@@ -53,13 +53,14 @@ const char* const ROCKE_LL_DATALAYOUT_LLVM22
       "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
       "-n32:64-S32-A5-G1-ni:7:8:9";
 
-/* LLVM 23 (ROCm 7.13+): re-derived on an LLVM 23 host and found to drift from
- * LLVM 22 by one field -- it emits the ELF symbol-mangling spec m:e that LLVM 22
- * omits. The p8-indexed layout is otherwise identical (Python
- * _DATALAYOUT_LLVM23). */
+/* Layout emitted for rocKE's llvm23 flavor: the llvm22 layout plus the ELF
+ * symbol-mangling spec m:e and address spaces p10-p15 (upstream 5bf967cb132b).
+ * Older compiler builds may omit p10-p15; see Python _DATALAYOUT_LLVM23 for the
+ * full rationale. Must stay byte-identical with it. */
 const char* const ROCKE_LL_DATALAYOUT_LLVM23
     = "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
+      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-p10:32:32-p11:32:32"
+      "-p12:32:32-p13:32:32-p14:32:32-p15:32:32-i64:64-v16:16-v24:32"
       "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
       "-n32:64-S32-A5-G1-ni:7:8:9";
 
@@ -277,9 +278,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"update.dpp.i32",
      "declare i32 @llvm.amdgcn.update.dpp.i32(i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 "
      "immarg)"},
-    {"global.atomic.fadd.v2bf16",
-     "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
-     "ptr addrspace(1), <2 x bfloat>)"},
     {"global.atomic.fadd.v2f16",
      "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
      "ptr addrspace(1), <2 x half>)"},
@@ -344,10 +342,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
      "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.fp8(i32, float, i1)"},
     {"amdgcn.cvt.scalef32.pk.f32.bf8",
      "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.bf8(i32, float, i1)"},
-    {"amdgcn.cvt.scalef32.pk.fp8.f32",
-     "declare i32 @llvm.amdgcn.cvt.scalef32.pk.fp8.f32(i32, <2 x float>, float, i1)"},
-    {"amdgcn.cvt.scalef32.pk.bf8.f32",
-     "declare i32 @llvm.amdgcn.cvt.scalef32.pk.bf8.f32(i32, <2 x float>, float, i1)"},
     {"amdgcn.ds.swizzle", "declare i32 @llvm.amdgcn.ds.swizzle(i32, i32 immarg)"},
     /* Not overloaded, so no name suffix, but the flags are immarg like every
      * other permlane* flag pair. */

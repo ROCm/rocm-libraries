@@ -244,6 +244,7 @@ There is no separate unit-test binary. The host-only tests that do exist are com
 | `caching_library_gtest.cpp` | `CachingLibraryCollision` | Solution-cache keying under a forced hash collision |
 | `ulp_gtest.cpp` | `UlpMantissaBits`, `UlpAsDouble`, `UlpDistance`, `UlpAccumulate`, `UlpCheckGeneral` | Units-in-the-last-place error-measurement helpers, pure math with no GPU dependency |
 | `unit_gtest.cpp` | `UnitCheckIdentical` | Exact-storage checks used to skip element-by-element output comparisons when the addressed values have identical bytes |
+| `fast_check_gtest.cpp` | `FastCheck_pre_checkin`, `FastCheckDevice_pre_checkin` | The `fast_check` verifier: fault injection into host-computed results and the per-solution failure summary (`FastCheck_pre_checkin`, no GPU), and the device padding, poison and probe-sum kernels plus 4 GiB-boundary buffer placement on small buffers (`FastCheckDevice_pre_checkin`, no hipBLASLt kernels) |
 | `arch_revision_gtest.cpp` | `ArchRevisionSmoke` | ASIC-revision-to-library-arch mapping, a pure function reached by relative `#include` of an internal header (see point 1 below) |
 
 That is a handful of test cases of genuinely hardware-independent logic, against a library of
@@ -765,14 +766,15 @@ the sanitizer runtime on real hardware.
 | Sanitizer | What it catches | Where it runs | Gating |
 | --- | --- | --- | --- |
 | **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | Every PR touching hipBLASLt, gfx90a | **Yes** |
-| **HOST_ASAN** | Same, second architecture | Opt-in via the `ci:asan` PR label, gfx942 | No, explicitly non-blocking |
 | **Full ASAN** (host plus device instrumentation) | Adds device-side memory errors in kernels | TheRock nightly and manual dispatch, gfx94X | No |
 | **TSAN** | Data races | **Nowhere.** Build options exist; no CI lane uses them | No |
 
 **Runtime configuration.** The lane sets a large ASAN quarantine, a LeakSanitizer suppression file
-at `test/therock/lsan.supp` in the repository root, an explicit symbolizer path, and `HSA_XNACK=1`
-(required for sanitized ROCm builds). The suppression file is the thing to look at first when a leak
-report appears that seems to come from outside hipBLASLt.
+at `test/therock/lsan.supp` in the repository root, an explicit symbolizer path, and `HSA_XNACK=0`.
+Host-only AddressSanitizer does not require GPU page-fault retry (XNACK), so this workflow disables
+it. The shared test launcher preserves the caller's XNACK setting for host-ASAN artifacts and sets
+`HSA_XNACK=1` for full-ASAN artifacts. The suppression file is the thing to look at first when a
+leak report appears that seems to come from outside hipBLASLt.
 
 **How to build it yourself.** For a standalone hipBLASLt build, `-DHIPBLASLT_ENABLE_ASAN=ON` or
 `-DHIPBLASLT_ENABLE_TSAN=ON`, with `-DTENSILELITE_ENABLE_HOST_ASAN=ON` for the TensileLite host
@@ -782,6 +784,12 @@ sanitizer options intentionally stand down when the superbuild is driving.
 **GPU-specific limitations.** Host ASAN does not instrument device code, so nothing in the generated
 kernels is checked by the gating lane. Device-side ASAN requires XNACK-capable configurations, is
 substantially slower, and is why full ASAN is nightly rather than per PR.
+
+There is currently no gfx90a device-ASAN runtime test lane. Before enabling one, runner capacity
+and stability with full ASAN and `HSA_XNACK=1` must be reviewed with DevOps. A dedicated pool,
+potentially for nightly testing, is a separate follow-up; the hang investigation remains tracked
+in [rocm-libraries #12727](https://github.com/ROCm/rocm-libraries/issues/12727) and
+[TheRock-Infra #978](https://github.com/ROCm/TheRock-Infra/issues/978).
 
 **Explicitly not covered:** thread safety (no TSAN lane, despite the build option existing);
 undefined behavior (no UBSAN); device-side memory errors on any per-PR lane; and any test outside

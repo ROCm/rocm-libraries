@@ -115,9 +115,9 @@ stays a full provider, one per dependency. This complements build-time codegen.
 | Fusion **matching**: one engine's pattern matches a bounded multi-op subgraph that is the entire graph, run as one kernel | Via the pattern's `native` arm, which is what ships; the declarative `nodes` arm is specified but not yet implemented ([RFC 0020 §4.3](0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)) | matching a fused pattern *inside* a larger graph: JIT |
 | Match criteria: dtype, rank, dim value and relation, stride order, packed, divisibility, attribute value and set, optional-operand presence, graph structure, cross-tensor arithmetic, device property, bounded `or` ([RFC 0018 §3](0018_UniversalMatchDescriptor.md#3-criteria-vocabulary)); opcode is the engine's pattern, not a criterion | Yes | None |
 | General matching: N-ary commutative, unbounded chains, optional/variadic operands | None | JIT |
-| Kernel sources | `kpack`, `hsaco`, and `rocke` (build-only, runs the rocKE AOT build) first; `hip` follows | new authoring adapters, DSLs |
+| Kernel sources | Authored build-time kinds `rocke` (runs the rocKE AOT build), `hip`, and `hsaco` (a prebuilt code object packed as-is); shipped runtime kind `kpack` | new authoring adapters, DSLs |
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables |
-| Runtime drop-in | prebuilt code objects, opt-in, off by default | JIT-compiled sources |
+| Runtime drop-in | None | prebuilt code objects (opt-in, off by default); JIT-compiled sources. Prebuilt code objects ship through build-time packing (`kind: hsaco`) |
 | Multi-kernel launch program (e.g. SDPA backward) | None | composition |
 | Selection composition: UCD (Universal Composite Descriptor) decomposition | None | composition |
 | JIT compilation; normalized providers | None | JIT |
@@ -280,10 +280,12 @@ follow-up RFC.
 
 There is one family of descriptor formats, one generic engine, and two ways descriptors reach it:
 
-- **Build-time (AOT).** Descriptors and kernel sources in the source tree are compiled and packed
-  per GPU architecture, then installed beside the provider.
-- **Runtime drop-in.** Descriptors backed by a prebuilt code object (or JIT source) are placed in a
-  folder and picked up on demand, with no build step and no restart.
+- **Build-time (AOT).** Descriptors and kernel sources in the source tree are compiled (a prebuilt
+  code object is taken as authored) and packed per GPU architecture, then installed beside the
+  provider.
+- **Runtime drop-in (deferred).** Descriptors backed by a prebuilt code object (or JIT source) are
+  placed in a folder and picked up on demand, with no build step and no restart. Until it lands, a
+  prebuilt code object ships through build-time packing (`kind: hsaco`).
 
 Both paths produce the same thing the generic engine consumes, so everything downstream (matching,
 selection, launch) is identical regardless of how a kernel arrived.
@@ -744,9 +746,10 @@ The table is a representative vocabulary for reading this RFC, not the normative
 `ceil_div`, `min`, `max`, and `rsqrt` earn their place in real dispatch code: every grid formula here
 is a `ceil_div` over a sequence or spatial dim, and `min`/`max` size a workspace that depends on a
 knob, such as a split-K GEMM whose scratch is the larger of its partials and its reduction, or one
-floored at a minimum. `rsqrt` expresses the SDPA convention's implicit default scale
-(`1/sqrt` of the head extent, read positionally as `$q.dims[3]`), which two kernel families in this
-repository compute today.
+floored at a minimum. `rsqrt` expresses a scale derived from the head extent (`1/sqrt` of
+`$q.dims[3]`, read positionally), the conventional softmax scale a kernel computes for itself. It
+is not the default for SDPA's `attn_scale_value`: hipDNN reads an unset scale as 1.0 (no scaling),
+as cuDNN does, which `value_or_default` with a literal 1.0 expresses.
 `value_or_default(["$field", <fallback>])` reads a possibly-absent optional field and substitutes
 the fallback when unset, so a matcher treats an unset field like an explicitly-defaulted one, the way
 hand-written applicability code already does. The fallback is usually a literal, but it may be any
@@ -1327,8 +1330,9 @@ source; a multi-launch UKD supplies one per Launch. The initial variants:
   // kind-specific fields point at a compiled kernel, or say how to build one; each yields one loadable handle:
   // kpack:  {"library": "rocke_attn.kpack", "symbol": "sdpa_fwd_d128_bf16_gfx942"}
   //           a function symbol resolved from a packed multi-arch library artifact (build-time)
-  // hsaco:  {"file": "sdpa_fwd_d128_bf16_gfx942.co"}
-  //           a prebuilt code-object file (runtime drop-in)
+  // hsaco:  {"file": "sdpa_fwd_d128_bf16_gfx942.co", "symbol": "sdpa_fwd_d128_bf16_gfx942"}
+  //           a prebuilt code object named relative to its descriptor, packed as-is into kpack at
+  //           build time (Section 12); a runtime drop-in form is deferred (Section 9.1)
   // hip:    {"source": "sdpa_fwd.hip", "entry": "sdpa_fwd_kernel"}
   //           a HIP source file, compiled ahead of time and packaged (build-time; covers hipRTC too)
   // rocke:  {"source": "kernels/gfx942/attention_tiled_2d.py",
@@ -1590,11 +1594,13 @@ Adapters come in two delivery classes, which decides where a target is available
 
 ### 9.1 Kernel-Source Adapters
 
-The source variants of [Section 7](#7-kernel-source) are the first built-in adapters: `kpack` and
-`hsaco` ship prebuilt, and `hip` follows as a build-only adapter since it needs the compiler to
-lower its source to a code object ahead of time. Adding a new authoring tool means adding one
-adapter that lowers its form to a code object, never a new launcher or dispatch path: a DSL with
-its own compiler is typically build-only, and a self-contained generator can be build-and-runtime.
+The source variants of [Section 7](#7-kernel-source) are the first built-in adapters: `kpack` ships
+prebuilt; `hsaco` is a build-time input that needs no producer and is packed into `kpack`; and
+`hip` and `rocke` are build-only adapters since each needs its compiler or build to lower its
+source to a code object ahead of time. A runtime drop-in of `hsaco` remains future work.
+Adding a new authoring tool means adding one adapter that lowers its form to a code object, never a
+new launcher or dispatch path: a DSL with its own compiler is typically build-only, and a
+self-contained generator can be build-and-runtime.
 Runtime JIT of source is a future direction (Section 9.3 below).
 
 The rocKE prototype ([PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)) is the first
@@ -1772,7 +1778,9 @@ becomes concrete.
   satisfiability, dispatch-to-ABI agreement, and metadata/heuristic feature-signature consistency,
   so problems surface at author time rather than at load.
 - **Bundling and packaging**: tools that assemble a kernel pack and its per-arch code objects into
-  a distributable bundle with its manifest and verify arch and toolchain provenance.
+  installable kpack archives beside the descriptors that name them, and that check at build and test
+  time that each packed descriptor matches the archive entry it names and its provenance sidecar
+  ([Section 12](#12-packaging-and-delivery)).
 - **Inspection**: viewers that render a descriptor set the way the provider sees it (the resolved plan,
   the why-not trace, the catalog of engines and packs), so a change can be reviewed without deploying it.
 
@@ -1786,9 +1794,15 @@ needed during implementation, on top of the stable descriptor format this RFC de
 The two ingestion paths differ only in where a kernel's code comes from:
 
 - **Build-time (AOT).** Discover and validate descriptors, compile each kernel per target
-  architecture, pack the code objects into per-arch bundles with a self-describing manifest, and
-  install them beside the provider. The manifest records provenance (architecture, toolchain,
-  build id) so incompatible bundles are rejected before load.
+  architecture, or take a prebuilt code object as authored, pack the code objects into one kpack
+  archive per architecture, and install each archive beside the provider with the descriptors that
+  name it. No separate manifest is emitted: each packed descriptor names its shard's architecture
+  and, per kernel, the archive entry, symbol and payload sha256, and the archive's own architecture
+  table refuses a device it holds no binary for, so an incompatible kernel is rejected before its
+  module loads. The author restricts a prebuilt object to the architecture it was built for.
+  Per-kernel provenance (authored source, spec, producing compiler and toolchain, or a prebuilt
+  object's file and digest) is never read at load, so shipped UKDs carry none: the packer moves it
+  to a sidecar (below).
 - **Runtime drop-in.** The path is opt-in and off by default. When enabled, the provider scans a
   dedicated drop-in location for custom bundles, compiles each descriptor to a matcher once on first
   use, and registers it the same way as an installed one. A single package may declare many
@@ -1796,9 +1810,48 @@ The two ingestion paths differ only in where a kernel's code comes from:
   on first use and cache their result. (The concrete enablement and location mechanism is left to
   the delivery follow-up RFC.)
 
-Compatibility is gated the same way in both paths: a descriptor whose schema version, required
-architecture, or toolchain does not match the runtime is refused with a clear error rather than
-risking silent misexecution.
+Compatibility is gated the same way in both paths: a descriptor whose schema version this runtime
+does not read ([Section 4](#4-descriptor-formats)) is skipped with a warning, and a kernel whose architecture
+the device does not match is never loaded, rather than risking silent misexecution. The toolchain
+that built a kernel is provenance for build and test tools, not a load-time check.
+
+**Provenance sidecar (format v1).** In the build tree the packer writes each packed descriptor's
+per-UKD provenance to a sidecar named after the descriptor file, `foo.kdp.provenance.json.gz`
+beside `foo.kdp.json` and `foo.ukd.provenance.json.gz` beside `foo.ukd.json`: gzip-compressed JSON
+`{"version": "1.0", "kdp_id": <id or null>, "entries": {<ukd id>: {"ukd_sha256": <hex>, "provenance": {...}}}}`.
+`version` is major.minor, gated as a descriptor's is ([Section 4](#4-descriptor-formats)): a reader
+accepts major 1 at minor 0 or earlier and refuses a missing version, another major, or a newer
+minor. `ukd_sha256` is the sha256 of the UKD as packed, with `provenance` removed, serialised as
+compact key-sorted UTF-8 JSON, so it binds every kernel-source kind, not only those that carry a
+payload digest. A KDP's own header `provenance` stays inline. Build and test tools read sidecars
+through one reader (`hkp_pack.provenance_sidecar`), which reports corrupt or oversized input as an
+error. The packer also writes an empty `hkp-packed.marker` into every directory it writes a packed
+descriptor into; a descriptor is packed exactly when its own directory holds one. A packed
+descriptor must have its sidecar; any other is authored, its sidecar unread, and refused if it holds
+a `kpack` UKD. A tree that lost its marker (a copy that kept only `*.json`, a hand-staged tree)
+reads as authored, so a shard of only `embedded_source` UKDs then gets no provenance check.
+
+**Sidecar install location.** Only build and test tools read provenance, so the runtime package
+ships none: the installed `arch_content/hip-kernel-provider/` tree holds descriptors, archives and
+the empty markers, a deliberate exception to keeping build and test data out of the runtime package:
+a marker holds no provenance and sits under its `<arch>/` folder, so it splits with its shard. With
+the provider's tests enabled, the sidecars install with the test package under
+`test_arch_content/hip-kernel-provider/provenance/`, at the same relative paths as their
+descriptors under `arch_content/hip-kernel-provider/`, so per-architecture packaging splits each
+one with its architecture. A tool reading an installed tree takes that folder as its provenance
+root: the sidecar for `<descriptor root>/<rel>/foo.kdp.json` is
+`<provenance root>/<rel>/foo.kdp.provenance.json.gz`. The provenance root only relocates
+sidecars; it does not make a descriptor without a marker packed.
+
+**kpack archive lifetime.** An opened kpack archive is shared by every load that names it and stays
+open while any hipDNN handle on the provider exists; destroying the last handle closes it. With no
+handle alive, a load opens the archive, reads its entry and closes it. An archive that fails to
+yield an intact entry (its entry fails to decompress, or its bytes miss the descriptor's sha256) is
+closed, so the next load reopens it; a missing entry or architecture leaves it open. An archive
+replaced on disk while open is not re-read, which is the inventory change
+[Section 8.6](#86-the-base-path-invariant) already admits as a cause of a failed plan build; the
+sha256 check refuses its changed bytes. Loaded modules stay resident for the life of the process
+either way.
 
 **Trust boundary.** Prebuilt code objects, whether packed in a bundle or installed into the
 provider's tree, inherit the trust of that install tree: an actor who can write them there can
@@ -2250,7 +2303,7 @@ follow-up RFCs.
   are handled by arbitration.
 - **Compatibility and caching.** Each descriptor file type is versioned independently as
   `major.minor`; a descriptor newer than the runtime understands is refused, an older minor within
-  the same major always loads, and architecture and toolchain are gated before load. This covers both
+  the same major always loads, and architecture is gated before load. This covers both
   directions: a pack built against an older minor keeps loading as the runtime advances, and a pack
   built against a newer runtime is refused by an older one. Whether a drop-in pack may carry its own
   engine/heuristic pair instead of binding an installed one is deferred to the drop-in packaging
@@ -2357,8 +2410,8 @@ follow-up RFCs.
    descriptor distinguish the two, so an operator can see a kernel's true LDS footprint, or is the
    launch value the only thing dispatch needs?
 6. **Deriving a conventional default versus requiring it explicitly:** where an operation defines a
-   conventional default for an attribute, such as SDPA's implicit `1/sqrt` scale over the head
-   extent, a pack may either derive it or require the graph to supply it
+   conventional default for an attribute, such as SDPA's scale (1.0 when `attn_scale_value` is
+   unset), a pack may either derive it or require the graph to supply it
    ([the worked example's criteria](./examples/0017_UniversalKernelDescriptor_WorkedExample.md#2-the-criteria)). Deriving accepts
    more graphs; requiring keeps the pack's contract narrow and its dispatch free of derived values.
    Should this be an author's choice per pack, as it is today, or a convention the schema settles
@@ -2495,6 +2548,8 @@ choices; none is a dependency.
 - **Code object:** a loadable, prebuilt GPU kernel binary.
 - **kpack:** a packed multi-architecture archive of code objects.
 - **hsaco:** a single prebuilt GPU code-object file (Heterogeneous System Architecture Code Object).
+  Authored as a build-time input (`file`, `symbol`) and packed as-is into kpack; a runtime drop-in
+  is deferred.
 - **hip:** a HIP source file compiled ahead of time into a code object and packaged (covers
   hipRTC-style sources, processed AOT rather than at runtime).
 - **Adapter:** a plug-in that turns one supported authoring form into something the generic engine

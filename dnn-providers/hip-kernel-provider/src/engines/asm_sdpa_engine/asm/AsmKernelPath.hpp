@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 //
-// ASM kernel path resolution utility.
+// ASM kernel TOC key derivation utility.
 //
 // AITER provenance (dual-snapshot — see asm_kernels/README.md for full table)
 //   Source repository: https://github.com/ROCm/aiter
@@ -9,67 +9,42 @@
 //   fmha_v3_bwd snapshot: 9522048dc10de20ba9dcda1c0a3f640867e7a586
 //   Local override: gfx942/fmha_v3_bwd/bwd_hd128_odo_bf16.co (see SOURCE.md)
 //
-// At runtime the kernel directory comes from the first of three sources that answers:
-// the HIPDNN_AITER_ASM_DIR environment variable; the asm_kernels tree installed beside
-// the loaded plugin (found through the module's own address, so a relocated or packaged
-// install finds its own files); else the AITER_ASM_DIR compile definition, the
-// configure-time install prefix, which is right only for an install that never moved.
+// Strips the arch prefix from a codegen-produced co_name to produce the TOC
+// key used by kpack_get_kernel(). At build time the packer indexes each .co
+// under its arch-relative path; at runtime we derive the same key here.
 
 #pragma once
 
-#ifndef AITER_ASM_DIR
-#error "AITER_ASM_DIR must be defined (set via CMake compile definition)"
-#endif
-#ifndef AITER_ASM_SUBDIR
-#error "AITER_ASM_SUBDIR must be defined (set via CMake compile definition)"
-#endif
-
-#include <filesystem>
-#include <stdexcept>
 #include <string>
-
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace asm_sdpa_engine::asm_kernels
 {
 
-inline auto getAsmKernelDir() -> std::string
+/// Strips the leading arch directory from a codegen-produced co_name to get
+/// the TOC key matching the .kpack archive index.
+///
+/// Input:  "gfx942/fmha_v3_bwd/bwd_hd128_odo_bf16.co"
+/// Output: "fmha_v3_bwd/bwd_hd128_odo_bf16.co"
+///
+/// Input:  "gfx942/fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co"
+/// Output: "fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co"
+///
+/// Edge cases:
+/// - If no slash is present, returns the input unchanged.
+/// - If the first component does not start with "gfx", returns unchanged.
+inline auto getAsmKernelTocKey(const std::string& coName) -> std::string
 {
-    auto envDir = hipdnn_data_sdk::utilities::getEnv("HIPDNN_AITER_ASM_DIR");
-    if(!envDir.empty())
+    auto pos = coName.find('/');
+    if(pos == std::string::npos)
     {
-        return envDir;
+        return coName;
     }
-
-    // Keyed on this function's own address, so the lookup measures from the module that
-    // contains this engine even when several providers are loaded.
-    try
+    // Only strip if the leading component is an arch prefix (e.g. "gfx942").
+    if(pos < 3 || coName.substr(0, 3) != "gfx")
     {
-        const auto besideModule = hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForAddress(
-                                      reinterpret_cast<const void*>(&getAsmKernelDir))
-                                  / AITER_ASM_SUBDIR;
-        std::error_code notFound;
-        if(std::filesystem::is_directory(besideModule, notFound))
-        {
-            return besideModule.string();
-        }
+        return coName;
     }
-    catch(const std::runtime_error& error)
-    {
-        // No module to measure from (code linked straight into an executable). Not fatal,
-        // the configure-time path below still answers; logged because on a real install it
-        // would mean the relocatable lookup had silently stopped working.
-        HIPDNN_PLUGIN_LOG_INFO("ASM SDPA: no module-relative kernel directory ("
-                               << error.what() << "); using the configure-time path");
-    }
-
-    return AITER_ASM_DIR;
-}
-
-inline auto getAsmKernelPath(const std::string& filename) -> std::string
-{
-    return getAsmKernelDir() + "/" + filename;
+    return coName.substr(pos + 1);
 }
 
 } // namespace asm_sdpa_engine::asm_kernels

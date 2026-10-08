@@ -69,6 +69,30 @@ _SKIP_GPU = _skip_reason_gpu()
 
 _ARCH = GPU_ARCH if GPU_ARCH in ("gfx942", "gfx950") else "gfx950"
 
+
+def _warp_tile_k(dtype: str, mn: int = 32, k_max: int = 64) -> int:
+    """Deepest ``mn x mn x k`` MFMA atom ``_ARCH`` has for ``dtype``.
+
+    The implicit-gemm specs below are dtype smoke tests, not atom tests, so the
+    K extent has to follow the arch catalog rather than being pinned: the 32x32
+    fp16/bf16 atom is K=16 on gfx950 but K=8 on gfx942, and a pinned 16 makes
+    the validator reject every spec on gfx942 before any IR is emitted.
+    """
+    from rocke.core.arch import ArchTarget
+
+    atom = ArchTarget.from_gfx(_ARCH).mma.select_largest_k(
+        family="mma",
+        a_dtype=dtype,
+        b_dtype=dtype,
+        c_dtype="fp32",
+        m=mn,
+        n=mn,
+        k_max=k_max,
+    )
+    assert atom is not None, f"no {mn}x{mn} mma atom for {dtype} on {_ARCH}"
+    return atom.k
+
+
 # Tolerances (relative error against float32 reference).
 _TOL_FP16 = 5e-2
 _TOL_BF16 = 1e-1
@@ -284,7 +308,7 @@ class TestImplicitGemmIRDtype(unittest.TestCase):
             warp_n=2,
             warp_tile_m=32,
             warp_tile_n=32,
-            warp_tile_k=16,
+            warp_tile_k=_warp_tile_k(dtype),
             # vec_c > 1 is incompatible with epilogue="default"; force 1.
             vector_size_c=1,
         )
@@ -318,7 +342,7 @@ class TestImplicitGemmIRDtype(unittest.TestCase):
             warp_n=2,
             warp_tile_m=32,
             warp_tile_n=32,
-            warp_tile_k=16,
+            warp_tile_k=_warp_tile_k(dtype),
         )
         kernel = build_implicit_gemm_conv_wgrad(spec, arch=_ARCH)
         ir = _lower(kernel, arch=_ARCH)
@@ -350,7 +374,7 @@ class TestImplicitGemmIRDtype(unittest.TestCase):
             warp_n=2,
             warp_tile_m=32,
             warp_tile_n=32,
-            warp_tile_k=16,
+            warp_tile_k=_warp_tile_k(dtype),
         )
         kernel = build_implicit_gemm_conv_dgrad(spec, arch=_ARCH)
         ir = _lower(kernel, arch=_ARCH)
@@ -396,11 +420,13 @@ def _conv_ref_f32(A_t, B_t, p_stride: int, p_pad: int, groups: int):
 def _run_direct_fwd(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
     import torch
     from rocke import compile_kernel
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_abi import conv_direct_args_signature
+    from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
         DirectConvProblem,
         DirectConvSpec,
         build_direct_conv,
+        direct_launch_geometry,
         is_valid_spec,
     )
     from rocke.runtime import synchronize_and_release
@@ -448,7 +474,8 @@ def _run_direct_fwd(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
     D_dev = rt.alloc(D.nbytes)
     rt.memset(D_dev, 0, D.nbytes)
 
-    sig = conv_args_signature(dtype)
+    # Direct conv is AOT: the whole shape travels as kernargs.
+    sig = conv_direct_args_signature(dtype)
     try:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=sig
@@ -458,20 +485,12 @@ def _run_direct_fwd(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
             rt.free(dev)
         return False, f"load failed: {e}"
 
-    q_tiles = (p.Wo + spec.block_q - 1) // spec.block_q
-    g_tiles = p.groups // spec.block_groups
+    grid, block = direct_launch_geometry(spec)
     launcher(
-        {
-            "A": A_dev,
-            "B": B_dev,
-            "D": D_dev,
-            "A_bytes": A.nbytes,
-            "B_bytes": B.nbytes,
-            "D_bytes": D.nbytes,
-        },
-        config=LaunchConfig(
-            grid=(q_tiles, g_tiles, N), block=(spec.threads_per_block, 1, 1), fence=True
+        ConvArgs.from_problem(p).to_launch_values(
+            int(A_dev), int(B_dev), int(D_dev), A.nbytes, B.nbytes, D.nbytes
         ),
+        config=LaunchConfig(grid=grid, block=block, fence=True),
     )
 
     D_cpu = torch.empty_like(D.cpu())
@@ -491,11 +510,13 @@ def _run_direct_fwd(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
 def _run_direct_dgrad(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
     import torch
     from rocke import compile_kernel
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_abi import conv_direct_args_signature
+    from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
         DirectConvDgradSpec,
         DirectConvProblem,
         build_direct_conv_dgrad,
+        direct_launch_geometry,
         is_valid_dgrad_spec,
     )
     from rocke.runtime import synchronize_and_release
@@ -558,7 +579,8 @@ def _run_direct_dgrad(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
     dX_dev = rt.alloc(dX.nbytes)
     rt.memset(dX_dev, 0, dX.nbytes)
 
-    sig = conv_args_signature(dtype)
+    # Direct conv is AOT: the whole shape travels as kernargs.
+    sig = conv_direct_args_signature(dtype, direction="dgrad")
     try:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=sig
@@ -568,22 +590,12 @@ def _run_direct_dgrad(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
             rt.free(dev)
         return False, f"load failed: {e}"
 
-    q_tiles = (W + spec.block_q - 1) // spec.block_q
-    g_tiles = (total_c + spec.threads_per_block - 1) // spec.threads_per_block
+    grid, block = direct_launch_geometry(spec)
     launcher(
-        {
-            "A": dY_dev,
-            "B": W_dev,
-            "D": dX_dev,
-            "A_bytes": dY.nbytes,
-            "B_bytes": Wt.nbytes,
-            "D_bytes": dX.nbytes,
-        },
-        config=LaunchConfig(
-            grid=(q_tiles, g_tiles, N * H),
-            block=(spec.threads_per_block, 1, 1),
-            fence=True,
+        ConvArgs.from_problem(p, direction="dgrad").to_launch_values(
+            int(dY_dev), int(W_dev), int(dX_dev), dY.nbytes, Wt.nbytes, dX.nbytes
         ),
+        config=LaunchConfig(grid=grid, block=block, fence=True),
     )
 
     dX_cpu = torch.empty_like(dX.cpu())
