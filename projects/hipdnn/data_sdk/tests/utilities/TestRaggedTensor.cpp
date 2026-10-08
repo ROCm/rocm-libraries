@@ -504,8 +504,7 @@ namespace
 // The sequence axis reported by the iterator is read from the tensor's RaggedCompositeIndex.
 int seqAxisOf(RaggedTensor<float>& tensor)
 {
-    return std::get<ITensorIterator<false>::RaggedCompositeIndex>(tensor.begin().index())
-        .info.seqAxis;
+    return std::get<ITensorIterator<false>::RaggedCompositeIndex>(tensor.begin().index()).seqAxis;
 }
 
 void expectConstructionRejected(const std::vector<int64_t>& dims,

@@ -85,6 +85,21 @@ struct AllOfTypes : std::conjunction<Predicate<Ts>...>
 // Forward declarations
 class ITensor;
 
+namespace detail
+{
+
+inline int64_t raggedSeqExtent(const std::vector<int64_t>& rowOffsets, int64_t seqStride, int64_t b)
+{
+    if(b < 0 || (b + 1) >= static_cast<int64_t>(rowOffsets.size()))
+    {
+        return 0;
+    }
+    const auto bIdx = static_cast<size_t>(b);
+    return (rowOffsets[bIdx + 1] - rowOffsets[bIdx]) / seqStride;
+}
+
+} // namespace detail
+
 /**
  * @brief Snapshot of the state a ragged tensor iterator needs to traverse its buffer.
  *
@@ -107,12 +122,7 @@ struct RaggedIterationInfo
      */
     int64_t seqExtent(int64_t b) const
     {
-        if(b < 0 || (b + 1) >= static_cast<int64_t>(rowOffsets.size()))
-        {
-            return 0;
-        }
-        const auto bIdx = static_cast<size_t>(b);
-        return (rowOffsets[bIdx + 1] - rowOffsets[bIdx]) / seqStride;
+        return detail::raggedSeqExtent(rowOffsets, seqStride, b);
     }
 
     /**
@@ -354,15 +364,18 @@ public:
      *
      * Walks each batch's full per-batch range `[ragged_offset[b], ragged_offset[b+1])`
      * in turn, visiting exactly `ragged_offset[B]` physical elements. The traversal
-     * state is snapshotted once as `info` at `begin()`/`end()`, so traversal performs
-     * no per-step aux reads.
+     * state (`rowOffsets`, `seqAxis`, `seqStride`) is snapshotted once via
+     * `RaggedIterationInfo` at `begin()`/`end()`, so traversal performs no per-step
+     * aux reads.
      */
     struct RaggedCompositeIndex
     {
-        RaggedCompositeIndex(TensorType tensor, RaggedIterationInfo iterationInfo, bool isEnd)
+        RaggedCompositeIndex(TensorType tensor, RaggedIterationInfo info, bool isEnd)
             : indices(tensor.get().dims().size(), 0)
-            , info(std::move(iterationInfo))
+            , rowOffsets(std::move(info.rowOffsets))
             , tensor(tensor)
+            , seqAxis(info.seqAxis)
+            , seqStride(info.seqStride)
         {
             const int64_t batchCount = numBatches();
             if(isEnd)
@@ -375,7 +388,7 @@ public:
             else
             {
                 // Skip leading empty batches so begin() lands on a real element.
-                while(indices[0] < batchCount && info.seqExtent(indices[0]) == 0)
+                while(indices[0] < batchCount && seqExtent(indices[0]) == 0)
                 {
                     ++indices[0];
                 }
@@ -401,8 +414,7 @@ public:
             {
                 const auto dimIdx = static_cast<size_t>(dim);
                 ++indices[dimIdx];
-                const int64_t bound
-                    = (dim == info.seqAxis) ? info.seqExtent(indices[0]) : dims[dimIdx];
+                const int64_t bound = (dim == seqAxis) ? seqExtent(indices[0]) : dims[dimIdx];
                 if(indices[dimIdx] < bound)
                 {
                     return *this;
@@ -415,7 +427,7 @@ public:
             do
             {
                 ++indices[0];
-            } while(indices[0] < batchCount && info.seqExtent(indices[0]) == 0);
+            } while(indices[0] < batchCount && seqExtent(indices[0]) == 0);
             return *this;
         }
 
@@ -447,13 +459,20 @@ public:
         }
 
         std::vector<int64_t> indices;
-        RaggedIterationInfo info;
+        std::vector<int64_t> rowOffsets;
         TensorType tensor;
+        int seqAxis{1};
+        int64_t seqStride{1};
 
     private:
         int64_t numBatches() const
         {
-            return static_cast<int64_t>(info.rowOffsets.size()) - 1;
+            return static_cast<int64_t>(rowOffsets.size()) - 1;
+        }
+
+        int64_t seqExtent(int64_t b) const
+        {
+            return detail::raggedSeqExtent(rowOffsets, seqStride, b);
         }
     };
 
