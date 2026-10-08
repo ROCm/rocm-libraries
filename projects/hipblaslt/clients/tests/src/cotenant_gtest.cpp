@@ -99,18 +99,23 @@ namespace
         EXPECT_EQ(lds_reservation(kLds64K, 0, 1), 65536);
     }
 
-    // Returns false when no GPU is available.
-    bool device_cu_count(int& cus)
+    bool gpuAvailable()
     {
-        int count = 0;
-        if(hipGetDeviceCount(&count) != hipSuccess || count == 0)
-            return false;
-        int dev = 0;
+        int deviceCount = 0;
+        return hipGetDeviceCount(&deviceCount) == hipSuccess && deviceCount > 0;
+    }
+
+    // CU count of the current device. Call only when gpuAvailable().
+    int deviceCuCount()
+    {
+        int             dev = 0;
         hipDeviceProp_t prop{};
         if(hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess)
-            return false;
-        cus = prop.multiProcessorCount;
-        return true;
+        {
+            ADD_FAILURE() << "Could not query the device";
+            return 0;
+        }
+        return prop.multiProcessorCount;
     }
 
     TEST(CotenantScoped, DisabledScopeDoesNothing)
@@ -120,8 +125,11 @@ namespace
 
     TEST(CotenantScoped, StartsAndStopsRepeatedly)
     {
-        int cus = 0;
-        if(!device_cu_count(cus) || cus < 2)
+        if(!gpuAvailable())
+            GTEST_SKIP() << "No GPU available";
+        const int cus = deviceCuCount();
+        ASSERT_GT(cus, 0);
+        if(cus < 2)
             GTEST_SKIP() << "Needs a GPU with at least 2 CUs";
 
         hipStream_t stream = nullptr;
@@ -138,9 +146,10 @@ namespace
 
     TEST(CotenantScoped, CountMayEqualCuCount)
     {
-        int cus = 0;
-        if(!device_cu_count(cus))
+        if(!gpuAvailable())
             GTEST_SKIP() << "No GPU available";
+        const int cus = deviceCuCount();
+        ASSERT_GT(cus, 0);
 
         hipStream_t stream = nullptr;
         ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
@@ -150,8 +159,11 @@ namespace
 
     TEST(CotenantScoped, RejectsInvalidArgumentsAndStaysUsable)
     {
-        int cus = 0;
-        if(!device_cu_count(cus) || cus < 2)
+        if(!gpuAvailable())
+            GTEST_SKIP() << "No GPU available";
+        const int cus = deviceCuCount();
+        ASSERT_GT(cus, 0);
+        if(cus < 2)
             GTEST_SKIP() << "Needs a GPU with at least 2 CUs";
 
         hipStream_t stream = nullptr;
