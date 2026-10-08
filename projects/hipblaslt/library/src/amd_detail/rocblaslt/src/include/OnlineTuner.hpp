@@ -495,7 +495,8 @@ namespace rocblaslt
         // the solution index alone would take the sample anyway. The offer is
         // dropped at the next visit and consumed by the first launch that
         // claims it, so a sample is only taken for a dispatch selection asked
-        // for, on the visit it asked.
+        // for, on the visit it asked -- which is true of one thread and is
+        // not true of several.
         //
         // m_dispatchesSinceSelection is how a problem the library is never
         // asked about again still comes to an end.
@@ -513,11 +514,23 @@ namespace rocblaslt
         // nothing to do, for a shape that can never be tuned.
         //
         // Counted at the measurement hook, which is the one every dispatch
-        // reaches, and reset wherever selection visits -- so it measures the
-        // run of dispatches selection has not seen, not the work an ordinary
-        // exploration does. An exploration's own dispatches are each preceded
-        // by a selection visit and never advance it. Past the same visit
-        // budget the selection half uses, the problem gives up, publishes a
+        // reaches, and reset by a visit of the problem that owns the
+        // exploration -- so it measures the run of dispatches THE REGISTRANT
+        // has not made, not the run nobody has made. The distinction is the
+        // whole mechanism: a merged sibling is exempt from spending the visit
+        // budget, so letting its visits reset this counter let it hold an
+        // exploration the registrant had abandoned open for ever, taking the
+        // exclusive lock on every dispatch -- the very failure this counter was
+        // added to end.
+        //
+        // Bounded by abandonBudget() and not by visitBudget(), because it is no
+        // longer counting an exploration's own progress. It counts everyone's
+        // dispatches, including a busy sibling's, so a ceiling tight enough to
+        // bound progress would end a healthy exploration early on whatever
+        // samples sibling traffic let it take. The two questions want two
+        // ceilings: visitBudget() bounds how many visits the registrant may
+        // spend, abandonBudget() bounds how long a problem nobody is exploring
+        // may stay unresolved. Past it the problem gives up, publishes a
         // winner-less resolution and both entry points short-circuit without a
         // lock, which is what the design already does for every other terminal
         // state.
@@ -580,6 +593,7 @@ namespace rocblaslt
         int  measurableCandidate(const ProblemState& state, int solutionIndex) const;
         int  inFlightCap(const ProblemState& state) const;
         int  visitBudget(const ProblemState& state) const;
+        int  abandonBudget(const ProblemState& state) const;
         float score(const std::vector<float>& samples) const;
         void  resolve(size_t problemKey, ProblemState& state);
         void  releaseExploration(ProblemState& state);

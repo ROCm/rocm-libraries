@@ -17,8 +17,10 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
 #include <hip/hip_runtime_api.h>
 #include <memory>
+#include <thread>
 #include <vector>
 
 using rocblaslt::OnlineTuner;
@@ -65,6 +67,20 @@ namespace
     // above that budget, so a tuner that never gives up fails an assertion
     // instead of hanging the suite.
     constexpr int kCallCeiling = 4096;
+
+    // The tuner's two ceilings, restated. visitBudget() bounds the visits the
+    // REGISTRANT may spend and abandonBudget() bounds how long a problem
+    // nobody is exploring stays unresolved; neither is reachable from here, so
+    // both are written out in the terms OnlineTuner.cpp computes them in
+    // (c_visitBudgetFactor and c_abandonBudgetFactor). Getting one wrong costs
+    // the merged-sibling case its point, not its result -- it asserts the
+    // ordering of all three numbers before using them.
+    constexpr int kVisitBudget   = kTopK * kRepeats * 8;
+    constexpr int kAbandonBudget = kVisitBudget * 16;
+
+    // A run of sibling dispatches long enough to be well past the registrant's
+    // budget and well short of the abandonment ceiling.
+    constexpr int kEarlyEnough = 512;
 
     // The resolution table is direct-mapped over the key and its size is the
     // tuner's own business, so this only has to be a multiple of whatever that
@@ -587,10 +603,12 @@ namespace
         ASSERT_NE(resolved, nullptr) << "a problem nothing can measure never gave up";
         EXPECT_EQ(resolved->winner(), -1) << "nothing was measured, so there is no winner";
 
-        // Bounded by the same visit budget the selection half uses, which is
-        // candidates * repeats * a slack factor -- a few dozen here.
+        // Bounded by abandonBudget(), not by the registrant's own visit budget:
+        // this counter is advanced by every dispatch under the key, including a
+        // merged sibling's, so a ceiling tight enough to bound an exploration's
+        // progress would end a healthy one early. See the merged-sibling case.
         EXPECT_GT(dispatches, kTopK * kRepeats);
-        EXPECT_LT(dispatches, 512) << "the budget did not bound it";
+        EXPECT_LE(dispatches, kAbandonBudget + 2) << "the budget did not bound it";
 
         // And the point of publishing: both entry points answer from the table
         // now, without taking anything.
@@ -635,9 +653,27 @@ namespace
     // measurement hook either. A sibling dispatching often enough would
     // otherwise end the exploration early on however many samples had been
     // taken by then -- which is the whole reason the sibling is exempt in the
-    // first place. Selection having visited at all is what says the library is
-    // still being asked about this shape.
-    TEST(OnlineTuner, AMergedSiblingsDispatchesDoNotEndTheExploration)
+    // first place.
+    //
+    // It must not do the opposite either, and the version of this case that
+    // asserted only the first half is what pinned the give-up defect in place: a
+    // sibling's selection visit reset the give-up counter, so a registrant
+    // that had stopped visiting could never be noticed, the problem stayed
+    // unresolved, and every one of those sibling dispatches took the tuner's
+    // process-wide mutex EXCLUSIVELY for the life of the process. Asserting
+    // only "still exploring at 512" was satisfied by never ending at all.
+    //
+    // So the two halves are two ceilings, and both are asserted. The
+    // registrant's own visit budget is small and a sibling cannot touch it;
+    // the abandonment ceiling is much larger and is the one a sibling's
+    // dispatches do advance, because what it measures is how long a shape
+    // NOBODY is exploring may stay unresolved.
+    //
+    // Deterministic by construction rather than by timing: the interleaving
+    // under test is "a sibling's visit between the registrant's", and driving
+    // both from this thread in a fixed order is that interleaving with the
+    // scheduler taken out. The concurrent case follows.
+    TEST(OnlineTuner, AMergedSiblingEndsAnExplorationLateAndNeverEarly)
     {
         constexpr size_t key = 0x1019;
 
@@ -648,9 +684,13 @@ namespace
 
         ASSERT_EQ(tuner().selectCandidate(key, registering, ranked), 0);
 
-        // Comfortably past the visit budget, which is candidates * repeats * a
-        // slack factor and so cannot be more than a few dozen here.
-        for(int visit = 0; visit < 512; ++visit)
+        // Comfortably past the registrant's visit budget and comfortably short
+        // of the abandonment ceiling, which is the window the first half of
+        // the rule lives in.
+        ASSERT_GT(kEarlyEnough, kVisitBudget);
+        ASSERT_LT(kEarlyEnough, kAbandonBudget);
+
+        for(int visit = 0; visit < kEarlyEnough; ++visit)
         {
             ASSERT_EQ(tuner().selectCandidate(key, merged, ranked), -1)
                 << "a merged sibling was handed a probe candidate on visit " << visit;
@@ -660,8 +700,85 @@ namespace
         EXPECT_EQ(tuner().resolution(key), nullptr)
             << "a merged sibling's dispatches ran the exploration out of its budget";
 
-        // Still owed its first candidate.
+        // Still owed its first candidate: the sibling spent none of the
+        // registrant's visits either.
         EXPECT_EQ(tuner().selectCandidate(key, registering, ranked), 0);
+
+        // The other half. The registrant now stops visiting -- the heuristic
+        // caller that asked once, or a shape the application has moved on from
+        // -- while the sibling keeps dispatching. Nothing can finish this
+        // exploration, so it has to be given up on.
+        int siblingVisits = 0;
+        for(; siblingVisits < kCallCeiling && !tuner().resolution(key); ++siblingVisits)
+        {
+            tuner().selectCandidate(key, merged, ranked);
+            tuner().harvestPending(key);
+        }
+
+        const OnlineTuner::Resolution* resolved = tuner().resolution(key);
+        ASSERT_NE(resolved, nullptr)
+            << "a merged sibling held an abandoned exploration open for ever";
+        EXPECT_EQ(resolved->winner(), -1) << "nothing was measured, so there is no winner";
+
+        // And it was the large ceiling that ended it, not the small one. If
+        // these two numbers could be met by one budget there would be nothing
+        // to get wrong here.
+        EXPECT_GT(siblingVisits, kVisitBudget) << "the registrant's budget ended it";
+    }
+
+    // The same rule with the scheduler putting the visits in order instead of
+    // this thread. The property is not about any one interleaving: a shape no
+    // caller is exploring must end under EVERY interleaving of sibling
+    // traffic, so this asserts termination with real threads and a bound.
+    TEST(OnlineTuner, ConcurrentMergedSiblingsCannotKeepADeadExplorationAlive)
+    {
+        constexpr size_t key = 0x101C;
+
+        const size_t registering = identityOf(key, 0);
+
+        const std::vector<int> ranked{241, 242, 243};
+
+        // The registrant registers, is offered its first candidate, and never
+        // comes back -- the dispatch never arrives, so no sample ever will.
+        ASSERT_EQ(tuner().selectCandidate(key, registering, ranked), 0);
+
+        constexpr int kSiblings = 4;
+
+        std::atomic<bool> resolved{false};
+        std::atomic<int>  visits{0};
+
+        std::vector<std::thread> siblings;
+        siblings.reserve(kSiblings);
+
+        for(int id = 0; id < kSiblings; ++id)
+        {
+            siblings.emplace_back([&, id] {
+                const size_t merged = identityOf(key, id + 1);
+
+                for(int visit = 0; visit < kCallCeiling && !resolved.load(); ++visit)
+                {
+                    // Never a probe, whoever else is inside the tuner.
+                    EXPECT_EQ(tuner().selectCandidate(key, merged, ranked), -1)
+                        << "a merged sibling was handed a probe candidate";
+                    tuner().harvestPending(key);
+                    visits.fetch_add(1);
+
+                    if(tuner().resolution(key))
+                        resolved.store(true);
+                }
+            });
+        }
+
+        for(std::thread& sibling : siblings)
+            sibling.join();
+
+        ASSERT_TRUE(resolved.load())
+            << "concurrent siblings held an abandoned exploration open for " << visits.load()
+            << " dispatches";
+
+        const OnlineTuner::Resolution* answer = tuner().resolution(key);
+        ASSERT_NE(answer, nullptr);
+        EXPECT_EQ(answer->winner(), -1) << "nothing was measured, so there is no winner";
     }
 
     // The samples and the in-flight record are what exploring costs, and a

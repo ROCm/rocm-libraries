@@ -20,6 +20,19 @@ namespace rocblaslt
         // the write lock, for the life of the process.
         constexpr int c_visitBudgetFactor = 8;
 
+        // Slack over the visit budget before a problem NOBODY is exploring is
+        // given up on. Deliberately much larger, because what it bounds is a
+        // different thing: see ProblemState::m_dispatchesSinceSelection. The
+        // counter it caps is advanced by every dispatch under the key,
+        // including a merged sibling's, and only the registrant's own visits
+        // reset it -- so this has to leave room for however much sibling
+        // traffic separates two of the registrant's visits, or heavy sibling
+        // traffic would end a healthy exploration early. Overshooting costs an
+        // abandoned problem a bounded run of cheap locked dispatches before it
+        // short-circuits for the life of the process; undershooting costs a
+        // live exploration its samples.
+        constexpr int c_abandonBudgetFactor = 16;
+
         constexpr const char* c_tracePrefix = "[hipblaslt-online-tune]";
 
         int positionOf(const std::vector<int>& rankedSolutionIndices, int solutionIndex)
@@ -93,6 +106,49 @@ namespace rocblaslt
     // leaking the handles costs nothing.
     OnlineTuner::~OnlineTuner() {}
 
+    /**
+     * @brief The rule this function keeps, stated once.
+     *
+     * Five guards turn a visit away here -- resolved, capturing, cold,
+     * retained-on-first-sight, merged sibling -- and each is argued where it
+     * stands. What none of them says, and what two earlier defects
+     * were, is how they relate to the state this function
+     * mutates. Both were a mutation sitting above a guard that should have
+     * refused it: the give-up counter reset above the merged-sibling guard, so
+     * a sibling exempt from spending the budget still cleared the counter
+     * exploration needs in order to end; and the offer dropped above the same
+     * guard, so a sibling cancelled an offer the registrant had not consumed.
+     * This change is the first of the two; the offer is still a slot per
+     * problem below and is still dropped above both markers.
+     *
+     * THE RULE IS IN TWO PARTS, BECAUSE THE GUARDS ANSWER TWO QUESTIONS.
+     *
+     * 1. WHOSE EXPLORATION IS THIS? Exploration state belongs to the one
+     *    problem that registered the candidate list. Before there is a
+     *    registrant nobody owns it and every visit is its own; afterwards only
+     *    the registrant's is. A visit that is not its own writes NOTHING -- not
+     *    the counter, not the offer, not the budget -- and is answered from
+     *    what it finds.
+     *
+     * 2. DOES THIS VISIT ADVANCE THE ROTATION? An own visit always says the
+     *    library is still being asked about this shape, and so always resets
+     *    the abandonment counter. Only an own visit that goes on to be answered
+     *    with a candidate spends a visit of the budget and carries an offer. A
+     *    cold visit and a retained caller's first sight are own visits that do
+     *    neither: they are the library being asked, which is what the counter
+     *    measures, without a probe going out, which is what the budget pays
+     *    for. That is why the two answers are not the same answer.
+     *
+     * The code below is laid out in exactly those two steps, with a marked line
+     * for each and no write to this problem's state above either of them --
+     * except registerProblem(), which creates the registrant rather than
+     * spending anything of its, and the offer drop, which is the offer defect
+     * and is marked where it stands.
+     *
+     * A SIXTH GUARD GOES ABOVE MARKER A IF IT SAYS "NOT THIS EXPLORATION'S",
+     * AND BETWEEN A AND B IF IT SAYS "NOT A ROTATION VISIT". There is nowhere
+     * else to put it, which is the property both defects above lacked.
+     */
     int OnlineTuner::selectCandidateImpl(size_t                  problemKey,
                                          size_t                  problem,
                                          const std::vector<int>& rankedSolutionIndices,
@@ -140,28 +196,36 @@ namespace rocblaslt
         // for the single launch the visit it was made to is about to issue, and
         // this is a different visit; one the caller never dispatched must not be
         // left lying around for the next arrival to claim.
+        //
+        // KNOWN VIOLATION OF THE RULE ABOVE, and the one thing left above the
+        // markers that is not registration: a merged sibling's visit drops an
+        // offer that is not its to drop, so it cancels one the registrant has
+        // not consumed. The slot cannot express the pairing it is for --
+        // the offer defect -- so moving this line is not the fix and the fix is
+        // not this change's.
         state.m_offered = -1;
 
-        // Selection has visited, so the run of dispatches it had not seen ends
-        // here. Only an unbroken run of them says the library has stopped
-        // being asked; the dispatches of an ordinary exploration are each
-        // preceded by one of these and must not accumulate into a give-up.
-        state.m_dispatchesSinceSelection.store(0, std::memory_order_relaxed);
+        // ------------------------------------------------------------------
+        // Step 1. Whose exploration is this?
+        // ------------------------------------------------------------------
 
-        if(state.m_candidates.empty())
+        // No candidate list yet, so this problem is still inside its cold
+        // visits: the caller's own ordering is left alone and nothing is
+        // offered an event pair, which is what makes exploration start on a
+        // device this problem has already warmed. There is no registrant yet
+        // either, so the sibling guard below has nothing to compare against
+        // and this visit is its own.
+        const bool cold = state.m_candidates.empty() && state.m_coldCalls < m_coldCalls;
+
+        // The first sight of a problem by a caller that keeps the answer. Read
+        // before registerProblem() runs, because registering is precisely what
+        // stops the NEXT such query being a first sight.
+        const bool deferred = state.m_candidates.empty() && !cold && retained;
+
+        if(cold)
+            ++state.m_coldCalls;
+        else if(state.m_candidates.empty())
         {
-            // No candidate list yet, so this problem is still inside its cold
-            // visits: the caller's own ordering is left alone and nothing is
-            // offered an event pair, which is what makes exploration start on a
-            // device this problem has already warmed.
-            if(state.m_coldCalls < m_coldCalls)
-            {
-                ++state.m_coldCalls;
-                return -1;
-            }
-
-            registerProblem(problemKey, problem, state, rankedSolutionIndices);
-
             // The first sight of a problem by a caller that keeps the answer.
             //
             // A probe is a kernel the rotation does not believe is best,
@@ -191,18 +255,44 @@ namespace rocblaslt
             // heuristic query is not, and refusing all of them would withdraw
             // online tuning from every application that asks the library for a
             // kernel per call -- which is half of what the feature is for.
-            if(retained)
-                return -1;
+            //
+            // The refusal itself is the `deferred` branch past marker A, not a
+            // return from here: a first sight is still the library being
+            // asked, so it still says the shape has not been abandoned.
+            registerProblem(problemKey, problem, state, rankedSolutionIndices);
         }
-
-        // A problem the key merges with the one being explored. Its launches are
-        // not this exploration's to sample, so it is offered nothing -- and it
-        // spends none of the visit budget either, which a sibling dispatching
-        // often enough could otherwise exhaust, ending exploration early on
-        // whatever samples had been taken by then. It takes the branch below
-        // once there is a winner, like every other caller.
-        if(!state.m_resolved && state.m_problem != problem)
+        // A problem the key merges with the one being explored. Its launches
+        // are not this exploration's to sample, so it is offered nothing -- and
+        // it spends none of the visit budget either, which a sibling
+        // dispatching often enough could otherwise exhaust, ending exploration
+        // early on whatever samples had been taken by then. It takes the branch
+        // below once there is a winner, like every other caller.
+        //
+        // Above marker A, and that placement is the whole rule: a visit that
+        // is not this exploration's writes none of this exploration's state. Reached only when there is a registrant
+        // to compare against -- the two branches above are the cases where
+        // there is not.
+        else if(!state.m_resolved && state.m_problem != problem)
             return -1;
+
+        // ------------------------------------------------------------------
+        // MARKER A. Past here the visit is this exploration's own.
+        // ------------------------------------------------------------------
+
+        // Selection has visited, so the run of dispatches the registrant had
+        // not made ends here. Only an unbroken run of them says the library has
+        // stopped being asked by the one caller whose visits can finish this.
+        state.m_dispatchesSinceSelection.store(0, std::memory_order_relaxed);
+
+        // Own visits that do not advance the rotation: still the library being
+        // asked, which is all marker A's counter measures, but no probe goes
+        // out so no visit of the budget is spent and no offer is carried.
+        if(cold || deferred)
+            return -1;
+
+        // ------------------------------------------------------------------
+        // MARKER B. Past here the visit advances the rotation.
+        // ------------------------------------------------------------------
 
         if(!state.m_resolved)
         {
@@ -258,7 +348,7 @@ namespace rocblaslt
             const int unseen
                 = state.m_dispatchesSinceSelection.fetch_add(1, std::memory_order_relaxed) + 1;
 
-            const bool exhausted = !state.m_resolved && unseen > visitBudget(state);
+            const bool exhausted = !state.m_resolved && unseen > abandonBudget(state);
 
             if(state.m_pending.empty() && !exhausted)
                 return;
@@ -275,7 +365,7 @@ namespace rocblaslt
         // Re-read under the write lock, which is where it can be acted on. The
         // drain below still runs: samples already paid for are not thrown away
         // for the sake of giving up, exactly as the selection half does it.
-        if(state.m_dispatchesSinceSelection.load(std::memory_order_relaxed) > visitBudget(state))
+        if(state.m_dispatchesSinceSelection.load(std::memory_order_relaxed) > abandonBudget(state))
             state.m_gaveUp = true;
 
         if(state.m_pending.empty() && !state.m_gaveUp)
@@ -503,6 +593,15 @@ namespace rocblaslt
             = state.m_candidates.empty() ? m_topK : static_cast<int>(state.m_candidates.size());
 
         return candidates * m_repeats * c_visitBudgetFactor;
+    }
+
+    // How long a problem no caller is exploring may stay unresolved, counted in
+    // dispatches rather than in visits of the registrant. A separate and much
+    // larger ceiling than visitBudget() on purpose: see
+    // ProblemState::m_dispatchesSinceSelection and c_abandonBudgetFactor.
+    int OnlineTuner::abandonBudget(const ProblemState& state) const
+    {
+        return visitBudget(state) * c_abandonBudgetFactor;
     }
 
     // GPU timing noise is one-sided: contention, clock excursions and cache
