@@ -14,10 +14,12 @@ These are pure-predicate tests: no emit, no GPU, no toolchain.
 """
 
 import itertools
+from types import SimpleNamespace
 
 import pytest
 
 from Tensile.Common.DataType import DataType
+from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.Common.Utilities import (
     isMxf4SubtilePath,
     plsinBlockSchedTile,
@@ -214,3 +216,75 @@ def test_partially_built_state_is_not_mxf4(kernel):
     hash of kernels that can never set it.
     """
     assert isMxf4SubtilePath(kernel) is False
+
+
+class TestStagedArmNoActivation:
+    """When the staged fused arm may carry only the no-activation store body.
+
+    The arm emits one store body. If that body is the no-activation one and the
+    kernel actually wants an activation, the activation is skipped outright --
+    there is no second body and no runtime path back to one. So the predicate
+    has to be false for every kernel that applies an activation, whether the
+    choice is made at runtime or baked in at compile time.
+
+    The compile-time case is the one with no safety net: a runtime-selectable
+    activation at least has an ``ActivationType`` SGPR that something could
+    branch on, while a kernel built for ``relu`` has nothing to test.
+    """
+
+    @staticmethod
+    def _call(kernel, sgprs=(), plsin=True):
+        """Invoke the predicate against a stub; it reads only these two fields."""
+        stub = SimpleNamespace(states=SimpleNamespace(postLoopStoreInNll=plsin),
+                               sgprs=dict.fromkeys(sgprs, 0))
+        return KernelWriterAssembly._plsinStagedArmNoActivation(stub, kernel)
+
+    def test_no_activation_folds(self):
+        k = kern()
+        k["ProblemType"]["ActivationType"] = "none"
+        k["ActivationFused"] = True
+        assert self._call(k) is True
+
+    def test_unfused_activation_folds(self):
+        """ActivationFused False means this kernel applies none regardless."""
+        k = kern()
+        k["ProblemType"]["ActivationType"] = "relu"
+        k["ActivationFused"] = False
+        assert self._call(k) is True
+
+    def test_fixed_nonnone_activation_does_not_fold(self):
+        """The regression: relu baked in at compile time has no SGPR to test.
+
+        Folding here emits the no-activation body and drops the relu with no
+        runtime fallback -- wrong results, not a slow path.
+        """
+        k = kern()
+        k["ProblemType"]["ActivationType"] = "relu"
+        k["ActivationFused"] = True
+        assert self._call(k) is False
+
+    def test_runtime_activation_does_not_fold(self):
+        """'all' carries an ActivationType SGPR, so the arm keeps every body.
+
+        The fused/not-fused decision is a pre-loop flag and ActivationType is
+        not defined that early, so it cannot be folded into that flag either.
+        """
+        k = kern()
+        k["ProblemType"]["ActivationType"] = "all"
+        k["ActivationFused"] = True
+        assert self._call(k, sgprs=("ActivationType",)) is False
+
+    def test_requires_staging_eligibility(self):
+        """Out of scope for staging, so the question never arises."""
+        k = kern(mt0=128, mt1=128)
+        k["ProblemType"]["ActivationType"] = "none"
+        k["ActivationFused"] = True
+        assert self._call(k) is False
+        assert self._call(kern_none_act(), plsin=False) is False
+
+
+def kern_none_act():
+    k = kern()
+    k["ProblemType"]["ActivationType"] = "none"
+    k["ActivationFused"] = True
+    return k

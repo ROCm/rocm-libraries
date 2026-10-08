@@ -16889,19 +16889,24 @@ class KernelWriterAssembly(KernelWriter):
   def _plsinStagedArmNoActivation(self, kernel):
     """Whether the staged fused arm may carry only the no-activation store body.
 
-    Sound only if the arm is also guarded on ActivationType==none, and that guard
-    is hoisted to the pre-loop flag where ActivationType is not defined yet: it
-    arrives with the epilogue kernargs. So a kernel built for the runtime 'all'
-    activation set keeps every body unless the knob forces the single-body form,
-    which is then correct only for no-activation inputs.
+    Sound only when the kernel applies no activation at all, because the arm
+    emits one body and there is no second chance to apply one.
+
+    A runtime-selectable activation ('all') cannot be folded away here. The
+    fused/not-fused decision is a pre-loop flag, and ActivationType is not
+    defined that early -- it arrives with the epilogue kernargs -- so the arm
+    keeps every body and selects at the normal point instead.
+
+    A compile-time activation has no SGPR to test at all, so a fixed non-'none'
+    one is not foldable either: dropping to the no-activation body would skip it
+    outright with no runtime path back. Those kernels keep the full body.
     """
     if not (bool(self.states.postLoopStoreInNll) and plsinStagingEligible(kernel)):
       return False
     if "ActivationType" in self.sgprs:
-      # Activation arrives at runtime, so the arm cannot assume it is none and has
-      # to keep every body.
       return False
-    return True
+    return kernel["ProblemType"]["ActivationType"] == 'none' \
+        or not kernel["ActivationFused"]
 
   def _plsinFusedSkipEpilogueMul(self):
     """True while emitting the fused NLL store: skip scalar alpha and ScaleAlphaVec."""
@@ -17212,17 +17217,12 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0,
                              comment="alpha != 1 -> not fused"))
 
-      # ActivationType == none. The staged fused arm emits only the no-activation
-      # store body (see initActivationLoop), so every other activation has to reach
-      # the PLAIN NLL and its own post-loop store.
-      if self._plsinStagedArmNoActivation(kernel) and "ActivationType" in self.sgprs:
-        from .Activation import ActivationType
-        noneIdx = ActivationType.getEnumIndex("none")
-        module.addComment1("PLSIN guard-hoist: fold ActivationType==none into %s" % flag)
-        module.add(self.getSCMPKInstruction("EQU32", "ActivationType", noneIdx,
-                                            comment="activationType == none (%u) ?" % noneIdx))
-        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0,
-                               comment="activation != none -> not fused"))
+      # No ActivationType fold here. It would pay for itself only if the staged
+      # arm carried a single store body while the activation was still selectable
+      # at runtime, and those two cannot hold at once: the arm drops to one body
+      # exactly when the kernel applies no activation, which is when there is
+      # nothing to test. _plsinStagedArmNoActivation and "ActivationType" in
+      # self.sgprs are mutually exclusive by construction.
 
       # Degenerate short-K guard: require numIter >= minIter so the NLL pipeline has a
       # real iteration to drain.
@@ -20908,8 +20908,9 @@ class KernelWriterAssembly(KernelWriter):
     activationLabelModules = []
     activationEnumStrList = []
     if self.states.subtileFusedStoreNoActivation:
-      # PLSIN staged store: the fused arm is guarded on ActivationType==none, so it
-      # only ever needs that one body. Emitting the full 'all' set here would put six
+      # PLSIN staged store: only set when the kernel applies no activation at all
+      # (see _plsinStagedArmNoActivation), so the arm needs this one body and there
+      # is nothing to guard against. Emitting the full 'all' set here would put six
       # copies of the store in the arm, each restarting its element N groups at 0 --
       # the stage markers are forward-only, so the five unreachable copies would all
       # collapse into the last stage and unbalance the per-partition drain.
