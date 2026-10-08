@@ -599,6 +599,18 @@ constexpr target_arch device_target_arch()
 #endif
 }
 
+template<typename Target>
+constexpr int match_target(const Target& target, gen g, target_arch i, gpu s = gpu::generic)
+{
+    // Priority order: prefer exact GPU match first; otherwise allow an Arch match (if GPU differs);
+    // finally allow a Gen match (if both Arch and GPU differ). This ensures we progressively
+    // refine the fallback from generic -> generation -> arch -> exact GPU.
+    return (target.s != gpu::generic && target.s == s)           ? 3
+           : (target.i != target_arch::unknown && target.i == i) ? 2
+           : (target.g != gen::unknown && target.g == g)         ? 1
+                                                                 : 0;
+}
+
 template<typename... Ts>
 struct comp_targets
 {
@@ -612,8 +624,7 @@ private:
     static constexpr target_arch cur_arch = device_target_arch();
     static constexpr gen         cur_gen  = gen_from_target_arch(cur_arch);
 
-    static constexpr bool has_arch_match = ((Ts{}.i == cur_arch) || ...);
-    static constexpr bool has_gen_match  = ((Ts{}.g == cur_gen) || ...);
+    static constexpr int best_score = std::max({match_target(Ts{}, cur_gen, cur_arch)...});
 
     template<typename T, typename F>
     static constexpr void call_if_selected(F& f)
@@ -622,35 +633,57 @@ private:
 
         if constexpr(cur_arch == target_arch::unknown)
         {
-            // Host pass / unrecognized arch: nothing to filter against.
+            // Compile time unrecognized arch: nothing to filter against.
             f(t);
         }
-        else if constexpr(has_arch_match)
+        else if constexpr(best_score == 0)
         {
-            // 1. Exact arch match exists: only build the entries with that arch.
-            if constexpr(t.i == cur_arch)
-            {
-                f(t);
-            }
-        }
-        else if constexpr(has_gen_match)
-        {
-            // 2. No arch match, but the generation matches: build all entries of that gen.
-            if constexpr(t.g == cur_gen)
+            // There are no matches at all: only build the unknown fallback.
+            if constexpr(target{t} == target{})
             {
                 f(t);
             }
         }
         else
         {
-            // 3. Neither matches: it should only build unknown fallback case.
-            if constexpr(t == target{})
+            // Keep only the entries that reach the best level
+            // (all matching-arch entries, or else all matching-gen entries).
+            if constexpr(match_target(t, cur_gen, cur_arch) == best_score)
             {
                 f(t);
             }
         }
     }
 };
+
+template<class Targets>
+constexpr target most_common_config(target target_current)
+{
+    // Takes unknown as default.
+    target ret{};
+    int    best_score = 0;
+
+    Targets::for_each(
+        [&](auto t)
+        {
+            // Skip unknown target for picking.
+            if(!(target{} == t))
+            {
+                // This determines the fallback order and which config is chosen.
+                const int score
+                    = match_target(t, target_current.g, target_current.i, target_current.s);
+
+                // Strictly better wins; on ties the later entry wins.
+                if(score > 0 && score >= best_score)
+                {
+                    best_score = score;
+                    ret        = target{t};
+                }
+            }
+        });
+
+    return ret;
+}
 
 constexpr arch::wavefront::target get_wavefront_size(const gen gen = gen::unknown)
 {
@@ -696,42 +729,6 @@ struct launch_plan
                            device_callback);
     }
 };
-
-template<class Targets>
-constexpr target most_common_config(target target_current)
-{
-    // Takes unknown as default.
-    target ret{};
-    // The for_each loop also does a compile time filtering on gen and arch,
-    // if you want to change the fallback path also look at the logic there.
-    Targets::for_each(
-        [&](auto t)
-        {
-            // Skip unknown target for picking.
-            if(!(target{} == t))
-            {
-                constexpr target_arch Arch = t.i;
-                constexpr gpu         GPU  = t.s;
-                constexpr gen         Gen  = t.g;
-
-                // Update `ret` if the candidate `t` matches more specifically than the current `ret`.
-                // Priority order: prefer exact GPU match first; otherwise allow an Arch match (if GPU differs);
-                // finally allow a Gen match (if both Arch and GPU differ). This ensures we progressively
-                // refine the fallback from generic -> generation -> arch -> exact GPU.
-                if((GPU == target_current.s)
-                   || (Arch == target_current.i
-                       && (target_current.s != ret.s || ret.s == gpu::generic))
-                   || (Gen == target_current.g
-                       && ((target_current.s != ret.s || ret.s == gpu::generic)
-                           && (target_current.i != ret.i || ret.i == target_arch::unknown))))
-                {
-                    ret = target{t};
-                }
-            }
-        });
-
-    return ret;
-}
 
 template<class Selector>
 constexpr typename Selector::param_type default_select_config(target t)
