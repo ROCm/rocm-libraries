@@ -16,16 +16,6 @@ namespace hipblaslt_jit
                 throw std::runtime_error(message);
         }
 
-        ProblemType::Scale scaleOf(const std::string& value)
-        {
-            if(value.empty())
-                return ProblemType::Scale::None;
-            if(value == "Scalar")
-                return ProblemType::Scale::Scalar;
-            if(value == "Vector")
-                return ProblemType::Scale::Vector;
-            throw std::runtime_error("UseScaleAB '" + value + "' is not none, scalar or vector");
-        }
     }
 
     const char* notImplemented(const TensileLite::ContractionProblemGemm& problem)
@@ -70,58 +60,54 @@ namespace hipblaslt_jit
         return gemm;
     }
 
-    ProblemType problemTypeFields(const TensileLite::ContractionProblemGemm& problem)
+    TensileLite::ContractionSolution::ProblemType
+        problemTypeFields(const TensileLite::ContractionProblemGemm& problem)
     {
         const auto gemm = canonicalGemm(problem);
-        ProblemType fields;
-        fields.batched             = true;
-        fields.stridedBatched      = true;
-        fields.transposeA          = gemm.transA;
-        fields.transposeB          = gemm.transB;
-        fields.complexConjugateA   = gemm.conjugateA;
-        fields.complexConjugateB   = gemm.conjugateB;
-        fields.dataType            = problem.computeInputTypeA();
-        fields.dataTypeA           = problem.a().dataType();
-        fields.dataTypeB           = problem.b().dataType();
-        fields.macDataTypeA        = problem.computeInputTypeA();
-        fields.macDataTypeB        = problem.computeInputTypeB();
-        fields.destDataType        = problem.d().dataType();
-        fields.computeDataType     = problem.computeType();
-        fields.f32XdlMathOp        = problem.f32XdlMathOp();
-        fields.highPrecisionAccumulate = problem.highPrecisionAccumulate();
-        fields.useBias             = problem.useBias();
-        fields.useE                = problem.useE();
-        fields.gradient            = problem.useGradient();
-        fields.scale               = scaleOf(problem.useScaleAB());
-        fields.useScaleCD          = problem.useScaleCD();
-        fields.useScaleAlphaVec    = problem.useScaleAlphaVec();
-        fields.outputAmaxD         = problem.outputAmaxD();
-        fields.mxBlockA            = static_cast<int>(problem.mxBlockA());
-        fields.mxBlockB            = static_cast<int>(problem.mxBlockB());
-        fields.sparse              = problem.sparse();
-        fields.swizzleTensorA      = problem.swizzleTensorA();
-        fields.swizzleTensorB      = problem.swizzleTensorB();
-        fields.useGateResidual     = problem.useGateResidual();
+        TensileLite::ContractionSolution::ProblemType fields;
+        fields.operationIdentifier       = problem.operationIdentifier();
+        fields.transA                    = gemm.transA;
+        fields.transB                    = gemm.transB;
+        fields.aType                     = problem.a().dataType();
+        fields.bType                     = problem.b().dataType();
+        fields.cType                     = problem.c().dataType();
+        fields.dType                     = problem.d().dataType();
+        fields.computeInputTypeA         = problem.computeInputTypeA();
+        fields.computeInputTypeB         = problem.computeInputTypeB();
+        fields.computeType               = problem.computeType();
+        fields.f32XdlMathOp              = problem.f32XdlMathOp();
+        fields.highPrecisionAccumulate   = problem.highPrecisionAccumulate();
+        fields.useGradient               = problem.useGradient();
+        fields.useBias                   = problem.useBias();
+        fields.useE                      = problem.useE();
+        fields.useGateResidual           = problem.useGateResidual();
+        fields.useScaleAB                = problem.useScaleAB();
+        fields.useScaleCD                = problem.useScaleCD();
+        fields.useScaleAlphaVec          = problem.useScaleAlphaVec();
+        fields.stridedBatched            = problem.stridedBatched();
+        fields.outputAmaxD               = problem.outputAmaxD();
+        fields.groupedGemm               = problem.groupedGemm();
+        fields.activationType            = problem.activationType();
+        fields.activationComputeDataType = problem.activationComputeType();
+        fields.sparse                    = problem.sparse();
+        fields.swizzleTensorA            = problem.swizzleTensorA();
+        fields.swizzleTensorB            = problem.swizzleTensorB();
+        fields.mxBlockA                  = static_cast<int>(problem.mxBlockA());
+        fields.mxBlockB                  = static_cast<int>(problem.mxBlockB());
+        fields.metadataLayout            = problem.metadataLayout();
         if(problem.mxBlockA())
-            fields.dataTypeMxsa = problem.mxTypeA();
+            fields.mxTypeA = problem.mxTypeA();
         if(problem.mxBlockB())
-            fields.dataTypeMxsb = problem.mxTypeB();
+            fields.mxTypeB = problem.mxTypeB();
         if(problem.useBias())
         {
-            fields.biasDataType = problem.bias().dataType();
-            fields.biasSrc      = problem.biasSrc();
+            fields.biasDataTypeWhiteList = {problem.bias().dataType()};
+            fields.biasSrcWhiteList      = {static_cast<int>(problem.biasSrc())};
         }
         if(problem.useGateResidual())
-            fields.gateResidualDataType = problem.gateResidual().dataType();
+            fields.gateResidualDataTypeWhiteList = {problem.gateResidual().dataType()};
         if(problem.useE())
-            fields.dataTypeE = problem.e().dataType();
-        if(problem.outputAmaxD())
-            fields.dataTypeAmaxD = problem.amaxd().dataType();
-        if(problem.activationType() != TensileLite::ActivationType::None)
-        {
-            fields.activation                  = problem.activationType();
-            fields.activationComputeDataType   = problem.activationComputeType();
-        }
+            fields.eType = problem.e().dataType();
         return fields;
     }
 }

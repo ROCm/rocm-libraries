@@ -339,28 +339,22 @@ namespace hipblaslt_jit
             number(name, static_cast<int>(value));
         };
         add("GEMM");
-        flag("b", fields.batched);
         flag("sb", fields.stridedBatched);
-        flag("ta", fields.transposeA);
-        flag("tb", fields.transposeB);
-        flag("ca", fields.complexConjugateA);
-        flag("cb", fields.complexConjugateB);
-        dataType("dt", fields.dataType);
-        dataType("dta", fields.dataTypeA);
-        dataType("dtb", fields.dataTypeB);
-        dataType("maca", fields.macDataTypeA);
-        dataType("macb", fields.macDataTypeB);
-        dataType("dest", fields.destDataType);
-        dataType("compute", fields.computeDataType);
+        flag("ta", fields.transA);
+        flag("tb", fields.transB);
+        dataType("dta", fields.aType);
+        dataType("dtb", fields.bType);
+        dataType("dtc", fields.cType);
+        dataType("dtd", fields.dType);
+        dataType("maca", fields.computeInputTypeA);
+        dataType("macb", fields.computeInputTypeB);
+        dataType("compute", fields.computeType);
         dataType("f32", fields.f32XdlMathOp);
         flag("hpa", fields.highPrecisionAccumulate);
         number("bias", fields.useBias);
         flag("e", fields.useE);
-        flag("grad", fields.gradient);
-        add(std::string("scale")
-            + (fields.scale == ProblemType::Scale::Scalar   ? "scalar"
-               : fields.scale == ProblemType::Scale::Vector ? "vector"
-                                                            : "none"));
+        flag("grad", fields.useGradient);
+        add(std::string("scale") + filesystemLiteral(fields.useScaleAB.empty() ? "none" : fields.useScaleAB));
         flag("scd", fields.useScaleCD);
         number("sav", fields.useScaleAlphaVec);
         flag("amax", fields.outputAmaxD);
@@ -370,26 +364,24 @@ namespace hipblaslt_jit
         flag("swa", fields.swizzleTensorA);
         flag("swb", fields.swizzleTensorB);
         flag("gate", fields.useGateResidual);
-        if(fields.dataTypeMxsa)
-            dataType("mxsa", *fields.dataTypeMxsa);
-        if(fields.dataTypeMxsb)
-            dataType("mxsb", *fields.dataTypeMxsb);
-        if(fields.biasDataType)
-            dataType("biasdt", *fields.biasDataType);
-        if(fields.biasSrc)
-            number("biassrc", static_cast<int>(*fields.biasSrc));
-        if(fields.gateResidualDataType)
-            dataType("gatedt", *fields.gateResidualDataType);
-        if(fields.dataTypeE)
-            dataType("dte", *fields.dataTypeE);
-        if(fields.dataTypeAmaxD)
-            dataType("amaxdt", *fields.dataTypeAmaxD);
-        if(fields.activation)
-            number("act", static_cast<unsigned>(*fields.activation));
-        if(fields.activationComputeDataType)
-            dataType("actc", *fields.activationComputeDataType);
-        add(std::string("id") + filesystemLiteral(problem.operationIdentifier()));
-        flag("gg", problem.groupedGemm());
+        if(fields.mxBlockA)
+            dataType("mxsa", fields.mxTypeA);
+        if(fields.mxBlockB)
+            dataType("mxsb", fields.mxTypeB);
+        if(!fields.biasDataTypeWhiteList.empty())
+            dataType("biasdt", fields.biasDataTypeWhiteList.front());
+        if(!fields.biasSrcWhiteList.empty())
+            number("biassrc", fields.biasSrcWhiteList.front());
+        if(!fields.gateResidualDataTypeWhiteList.empty())
+            dataType("gatedt", fields.gateResidualDataTypeWhiteList.front());
+        if(fields.useE)
+            dataType("dte", fields.eType);
+        if(fields.activationType != TensileLite::ActivationType::None)
+            number("act", static_cast<unsigned>(fields.activationType));
+        if(fields.activationType != TensileLite::ActivationType::None)
+            dataType("actc", fields.activationComputeDataType);
+        add(std::string("id") + filesystemLiteral(fields.operationIdentifier));
+        flag("gg", fields.groupedGemm);
         return key;
     }
 
