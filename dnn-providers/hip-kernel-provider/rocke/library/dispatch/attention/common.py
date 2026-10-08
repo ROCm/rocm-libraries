@@ -183,7 +183,7 @@ class AttentionRequest(OperatorRequest):
             active.add("sinks")
         if bool(self.use_fp8):
             active.add("fp8")
-        if bool(self.emit_lse):
+        if self.emit_lse:
             active.add("lse")
         return frozenset(active)
 
@@ -212,6 +212,10 @@ def _request_errors(req: OperatorRequest) -> list[str]:
         errors.append("kv_layout must be paged or strided")
     if req.op != "attention":
         errors.append(f"unsupported op {req.op!r}")
+    if type(req.emit_lse) is not bool:
+        errors.append(
+            f"emit_lse must be a bool, got {type(req.emit_lse).__name__}"
+        )
     for field in ("batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k", "hdim_q"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
