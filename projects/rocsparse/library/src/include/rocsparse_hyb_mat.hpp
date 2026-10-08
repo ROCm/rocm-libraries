@@ -57,12 +57,13 @@ struct _rocsparse_hyb_mat
 
     rocsparse_datatype data_type_T = rocsparse_datatype_f32_r;
 
-    // True for an array rocSPARSE allocated (csr2hyb, copy_hyb_mat), which
-    // rocSPARSE frees. Arrays set with rocsparse_hyb_mat_set_info belong to
-    // the caller and are never freed here.
-    bool ell_col_ind_owned{};
-    bool ell_val_owned{};
-    bool coo_row_ind_owned{};
-    bool coo_col_ind_owned{};
-    bool coo_val_owned{};
+    // Arrays rocSPARSE allocated (csr2hyb, copy_hyb_mat), which rocSPARSE
+    // frees. They are tracked apart from the fields above because
+    // rocsparse_hyb_mat_set_info can point those at caller arrays, which
+    // rocSPARSE never frees.
+    rocsparse_int* allocated_ell_col_ind{};
+    void*          allocated_ell_val{};
+    rocsparse_int* allocated_coo_row_ind{};
+    rocsparse_int* allocated_coo_col_ind{};
+    void*          allocated_coo_val{};
 };

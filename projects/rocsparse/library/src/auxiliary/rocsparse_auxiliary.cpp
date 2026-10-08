@@ -1260,7 +1260,7 @@ try
         {
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->ell_col_ind, sizeof(rocsparse_int) * src->ell_nnz));
-            dest->ell_col_ind_owned = true;
+            dest->allocated_ell_col_ind = dest->ell_col_ind;
         }
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->ell_col_ind,
                                                 src->ell_col_ind,
@@ -1273,7 +1273,7 @@ try
         if(dest->ell_val == nullptr)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->ell_val, T_size * src->ell_nnz));
-            dest->ell_val_owned = true;
+            dest->allocated_ell_val = dest->ell_val;
         }
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
             dest->ell_val, src->ell_val, T_size * src->ell_nnz, hipMemcpyDeviceToDevice));
@@ -1285,7 +1285,7 @@ try
         {
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->coo_row_ind, sizeof(rocsparse_int) * src->coo_nnz));
-            dest->coo_row_ind_owned = true;
+            dest->allocated_coo_row_ind = dest->coo_row_ind;
         }
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->coo_row_ind,
                                                 src->coo_row_ind,
@@ -1299,7 +1299,7 @@ try
         {
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->coo_col_ind, sizeof(rocsparse_int) * src->coo_nnz));
-            dest->coo_col_ind_owned = true;
+            dest->allocated_coo_col_ind = dest->coo_col_ind;
         }
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->coo_col_ind,
                                                 src->coo_col_ind,
@@ -1312,7 +1312,7 @@ try
         if(dest->coo_val == nullptr)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->coo_val, T_size * src->coo_nnz));
-            dest->coo_val_owned = true;
+            dest->allocated_coo_val = dest->coo_val;
         }
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
             dest->coo_val, src->coo_val, T_size * src->coo_nnz, hipMemcpyDeviceToDevice));
@@ -1353,27 +1353,27 @@ try
     RETURN_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     // Clean up ELL part
-    if(hyb->ell_col_ind_owned)
+    if(hyb->allocated_ell_col_ind != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->ell_col_ind));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->allocated_ell_col_ind));
     }
-    if(hyb->ell_val_owned)
+    if(hyb->allocated_ell_val != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->ell_val));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->allocated_ell_val));
     }
 
     // Clean up COO part
-    if(hyb->coo_row_ind_owned)
+    if(hyb->allocated_coo_row_ind != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->coo_row_ind));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->allocated_coo_row_ind));
     }
-    if(hyb->coo_col_ind_owned)
+    if(hyb->allocated_coo_col_ind != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->coo_col_ind));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->allocated_coo_col_ind));
     }
-    if(hyb->coo_val_owned)
+    if(hyb->allocated_coo_val != nullptr)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->coo_val));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(hyb->allocated_coo_val));
     }
 
     delete hyb;
@@ -1468,7 +1468,7 @@ catch(...)
 
 /********************************************************************************
  * \brief Set the internal fields of a HYB matrix, without exposing its layout.
- * Ownership of the array pointers is transferred to the HYB matrix on success.
+ * The array pointers are stored, not copied; the caller keeps ownership.
  *******************************************************************************/
 rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat       hyb,
                                             rocsparse_int           m,
@@ -1489,8 +1489,7 @@ try
 
     ROCSPARSE_CHECKARG_POINTER(0, hyb);
 
-    // Validate everything before modifying hyb. Ownership of the incoming
-    // arrays is transferred only when this function returns success.
+    // Validate everything before modifying hyb.
     ROCSPARSE_CHECKARG_SIZE(1, m);
     ROCSPARSE_CHECKARG_SIZE(2, n);
     ROCSPARSE_CHECKARG_ENUM(3, partition);
@@ -1537,69 +1536,18 @@ try
         (coo_nnz > 0 && (coo_row_ind == nullptr || coo_col_ind == nullptr || coo_val == nullptr)),
         rocsparse_status_invalid_pointer);
 
-    // The caller keeps ownership of the arrays passed in. An array rocSPARSE
-    // allocated stays owned by hyb when it is passed back, in any field; the
-    // ones that are not passed back are released.
-    void* const old_arrays[]
-        = {hyb->ell_col_ind, hyb->ell_val, hyb->coo_row_ind, hyb->coo_col_ind, hyb->coo_val};
-    const bool  old_owned[]  = {hyb->ell_col_ind_owned,
-                              hyb->ell_val_owned,
-                              hyb->coo_row_ind_owned,
-                              hyb->coo_col_ind_owned,
-                              hyb->coo_val_owned};
-    void* const new_arrays[] = {ell_col_ind, ell_val, coo_row_ind, coo_col_ind, coo_val};
-    bool        new_owned[5] = {};
-    bool        kept[5]      = {};
-    bool        release      = false;
-    for(int i = 0; i < 5; ++i)
-    {
-        if(!old_owned[i])
-        {
-            continue;
-        }
-        for(int j = 0; j < 5; ++j)
-        {
-            if(!new_owned[j] && new_arrays[j] == old_arrays[i])
-            {
-                new_owned[j] = true;
-                kept[i]      = true;
-                break;
-            }
-        }
-        release |= !kept[i];
-    }
-
-    // freeing a hipMallocAsync allocation is asynchronous (see rocsparse_destroy_hyb_mat).
-    if(release)
-    {
-        RETURN_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
-    }
-
-    hyb->m                 = m;
-    hyb->n                 = n;
-    hyb->partition         = partition;
-    hyb->ell_nnz           = static_cast<decltype(hyb->ell_nnz)>(ell_nnz);
-    hyb->ell_width         = ell_width;
-    hyb->coo_nnz           = coo_nnz;
-    hyb->data_type_T       = data_type;
-    hyb->ell_col_ind       = ell_col_ind;
-    hyb->ell_val           = ell_val;
-    hyb->coo_row_ind       = coo_row_ind;
-    hyb->coo_col_ind       = coo_col_ind;
-    hyb->coo_val           = coo_val;
-    hyb->ell_col_ind_owned = new_owned[0];
-    hyb->ell_val_owned     = new_owned[1];
-    hyb->coo_row_ind_owned = new_owned[2];
-    hyb->coo_col_ind_owned = new_owned[3];
-    hyb->coo_val_owned     = new_owned[4];
-
-    for(int i = 0; i < 5; ++i)
-    {
-        if(old_owned[i] && !kept[i])
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFree(old_arrays[i]));
-        }
-    }
+    hyb->m           = m;
+    hyb->n           = n;
+    hyb->partition   = partition;
+    hyb->ell_nnz     = static_cast<decltype(hyb->ell_nnz)>(ell_nnz);
+    hyb->ell_width   = ell_width;
+    hyb->coo_nnz     = coo_nnz;
+    hyb->data_type_T = data_type;
+    hyb->ell_col_ind = ell_col_ind;
+    hyb->ell_val     = ell_val;
+    hyb->coo_row_ind = coo_row_ind;
+    hyb->coo_col_ind = coo_col_ind;
+    hyb->coo_val     = coo_val;
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
