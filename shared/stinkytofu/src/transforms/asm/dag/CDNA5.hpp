@@ -551,7 +551,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool hideBudgetPrescanEnabled() const {
         return getPassContext().getPassFeatureConfig().dagFeatures.enableWmmaHideBudgetPrescan;
     }
-    // MX128 (mxUnit==1) pack/parent rules. MX16/MX32 leave this clear and keep
+    // MX128 (mxUnit==1) consumer/parent rules. MX16/MX32 leave this clear and keep
     // the DS-priority / unfiltered parent-VALU schedule.
     bool mxUnit1Scheduling() const {
         return getPassContext().getPassFeatureConfig().dagFeatures.mxUnit1Scheduling;
@@ -714,6 +714,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Synthetic throttle cycles charged to DS placement in the current WMMA.
     // Kept separate from coIssueCyclePos_, the real hardware/hazard timeline.
     int dsSchedulingBudgetUsed_ = 0;
+    // Unissued ds_loads per earliest in-region matrix consumer (DAG id), and that
+    // consumer per ds_load DAG id. Inside a steady loop a ds_load may issue only
+    // once every earlier consumer has none left: LDS returns in order,
+    // so a B_X2 load ahead of an outstanding B_X1+28 is waited out by X1's WMMA.
+    std::map<int, int> unissuedDsByConsumer_;
+    std::vector<int> dsConsumerById_;
+    int earliestUnissuedDsConsumer() const {
+        return unissuedDsByConsumer_.empty() ? INT_MAX : unissuedDsByConsumer_.begin()->first;
+    }
     // Exact consumer focus used outside a steady-state loop, where there is no
     // next-iteration latency to hide and younger DS work only pollutes FIFO.
     int dsWindowFocusWmmaId_ = INT_MAX;
@@ -1286,6 +1295,11 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         dsIssueCap_.push(dsIssueCapSpan());
         const int wmmaId = earliestPendingWmmaId(node);
         dsWindowFocusWmmaId_ = std::min(dsWindowFocusWmmaId_, wmmaId);
+        if (node->id < dsConsumerById_.size()) {
+            auto it = unissuedDsByConsumer_.find(dsConsumerById_[node->id]);
+            if (it != unissuedDsByConsumer_.end() && --it->second == 0)
+                unissuedDsByConsumer_.erase(it);
+        }
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
     } else if (pickKind == kPrefetch) {
@@ -2629,16 +2643,21 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         bool pickedPending = false;
         int pickedEarly = INT_MAX;
         const bool holdIssuedOnlyPreload = wmmaIssueConfig.issuedCount > 0;
-        // Steady-state loops may look ahead across consumers. At a tail, retain
+        // Steady-state loops may look ahead to a later consumer once every
+        // earlier consumer has no ds_load left to issue. At a tail, retain
         // exact-consumer focus: there is no next iteration to prepare, and
         // younger loads would only sit ahead of the current consumer in DS FIFO.
         const Loop* loop = getLoop();
         const bool inSteadyLoop = loop && currentBB_ && loop->contains(currentBB_);
+        const int openConsumer = earliestUnissuedDsConsumer();
         for (DAGNode* n : localReadQueue) {
             if (holdIssuedOnlyPreload && dsFeedsIssuedOnlyWmma(n)) continue;
             const int early = earliestPendingWmmaId(n);
-            if (!inSteadyLoop && dsWindowFocusWmmaId_ != INT_MAX && early > dsWindowFocusWmmaId_)
+            if (inSteadyLoop) {
+                if (early > openConsumer) continue;
+            } else if (dsWindowFocusWmmaId_ != INT_MAX && early > dsWindowFocusWmmaId_) {
                 continue;
+            }
             const bool pending = early != INT_MAX;
             if (!pickedDS || (pending && !pickedPending) ||
                 (pending == pickedPending &&
@@ -3168,6 +3187,14 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     carryQueuedWar();
     wmmaIssuedCountThisRegion_ = 0;
     dsWindowFocusWmmaId_ = INT_MAX;
+    unissuedDsByConsumer_.clear();
+    dsConsumerById_.assign(deps.dag.nodes.size(), INT_MAX);
+    for (const DAGNode& n : deps.dag.nodes) {
+        if (!isDSRead(*n.inst)) continue;
+        const int consumer = earliestPendingWmmaId(&n);
+        dsConsumerById_[n.id] = consumer;
+        if (consumer != INT_MAX) ++unissuedDsByConsumer_[consumer];
+    }
     lastPickedNode_ = nullptr;
     // SCC chain locks are per-region: chain ids index the prior region's
     // DAGNodeList, and region boundaries are side-effect cuts no reordering
