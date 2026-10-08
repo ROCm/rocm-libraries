@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "operation": "reduction",
   "display_name": "Reduction",
-  "description": "Reduces the trailing axis. The output shape is the statement of which axes reduce, so it is declared rather than inferred.",
+  "description": "Reduces the trailing axis: each of the rows reduces its cols to one value, so the output is [rows, 1]. hipDNN reduces every axis where the output extent is 1 and the input's is not, so the output shape is the statement of which axes reduce; it is declared rather than inferred.",
   "parameters": {
     "rows": {
       "type": "int64"
@@ -75,8 +75,8 @@
         "name": "outDims",
         "kind": "expr",
         "value": [
-          1,
-          "$q.cols"
+          "$q.rows",
+          1
         ]
       },
       {
@@ -99,7 +99,7 @@
   "constraints": [
     {
       ">": [
-        "$q.rows",
+        "$q.cols",
         1
       ]
     }

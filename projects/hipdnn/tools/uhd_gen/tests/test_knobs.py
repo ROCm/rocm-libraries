@@ -121,6 +121,30 @@ def test_a_uniformly_better_value_costs_exactly_nothing():
     assert exp2["cost_of_pinning"] == pytest.approx(0.0, abs=1e-9)
 
 
+@pytest.mark.parametrize(
+    "column,marker",
+    [
+        ("numerically_valid", "False"),
+        ("is_valid", "false"),
+        ("error", "hip error 700"),
+    ],
+)
+def test_a_row_train_would_drop_is_never_the_oracle(column, marker):
+    """A wrong-but-fast, never-run or errored candidate cannot make its value the best."""
+    df = _corpus()
+    if column == "error":
+        df[column] = ""
+    # The fastest timing in every problem, on the losing exp2 value.
+    fake = (df["kernel.use_exp2_fast"] == 0) & (df["kernel.waves_per_eu"] == 2)
+    df.loc[fake, "robustMeanMs"] = 0.001
+    df.loc[fake, column] = marker
+
+    exp2 = _knob(analyse_knobs(df), "kernel.use_exp2_fast")
+
+    assert exp2["best_value"] == 1
+    assert exp2["cost_of_pinning"] == pytest.approx(0.0, abs=1e-9)
+
+
 def test_pinning_never_silently_drops_a_problem():
     """Coverage loss is counted apart from regret; best value favours coverage."""
     df = _corpus()

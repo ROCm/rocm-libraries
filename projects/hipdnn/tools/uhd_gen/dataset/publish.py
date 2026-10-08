@@ -308,16 +308,25 @@ def resolve_duplicates(
     """Keep, per problem, only the most recent occasion it was measured.
 
     Latest deduplicates; fastest breaks ties within one occasion. Per problem, not per file, so
-    problems the newest occasion did not cover are kept.
+    problems the newest occasion did not cover are kept. A row with no `latest_column` value
+    cannot be ordered against the others, so it is refused as a corpus without the column is.
     """
     # Full problem identity (shape, graph, device): one shape on two boards is two problems.
     query = _problem_key_columns(frame)
     if not query:
         return frame
 
+    occasion = frame[latest_column]
+    undated = occasion.isna() | (occasion.astype(str).str.strip() == "")
+    if undated.any():
+        raise ValidationError(
+            f"--resolve-duplicates orders occasions by {latest_column!r}, and "
+            f"{int(undated.sum())} row(s) carry none; fill it in or publish without "
+            "--resolve-duplicates"
+        )
+
     frame = frame.copy()
     problem = frame[query].astype(str).agg("|".join, axis=1)
-    occasion = frame[latest_column]
 
     # The most recent occasion each problem was measured on, then only that occasion's rows.
     newest = occasion.groupby(problem).transform("max")
@@ -422,8 +431,9 @@ def main(argv: list[str] | None = None) -> int:
         dest="resolve_duplicates",
         metavar="COLUMN",
         help="keep, per problem, only the most recent occasion it was measured, ordered by "
-        "COLUMN (e.g. date_run), breaking ties within it by --best-column. Without this "
-        "a re-measured problem is rejected as two merged collections.",
+        "COLUMN (e.g. date_run), breaking ties within it by --best-column. Every row must "
+        "carry COLUMN. Without this a re-measured problem is rejected as two merged "
+        "collections.",
     )
     parser.add_argument(
         "--best-column",

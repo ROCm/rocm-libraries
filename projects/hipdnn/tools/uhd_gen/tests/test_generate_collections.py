@@ -12,6 +12,7 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 from uhd_gen.provenance import snapshot_provenance
+from uhd_gen.tests.bench_stub import find_any_bench
 
 UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
 KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
@@ -23,6 +24,9 @@ def world(tmp_path, monkeypatch):
     """An L1 engine behind a fake bench with settable device, revision and speed."""
     pytest.importorskip("lightgbm")
     pytest.importorskip("flatbuffers")
+    # The fake bench reads HIP_VISIBLE_DEVICES as `--device`; one inherited from the
+    # environment would move every run off the default board.
+    monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
     tree = tmp_path / "descriptors"
     tree.mkdir()
     (tree / "engine.ued.json").write_text(
@@ -98,7 +102,7 @@ def world(tmp_path, monkeypatch):
         }
 
     monkeypatch.setattr("uhd_gen.generate._run_json", bench)
-    monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
+    find_any_bench(monkeypatch)
     return {"tree": tree, "graphs": graphs, "engine": engine, "root": tmp_path}
 
 

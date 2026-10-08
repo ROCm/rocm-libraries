@@ -33,10 +33,22 @@ import re
 import sys
 from pathlib import Path
 
+#: rocKE's `AttentionMaskType` ordinals, which a mined shape's `mask_type` carries
+#: verbatim. The request states the causal anchor through the mask kind and has no
+#: other field for it, so a shape never carries a separate alignment key.
+NO_MASK, TOP_LEFT_CAUSAL, BOTTOM_RIGHT_CAUSAL, SLIDING_WINDOW = 0, 1, 2, 3
+
 #: CSV mask spellings -> the request's mask_type. `swin` (sliding window) keeps its own
 #: value so the dispatcher declines it instead of serving it as causal. `bottom_right`
 #: is deliberately absent: it differs from top-left causal when seqlen_q != seqlen_k.
-MASK_TYPE = {"full": 0, "none": 0, "no_mask": 0, "causal": 1, "top_left": 1, "swin": 2}
+MASK_TYPE = {
+    "full": NO_MASK,
+    "none": NO_MASK,
+    "no_mask": NO_MASK,
+    "causal": TOP_LEFT_CAUSAL,
+    "top_left": TOP_LEFT_CAUSAL,
+    "swin": SLIDING_WINDOW,
+}
 
 #: Tensor names marking a graph as backward, in both gradient spellings a
 #: corpus uses: `d_query`-style names alone would let `dq`/`dk`/`dv`/`do`
@@ -110,13 +122,22 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
     return shapes
 
 
+def _causal_mask_type(bottom_right: bool, seqlen_q: int, seqlen_k: int) -> int:
+    """The causal mask kind for an anchor. Equal lengths put both anchors on one
+    diagonal, so only a cross-length bottom-right request is BOTTOM_RIGHT_CAUSAL."""
+    if bottom_right and seqlen_q != seqlen_k:
+        return BOTTOM_RIGHT_CAUSAL
+    return TOP_LEFT_CAUSAL
+
+
 def _mask_from_attributes(
     attrs: dict, path: Path, seqlen_q: int, seqlen_k: int
 ) -> dict:
-    """Normalize the graph dialect to a mask kind, a window, and an anchor.
+    """Normalize the graph dialect to the request's mask kind and window.
 
-    The anchor is reported, not folded onto top-left: the two differ when Sq != Sk,
-    and the UHD corpus deliberately includes that case. `alignment` is additive.
+    The anchor is carried by the mask kind, not folded onto top-left: the two differ
+    when Sq != Sk, and the UHD corpus deliberately includes that case. A window kind
+    has no anchor, so a bottom-right window across unequal lengths is refused.
     """
     alignment = attrs.get("diagonal_alignment", "TOP_LEFT")
     if alignment not in ("TOP_LEFT", "BOTTOM_RIGHT"):
@@ -137,18 +158,21 @@ def _mask_from_attributes(
     left = -1 if left is None else left
     right = -1 if right is None else right
     if left == -1 and right == -1:
-        return {"mask_type": 0, "sliding_window": 0, "alignment": "top_left"}
-    if right != 0:
-        # A right bound other than 0 is not causal under any anchor.
+        return {"mask_type": NO_MASK, "sliding_window": 0}
+    bottom_right = alignment == "BOTTOM_RIGHT"
+    # A right bound other than 0 is not causal under any anchor, and a shifted
+    # window has no request spelling.
+    if right != 0 or (left != -1 and bottom_right and seqlen_q != seqlen_k):
         raise SystemExit(
             f"FAIL: {path}: unsupported translation of bounds ({left}, {right}), "
             f"alignment {alignment}, Sq={seqlen_q}, Sk={seqlen_k} to AttentionRequest"
         )
-    return {
-        "mask_type": 1 if left == -1 else 2,
-        "sliding_window": 0 if left == -1 else left + 1,
-        "alignment": "bottom_right" if alignment == "BOTTOM_RIGHT" else "top_left",
-    }
+    if left == -1:
+        return {
+            "mask_type": _causal_mask_type(bottom_right, seqlen_q, seqlen_k),
+            "sliding_window": 0,
+        }
+    return {"mask_type": SLIDING_WINDOW, "sliding_window": left + 1}
 
 
 #: Every source spelling of a dtype -> the rocKE spec's spelling. An unmapped dtype
@@ -695,8 +719,10 @@ def _catalog_lengths(body: str) -> list[int]:
 def from_model_catalog(path: Path, batches=CATALOG_BATCHES) -> list[dict]:
     """Every attention geometry `MODEL_CATALOG.md` records, expanded over batch.
 
-    A causal entry also yields its decode shape (one query token against the full
-    context), which is memory bound where prefill is compute bound.
+    A causal entry also yields its decode shape: one query token against the full
+    context, which is memory bound where prefill is compute bound. The token is the
+    newest position, so its diagonal is anchored bottom-right; anchored top-left it
+    would attend to key 0 alone.
     """
     text = path.read_text(encoding="utf-8")
     sections = _catalog_sections(text)
@@ -782,6 +808,7 @@ def from_model_catalog(path: Path, batches=CATALOG_BATCHES) -> list[dict]:
                                     {
                                         **common,
                                         "seqlen_q": 1,
+                                        "mask_type": _causal_mask_type(True, 1, length),
                                         "seqlen_k": length,
                                         "_provenance": {
                                             "source": "catalog",
@@ -817,10 +844,10 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
     """The mined corpus as the `q.<parameter>` columns `corpus_gen --model-shapes` reads.
 
     Narrows to what `sdpa_fwd` can express (no sliding window, asymmetric head dim,
-    or sinks) and counts each drop by reason. `q.alignment` defaults to `top_left`
-    for sources that cannot record an anchor; it and `q.generate_stats` (always
-    `false`: sources record inference forwards) are always written because argument
-    resolution requires every parameter it reads.
+    or sinks) and counts each drop by reason. `q.alignment` is `bottom_right` for a
+    bottom-right causal shape and `top_left` otherwise; it and `q.generate_stats`
+    (always `false`: sources record inference forwards) are always written because
+    argument resolution requires every parameter it reads.
     """
     columns = [
         "name",
@@ -843,7 +870,7 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
         writer.writerow(columns)
         for index, shape in enumerate(shapes):
             reason = None
-            if shape["mask_type"] not in (MASK_TYPE["full"], MASK_TYPE["causal"]):
+            if shape["mask_type"] == SLIDING_WINDOW:
                 reason = "windowed mask, which sdpa_fwd declares no parameter for"
             elif shape["hdim_q"] != shape["hdim_v"]:
                 reason = "asymmetric head dims (MLA), one head_dim declared"
@@ -852,7 +879,7 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
             if reason is not None:
                 dropped[reason] = dropped.get(reason, 0) + 1
                 continue
-            causal = shape["mask_type"] == MASK_TYPE["causal"]
+            causal = shape["mask_type"] != NO_MASK
             writer.writerow(
                 [
                     _shape_name(shape, index),
@@ -864,7 +891,11 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
                     shape["seqlen_k"],
                     shape["hdim_q"],
                     "true" if causal else "false",
-                    shape.get("alignment", "top_left") if causal else "top_left",
+                    (
+                        "bottom_right"
+                        if shape["mask_type"] == BOTTOM_RIGHT_CAUSAL
+                        else "top_left"
+                    ),
                     "false",
                     shape["dtype"],
                 ]

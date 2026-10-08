@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 find_package(Threads REQUIRED)
 
 # Pure logic, no backend or HIP: plain gtest_main instead of the shared test main.cpp.

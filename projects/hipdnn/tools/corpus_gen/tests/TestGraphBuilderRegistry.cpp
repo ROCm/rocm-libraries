@@ -20,8 +20,11 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <numeric>
 #include <optional>
 #include <string>
+#include <variant>
+#include <vector>
 
 namespace hipdnn_corpus_gen
 {
@@ -69,6 +72,51 @@ OperationMetadata matmulMetadata()
 const hipdnn_flatbuffers_sdk::data_objects::Graph* asGraph(const GraphBytes& bytes)
 {
     return hipdnn_flatbuffers_sdk::data_objects::GetGraph(bytes.data());
+}
+
+/// Whether @p strides lay @p dims out densely in some axis order: each axis steps over exactly
+/// the axes inside it, so the tensor has neither gaps nor overlap.
+bool isPacked(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+{
+    if(dims.size() != strides.size())
+    {
+        return false;
+    }
+    std::vector<size_t> order(dims.size());
+    std::iota(order.begin(), order.end(), size_t{0});
+    // Innermost first. A unit axis shares its stride with the axis outside it, so on a tie it
+    // goes first: only an axis wider than one advances the next stride.
+    std::sort(order.begin(), order.end(), [&dims, &strides](size_t lhs, size_t rhs) {
+        if(strides[lhs] != strides[rhs])
+        {
+            return strides[lhs] < strides[rhs];
+        }
+        return dims[lhs] == 1 && dims[rhs] != 1;
+    });
+    int64_t expected = 1;
+    for(const auto axis : order)
+    {
+        if(strides[axis] != expected)
+        {
+            return false;
+        }
+        expected *= dims[axis];
+    }
+    return true;
+}
+
+/// Whether @p point sets any `stride_*` parameter above one.
+bool isStrided(const ProblemPoint& point)
+{
+    for(const auto& [name, value] : point)
+    {
+        const auto* stride = std::get_if<int64_t>(&value);
+        if(name.rfind("stride", 0) == 0 && stride != nullptr && *stride > 1)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -324,7 +372,7 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionMetadataBuildsRealGraphs)
     const auto built = buildGraphFor(*parsed.metadata, conv1);
     ASSERT_TRUE(built.ok()) << built.error;
 
-    // floor((224 + 6 - 6 - 1)/2) + 1 = 112.
+    // floor((224 + 6 - 6 - 1)/2) + 1 = 112, and the strides are those of the floored extents.
     bool sawOutput = false;
     for(const auto* tensor : *asGraph(built.bytes)->tensors())
     {
@@ -333,9 +381,131 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionMetadataBuildsRealGraphs)
            && extents->Get(1) == 64 && extents->Get(2) == 112 && extents->Get(3) == 112)
         {
             sawOutput = true;
+            const std::vector<int64_t> strides(tensor->strides()->begin(),
+                                               tensor->strides()->end());
+            EXPECT_EQ(strides,
+                      (std::vector<int64_t>{int64_t{64} * 112 * 112, int64_t{112} * 112, 112, 1}));
         }
     }
     EXPECT_TRUE(sawOutput) << "no tensor carried the derived 64x64x112x112 output extents";
+}
+
+TEST(TestGraphBuilderRegistry, EveryShippedTensorIsPackedInItsLayout)
+{
+    // A stride derived from an unfloored extent (224 at stride 2 is 111.5 wide before the
+    // floor) leaves gaps between rows the dims do not account for.
+    int64_t stridedOperations = 0;
+    for(const auto& entry :
+        std::filesystem::directory_iterator(hipdnn_corpus_gen::test::operationsDir()))
+    {
+        if(entry.path().string().find(".opmeta.") == std::string::npos)
+        {
+            continue;
+        }
+        std::ifstream file(entry.path());
+        ASSERT_TRUE(file.good()) << entry.path();
+        const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+        ASSERT_TRUE(parsed.ok()) << entry.path().filename().string() << ": "
+                                 << (parsed.errors.empty() ? "" : parsed.errors.front());
+        auto metadata = *parsed.metadata;
+
+        // Element type and activation never reach a stride; one value of each keeps the sweep
+        // to the combinations that change a shape (layout, rank, fusion, spatial dims).
+        bool declaresStride = false;
+        for(auto& parameter : metadata.parameters)
+        {
+            if((parameter.name == "dtype" || parameter.name == "mode") && !parameter.values.empty())
+            {
+                parameter.values.resize(1);
+            }
+            declaresStride = declaresStride || parameter.name.rfind("stride", 0) == 0;
+        }
+
+        // A few points per combination; the walk's extents and strides are rarely divisible.
+        ExplorationRequest request;
+        request.pointsPerCombination = 4;
+        request.budgetPerCombination = 400;
+        request.probeBudget = 400;
+        request.restarts = 2;
+        request.stepsPerStart = 40;
+        request.maxSkeleton = 32;
+        request.numericCeiling = 256;
+        request.seed = 41;
+        const auto problems = exploreProblemSpace(metadata, request, [](const ProblemPoint&) {
+                                  return true;
+                              }).problems();
+        EXPECT_FALSE(problems.empty()) << metadata.operation << " explored no problems";
+
+        int64_t stridedProblems = 0;
+        for(const auto& point : problems)
+        {
+            const auto built = buildGraphFor(metadata, point);
+            ASSERT_TRUE(built.ok())
+                << metadata.operation << " " << detail::describe(point) << ": " << built.error;
+            stridedProblems += isStrided(point) ? 1 : 0;
+            for(const auto* tensor : *asGraph(built.bytes)->tensors())
+            {
+                ASSERT_NE(tensor->dims(), nullptr);
+                ASSERT_NE(tensor->strides(), nullptr);
+                const std::vector<int64_t> dims(tensor->dims()->begin(), tensor->dims()->end());
+                const std::vector<int64_t> strides(tensor->strides()->begin(),
+                                                   tensor->strides()->end());
+                ASSERT_TRUE(isPacked(dims, strides))
+                    << metadata.operation << " tensor '" << tensor->name()->str()
+                    << "' is not packed, " << detail::describe(point)
+                    << "\n  dims:    " << ::testing::PrintToString(dims)
+                    << "\n  strides: " << ::testing::PrintToString(strides);
+            }
+        }
+        if(declaresStride)
+        {
+            EXPECT_GT(stridedProblems, 0)
+                << metadata.operation << " explored no stride above one; its sweep is vacuous";
+            ++stridedOperations;
+        }
+    }
+    EXPECT_GT(stridedOperations, 0) << "no shipped operation declares a stride";
+}
+
+TEST(TestGraphBuilderRegistry, EveryShippedReductionArchetypeReducesItsTrailingAxis)
+{
+    // hipDNN reduces each axis whose output extent is 1 and input extent is not. An archetype
+    // the constraints refuse is never drawn, and one whose output equals its input is a copy.
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/reduction.opmeta.json");
+    ASSERT_TRUE(file.good());
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+    const auto& metadata = *parsed.metadata;
+    ASSERT_FALSE(metadata.archetypes.empty());
+
+    for(const auto& archetype : metadata.archetypes)
+    {
+        for(const auto& rowsValue : archetype.values.at("rows"))
+        {
+            for(const auto& colsValue : archetype.values.at("cols"))
+            {
+                const auto rows = rowsValue.get<int64_t>();
+                const auto cols = colsValue.get<int64_t>();
+                const ProblemPoint point{{"rows", rows},
+                                         {"cols", cols},
+                                         {"mode", std::string("ADD")},
+                                         {"dtype", std::string("fp32")}};
+                EXPECT_TRUE(detail::satisfiesConstraints(metadata, point))
+                    << archetype.name << " is refused: " << detail::describe(point);
+
+                const auto built = buildGraphFor(metadata, point);
+                ASSERT_TRUE(built.ok()) << archetype.name << ": " << built.error;
+                std::map<std::string, std::vector<int64_t>> dims;
+                for(const auto* tensor : *asGraph(built.bytes)->tensors())
+                {
+                    dims[tensor->name()->str()]
+                        = std::vector<int64_t>(tensor->dims()->begin(), tensor->dims()->end());
+                }
+                EXPECT_EQ(dims["in"], (std::vector<int64_t>{rows, cols})) << archetype.name;
+                EXPECT_EQ(dims["out"], (std::vector<int64_t>{rows, 1})) << archetype.name;
+            }
+        }
+    }
 }
 
 TEST(TestGraphBuilderRegistry, TheShippedMetadataCoversEveryDeclaredDtype)

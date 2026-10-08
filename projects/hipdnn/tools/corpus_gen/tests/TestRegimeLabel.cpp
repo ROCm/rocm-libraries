@@ -286,16 +286,25 @@ TEST(TestRegimeFocus, HeldPointsAreNeverReturned)
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "prefill_short_gqa", error);
     ASSERT_TRUE(focus.has_value()) << error;
-    const ProblemOracle evenBatchIsHeld
-        = [](const ProblemPoint& point) { return std::get<int64_t>(point.at("batch")) % 2 == 0; };
+    // Three batches in four are held, as a large --exclude-corpus holds most of a regime.
+    const ProblemOracle mostBatchesAreHeld
+        = [](const ProblemPoint& point) { return std::get<int64_t>(point.at("batch")) % 4 != 1; };
+    // A small box, so the walk sees most of the region and held points crowd the cells.
+    auto request = focusRequest();
+    request.numericCeiling = 32;
 
-    const auto found = exploreRegime(
-        metadata, *focus, focusRequest(), 20, SERVES_EVERYTHING, evenBatchIsHeld, {});
+    const auto found
+        = exploreRegime(metadata, *focus, request, 20, SERVES_EVERYTHING, mostBatchesAreHeld, {});
 
-    ASSERT_FALSE(found.problems.empty());
+    // Held points take cells, not budget: thousands of servable points remain, so the search
+    // must deliver all 20 rather than stop capped or saturated.
+    EXPECT_GE(found.problems.size(), 20u)
+        << "saturated=" << found.saturated << " capped=" << found.searchCapped;
+    EXPECT_FALSE(found.saturated);
+    EXPECT_FALSE(found.searchCapped);
     for(const auto& point : found.problems)
     {
-        EXPECT_NE(std::get<int64_t>(point.at("batch")) % 2, 0);
+        EXPECT_EQ(std::get<int64_t>(point.at("batch")) % 4, 1);
         EXPECT_EQ(regimeLabel(metadata, point), "prefill_short_gqa");
     }
 }

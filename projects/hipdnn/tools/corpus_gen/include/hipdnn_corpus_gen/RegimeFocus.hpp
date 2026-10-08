@@ -454,6 +454,8 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         std::map<Shape, bool> memo;
         std::vector<ProblemPoint> fresh;
         int64_t held = 0;
+        /// Cells the last search returned, and the distinct points it observed.
+        int64_t cells = 0;
         int64_t reached = 0;
         bool saturated = false;
         bool capped = false;
@@ -526,6 +528,7 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         lane.search.targetCount += lane.held;
         const auto found = buildFeasibleShapeSet(oracle, lane.search);
         lane.search.targetCount -= lane.held;
+        lane.cells = static_cast<int64_t>(found.shapes.size());
         lane.fresh.clear();
         lane.held = 0;
         for(const auto& shape : found.shapes)
@@ -578,6 +581,24 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
             lane->reached = run(*lane);
             while(static_cast<int64_t>(lane->fresh.size()) < target)
             {
+                if(lane->cells < lane->reached)
+                {
+                    // Selection, not search, was the limit: held points took some cells. Ask
+                    // for more cells over the same observations before spending more budget.
+                    const auto cellsBefore = lane->cells;
+                    const auto fresh = static_cast<int64_t>(lane->fresh.size());
+                    const auto deficit = target - fresh;
+                    const auto extra
+                        = fresh > 0 ? (deficit * cellsBefore + fresh - 1) / fresh : lane->reached;
+                    // run() pads the request by the held count it last saw.
+                    lane->search.targetCount
+                        = std::min(cellsBefore + extra, lane->reached) - lane->held;
+                    lane->reached = run(*lane);
+                    if(lane->cells > cellsBefore)
+                    {
+                        continue;
+                    }
+                }
                 if(lane->search.oracleBudget
                    >= request.budgetPerCombination * request.budgetGrowthLimit)
                 {

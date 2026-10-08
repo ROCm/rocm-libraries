@@ -45,6 +45,19 @@ test_categories:
       - "hipdnn_frontend_tests"
       - "hipdnn_test_sdk_tests"
       - "hipdnn_plugin_sdk_tests"
+      - "hipdnn_bench_tests"
+      - "hipdnn_corpus_gen_tests"
+      # Build tree only: pytest suites registered by tools/CMakeLists.txt with the
+      # kernel ingestor, absent from the installed CTestTestfile.cmake.
+      - "uhd_gen_tests"
+      - "uhd_gen_dataset_tests"
+      - "mine_shapes_tests"
+      # Build tree only: CMake driver scripts (tools/corpus_gen/tests/CliExitStatus.cmake)
+      # checking hipdnn_corpus_gen's exit status for its arguments; not installed.
+      - "hipdnn_corpus_gen_cli_help"
+      - "hipdnn_corpus_gen_cli_unknown_flag"
+      - "hipdnn_corpus_gen_cli_flag_as_value"
+      - "hipdnn_corpus_gen_cli_trailing_flag"
 
   integration:
     description: "Current hipDNN integration-check coverage"

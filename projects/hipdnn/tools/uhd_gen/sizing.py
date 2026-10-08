@@ -225,12 +225,25 @@ def miss_at(fit: dict, n: float) -> float:
     return fit["floor"] + fit["a"] * n ** (-fit["b"])
 
 
+#: Past this many fitted shapes a target is reported unreachable: a near-flat curve
+#: extrapolates to counts no collection could ever supply.
+MAX_FITTED_SHAPES = 1e9
+
+
 def size_for(fit: dict, target_within: float) -> float | None:
-    """Fitted shapes for `target_within`, or None when the target is at or past the ceiling."""
+    """Fitted shapes for `target_within`, or None when the curve cannot reach it.
+
+    None when the target is at or past the ceiling, the curve does not fall (b <= 0), or
+    reaching it would take more than MAX_FITTED_SHAPES. Solved in log space, so a
+    near-flat curve cannot overflow.
+    """
     wanted_miss = 1.0 - target_within
     if wanted_miss <= fit["floor"] or fit["b"] <= 0:
         return None
-    return (fit["a"] / (wanted_miss - fit["floor"])) ** (1.0 / fit["b"])
+    log_shapes = math.log(fit["a"] / (wanted_miss - fit["floor"])) / fit["b"]
+    if log_shapes > math.log(MAX_FITTED_SHAPES):
+        return None
+    return math.exp(log_shapes)
 
 
 def allocate(new_shapes: int, regimes: dict, floor: int) -> dict:
@@ -575,11 +588,18 @@ def run_size(args: argparse.Namespace) -> int:
                 needed = size_for(fit, args.target)
                 if needed is None:
                     recommendation["reachable"] = False
-                    recommendation["reason"] = (
-                        f"the target {args.target:.2f} is at or above the ceiling "
-                        f"{1 - fit['floor']:.2f} ({fit['floor_source']}): more shapes cannot reach "
-                        f"it; better measurement (repeatability) can"
-                    )
+                    if 1.0 - args.target <= fit["floor"]:
+                        recommendation["reason"] = (
+                            f"the target {args.target:.2f} is at or above the ceiling "
+                            f"{1 - fit['floor']:.2f} ({fit['floor_source']}): more shapes cannot reach "
+                            f"it; better measurement (repeatability) can"
+                        )
+                    else:
+                        recommendation["reason"] = (
+                            f"the fitted curve (b={fit['b']:.3g}) does not reach the target "
+                            f"{args.target:.2f} within {MAX_FITTED_SHAPES:.0e} training "
+                            "shapes: more shapes alone will not reach it"
+                        )
                 else:
                     interval = sorted(
                         n for n in (size_for(r, args.target) for r in resampled) if n
@@ -721,7 +741,7 @@ def run_size(args: argparse.Namespace) -> int:
             writer.writerows(curve)
         _print(report, output)
         return 0
-    except (OSError, ValueError, KeyError) as error:
+    except (OSError, ValueError, KeyError, OverflowError) as error:
         logger.error("%s", error)
         return 1
 

@@ -19,6 +19,7 @@ from uhd_gen.sizing import (
     size_for,
     stratified_test_set,
 )
+from uhd_gen.tests.bench_stub import find_any_bench
 
 UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
 KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
@@ -54,6 +55,14 @@ def test_a_target_at_or_past_the_ceiling_is_unreachable():
     assert size_for(fit, 0.87) is None, "the ceiling itself is only approached"
     assert size_for(fit, 0.95) is None
     assert size_for(fit, 0.80) > 0
+
+
+@pytest.mark.parametrize("b", [0.002, 0.03])
+def test_a_near_flat_curve_is_unreachable_rather_than_astronomical(b):
+    """b=0.002 overflows a float; b=0.03 asks for ~1e33 shapes. Neither is a plan."""
+    fit = {"floor": 0.1, "a": 0.5, "b": b}
+    assert size_for(fit, 0.85) is None
+    assert size_for({**fit, "b": 0.5}, 0.85) == pytest.approx(100.0)
 
 
 def test_two_points_are_not_a_curve():
@@ -213,7 +222,7 @@ def store(tmp_path, monkeypatch):
         }
 
     monkeypatch.setattr("uhd_gen.generate._run_json", bench)
-    monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
+    find_any_bench(monkeypatch)
 
     def collect(name, device, collected_at):
         from uhd_gen.__main__ import main

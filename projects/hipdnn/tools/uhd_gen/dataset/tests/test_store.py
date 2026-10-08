@@ -114,6 +114,31 @@ def test_converting_the_same_collection_twice_adds_nothing(tmp_path):
     assert len(store.read_rows(dataset)) == 3
 
 
+def test_a_retry_after_a_write_interrupted_between_the_two_files_adds_no_rows_twice(
+    tmp_path, monkeypatch
+):
+    dataset = tmp_path / "ds"
+    contribution = store.from_collection(_collection(tmp_path, "a"))
+    write = store._write_atomically
+
+    def crash_before_manifest(path, writer):
+        if path.name == store.MANIFEST_FILE:
+            raise OSError("killed")
+        write(path, writer)
+
+    monkeypatch.setattr(store, "_write_atomically", crash_before_manifest)
+    with pytest.raises(OSError):
+        store.add(dataset, *contribution)
+    monkeypatch.undo()
+
+    assert store.add(dataset, *contribution)["added"] is True
+    assert len(store.read_rows(dataset)) == 3
+    recorded = store.read_manifest(dataset)["contributions"]
+    identity = contribution[0]["contribution_id"]
+    assert [c["contribution_id"] for c in recorded] == [identity]
+    assert store.add(dataset, *contribution)["added"] is False
+
+
 def test_a_dataset_holds_one_binding(tmp_path):
     dataset = tmp_path / "ds"
     store.add(dataset, *store.from_collection(_collection(tmp_path, "a")))

@@ -282,7 +282,7 @@ It validates everything before writing anything, and refuses rather than half-su
 
 ## `evaluate`: regret against the best kernel that was measured
 
-RMSE on `log1p(target)` is what `train` reports, and it can improve while the model's
+RMSE on `log(target)` is what `train` reports, and it can improve while the model's
 *choice* gets worse. `evaluate` measures the choice, per RFC 0019.13 §11.2 and §11.4:
 
 - **top-1 regret** — how much worse the model's pick is than the oracle `v*(p)`, the
@@ -744,7 +744,9 @@ derived from the `<root>.flops` and `<root>.bytes` that same engine logged besid
 problem, and the row's own `avgTimeMs` -- the statistic a calibrated label is defined on,
 in both paths. Both take the count from the engine and differ only in which of its
 outputs they read. `--resolve-duplicates` keys a problem on its shape, graph and device
-together, so one shape measured on two boards stays two problems.
+together, so one shape measured on two boards stays two problems. Every row must carry
+the ordering column: an undated row is neither older nor newer than another, so it is
+refused rather than silently dropped.
 
 ### Regenerating a shipped model
 
@@ -1156,7 +1158,7 @@ generated bindings.
   "features_signature": ["$q.M", "$q.N", "$q.K", "$kernel.tile_m", ...],
   "features_hash": "sha256:...",
   "objective": "max",
-  "score": {"metric": "tflops", "calibrated": false, "transform": "log1p"},
+  "score": {"metric": "tflops", "calibrated": false, "transform": "log"},
   "categorical_encoding": {"$kernel.dtype": {"bf16": 0, "fp16": 1}},
   "tree_data": {"artifact": "model.bin"}
 }
@@ -1178,7 +1180,9 @@ recorded in `train_manifest.json` (as `{}` when there is none) and is the one
 
 ## Training Details
 
-- **Target transform**: `log1p(target)` for scale-invariant training
+- **Target transform**: `log(target)` for scale-invariant training; its inverse `exp` is
+  positive for every finite prediction, so the runtime never orders a physical score last
+  as non-positive (`log1p`'s `expm1` could). Targets must be strictly positive
 - **Cross-validation**: GroupKFold when `--group-by` specified
 - **Early stopping**: Prevents overfitting
 - **Model format**: LightGBM → FlatBuffer GbdtModel

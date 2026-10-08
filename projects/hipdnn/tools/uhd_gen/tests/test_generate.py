@@ -15,6 +15,7 @@ from uhd_gen.generate import (
     withheld_kernel_fields,
 )
 from uhd_gen.provenance import snapshot_provenance
+from uhd_gen.tests.bench_stub import find_any_bench
 
 
 def _cli():
@@ -421,7 +422,7 @@ def _immediate_bench(
         return response
 
     monkeypatch.setattr("uhd_gen.generate._run_json", bench)
-    monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
+    find_any_bench(monkeypatch)
     return requested
 
 
@@ -666,7 +667,7 @@ def test_an_l1_measurement_cannot_inherit_a_benchmarking_override(
         raise ValueError("stop after observing the child environment")
 
     monkeypatch.setattr("uhd_gen.generate._run_json", bench)
-    monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
+    find_any_bench(monkeypatch)
     arguments = [
         "generate",
         "--graphs",
@@ -784,7 +785,7 @@ def test_the_measured_tree_is_the_only_descriptor_root_the_bench_sees(
         raise ValueError("stop after observing the child environment")
 
     monkeypatch.setattr("uhd_gen.generate._run_json", bench)
-    monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
+    find_any_bench(monkeypatch)
     arguments = [
         "generate",
         "--graphs",

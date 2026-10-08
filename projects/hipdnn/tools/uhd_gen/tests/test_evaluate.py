@@ -243,7 +243,8 @@ def test_an_invalid_row_carrying_a_stale_timing_is_still_excluded():
     assert result.report["exclusions"]["invalid_rows"] == 1
 
 
-def test_a_numerically_wrong_row_is_never_the_oracle():
+@pytest.mark.parametrize("undecided", ["", "Unknown"])
+def test_a_numerically_wrong_row_is_never_the_oracle(undecided):
     """RFC 0019 §13.2: wrong-answer timings are dropped; unchecked ones stay."""
     df = make_corpus(
         [
@@ -252,8 +253,8 @@ def test_a_numerically_wrong_row_is_never_the_oracle():
             {"benchmark": "g1", "kernel": "wrong_but_fast", "minTimeMs": 0.5},
         ]
     )
-    # As CSV text, the way a direct corpus carries it.
-    df["numerically_valid"] = ["True", "", "False"]
+    # As CSV text, the way a direct corpus carries it; hipdnn_bench writes `Unknown`.
+    df["numerically_valid"] = ["True", undecided, "False"]
     result = evaluate_all(
         df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
     )
