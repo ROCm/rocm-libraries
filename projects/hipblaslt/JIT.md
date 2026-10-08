@@ -137,9 +137,8 @@ the call succeeds, and kept after a failure that left files in it. `Jit`
 requires a backend, a builder and a loader; the store is optional. One `Jit`
 can generate from several threads at once.
 
-`OperationRequest` names only its kind, so `Jit` sees no GEMM. The interfaces
-are for compiled-in implementations and do not establish a stable external
-plugin application binary interface (ABI).
+`Jit` takes a GEMM request. The interfaces are for compiled-in implementations
+and do not establish a stable external plugin application binary interface (ABI).
 
 The implementations are:
 
