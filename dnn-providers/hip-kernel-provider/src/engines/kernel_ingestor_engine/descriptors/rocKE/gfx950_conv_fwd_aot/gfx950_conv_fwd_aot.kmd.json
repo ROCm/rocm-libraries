@@ -90,6 +90,66 @@
     {
       "name": "layout",
       "type": "string"
+    },
+    {
+      "name": "kernel_family",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "direct_variant",
+      "type": "string",
+      "default_value": "none"
+    },
+    {
+      "name": "filter_h",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "filter_w",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "stride_h",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "stride_w",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "pad_h",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "pad_w",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "dilation_h",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "dilation_w",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "block_w",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "block_waves",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

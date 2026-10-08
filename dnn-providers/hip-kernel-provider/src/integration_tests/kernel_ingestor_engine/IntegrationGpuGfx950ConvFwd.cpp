@@ -899,10 +899,11 @@ TEST_P(IntegrationGpuGfx950ConvFwdServing, EveryServingKernelMatchesCpuReference
 
 // ---- hipkernel:Gfx950ConvFwdAot: shape-generic AOT instances ----
 //
-// The shipped seed catalog holds 8 instances per dtype, each built once against rocKE's
-// probe problem and matched to a graph by capability. Every variant states how many
-// instances serve it, computed by gfx950_conv_fwd_aot_serves in
-// convolution_forward.py, so the native matcher is checked against the Python one.
+// The shipped seed catalog holds 8 implicit-GEMM and 4 direct depthwise instances per
+// dtype, each built once against rocKE's probe problem and matched to a graph by
+// capability. Every variant states how many instances of each family serve it, computed
+// by gfx950_conv_fwd_aot_serves in convolution_forward.py, so the native matcher is
+// checked against the Python one.
 
 namespace
 {
@@ -911,7 +912,9 @@ constexpr const char* AOT_ENGINE_NAME = "hipkernel:Gfx950ConvFwdAot";
 
 std::vector<Variant> aotVariants()
 {
-    // Every instance is implicit GEMM, so the count is the implicitArms field.
+    // Direct instances serve only guarded depthwise graphs with their compiled filter,
+    // stride and padding: std 3x3/1 and 5x5/2, spatial (fewer than 64 groups) 3x3/1 and
+    // 7x7/2. Batch, image and group count are kernel arguments.
     return withBothDtypes({
         {"Smoke", {}, 0, 8},
         {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 8},
@@ -922,7 +925,17 @@ std::vector<Variant> aotVariants()
         {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 8},
         // Only the 1/1/1-wide instance divides three channels per group.
         {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1},
-        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 0, 1},
+        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 2, 1},
+        {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 2, 1},
+        // 64 groups and more: std only.
+        {"DepthwiseG96", {3, 96, 96, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 1, 1},
+        {"DepthwiseG256N1", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 256}, 1, 1},
+        {"DepthwiseG64Strided5x5", {2, 64, 64, 17, 17, 5, 5, 2, 2, 2, 2, 1, 1, 64}, 1, 1},
+        {"DepthwiseG48Strided5x5", {1, 48, 48, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1, 48}, 1, 1},
+        {"DepthwiseG12Strided7x7", {2, 12, 12, 21, 15, 7, 7, 2, 2, 3, 3, 1, 1, 12}, 1, 1},
+        {"DepthwiseG40Strided7x7", {3, 40, 40, 16, 30, 7, 7, 2, 2, 3, 3, 1, 1, 40}, 1, 1},
+        // Outside the direct guard: implicit GEMM alone.
+        {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 0, 1},
         // C = 12 admits load widths up to 4 and K = 20 store widths up to 4.
         {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 3},
         {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 8},
@@ -956,6 +969,48 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, UnbenchmarkedPlanServesACapableInstance)
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {disableBenchmarkingKnob()}));
     EXPECT_FALSE(selectedKernel(recorder).empty()) << recorder.getRecordedLogsAsString();
     ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 41));
+}
+
+TEST_P(IntegrationGpuGfx950ConvFwdAot, KernelFamilyKnobSelectsEachFamilysInstances)
+{
+    const auto& variant = GetParam();
+    const ScopedPluginLogCapture capture(this);
+    auto& recorder = capture.recorder();
+    const auto catalog = variant.directArms + variant.implicitArms;
+
+    auto implicitGemm = buildConvGraph(variant.dtype, variant.problem);
+    ASSERT_NO_FATAL_FAILURE(buildAndCompile(
+        *implicitGemm, {kernelFamilyKnob(IMPLICIT_GEMM_FAMILY), disableBenchmarkingKnob()}));
+    EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(variant.implicitArms)
+                                          + " (" + std::to_string(catalog)
+                                          + " before knob filtering)"))
+        << recorder.getRecordedLogsAsString();
+    const auto implicitKernel = selectedKernel(recorder);
+    ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*implicitGemm, variant.dtype, 43));
+    implicitGemm.reset();
+    if(variant.directArms == 0)
+    {
+        return;
+    }
+
+    recorder.clearLogs();
+    auto direct = buildConvGraph(variant.dtype, variant.problem);
+    ASSERT_NO_FATAL_FAILURE(buildAndCompile(
+        *direct, {kernelFamilyKnob(DIRECT_DEPTHWISE_FAMILY), disableBenchmarkingKnob()}));
+    EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(variant.directArms)
+                                          + " (" + std::to_string(catalog)
+                                          + " before knob filtering)"))
+        << recorder.getRecordedLogsAsString();
+    const auto directKernel = selectedKernel(recorder);
+    EXPECT_NE(directKernel, implicitKernel);
+    ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*direct, variant.dtype, 47));
+    direct.reset();
+
+    // Unbenchmarked, a direct instance ranks above every implicit-GEMM one.
+    recorder.clearLogs();
+    auto unforced = buildConvGraph(variant.dtype, variant.problem);
+    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*unforced, {disableBenchmarkingKnob()}));
+    EXPECT_EQ(selectedKernel(recorder), directKernel) << recorder.getRecordedLogsAsString();
 }
 
 #endif // HKP_TEST_GFX950_CONV_FWD_AOT
