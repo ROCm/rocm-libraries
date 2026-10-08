@@ -31,6 +31,7 @@
 #include "benchmark_timing.hpp"
 #include "cblas_interface.hpp"
 #include "efficiency_monitor.hpp"
+#include "fast_check.hpp"
 #include "flops.hpp"
 #include "hipBuffer.hpp"
 #include "hipblaslt_bench_options.hpp"
@@ -58,6 +59,7 @@
 #include <hipblaslt/hipblaslt.h>
 #include <iomanip>
 #include <map>
+#include <memory>
 #include <numeric>
 #include <omp.h>
 #include <optional>
@@ -1091,6 +1093,123 @@ void dumpBuffer(const char* title, hipDataType To, HipHostBuffer& buf, size_t M,
     return;
 }
 
+// Returns why fast_check cannot verify this configuration, or an empty string when it can.
+inline std::string fast_check_unsupported_reason(const Arguments&     arg,
+                                                 hipblasLtBatchMode_t batchMode,
+                                                 bool                 do_swizzle,
+                                                 hipDataType          TiA,
+                                                 hipDataType          TiB,
+                                                 hipDataType          To,
+                                                 hipDataType          Tc)
+{
+    if(arg.initialization != hipblaslt_initialization::integer_exact)
+        return "fast_check requires initialization: integer_exact";
+    if(arg.timing)
+        return "fast_check does not support timing runs";
+    if(batchMode != HIPBLASLT_BATCH_MODE_STRIDED || arg.grouped_gemm > 0)
+        return "fast_check supports single strided-batched GEMMs only";
+    if(arg.activation_type != hipblaslt_activation_type::none || arg.gradient || arg.use_e
+       || arg.amaxD)
+        return "fast_check does not support activation, gradient, E output or amaxD";
+    if(arg.scaleA != hipblaslt_scaling_format::none || arg.scaleB != hipblaslt_scaling_format::none
+       || arg.scaleC || arg.scaleD || arg.scaleE)
+        return "fast_check does not support scaleA, scaleB, scaleC, scaleD or scaleE";
+    if(do_swizzle)
+        return "fast_check does not support swizzled A or B";
+    // fast_check models the bias as one value per row of D, which is what bias_source a and d
+    // allocate. bias_source b allocates one value per column.
+    if(arg.bias_vector && arg.bias_source == hipblaslt_bias_source::b)
+        return "fast_check supports a bias with one value per row of D (bias_source a or d), not "
+               "bias_source b";
+    if(arg.bias_vector && arg.bias_stride > 0 && arg.bias_stride < arg.M[0])
+        return "fast_check requires bias_stride to be at least M";
+    for(hipDataType t : {TiA, TiB, To, Tc})
+    {
+        std::string why;
+        if(!fast_check_supported_type(t, &why))
+            return why;
+    }
+    return {};
+}
+
+// Returns why this process cannot select Stream-K solutions, or an empty string when it can.
+// TensileLite reads TENSILE_SOLUTION_SELECTION_METHOD once per process (Debug::Instance). A case's
+// tensile_solution_selection_method sets the variable per handle, after that read, so a case that
+// needs the Stream-K solutions needs the variable set when the process starts; this is that value.
+// On gfx950 the Stream-K library is the only one, and the variable has no effect.
+inline const bool kStreamKSelectedAtStartup = [] {
+    const char* method = getenv("TENSILE_SOLUTION_SELECTION_METHOD");
+    return method && !strcmp(method, "2");
+}();
+
+inline std::string streamk_unavailable_reason()
+{
+    int device = 0;
+    if(hipGetDevice(&device) == hipSuccess)
+    {
+        hipDeviceProp_t props;
+        if(hipGetDeviceProperties(&props, device) == hipSuccess
+           && !strncmp(props.gcnArchName, "gfx950", 6))
+            return {};
+    }
+    if(kStreamKSelectedAtStartup)
+        return {};
+    return "this case covers Stream-K solutions, which the library offers only when the process "
+           "starts with TENSILE_SOLUTION_SELECTION_METHOD=2";
+}
+
+// Skips the test when buffer placement is unavailable on this platform, and fails it when the
+// placement request is invalid.
+#ifdef GOOGLE_TEST
+#define CHECK_PLACEMENT(ok, unsupported, why) \
+    do                                        \
+    {                                         \
+        if(!(ok))                             \
+        {                                     \
+            if(unsupported)                   \
+                GTEST_SKIP() << (why);        \
+            else                              \
+                FAIL() << (why);              \
+        }                                     \
+    } while(0)
+#else
+#define CHECK_PLACEMENT(ok, unsupported, why)     \
+    do                                            \
+    {                                             \
+        if(!(ok))                                 \
+        {                                         \
+            hipblaslt_cerr << (why) << std::endl; \
+            return;                               \
+        }                                         \
+    } while(0)
+#endif
+
+// Seed for the fast_check probe vectors: FNV-1a over the test name, so a failure reproduces.
+inline uint64_t fast_check_seed(const Arguments& arg)
+{
+    uint64_t h = 0xcbf29ce484222325ull;
+    for(const char* c = arg.name; *c; c++)
+        h = (h ^ uint8_t(*c)) * 0x100000001b3ull;
+    return h;
+}
+
+// Names one solution for failure messages: its position in this test's list and its library
+// index. with_kernel adds the kernel name.
+inline std::string solution_description(hipblasLtHandle_t      handle,
+                                        hipblasLtMatmulAlgo_t& algo,
+                                        size_t                 sol,
+                                        size_t                 count,
+                                        bool                   with_kernel)
+{
+    std::ostringstream s;
+    s << "solution " << sol << " of " << count << " (library index "
+      << hipblaslt_ext::getIndexFromAlgo(algo);
+    if(with_kernel)
+        s << ", kernel " << hipblaslt_ext::getKernelNameFromAlgo(handle, algo);
+    s << ")";
+    return s.str();
+}
+
 void check(hipStream_t                   stream,
            const Arguments&              arg,
            const uint32_t&               gemm_count,
@@ -1790,7 +1909,10 @@ void testing_matmul(const Arguments& arg)
                            << std::endl;
             return;
         }
-        if(is_16bit)
+        // fast_check models the rounding of large results into 16-bit outputs, so the limit
+        // applies only when a host reference comparison runs.
+        const bool host_reference = arg.unit_check || arg.norm_check || arg.allclose_check;
+        if(is_16bit && (host_reference || !arg.fast_check))
         {
             // alpha=2: |2*dot|<=8K; beta=-2 adds 2*C. fp16 exact int ~2048 => K<=256 for both betas used
             const int32_t k_limit
@@ -1989,6 +2111,10 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     std::vector<HipHostBuffer> hE, hE_gold, hBias, hBias_gold;
     std::vector<HipHostBuffer> hA, hB, hC, hD_gold, hD_1;
+    // Contiguous host copies of the A, B and C regions, without padding, for fast_check, and the
+    // expected probe sums, which depend only on the inputs and are shared by every solution.
+    std::vector<std::unique_ptr<char[]>> fcA(gemm_count), fcB(gemm_count), fcC(gemm_count);
+    std::vector<FastCheckExpected>       fcExpected(gemm_count);
     std::vector<HipHostBuffer> hScaleAlphaVec, hScaleA, hScaleB, hScaleC, hScaleD, hScaleE,
         hAmaxD_gold, hAmaxD, hD_gold_epl, hD_gold_ScaleAlpha, hBias_gold_epl;
 
@@ -2266,6 +2392,100 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
 
     gpu_mem_gbytes = static_cast<double>(totalRotatingSizeNeeded) / (1024 * 1024 * 1024);
+
+    // fast_check alone needs no padded host copies of A, B and D, and no host reference.
+    const bool fast_check_only
+        = arg.fast_check && !(arg.unit_check || arg.norm_check || arg.allclose_check);
+    if(arg.fast_check)
+    {
+        std::string why = fast_check_unsupported_reason(
+            arg, batchMode, do_swizzle_a || do_swizzle_b, TiA, TiB, To, Tc);
+        for(int i = 0; i < gemm_count && why.empty(); i++)
+        {
+            if(lda[i] < A_row[i] || ldb[i] < B_row[i] || ldc[i] < M[i] || ldd[i] < M[i])
+                why = "fast_check requires each leading dimension to be at least the number of "
+                      "rows stored";
+            else if(num_batches[i] > 1
+                    && (stride_a[i] < lda[i] * A_col[i] || stride_b[i] < ldb[i] * B_col[i]
+                        || stride_c[i] < ldc[i] * N[i] || stride_d[i] < ldd[i] * N[i]))
+                why = "fast_check requires batch strides that do not overlap";
+        }
+        if(!why.empty())
+        {
+#ifdef GOOGLE_TEST
+            FAIL() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
+#endif
+        }
+    }
+
+    if(arg.placement[0])
+    {
+        static const char* operands[]
+            = {"a", "b", "c", "d", "bias", "scale_alpha_vec", "workspace"};
+        std::string why;
+        if(!arg.fast_check)
+            why = "placement requires fast_check";
+        else if(std::none_of(std::begin(operands), std::end(operands), [&](const char* o) {
+                    return !strcmp(o, arg.placement);
+                }))
+            why = std::string("unknown placement operand '") + arg.placement + "'";
+        else if(HMM)
+            why = "placement does not support HMM";
+        else if(arg.c_equal_d && !strcmp(arg.placement, "d"))
+            why = "with c_equal_d, D is C: place c instead of d";
+        else if(!strcmp(arg.placement, "bias") && !arg.bias_vector)
+            why = "placing the bias requires bias_vector";
+        else if(!strcmp(arg.placement, "scale_alpha_vec") && !arg.scaleAlpha_vector)
+            why = "placing the scaleAlpha vector requires scaleAlpha_vector";
+        if(!why.empty())
+        {
+#ifdef GOOGLE_TEST
+            FAIL() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
+#endif
+        }
+    }
+
+    if(arg.fast_check_repeat != 1 || arg.fast_check_inject != -1)
+    {
+        std::string why;
+        if(!arg.fast_check)
+            why = "fast_check_repeat and fast_check_inject require fast_check";
+        else if(arg.fast_check_repeat < 1)
+            why = "fast_check_repeat must be at least 1";
+        else if(arg.fast_check_inject < -1)
+            why = "fast_check_inject must be -1 (no injection) or an iteration number";
+        else if(arg.fast_check_inject >= arg.fast_check_repeat)
+            why = "fast_check_inject must name an iteration below fast_check_repeat";
+        if(!why.empty())
+        {
+#ifdef GOOGLE_TEST
+            FAIL() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
+#endif
+        }
+    }
+
+    if(arg.requires_streamk)
+    {
+        std::string why = streamk_unavailable_reason();
+        if(!why.empty())
+        {
+#ifdef GOOGLE_TEST
+            GTEST_SKIP() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
+#endif
+        }
+    }
 
     // Calculating block count
     auto plan = hipblaslt_bench::compute_rotating_buffer_plan(
@@ -2564,17 +2784,44 @@ void testing_matmul_with_bias(const Arguments& arg,
                 epilogue_on[i] = true;
             }
 
-            // allocate memory on device
-            dA.emplace_back(TiA, size_dA[i] * block_count, HMM);
+            // allocate memory on device; the operand named by arg.placement crosses a 4 GiB
+            // boundary. allocate() returns false when that placement failed.
+            std::string placement_why;
+            bool        placement_unsupported = false;
+            auto        allocate              = [&](std::vector<HipDeviceBuffer>& v,
+                                hipDataType                   type,
+                                size_t                        elements,
+                                const char*                   operand) {
+                if(i == 0 && !strcmp(arg.placement, operand))
+                {
+                    v.emplace_back(type,
+                                   elements,
+                                   size_t(arg.placement_offset),
+                                   &placement_why,
+                                   &placement_unsupported);
+                    return v.back().buf() != nullptr;
+                }
+                v.emplace_back(type, elements, HMM);
+                return true;
+            };
+            CHECK_PLACEMENT(allocate(dA, TiA, size_dA[i] * block_count, "a"),
+                            placement_unsupported,
+                            placement_why);
             CHECK_DEVICE_ALLOCATION(hipGetLastError());
-            dB.emplace_back(TiB, size_dB[i] * block_count, HMM);
+            CHECK_PLACEMENT(allocate(dB, TiB, size_dB[i] * block_count, "b"),
+                            placement_unsupported,
+                            placement_why);
             CHECK_DEVICE_ALLOCATION(hipGetLastError());
-            dC.emplace_back(To, size_C[i] * block_count, HMM);
+            CHECK_PLACEMENT(allocate(dC, To, size_C[i] * block_count, "c"),
+                            placement_unsupported,
+                            placement_why);
             CHECK_DEVICE_ALLOCATION(hipGetLastError());
 
             if(!arg.c_equal_d)
             {
-                dD.emplace_back(To, size_D[i] * block_count, HMM);
+                CHECK_PLACEMENT(allocate(dD, To, size_D[i] * block_count, "d"),
+                                placement_unsupported,
+                                placement_why);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
                 dDp = &dD;
             }
@@ -2583,13 +2830,20 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(size_bias[i] * block_count != 0)
             {
-                dBias.emplace_back(Tbias, size_bias[i] * block_count, HMM);
+                CHECK_PLACEMENT(allocate(dBias, Tbias, size_bias[i] * block_count, "bias"),
+                                placement_unsupported,
+                                placement_why);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
 
             if(arg.scaleAlpha_vector)
             {
-                dScaleAlphaVec.emplace_back(Talpha, size_scaleAlphaVec[i] * block_count, HMM);
+                CHECK_PLACEMENT(allocate(dScaleAlphaVec,
+                                         Talpha,
+                                         size_scaleAlphaVec[i] * block_count,
+                                         "scale_alpha_vec"),
+                                placement_unsupported,
+                                placement_why);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
 
@@ -2646,9 +2900,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
 
             // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory
-            hA.emplace_back(TiA, size_A[i]);
-            hB.emplace_back(TiB, size_B[i]);
-            hC.emplace_back(To, size_C[i]);
+            hA.emplace_back(TiA, fast_check_only ? 0 : size_A[i]);
+            hB.emplace_back(TiB, fast_check_only ? 0 : size_B[i]);
+            // With c_equal_d, hC restores the shared C/D buffer before each solution.
+            hC.emplace_back(To, fast_check_only && !arg.c_equal_d ? 0 : size_C[i]);
             hD_gold.emplace_back(To, size_D_copy[i]);
             hD_1.emplace_back(To, size_D_copy[i]);
             if(size_bias[i] * block_count != 0)
@@ -3085,6 +3340,53 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         // generateMXInput already produced the reference floats and the
         // kernel-ready scale layout for both A and B; nothing to do here.
+            if(arg.fast_check)
+            {
+                CHECK_HIP_ERROR(fast_check_poison_padding_device(
+                    {dA[i].buf(), TiA, A_row[i], A_col[i], lda[i], stride_a[i]},
+                    num_batches[i],
+                    size_A[i],
+                    stream));
+                CHECK_HIP_ERROR(fast_check_poison_padding_device(
+                    {dB[i].buf(), TiB, B_row[i], B_col[i], ldb[i], stride_b[i]},
+                    num_batches[i],
+                    size_B[i],
+                    stream));
+                CHECK_HIP_ERROR(fast_check_poison_padding_device(
+                    {dC[i].buf(), To, M[i], N[i], ldc[i], stride_c[i]},
+                    num_batches[i],
+                    size_C[i],
+                    stream));
+                CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+                fcA[i].reset(
+                    new char[size_t(A_row[i] * A_col[i] * num_batches[i]) * realDataTypeSize(TiA)]);
+                fcB[i].reset(
+                    new char[size_t(B_row[i] * B_col[i] * num_batches[i]) * realDataTypeSize(TiB)]);
+                CHECK_HIP_ERROR(fast_check_copy_region_to_host(
+                    fcA[i].get(),
+                    {dA[i].buf(), TiA, A_row[i], A_col[i], lda[i], stride_a[i]},
+                    num_batches[i],
+                    stream));
+                CHECK_HIP_ERROR(fast_check_copy_region_to_host(
+                    fcB[i].get(),
+                    {dB[i].buf(), TiB, B_row[i], B_col[i], ldb[i], stride_b[i]},
+                    num_batches[i],
+                    stream));
+                // fast_check reads C only when beta is nonzero.
+                if(get_computeInterface(h_beta[i], Tc) != 0)
+                {
+                    fcC[i].reset(new char[size_t(M[i] * N[i] * num_batches[i]) * realDataTypeSize(To)]);
+                    CHECK_HIP_ERROR(fast_check_copy_region_to_host(
+                        fcC[i].get(),
+                        {dC[i].buf(), To, M[i], N[i], ldc[i], stride_c[i]},
+                        num_batches[i],
+                        stream));
+                }
+                if(fast_check_only && arg.c_equal_d)
+                    CHECK_HIP_ERROR(synchronize(hC[i], dC[i], 0, 0, 0, 0, 1, false, stream));
+            }
+
             // broadcast first block
             CHECK_HIP_ERROR(broadcast(dA[i], block_count));
             CHECK_HIP_ERROR(broadcast(dB[i], block_count));
@@ -3867,7 +4169,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         HIPBLAS_STATUS_SUCCESS);
 
     // set workspace
-    device_vector<unsigned char>* dWorkspace     = nullptr;
+    std::unique_ptr<device_vector<unsigned char>> dWorkspace;
     size_t                        workspace_size = 0;
 
     // set user args
@@ -4869,8 +5171,62 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     CHECK_SOLUTION_FOUND(returnedAlgoCount);
 
-    dWorkspace = new device_vector<unsigned char>(workspace_size * block_count, 1, HMM);
+    // A Stream-K case that got no Stream-K kernel (TileProcessingStrategy StreamK, "TPSSK" in the
+    // kernel name) would pass while testing none.
+    if(arg.requires_streamk)
+    {
+        bool streamk = false;
+        for(auto& r : heuristicResult)
+            streamk |= hipblaslt_ext::getKernelNameFromAlgo(handle, r.algo).find("_TPSSK_")
+                       != std::string::npos;
+        if(!streamk)
+        {
+            const std::string why = "none of the " + std::to_string(heuristicResult.size())
+                                    + " solutions for this case is a Stream-K kernel";
+#ifdef GOOGLE_TEST
+            GTEST_SKIP() << why;
+#else
+            hipblaslt_cout << why << std::endl;
+            return;
+#endif
+        }
+    }
+
+    // A placed workspace replaces the normal one, which placement runs never use: placement
+    // requires fast_check, and fast_check refuses timing runs.
+    const bool placeWorkspace = !strcmp(arg.placement, "workspace");
+    dWorkspace                = std::make_unique<device_vector<unsigned char>>(
+        placeWorkspace ? 0 : workspace_size * block_count, 1, HMM);
     CHECK_DEVICE_ALLOCATION(dWorkspace->memcheck());
+
+    // The workspace the checked solutions use. A placed workspace moves for each solution, so
+    // that solution's own workspace straddles the 4 GiB boundary.
+    std::unique_ptr<PlacedRegion> placedWorkspace;
+    void*                         workspacePtr   = static_cast<unsigned char*>(*dWorkspace);
+    size_t                        workspaceBytes = workspace_size;
+    if(placeWorkspace)
+    {
+        std::string why;
+        bool        unsupported = false;
+        // Whether any solution needs a workspace depends on the library and GPU, so a run with
+        // none has nothing to place: a skip, not a failure.
+        if(workspace_size == 0)
+        {
+            why         = "no solution here uses a workspace, so there is nothing to place";
+            unsupported = true;
+        }
+        else
+            // Twice the workspace (plus room for the boundary to land on a mapping granule), so
+            // that each solution's start can sit below the boundary with the whole workspace
+            // size, which any solution may use, still mapped after it.
+            placedWorkspace = PlacedRegion::create(2 * workspace_size + (size_t(4) << 20),
+                                                   size_t(arg.placement_offset),
+                                                   HIP_R_8I,
+                                                   &why,
+                                                   &unsupported);
+        CHECK_PLACEMENT(placedWorkspace != nullptr, unsupported, why);
+        workspacePtr = placedWorkspace->ptr();
+    }
 
     if(arg.use_user_args)
     {
@@ -5322,9 +5678,40 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
     if(!arg.timing)
     {
-        for(size_t sol = 0; sol < heuristicResult.size(); sol++)
+        // fast_check launches and checks each solution fast_check_repeat times, solution by
+        // solution, so a defect that fails only some launches is reported with its iteration.
+        const int            fcIterations = arg.fast_check ? std::max(1, arg.fast_check_repeat) : 1;
+        const bool           fcInjecting  = arg.fast_check && arg.fast_check_inject >= 0;
+        FastCheckSolutionLog fcLog;
+        for(size_t run = 0; run < heuristicResult.size() * fcIterations; run++)
         {
-            if((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.c_equal_d)
+            const size_t sol  = run / fcIterations;
+            const int    iter = int(run % fcIterations);
+#ifdef GOOGLE_TEST
+            SCOPED_TRACE(solution_description(
+                             handle, heuristicResult[sol].algo, sol, heuristicResult.size(), false)
+                         + (fcIterations > 1 ? ", iteration " + std::to_string(iter) : ""));
+#endif
+            if(placedWorkspace)
+            {
+                workspacePtr
+                    = placedWorkspace->straddle(heuristicResult[sol].workspaceSize, workspace_size);
+                workspaceBytes = heuristicResult[sol].workspaceSize;
+            }
+            if(arg.fast_check && !arg.c_equal_d)
+            {
+                for(int i = 0; i < gemm_count; i++)
+                    CHECK_HIP_ERROR(
+                        fast_check_fill_sentinel_device((*dDp)[i].buf(), To, size_D[i], stream));
+            }
+            // Return the workspace to the zeros of a fresh allocation, so that a launch cannot
+            // pass on the partial sums an earlier launch left there (a Stream-K fixup that reads
+            // too early, for example). Zero rather than poison: kernels may rely on their flags
+            // starting at zero.
+            if(arg.fast_check && workspacePtr && workspace_size)
+                CHECK_HIP_ERROR(hipMemsetAsync(workspacePtr, 0, workspace_size, stream));
+            if((arg.unit_check || arg.norm_check || arg.allclose_check || arg.fast_check)
+               && arg.c_equal_d)
             {
                 if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) // Iterate for batch_count for General Batched GEMM
                 {
@@ -5349,7 +5736,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     CHECK_HIPBLASLT_ERROR(
                         gemmVec[0].initialize(heuristicResult[sol].algo,
                                               tuningVec[heuristicTuningIndex[sol]],
-                                              *dWorkspace));
+                                              workspacePtr));
                     CHECK_HIPBLASLT_ERROR(gemmVec[0].run(stream));
                 }
                 else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
@@ -5377,7 +5764,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                           ddd[0],
                                                           matD[0],
                                                           &heuristicResult[sol].algo,
-                                                          *dWorkspace,
+                                                          workspacePtr,
                                                           workspace_size,
                                                           stream),
                                           HIPBLAS_STATUS_SUCCESS);
@@ -5398,7 +5785,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                           (*dDp)[0].buf(),
                                                           matD[0],
                                                           &heuristicResult[sol].algo,
-                                                          *dWorkspace,
+                                                          workspacePtr,
                                                           workspace_size,
                                                           stream),
                                           HIPBLAS_STATUS_SUCCESS);
@@ -5413,7 +5800,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     CHECK_HIPBLASLT_ERROR(
                         groupedGemmVec[0].initialize(heuristicResult[sol].algo,
                                                      tuningVec[heuristicTuningIndex[0]],
-                                                     *dWorkspace));
+                                                     workspacePtr));
                     groupedGemmVec[0].getDefaultValueForDeviceUserArguments(userArgs);
                     // Copy them to device memory
                     CHECK_HIP_ERROR(hipMemcpy(d_userArgs,
@@ -5429,7 +5816,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     CHECK_HIPBLASLT_ERROR(
                         groupedGemmVec[0].initialize(heuristicResult[sol].algo,
                                                      tuningVec[heuristicTuningIndex[0]],
-                                                     *dWorkspace,
+                                                     workspacePtr,
                                                      false,
                                                      stream));
 
@@ -5513,6 +5900,179 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Talpha,
                       batchMode);
             }
+            if(arg.fast_check)
+            {
+                CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+                // The self-test corrupts one element of the last batch of D after the launch,
+                // so only this iteration's result is wrong.
+                const int64_t injRow = M[0] / 2, injCol = N[0] / 2, injBatch = num_batches[0] - 1;
+                if(iter == arg.fast_check_inject)
+                    CHECK_HIP_ERROR(fast_check_corrupt_element_device(
+                        {(*dDp)[0].buf(), To, M[0], N[0], ldd[0], stride_d[0]},
+                        injBatch,
+                        injRow,
+                        injCol,
+                        stream));
+
+                // Failures are reported as they are found, except in the self-test, which
+                // collects them and checks that they fall on the corrupted iteration.
+                bool        iterPassed = true;
+                std::string iterReport;
+                auto        reportFailure = [&](const std::string& what, const std::string& text) {
+                    iterPassed = false;
+                    const std::string report
+                        = what + ", "
+                          + solution_description(
+                              handle, heuristicResult[sol].algo, sol, heuristicResult.size(), true)
+                          + (fcIterations > 1 ? ", iteration " + std::to_string(iter) + " of "
+                                                    + std::to_string(fcIterations)
+                                                     : "")
+                          + ":\n" + text;
+                    iterReport += report;
+                    if(fcInjecting)
+                        return;
+#ifdef GOOGLE_TEST
+                    ADD_FAILURE() << report;
+#else
+                    hipblaslt_cerr << report << std::endl;
+#endif
+                };
+
+                for(int i = 0; i < gemm_count; i++)
+                {
+                    FastCheckMatrix d_dev{(*dDp)[i].buf(), To, M[i], N[i], ldd[i], stride_d[i]};
+                    FastCheckResult scan = fast_check_scan_padding_device(
+                        d_dev, num_batches[i], size_D[i], arg.c_equal_d, stream);
+
+                    FastCheckProblem fp;
+                    fp.M           = M[i];
+                    fp.N           = N[i];
+                    fp.K           = K[i];
+                    fp.batch_count = num_batches[i];
+                    fp.transA      = transA != HIPBLAS_OP_N;
+                    fp.transB      = transB != HIPBLAS_OP_N;
+                    fp.A = {fcA[i].get(), TiA, A_row[i], A_col[i], A_row[i], A_row[i] * A_col[i]};
+                    fp.B = {fcB[i].get(), TiB, B_row[i], B_col[i], B_row[i], B_row[i] * B_col[i]};
+                    fp.C = {fcC[i].get(), To, M[i], N[i], M[i], M[i] * N[i]};
+                    fp.D = d_dev;
+                    fp.compute_type = Tc;
+                    fp.alpha        = get_computeInterface(h_alpha[i], Tc);
+                    fp.beta         = get_computeInterface(h_beta[i], Tc);
+                    if(arg.scaleAlpha_vector)
+                    {
+                        fp.scale_alpha_vec      = hScaleAlphaVec[i].buf();
+                        fp.scale_alpha_vec_type = Talpha;
+                    }
+                    if(arg.bias_vector)
+                    {
+                        fp.bias        = hBias[i].buf();
+                        fp.bias_type   = Tbias;
+                        fp.bias_stride = arg.bias_stride > 0 ? arg.bias_stride : 0;
+                    }
+                    fp.seed = fast_check_seed(arg);
+                    if(run == 0)
+                        fcExpected[i] = fast_check_expected(fp);
+                    FastCheckResult res = fast_check_result_device(fp, fcExpected[i], stream);
+                    if(!scan.passed || !res.passed)
+                    {
+                        std::vector<FastCheckBuffer> buffers
+                            = {{"A", dA[i].buf(), size_A[i] * realDataTypeSize(TiA)},
+                               {"B", dB[i].buf(), size_B[i] * realDataTypeSize(TiB)},
+                               {"C", dC[i].buf(), size_C[i] * realDataTypeSize(To)},
+                               {"D", (*dDp)[i].buf(), size_D[i] * realDataTypeSize(To)},
+                               {"workspace", workspacePtr, workspaceBytes}};
+                        if(arg.bias_vector)
+                            buffers.push_back(
+                                {"bias", dBias[i].buf(), size_bias[i] * realDataTypeSize(Tbias)});
+                        if(arg.scaleAlpha_vector)
+                            buffers.push_back({"scaleAlpha_vector",
+                                               dScaleAlphaVec[i].buf(),
+                                               size_scaleAlphaVec[i] * realDataTypeSize(Talpha)});
+                        reportFailure("fast_check",
+                                      scan.message + res.message
+                                          + fast_check_describe_buffers(buffers));
+                    }
+                }
+
+                // A write that missed a placed operand by exactly 4 GiB lands in its poison.
+                const PlacedRegion* placed = placedWorkspace.get();
+                for(auto* v : {&dA, &dB, &dC, &dD, &dBias, &dScaleAlphaVec})
+                    if(!placed && !v->empty() && (*v)[0].placement())
+                        placed = (*v)[0].placement();
+                // A placement that silently fell back to a normal allocation would pass while
+                // testing nothing.
+                const bool straddles = placed
+                                       && (placed != placedWorkspace.get() || workspaceBytes <= 256
+                                           || placed->crosses(workspacePtr, workspaceBytes));
+                if(*arg.placement && !straddles)
+                {
+                    const std::string report
+                        = std::string("fast_check placement: ") + arg.placement
+                          + " was to cross a 4 GiB boundary but "
+                          + (placed ? "this solution's range does not" : "no buffer was placed");
+#ifdef GOOGLE_TEST
+                    ADD_FAILURE() << report;
+#else
+                    hipblaslt_cerr << report << std::endl;
+#endif
+                }
+                if(placed)
+                {
+                    FastCheckResult poison = placed->verify_poison(arg.placement, stream);
+                    if(!poison.passed)
+                        reportFailure("fast_check placement", poison.message);
+                    CHECK_HIP_ERROR(placed->fill_poison(stream));
+                }
+
+                fcLog.record(sol,
+                             hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo),
+                             iterPassed ? std::string()
+                                        : hipblaslt_ext::getKernelNameFromAlgo(
+                                              handle, heuristicResult[sol].algo),
+                             iter,
+                             iterPassed);
+
+                if(fcInjecting)
+                {
+                    // The corrupted iteration must fail and name the corrupted element; every
+                    // other iteration must pass.
+                    const std::string where = "batch " + std::to_string(injBatch) + ", row "
+                                              + std::to_string(injRow) + ", col "
+                                              + std::to_string(injCol);
+                    std::string selfTestError;
+                    if(iter == arg.fast_check_inject && iterPassed)
+                        selfTestError = "fast_check_inject: the corrupted iteration "
+                                        + std::to_string(iter) + " passed";
+                    else if(iter == arg.fast_check_inject
+                            && iterReport.find(where) == std::string::npos)
+                        selfTestError = "fast_check_inject: the report for iteration "
+                                        + std::to_string(iter) + " does not name " + where + ":\n"
+                                        + iterReport;
+                    else if(iter != arg.fast_check_inject && !iterPassed)
+                        selfTestError = "fast_check_inject: iteration " + std::to_string(iter)
+                                        + " was not corrupted but failed:\n" + iterReport;
+                    if(!selfTestError.empty())
+                    {
+#ifdef GOOGLE_TEST
+                        ADD_FAILURE() << selfTestError;
+#else
+                        hipblaslt_cerr << selfTestError << std::endl;
+#endif
+                    }
+                }
+            }
+        }
+
+        // Which solutions failed, and on which iterations, in one place at the end.
+        const std::string fcSummary = fcInjecting ? std::string() : fcLog.summary(fcIterations);
+        if(!fcSummary.empty())
+        {
+#ifdef GOOGLE_TEST
+            ADD_FAILURE() << fcSummary;
+#else
+            hipblaslt_cerr << fcSummary << std::endl;
+#endif
         }
     }
     else
@@ -6303,8 +6863,6 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
     }
 
-    if(dWorkspace != nullptr)
-        delete dWorkspace;
     if(userArgs != nullptr)
         CHECK_HIP_ERROR(hipFree(userArgs));
     if(d_userArgs != nullptr)

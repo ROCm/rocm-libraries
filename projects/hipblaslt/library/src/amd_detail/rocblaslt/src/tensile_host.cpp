@@ -3781,6 +3781,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     }
     catch(...)
     {
+        log_error(__func__, "unknown exception");
     }
 
     return status;
@@ -4015,6 +4016,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             // set workspace size from argument
             data->inputs.workspaceSize = workspaceSizeInBytes;
             data->problem.setWorkspaceSize(workspaceSizeInBytes);
+            if(workspaceSizeInBytes < solution->requiredWorkspaceSize(data->problem, *hardware))
+            {
+                log_error(__func__, "workspace size is less than the solution requires");
+                return rocblaslt_status_invalid_value;
+            }
 
             // The object API learns its stream here, not at create time, and the
             // flag pointer is baked into the kernel arguments by solve() just
@@ -4113,6 +4119,23 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 data->problem.gemms[i].setWorkspaceSizeGroupedGemm(workspaceSizeInBytes);
                 data->problem.gemms[i].setWorkspaceSize(workspaceSizeInBytes);
             }
+            // User-args workspace holds no host args, only per-problem workspaces.
+            size_t requiredWorkspace = 0;
+            if(useUserArgs)
+            {
+                for(const auto& gemm : data->problem.gemms)
+                    requiredWorkspace += solution->requiredWorkspaceSize(gemm, *hardware);
+            }
+            else
+            {
+                requiredWorkspace
+                    = solution->requiredWorkspaceSizeGroupedGemm(data->problem.gemms, *hardware);
+            }
+            if(workspaceSizeInBytes < requiredWorkspace)
+            {
+                log_error(__func__, "workspace size is less than the solution requires");
+                return rocblaslt_status_invalid_value;
+            }
 
             // Grouped GEMM does select Stream-K solutions, so isolation has to
             // cover the stream as well as the problem index: offsetting by index
@@ -4174,6 +4197,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
     }
     catch(...)
     {
+        log_error(__func__, "unknown exception");
     }
 
     return status;
@@ -4547,9 +4571,11 @@ rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             h
     }
     catch(const std::exception& e)
     {
+        log_error(__func__, e.what());
     }
     catch(...)
     {
+        log_error(__func__, "unknown exception");
     }
 
     return status;
