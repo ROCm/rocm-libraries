@@ -4106,6 +4106,11 @@ namespace
         static TensileLite::TuningSearch search(size_t workspaceBytes)
         {
             TensileLite::TuningSearch s;
+
+            // Stamped, not inherited. The column exists to say which mode
+            // measured a row, and a default cannot say that: it says whichever
+            // mode happened to be written first. Online already stamps its own.
+            s.mode           = TensileLite::TuningMode::Tune;
             s.allKernels     = allKernels();
             s.maxCandidates  = s.allKernels ? 0 : candidateCap();
             s.workspaceBytes = workspaceBytes;
