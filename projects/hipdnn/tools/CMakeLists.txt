@@ -121,6 +121,41 @@ endif()
     _apply_hipdnn_test_category_labels(hipdnn_list_engines_smoke)
 endif()
 
+# DescriptorGenerator pytest suite, plus the junit directory both tooling suites write to.
+# ctest reports a suite whose every case skips as a pass, so the pytest junit is the only place
+# a skip is visible: .github/scripts/check_pytest_junit.py reads it in the Linux superbuild
+# lane and fails on any skip .github/hipdnn-tooling-allowed-skips.txt does not name.
+# Build tree only, like the smoke tests above. The option is OFF by default so TheRock and
+# developer builds are unchanged; when ON, a missing prerequisite fails configure rather than
+# silently skipping.
+if(HIPDNN_ENABLE_TOOLING_TESTS AND NOT HIPDNN_SKIP_TESTS)
+    if(NOT Python3_FOUND)
+        message(FATAL_ERROR "hipDNN: HIPDNN_ENABLE_TOOLING_TESTS=ON needs a Python3 interpreter")
+    endif()
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -c "import pytest, yaml, jinja2"
+        RESULT_VARIABLE _hipdnn_tooling_imports
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    if(NOT _hipdnn_tooling_imports EQUAL 0)
+        message(
+            FATAL_ERROR
+                "hipDNN: pytest, PyYAML and Jinja2 are not all importable by "
+                "${Python3_EXECUTABLE}, so the tooling tests cannot run. Install "
+                "tools/IngestorGenerator/requirements.txt for that interpreter, or configure "
+                "with -DHIPDNN_ENABLE_TOOLING_TESTS=OFF."
+        )
+    endif()
+    set(HIPDNN_TOOLING_JUNIT_DIR "${CMAKE_BINARY_DIR}/tooling-junit")
+    add_test(
+        NAME hipdnn_descriptor_generator_pytest
+        COMMAND
+            "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/DescriptorGenerator/tests"
+            -v "--junitxml=${HIPDNN_TOOLING_JUNIT_DIR}/hipdnn_descriptor_generator_pytest.xml"
+    )
+    _apply_hipdnn_test_category_labels(hipdnn_descriptor_generator_pytest)
+endif()
+
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # ValidateDescriptors.cpp transitively includes <hip/hip_runtime.h> through
     # DescriptorLoader.hpp, so it needs the same HIP wiring every ingestor test target
@@ -243,5 +278,71 @@ endif()
         endif()
 
         _apply_hipdnn_test_category_labels(hipdnn_validate_descriptors_smoke)
+
+        # IngestorGenerator pytest suite. It runs here, not next to the DescriptorGenerator
+        # suite above, because two of its gates need this directory's tool target:
+        #   * tests/test_round_trip.py runs the validator named by HIPDNN_VALIDATE_DESCRIPTORS.
+        #   * tests/test_native_stub.py compiles generated stubs against the flatbuffers and
+        #     HIP headers listed in the file named by HIPDNN_INGESTOR_STUB_INCLUDE_FILE.
+        # Without them those tests skip, and ctest reports a suite of skips as a pass.
+        if(HIPDNN_ENABLE_TOOLING_TESTS)
+            add_test(
+                NAME hipdnn_ingestor_generator_pytest
+                COMMAND
+                    "${Python3_EXECUTABLE}" -m pytest
+                    "${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests" -v
+                    "--junitxml=${HIPDNN_TOOLING_JUNIT_DIR}/hipdnn_ingestor_generator_pytest.xml"
+            )
+
+            set(_hipdnn_ingestor_pytest_env
+                "HIPDNN_VALIDATE_DESCRIPTORS=$<TARGET_FILE:hipdnn_validate_descriptors>"
+            )
+
+            # The native-stub tests need a POSIX C++ compiler; the Windows lane is out of scope.
+            if(NOT WIN32)
+                # TARGET_PROPERTY does not follow ALIAS targets, so resolve to the real target.
+                set(_hipdnn_stub_include_exprs "")
+                foreach(_stub_dep flatbuffers::flatbuffers hip::host hip::amdhip64)
+                    if(TARGET ${_stub_dep})
+                        get_target_property(_stub_real ${_stub_dep} ALIASED_TARGET)
+                        if(NOT _stub_real)
+                            set(_stub_real ${_stub_dep})
+                        endif()
+                        string(
+                            APPEND
+                            _hipdnn_stub_include_exprs
+                            "$<JOIN:$<TARGET_PROPERTY:${_stub_real},INTERFACE_INCLUDE_DIRECTORIES>,\n>\n"
+                        )
+                    endif()
+                endforeach()
+                file(
+                    GENERATE
+                    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ingestor_stub_include_dirs.txt"
+                    CONTENT "${_hipdnn_stub_include_exprs}"
+                )
+                list(
+                    APPEND
+                    _hipdnn_ingestor_pytest_env
+                    "HIPDNN_INGESTOR_STUB_INCLUDE_FILE=${CMAKE_CURRENT_BINARY_DIR}/ingestor_stub_include_dirs.txt"
+                )
+            endif()
+
+            if(DEFINED TEST_ENVIRONMENT)
+                list(APPEND _hipdnn_ingestor_pytest_env ${TEST_ENVIRONMENT})
+            endif()
+            set_tests_properties(
+                hipdnn_ingestor_generator_pytest PROPERTIES ENVIRONMENT
+                                                            "${_hipdnn_ingestor_pytest_env}"
+            )
+
+            if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+                set_tests_properties(
+                    hipdnn_ingestor_generator_pytest
+                    PROPERTIES ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}"
+                )
+            endif()
+
+            _apply_hipdnn_test_category_labels(hipdnn_ingestor_generator_pytest)
+        endif()
     endif()
 endif()

@@ -11,6 +11,9 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - '.github/workflows/hipdnn-superbuild-ci.yml'
+      - '.github/requirements-hipdnn-superbuild-ci.txt'
+      - '.github/scripts/check_pytest_junit.py'
+      - '.github/hipdnn-tooling-allowed-skips.txt'
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
   schedule:
@@ -336,7 +339,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build ccache
+          sudo apt-get install -y ninja-build ccache g++
           # clang-tidy-20 comes from Ubuntu's noble-updates archive rather than
           # apt.llvm.org, whose intermittent outages failed this step.
           sudo apt-get install -y clang-tidy-20 clang-tools-20
@@ -442,8 +445,10 @@ jobs:
           echo "Fetched $count golden tensor blob(s)"
 
       # Must precede configure: configuration fails if pytest is not importable
-      # by the interpreter descriptor-packaging registers its tests under. The
-      # interpreter is named explicitly because it must be the one passed as
+      # by the interpreter descriptor-packaging registers its tests under, or if
+      # pytest, PyYAML and Jinja2 are not importable by it for the hipDNN
+      # DescriptorGenerator/IngestorGenerator tooling suites. The interpreter is
+      # named explicitly because it must be the one passed as
       # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
       # setup-python tool-cache interpreter instead.
       - name: Install Python dependencies
@@ -462,6 +467,7 @@ jobs:
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$GITHUB_WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
             -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="$HKP_ROCKE_COMGR_LIB" \
@@ -486,7 +492,19 @@ jobs:
           printf '%s\n' "${kpacks[@]}"
 
       - name: Run tests
+        id: run-tests
         run: ctest --test-dir build --output-on-failure
+
+      # The tooling suites run inside the ctest step above as two ctest tests, which pass
+      # even when every pytest case inside them skips. Their pytest junit is the only
+      # place a skip is visible; fail on any skip the allow-list does not name.
+      - name: Check tooling tests ran without unexpected skips
+        if: ${{ !cancelled() && steps.run-tests.outcome != 'skipped' }}
+        run: |
+          "$VENV_PYTHON" .github/scripts/check_pytest_junit.py \
+            --junit build/tooling-junit/hipdnn_descriptor_generator_pytest.xml \
+            --junit build/tooling-junit/hipdnn_ingestor_generator_pytest.xml \
+            --allow-skips .github/hipdnn-tooling-allowed-skips.txt
 
       # Golden-data validation used to live here as a schedule-gated re-run of the
       # external integration targets with HIPDNN_TEST_VERIFICATION_MODE=golden-check.

@@ -381,6 +381,30 @@ class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
         assert value == "off", value
 
     @staticmethod
+    def _provided_by_the_bound_provider(top: str, profile) -> bool:
+        """True when top-level module ``top`` resolves to a file inside the profile's
+        provider root, i.e. the provider itself, not one of its dependencies."""
+        import importlib.util
+
+        if not top:
+            return False
+        try:
+            spec = importlib.util.find_spec(top)
+        except (ImportError, ValueError):
+            return False
+        if spec is None:
+            return False
+        root = (
+            Path(__file__).resolve().parents[5]
+            / os.path.expanduser(profile["provider_root"])
+        ).resolve()
+        locations = [spec.origin, *(spec.submodule_search_locations or [])]
+        for location in locations:
+            if location and Path(location).resolve().is_relative_to(root):
+                return True
+        return False
+
+    @staticmethod
     def _resolve_with_the_real_dispatcher(monkeypatch, **overrides):
         """B1, Sq=Skv=8192, Hq=Hkv=8, D=128, bf16, causal through the dispatcher and
         request class the shipped profile binds, on its own ``request.defaults``.
@@ -399,6 +423,17 @@ class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
             factory_module = importlib.import_module(dispatch["module"])
             request_module = importlib.import_module(request["module"])
         except ImportError as exc:
+            missing = exc.name or ""
+            owner = TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom
+            if owner._provided_by_the_bound_provider(missing.split(".")[0], profile):
+                # The library is bound and owns this name, so the profile is stale. A skip
+                # here hid that: fail so it is seen.
+                pytest.fail(
+                    f"the shipped profile names {missing!r}, which the in-tree rocKE no "
+                    f"longer provides -- port {_SHIPPED_PROFILE.name} to the current "
+                    "rocKE dispatcher API"
+                )
+            # Not the provider's own: a third-party dependency of it is absent.
             pytest.skip(
                 f"the rocKE library cannot be imported here ({exc}) -- run with an "
                 "interpreter that has its dependencies, e.g. <build-dir>/dnn-providers/"

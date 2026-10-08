@@ -575,7 +575,10 @@ matcher-test stubs with `g++`/`clang++`, plus an intentionally broken source con
 plugin/data/flatbuffers SDK and provider sources beside this checkout plus
 `flatbuffers/array.h` under `/opt/rocm/include`, and generates stand-ins for the
 CMake-configured `version.h`/`CacheRootDefaults.h` headers. Missing prerequisites skip
-explicitly.
+explicitly. Setting `HIPDNN_INGESTOR_STUB_INCLUDE_FILE` to a file of include directories
+(one per line, containing `flatbuffers/array.h` and `hip/hip_runtime.h`) replaces the
+`/opt/rocm/include` probe, and a bad value then fails rather than skips; the hipDNN
+superbuild sets it under `HIPDNN_ENABLE_TOOLING_TESTS`.
 
 ### Fragment contracts (`tests/test_fragment_contracts.py`)
 
