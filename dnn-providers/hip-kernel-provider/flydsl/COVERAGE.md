@@ -477,16 +477,27 @@ The native half is
 The objects are built **per arch**, not per generic family: CDNA has no generic
 target that spans gfx942 and gfx950, and the two get different kernels.
 
-| Arch | Kernel (`kernel`) | `head_dim` | Tile | Workgroup | Grid |
-|---|---|---|---|---|---|
-| gfx950 | `dualwave` — `flash_attn_gfx950.py`, software-pipelined, two waves per 32 query rows | 64, 128 | `block_m` 256 | 512 threads | (query heads, query blocks, batch) |
-| gfx950 | `generic` — `flash_attn_generic.py`, one wave per SIMD (`waves_per_eu` 1) | 256 | `block_m` 128 | 256 threads | batch × query tiles × query heads, flattened |
-| gfx942 | `generic` | 64, 128 | `block_m` 128 | 256 threads | as above |
+| Kernel (`kernel`) | Workgroup | Grid |
+|---|---|---|
+| `dualwave` — `flash_attn_gfx950.py`, software-pipelined, two waves per 32 query rows, gfx950 only | 512 threads, `block_m` 256 | (query heads, query blocks, batch) |
+| `generic` — `flash_attn_generic.py` | `block_m` × 2 threads (`block_m` 64, 128 or 256) | batch × query tiles × query heads, flattened |
 
-Each in bf16 and f16. The dual-wave kernel takes 64 and 128 only, so gfx950's 256
-comes from the generic kernel, which at that width holds its tile without spilling
-only with the whole register file per wave. The generic kernel takes powers of two
-only, and at 256 its tile needs more LDS than gfx942's 64 KiB.
+Which objects serve each class was chosen by measurement (§7.6). Per arch, in bf16
+and f16, the default tier first:
+
+| Arch | `head_dim` | Non-causal | Causal |
+|---|---|---|---|
+| gfx950 | 64 | `dualwave` (setprio off); `generic` 64 | `dualwave`; `generic` 64, preferred for small batch × heads × query rows |
+| gfx950 | 128 | `dualwave` (setprio off); `generic` 64 | `dualwave` (+ offset-0 build); `generic` 64, preferred below 256 query rows |
+| gfx950 | 256 | `generic` 128; `generic` 64 (each + `kv_align` 64), one wave per SIMD | `generic` 128; `generic` 64, preferred below 256 query rows |
+| gfx942 | 64 | `generic` 128 (three waves per EU); `generic` 64, preferred for small problems (each + `kv_align` 64) | the same, without `kv_align` |
+| gfx942 | 128 | `generic` 128; `generic` 64 for small problems, 256 for large ones (each + `kv_align` 64) | the same, the 128 tile without KV global prefetch |
+| gfx950 bias | 64, 128 | `dualwave` | `dualwave` (+ offset-0 build at 128) |
+
+The dual-wave kernel takes `head_dim` 64 and 128 only, so gfx950's 256 comes from the
+generic kernel, which at that width holds its tile without spilling only with the
+whole register file per wave. The generic kernel takes powers of two only, and at
+256 its tile needs more LDS than gfx942's 64 KiB.
 
 ### 7.1 What is baked, and what is not
 
@@ -502,22 +513,26 @@ baked field at a time (§7.3).
 | | every operand's (batch, sequence, head) strides: BSHD, BHSD, packed QKV |
 | | softmax scale |
 | | whether to write the LSE output |
-| gfx942 non-causal: whether the KV tail is masked (`kv_align`) | |
-| gfx950 causal: whether any diagonal is served (`any_diagonal`) | |
+| the schedule: kernel, `block_m`, waves per EU, setprio, KV global prefetch -- a class's tiers (§7.6) | which tier serves a graph, by its size (the score) or by autotune |
+| generic non-causal: whether the KV tail is masked (`kv_align`) | |
+| gfx950 d128 causal: whether any diagonal is served (`any_diagonal`) | |
 | gfx950: whether an additive bias is added (`has_bias`) | the bias's (batch, head, query) strides |
 
-Thirty objects on gfx950, twelve on gfx942: three per (dtype, `head_dim`), and on gfx950
-the dual-wave ones again with a bias. The
-generic kernel can skip masking the last KV tile when the key length is a multiple
-of its 64-row KV tile, which is measurably faster; so its non-causal class ships
-twice -- `kv_align` 0, masked, for any
-length, and `kv_align` 64, unmasked, ranked above it and admitted by the kernel
-matcher only for such lengths. On gfx950 the dual-wave causal kernel serves an
-arbitrary diagonal only when built with upstream's `cross_seqlen`, which costs a
-few percent; so its causal class ships twice too -- `any_diagonal` 1 for every
-diagonal, and `any_diagonal` 0, the plain build, ranked above it and admitted only
-at offset 0: causal self-attention, and top-left causal with fewer queries than
-keys. Each tensor is passed as FlyDSL's
+Forty objects on gfx950, thirty on gfx942. A class -- (dtype, `head_dim`, causal,
+bias) -- ships a default tier that serves every shape of it, and measured companions
+for the shapes where another schedule wins (§7.6). Two variants specialise a tier
+further and rank above it where they apply. The generic kernel can skip masking the
+last KV tile when the key length is a multiple of its 64-row KV tile, which is
+measurably faster; so a non-causal generic tier may ship twice -- `kv_align` 0,
+masked, for any length, and `kv_align` 64, unmasked, admitted by the kernel matcher
+only for such lengths. On gfx950 the dual-wave causal kernel serves an arbitrary
+diagonal only when built with upstream's `cross_seqlen`, which at `head_dim` 128
+costs a few percent; so that tier ships twice too -- `any_diagonal` 1 for every
+diagonal, and `any_diagonal` 0, the plain build, admitted only at offset 0: causal
+self-attention, and top-left causal with fewer queries than keys. At `head_dim` 64
+the two measured the same, and only `any_diagonal` 1 ships.
+
+Each tensor is passed as FlyDSL's
 `fx.Tensor`: an 8-byte pointer followed by a 40-byte by-value layout (four i32
 extents, then the i64 strides of the three non-unit-stride dimensions);
 `gen_sdpa_cdna.py` asserts every object's argument list against its family's
@@ -530,7 +545,7 @@ One SDPA-forward node, and:
 | Condition | Why |
 |---|---|
 | Q, K, V, O rank 4, device operands, **not ragged**; head-dim stride 1; every other stride on an axis longer than 1 positive and a multiple of 8 elements; K and V with the same strides; one (batch, head) slice of each within 32-bit addressing | The batch, sequence and head strides are kernel arguments, so BSHD, BHSD and packed-QKV views are served; each lane moves 16-byte vectors; the kernels take one stride set for K and V; each slice is one buffer view, whose record count is 32-bit. |
-| One dtype for all four; an object exists only for `bf16` | The graph matcher accepts `HALF` as well, and the kernel matcher then finds no object. |
+| One dtype for all four, `bf16` or `f16` | One object per dtype. |
 | `Hq % Hk == 0`; V shaped as K, O as Q | The kernels have one head dimension and do not broadcast. |
 | `head_dim` equal to an object's baked value | Checked by the kernel matcher against each candidate's metadata. |
 | No mask, or `right_bound` ≥ 0 at either alignment (or the deprecated causal booleans), with no `left_bound`, and a diagonal offset `align + right_bound` of at most `Skv − Sq` | The kernels apply the reference's rule, key `j` visible from query row `i` iff `j ≤ i + offset`, with `align` 0 top-left and `Skv − Sq` bottom-right. The causal objects mask the last KV tile's padding with the same compare, which holds only while every row's diagonal stays inside the keys: so bottom-right is served at any lengths, top-left when `Sq ≤ Skv`, and a band only as far as `Skv − Sq`. A sliding window (`left_bound`) declines. |
@@ -560,8 +575,9 @@ against the coverage it buys. In order:
 | Varlen, paged KV | Both kernels already take cumulative sequence offsets and a block table, passed unused today. |
 | ~~Additive bias~~ | Done on gfx950 (modification 8). gfx942 and gfx950's `head_dim` 256 run the generic kernel, which has no bias operand; f32 bias and misaligned rows need a conversion or unaligned path. |
 
-Then the instance set is chosen by the provider's AOT selection process
-(build every candidate, tune, cover, prune) rather than by hand.
+The instance set is then chosen by the provider's AOT selection process (build
+every candidate, tune, cover, prune) rather than by hand -- done for the features
+above (§7.6), and repeated as features land.
 
 ### 7.4 Where each claim is checked
 
@@ -570,7 +586,8 @@ Then the instance set is chosen by the provider's AOT selection process
 | The objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 |
 | Each object has its family's argument layout, workgroup size and arch, fits the arch's LDS, and spills no registers but where a class's spill is explicitly allowed and recorded (`vgpr_spills`) | `gen_sdpa_cdna.py`, before the object is written |
 | The vendored kernels match FlyDSL but for their recorded modifications | `tools/diff_upstream.py` ([REGEN.md](REGEN.md) §5) |
-| Each arch's shard ships one object per class, one kernel family per (dtype, `head_dim`), each with its family's signature | `TestFlydslSdpaCdnaPacks`, and the shard census that runs it for gfx950 and gfx942 |
+| Each arch's shard ships no two objects of one build, exactly one serve-all default per graph class, and each object with its family's signature | `TestFlydslSdpaCdnaPacks`, and the shard census that runs it for gfx950 and gfx942 |
+| A companion outranks its class's default exactly where its rule prefers it | `TestFlydslSdpaCdnaKernelMatch` |
 | The accept/decline rules above, the causal and scale bindings, and candidate selection, including `kv_align` | `TestFlydslSdpaCdnaGraphAccepts`, `TestFlydslSdpaCdnaGraphDeclines`, `TestFlydslSdpaCdnaBinding`, `TestFlydslSdpaCdnaKernelMatch` |
 | Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor, MHA, MQA and an odd group size, cross-attention, chunked prefill, decode, rows no key reaches, a top-left band, `head_dim` 64 and 256, f16, BHSD and packed QKV, a per-head bias and a padding mask — and the LSE output, against a reference | `TestGpuFlydslSdpaCdnaDispatch`, on gfx950 and gfx942 |
 
@@ -608,3 +625,60 @@ the harness's own bias. The measurements are kept outside the repository.
 5. *Runtime strides on the generic kernel.* gfx942 d128 and gfx950 d256 pay a
    little for per-head addressing; a contiguous-BSHD build beside the strided one,
    or a schedule that recovers it.
+
+### 7.6 How the instance set was chosen
+
+By the provider's AOT selection process, with the measurements kept outside the
+repository:
+
+1. **Reduce the knobs.** Everything the graph fixes is runtime (§7.1). What is
+   left is the schedule: the kernel; the generic kernel's `block_m` (64, 128, 256),
+   path (N32 / N128), waves per EU and its build-time switches (DMA, three-buffer
+   prefetch, KV global prefetch, QK prefetch depth, K padding, 16-byte LDS vectors,
+   the reduction); the dual-wave kernel's lazy rescale, setprio, stagger and waves
+   per EU.
+2. **Build every candidate** through `gen_sdpa_cdna.py`'s own build and checks,
+   one factor at a time around each class's previous default, bf16.
+3. **Time every candidate on every shape** of its class, on gfx950 (MI355X) and
+   gfx942 (MI325X): the forward SDPA graphs of the dnn-benchmarking workloads
+   (model configurations from its attention, cuDNN-attention, PyTorch, rocKE and
+   HipKittens sets; AITER's and AOTriton's sweeps weighted down as synthetic) that
+   the matcher admits -- about nine hundred distinct shapes on gfx950 and eight
+   hundred on gfx942 -- each output checked against a reference.
+4. **Cover and prune.** The knobs that won anywhere were crossed and timed again,
+   with the `kv_align` and `any_diagonal` variants; per class, a greedy cover
+   counting "best" within noise, then sets of one to three tiers compared by how
+   far their best object, and the object a one-feature size rule picks, fall
+   behind the best candidate on each shape.
+5. **Ship the set**, its rules as descriptor metadata (`prefer_feature`,
+   `prefer_min`, `prefer_max`), read by the score.
+
+What came out of it:
+
+- The dual-wave kernel's 256-row tile is mostly idle on short queries -- decode,
+  small prefill -- where the generic kernel's 64-row tile is several times
+  faster at the extreme. It is each gfx950 class's companion; a size rule picks
+  it for causal graphs, and autotune finds it for non-causal decode, where no
+  one-feature rule separated the two well.
+- On gfx942 the 128-row tile alone left large problems well behind the 256-row
+  one (upstream's launcher switches between them by size) and small ones behind
+  the 64-row one: the head_dim 128 classes ship all three.
+- Small, free gains kept: setprio off on the non-causal dual-wave objects, three
+  waves per EU at gfx942 head_dim 64, and KV global prefetch off on gfx942's causal
+  head_dim 128 tile.
+- Kept specialisations: `kv_align` 64 is worth a separate object wherever the
+  generic kernel serves non-causal graphs at a 128-row tile or larger; the
+  `any_diagonal` 0 build only at gfx950 `head_dim` 128.
+- Rejected: the generic kernel's `ds_bpermute` reduction and, on gfx942 at
+  `head_dim` 64, KV global prefetch off (neither builds); three-buffer prefetch
+  (over the LDS limit at the larger head dims, slower elsewhere); and its DMA paths
+  -- N128 on gfx950, which turns DMA on, and gfx942's DMA switch -- which produce
+  wrong results, so no object is built with either.
+- Accepted spills, each the winner on the shapes its tier is for: the generic
+  64-row tile at gfx950 `head_dim` 128 (causal) and the 256-row tile at gfx942
+  `head_dim` 128; recorded per object and allowed by name in `gen_sdpa_cdna.py`.
+
+The rules were fitted on bf16 and the f16 objects share them. Bias classes are
+rare in the corpus and ship their default tier only. The process is repeated as
+features land; the rules are coarse by design, and a trained heuristic replaces
+them when the ingestor gains one.
