@@ -393,13 +393,21 @@ class TestCompileTimeout(unittest.TestCase):
                 root = Path(d)
                 cfg, reason = _bridge_config(vec)
                 self.assertIsNone(reason)
-                with (
-                    mock.patch.object(ctypes_utils, "get_build_dir", return_value=root),
-                    mock.patch.object(
-                        gemm_utils, "_tile_engine_codegen_flags", return_value=[]
-                    ),
+                # Nested rather than a parenthesized multi-context `with`: the
+                # project declares requires-python = ">=3.8" in pyproject.toml,
+                # ruff reads its target-version from that, and parenthesized
+                # context managers are a 3.9 syntax. ruff-check is a pinned
+                # pre-commit hook here, so the parenthesized form fails the
+                # hook outright -- as a syntax error, which no noqa suppresses.
+                with mock.patch.object(
+                    ctypes_utils, "get_build_dir", return_value=root
                 ):
-                    job, _ = gemm_utils._build_compile_jobs(cfg, root / "kernel.hpp")
+                    with mock.patch.object(
+                        gemm_utils, "_tile_engine_codegen_flags", return_value=[]
+                    ):
+                        job, _ = gemm_utils._build_compile_jobs(
+                            cfg, root / "kernel.hpp"
+                        )
                 with mock.patch(
                     "subprocess.run", return_value=mock.Mock(returncode=0)
                 ) as run:
