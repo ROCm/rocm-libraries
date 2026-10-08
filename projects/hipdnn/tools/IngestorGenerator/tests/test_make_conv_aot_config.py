@@ -6,6 +6,7 @@
 import copy
 import dataclasses
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -44,7 +45,7 @@ _BUNDLES = {
     "product": (
         tool.PRODUCT_ENGINE,
         _SHIPPED_DIR,
-        _CONFIGS / "gfx950_conv_fwd_aot_seed.instances.json",
+        _CONFIGS / "gfx950_conv_fwd_aot.instances.json",
     ),
     "seed": (_SEED_ENGINE, _SEED_DIR, _INSTANCES),
 }
@@ -464,3 +465,60 @@ def test_dumped_config_has_one_line_per_shape_and_loads_back(seed_specs):
     assert yaml.safe_load(text) == config
     rows = [line for line in text.splitlines() if line.startswith("    - {dtype: ")]
     assert len(rows) == len(seed_specs)
+
+
+# ---- The GPU suites' serving counts ----
+
+_GPU_SUITE = (
+    _REPO
+    / "dnn-providers/hip-kernel-provider/src/integration_tests"
+    / "kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp"
+)
+#: One aotGraphs() row: name, problem (empty = ConvProblem's defaults), then the
+#: seed's direct and implicit counts and the full catalog's.
+_GRAPH_ROW = re.compile(
+    r'^\s*\{"(\w+)", \{([\d, ]*)\}, (\d+), (\d+), (\d+), (\d+)\},$', re.MULTILINE
+)
+#: ConvProblem's defaults, in its field order: n, c, k, hi, wi, y, x, strides,
+#: paddings, dilations, groups.
+_DEFAULT_PROBLEM = (2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1)
+
+
+def _serving_counts(specs, problem, dtype):
+    from builders.common.convolution_forward import (
+        Gfx950ConvFwdSpec,
+        gfx950_conv_fwd_aot_serves,
+    )
+
+    n, c, k, hi, wi, y, x, sh, sw, ph, pw, dh, dw, groups = problem
+    runtime = Gfx950ConvFwdSpec(
+        N=n, C=c, K=k, Hi=hi, Wi=wi, Y=y, X=x, sH=sh, sW=sw, pH=ph, pW=pw,
+        dH=dh, dW=dw, groups=groups, dtype=dtype,
+    )  # fmt: skip
+    counts = [0, 0]
+    for spec in specs:
+        if spec.dtype == dtype and gfx950_conv_fwd_aot_serves(spec, runtime)[0]:
+            counts[0 if spec.is_direct else 1] += 1
+    return tuple(counts)
+
+
+def test_gpu_suite_serving_counts_are_the_python_serves_counts():
+    """IntegrationGpuGfx950ConvFwd.cpp states, per graph, how many instances of each
+    family serve it in the seed and in the full catalog; the native matcher is checked
+    against those numbers on the GPU, so they must be what the Python serves function
+    counts over the committed lists, in both dtypes."""
+    rows = _GRAPH_ROW.findall(_GPU_SUITE.read_text())
+    assert len(rows) >= 19, "aotGraphs() rows not found; keep one row per line"
+    catalogs = {
+        name: _specs(json.loads(_BUNDLES[name][2].read_text()))
+        for name in ("seed", "product")
+    }
+    for name, problem, *stated in rows:
+        values = tuple(int(v) for v in problem.split(",")) if problem else ()
+        if len(values) == 13:
+            values += (1,)
+        values = values or _DEFAULT_PROBLEM
+        for dtype in ("fp16", "bf16"):
+            counted = _serving_counts(catalogs["seed"], values, dtype)
+            counted += _serving_counts(catalogs["product"], values, dtype)
+            assert counted == tuple(int(v) for v in stated), (name, dtype)

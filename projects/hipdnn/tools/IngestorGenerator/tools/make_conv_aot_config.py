@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Turn rocKE AOT forward-conv instances into the hipkernel:Gfx950ConvFwdAot config.
+"""Turn rocKE AOT forward-conv instances into a hipkernel:Gfx950ConvFwdAot config.
 
 An instance is one rocKE ``KernelIdentity`` (``benchmarks/common/kernel_cache.py``):
 a compiled configuration with no problem extents, which serves every problem its
@@ -13,19 +13,25 @@ Every entry must be a gfx950 forward identity in fp16 or bf16 that the packaged
 launch supports: an implicit-GEMM identity of the AOT sweep, or a ``direct_depthwise``
 (std) or ``direct_depthwise_spatial`` identity of the direct sweep
 (``benchmarks/common/direct_kernel_sweep.py``). Anything else is listed with its
-reason and the tool exits non-zero, unless ``--skip-unsupported`` is given. Entries are de-duplicated by
-``instance_id`` (``KernelIdentity.stable_hash()``), which is the key that ties a
-packaged kernel back to the identity it was built from.
+reason and the tool exits non-zero, unless ``--skip-unsupported`` is given. Entries
+are de-duplicated by ``instance_id`` (``KernelIdentity.stable_hash()``), which is the
+key that ties a packaged kernel back to the identity it was built from.
+
+The shipped catalog is ``configs/gfx950_conv_fwd_aot.instances.json``, written by
+``tools/enumerate_conv_aot_instances.py``. ``--engine-name`` emits the same instances
+as another engine over the shipped engine's native code: the test-only seed is
+``configs/gfx950_conv_fwd_aot_seed.instances.json`` as
+``hipkernel:Gfx950ConvFwdAotSeed``. The config is an intermediate, regenerated from
+the list on every run; only the seed's small one is kept, as a worked example.
 
 Then run ``generate.py --config <output>`` and ``--stabilize-ids`` on the emitted
 bundle: the generator mints random kernel UUIDs, and a recorded autotune winner is
 keyed by kernel UUID, so this tool re-derives each kernel's UUID from its
-``instance_id`` to keep it stable across regenerations::
+``instance_id`` (and engine) to keep it stable across regenerations::
 
     python tools/make_conv_aot_config.py --rocke-root "$ROCKE" \\
-        --instances instances.json --output configs/gfx950_conv_fwd_aot.yaml
-    python generate.py --config configs/gfx950_conv_fwd_aot.yaml \\
-        --output-dir "$GENERATED" --force
+        --instances configs/gfx950_conv_fwd_aot.instances.json --output "$WORK"/aot.yaml
+    python generate.py --config "$WORK"/aot.yaml --output-dir "$GENERATED" --force
     python tools/make_conv_aot_config.py --stabilize-ids "$GENERATED"/<...>/*.kdp.json
 
 The config holds one pack, so one KDP, per dtype: a shard of the one catalog, which
