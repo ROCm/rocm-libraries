@@ -110,6 +110,11 @@ equivalent; `USE_TF32` output is not a bit-accuracy oracle for BF16 compute.
 The matrix below therefore labels this possible mode `bf16-mode`. It is separate
 from logical TF32; no production selector maps TF32 requests to BF16 compute.
 
+**Integer spellings.** `iu8` and `iu4` are spellings of `i8` and `i4`: they are
+the operand names RDNA integer WMMA instructions use, and signedness is an operand
+of those instructions, not a property of the data. `i4` is a logical type with no
+LLVM rendering, like `fp4e2m1`; its values travel packed.
+
 **Types that are entirely absent from the vocabulary:** unsigned
 `u8/u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
 references them.
@@ -205,7 +210,7 @@ Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 | `bf8e5m2` (OCP) | 3 | 3 | 1 | 1 | 1 | 1 | **56%** | [C][P] |
 | `fp8 fnuz` (gfx942 only) | 1 | 3 | 1 | 1 | 1 | 1 | **44%** | [P] |
 | **Sub-byte / block formats** | | | | | | | | |
-| `i4` (packed) | 0 | 1 | 1 | 2 | 2 | 2 | **44%** | [C][P] |
+| `i4` (packed) | 1 | 1 | 1 | 2 | 2 | 2 | **50%** | [C][P] |
 | `fp4` (E2M1, MX) | 0 | 2 | 1 | 1 | 0 | 2 | **33%** | [P][M] |
 | `fp6` (E2M3, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
 | `bf6` (E3M2, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
@@ -276,12 +281,12 @@ mode. The missing selector and precision contract are described in §2.5.
   rather than 3 because the scale semantics are not part of the contract — the
   helpers take a scale operand but neither document nor enforce per-tensor vs
   per-channel, so two callers can disagree about what a scale means.
-- **`i4` C1=0 / C3=1** — packed i4 is not a scalar IR `Type`.
+- **`i4` C1=1 / C3=1** — `I4` is a logical IR `Type` in the Python engine only (§6), with no LLVM rendering; its values travel packed.
   [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) provides conversions
   from packed i4 to i32, f32, f16, fp8, and bf8, but no reverse f32→packed-i4
   conversion. The quantization helpers accept only i8, fp8, and bf8
   (`quant.py:58-70`). This is one-direction support under C3's round-trip
-  criterion. C2=1 reflects `iu4` WMMA on gfx1151/gfx11-generic; the MFMA targets
+  criterion. C2=1 reflects the i4 (`iu4`) WMMA on gfx1151/gfx11-generic; the MFMA targets
   and gfx1250 have no native INT4 matrix instruction (§4A).
 - **`fp4` / `fp6` / `bf6` C5=0** — the widest silicon-to-software gap in the
   matrix. The gfx950 atoms exist (`mfma_f32_16x16x128_fp4`,
@@ -444,10 +449,10 @@ The original basis snapshot, with the gfx942 XF32 addition noted below:
 | `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` | f16, bf16 |
 | `gfx942` | the gfx90a set + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` | f32, f16, bf16, fp8, bf8, **tf32** |
 | `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4` + `mfma_f32_16x16x96_fp6` | f32, f16, bf16, fp8, bf8, **fp4, fp6** |
-| `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **iu8, iu4** |
+| `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **i8, i4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` | f16, bf16 |
 | `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8 (+ fp8 block-scaled) |
-| `gfx11-generic` | same as `gfx1151` | f16, bf16, iu8, iu4 |
+| `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4 |
 
 - The `gfx1250` catalog entry defines its target family, memory model, limits,
   and nine matrix atoms, including FP8 `SCALE`/`SCALE16` forms. §4C.1 lists the
@@ -580,3 +585,5 @@ names the C++ files a mirror must change.
 | `F64` scalar type: constants, arithmetic, `cvt_f32_to_f64` / `cvt_f64_to_f32`, global and LDS loads and stores | `core/ir.py`, `core/lower_llvm.py`, `core/dtypes.py` | `cpp/core/dtypes.cpp`, `cpp/core/ir/core_types.cpp`, `cpp/core/ir/ir_arith.cpp`, `cpp/core/ir/ir_mem.cpp` (vector load/store widths), `cpp/core/lower_llvm/core.cpp`, `cpp/core/lower_llvm/convert.cpp` (`fpext`/`fptrunc` choice), `cpp/core/lower_llvm/control.cpp` (vector float add/sub/mul), `cpp/core/lower_llvm/mem.cpp` (element sizes) |
 | `zero_vec` of `i16` and `f64` | `IRBuilder.zero_vec` | `cpp/core/ir/ir_arith.cpp` |
 | LDS loads and stores of `i16` and `f64` (`smem_load_vN`, `smem_store_vN`) | `core/ir.py`, LDS element sizes in `core/lower_llvm.py` | `cpp/core/ir/ir_tile.cpp`, `cpp/core/lower_llvm/mem.cpp` |
+| `I4` logical type | `core/ir.py` | `cpp/include/rocke/ir.h`, `cpp/core/ir/core_types.cpp`, `cpp/core/dtypes.cpp` |
+| `iu8` / `iu4` as spellings of `i8` / `i4`; gfx1151 and gfx11-generic integer WMMA rows record `i8` / `i4` operands (the C++ engine still treats `iu8` / `iu4` as their own dtypes and finds no op for an `i8` / `i4` query) | `core/dtypes.py`, `core/arch/data/arch_specs.json` | `cpp/core/dtypes.cpp`, `cpp/core/arch/data.cpp` (embedded catalog rows) |

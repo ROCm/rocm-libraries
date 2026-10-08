@@ -61,11 +61,25 @@ def test_quant_type_recognition_does_not_enable_integer_conversion(dtype):
         dequantize_scalar_to_f32(b, value, scale=scale)
 
 
-def test_unknown_dtype_and_unrepresented_integer_family():
+def test_unknown_dtype_is_rejected():
     with pytest.raises(ValueError, match="unknown dtype"):
         dtype_info("custom_format")
-    with pytest.raises(ValueError, match="no logical IR type"):
-        dtype_to_ir_type("iu4")
+
+
+def test_iu8_and_iu4_are_spellings_of_i8_and_i4():
+    # Signedness is an instruction operand of integer WMMA, not a property of the data.
+    from rocke.core.ir import I4
+    from rocke.core.lower_llvm import _llvm_type
+
+    assert normalize_dtype("iu8") == "i8"
+    assert normalize_dtype("iu4") == "i4"
+    assert dtype_to_ir_type("iu8") is I8
+    assert dtype_to_ir_type("iu4") is dtype_to_ir_type("i4") is I4
+    assert dtype_info("iu4").encoded_bits == 4
+    # I4 is logical only, like FP4E2M1: its values travel packed, never as an LLVM i4.
+    with pytest.raises(NotImplementedError, match="no LLVM mapping for type i4"):
+        _llvm_type(I4)
+    assert storage_ir_type("i4") is I8
 
 
 @pytest.mark.parametrize(

@@ -45,6 +45,7 @@ class Type:
 
 
 I1 = Type("i1")
+I4 = Type("i4")
 I8 = Type("i8")
 I16 = Type("i16")
 I32 = Type("i32")
@@ -71,6 +72,7 @@ def dtype_to_ir_type(dtype: str) -> Type:
     info = dtype_info(dtype)
     types = {
         "i1": I1,
+        "i4": I4,
         "i8": I8,
         "i16": I16,
         "i32": I32,
