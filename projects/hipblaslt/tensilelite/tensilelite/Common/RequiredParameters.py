@@ -148,6 +148,7 @@ def getRequiredParametersMin() -> set:
         "MXScaleFormat",
         "MXLoadInst",
         'SwInstructionPrefetch',
+        'StinkyTofuRegisterAllocation',
         'HalfPLR',
         'TemporalHint',
         'TemporalHintA',
