@@ -53,12 +53,12 @@ namespace
                 arg.transA = a;
                 arg.transB = b;
                 auto why   = fast_check_unsupported_reason(arg,
-                                                           HIPBLASLT_BATCH_MODE_STRIDED,
-                                                           false,
-                                                           HIP_R_8F_E4M3,
-                                                           HIP_R_8F_E5M2,
-                                                           HIP_R_32F,
-                                                           HIP_R_32F);
+                                                         HIPBLASLT_BATCH_MODE_STRIDED,
+                                                         false,
+                                                         HIP_R_8F_E4M3,
+                                                         HIP_R_8F_E5M2,
+                                                         HIP_R_32F,
+                                                         HIP_R_32F);
                 if(a == 'T' && b == 'N')
                     EXPECT_TRUE(why.empty()) << why;
                 else
