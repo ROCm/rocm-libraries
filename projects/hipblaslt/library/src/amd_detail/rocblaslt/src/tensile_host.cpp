@@ -4823,9 +4823,19 @@ namespace
         std::vector<rocblaslt_matmul_heuristic_result> ranked(cap);
         int                                            returned = 0;
         RocblasltContractionProblem                    probe    = prob;
+        // Not a dispatch: nothing returned here is launched by this call, the
+        // indexes go to benchmarkAndSelectWinner, which measures them on
+        // isolated scratch. Online's rotation is only sound where the next
+        // visit reconsiders, so this asks as the heuristic entry point does.
         const bool                                     found
-            = getBestSolutions(
-                  probe, handle, gemmData, cap, ranked.data(), &returned, prob.workspaceSize)
+            = getBestSolutions(probe,
+                               handle,
+                               gemmData,
+                               cap,
+                               ranked.data(),
+                               &returned,
+                               prob.workspaceSize,
+                               SolutionLookup::Heuristic)
               == rocblaslt_status_success;
         const bool toppedUp
             = returned < cap
@@ -5707,8 +5717,14 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(algo == nullptr)
         {
             int returnAlgoCount = 0;
-            status = getBestSolutions(
-                prob, handle, gemmData, 1, &heuristicResult, &returnAlgoCount, prob.workspaceSize);
+            status              = getBestSolutions(prob,
+                                      handle,
+                                      gemmData,
+                                      1,
+                                      &heuristicResult,
+                                      &returnAlgoCount,
+                                      prob.workspaceSize,
+                                      SolutionLookup::PerDispatch);
             if(returnAlgoCount == 0)
                 return rocblaslt_status_not_implemented;
             algo = &heuristicResult.algo;
@@ -7355,12 +7371,17 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
 // measurement hook already refuses a capturing stream; this is the other half
 // of the same rule, and the half that decides what the graph keeps. See
 // OnlineTuner::selectCandidateImpl().
+//
+// A caller that fetched this answer from the heuristic is told so for the same
+// reason, since it keeps the algo and dispatches it itself. See
+// SolutionLookup.
 inline void promoteOnlineTuningCandidate(
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
     const TensileLite::ContractionProblemGemm&                      tensile_prob,
     const TensileLite::Hardware&                                    hardware,
     const RocblasltContractionProblem&                              prob,
-    size_t                                                          problemKey)
+    size_t                                                          problemKey,
+    SolutionLookup                                                  lookup)
 {
     std::vector<int>    rankedSolutionIndices;
     std::vector<size_t> rankedPositions;
@@ -7386,9 +7407,12 @@ inline void promoteOnlineTuningCandidate(
     // before the ranking it would reorder is even fetched.
     const size_t problemIdentity = std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob);
 
-    auto&     tuner = rocblaslt::OnlineTuner::getInstance();
-    const int promote = tuner.selectCandidate(
-        problemKey, problemIdentity, rankedSolutionIndices, streamIsCapturing(prob.stream));
+    auto&     tuner   = rocblaslt::OnlineTuner::getInstance();
+    const int promote = tuner.selectCandidate(problemKey,
+                                              problemIdentity,
+                                              rankedSolutionIndices,
+                                              streamIsCapturing(prob.stream),
+                                              lookup == SolutionLookup::Heuristic);
     if(promote < 0)
         return;
 
@@ -7535,6 +7559,11 @@ inline bool promoteResolvedOnlineTuningWinner(
 // does not come back through runContractionProblem's measurement hook: a
 // promoted candidate nothing times would spend the shape's visit budget for no
 // samples, and tune mode's own candidate enumeration is not a dispatch at all.
+//
+// lookup says which contract the caller holds this answer under, which decides
+// whether a probe may be promoted into it at all. It is read only where
+// onlineTuningProb is non-null, so the default is the one that promotes
+// nothing on first sight.
 template <typename T>
 inline auto getSolutions(
     const T& inputs,
@@ -7544,7 +7573,8 @@ inline auto getSolutions(
     TensileLite::ContractionProblemGemm&          tensile_prob,
     bool                                          enableEpilogue,
     const int&                                    requestedAlgoCount,
-    const RocblasltContractionProblem*            onlineTuningProb = nullptr)
+    const RocblasltContractionProblem*            onlineTuningProb = nullptr,
+    SolutionLookup                                lookup           = SolutionLookup::Heuristic)
 {
     // Cached from TENSILE_DB at first use; off by default, so the whole
     // diagnostic costs one predictable branch per lookup.
@@ -7612,7 +7642,7 @@ inline auto getSolutions(
         if(!resolved
            || !promoteResolvedOnlineTuningWinner(solutions, tensile_prob, *hardware, *resolved))
             promoteOnlineTuningCandidate(
-                solutions, tensile_prob, *hardware, *onlineTuningProb, problemKey);
+                solutions, tensile_prob, *hardware, *onlineTuningProb, problemKey, lookup);
 
         // The extra candidates were for the tuner, not for the caller.
         if(solutions.size() > static_cast<size_t>(requestedAlgoCount))
@@ -7787,7 +7817,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int                                requestedAlgoCount,
                                   rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                                   int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes)
+                                  size_t                             maxWorkSpaceBytes,
+                                  SolutionLookup                     lookup)
 {
     *returnAlgoCount = 0;
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -7830,17 +7861,24 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     // the answer below immediately, and hipblasLtMatmulAlgoGetHeuristic, whose
     // answer the caller hands back to hipblasLtMatmul -- and both therefore
     // reach the measurement hook in runContractionProblem with the same problem
-    // this ranked.
+    // this ranked. What separates them is how long the answer is good for,
+    // which only the caller knows and which lookup carries down.
     auto solutions = getSolutions(
-        prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount, &prob);
+        prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount, &prob, lookup);
 
     // when there is no solution for xfloat32, fallback comput_type to fp32
     if(solutions.size() == 0 && prob.compute_type == rocblaslt_compute_f32_fast_xf32)
     {
         log_api(__func__, "no xf32 solutions found, try to fallback fp32");
         data->problem.setF32XdlMathOp(rocisa::DataType::Float);
-        solutions = getSolutions(
-            prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount, &prob);
+        solutions = getSolutions(prob,
+                                 library,
+                                 hardware,
+                                 data->problem,
+                                 enableEpilogue,
+                                 requestedAlgoCount,
+                                 &prob,
+                                 lookup);
     }
 
     auto algoCount = min(static_cast<size_t>(requestedAlgoCount), solutions.size());

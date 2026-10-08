@@ -75,7 +75,8 @@ namespace rocblaslt
     int OnlineTuner::selectCandidateImpl(size_t                  problemKey,
                                          size_t                  problem,
                                          const std::vector<int>& rankedSolutionIndices,
-                                         bool                    capturing)
+                                         bool                    capturing,
+                                         bool                    retained)
     {
         if(rankedSolutionIndices.empty())
             return -1;
@@ -133,6 +134,38 @@ namespace rocblaslt
             }
 
             registerProblem(problemKey, problem, state, rankedSolutionIndices);
+
+            // The first sight of a problem by a caller that keeps the answer.
+            //
+            // A probe is a kernel the rotation does not believe is best,
+            // dispatched because the next visit reconsiders it. A caller
+            // holding the answer decides for itself whether there is a next
+            // visit, and the one that fetches a heuristic once and dispatches
+            // the algo for the life of the process never comes back -- so the
+            // probe it was handed is permanent, exactly as a captured graph's
+            // is, and there is no later visit to correct it.
+            //
+            // Which kind of caller this is cannot be known on the first query
+            // and does not have to be: asking again for the same problem is
+            // the evidence, and it is evidence the caller supplies by its own
+            // behaviour. So the first query registers the problem and is
+            // answered by the ranking it brought, and a second one is an
+            // ordinary visit. A caller that queries per call therefore still
+            // drives a full exploration, one visit later than before; a caller
+            // that queries once is never offered anything it cannot take back.
+            //
+            // Registering here rather than returning before it is what makes
+            // the second query an ordinary visit instead of another first one,
+            // and it is also what gives the shape a state the measurement hook
+            // can bring to an end if the second query never comes.
+            //
+            // Deliberately not a blanket refusal of every heuristic query, the
+            // way a capture is refused. A capture is known not to come back; a
+            // heuristic query is not, and refusing all of them would withdraw
+            // online tuning from every application that asks the library for a
+            // kernel per call -- which is half of what the feature is for.
+            if(retained)
+                return -1;
         }
 
         // A problem the key merges with the one being explored. Its launches are

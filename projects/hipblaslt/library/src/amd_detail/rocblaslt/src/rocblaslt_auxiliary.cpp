@@ -3176,7 +3176,8 @@ rocblaslt_status
                                       override_success ? &heuristicResultsArray[1]
                                                        : heuristicResultsArray,
                                       returnAlgoCount,
-                                      pref->max_workspace_bytes);
+                                      pref->max_workspace_bytes,
+                                      SolutionLookup::Heuristic);
         }
 
         // The top Tensile result reports enough workspace for a StreamK hybrid

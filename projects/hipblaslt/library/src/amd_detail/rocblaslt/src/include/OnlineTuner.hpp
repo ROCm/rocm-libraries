@@ -330,16 +330,26 @@ namespace rocblaslt
      * rather than executed. Such a caller is never offered a probe candidate;
      * it is served a measured winner if there is one, and otherwise left its
      * own ordering. See selectCandidateImpl() for why.
+     *
+     * retained says the caller keeps this answer and dispatches it itself,
+     * rather than being asked again on its next dispatch -- a heuristic query.
+     * Such a caller is never the one a problem's first probe is offered to,
+     * because nothing here can know whether it will ever ask again. Asking a
+     * second time is what says it will, and from then on it is an ordinary
+     * visit. See selectCandidateImpl() for why that, and not a blanket
+     * refusal.
      */
         int selectCandidate(size_t                  problemKey,
                             size_t                  problem,
                             const std::vector<int>& rankedSolutionIndices,
-                            bool                    capturing = false)
+                            bool                    capturing = false,
+                            bool                    retained  = false)
         {
             if(!m_enabled)
                 return -1;
 
-            return selectCandidateImpl(problemKey, problem, rankedSolutionIndices, capturing);
+            return selectCandidateImpl(
+                problemKey, problem, rankedSolutionIndices, capturing, retained);
         }
 
         /**
@@ -490,7 +500,8 @@ namespace rocblaslt
         int  selectCandidateImpl(size_t                  problemKey,
                                  size_t                  problem,
                                  const std::vector<int>& rankedSolutionIndices,
-                                 bool                    capturing);
+                                 bool                    capturing,
+                                 bool                    retained);
         void harvestPendingImpl(size_t problemKey);
         bool beginMeasurementImpl(size_t      problemKey,
                                   int         solutionIndex,

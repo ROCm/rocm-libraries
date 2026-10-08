@@ -220,6 +220,29 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
                         int                                requestedAlgoCount,
                         size_t                             maxWorkSpaceBytes);
 
+/**
+ * Which of the two contracts a solution lookup is made under.
+ *
+ * Both leave the choice of kernel to the library and both reach
+ * getBestSolutions() below with the same problem, so nothing about the call
+ * itself tells them apart -- but what the caller does with the answer differs,
+ * and online tuning's rotation is only sound under one of them. The rotation
+ * dispatches a candidate it does not believe is best, on the understanding
+ * that the next visit reconsiders. That understanding holds for one of these
+ * and is the caller's business for the other.
+ */
+enum class SolutionLookup
+{
+    /// hipblasLtMatmul with algo == nullptr. The library chooses, this call
+    /// dispatches what it chose, and the next call asks again.
+    PerDispatch,
+
+    /// hipblasLtMatmulAlgoGetHeuristic. The caller is handed an algo and
+    /// dispatches it itself, as often and for as long as it likes. Whether it
+    /// ever asks again is not knowable here.
+    Heuristic,
+};
+
 /*******************************************************************************
  * getBestSolutions() calls finTopSolutions from Tensile and converts to       *
  * rocblaslt_matmul_heuristic_result                                           *
@@ -230,7 +253,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int                                requestedAlgoCount,
                                   rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                                   int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes);
+                                  size_t                             maxWorkSpaceBytes,
+                                  SolutionLookup                     lookup);
 
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
