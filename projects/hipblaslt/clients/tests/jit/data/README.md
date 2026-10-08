@@ -40,6 +40,15 @@ build and then `projects/hipblaslt/tensilelite`. Copy only `sources/*.s` from
 argument layout differs from the description for that architecture's `plain`,
 update the description.
 
+The `custom.config` block in each `.s` holds the kernel's complete TensileLite
+solution state: every key TensileLite holds after writing the kernel, in the
+form `LibraryIO.writeSolutions` writes. The assembler copies it into the code
+object's metadata, and `TensileLite::solutionFromState`
+(`tensilelite/include/Tensile/msgpack/SolutionState.hpp`) builds the kernel's
+`ContractionSolution` from it with no Python. Regenerating the assembly
+regenerates this block from the same TensileLite run, with the solution and
+kernel names equal to the kernel symbol.
+
 The assembly is stale when the `KernArgsVersion` or `PersistentLoopArgsVersion`
 in it differs from the one in
 `tensilelite/Tensile/Common/GlobalParameters.py`, or the code-object version it
