@@ -106,8 +106,8 @@ namespace hipblaslt_jit::code_object
                  const Target&                          target,
                  const Options&                         options) noexcept;
 
-    // The Relocatable for bundle.mainKernel. The helper library stores these
-    // bytes; the solution library stores the Executable link produces.
+    // The Relocatable for bundle.mainKernel. JitLibrary stores a helper as these
+    // bytes, and a solution's code object as the Executable link produces.
     Result compileRelocatable(const hipblaslt_jit::SourceCodeBundle& bundle,
                               const Target&                          target,
                               const Options&                         options) noexcept;

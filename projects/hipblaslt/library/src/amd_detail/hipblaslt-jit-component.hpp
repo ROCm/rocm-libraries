@@ -96,8 +96,8 @@ namespace hipblaslt_jit
     };
 
     // One file. Assembly and Hip are sources. Relocatable is compiled and not
-    // linked, such as a helper from the helper library or an assembled main
-    // kernel. Executable is a linked code object.
+    // linked, such as a helper JitLibrary stores or an assembled main kernel.
+    // Executable is a linked code object.
     struct Artifact
     {
         std::string name;
@@ -114,11 +114,11 @@ namespace hipblaslt_jit
 
     constexpr int jitCodeObjectVersion = 4;
 
-    // The sources that become one solution in JitLibrary, and how to build
+    // The sources that become one executable in JitLibrary, and how to build
     // them. Not a TensileLite library entry. helpers are HIP sources, compiled
-    // with the main kernel, or Relocatables from the helper library, which keeps
-    // one per backend id and helper name. includes are headers. hipFlags are
-    // appended after the HIP defaults, so -std=c++20 overrides -std=c++17.
+    // with the main kernel, or Relocatables, such as those JitLibrary stores per
+    // helper kernel name. includes are headers. hipFlags are appended after the
+    // HIP defaults, so -std=c++20 overrides -std=c++17.
     struct SourceCodeBundle
     {
         // Assembly or Hip, or for an Executable build a Relocatable built from either
@@ -136,7 +136,7 @@ namespace hipblaslt_jit
     {
         // The main kernel linked with every helper into one Executable.
         Executable,
-        // The main kernel alone as one Relocatable. The helper library stores it.
+        // The main kernel alone as one Relocatable, such as a helper JitLibrary stores.
         Relocatable,
     };
 
@@ -151,7 +151,7 @@ namespace hipblaslt_jit
 
     // Builds a SourceCodeBundle with comgr. An Executable build checks the
     // ISA, the code-object version and the bundle's kernel names. JitLibrary's
-    // helper library is the helper cache. comgr's own file cache is not part of
+    // helper store is the helper cache. comgr's own file cache is not part of
     // the library.
     std::shared_ptr<const CodeObjectBuilder> makeComgrBuilder();
 

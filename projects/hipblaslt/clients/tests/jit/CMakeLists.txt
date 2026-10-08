@@ -107,6 +107,7 @@ set_tests_properties(jit-publish PROPERTIES FIXTURES_SETUP jit-publish)
 # Loads that library and resolves the pre-generated kernel.
 add_executable(hipblaslt-jit-loader-test
     loader_test.cpp
+    "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
     "${hipblaslt_jit_source}/hipblaslt-jit-loader.cpp"
     ${hipblaslt_jit_library_sources})
 target_include_directories(hipblaslt-jit-loader-test PRIVATE
@@ -119,7 +120,8 @@ target_compile_definitions(hipblaslt-jit-loader-test PRIVATE
 hipblaslt_jit_test(jit-loader jit-gpu hipblaslt-jit-loader-test)
 set_tests_properties(jit-loader PROPERTIES FIXTURES_REQUIRED jit-publish)
 
-# Compiles the committed assembly, publishes it, retrieves it and launches it.
+# Compiles the committed assembly, publishes it, retrieves it, launches it and
+# checks D. Also stores a helper relocatable and links it.
 add_executable(hipblaslt-jit-launch-test
     launch_test.cpp
     "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
@@ -130,6 +132,8 @@ target_link_libraries(hipblaslt-jit-launch-test PRIVATE
     roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} amd_comgr hip::device)
 target_compile_definitions(hipblaslt-jit-launch-test PRIVATE
     "HIPBLASLT_JIT_DATA=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
+    "HIPBLASLT_JIT_HELPER_LIBRARY=\"${hipblaslt_jit_scratch}/helper-library\""
+    "HIPBLASLT_JIT_KERNEL=\"${CMAKE_CURRENT_SOURCE_DIR}/builder_test_kernel.hip\""
     "HIPBLASLT_JIT_LAUNCH_LIBRARY=\"${hipblaslt_jit_scratch}/launch-library\""
     "HIPBLASLT_JIT_LAUNCH_SCRATCH=\"${hipblaslt_jit_scratch}/launch\"")
 hipblaslt_jit_test(jit-launch jit-gpu hipblaslt-jit-launch-test)

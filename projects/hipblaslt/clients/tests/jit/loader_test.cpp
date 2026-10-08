@@ -3,30 +3,48 @@
 #include "hipblaslt-jit-loader.hpp"
 #include "library_fixture.hpp"
 #include "solution_entry.hpp"
+#include <Tensile/ExactLogicLibrary.hpp>
+#include <Tensile/SingleSolutionLibrary.hpp>
+#include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
+#include <Tensile/msgpack/Writing.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <vector>
 
 // Loads the JIT solution library written for this device and finds the
-// pre-generated kernel. Also checks that an entry whose solutions are not
+// pre-generated kernel's solutions, including both solutions of one published
+// executable in one entry. Also checks that a library whose solutions are not
 // 0 to N-1 is rejected. Launches nothing.
 namespace
 {
     namespace fs = std::filesystem;
     namespace hj = hipblaslt_jit;
 
-    std::vector<uint8_t> skipIndexOne(std::vector<uint8_t> entry)
+    // A library of copies of solutions under indices, written by TensileLite.
+    std::vector<uint8_t> numbered(const std::vector<hipblaslt_jit_test::Solution>& solutions,
+                                  const std::vector<int>&                         indices)
     {
-        const std::vector<uint8_t> from{0xa5, 'i', 'n', 'd', 'e', 'x', 1};
-        auto                       at = entry.begin();
-        while((at = std::search(at, entry.end(), from.begin(), from.end())) != entry.end())
-            *(at += from.size() - 1) = 2;
-        return entry;
+        using Gemm = TensileLite::ContractionProblemGemm;
+        using Rows = TensileLite::ProblemSelectionLibrary<Gemm, TensileLite::ContractionSolution>;
+        auto rows  = std::make_shared<Rows>();
+        hj::GemmMaster library;
+        for(size_t i = 0; i < solutions.size(); ++i)
+        {
+            auto copy   = hj::copySolution(solutions[i]);
+            copy->index = indices[i];
+            library.solutions.emplace(copy->index, copy);
+            rows->rows.emplace_back(
+                copy->problemPredicate,
+                std::make_shared<
+                    TensileLite::SingleSolutionLibrary<Gemm, TensileLite::ContractionSolution>>(
+                    copy));
+        }
+        library.library = rows;
+        return TensileLite::MessagePackWriteLibraryData(library);
     }
 }
 
@@ -39,60 +57,56 @@ TEST_CASE("the loader reads the JIT solution library", "[jit-gpu]")
         REQUIRE((hipGetDevice(&device) == hipSuccess
             && hipGetDeviceProperties(&properties, device) == hipSuccess));
     }
-    const auto     arch     = hipblaslt_jit_test::deviceTarget(properties).processorName();
+    const auto     target   = hipblaslt_jit_test::deviceTarget(properties);
     const auto     hardware = TensileLite::hip::GetDevice(properties, device);
     const auto     key      = hipblaslt_jit_test::pregeneratedKey(properties);
     hj::JitLibrary library(fs::u8path(HIPBLASLT_JIT_LIBRARY));
 
-    const auto prepared = hipblaslt_jit_test::prepareSolutions(fs::u8path(HIPBLASLT_JIT_DATA));
-    const hipblaslt_jit_test::Prepared* plain = nullptr;
-    const hipblaslt_jit_test::Prepared* pair  = nullptr;
-    bool                                loaded = false;
+    const auto prepared
+        = hipblaslt_jit_test::prepareSolutions(fs::u8path(HIPBLASLT_JIT_DATA), target);
+    const hipblaslt_jit_test::Prepared* pair = nullptr;
+    bool                                loaded = false, paired = false;
     for(const auto& item : prepared)
     {
-        if(item.arch != arch)
-            continue;
-        if(item.name == "plain")
-            plain = &item;
         if(item.name == "plain-pair")
             pair = &item;
-        for(const auto& publication : item.publications)
+        for(const auto k : item.ks)
         {
+            const auto problem = hipblaslt_jit_test::fp16Gemm(false, k);
+            const auto expected
+                = hipblaslt_jit_test::supported(item.assembly.solutions, problem, *hardware);
+            const auto           label = item.name + " K=" + std::to_string(k);
             std::vector<int32_t> indices;
-            const auto           problem = hipblaslt_jit_test::fp16Gemm(false, publication.k);
-            const auto           status
-                = library.lookup(key, device, problem, *hardware, 4, {}, indices);
+            const auto status = library.lookup(key, device, problem, *hardware, 4, {}, indices);
             {
-                INFO(("lookup K=" + std::to_string(publication.k) + ": " + status.message));
+                INFO(("lookup " + label + ": " + status.message));
                 REQUIRE((status.ok()));
             }
             {
-                INFO((item.name + " K=" + std::to_string(publication.k)
-                    + " is not one JIT solution index"));
-                REQUIRE((indices.size() == 1 && hj::isJitIndex(indices[0])));
+                INFO((label + " did not find one JIT solution index per published solution"));
+                REQUIRE((!expected.empty() && indices.size() == expected.size()));
             }
-            hj::Status why;
-            const auto solution = library.solutionByIndex(device, *hardware, indices[0], why);
+            for(size_t i = 0; i < indices.size(); ++i)
             {
-                INFO(("Cannot load solution: " + why.message));
-                REQUIRE((solution != nullptr));
-            }
-            {
-                INFO(("Found kernel " + solution->kernelName + ", expected " + publication.kernel));
-                REQUIRE((solution->kernelName == publication.kernel));
-            }
-            {
-                INFO(("Found solution " + solution->solutionName + ", expected "
-                    + publication.solutionName));
-                REQUIRE((solution->solutionName == publication.solutionName));
-            }
-            {
-                INFO(("The loaded solution has another index"));
-                REQUIRE((solution->index == indices[0]));
-            }
-            if(!loaded)
-            {
-                const auto view = library.resolve(device, indices[0], why);
+                hj::Status why;
+                const auto solution = library.solutionByIndex(device, *hardware, indices[i], why);
+                {
+                    INFO(("Cannot load solution: " + why.message));
+                    REQUIRE((hj::isJitIndex(indices[i]) && solution != nullptr));
+                }
+                {
+                    INFO(("Found solution " + solution->solutionName + ", expected "
+                          + expected[i]->solutionName));
+                    REQUIRE((solution->kernelName == expected[i]->kernelName
+                             && solution->solutionName == expected[i]->solutionName));
+                }
+                {
+                    INFO(("The loaded solution has another index"));
+                    REQUIRE((solution->index == indices[i]));
+                }
+                if(loaded)
+                    continue;
+                const auto view = library.resolve(device, indices[i], why);
                 {
                     INFO(("resolve: " + why.message));
                     REQUIRE((view.master && view.adapter));
@@ -109,11 +123,40 @@ TEST_CASE("the loader reads the JIT solution library", "[jit-gpu]")
                 }
                 loaded = true;
             }
+            if(indices.size() < 2)
+                continue;
+
+            // The solutions published from one executable share its entry.
+            hj::Status why;
+            const auto view = library.resolve(device, indices.front(), why);
+            {
+                INFO(("resolve: " + why.message));
+                REQUIRE((view.master != nullptr));
+            }
+            const auto& mapping = view.master->libraryMapping;
+            const auto  prefix  = mapping.at(indices.front());
+            for(const auto index : indices)
+            {
+                INFO((label + " published its solutions into more than one entry"));
+                REQUIRE((mapping.count(index) && mapping.at(index) == prefix));
+            }
+            const auto file = library.directory(key) / "slices" / hj::sliceKey(problem)
+                              / fs::u8path(prefix + ".dat");
+            const auto entry = std::dynamic_pointer_cast<hj::GemmMaster>(
+                TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm>(file.string()));
+            {
+                INFO(("The entry " + file.u8string() + " does not hold every solution of "
+                      + label));
+                REQUIRE((entry && entry->solutions.size() == indices.size()));
+                for(const auto index : indices)
+                    REQUIRE((entry->solutions.count(index)));
+            }
+            paired = true;
         }
     }
     {
-        INFO(("This device has no committed plain kernel"));
-        REQUIRE((plain && pair && loaded));
+        INFO(("plain-pair was not published as one entry, or nothing was loaded"));
+        REQUIRE((pair && loaded && paired));
     }
 
     std::vector<int32_t> transposed;
@@ -124,6 +167,11 @@ TEST_CASE("the loader reads the JIT solution library", "[jit-gpu]")
         REQUIRE((status.ok() && transposed.empty()));
     }
 
-    hipblaslt_jit_test::reject([&] { hj::loadGemmLibrary(skipIndexOne(pair->record)); },
+    const auto& solutions = pair->assembly.solutions;
+    {
+        INFO(("The loader rejected solutions 0 and 1"));
+        REQUIRE((hj::loadGemmLibrary(numbered(solutions, {0, 1}))->solutions.size() == 2));
+    }
+    hipblaslt_jit_test::reject([&] { hj::loadGemmLibrary(numbered(solutions, {0, 2})); },
                                "The loader accepted solutions 0 and 2");
 }
