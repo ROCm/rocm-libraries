@@ -153,6 +153,22 @@ def check_feature_compatibility(
             parts.append("  Feature order changed (names match but order differs).")
         raise ValueError("\n".join(parts))
 
+    # feature_names pins the schema but not the MEANING of the values. An
+    # engine bumps ENCODING_VERSION when it re-encodes an existing feature;
+    # warm-start is precisely where two encodings would be mixed into one
+    # booster, and the names would match throughout. A spec with no key predates
+    # versioning, which is version 0.
+    prev_version = prev_spec.get("feature_encoding_version", 0)
+    curr_version = getattr(feature_engine, "ENCODING_VERSION", 0)
+    if prev_version != curr_version:
+        raise ValueError(
+            f"Feature encoding mismatch: the previous model was written at "
+            f"encoding version {prev_version}, this engine emits version "
+            f"{curr_version}. The feature NAMES match, so this would otherwise "
+            "go unnoticed -- the values mean different things. Train fresh "
+            "rather than warm-starting."
+        )
+
     prev_cats = prev_spec.get("categorical_features", [])
     curr_cats = feature_engine.get_categorical_features()
     if sorted(prev_cats) != sorted(curr_cats):
@@ -208,6 +224,13 @@ def build_feature_spec(
     """
     return {
         "op_type": operation,
+        # Bumped when the MEANING of a feature changes while its name does not.
+        # check_feature_compatibility and Predictor both compare feature_names
+        # only, so a silent re-encoding is otherwise undetectable: when
+        # GemmUniversalVecFeatureEngine stopped treating "native" as the
+        # problem's widest legal width, every vec_frac_* value moved under an
+        # unchanged schema. A spec with no version predates that.
+        "feature_encoding_version": getattr(fe, "ENCODING_VERSION", 0),
         # The engine class, so Predictor can rebuild the matching one. op_type
         # alone is not enough: gemm_universal and gemm_universal_vec read the
         # same data through different engines, and loading a vec-trained model

@@ -22,7 +22,6 @@ Usage:
 """
 
 import gzip
-import inspect
 import json
 from pathlib import Path
 from typing import Optional
@@ -55,15 +54,7 @@ def _engine_for_spec(spec: dict):
     if name is None:
         op = spec.get("op_type")
         name = OPERATION_ENGINES.get(op, "GemmUniversalFeatureEngine")
-    cls = feature_engine_class(name)
-    # Pass the architecture the model was trained for where the engine accepts
-    # one. GemmUniversalVecFeatureEngine resolves a kernel's native vector
-    # widths, which are arch-dependent, and inference rows do not carry an arch
-    # column -- so without this it would silently fall back to its default.
-    arch = spec.get("arch")
-    if arch and "arch" in inspect.signature(cls.__init__).parameters:
-        return cls(arch=arch)
-    return cls()
+    return feature_engine_class(name)()
 
 
 class Predictor:
@@ -100,6 +91,23 @@ class Predictor:
         else:
             self._feature_engine = _engine_for_spec(self._spec)
 
+        # The encoding version guards what feature_names cannot: the MEANING of
+        # a value under an unchanged name. Enforced here as well as on warm
+        # start, because inference is the production path -- a stale vec model
+        # would rank a pool under the superseded encoding and the wrong kernel
+        # would be built and benchmarked. An absent key means "written before
+        # versioning", which is version 0.
+        spec_version = self._spec.get("feature_encoding_version", 0)
+        engine_version = getattr(self._feature_engine, "ENCODING_VERSION", 0)
+        if self._spec and spec_version != engine_version:
+            raise ValueError(
+                f"{type(self._feature_engine).__name__} emits feature encoding "
+                f"version {engine_version}, but {self._model_dir.name} was "
+                f"trained at version {spec_version}. The feature names match, "
+                "so this would otherwise go unnoticed -- the values mean "
+                "different things. Retrain the model with this engine."
+            )
+
         # Build a column index map so models trained with an older (smaller)
         # feature set still work with a feature engine that has since been
         # extended. The model's feature_spec.json["feature_names"] is the
@@ -134,6 +142,16 @@ class Predictor:
 
     #: Retained for callers written against the private name.
     _select_features = select_features
+
+    @property
+    def spec(self):
+        """The loaded feature_spec.json, or {} when the model has none.
+
+        Exposed so callers can cross-check what the model was trained for --
+        notably `arch`, which a vec engine's native vector widths depend on and
+        which nothing else compares.
+        """
+        return self._spec
 
     @property
     def feature_engine(self):

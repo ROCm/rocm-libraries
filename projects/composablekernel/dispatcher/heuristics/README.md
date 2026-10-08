@@ -80,7 +80,7 @@ python3 train.py \
 
 `gemm_universal_vec` reads the same `gemm_universal` data; only the engine
 differs, adding `vec_a/b/c` (the width in elements, 0 meaning native) and
-`vec_frac_a/b/c` (that width over the widest the problem allows). The choice is
+`vec_frac_a/b/c` (the width actually used, over the widest the problem allows). The choice is
 recorded in `feature_spec.json`, so `evaluate.py`, `predict.py` and the
 `Predictor` class rebuild the matching engine with no extra flag.
 
@@ -106,22 +106,26 @@ Native must be written as `0`, not as null. A null width means nothing parsed
 the kernel name, so the engine raises and names the offending column rather
 than guessing. (It aborts the call, not just that row.)
 
-**What `0` resolves to.** A native width is a property of the *kernel* — tile
-shape, warps per block, warp tile, epilogue and architecture — obtained from
+**What `0` resolves to.** A native width is a property of the *kernel* -- tile
+shape, warps per block, warp tile, epilogue and architecture -- obtained from
 `codegen_common.gemm_native_vector_sizes`. It is **not** the widest width the
 problem allows: with a row-major C the default epilogue stores one element at a
 time however well aligned N is, so a native kernel there has
-`vec_frac_c = 1/legal`, not `1.0`. Rows therefore need `epilogue` and the nine
-tile/wave/warp-tile columns; `arch` is taken from the row if present and
-otherwise from the engine (`GemmUniversalVecFeatureEngine(arch=...)`, which
-`Predictor` sets from `feature_spec.json`).
+`vec_frac_c = 1/legal`, not `1.0`. Rows therefore need `arch`, `epilogue` and the nine `tile_m/n/k`,
+`warp_m/n/k` (warps per block) and `warp_tile_m/n/k` columns, all non-null.
+`arch` is validated against the known gfx families rather than defaulted: the
+wavefront size it selects changes the native widths, so an absent or
+unrecognised value would otherwise be silently wrong.
 
-> **Models trained before this correction are not comparable.** An earlier
-> revision substituted the problem's legal width for native, recording
+> **Retrain any existing `gemm_universal_vec` model.** An earlier revision of
+> this engine substituted the problem's legal width for native, recording
 > `vec_frac_c = 1.0` on every native kernel. The feature *names and count are
-> unchanged*, so nothing detects the difference automatically — a model whose
-> `feature_spec.json` predates the fix was fitted on the old encoding and must
-> be retrained before it is used with this engine. Do not mix the two.
+> unchanged*, so neither `check_feature_compatibility` nor `Predictor` can see
+> the schema difference -- so the engine declares an `ENCODING_VERSION`,
+> `build_feature_spec` records it as `feature_encoding_version`, and
+> `check_feature_compatibility` refuses a warm start across a bump. A spec with
+> no version predates this and counts as version 0. No in-tree model is
+> affected; the engine and the correction land together.
 
 **Not supported by `search.py`.** `SurrogateSearch` generates candidates from the
 base engine's parameter space, which has no width axes -- and a legal width is a

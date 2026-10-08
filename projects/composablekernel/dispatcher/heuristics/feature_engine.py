@@ -43,6 +43,16 @@ EPILOGUE_MAP = {"default": 0, "cshuffle": 1}
 class FeatureEngine(ABC):
     """Abstract base for per-op feature extraction."""
 
+    #: Encoding generation for this engine's feature VALUES.
+    #:
+    #: feature_names pins the schema, but not what the numbers mean. When
+    #: GemmUniversalVecFeatureEngine stopped treating "native" as the problem's
+    #: widest legal width, every vec_frac_* value moved under an unchanged name
+    #: list -- so warm-starting a new model from an old one would have mixed two
+    #: encodings into one booster with nothing to detect it. Engines that have
+    #: never been re-encoded stay at 0.
+    ENCODING_VERSION = 0
+
     @abstractmethod
     def get_feature_names(self) -> list[str]:
         """Ordered list of feature names matching the output array columns."""
@@ -104,6 +114,8 @@ class FeatureEngine(ABC):
 
 
 class GemmUniversalFeatureEngine(FeatureEngine):
+    #: Bumped when the MEANING of a feature changes while its name does not.
+    #: 0 means "never re-encoded". See FeatureEngine.ENCODING_VERSION.
     """Feature engine for gemm_universal kernels."""
 
     def __init__(

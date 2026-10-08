@@ -39,16 +39,22 @@ model a single-element store was a full-width one.
 
 .. warning::
    That makes ``vec_frac_*`` incompatible between models trained before and
-   after this correction. A model whose ``feature_spec.json`` predates it was
-   fitted on the old encoding; re-train rather than mixing the two. The feature
-   NAMES and count are unchanged, so nothing detects the difference
-   automatically.
+   after this correction, and the feature NAMES and count are unchanged, so the
+   schema check alone cannot see it. :attr:`ENCODING_VERSION` carries the
+   generation instead: ``build_feature_spec`` records it and
+   ``check_feature_compatibility`` refuses a warm start across a bump. A model
+   whose ``feature_spec.json`` has no version predates this and must be
+   retrained rather than warm-started.
 
-``vec_frac`` can exceed 1.0 when a kernel's fixed width does not divide the
-problem's legal width. Such a pairing is rejected by the kernel, so it should
-not appear in training data; the value is left unclamped so that if it does
-appear, it is visible rather than silently indistinguishable from a legal
-exact-fit.
+``vec_frac`` can exceed 1.0 whenever the width a kernel uses is wider than the
+problem's legal width -- either a fixed width that does not divide it, or a
+native width whose geometry simply asks for more than the extent allows.
+``resolve_gemm_vector_sizes`` does not clamp the native case against the
+problem, so such a pairing is rejected at launch by the vector-size gate. It
+should therefore not appear in measured training data, but IS routine in an
+inference candidate pool, which is scored before any legality filter. The value
+is left unclamped so it stays visible rather than being silently
+indistinguishable from a legal exact fit.
 
 Selecting this engine
 ---------------------
@@ -64,6 +70,7 @@ exact feature-schema match -- so widening the base invalidates every
 already-trained model that uses it. Opting in by class keeps those working.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -86,6 +93,7 @@ from codegen_common import (
     gemm_contiguous_dims,
     gemm_native_vector_sizes,
     gemm_problem_vector_sizes,
+    normalize_gfx_arch,
 )
 
 
@@ -190,7 +198,8 @@ def _vec_widths(problem: dict, kernel: dict) -> list[int]:
             raise KeyError(
                 f"{key!r} absent from both the problem and the kernel config; "
                 f"{', '.join(VEC_FEATURES[:3])} are required by this engine. "
-                "Pass 0 to mean native (the widest legal width)."
+                "Pass 0 to mean native (this kernel's own width; see "
+                "_native_widths)."
             )
     return out
 
@@ -244,6 +253,51 @@ _GEOMETRY_KEYS = (
 )
 
 
+#: Epilogues whose C store width _vector_geometry models explicitly. Anything
+#: else falls into its cshuffle branch, which would silently report a wide store
+#: for a narrow one -- the exact error this module exists to avoid.
+_EPILOGUES = frozenset({"default", "tdm", "cshuffle"})
+
+#: A gfx target: two to four digits and an optional revision letter, after
+#: normalize_gfx_arch has stripped any ``:xnack-``-style suffix. Two digits plus
+#: a letter is a real shape -- gfx90a is MI210 -- so requiring three rejects a
+#: supported part.
+#:
+#: Both a shape AND a known family. A bare prefix test accepts anything that
+#: merely starts like a target ("gfx9zzz"); a bare shape test accepts an unknown
+#: family ("gfx13", "gfx99"), which _vector_geometry then silently assigns a
+#: wavefront to. Requiring both rejects a future family loudly, which is the
+#: safe direction. That matters here because
+#: normalize_gfx_arch does not validate and _vector_geometry picks the wavefront
+#: size with `startswith("gfx9")`, so a value that is wrong but gfx9-shaped
+#: silently yields wave-64 widths, and one that is wrong in any other way
+#: silently yields wave-32 widths. data_pipeline defaults arch to "unknown" and
+#: backfills unpopulated columns with None, so both are reachable.
+_ARCH_RE = re.compile(r"^(gfx9\d[0-9a-z]|gfx(?:10|11|12)\d{2})$")
+
+
+def _check_arch(arch: str) -> str:
+    normalized = normalize_gfx_arch(arch)
+    if not _ARCH_RE.match(normalized):
+        raise ValueError(
+            f"unrecognised architecture {arch!r}; native vector widths depend on "
+            "the wavefront size, which is selected by the gfx family, so an "
+            "unrecognised value would silently yield wrong widths. Expected a "
+            "target like gfx950, gfx942, gfx90a or gfx1250."
+        )
+    return normalized
+
+
+def _check_epilogue(epilogue: str) -> str:
+    if epilogue not in _EPILOGUES:
+        raise ValueError(
+            f"unrecognised epilogue {epilogue!r}; expected one of "
+            f"{sorted(_EPILOGUES)}. An unmodelled epilogue would be treated as "
+            "cshuffle and report a wider C store than it performs."
+        )
+    return epilogue
+
+
 def _native_widths(dtype: str, layout: str, arch: str, epilogue: str, geom) -> tuple:
     """The A/B/C widths this KERNEL uses when it fixes none of them.
 
@@ -267,17 +321,19 @@ def _native_widths(dtype: str, layout: str, arch: str, epilogue: str, geom) -> t
         tile=tile,
         waves=waves,
         warp_tile=warp_tile,
-        gfx_arch=arch,
-        epilogue=epilogue,
+        gfx_arch=_check_arch(arch),
+        epilogue=_check_epilogue(epilogue),
     )
 
 
 def _effective_widths(raw, native, legal) -> list:
-    """Width each operand actually uses, and its share of what the problem allows.
+    """The raw width per operand, then the share of the legal width it uses.
 
-    A fixed width is used as given; a native one resolves to the kernel's own.
-    The denominator stays the problem's legal width, so the fraction keeps its
-    meaning: how much of the available alignment this kernel exploits.
+    ``out[:3]`` is the RAW stored value -- 0 for native, unresolved. ``out[3:]``
+    is the resolved width over the problem's legal width: a fixed width as
+    given, a native one from the kernel's geometry. The denominator stays the
+    problem's legal width so the fraction keeps one meaning: how much of the
+    available alignment this kernel exploits.
     """
     out = [float(v) for v in raw]
     for v, nat, lg in zip(raw, native, legal):
@@ -336,19 +392,10 @@ class GemmUniversalVecFeatureEngine(GemmUniversalFeatureEngine):
     against that asymmetry moving.
     """
 
-    #: Fallback architecture when a row does not carry one. A native width
-    #: depends on the arch (gfx11/gfx12 WMMA store different C widths), but the
-    #: inference paths build candidate dicts from a KernelSpec and a problem,
-    #: neither of which has an ``arch`` field -- ml_heuristic_sweep and
-    #: create_ml_heuristic both know the arch, they just do not repeat it per
-    #: row. Taking it at construction keeps those working without forcing every
-    #: caller to widen its dicts; an ``arch`` column still wins where present,
-    #: so training data stays self-describing.
-    DEFAULT_ARCH = "gfx950"
-
-    def __init__(self, *args, arch: str | None = None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._arch = arch or self.DEFAULT_ARCH
+    #: 1: native widths resolve from the KERNEL's geometry. Version 0 read them
+    #: as the problem's widest legal width, which recorded vec_frac_* = 1.0 for
+    #: every native kernel. Same names, same count, different numbers.
+    ENCODING_VERSION = 1
 
     #: Base feature count, read from the base class's own implementation so a
     #: subclass override cannot perturb it. Instantiated rather than called
@@ -393,7 +440,7 @@ class GemmUniversalVecFeatureEngine(GemmUniversalFeatureEngine):
         native = _native_widths(
             dtype,
             layout,
-            self._arch_for(problem, kernel),
+            _required(problem, kernel, "arch"),
             _required(problem, kernel, "epilogue"),
             tuple(
                 tuple(_geom_value(problem, kernel, k) for k in group)
@@ -410,15 +457,16 @@ class GemmUniversalVecFeatureEngine(GemmUniversalFeatureEngine):
             [base, np.array(self._vec_row(problem, kernel), dtype=np.float64)]
         )
 
-    #: Columns extract_batch needs beyond the base engine's. arch, epilogue and
-    #: the nine geometry knobs are required because a native width is a property
-    #: of the kernel, not of the problem.
+    #: Columns extract_batch requires to be present and non-null. arch,
+    #: epilogue and the nine geometry knobs join the base engine's own because a
+    #: native width is a property of the kernel, not of the problem.
     _REQUIRED = (
         "m",
         "n",
         "k",
         "layout",
         "dtype",
+        "arch",
         "epilogue",
         "vec_a",
         "vec_b",
@@ -426,15 +474,7 @@ class GemmUniversalVecFeatureEngine(GemmUniversalFeatureEngine):
         *(k for group in _GEOMETRY_KEYS for k in group),
     )
 
-    def _arch_for(self, problem: dict, kernel: dict) -> str:
-        """The architecture for this row: an explicit one wins, else the
-        engine's. Never guessed silently from nothing."""
-        for src in (problem, kernel):
-            if src.get("arch") is not None:
-                return str(src["arch"])
-        return self._arch
-
-    def _native_width_columns(self, df, layout, dtypes) -> np.ndarray:
+    def _native_width_columns(self, df: pd.DataFrame) -> np.ndarray:
         """Per-row native A/B/C widths, resolved once per distinct geometry.
 
         gemm_native_vector_sizes is pure Python, and a sweep frame is tens of
@@ -449,8 +489,6 @@ class GemmUniversalVecFeatureEngine(GemmUniversalFeatureEngine):
             "epilogue",
             *(k for g in _GEOMETRY_KEYS for k in g),
         ]
-        if "arch" not in df.columns:
-            df = df.assign(arch=self._arch)
         combos = df[keys].astype({k: np.int64 for g in _GEOMETRY_KEYS for k in g})
         codes, uniques = pd.factorize(
             pd.MultiIndex.from_frame(combos), use_na_sentinel=False
@@ -518,7 +556,7 @@ class GemmUniversalVecFeatureEngine(GemmUniversalFeatureEngine):
         operand_caps = (caps_ab, caps_ab, caps_c)
         dims = {d: df[d].to_numpy(dtype=np.int64) for d in ("m", "n", "k")}
 
-        native = self._native_width_columns(df, layout, dtypes)
+        native = self._native_width_columns(df)
 
         extra = np.empty((len(df), len(VEC_FEATURES)), dtype=np.float64)
         for i, operand in enumerate(("a", "b", "c")):

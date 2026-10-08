@@ -243,7 +243,17 @@ class TestPredictorEngineWiring:
         lgb.LGBMRegressor(n_estimators=3, verbose=-1).fit(X, y).booster_.save_model(
             str(tmp_path / "model_tflops.lgbm")
         )
-        spec = {"feature_engine": engine_name, "feature_names": feature_names}
+        from feature_engine import feature_engine_class
+
+        spec = {
+            "feature_engine": engine_name,
+            "feature_names": feature_names,
+            # Written from the engine, as build_feature_spec does: Predictor
+            # rejects a spec whose encoding version disagrees.
+            "feature_encoding_version": feature_engine_class(
+                engine_name
+            ).ENCODING_VERSION,
+        }
         (tmp_path / "feature_spec.json").write_text(json.dumps(spec))
         return tmp_path
 
@@ -283,11 +293,16 @@ class TestFeatureRemap:
         lgb.LGBMRegressor(n_estimators=3, verbose=-1).fit(
             rs.rand(40, n_model_features), rs.rand(40)
         ).booster_.save_model(str(tmp_path / "model_tflops.lgbm"))
+        from feature_engine_vec import GemmUniversalVecFeatureEngine
+
         (tmp_path / "feature_spec.json").write_text(
             json.dumps(
                 {
                     "feature_engine": "GemmUniversalVecFeatureEngine",
                     "feature_names": feature_names,
+                    "feature_encoding_version": (
+                        GemmUniversalVecFeatureEngine.ENCODING_VERSION
+                    ),
                 }
             )
         )
@@ -315,6 +330,71 @@ class TestFeatureRemap:
 
         with pytest.raises(ValueError, match="cannot supply"):
             Predictor(self._dir(tmp_path, ["vec_a", "not_a_real_feature"], 2))
+
+
+class TestEncodingVersionAtInference:
+    """Warm start is not the only place two encodings meet. Inference is the
+    production path: a stale vec model would rank a pool under the superseded
+    encoding and the wrong kernel would be built and benchmarked."""
+
+    @staticmethod
+    def _dir(tmp_path, engine_name, version):
+        import lightgbm as lgb
+
+        from feature_engine import feature_engine_class
+
+        names = feature_engine_class(engine_name)().get_feature_names()
+        rs = np.random.RandomState(0)
+        lgb.LGBMRegressor(n_estimators=3, verbose=-1).fit(
+            rs.rand(40, len(names)), rs.rand(40)
+        ).booster_.save_model(str(tmp_path / "model_tflops.lgbm"))
+        spec = {"feature_engine": engine_name, "feature_names": names}
+        if version is not None:
+            spec["feature_encoding_version"] = version
+        (tmp_path / "feature_spec.json").write_text(json.dumps(spec))
+        return tmp_path
+
+    def test_a_matching_version_loads(self, tmp_path):
+        from predict import Predictor
+
+        d = self._dir(tmp_path, "GemmUniversalVecFeatureEngine", 1)
+        assert Predictor(d) is not None
+
+    def test_a_vec_model_with_no_version_is_refused(self, tmp_path):
+        """Every vec model written before versioning used the superseded
+        native-width encoding."""
+        from predict import Predictor
+
+        d = self._dir(tmp_path, "GemmUniversalVecFeatureEngine", None)
+        with pytest.raises(ValueError, match="feature encoding version"):
+            Predictor(d)
+
+    def test_a_stale_version_is_refused(self, tmp_path):
+        from predict import Predictor
+
+        d = self._dir(tmp_path, "GemmUniversalVecFeatureEngine", 0)
+        with pytest.raises(ValueError, match="trained at version 0"):
+            Predictor(d)
+
+    def test_a_version_less_base_model_still_loads(self, tmp_path):
+        """The shipped models carry no version; the base engine is version 0,
+        so they must keep working."""
+        from predict import Predictor
+
+        d = self._dir(tmp_path, "GemmUniversalFeatureEngine", None)
+        assert Predictor(d) is not None
+
+    def test_every_shipped_model_still_loads(self):
+        """The real artifacts, not a fixture."""
+        from pathlib import Path
+
+        from predict import Predictor
+
+        models = Path(__file__).resolve().parents[1] / "models"
+        dirs = [d for d in models.iterdir() if (d / "feature_spec.json").exists()]
+        assert dirs, "no shipped models found"
+        for d in dirs:
+            assert Predictor(d) is not None, d.name
 
 
 if __name__ == "__main__":

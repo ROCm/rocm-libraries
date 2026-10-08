@@ -26,6 +26,7 @@ from dispatcher_integration import (
     feature_dict_to_ml_spec,
     ml_spec_to_dispatcher_config,
     create_ml_heuristic,
+    create_ranked_heuristic,
     load_kernel_pool_from_binaries,
     MLKernelSpec,
     LAYOUT_TO_DISPATCHER,
@@ -305,6 +306,185 @@ class TestCreateMLHeuristic:
     def test_empty_pool_raises(self, mock_model_dir):
         with pytest.raises(ValueError, match="No kernel configs"):
             create_ml_heuristic(mock_model_dir, kernel_pool=[])
+
+
+class TestArchCrossCheck:
+    """A vec-trained model encodes native vector widths for the arch it was
+    fitted on, and the feature names and count do not change with arch -- so
+    extracting under a different one scores the pool against a distribution the
+    model never saw, silently. feature_spec.json records the arch, so say so.
+
+    Both factories are exercised: an earlier revision wired the check into one
+    of them and left the other referencing an unbound name, which no test caught
+    because the closure is only evaluated when it is called."""
+
+    KN = (
+        "gemm_universal_bf16_rcr_compv3_default_intrawave_False_False_False_True"
+        "_128x128x128_2x2x1_32x32x16"
+    )
+
+    @staticmethod
+    def _model(tmp_path, arch="gfx950"):
+        import lightgbm as lgb
+
+        names = GemmUniversalFeatureEngine().get_feature_names()
+        rs = np.random.RandomState(0)
+        lgb.LGBMRegressor(n_estimators=3, verbose=-1).fit(
+            rs.rand(40, len(names)), rs.rand(40)
+        ).booster_.save_model(str(tmp_path / "model_tflops.lgbm"))
+        (tmp_path / "feature_spec.json").write_text(
+            json.dumps(
+                {
+                    "feature_engine": "GemmUniversalFeatureEngine",
+                    "feature_names": names,
+                    "arch": arch,
+                }
+            )
+        )
+        return tmp_path
+
+    def _pool(self, **over):
+        return [{**kernel_config_to_feature_dict(self.KN), **over}]
+
+    @pytest.mark.parametrize(
+        "factory", [create_ml_heuristic, create_ranked_heuristic], ids=["ml", "ranked"]
+    )
+    def test_an_agreeing_arch_is_accepted_and_the_closure_runs(self, tmp_path, factory):
+        """Calls the closure: a factory that only binds the name at definition
+        time would raise NameError here, not at construction."""
+        h = factory(self._model(tmp_path), arch="gfx950", kernel_pool=self._pool())
+        assert h(1024, 1024, 1024) is not None
+
+    @pytest.mark.parametrize(
+        "factory", [create_ml_heuristic, create_ranked_heuristic], ids=["ml", "ranked"]
+    )
+    def test_a_disagreeing_arch_raises(self, tmp_path, factory):
+        with pytest.raises(ValueError, match="disagrees with the model"):
+            factory(self._model(tmp_path), arch="gfx1250", kernel_pool=self._pool())
+
+    @pytest.mark.parametrize(
+        "factory", [create_ml_heuristic, create_ranked_heuristic], ids=["ml", "ranked"]
+    )
+    def test_a_pool_entry_cannot_shadow_the_arch(self, tmp_path, factory):
+        """rank_kernels merges {**problem, **kc} with the KERNEL winning, so a
+        pool dict carrying arch would otherwise override the argument with no
+        message -- and rows of a canonical frame, the obvious thing to pass, do
+        carry it."""
+        with pytest.raises(ValueError, match="kernel_pool entries carry arch"):
+            factory(
+                self._model(tmp_path),
+                arch="gfx950",
+                kernel_pool=self._pool(arch="gfx942"),
+            )
+
+    @pytest.mark.parametrize(
+        "factory", [create_ml_heuristic, create_ranked_heuristic], ids=["ml", "ranked"]
+    )
+    @pytest.mark.parametrize("model_arch", ["gfx950", "gfx942", "gfx1250"])
+    def test_a_model_loads_without_naming_an_arch(self, tmp_path, factory, model_arch):
+        """Omitting arch must use the MODEL's, for every arch -- not just the
+        one that happened to be the old default. A literal default is
+        indistinguishable from a deliberate choice, so a gfx1250 model raised a
+        disagreement against a gfx950 nobody asked for."""
+        h = factory(self._model(tmp_path, arch=model_arch), kernel_pool=self._pool())
+        assert h(1024, 1024, 1024) is not None
+
+    def test_neither_source_supplying_an_arch_yields_none(self, tmp_path):
+        """The BASE engine ignores arch, so raising here would break every
+        base-engine caller to serve the vec engine. The key is then omitted and
+        a vec engine fails by name from its own required-column check."""
+        import lightgbm as lgb
+        from dispatcher_integration import _resolve_arch
+        from predict import Predictor
+
+        names = GemmUniversalFeatureEngine().get_feature_names()
+        rs = np.random.RandomState(0)
+        lgb.LGBMRegressor(n_estimators=3, verbose=-1).fit(
+            rs.rand(40, len(names)), rs.rand(40)
+        ).booster_.save_model(str(tmp_path / "model_tflops.lgbm"))
+        (tmp_path / "feature_spec.json").write_text(
+            json.dumps({"feature_names": names})
+        )
+        assert _resolve_arch(Predictor(tmp_path), None, self._pool()) is None
+
+    @pytest.mark.parametrize("key", ["m", "n", "k", "split_k"])
+    def test_a_pool_entry_cannot_pin_a_problem_key(self, tmp_path, key):
+        """rank_kernels merges {**problem, **kernel} kernel-first, so a pool
+        carrying m/n/k would rank every query against the pool's values."""
+        with pytest.raises(ValueError, match="problem keys"):
+            create_ml_heuristic(
+                self._model(tmp_path), kernel_pool=self._pool(**{key: 9999})
+            )
+
+    @pytest.mark.parametrize("key", ["dtype", "layout"])
+    def test_a_pool_entry_may_carry_a_kernel_property(self, tmp_path, key):
+        """dtype and layout are parsed out of the kernel name, so every
+        ordinary pool has them; rejecting those would reject every pool."""
+        h = create_ml_heuristic(
+            self._model(tmp_path),
+            kernel_pool=self._pool(**{key: "bf16" if key == "dtype" else "rcr"}),
+        )
+        assert h(1024, 1024, 1024) is not None
+
+    @pytest.mark.parametrize(
+        "spelling", ["gfx950:xnack-", "gfx950:sramecc+:xnack-", "gfx950"]
+    )
+    def test_a_feature_suffix_still_names_the_same_part(self, tmp_path, spelling):
+        """rocminfo and hipDeviceProp_t::gcnArchName report the suffixed form,
+        and _check_arch accepts it, so comparing raw strings would reject a
+        caller for naming exactly the architecture the model recorded."""
+        from dispatcher_integration import _resolve_arch
+        from predict import Predictor
+
+        p = Predictor(self._model(tmp_path, arch="gfx950"))
+        assert _resolve_arch(p, spelling, self._pool()) is not None
+
+    def test_a_suffixed_pool_entry_is_not_a_conflict(self, tmp_path):
+        from dispatcher_integration import _resolve_arch
+        from predict import Predictor
+
+        p = Predictor(self._model(tmp_path, arch="gfx950"))
+        assert _resolve_arch(p, "gfx950", self._pool(arch="gfx950:xnack-")) == "gfx950"
+
+    def test_a_genuinely_different_part_still_raises(self, tmp_path):
+        """Guard the guard: normalising must not swallow a real disagreement."""
+        from dispatcher_integration import _resolve_arch
+        from predict import Predictor
+
+        p = Predictor(self._model(tmp_path, arch="gfx950"))
+        with pytest.raises(ValueError, match="disagrees with the model"):
+            _resolve_arch(p, "gfx1250:xnack-", self._pool())
+
+    def test_a_pool_entry_matching_the_resolved_arch_is_fine(self, tmp_path):
+        """The guard must reject only CONFLICTING entries."""
+        from dispatcher_integration import _resolve_arch
+        from predict import Predictor
+
+        p = Predictor(self._model(tmp_path, arch="gfx950"))
+        assert _resolve_arch(p, None, self._pool(arch="gfx950")) == "gfx950"
+
+    def test_the_models_arch_is_used_when_the_caller_names_none(self, tmp_path):
+        from dispatcher_integration import _resolve_arch
+        from predict import Predictor
+
+        p = Predictor(self._model(tmp_path, arch="gfx1250"))
+        assert _resolve_arch(p, None, self._pool()) == "gfx1250"
+
+    def test_a_spec_without_an_arch_falls_back_to_the_caller(self, tmp_path):
+        """Models written before arch was recorded must stay usable."""
+        import lightgbm as lgb
+        from dispatcher_integration import _resolve_arch
+        from predict import Predictor
+
+        names = GemmUniversalFeatureEngine().get_feature_names()
+        rs = np.random.RandomState(0)
+        lgb.LGBMRegressor(n_estimators=3, verbose=-1).fit(
+            rs.rand(40, len(names)), rs.rand(40)
+        ).booster_.save_model(str(tmp_path / "model_tflops.lgbm"))
+        (tmp_path / "feature_spec.json").write_text(
+            json.dumps({"feature_names": names})
+        )
+        assert _resolve_arch(Predictor(tmp_path), "gfx942", self._pool()) == "gfx942"
 
 
 if __name__ == "__main__":

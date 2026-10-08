@@ -52,8 +52,10 @@ CANONICAL_COLUMNS = [
     "pad_n",
     "pad_k",
     "persistent",
-    # Fixed A/B/C global vector widths, in elements; 0 means native (the widest
-    # legal width for the problem). Parsed from the kernel name's optional
+    # Fixed A/B/C global vector widths, in elements; 0 means native, i.e. the
+    # width the kernel uses when it fixes none -- a property of the KERNEL (tile,
+    # waves, warp tile, epilogue, arch) via codegen_common.gemm_native_vector_sizes,
+    # NOT the widest width the problem allows. Parsed from the kernel name's optional
     # _vecA_B_C suffix. Only GemmUniversalVecFeatureEngine consumes them; the
     # base engine ignores them, so adding these does not change its schema.
     "vec_a",
@@ -80,8 +82,10 @@ def parse_kernel_name(name: str) -> dict:
 
     The optional ``_vec`` suffix carries fixed A/B/C global vector widths. It is
     absent for native-width kernels, which is why ``vec_a/b/c`` come back as 0
-    rather than missing: 0 means "native", i.e. the widest legal width for the
-    problem. Kernels differing only in these widths are otherwise identical in
+    rather than missing: 0 means "native", i.e. the width the kernel uses when it
+    fixes none. That is a property of the KERNEL (tile, waves, warp tile,
+    epilogue, arch) -- see codegen_common.gemm_native_vector_sizes -- and is NOT
+    in general the widest width the problem allows. Kernels differing only in these widths are otherwise identical in
     the canonical schema, so without them a model sees their performance
     difference as noise.
     """

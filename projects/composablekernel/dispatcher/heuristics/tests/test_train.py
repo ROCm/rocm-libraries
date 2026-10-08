@@ -562,5 +562,89 @@ class TestVariantReachesTheRunners:
         assert seen["op_type"] == "gemm_universal"
 
 
+class TestEncodingVersion:
+    """feature_names pins the schema but not what the values MEAN. Warm start is
+    where two encodings would be mixed into one booster, with the names matching
+    throughout -- so the version must be enforced there, not merely recorded."""
+
+    @staticmethod
+    def _spec_dir(tmp_path, engine, **override):
+        import json
+
+        from train import build_feature_spec
+
+        spec = build_feature_spec(
+            "gemm_universal_vec", engine, "bf16", "gfx950", ["tflops"], ["tflops"], {}
+        )
+        spec.update(override)
+        for k in [k for k, v in override.items() if v is None]:
+            spec.pop(k)
+        (tmp_path / "feature_spec.json").write_text(json.dumps(spec))
+        return tmp_path
+
+    def test_the_engines_declare_distinct_versions(self):
+        from feature_engine import GemmUniversalFeatureEngine
+        from feature_engine_vec import GemmUniversalVecFeatureEngine
+
+        assert GemmUniversalFeatureEngine.ENCODING_VERSION == 0
+        assert GemmUniversalVecFeatureEngine.ENCODING_VERSION == 1
+
+    def test_the_spec_records_the_engines_version(self):
+        from feature_engine_vec import GemmUniversalVecFeatureEngine
+        from train import build_feature_spec
+
+        fe = GemmUniversalVecFeatureEngine()
+        spec = build_feature_spec(
+            "gemm_universal_vec", fe, "bf16", "gfx950", ["tflops"], ["tflops"], {}
+        )
+        assert spec["feature_encoding_version"] == fe.ENCODING_VERSION
+
+    def test_a_matching_version_warm_starts(self, tmp_path):
+        from feature_engine_vec import GemmUniversalVecFeatureEngine
+        from train import check_feature_compatibility
+
+        fe = GemmUniversalVecFeatureEngine()
+        check_feature_compatibility(self._spec_dir(tmp_path, fe), fe)
+
+    def test_a_spec_with_no_version_is_refused(self, tmp_path):
+        """Every model written before versioning. Its vec_frac_* values came
+        from the superseded encoding, under identical feature names."""
+        from feature_engine_vec import GemmUniversalVecFeatureEngine
+        from train import check_feature_compatibility
+
+        fe = GemmUniversalVecFeatureEngine()
+        d = self._spec_dir(tmp_path, fe, feature_encoding_version=None)
+        with pytest.raises(ValueError, match="encoding version 0"):
+            check_feature_compatibility(d, fe)
+
+    def test_a_newer_version_is_refused(self, tmp_path):
+        from feature_engine_vec import GemmUniversalVecFeatureEngine
+        from train import check_feature_compatibility
+
+        fe = GemmUniversalVecFeatureEngine()
+        d = self._spec_dir(tmp_path, fe, feature_encoding_version=99)
+        with pytest.raises(ValueError, match="encoding"):
+            check_feature_compatibility(d, fe)
+
+    def test_the_base_engine_still_warm_starts_from_a_version_less_spec(self, tmp_path):
+        """The six shipped models carry no version and must keep working: the
+        base engine has never been re-encoded, so it is version 0."""
+        import json
+
+        from feature_engine import GemmUniversalFeatureEngine
+        from train import check_feature_compatibility
+
+        fe = GemmUniversalFeatureEngine()
+        (tmp_path / "feature_spec.json").write_text(
+            json.dumps(
+                {
+                    "feature_names": fe.get_feature_names(),
+                    "categorical_features": fe.get_categorical_features(),
+                }
+            )
+        )
+        check_feature_compatibility(tmp_path, fe)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

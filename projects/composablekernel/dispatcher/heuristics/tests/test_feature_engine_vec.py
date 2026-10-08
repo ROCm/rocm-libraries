@@ -56,7 +56,28 @@ def _problem(m=512, n=512, k=512, layout="rcr", dtype="bf16", upper=False):
     }
 
 
-def _kernel(vec=(0, 0, 0)):
+#: A geometry whose native widths DISCRIMINATE the things that can go wrong.
+#:
+#: The default fixture geometry saturates: for bf16/gfx950 it returns (8, 8, *)
+#: for every layout, and returns the SAME triple if `waves` and `warp_tile` are
+#: transposed, or if the arch changes -- so it cannot detect the module's own
+#: documented hazards. This one resolves to (1, 1, 1) on gfx950/default, and
+#: gives (8, 8, 1) under a waves<->warp_tile swap and (4, 4, 1) on a wave-32
+#: arch, so each error is visible by value.
+DISCRIMINATING = {
+    "tile_m": 32,
+    "tile_n": 32,
+    "tile_k": 16,
+    "warp_m": 2,
+    "warp_n": 2,
+    "warp_k": 1,
+    "warp_tile_m": 32,
+    "warp_tile_n": 32,
+    "warp_tile_k": 16,
+}
+
+
+def _kernel(vec=(0, 0, 0), **over):
     """Kernel-side keys only -- the vector widths live here."""
     return {
         "tile_m": 128,
@@ -78,21 +99,37 @@ def _kernel(vec=(0, 0, 0)):
         "vec_a": vec[0],
         "vec_b": vec[1],
         "vec_c": vec[2],
+        **over,
     }
 
 
-def _frame(**kw):
-    """One-row DataFrame equivalent of _problem + _kernel merged."""
+def _row(**kw):
+    """One merged problem+kernel row. Kernel-side keys may be overridden."""
+    pk = ("m", "n", "k", "layout", "dtype")
+    kernel_over = {k: v for k, v in kw.items() if k not in (*pk, "vec", "arch")}
     row = {
-        **_problem(
-            **{k: v for k, v in kw.items() if k in ("m", "n", "k", "layout", "dtype")}
-        ),
-        **_kernel(kw.get("vec", (0, 0, 0))),
+        **_problem(**{k: v for k, v in kw.items() if k in pk}),
+        **_kernel(kw.get("vec", (0, 0, 0)), **kernel_over),
         "measured_tflops": 1.0,
         "latency_ms": 1.0,
         "is_valid": True,
     }
-    return pd.DataFrame([row])
+    if "arch" in kw:
+        row["arch"] = kw["arch"]
+    return row
+
+
+def _frame(**kw):
+    """One-row DataFrame equivalent of _problem + _kernel merged."""
+    return pd.DataFrame([_row(**kw)])
+
+
+def _legal(m, n, k, layout="rcr", dtype="bf16"):
+    """The problem's widest legal A/B/C widths -- the fraction's denominator."""
+    from codegen_common import gemm_problem_vector_sizes
+    from feature_engine_vec import _out_dtype
+
+    return gemm_problem_vector_sizes(m, n, k, layout, dtype, dtype, _out_dtype(dtype))
 
 
 class TestSchema:
@@ -533,6 +570,267 @@ class TestBaseBlockIsUnperturbed:
             rtol=0,
             atol=0,
         )
+
+
+class TestNativeWidthsAreKernelDerived:
+    """The four properties the native path depends on, each pinned on a geometry
+    that can actually tell right from wrong. The default fixture saturates at
+    (8, 8, *) and is identical under a waves<->warp_tile swap or an arch change,
+    so every one of these survived mutation against it."""
+
+    P = dict(m=1792, n=1536, k=7168, layout="rcr", dtype="bf16")
+
+    def _native(self, **over):
+        """Resolve through codegen directly, as the oracle."""
+        from codegen_common import gemm_native_vector_sizes
+
+        g = {**DISCRIMINATING, **over}
+        return gemm_native_vector_sizes(
+            dtype_a=over.get("dtype", "bf16"),
+            dtype_b=over.get("dtype", "bf16"),
+            dtype_c=over.get("dtype_c", over.get("dtype", "bf16")),
+            layout="rcr",
+            tile=(g["tile_m"], g["tile_n"], g["tile_k"]),
+            waves=(g["warp_m"], g["warp_n"], g["warp_k"]),
+            warp_tile=(g["warp_tile_m"], g["warp_tile_n"], g["warp_tile_k"]),
+            gfx_arch=over.get("arch", "gfx950"),
+            epilogue=over.get("epilogue", "default"),
+        )
+
+    def test_the_geometry_actually_discriminates(self):
+        """Guard the guard: if this ever stops holding, the tests below go
+        vacuous without failing."""
+        from codegen_common import gemm_native_vector_sizes as nat
+
+        g = DISCRIMINATING
+        kw = dict(
+            dtype_a="bf16",
+            dtype_b="bf16",
+            dtype_c="bf16",
+            layout="rcr",
+            gfx_arch="gfx950",
+            epilogue="default",
+        )
+        right = nat(
+            **kw,
+            tile=(g["tile_m"], g["tile_n"], g["tile_k"]),
+            waves=(2, 2, 1),
+            warp_tile=(32, 32, 16),
+        )
+        swapped = nat(
+            **kw,
+            tile=(g["tile_m"], g["tile_n"], g["tile_k"]),
+            waves=(32, 32, 16),
+            warp_tile=(2, 2, 1),
+        )
+        assert right != swapped, "fixture no longer detects a waves/warp_tile swap"
+        wave32 = nat(
+            **{**kw, "gfx_arch": "gfx1250"},
+            tile=(g["tile_m"], g["tile_n"], g["tile_k"]),
+            waves=(2, 2, 1),
+            warp_tile=(32, 32, 16),
+        )
+        assert right != wave32, "fixture no longer detects an arch change"
+
+    def test_waves_and_warp_tile_are_not_transposed(self):
+        """The module's own comment calls this the hazard: the engine's warp_m
+        is warps-per-block (codegen's `waves`) and warp_tile_m is codegen's
+        `warp_tile`. A swap yields a native width for a different kernel."""
+        fe = GemmUniversalVecFeatureEngine()
+        legal = _legal(**self.P)
+        got = fe.extract(_problem(**self.P), _kernel((0, 0, 0), **DISCRIMINATING))[-3:]
+        exp = [nat / lim for nat, lim in zip(self._native(), legal)]
+        np.testing.assert_allclose(got, exp)
+
+    @pytest.mark.parametrize("dtype", ["bf16", "fp16", "fp8", "int8"])
+    def test_native_c_uses_the_output_dtype(self, dtype):
+        """The native path must apply the same A/B-vs-C dtype split as the fixed
+        path. Every other native test is bf16, where _out_dtype is the identity,
+        so passing the input dtype through survived there."""
+        from feature_engine_vec import _out_dtype
+
+        fe = GemmUniversalVecFeatureEngine()
+        P = {**self.P, "dtype": dtype}
+        got = fe.extract(
+            _problem(**P), _kernel((0, 0, 0), **DISCRIMINATING, epilogue="cshuffle")
+        )[-3:]
+        exp_nat = self._native(
+            dtype=dtype, dtype_c=_out_dtype(dtype), epilogue="cshuffle"
+        )
+        exp = [nat / lim for nat, lim in zip(exp_nat, _legal(**P))]
+        np.testing.assert_allclose(got, exp)
+
+    @pytest.mark.parametrize("arch", ["gfx950", "gfx942", "gfx1250"])
+    def test_the_rows_arch_selects_the_wavefront_size(self, arch):
+        """Native widths go through block_size, which depends on the wavefront
+        size, which the gfx family selects. Nothing varied arch before."""
+        fe = GemmUniversalVecFeatureEngine()
+        got = fe.extract(
+            _problem(**self.P) | {"arch": arch},
+            _kernel((0, 0, 0), **DISCRIMINATING),
+        )[-3:]
+        exp = [nat / lim for nat, lim in zip(self._native(arch=arch), _legal(**self.P))]
+        np.testing.assert_allclose(got, exp)
+
+    def test_a_wave32_arch_differs_from_a_wave64_one(self):
+        """Pins that the parametrize above is not vacuous."""
+        fe = GemmUniversalVecFeatureEngine()
+        k = _kernel((0, 0, 0), **DISCRIMINATING)
+        a = fe.extract(_problem(**self.P) | {"arch": "gfx950"}, k)[-3:]
+        b = fe.extract(_problem(**self.P) | {"arch": "gfx1250"}, k)[-3:]
+        assert list(a) != list(b)
+
+
+class TestHeterogeneousBatch:
+    """extract_batch resolves native widths once per distinct geometry and
+    scatters them back by factorize codes. Every existing batch test used a
+    frame of identical kernels, so broadcasting row 0 to every row -- or
+    reversing the scatter -- produced the same answer and survived."""
+
+    def _mixed(self):
+        rows = [
+            _row(m=1792, n=1536, k=7168, epilogue="default"),
+            _row(m=1792, n=1536, k=7168, epilogue="cshuffle"),
+            _row(m=1792, n=1536, k=7168, **DISCRIMINATING),
+            _row(m=1792, n=1536, k=7168, **DISCRIMINATING, epilogue="cshuffle"),
+            _row(m=1792, n=1536, k=7168, arch="gfx1250", **DISCRIMINATING),
+            _row(m=512, n=300, k=20226, layout="ccr", vec=(4, 4, 8)),
+        ]
+        return pd.DataFrame(rows), rows
+
+    def test_each_row_matches_its_own_scalar_extraction(self):
+        fe = GemmUniversalVecFeatureEngine()
+        df, rows = self._mixed()
+        batch = fe.extract_batch(df)
+        for i, row in enumerate(rows):
+            np.testing.assert_allclose(
+                batch[i],
+                fe.extract(row, row),
+                rtol=0,
+                atol=1e-12,
+                err_msg=f"row {i} disagrees with the scalar path",
+            )
+
+    def test_the_rows_are_not_all_the_same(self):
+        """Guard the guard: a frame of identical rows would make the parity
+        assertion above pass under a broadcast bug."""
+        fe = GemmUniversalVecFeatureEngine()
+        df, _ = self._mixed()
+        fracs = {tuple(r) for r in fe.extract_batch(df)[:, -3:]}
+        assert len(fracs) >= 3, (
+            f"frame is too homogeneous to detect a regroup bug: {fracs}"
+        )
+
+
+class TestRequiredColumns:
+    """Each load-bearing column, individually.
+
+    The list is written out rather than taken from ``_REQUIRED``: parametrizing
+    over the constant under test means deleting a name from it silently deletes
+    its test case instead of failing one. Verified by mutation -- dropping
+    "epilogue" from _REQUIRED left the self-referential version green."""
+
+    EXPECTED = (
+        "m",
+        "n",
+        "k",
+        "layout",
+        "dtype",
+        "arch",
+        "epilogue",
+        "vec_a",
+        "vec_b",
+        "vec_c",
+        "tile_m",
+        "tile_n",
+        "tile_k",
+        "warp_m",
+        "warp_n",
+        "warp_k",
+        "warp_tile_m",
+        "warp_tile_n",
+        "warp_tile_k",
+    )
+
+    def test_the_constant_lists_exactly_these(self):
+        assert set(GemmUniversalVecFeatureEngine._REQUIRED) == set(self.EXPECTED)
+
+    @pytest.mark.parametrize("col", EXPECTED)
+    def test_dropping_any_required_column_raises_naming_it(self, col):
+        fe = GemmUniversalVecFeatureEngine()
+        with pytest.raises(KeyError, match=col):
+            fe.extract_batch(_frame().drop(columns=[col]))
+
+
+class TestInputValidation:
+    """arch and epilogue became load-bearing; neither is validated by codegen."""
+
+    #: Real targets, including the two-digits-plus-letter shape (gfx90a is
+    #: MI210) that a three-digit pattern would wrongly reject.
+    REAL_ARCHES = (
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950",
+        "gfx1030",
+        "gfx1100",
+        "gfx1201",
+        "gfx1250",
+        "gfx950:xnack-",
+    )
+
+    @pytest.mark.parametrize("arch", REAL_ARCHES)
+    def test_every_supported_arch_is_accepted(self, arch):
+        """Validation must not reject a part this repo builds for."""
+        fe = GemmUniversalVecFeatureEngine()
+        assert (
+            fe.extract(_problem() | {"arch": arch}, _kernel((0, 0, 0))).shape[0] == 78
+        )
+
+    @pytest.mark.parametrize(
+        "arch", ["unknown", "nan", "", "GFX950", "gfx", "gfx8", "gfx9zzz", "gfx12345"]
+    )
+    def test_an_unrecognised_arch_raises(self, arch):
+        """data_pipeline defaults arch to "unknown" and backfills unpopulated
+        columns with None. normalize_gfx_arch only strips suffixes, and the
+        wavefront size is chosen by startswith("gfx9"), so an unknown value
+        silently yields wave-32 widths on a wave-64 part."""
+        fe = GemmUniversalVecFeatureEngine()
+        with pytest.raises(ValueError, match="architecture"):
+            fe.extract(_problem() | {"arch": arch}, _kernel((0, 0, 0)))
+
+    @pytest.mark.parametrize("epi", ["cshufle", "comp_tdm", "", "gemm"])
+    def test_an_unmodelled_epilogue_raises(self, epi):
+        """Anything _vector_geometry does not name falls into its cshuffle
+        branch and reports a wider C store than the kernel performs."""
+        fe = GemmUniversalVecFeatureEngine()
+        with pytest.raises(ValueError, match="epilogue"):
+            fe.extract(_problem(), _kernel((0, 0, 0), epilogue=epi))
+
+    def test_the_batch_path_validates_too(self):
+        fe = GemmUniversalVecFeatureEngine()
+        with pytest.raises(ValueError, match="architecture"):
+            fe.extract_batch(_frame(arch="unknown"))
+
+
+class TestGeometryPrecedence:
+    """Geometry describes the kernel, so the kernel dict wins."""
+
+    def test_the_kernels_geometry_beats_the_problems(self):
+        fe = GemmUniversalVecFeatureEngine()
+        p = {**_problem(m=1792, n=1536, k=7168), "tile_m": 999, "warp_tile_n": 999}
+        k = _kernel((0, 0, 0), **DISCRIMINATING)
+        np.testing.assert_allclose(
+            fe.extract(p, k), fe.extract(_problem(m=1792, n=1536, k=7168), k)
+        )
+
+    def test_a_missing_geometry_knob_raises_rather_than_defaulting(self):
+        """A guessed tile yields a native width for a kernel that was never
+        built, and the caller would never know."""
+        fe = GemmUniversalVecFeatureEngine()
+        k = {kk: v for kk, v in _kernel((0, 0, 0)).items() if kk != "warp_tile_n"}
+        with pytest.raises(KeyError, match="warp_tile_n"):
+            fe.extract(_problem(), k)
 
 
 if __name__ == "__main__":

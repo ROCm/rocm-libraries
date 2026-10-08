@@ -234,13 +234,19 @@ Every parquet file follows this schema:
 | `warp_tile_m/n/k` | int | Warp tile dimensions |
 | `pipeline` | str | `compv3`, `compv4`, `mem`, etc. |
 | `scheduler` | str | `intrawave`, `interwave` |
-| `epilogue` | str | `cshuffle`, `default` |
+| `epilogue` | str | `cshuffle`, `default`, `tdm` |
 | `pad_m`, `pad_n`, `pad_k` | bool | Padding flags |
 | `persistent` | bool | Persistent kernel flag |
-| `vec_a` | int | Fixed A global vector width in elements; 0 = native (widest legal) |
-| `vec_b` | int | Fixed B global vector width in elements; 0 = native |
-| `vec_c` | int | Fixed C global vector width in elements; 0 = native |
+| `vec_a` | int | Fixed A global vector width in elements; 0 = native (the kernel's own width, from its geometry and epilogue -- not the widest legal) |
+| `vec_b` | int | Fixed B global vector width in elements; 0 = native (as above) |
+| `vec_c` | int | Fixed C global vector width in elements; 0 = native (as above) |
 | `run_id` | str | Unique collection run identifier |
+
+`GemmUniversalVecFeatureEngine` additionally requires `arch`, `epilogue` and the
+nine `tile_m/n/k`, `warp_m/n/k`, `warp_tile_m/n/k` columns to be present and
+non-null: it resolves a native width from the kernel's geometry, and an absent
+or unrecognised `arch` would otherwise select the wrong wavefront size silently.
+
 
 ## Shape Selection Guidelines
 
