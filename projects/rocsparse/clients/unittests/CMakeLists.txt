@@ -148,6 +148,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collectives_readfirstlane.cpp
   # Per-axis grid-size helpers in rocsparse_grid.hpp (append-only leaf)
   unit_test_internal_grid.cpp
+  # dispatch_grid_stride_x variant selection in rocsparse_grid.hpp (append-only leaf)
+  unit_test_internal_grid_dispatch.cpp
   unit_test_internal_collectives_boost.cpp
   unit_test_internal_infostructs.cpp
   #10156: distinct anchor to avoid stacked-branch merge conflicts
@@ -187,6 +189,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_util_checkmatrix.cpp
   #10149: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_conversion_bsr.cpp
+  # --- Dense conversion grid.x clamps [AISPARSE-687] ------------------------
+  # Distinct anchor (after the BSR conversion host tests) so this leaf does not
+  # conflict with the sibling grid-clamp branches. Drives the public
+  # rocsparse_dense_to_sparse and rocsparse_Xcoo2dense entry points with
+  # handle->properties.maxGridSize[0] shrunk; no compile-in TUs.
+  unit_test_internal_conversion_dense_grids.cpp
   unit_test_internal_conversion_extras.cpp
   unit_test_internal_conversion_csr2csc_buffer.cpp
   unit_test_internal_extra_geam.cpp
@@ -203,6 +211,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   #10158: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_level3.cpp
   unit_test_internal_level2_extras.cpp
+  # csrmv LRB / adaptive partial_scale_y forced grid.x clamp [AISPARSE-662]
+  unit_test_internal_level2_csrmv_lrb_grids.cpp
   # --- Level 2 (SpMV/gebsrmv) public C-API host tests [AISPARSE-642] --------
   # Distinct anchor (end of the level-2 group) so this leaf does not conflict
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
@@ -213,6 +223,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # sibling branches appending elsewhere. Needs the defining library TU in
   # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below.
   unit_test_internal_conversion_csr2ell_batch.cpp
+  # --- csrmm merge path / nnz split grid.x extents [AISPARSE-671, 672] -------
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # the sibling unit-test branches above. Drives the public rocsparse_spmm entry
+  # point with handle->properties.maxGridSize[0] shrunk, so no internal
+  # translation unit has to be compiled in.
+  unit_test_internal_level3_csrmm_grids.cpp
   # --- Blocked-ELL SpMM grid.y clamp + column-panel stride [AISPARSE-667] ---
   # Appended at the end (distinct anchor) so this leaf does not conflict with the
   # sibling large-grid branches. Drives rocsparse_spmm through the public API;
