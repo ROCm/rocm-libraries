@@ -53,9 +53,10 @@
  * vendored under `flydsl/kernels_src/kernels/attention_cdna/` -- the dual-wave
  * software-pipelined kernel on gfx950, the generic MFMA kernel on gfx942.
  *
- * Those kernels bake more than the RDNA ones: head_dim, whether a causal mask applies, and
- * a contiguous BSHD layout. Batch, both sequence lengths, both head counts, the softmax
- * scale, the mask's diagonal offset and whether to write the LSE are runtime arguments. So the matcher accepts exactly that envelope and declines everything else,
+ * Each object bakes its dtype, head_dim and whether a causal mask applies. Batch, both
+ * sequence lengths, both head counts, every operand's (batch, sequence, head) strides, the
+ * softmax scale, the mask's diagonal offset and whether to write the LSE are runtime
+ * arguments. So the matcher accepts exactly that envelope and declines everything else,
  * and each object serves one (dtype, head_dim, causal) class. The
  * remaining baked fields become runtime one by one, each measured against the object
  * it replaces (flydsl/COVERAGE.md section 7).
@@ -123,6 +124,7 @@ constexpr int64_t DUALWAVE_BLOCK_THREADS = 512;
 constexpr int64_t GENERIC_THREADS_PER_ROW = 2;
 
 constexpr int64_t INT32_LIMIT = 2147483647LL;
+constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and f16 only
 /// A bound the graph leaves open (hipDNN's sentinel for left_bound / right_bound).
 constexpr int64_t UNBOUNDED = -1;
 
@@ -223,48 +225,114 @@ SdpaProblem problemFor(const data_objects::TensorAttributes& q,
     return problem;
 }
 
+/// One operand's (batch, sequence, head) strides, in elements; head_dim's is 1.
+struct OperandStrides
+{
+    int64_t batch = 0;
+    int64_t sequence = 0;
+    int64_t head = 0;
+
+    bool operator==(const OperandStrides& other) const
+    {
+        return batch == other.batch && sequence == other.sequence && head == other.head;
+    }
+};
+
+/// The kernels move 16-byte vectors: eight bf16 / f16 elements.
+constexpr int64_t VECTOR_ELEMENTS = 8;
+
 /**
- * @brief Is @p tensor a plain device tensor of logical shape [B, H, S, D] laid out as
- *        contiguous BSHD memory?
+ * @brief The strides of @p tensor as the kernels take them, or nullopt for a tensor they
+ *        cannot read.
  *
- * The kernels address each operand by a token pitch and a baked head stride of head_dim,
- * so the only layout they read correctly is BSHD with every row packed: strides
- * (S*H*D, D, H*D, 1) on the logical (batch, head, sequence, head_dim) axes. A ragged
+ * Logical shape [B, H, S, D] with head_dim contiguous; the batch, sequence and head strides
+ * are kernel arguments, so BSHD, BHSD and packed-QKV views are all served. Each stride on an
+ * axis longer than 1 must be positive and keep every row 16-byte aligned; an axis of extent
+ * 1 is never stepped, so its stride is not used. Each (batch, head) slice is one buffer view
+ * of (S - 1) * stride_s + D elements, which must stay within 32-bit addressing. A ragged
  * operand would be read as one dense batch, so it declines too.
  */
-bool isContiguousBshd(const data_objects::TensorAttributes& tensor,
-                      int64_t batch,
-                      int64_t heads,
-                      int64_t sequence,
-                      int64_t headDim)
+std::optional<OperandStrides> servableStrides(const data_objects::TensorAttributes& tensor,
+                                              int64_t batch,
+                                              int64_t heads,
+                                              int64_t sequence,
+                                              int64_t headDim)
 {
     const auto* dims = tensor.dims();
     const auto* strides = tensor.strides();
     if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
        || strides->size() != SDPA_RANK)
     {
-        return false;
+        return std::nullopt;
     }
     if(dims->Get(BATCH_AXIS) != batch || dims->Get(HEAD_AXIS) != heads
-       || dims->Get(SEQ_AXIS) != sequence || dims->Get(HEAD_DIM_AXIS) != headDim)
+       || dims->Get(SEQ_AXIS) != sequence || dims->Get(HEAD_DIM_AXIS) != headDim
+       || strides->Get(HEAD_DIM_AXIS) != 1)
     {
-        return false;
+        return std::nullopt;
     }
-    const auto tokenPitch = checkedProduct({heads, headDim});
-    const auto batchPitch
-        = tokenPitch.has_value() ? checkedProduct({*tokenPitch, sequence}) : std::nullopt;
-    if(!batchPitch.has_value() || *batchPitch > INT32_LIMIT)
+    const auto stepped = [&](uint32_t axis, int64_t extent) -> std::optional<int64_t> {
+        if(extent == 1)
+        {
+            return 0;
+        }
+        const int64_t stride = strides->Get(axis);
+        if(stride <= 0 || stride % VECTOR_ELEMENTS != 0 || stride > INT32_LIMIT)
+        {
+            return std::nullopt;
+        }
+        return stride;
+    };
+    const auto batchStride = stepped(BATCH_AXIS, batch);
+    const auto sequenceStride = stepped(SEQ_AXIS, sequence);
+    const auto headStride = stepped(HEAD_AXIS, heads);
+    if(!batchStride.has_value() || !sequenceStride.has_value() || !headStride.has_value())
     {
-        return false;
+        return std::nullopt;
     }
-    if(strides->Get(HEAD_DIM_AXIS) != 1 || strides->Get(HEAD_AXIS) != headDim
-       || (sequence > 1 && strides->Get(SEQ_AXIS) != *tokenPitch)
-       || (batch > 1 && strides->Get(BATCH_AXIS) != *batchPitch))
+    const auto spanRows = checkedProduct({sequence - 1, *sequenceStride});
+    if(!spanRows.has_value() || (*spanRows + headDim) * BYTES_PER_ELEMENT > INT32_LIMIT)
     {
-        return false;
+        return std::nullopt;
     }
-    return !tensor.ragged_offset_tensor_uid().has_value() && !tensor.virtual_()
-           && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
+    if(tensor.ragged_offset_tensor_uid().has_value() || tensor.virtual_()
+       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor))
+    {
+        return std::nullopt;
+    }
+    return OperandStrides{*batchStride, *sequenceStride, *headStride};
+}
+
+/// The strides the kernels take: Q's, O's, and the one set K and V share.
+struct ViewStrides
+{
+    OperandStrides q;
+    OperandStrides o;
+    OperandStrides kv;
+};
+
+/// The operands' strides, or nullopt when any is unservable or K and V differ -- the
+/// kernels take one set for both.
+std::optional<ViewStrides> viewStridesFor(const data_objects::TensorAttributes& q,
+                                          const data_objects::TensorAttributes& k,
+                                          const data_objects::TensorAttributes& v,
+                                          const data_objects::TensorAttributes& o,
+                                          const SdpaProblem& problem)
+{
+    const auto qStrides
+        = servableStrides(q, problem.batch, problem.numHeads, problem.seqLenQ, problem.headDim);
+    const auto oStrides
+        = servableStrides(o, problem.batch, problem.numHeads, problem.seqLenQ, problem.headDim);
+    const auto kStrides
+        = servableStrides(k, problem.batch, problem.numKvHeads, problem.seqLenKv, problem.headDim);
+    const auto vStrides
+        = servableStrides(v, problem.batch, problem.numKvHeads, problem.seqLenKv, problem.headDim);
+    if(!qStrides.has_value() || !oStrides.has_value() || !kStrides.has_value()
+       || !vStrides.has_value() || !(*kStrides == *vStrides))
+    {
+        return std::nullopt;
+    }
+    return ViewStrides{*qStrides, *oStrides, *kStrides};
 }
 
 /// Whether @p stats is an LSE output the kernels write: f32 [B, H, Sq, 1] in packed
@@ -399,12 +467,7 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     {
         return std::nullopt;
     }
-    if(!isContiguousBshd(*q, problem.batch, problem.numHeads, problem.seqLenQ, problem.headDim)
-       || !isContiguousBshd(
-           *k, problem.batch, problem.numKvHeads, problem.seqLenKv, problem.headDim)
-       || !isContiguousBshd(
-           *v, problem.batch, problem.numKvHeads, problem.seqLenKv, problem.headDim)
-       || !isContiguousBshd(*o, problem.batch, problem.numHeads, problem.seqLenQ, problem.headDim))
+    if(!viewStridesFor(*q, *k, *v, *o, problem).has_value())
     {
         return std::nullopt;
     }
@@ -729,7 +792,9 @@ struct FlydslLayout4
 static_assert(sizeof(FlydslLayout4) == 40, "FlyDSL's rank-4 dynamic layout is 40 bytes");
 
 /// The layout of a contiguous BSHD tensor viewed as [B, S, H, D], as upstream's launchers
-/// pass it: strides (S*H*D, H*D, D) for the batch, sequence and head dimensions.
+/// pass it: strides (S*H*D, H*D, D) for the batch, sequence and head dimensions. The
+/// kernels read only each tensor's pointer -- the strides are their own arguments -- so this
+/// fills the layout slots in a well-formed way whatever the operands' strides.
 FlydslLayout4 bshdLayout(int64_t batch, int64_t sequence, int64_t heads, int64_t headDim)
 {
     FlydslLayout4 layout{};
@@ -750,9 +815,11 @@ FlydslLayout4 bshdLayout(int64_t batch, int64_t sequence, int64_t heads, int64_t
  * BlockTable, Bias, AlibiSlopes, Sink (each a pointer and its layout); then seq_len,
  * seq_len_kv, stride_q_n, stride_kv_n, head_dim_runtime, block_table_stride,
  * bias_stride0, alibi_stride_b (i32); sm_scale (f32); num_heads_q, num_heads_kv, lse_on,
- * diag_offset (i32). Generic (flash_attn_generic.py): Q, K, V, O, LSE; seq_len,
- * seq_len_kv (i32); CuSeqQ, CuSeqKv, BlockTable; block_table_stride (i32); sm_scale (f32);
- * num_heads_q, num_heads_kv, stride_q_n, stride_kv_n, lse_on, diag_offset (i32). A 4-byte scalar slot is the same to the
+ * diag_offset, then the strides stride_q_b, stride_q_h, stride_o_b, stride_o_n,
+ * stride_o_h, stride_kv_b, stride_kv_h (i32). Generic (flash_attn_generic.py): Q, K, V, O,
+ * LSE; seq_len, seq_len_kv (i32); CuSeqQ, CuSeqKv, BlockTable; block_table_stride (i32);
+ * sm_scale (f32); num_heads_q, num_heads_kv, stride_q_n, stride_kv_n, lse_on, diag_offset
+ * and the same seven strides (i32). A 4-byte scalar slot is the same to the
  * signature check whichever type it holds, so each list is written as runs of tensors
  * and scalars.
  */
@@ -788,14 +855,14 @@ std::vector<KernelArgument> signatureOf(std::initializer_list<ArgumentRun> runs)
 
 const std::vector<KernelArgument>& dualwaveSignature()
 {
-    static const std::vector<KernelArgument> s_signature = signatureOf({{12, true}, {13, false}});
+    static const std::vector<KernelArgument> s_signature = signatureOf({{12, true}, {20, false}});
     return s_signature;
 }
 
 const std::vector<KernelArgument>& genericSignature()
 {
     static const std::vector<KernelArgument> s_signature
-        = signatureOf({{5, true}, {2, false}, {3, true}, {8, false}});
+        = signatureOf({{5, true}, {2, false}, {3, true}, {15, false}});
     return s_signature;
 }
 
@@ -819,13 +886,20 @@ public:
                            FlydslSdpaCdnaBinding binding,
                            SdpaProblem problem,
                            bool dualwave,
-                           std::optional<hipdnn_plugin_sdk::ScalarOperand> scaleOperand)
+                           std::optional<hipdnn_plugin_sdk::ScalarOperand> scaleOperand,
+                           ViewStrides strides)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
         , _dualwave(dualwave)
         , _scaleOperand(scaleOperand)
+        , _strides(strides)
     {
+    }
+
+    const ViewStrides& strides() const
+    {
+        return _strides;
     }
 
     compilation::IRunnableKernel& kernelForStream(hipStream_t stream) const
@@ -860,6 +934,7 @@ private:
     SdpaProblem _problem;
     bool _dualwave = false;
     std::optional<hipdnn_plugin_sdk::ScalarOperand> _scaleOperand;
+    ViewStrides _strides;
 };
 
 /**
@@ -928,8 +1003,19 @@ public:
             scaleOperand = hipdnn_plugin_sdk::makeScalarOperand(
                 context.graph.getTensorMap(), binding.scale, "scale");
         }
+        const auto strides = viewStridesFor(requireTensor(context, binding.q),
+                                            requireTensor(context, binding.k),
+                                            requireTensor(context, binding.v),
+                                            requireTensor(context, binding.o),
+                                            problem);
+        if(!strides.has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "flydsl_sdpa_cdna: the bound operands' strides are not ones the kernels read");
+        }
         return std::make_unique<PreparedFlydslSdpaCdna>(
-            std::move(code), binding, problem, tile->dualwave, scaleOperand);
+            std::move(code), binding, problem, tile->dualwave, scaleOperand, *strides);
     }
 
     void launch(const Handle& handle,
@@ -981,9 +1067,8 @@ public:
         const auto diagOffset = static_cast<int32_t>(binding.diagOffset);
         const auto numHeads = static_cast<int32_t>(problem.numHeads);
         const auto numKvHeads = static_cast<int32_t>(problem.numKvHeads);
-        // One token's pitch in contiguous BSHD.
-        const auto strideQ = static_cast<int32_t>(problem.numHeads * problem.headDim);
-        const auto strideKv = static_cast<int32_t>(problem.numKvHeads * problem.headDim);
+        const auto& strides = preparedSdpa.strides();
+        const auto i32 = [](int64_t value) { return static_cast<int32_t>(value); };
         const int32_t zero = 0;
         auto& kernel = preparedSdpa.kernelForStream(handle.getStream());
 
@@ -1020,8 +1105,8 @@ public:
                           qLayout,
                           seqLenQ,
                           seqLenKv,
-                          strideQ,
-                          strideKv,
+                          i32(strides.q.sequence),
+                          i32(strides.kv.sequence),
                           headDim,
                           zero,
                           zero,
@@ -1030,7 +1115,14 @@ public:
                           numHeads,
                           numKvHeads,
                           lseFlag,
-                          diagOffset);
+                          diagOffset,
+                          i32(strides.q.batch),
+                          i32(strides.q.head),
+                          i32(strides.o.batch),
+                          i32(strides.o.sequence),
+                          i32(strides.o.head),
+                          i32(strides.kv.batch),
+                          i32(strides.kv.head));
             return;
         }
         kernel.launch(handle.getStream(),
@@ -1056,10 +1148,17 @@ public:
                       scale,
                       numHeads,
                       numKvHeads,
-                      strideQ,
-                      strideKv,
+                      i32(strides.q.sequence),
+                      i32(strides.kv.sequence),
                       lseFlag,
-                      diagOffset);
+                      diagOffset,
+                      i32(strides.q.batch),
+                      i32(strides.q.head),
+                      i32(strides.o.batch),
+                      i32(strides.o.sequence),
+                      i32(strides.o.head),
+                      i32(strides.kv.batch),
+                      i32(strides.kv.head));
     }
 
 private:

@@ -176,6 +176,13 @@ std::vector<CdnaCase> acceptedCases()
     auto stats = cdnaSpec();
     stats.stats = SdpaStats::LSE;
     cases.push_back({"SoftmaxStats", stats});
+    auto bhsd = cdnaSpec();
+    bhsd.layout = SdpaLayout::BHSD;
+    cases.push_back({"BhsdLayout", bhsd});
+    auto packed = cdnaSpec();
+    packed.kvHeads = 32;
+    packed.packedQkv = true;
+    cases.push_back({"PackedQkv", packed});
     auto cross = cdnaSpec();
     cross.seqLenKv = 512;
     cases.push_back({"UnequalSequenceLengths", cross});
@@ -215,9 +222,6 @@ TEST_P(TestFlydslSdpaCdnaGraphDeclines, DeclinesTheGraph)
 std::vector<CdnaCase> declinedCases()
 {
     std::vector<CdnaCase> cases;
-    auto bhsd = cdnaSpec();
-    bhsd.layout = SdpaLayout::BHSD;
-    cases.push_back({"BhsdLayout", bhsd});
     auto topLeftOverflow = cdnaSpec();
     topLeftOverflow.mask = SdpaMask::TOP_LEFT_CAUSAL;
     topLeftOverflow.seqLenQ = 512;
@@ -262,10 +266,6 @@ std::vector<CdnaCase> declinedCases()
     auto ragged = cdnaSpec();
     ragged.raggedQuery = true;
     cases.push_back({"RaggedQuery", ragged});
-    auto packed = cdnaSpec();
-    packed.kvHeads = 32;
-    packed.packedQkv = true;
-    cases.push_back({"PackedQkv", packed});
     auto group = cdnaSpec();
     group.heads = 30;
     group.kvHeads = 8;
@@ -509,7 +509,8 @@ std::vector<T> fillValues(size_t count, uint32_t seed)
 constexpr double LSE_TOLERANCE = 1e-2;
 
 /// Runs @p kernel for @p spec through prepare() and launch() and checks every output element
-/// against a double-precision reference. BSHD memory throughout.
+/// against a double-precision reference, in the memory layout @p spec names: BSHD, BHSD, or
+/// Q, K and V as views into one packed buffer.
 template <typename T>
 void expectCandidateMatchesReference(const MatchContext& context,
                                      const BoundTokens& bound,
@@ -528,25 +529,45 @@ void expectCandidateMatchesReference(const MatchContext& context,
     const int64_t h = spec.heads;
     const int64_t hk = spec.kvHeads;
     const int64_t d = spec.headDim;
-    const auto qCount = static_cast<size_t>(b * s * h * d);
+    // Logical (B, H, S, D) strides of each operand, as the graph states them. In a packed
+    // buffer K and V start one and two heads' worth of a token's row after Q.
+    const auto qStrides
+        = spec.packedQkv ? sdpaPackedQkvStrides(spec) : sdpaStrides(spec.layout, h, s, d);
+    const auto kvStrides
+        = spec.packedQkv ? sdpaPackedQkvStrides(spec) : sdpaStrides(spec.layout, hk, skv, d);
+    const auto oStrides = sdpaStrides(spec.layout, h, s, d);
+    const int64_t kStart = spec.packedQkv ? h * d : 0;
+    const int64_t vStart = spec.packedQkv ? 2 * h * d : 0;
+    const auto qCount = static_cast<size_t>(spec.packedQkv ? b * s * 3 * h * d : b * s * h * d);
     const auto kvCount = static_cast<size_t>(b * skv * hk * d);
+    const auto oCount = static_cast<size_t>(b * s * h * d);
     const auto q = fillValues<T>(qCount, 1U);
-    const auto k = fillValues<T>(kvCount, 2U);
-    const auto v = fillValues<T>(kvCount, 3U);
-    std::vector<T> o(qCount, T(0.0F));
+    const auto k = spec.packedQkv ? q : fillValues<T>(kvCount, 2U);
+    const auto v = spec.packedQkv ? q : fillValues<T>(kvCount, 3U);
+    std::vector<T> o(oCount, T(0.0F));
 
     void* qDevice = nullptr;
     void* kDevice = nullptr;
     void* vDevice = nullptr;
     void* oDevice = nullptr;
     ASSERT_EQ(hipSuccess, hipMalloc(&qDevice, qCount * sizeof(T)));
-    ASSERT_EQ(hipSuccess, hipMalloc(&kDevice, kvCount * sizeof(T)));
-    ASSERT_EQ(hipSuccess, hipMalloc(&vDevice, kvCount * sizeof(T)));
-    ASSERT_EQ(hipSuccess, hipMalloc(&oDevice, qCount * sizeof(T)));
+    ASSERT_EQ(hipSuccess, hipMalloc(&oDevice, oCount * sizeof(T)));
     ASSERT_EQ(hipSuccess, hipMemcpy(qDevice, q.data(), qCount * sizeof(T), hipMemcpyHostToDevice));
-    ASSERT_EQ(hipSuccess, hipMemcpy(kDevice, k.data(), kvCount * sizeof(T), hipMemcpyHostToDevice));
-    ASSERT_EQ(hipSuccess, hipMemcpy(vDevice, v.data(), kvCount * sizeof(T), hipMemcpyHostToDevice));
-    ASSERT_EQ(hipSuccess, hipMemset(oDevice, 0, qCount * sizeof(T)));
+    if(spec.packedQkv)
+    {
+        kDevice = static_cast<T*>(qDevice) + kStart;
+        vDevice = static_cast<T*>(qDevice) + vStart;
+    }
+    else
+    {
+        ASSERT_EQ(hipSuccess, hipMalloc(&kDevice, kvCount * sizeof(T)));
+        ASSERT_EQ(hipSuccess, hipMalloc(&vDevice, kvCount * sizeof(T)));
+        ASSERT_EQ(hipSuccess,
+                  hipMemcpy(kDevice, k.data(), kvCount * sizeof(T), hipMemcpyHostToDevice));
+        ASSERT_EQ(hipSuccess,
+                  hipMemcpy(vDevice, v.data(), kvCount * sizeof(T), hipMemcpyHostToDevice));
+    }
+    ASSERT_EQ(hipSuccess, hipMemset(oDevice, 0, oCount * sizeof(T)));
     // The LSE output, [B, H, Sq] f32, when the graph asks for it.
     const bool withStats = spec.stats == SdpaStats::LSE;
     const auto statsCount = static_cast<size_t>(b * h * s);
@@ -576,10 +597,13 @@ void expectCandidateMatchesReference(const MatchContext& context,
     handler.launch(
         handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr);
     ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
-    ASSERT_EQ(hipSuccess, hipMemcpy(o.data(), oDevice, qCount * sizeof(T), hipMemcpyDeviceToHost));
+    ASSERT_EQ(hipSuccess, hipMemcpy(o.data(), oDevice, oCount * sizeof(T), hipMemcpyDeviceToHost));
     static_cast<void>(hipFree(qDevice));
-    static_cast<void>(hipFree(kDevice));
-    static_cast<void>(hipFree(vDevice));
+    if(!spec.packedQkv)
+    {
+        static_cast<void>(hipFree(kDevice));
+        static_cast<void>(hipFree(vDevice));
+    }
     static_cast<void>(hipFree(oDevice));
     if(withStats)
     {
@@ -590,17 +614,17 @@ void expectCandidateMatchesReference(const MatchContext& context,
         static_cast<void>(hipFree(statsDevice));
     }
 
-    // BSHD element (batch, token, head, d).
+    // Element (batch, head, token, d) of a buffer laid out by logical (B, H, S, D) strides.
     const auto at = [](const std::vector<T>& t,
-                       int64_t heads,
-                       int64_t seq,
-                       int64_t dim,
+                       const std::vector<int64_t>& strides,
+                       int64_t start,
                        int64_t bi,
                        int64_t hi,
                        int64_t si,
                        int64_t di) {
-        return static_cast<double>(
-            static_cast<float>(t[static_cast<size_t>(((bi * seq + si) * heads + hi) * dim + di)]));
+        const int64_t index
+            = start + bi * strides[0] + hi * strides[1] + si * strides[2] + di * strides[3];
+        return static_cast<double>(static_cast<float>(t[static_cast<size_t>(index)]));
     };
     const double scale = spec.scaleKind == SdpaScale::ABSENT
                              ? 1.0 / std::sqrt(static_cast<double>(d))
@@ -629,8 +653,8 @@ void expectCandidateMatchesReference(const MatchContext& context,
                     double dot = 0.0;
                     for(int64_t e = 0; e < d; ++e)
                     {
-                        dot += at(q, h, s, d, bi, hi, si, e)
-                               * at(k, hk, skv, d, bi, hi / group, j, e);
+                        dot += at(q, qStrides, 0, bi, hi, si, e)
+                               * at(k, kvStrides, kStart, bi, hi / group, j, e);
                     }
                     scores[static_cast<size_t>(j)] = dot * scale;
                     maxScore = std::max(maxScore, scores[static_cast<size_t>(j)]);
@@ -668,10 +692,10 @@ void expectCandidateMatchesReference(const MatchContext& context,
                     for(int64_t j = 0; j <= lastKey; ++j)
                     {
                         expected += scores[static_cast<size_t>(j)]
-                                    * at(v, hk, skv, d, bi, hi / group, j, e);
+                                    * at(v, kvStrides, vStart, bi, hi / group, j, e);
                     }
                     expected = lastKey < 0 ? 0.0 : expected / sum;
-                    const double error = std::abs(at(o, h, s, d, bi, hi, si, e) - expected);
+                    const double error = std::abs(at(o, oStrides, 0, bi, hi, si, e) - expected);
                     if(error > worst)
                     {
                         worst = error;
@@ -901,6 +925,33 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim256WhereShipped)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
     spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
     spec.dataType = DataType::HALF;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesBhsdLayout)
+{
+    auto spec = cdnaSpec();
+    spec.layout = SdpaLayout::BHSD;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 333;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.headDim = 64;
+    spec.dataType = DataType::HALF;
+    spec.mask = SdpaMask::NONE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesPackedQkvViews)
+{
+    auto spec = cdnaSpec();
+    spec.kvHeads = 32;
+    spec.packedQkv = true;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 

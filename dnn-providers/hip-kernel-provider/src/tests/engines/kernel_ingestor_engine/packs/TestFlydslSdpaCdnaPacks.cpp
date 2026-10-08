@@ -124,10 +124,10 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
 {
     const auto& set = loadedSet(ENGINE);
 
-    // Dual-wave: 12 tensors, then 8 i32, the f32 scale, the two head counts, lse_on and
-    // diag_offset. Generic: 5 tensors, 2 i32, 3 tensors, then 1 i32, the f32 scale, the
-    // two head counts, the two token strides, lse_on and diag_offset. Every scalar slot
-    // is 4 bytes.
+    // Dual-wave: 12 tensors, then 8 i32, the f32 scale, the two head counts, lse_on,
+    // diag_offset and seven strides. Generic: 5 tensors, 2 i32, 3 tensors, then 1 i32, the
+    // f32 scale, the two head counts, the two token strides, lse_on, diag_offset and the
+    // same seven strides. Every scalar slot is 4 bytes.
     using Slot = std::pair<std::string, uint32_t>;
     const auto expected = [](const std::string& family) {
         std::vector<Slot> slots;
@@ -147,14 +147,14 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
         if(family == "dualwave")
         {
             tensors(12);
-            scalars(13);
+            scalars(20);
         }
         else
         {
             tensors(5);
             scalars(2);
             tensors(3);
-            scalars(8);
+            scalars(15);
         }
         return slots;
     };

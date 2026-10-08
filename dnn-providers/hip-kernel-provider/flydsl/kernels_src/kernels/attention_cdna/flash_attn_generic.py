@@ -70,6 +70,7 @@ def build_flash_attn_func_module_primary(
     kv_cache_layout="linear",
     skip_kv_pad_mask=None,
     return_lse=False,
+    extra_llvm_options=None,
 ):
     """Build a generic f16/bf16 flash-attention launcher.
 
@@ -113,6 +114,7 @@ def build_flash_attn_func_module_primary(
             kv_cache_layout=kv_cache_layout,
             skip_kv_pad_mask=skip_kv_pad_mask,
             return_lse=return_lse,
+            extra_llvm_options=extra_llvm_options,
         )
         _launcher_m256 = build_flash_attn_func_module_primary(
             num_heads,
@@ -136,6 +138,7 @@ def build_flash_attn_func_module_primary(
             kv_cache_layout=kv_cache_layout,
             skip_kv_pad_mask=skip_kv_pad_mask,
             return_lse=return_lse,
+            extra_llvm_options=extra_llvm_options,
         )
         _bs_threshold = (
             2048 * num_heads if gpu_arch.startswith("gfx942") else 4096 * num_heads
@@ -284,6 +287,13 @@ def build_flash_attn_func_module_primary(
         stride_kv_n: fx.Int32,
         lse_on: fx.Int32,
         diag_offset: fx.Int32,
+        stride_q_b: fx.Int32,
+        stride_q_h: fx.Int32,
+        stride_o_b: fx.Int32,
+        stride_o_n: fx.Int32,
+        stride_o_h: fx.Int32,
+        stride_kv_b: fx.Int32,
+        stride_kv_h: fx.Int32,
     ):
         # Make shape/mode traits visible to the JIT cache key.
         _ = _flash_attn_generic_cache_tag
@@ -299,6 +309,15 @@ def build_flash_attn_func_module_primary(
             stride_token_kv=stride_kv_n,
             lse_on=lse_on,
             diag_offset=diag_offset,
+            view_strides={
+                "q_b": stride_q_b,
+                "q_h": stride_q_h,
+                "o_b": stride_o_b,
+                "o_n": stride_o_n,
+                "o_h": stride_o_h,
+                "kv_b": stride_kv_b,
+                "kv_h": stride_kv_h,
+            },
         )
         ctx.init_types_and_pointers()
         gemm_helper = GenericGemmHelper(ctx)
@@ -638,6 +657,13 @@ def build_flash_attn_func_module_primary(
         stride_kv_n: fx.Int32,
         lse_on: fx.Int32,
         diag_offset: fx.Int32,
+        stride_q_b: fx.Int32,
+        stride_q_h: fx.Int32,
+        stride_o_b: fx.Int32,
+        stride_o_n: fx.Int32,
+        stride_o_h: fx.Int32,
+        stride_kv_b: fx.Int32,
+        stride_kv_h: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         bs_idx = fx.Index(batch_size)
@@ -672,6 +698,13 @@ def build_flash_attn_func_module_primary(
             stride_kv_n,
             lse_on,
             diag_offset,
+            stride_q_b,
+            stride_q_h,
+            stride_o_b,
+            stride_o_n,
+            stride_o_h,
+            stride_kv_b,
+            stride_kv_h,
             value_attrs={
                 "rocdl.waves_per_eu": waves_per_eu,
                 "rocdl.flat_work_group_size": (
@@ -695,6 +728,8 @@ def build_flash_attn_func_module_primary(
     _llvm_opts = {
         "enable-post-misched": os.getenv("FLYDSL_LLVM_ENABLE_POST_MISCHED", "0") == "1",
         "lsr-drop-solution": True,
+        # A caller's additions (modification 7); none by default.
+        **(extra_llvm_options or {}),
     }
     _fmha_compile_hints = {
         "fast_fp_math": fast_fp_math,
@@ -755,6 +790,13 @@ def build_flash_attn_func_module_primary(
                 traits.STRIDE_TOKEN_KV,
                 1,
                 skv - seq_len,
+                seq_len * traits.STRIDE_TOKEN_Q,
+                traits.HEAD_DIM,
+                seq_len * traits.STRIDE_TOKEN_Q,
+                traits.STRIDE_TOKEN_Q,
+                traits.HEAD_DIM,
+                skv * traits.STRIDE_TOKEN_KV,
+                traits.HEAD_DIM,
                 fx.Stream(stream),
             )
 
@@ -800,6 +842,13 @@ def build_flash_attn_func_module_primary(
                 traits.STRIDE_TOKEN_KV,
                 1,
                 skv - seq_len,
+                seq_len * traits.STRIDE_TOKEN_Q,
+                traits.HEAD_DIM,
+                seq_len * traits.STRIDE_TOKEN_Q,
+                traits.STRIDE_TOKEN_Q,
+                traits.HEAD_DIM,
+                skv * traits.STRIDE_TOKEN_KV,
+                traits.HEAD_DIM,
                 fx.Stream(stream),
             )
 
@@ -831,6 +880,7 @@ def build_flash_attn_func_module_primary(
             kv_cache_layout=kv_cache_layout,
             skip_kv_pad_mask=True,
             return_lse=return_lse,
+            extra_llvm_options=extra_llvm_options,
         )
         _launch_mask = build_flash_attn_func_module_primary(
             num_heads,
@@ -854,6 +904,7 @@ def build_flash_attn_func_module_primary(
             kv_cache_layout=kv_cache_layout,
             skip_kv_pad_mask=False,
             return_lse=return_lse,
+            extra_llvm_options=extra_llvm_options,
         )
 
         def _pad_dispatch(*args, **kwargs):

@@ -2531,6 +2531,7 @@ class GenericFlashAttnContext:
         stride_token_kv=None,
         lse_on=None,
         diag_offset=None,
+        view_strides=None,
     ):
         self.traits = traits
         self.K = K
@@ -2545,6 +2546,9 @@ class GenericFlashAttnContext:
         self.stride_token_kv = stride_token_kv
         self.lse_on = lse_on
         self.diag_offset = diag_offset
+        # Runtime (batch, head) strides of Q, O and K/V, and O's token stride
+        # (modification 6); None keeps the BSHD layout the token strides imply.
+        self.view_strides = view_strides
 
     def init_types_and_pointers(self):
         traits = self.traits
@@ -2703,8 +2707,22 @@ class GenericFlashAttnContext:
     def init_kv_batch_pointers(self):
         # Dense/varlen fold batch into raw K/V pointers; paged adds page_id per tile.
         traits = self.traits
+        strides = self.view_strides
+        if strides is not None and const_expr(traits.PAGED or traits.VARLEN):
+            raise ValueError("runtime strides serve the dense kernel only")
+        # The head's offset lives in the K/V base under runtime strides, and in
+        # each lane's index otherwise.
+        self.kv_head_byte_offset = (
+            fx.Index(0)
+            if strides is not None
+            else self.kv_head_idx * fx.Index(traits.HEAD_DIM * 2)
+        )
         if const_expr(not traits.PAGED):
             off = self.kv_tok_base * self.stride_token_kv_v
+            if strides is not None:
+                off = fx.Index(self.batch_idx) * fx.Index(
+                    strides["kv_b"]
+                ) + self.kv_head_idx * fx.Index(strides["kv_h"])
             self.k_ptr = buffer_ops.get_element_ptr(
                 self.k_ptr, off, elem_type=self.elem_type
             )
@@ -2716,6 +2734,75 @@ class GenericFlashAttnContext:
         # Per-batch descriptors keep global indices 0-based and bounded to one batch,
         # keeping 32-bit offsets small while preserving arbitrary-seqlen OOB behavior.
         traits = self.traits
+        if self.view_strides is not None:
+            self._init_strided_descriptors(Q, O)
+        else:
+            self._init_bshd_descriptors(Q, O)
+        # LSE output: fp32 [batch, num_heads, seq_len], per-batch descriptor.
+        if const_expr(traits.RETURN_LSE):
+            self.lse_per_batch_elems = self.num_heads_q_v * self.seq_len_v
+            # OOB sentinel (== num records) the buffer bound drops; predicates the store.
+            self.lse_oob_off = self.lse_per_batch_elems
+            _lse_nrec_bytes = as_mlir_value(
+                _lse_records(self.lse_on, self.lse_per_batch_elems * fx.Index(4))
+            )
+            _lse_batch_byte_off = as_mlir_value(
+                self.batch_idx * self.lse_per_batch_elems * fx.Index(4)
+            )
+            self.lse_rsrc = buffer_ops.create_buffer_resource(
+                LSE,
+                max_size=False,
+                num_records_bytes=_lse_nrec_bytes,
+                base_byte_offset=_lse_batch_byte_off,
+            )
+
+    def _init_strided_descriptors(self, Q, O):  # noqa: E741
+        """Per-(batch, head) descriptors under runtime strides (modification 6).
+
+        Each starts at its head's first row and ends at that head's last element,
+        (seq_len - 1) * stride_n + head_dim, so any stride order reads rows past the
+        sequence as zero and drops stores to them, as the per-batch BSHD
+        descriptors did; the head offset lives in the base, not in each index.
+        """
+        traits = self.traits
+        strides = self.view_strides
+        head_dim = fx.Index(traits.HEAD_DIM)
+        batch = fx.Index(self.batch_idx)
+
+        def span_bytes(rows, stride_n):
+            return as_mlir_value(
+                ((rows - fx.Index(1)) * stride_n + head_dim) * fx.Index(2)
+            )
+
+        def base_bytes(stride_b, head, stride_h):
+            return as_mlir_value(
+                (batch * fx.Index(stride_b) + head * fx.Index(stride_h)) * fx.Index(2)
+            )
+
+        self.kv_nrec_bytes = span_bytes(self.seqlen_kv_b, self.stride_token_kv_v)
+        self.kv_batch_byte_off = base_bytes(
+            strides["kv_b"], self.kv_head_idx, strides["kv_h"]
+        )
+        self.stride_token_o_v = fx.Index(strides["o_n"])
+        self.q_rsrc = buffer_ops.create_buffer_resource(
+            Q,
+            max_size=False,
+            num_records_bytes=span_bytes(self.seqlen_q_b, self.stride_token_q_v),
+            base_byte_offset=base_bytes(
+                strides["q_b"], self.q_head_idx, strides["q_h"]
+            ),
+        )
+        self.o_rsrc = buffer_ops.create_buffer_resource(
+            O,
+            max_size=False,
+            num_records_bytes=span_bytes(self.seqlen_q_b, self.stride_token_o_v),
+            base_byte_offset=base_bytes(
+                strides["o_b"], self.q_head_idx, strides["o_h"]
+            ),
+        )
+
+    def _init_bshd_descriptors(self, Q, O):  # noqa: E741
+        self.stride_token_o_v = self.stride_token_q_v
         self.kv_nrec_bytes = as_mlir_value(
             self.seqlen_kv_b * (self.stride_token_kv_v * fx.Index(2))
         )
@@ -2740,23 +2827,6 @@ class GenericFlashAttnContext:
             num_records_bytes=q_nrec_bytes,
             base_byte_offset=q_batch_byte_off,
         )
-        # LSE output: fp32 [batch, num_heads, seq_len], per-batch descriptor.
-        if const_expr(traits.RETURN_LSE):
-            self.lse_per_batch_elems = self.num_heads_q_v * self.seq_len_v
-            # OOB sentinel (== num records) the buffer bound drops; predicates the store.
-            self.lse_oob_off = self.lse_per_batch_elems
-            _lse_nrec_bytes = as_mlir_value(
-                _lse_records(self.lse_on, self.lse_per_batch_elems * fx.Index(4))
-            )
-            _lse_batch_byte_off = as_mlir_value(
-                self.batch_idx * self.lse_per_batch_elems * fx.Index(4)
-            )
-            self.lse_rsrc = buffer_ops.create_buffer_resource(
-                LSE,
-                max_size=False,
-                num_records_bytes=_lse_nrec_bytes,
-                base_byte_offset=_lse_batch_byte_off,
-            )
 
     def init_q_row(self):
         # B operand: j = lane_mod_32, k-subblock = lane_div_32*MFMA_LANE_K. Q is
@@ -2789,12 +2859,22 @@ class GenericFlashAttnContext:
 
     def global_idx_q(self, token_idx, col):
         traits = self.traits
+        if self.view_strides is not None:
+            return token_idx * self.stride_token_q_v + col
         return (
             token_idx * self.stride_token_q_v + self.q_head_idx * traits.HEAD_DIM + col
         )
 
+    def global_idx_o(self, token_idx, col):
+        """O's element index: its own token stride under runtime strides."""
+        if self.view_strides is not None:
+            return token_idx * self.stride_token_o_v + col
+        return self.global_idx_q(token_idx, col)
+
     def global_idx_kv(self, token_idx, col):
         traits = self.traits
+        if self.view_strides is not None:
+            return token_idx * self.stride_token_kv_v + col
         return (
             token_idx * self.stride_token_kv_v
             + self.kv_head_idx * traits.HEAD_DIM
@@ -3358,7 +3438,7 @@ class GenericKvGmemToLdsLoader:
             )  # 0-based: batch base folded into k/v_rsrc
             global_byte = (
                 global_row * (ctx.stride_token_kv_v * fx.Index(2))
-                + ctx.kv_head_idx * fx.Index(traits.HEAD_DIM * 2)
+                + ctx.kv_head_byte_offset
                 + col_byte
             )
             rocdl.raw_ptr_buffer_load_lds(
@@ -3398,7 +3478,7 @@ class GenericKvGmemToLdsLoader:
                 )
                 global_byte = (
                     global_row * (ctx.stride_token_kv_v * fx.Index(2))
-                    + ctx.kv_head_idx * fx.Index(traits.HEAD_DIM * 2)
+                    + ctx.kv_head_byte_offset
                     + col_byte
                 )
                 rocdl.raw_ptr_buffer_load_lds(
@@ -3932,7 +4012,7 @@ class GenericStoreHelper:
                     d_col = fx.Index(dc * traits.D_CHUNK) + (
                         fx.Index(2 * g) + ctx.lane_div_32
                     ) * fx.Index(8)
-                    o_global = ctx.global_idx_q(q_row, d_col)
+                    o_global = ctx.global_idx_o(q_row, d_col)
                     buffer_ops.buffer_store(
                         zero_pack, o_rsrc, o_global * fx.Index(2), offset_is_bytes=True
                     )
@@ -3945,7 +4025,7 @@ class GenericStoreHelper:
                         + ctx.lane_div_32 * fx.Index(4)
                         + fx.Index(grp * 8)
                     )
-                    o_global = ctx.global_idx_q(q_row, d_col)
+                    o_global = ctx.global_idx_o(q_row, d_col)
                     buffer_ops.buffer_store(
                         zero_pack, o_rsrc, o_global * fx.Index(2), offset_is_bytes=True
                     )
@@ -4058,7 +4138,7 @@ class GenericStoreHelper:
                 d_col = fx.Index(dc * traits.D_CHUNK) + (
                     fx.Index(2 * g) + ctx.lane_div_32
                 ) * fx.Index(8)
-                o_global = ctx.global_idx_q(q_row, d_col)
+                o_global = ctx.global_idx_o(q_row, d_col)
                 buffer_ops.buffer_store(
                     o_pack, o_rsrc, o_global * fx.Index(2), offset_is_bytes=True
                 )
@@ -4082,7 +4162,7 @@ class GenericStoreHelper:
                     + ctx.lane_div_32 * fx.Index(4)
                     + fx.Index(grp * 8)
                 )
-                o_global = ctx.global_idx_q(q_row, d_col)
+                o_global = ctx.global_idx_o(q_row, d_col)
                 buffer_ops.buffer_store(
                     o2, o_rsrc, o_global * fx.Index(2), offset_is_bytes=True
                 )
@@ -4114,6 +4194,7 @@ class DualwaveKernelContext:
         num_heads_kv=None,
         lse_on=None,
         diag_offset=None,
+        view_strides=None,
     ):
         if isinstance(traits_or_ctx, DualwaveKernelContext):
             self.__dict__.update(traits_or_ctx.__dict__)
@@ -4142,6 +4223,7 @@ class DualwaveKernelContext:
         self.num_heads_kv = num_heads_kv
         self.lse_on = lse_on
         self.diag_offset = diag_offset
+        self.view_strides = view_strides
 
     def init_types_and_constants(self, head_dim_runtime=None):
         if head_dim_runtime is None:
@@ -4284,13 +4366,20 @@ class DualwaveKernelContext:
             self.delta_i32 = fx.Int32(self.seqlen_kv_i32 - fx.Int32(self.seqlen_q_v))
         else:
             self.delta_i32 = fx.Int32(self.diag_offset)
+        self.buf_flags_i32 = fx.Int32(buffer_ops._get_buffer_flags())
+        self.elem_ir = self.elem_dtype.ir_type
+        view_strides = getattr(self, "view_strides", None)
+        if view_strides is not None:
+            self._init_strided_views(
+                q_tensor, k_tensor, v_tensor, o_tensor, view_strides
+            )
+            return
+        self.o_stride_n_v = self.stride_q_n_v
+        self.o_head_elem_offset = self.q_head_idx * traits.HEAD_DIM
         self.q_gmem_elem_offset = (
             self.q_start * self.stride_q_n_v + self.q_head_idx * traits.HEAD_DIM
         )
         self.kv_gmem_elem_offset = self.kv_head_idx * traits.HEAD_DIM
-
-        self.buf_flags_i32 = fx.Int32(buffer_ops._get_buffer_flags())
-        self.elem_ir = self.elem_dtype.ir_type
         qo_per_batch_elems = self.seqlen_q_v * self.stride_q_n_v
         qo_nrec_bytes = qo_per_batch_elems * fx.Index(traits.BF16_BYTES)
         qo_layout = fx.make_layout(fx.Int32(qo_per_batch_elems), fx.Int32(1))
@@ -4352,6 +4441,78 @@ class DualwaveKernelContext:
             if traits.DUALWAVE_SWP_DEBUG_LAZY_COUNTS
             else None
         )
+
+    def _init_strided_views(self, q_tensor, k_tensor, v_tensor, o_tensor, strides):
+        """Per-(batch, head) views of Q, O, K and V under runtime strides
+        (modification 6).
+
+        Each view starts at its head's first row and ends at that head's last
+        element, (seq_len - 1) * stride_n + head_dim, so any (batch, sequence,
+        head) stride order -- BSHD, BHSD, a packed-QKV view -- reads rows past the
+        sequence as zero and drops stores to them, as the per-batch BSHD views
+        did. The head offset lives in the view's base, not in each lane's index.
+        """
+        traits = self.traits
+        if const_expr(traits.PAGED or traits.VARLEN or traits.SPLITK):
+            raise ValueError("runtime strides serve the dense, unsplit kernel only")
+        elem_bytes = fx.Index(traits.BF16_BYTES)
+        head_dim = fx.Index(traits.HEAD_DIM)
+        batch = fx.Index(self.batch_idx)
+
+        def view(tensor, stride_b, stride_n, stride_h, head, rows):
+            base_bytes = (
+                batch * fx.Index(stride_b) + head * fx.Index(stride_h)
+            ) * elem_bytes
+            elems = (rows - fx.Index(1)) * fx.Index(stride_n) + head_dim
+            return _make_rebased_view(
+                fx.get_iter(tensor),
+                base_bytes,
+                elems * elem_bytes,
+                fx.make_layout(fx.Int32(elems), fx.Int32(1)),
+                _buf_flags_i32=self.buf_flags_i32,
+                _elem_ir=self.elem_ir,
+            )
+
+        self.q_div = view(
+            q_tensor,
+            strides["q_b"],
+            self.stride_q_n_v,
+            strides["q_h"],
+            self.q_head_idx,
+            self.seqlen_q_v,
+        )
+        self.o_div = view(
+            o_tensor,
+            strides["o_b"],
+            strides["o_n"],
+            strides["o_h"],
+            self.q_head_idx,
+            self.seqlen_q_v,
+        )
+        self.k_div = view(
+            k_tensor,
+            strides["kv_b"],
+            self.stride_kv_n_v,
+            strides["kv_h"],
+            self.kv_head_idx,
+            self.seqlen_kv_v,
+        )
+        self.v_div = view(
+            v_tensor,
+            strides["kv_b"],
+            self.stride_kv_n_v,
+            strides["kv_h"],
+            self.kv_head_idx,
+            self.seqlen_kv_v,
+        )
+        self.o_stride_n_v = fx.Index(strides["o_n"])
+        self.o_head_elem_offset = fx.Index(0)
+        self.q_gmem_elem_offset = self.q_start * self.stride_q_n_v
+        self.kv_gmem_elem_offset = fx.Index(0)
+        self.page_byte_stride = None
+        self.page_nrec_bytes = None
+        self.page_layout = None
+        self.debug_counts_rsrc = None
 
     def init_workspace(self, DebugCounts=None):
         if DebugCounts is None:
@@ -5166,9 +5327,7 @@ class DualwaveStoreHelper(DualwaveKernelContext):
 
     def _final_o_base(self, q_row):
         return (
-            q_row * self.stride_q_n_v
-            + self.q_head_idx * self.traits.HEAD_DIM
-            + self.lane_div_32 * 8
+            q_row * self.o_stride_n_v + self.o_head_elem_offset + self.lane_div_32 * 8
         )
 
     def _final_o_global(self, o_base, dc, g):

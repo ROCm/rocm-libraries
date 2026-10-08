@@ -233,6 +233,13 @@ def build_flash_attn_dualwave_swp_module(
         num_heads_kv: fx.Int32,
         lse_on: fx.Int32,
         diag_offset: fx.Int32,
+        stride_q_b: fx.Int32,
+        stride_q_h: fx.Int32,
+        stride_o_b: fx.Int32,
+        stride_o_n: fx.Int32,
+        stride_o_h: fx.Int32,
+        stride_kv_b: fx.Int32,
+        stride_kv_h: fx.Int32,
     ):
         ctx = DualwaveKernelContext(
             traits,
@@ -256,6 +263,15 @@ def build_flash_attn_dualwave_swp_module(
             num_heads_kv=num_heads_kv,
             lse_on=lse_on,
             diag_offset=diag_offset,
+            view_strides={
+                "q_b": stride_q_b,
+                "q_h": stride_q_h,
+                "o_b": stride_o_b,
+                "o_n": stride_o_n,
+                "o_h": stride_o_h,
+                "kv_b": stride_kv_b,
+                "kv_h": stride_kv_h,
+            },
         )
         ctx.init_types_and_constants()
         ctx.init_runtime_indices()
@@ -1106,6 +1122,13 @@ def build_flash_attn_dualwave_swp_module(
         num_heads_kv: fx.Int32,
         lse_on: fx.Int32,
         diag_offset: fx.Int32,
+        stride_q_b: fx.Int32,
+        stride_q_h: fx.Int32,
+        stride_o_b: fx.Int32,
+        stride_o_n: fx.Int32,
+        stride_o_h: fx.Int32,
+        stride_kv_b: fx.Int32,
+        stride_kv_h: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         # Make shape/mode traits visible to the JIT cache key.
@@ -1152,6 +1175,13 @@ def build_flash_attn_dualwave_swp_module(
             num_heads_kv,
             lse_on,
             diag_offset,
+            stride_q_b,
+            stride_q_h,
+            stride_o_b,
+            stride_o_n,
+            stride_o_h,
+            stride_kv_b,
+            stride_kv_h,
             value_attrs={
                 "rocdl.waves_per_eu": traits.WAVES_PER_EU,
                 "rocdl.flat_work_group_size": f"{traits.BLOCK_SIZE},{traits.BLOCK_SIZE}",
@@ -1358,6 +1388,13 @@ def build_flash_attn_dualwave_swp_module(
                     traits.NUM_HEADS_KV,
                     1,
                     seq_len_kv - seq_len,
+                    seq_len * stride_q_n,
+                    traits.HEAD_DIM,
+                    seq_len * stride_q_n,
+                    stride_q_n,
+                    traits.HEAD_DIM,
+                    seq_len_kv * stride_kv_n,
+                    traits.HEAD_DIM,
                 )
             return launch_flash_attn_dualwave_swp(
                 Q,
@@ -1386,6 +1423,13 @@ def build_flash_attn_dualwave_swp_module(
                 traits.NUM_HEADS_KV,
                 1,
                 seq_len_kv - seq_len,
+                seq_len * stride_q_n,
+                traits.HEAD_DIM,
+                seq_len * stride_q_n,
+                stride_q_n,
+                traits.HEAD_DIM,
+                seq_len_kv * stride_kv_n,
+                traits.HEAD_DIM,
                 stream=stream,
             )
 
@@ -1480,6 +1524,13 @@ def build_flash_attn_dualwave_swp_module(
                 traits.NUM_HEADS_KV,
                 1,
                 seq_len_kv - seq_len,
+                seq_len * stride_q_n,
+                traits.HEAD_DIM,
+                seq_len * stride_q_n,
+                stride_q_n,
+                traits.HEAD_DIM,
+                seq_len_kv * stride_kv_n,
+                traits.HEAD_DIM,
                 fx.Stream(stream),
             )
 

@@ -29,6 +29,7 @@ manifest: FlyDSL emits none, and the dispatcher marshals by position.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -99,6 +100,13 @@ _PARAMS = {
         ("num_heads_kv", "i32"),
         ("lse_on", "i32"),
         ("diag_offset", "i32"),
+        ("stride_q_b", "i32"),
+        ("stride_q_h", "i32"),
+        ("stride_o_b", "i32"),
+        ("stride_o_n", "i32"),
+        ("stride_o_h", "i32"),
+        ("stride_kv_b", "i32"),
+        ("stride_kv_h", "i32"),
     ),
     "generic": (
         ("Q", "tensor"),
@@ -119,6 +127,13 @@ _PARAMS = {
         ("stride_kv_n", "i32"),
         ("lse_on", "i32"),
         ("diag_offset", "i32"),
+        ("stride_q_b", "i32"),
+        ("stride_q_h", "i32"),
+        ("stride_o_b", "i32"),
+        ("stride_o_n", "i32"),
+        ("stride_o_h", "i32"),
+        ("stride_kv_b", "i32"),
+        ("stride_kv_h", "i32"),
     ),
 }
 
@@ -136,6 +151,13 @@ _BLOCK_THREADS = {
     "generic": lambda block_m: block_m * 2,
 }
 
+# LLVM options added to the generic kernel's own, per (arch, head_dim), recorded per
+# object as `llvm_options`. On gfx942 at head_dim 64 the register-pressure trackers
+# keep the objects under the occupancy step (three waves per SIMD) the runtime
+# strides otherwise push them past; at 128 they cut registers but schedule the loop
+# measurably worse, so they apply only where they were measured to help.
+_GENERIC_LLVM_OPTIONS = {("gfx942", 64): {"amdgpu-use-amdgpu-trackers": True}}
+
 _TRACE_BATCH = 1
 _TRACE_SEQ = 1024
 # The head counts the objects are traced with. They are kernel arguments, so these
@@ -144,7 +166,14 @@ _TRACE_HEADS = 32
 _TRACE_KV_HEADS = 8
 
 
-def _build_one(instance: Instance, dump_dir: Path) -> bytes:
+def _llvm_options(instance: Instance, arch: str) -> dict:
+    """The LLVM options this pack adds to the kernel's own for @p instance."""
+    if instance.knobs["kernel"] != "generic":
+        return {}
+    return dict(_GENERIC_LLVM_OPTIONS.get((arch, instance.knobs["head_dim"]), {}))
+
+
+def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
     """Compile one instance; return its code object."""
     import torch  # noqa: PLC0415  (after prepare(); meta tensors only)
 
@@ -203,6 +232,7 @@ def _build_one(instance: Instance, dump_dir: Path) -> bytes:
             # this object is, and the kernel matcher holds the graph to it.
             skip_kv_pad_mask=bool(knobs["kv_align"]),
             return_lse=True,
+            extra_llvm_options=_llvm_options(instance, arch),
             **(
                 {"waves_per_eu": knobs["waves_per_eu"]} if knobs["waves_per_eu"] else {}
             ),
@@ -264,6 +294,8 @@ def _verify(
 def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
     env.assert_flydsl_version()
     env.prepare(arch)
+    # The generic kernel reads this at build time; pinned so no shell changes the bytes.
+    os.environ["FLYDSL_LLVM_ENABLE_POST_MISCHED"] = "0"
 
     op_dir = out_root / OP / arch
     op_dir.mkdir(parents=True, exist_ok=True)
@@ -276,7 +308,7 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
         with tempfile.TemporaryDirectory(prefix=f"flydsl-{instance.name}-") as tmp:
             dump_dir = Path(keep_ir) / instance.name if keep_ir else Path(tmp)
             try:
-                blob = _build_one(instance, dump_dir)
+                blob = _build_one(instance, dump_dir, arch)
             except Exception as exc:
                 raise GeneratorError(f"{instance.name}: {exc}") from exc
 
@@ -302,8 +334,8 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
                 "kernarg_segment_size": described["kernarg_segment_size"],
                 "lds_bytes": described["group_segment_fixed_size"],
                 "vgprs": described["vgpr_count"],
-                # The kernels carry their own compile hints; none are added here.
-                "llvm_options": {},
+                # Added to the kernel's own compile hints, which are not repeated here.
+                "llvm_options": _llvm_options(instance, arch),
                 "named_args": described["named_args"],
             }
         )

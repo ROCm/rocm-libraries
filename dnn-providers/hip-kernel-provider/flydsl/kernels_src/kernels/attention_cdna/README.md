@@ -57,6 +57,18 @@ diff against upstream plus the modifications below.
    row i sees key j <= i + diag_offset, where the kernels had computed
    `seq_len_kv - seq_len` (bottom-right). Top-left causal and right-side bands are
    then the same objects. The launchers pass `seq_len_kv - seq_len`.
+6. **Runtime operand strides** (both kernels). Trailing `stride_q_b, stride_q_h,
+   stride_o_b, stride_o_n, stride_o_h, stride_kv_b, stride_kv_h` beside the token
+   strides already there. Q, O, K and V are read through per-(batch, head) buffer
+   views: each starts at its head's first row and ends at its last element,
+   `(seq_len - 1) * stride_n + head_dim`, so rows past the sequence read as zero
+   and stores to them are dropped whatever the stride order, as the per-batch
+   BSHD views guaranteed. The head's offset moves from each lane's index into the
+   view's base, and O gets its own token stride. The launchers pass contiguous
+   BSHD strides.
+7. **Extra LLVM options** (`flash_attn_generic.py`). An `extra_llvm_options`
+   builder argument merged into the kernel's own compile options, and forwarded
+   through the builder's internal re-builds; none by default.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).
