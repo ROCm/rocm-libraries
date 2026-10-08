@@ -186,6 +186,8 @@ enum class target_arch : unsigned int
     gfx1151 = 1151,
     gfx1152 = 1152,
     gfx1153 = 1153,
+    gfx1170 = 1170,
+    gfx1171 = 1171,
     gfx1200 = 1200,
     gfx1201 = 1201,
     gfx1250 = 1250,
@@ -257,7 +259,9 @@ constexpr gen gen_from_target_arch(target_arch i)
         case target_arch::gfx1150:
         case target_arch::gfx1151:
         case target_arch::gfx1152:
-        case target_arch::gfx1153: return gen::rdna3;
+        case target_arch::gfx1153:
+        case target_arch::gfx1170:
+        case target_arch::gfx1171: return gen::rdna3;
         case target_arch::gfx1200:
         case target_arch::gfx1201: return gen::rdna4;
         case target_arch::gfx1250: return gen::cdna5; // this also covers gfx1250-strict as it also maps to gfx1250
@@ -333,6 +337,8 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
     ROCPRIM_RETURN_IF_ARCH(gfx1151);
     ROCPRIM_RETURN_IF_ARCH(gfx1152);
     ROCPRIM_RETURN_IF_ARCH(gfx1153);
+    ROCPRIM_RETURN_IF_ARCH(gfx1170);
+    ROCPRIM_RETURN_IF_ARCH(gfx1171);
     ROCPRIM_RETURN_IF_ARCH(gfx1200);
     ROCPRIM_RETURN_IF_ARCH(gfx1201);
     ROCPRIM_RETURN_IF_ARCH(gfx1250);
