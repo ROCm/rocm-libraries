@@ -21,12 +21,14 @@
 // The Sobol direction-vector tables live in a function-local static and are
 // released from its destructor at process exit. hipDeviceReset() frees that
 // memory first, so the destructor sees hipErrorInvalidValue. This program is
-// its own process, with no test framework, so returning from main runs that
-// destructor. A GoogleTest death test would _exit() the child and skip it.
+// its own process, with no test framework (e.g., GoogleTest), so returning
+// from main runs that destructor. A GoogleTest death test would _exit() the
+// child and skip it.
 
 #include <hip/hip_runtime.h>
 #include <rocrand/rocrand.h>
 
+#include <cstddef>
 #include <iostream>
 #include <string>
 
@@ -45,14 +47,17 @@ int main(int argc, char** argv)
 {
     if(argc != 3)
     {
-        std::cerr << "usage: " << argv[0] << " <sobol32|scrambled_sobol32> <reset|noreset>\n";
+        std::cerr << "usage: " << argv[0]
+                  << " <sobol32|scrambled_sobol32|sobol64|scrambled_sobol64>"
+                  << " <reset|noreset>\n";
         return 2;
     }
 
     const std::string generator_name(argv[1]);
     const std::string mode(argv[2]);
 
-    rocrand_rng_type generator_type;
+    rocrand_rng_type generator_type = ROCRAND_RNG_QUASI_SOBOL32;
+    bool             is_64          = false;
     if(generator_name == "sobol32")
     {
         generator_type = ROCRAND_RNG_QUASI_SOBOL32;
@@ -60,6 +65,16 @@ int main(int argc, char** argv)
     else if(generator_name == "scrambled_sobol32")
     {
         generator_type = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32;
+    }
+    else if(generator_name == "sobol64")
+    {
+        generator_type = ROCRAND_RNG_QUASI_SOBOL64;
+        is_64          = true;
+    }
+    else if(generator_name == "scrambled_sobol64")
+    {
+        generator_type = ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64;
+        is_64          = true;
     }
     else
     {
@@ -74,21 +89,26 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    rocrand_generator generator{};
+    rocrand_generator    generator{};
     const rocrand_status create_status = rocrand_create_generator(&generator, generator_type);
     if(create_status != ROCRAND_STATUS_SUCCESS)
     {
         return fail("rocrand_create_generator", static_cast<int>(create_status));
     }
 
-    unsigned int* data = nullptr;
-    const hipError_t malloc_status = hipMalloc(&data, 256 * sizeof(unsigned int));
+    void*             data          = nullptr;
+    const std::size_t data_size     = is_64 ? sizeof(unsigned long long int) : sizeof(unsigned int);
+    const hipError_t  malloc_status = hipMalloc(&data, 256 * data_size);
     if(malloc_status != hipSuccess)
     {
         return fail("hipMalloc", static_cast<int>(malloc_status));
     }
 
-    const rocrand_status generate_status = rocrand_generate(generator, data, 256);
+    const rocrand_status generate_status
+        = is_64 ? rocrand_generate_long_long(generator,
+                                             static_cast<unsigned long long int*>(data),
+                                             256)
+                : rocrand_generate(generator, static_cast<unsigned int*>(data), 256);
     if(generate_status != ROCRAND_STATUS_SUCCESS)
     {
         return fail("rocrand_generate", static_cast<int>(generate_status));

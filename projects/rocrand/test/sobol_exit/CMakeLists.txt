@@ -46,7 +46,7 @@ set_target_properties(test_rocrand_sobol_exit
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
 )
 
-foreach(generator sobol32 scrambled_sobol32)
+foreach(generator sobol32 scrambled_sobol32 sobol64 scrambled_sobol64)
     foreach(mode reset noreset)
         set(test_name "test_rocrand_sobol_exit_${generator}_${mode}")
         add_test(
@@ -54,8 +54,9 @@ foreach(generator sobol32 scrambled_sobol32)
             COMMAND test_rocrand_sobol_exit ${generator} ${mode}
         )
         # Not registered through add_relative_test: that path appends a gtest
-        # filter, and this binary is not a GoogleTest executable. Label it so
-        # the documented ctest -L quick / -L standard selections still run it.
+        # filter, and this binary is not a GoogleTest executable (see the
+        # test's source code for the reason). Label it so the filters of
+        # ctest -L quick / -L standard still run it.
         set_tests_properties(${test_name} PROPERTIES LABELS "quick;standard")
         file(APPEND "${INSTALL_TEST_FILE}"
             "add_test(${test_name} \"../test_rocrand_sobol_exit\" ${generator} ${mode})\n")
