@@ -5,6 +5,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
+### Resolved Issues
+* [Conv] Fixed the grouped CK xdlops convolution solvers (2D forward/backward-data/backward-weights
+  and 3D forward/backward-data) skipping `valid_kernels[0]` during exhaustive tuning: `SetNextValue`
+  returned the first config unseeded, so GenericSearch began enumeration at `valid_kernels[1]` and
+  the first applicable CK instance was never tuned.
+
 ### Added
 * [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise
   kernels to the `ConvHipConv` solver (hipconv v0.3.1).
