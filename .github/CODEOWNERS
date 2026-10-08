@@ -42,6 +42,12 @@
 /.github/workflows/update-release-staging-subtree.yml   @ROCm/rocm-libraries-reviewers @jayhawk-commits
 /.github/workflows/update-subtrees.yml              @ROCm/rocm-libraries-reviewers @jayhawk-commits
 
+# GitHub Copilot custom review instructions
+/.github/instructions/                                           @ROCm/rocm-math-lib-build-infra
+/.github/instructions/hipblaslt-pr-quality.instructions.md       @ROCm/hipblaslt-reviewers
+/.github/instructions/projects-rocblas-testing.instructions.md   @ROCm/rocblas-reviewers
+/.github/instructions/rocke-pr-review.instructions.md            @ROCm/rocke-platform @ROCm/rocke-lib @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
+
 # Project-specific ownership
 /dnn-providers/miopen-provider/                     @ROCm/dnn-providers-core
 /dnn-providers/hipblaslt-provider/                  @ROCm/dnn-providers-core
