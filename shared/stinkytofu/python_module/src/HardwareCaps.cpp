@@ -233,8 +233,12 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
 
     rv["HasNewBarrier"] = hasMnemonic(m, "s_barrier_wait");
     rv["HasClusterBarrier"] = tryAsm(isaName, ws, "s_barrier_wait -3");
+    // gfx11 WMMA V1 (D is 8 VGPRs in wave32, 4 in wave64) or gfx12 WMMA V3.
     rv["HasWMMA_AccImmZero"] =
-        tryAsm(isaName, ws, "v_wmma_f32_16x16x32_bf16 v[0:7], v[8:15], v[8:15], 0");
+        tryAsmAny(isaName, ws,
+                  {"v_wmma_f32_16x16x16_f16 v[0:7], v[8:15], v[16:23], 0",
+                   "v_wmma_f32_16x16x16_f16 v[0:3], v[8:15], v[16:23], 0",
+                   "v_wmma_f32_16x16x32_bf16 v[0:7], v[8:15], v[8:15], 0"});
     rv["s_add_u64"] = tryAsm(isaName, ws, "s_add_u64 s[0:1], s[0:1], s[2:3]");
     rv["v_add_nc_u64"] = tryAsm(isaName, ws, "v_add_nc_u64 v[0:1], v[2:3], v[4:5]");
     rv["HasTDM"] = hasMnemonic(m, "tensor_load_to_lds");
