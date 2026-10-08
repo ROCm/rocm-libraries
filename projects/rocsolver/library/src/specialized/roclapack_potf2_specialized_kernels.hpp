@@ -69,8 +69,8 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
 
     ASSERT(hipBlockDim_z == 1);
 
-    // get batch index
-    auto const bid = hipBlockIdx_z;
+    // batch index on x, since grid.z can be capped at 65536
+    auto const bid = hipBlockIdx_x;
     ASSERT(AA != nullptr);
     ASSERT(info != nullptr);
 
@@ -380,7 +380,7 @@ rocblas_status potf2_run_small(rocblas_handle handle,
         {
             return rocblas_status_internal_error;
         }
-        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1),
+        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(batch_count, 1, 1), dim3(BS2, BS2, 1),
                                 lmemsize, stream, is_upper, n, A, shiftA, lda, strideA, info);
     }
     else if constexpr(BS2 == 32)
@@ -394,7 +394,7 @@ rocblas_status potf2_run_small(rocblas_handle handle,
         {
             return rocblas_status_internal_error;
         }
-        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1),
+        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(batch_count, 1, 1), dim3(BS2, BS2, 1),
                                 lmemsize, stream, is_upper, n, A, shiftA, lda, strideA, info);
     }
     else

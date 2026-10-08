@@ -25,6 +25,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Resolved issues
 
 * Fixed sparse functions potentially not using the stream set in the handle.
+* Fixed an invalid kernel launch for large batch counts in GETRS, LASWP and the small-matrix POTF2/POTRF, which left the output uncomputed while returning success.
 
 ### Known issues
 ### Upcoming changes

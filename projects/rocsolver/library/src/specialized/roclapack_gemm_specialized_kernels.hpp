@@ -37,7 +37,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 /** GEMM device function to compute C = alpha * A * B + beta * C.
 
-    Call this kernel with 'batch_count' groups in z, and enough
+    Call this kernel with up to 'batch_count' groups in z, and enough
     groups in x and y to cover all the 'm' rows and 'n' columns of C. **/
 template <typename T, typename I, typename V, typename U1, typename U2, typename U3>
 ROCSOLVER_KERNEL void gemm_kernel(const I m,
@@ -61,24 +61,28 @@ ROCSOLVER_KERNEL void gemm_kernel(const I m,
                                   rocblas_stride shiftC,
                                   I incc,
                                   I ldc,
-                                  rocblas_stride strideC)
+                                  rocblas_stride strideC,
+                                  const I batch_count)
 {
     // indices
-    I bid = hipBlockIdx_z;
     I i = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
     I j = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + hipThreadIdx_y;
 
-    // batch instance
-    T a = load_scalar(alpha, bid, 0);
-    T b = load_scalar(beta, bid, 0);
-    T* A = load_ptr_batch(AA, bid, shiftA, strideA);
-    T* B = load_ptr_batch(BB, bid, shiftB, strideB);
-    T* C = load_ptr_batch(CC, bid, shiftC, strideC);
+    if(i >= m || j >= n)
+        return;
 
-    // gemm function
-    T temp = 0;
-    if(i < m && j < n)
+    // grid.z is capped at maxGridSize[2], so it can hold fewer groups than batch_count
+    for(I bid = hipBlockIdx_z; bid < batch_count; bid += gridDim.z)
     {
+        // batch instance
+        T a = load_scalar(alpha, bid, 0);
+        T b = load_scalar(beta, bid, 0);
+        T* A = load_ptr_batch(AA, bid, shiftA, strideA);
+        T* B = load_ptr_batch(BB, bid, shiftB, strideB);
+        T* C = load_ptr_batch(CC, bid, shiftC, strideC);
+
+        // gemm function
+        T temp = 0;
         for(I idx = 0; idx < k; idx++)
         {
             const auto Aval = conjA ? conj(A[i * inca + idx * lda]) : A[i * inca + idx * lda];
@@ -93,7 +97,7 @@ ROCSOLVER_KERNEL void gemm_kernel(const I m,
 
 /** GEMM device function to compute C = alpha * A * B + beta * C.
 
-    Call this kernel with 'batch_count' groups in z. Each wave in x
+    Call this kernel with up to 'batch_count' groups in z. Each wave in x
     and y computes 16 of 'm' rows and 16 of the 'n' columns of C. **/
 template <typename T, typename I, typename V, typename U1, typename U2, typename U3>
 ROCSOLVER_KERNEL void mfma_gemm_kernel(rocblas_operation transA,
@@ -117,7 +121,8 @@ ROCSOLVER_KERNEL void mfma_gemm_kernel(rocblas_operation transA,
                                        rocblas_stride shiftC,
                                        I incc,
                                        I ldc,
-                                       rocblas_stride strideC)
+                                       rocblas_stride strideC,
+                                       const I batch_count)
 {
     const I bid_x = blockIdx.x;
     const I bid_y = blockIdx.y;
@@ -139,21 +144,23 @@ ROCSOLVER_KERNEL void mfma_gemm_kernel(rocblas_operation transA,
     const I m_bar = (block_row + 16) <= m ? 16 : m % 16;
     const I n_bar = (block_col + 16) <= n ? 16 : n % 16;
 
-    I batch_id = hipBlockIdx_z;
+    // grid.z is capped at maxGridSize[2], so it can hold fewer groups than batch_count
+    for(I batch_id = hipBlockIdx_z; batch_id < batch_count; batch_id += gridDim.z)
+    {
+        // batch instance
+        T a = load_scalar(alpha, batch_id, 0);
+        T b = load_scalar(beta, batch_id, 0);
+        T* A = load_ptr_batch(AA, batch_id, shiftA, strideA);
+        T* B = load_ptr_batch(BB, batch_id, shiftB, strideB);
+        T* C = load_ptr_batch(CC, batch_id, shiftC, strideC);
 
-    // batch instance
-    T a = load_scalar(alpha, batch_id, 0);
-    T b = load_scalar(beta, batch_id, 0);
-    T* A = load_ptr_batch(AA, batch_id, shiftA, strideA);
-    T* B = load_ptr_batch(BB, batch_id, shiftB, strideB);
-    T* C = load_ptr_batch(CC, batch_id, shiftC, strideC);
+        A += block_row * (transA == rocblas_operation_none ? inca : lda);
+        B += block_col * (transB == rocblas_operation_none ? ldb : incb);
 
-    A += block_row * (transA == rocblas_operation_none ? inca : lda);
-    B += block_col * (transB == rocblas_operation_none ? ldb : incb);
-
-    // C(bid_x,bid_y) += A(bid_x,:) * B(:,bid_y)
-    gemm_16x16xp(transA, transB, m_bar, n_bar, p, a, A, inca, lda, B, incb, ldb, b,
-                 C + (block_col * ldc + block_row * incc), incc, ldc);
+        // C(bid_x,bid_y) += A(bid_x,:) * B(:,bid_y)
+        gemm_16x16xp(transA, transB, m_bar, n_bar, p, a, A, inca, lda, B, incb, ldb, b,
+                     C + (block_col * ldc + block_row * incc), incc, ldc);
+    }
 }
 
 #else // ROCSOLVER_MFMA_ENABLED
@@ -179,7 +186,8 @@ ROCSOLVER_KERNEL void mfma_gemm_kernel(rocblas_operation transA,
                                        rocblas_stride shiftC,
                                        I incc,
                                        I ldc,
-                                       rocblas_stride strideC)
+                                       rocblas_stride strideC,
+                                       const I batch_count)
 {
 }
 #endif // ROCSOLVER_MFMA_ENABLED
@@ -237,6 +245,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_gemm(rocblas_handle handle,
 
     // get warp size
     const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    const I blocksz = std::min(batch_count, I(props->maxGridSize[2]));
 
     std::string deviceArch(props->gcnArchName);
 
@@ -252,19 +261,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_gemm(rocblas_handle handle,
         const I numWarpsY = 4;
         const I blocksx = (m + (numWarpsX * 16 - 1)) / (numWarpsX * 16);
         const I blocksy = (n + (numWarpsY * 16 - 1)) / (numWarpsY * 16);
-        dim3 grid(blocksx, blocksy, batch_count);
+        dim3 grid(blocksx, blocksy, blocksz);
         dim3 threads(numWarpsX * warpSize, numWarpsY, 1);
         if(pmode == rocblas_pointer_mode_device)
         {
             ROCSOLVER_LAUNCH_KERNEL((mfma_gemm_kernel<T>), grid, threads, 0, stream, transA, transB,
                                     m, n, k, alpha, A, shiftA, inca, lda, strideA, B, shiftB, incb,
-                                    ldb, strideB, beta, C, shiftC, incc, ldc, strideC);
+                                    ldb, strideB, beta, C, shiftC, incc, ldc, strideC, batch_count);
         }
         else
         {
             ROCSOLVER_LAUNCH_KERNEL((mfma_gemm_kernel<T>), grid, threads, 0, stream, transA, transB,
                                     m, n, k, *alpha, A, shiftA, inca, lda, strideA, B, shiftB, incb,
-                                    ldb, strideB, *beta, C, shiftC, incc, ldc, strideC);
+                                    ldb, strideB, *beta, C, shiftC, incc, ldc, strideC, batch_count);
         }
     }
     else
@@ -291,19 +300,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_gemm(rocblas_handle handle,
         // launch specialized kernel
         I blocksx = (m - 1) / BS2 + 1;
         I blocksy = (n - 1) / BS2 + 1;
-        dim3 grid(blocksx, blocksy, batch_count);
+        dim3 grid(blocksx, blocksy, blocksz);
         dim3 threads(BS2, BS2, 1);
         if(pmode == rocblas_pointer_mode_device)
         {
             ROCSOLVER_LAUNCH_KERNEL((gemm_kernel<T>), grid, threads, 0, stream, m, n, k, alpha,
                                     conjA, A, shiftA, lda1, lda2, strideA, conjB, B, shiftB, ldb1,
-                                    ldb2, strideB, beta, C, shiftC, incc, ldc, strideC);
+                                    ldb2, strideB, beta, C, shiftC, incc, ldc, strideC, batch_count);
         }
         else
         {
             ROCSOLVER_LAUNCH_KERNEL((gemm_kernel<T>), grid, threads, 0, stream, m, n, k, *alpha,
                                     conjA, A, shiftA, lda1, lda2, strideA, conjB, B, shiftB, ldb1,
-                                    ldb2, strideB, *beta, C, shiftC, incc, ldc, strideC);
+                                    ldb2, strideB, *beta, C, shiftC, incc, ldc, strideC, batch_count);
         }
     }
 
