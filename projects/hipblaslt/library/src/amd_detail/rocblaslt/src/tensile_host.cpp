@@ -6897,15 +6897,28 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
         TensileLite::recordTuningLookup(winner.m_tuningKey, true);
         TensileLite::recordTuningWinner(winner.m_tuningKey);
 
-        std::ostringstream msg;
-        msg << "online-winner=" << entry.solutionIndex << " us=" << std::fixed
-            << std::setprecision(2) << winnerTimeUs << " candidates=" << search.maxCandidates
-            << " repeats=" << search.hotIters << " persisted=" << (persisted ? "yes" : "no");
-        if(!persisted)
-            msg << " (could not write " << tuning.cachePath()
-                << "; the winner is used now but lost at exit)";
+        // Through the gate the tune path's terminal line goes through, not
+        // around it. This is online's equivalent of tuning-done: the one line
+        // that says a shape was settled and what it cost. Tune emits one per
+        // shape too, but a tune line is paid for by a search the caller waited
+        // seconds for, while online settles a shape every 3K+1 visits, so an
+        // ungated line here is the same notice at a rate nothing limits.
+        // Routing it through shouldLogTuningTerminal puts both modes under one
+        // policy -- per key, and unconditional once info logging is on -- so a
+        // later change to what the stack reports moves online with it.
+        if(TensileLite::shouldLogTuningTerminal(winner.m_tuningKey,
+                                                TensileLite::TuningAttempt::Tuned))
+        {
+            std::ostringstream msg;
+            msg << "online-winner=" << entry.solutionIndex << " us=" << std::fixed
+                << std::setprecision(2) << winnerTimeUs << " candidates=" << search.maxCandidates
+                << " repeats=" << search.hotIters << " persisted=" << (persisted ? "yes" : "no");
+            if(!persisted)
+                msg << " (could not write " << tuning.cachePath()
+                    << "; the winner is used now but lost at exit)";
 
-        log_tuning_lifecycle(__func__, msg.str());
+            log_tuning_lifecycle(__func__, msg.str());
+        }
     }
     catch(...)
     {

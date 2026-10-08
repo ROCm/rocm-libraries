@@ -3104,10 +3104,18 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_debug_reload()
     TensileLite::reloadHostDebugBitsForTest();
 }
 
-// Test support, like hipblaslt_debug_reload: the tuning variables are read on
-// first use, each file is loaded once per process, and the diagnostics latch
-// for the process. Not part of any supported interface.
-extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
+// Everything hipblaslt_tuning_reset_for_test does except the diagnostics, the
+// counters and the injected failure: the configuration is re-read and every
+// shape this process has learned about is dropped, both the in-memory rows and
+// the online tuner's own tables.
+//
+// Separable because the lifecycle notices are bounded per shape by diagnostics
+// that live for the process, and that bound can only be seen where a shape is
+// settled twice while the diagnostics still remember the first time. Nothing
+// in one process reaches that state by itself -- a settled shape is served
+// from the in-memory cache and is never measured again -- so a test has to
+// make it, and the diagnostics are the one thing it may not clear.
+extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_forget_shapes_for_test()
 {
     TensileLite::TuningModeSingleton::getInstance().reloadForTest();
     TensileLite::OverrideMap::getMap().resetForTest();
@@ -3116,7 +3124,14 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     // After the mode singleton, which is where the tuner reads whether it is on
     // and how deep it searches.
     rocblaslt::OnlineTuner::getInstance().reloadForTest();
+}
 
+// Test support, like hipblaslt_debug_reload: the tuning variables are read on
+// first use, each file is loaded once per process, and the diagnostics latch
+// for the process. Not part of any supported interface.
+extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
+{
+    hipblaslt_tuning_forget_shapes_for_test();
     TensileLite::resetTuningDiagnosticsForTest();
 
     auto& counters         = TensileLite::TuningCounters::instance();
