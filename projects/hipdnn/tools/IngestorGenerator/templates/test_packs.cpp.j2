@@ -240,7 +240,7 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, ShipsNoHeuristicAndRegistersNoS
 }
 {% endif %}
 
-{% if config.is_multi_pack %}
+{% if config.has_operation_matchers %}
 /// UMD policy, this engine's shape: a MULTI-pack engine carries one graph-scoped
 /// operation matcher per pack, on top of the one shared kernel-scoped matcher.
 TEST_F(Test{{ config.engine.pascal_name }}Packs, CarriesOneGraphScopedMatcherPerPack)
@@ -252,9 +252,10 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, CarriesOneGraphScopedMatcherPer
     EXPECT_EQ(static_cast<size_t>(graphScoped), _expected->packNames.size());
 }
 {% else %}
-/// UMD policy, this engine's shape: a SINGLE-pack engine carries no graph-scoped
-/// criterion -- its own graph_match admits the node type and validates shape. Mirrors
-/// TestConvFwdPack.cpp's HasAGraphMatchAndOneKernelMatcher.
+/// UMD policy, this engine's shape: a SINGLE-pack engine, or one catalog sharded across
+/// packs that declare no discriminator, carries no graph-scoped criterion -- its own
+/// graph_match admits the node type and validates shape. Mirrors TestConvFwdPack.cpp's
+/// HasAGraphMatchAndOneKernelMatcher.
 TEST_F(Test{{ config.engine.pascal_name }}Packs, CarriesNoGraphScopedMatcher)
 {
     EXPECT_FALSE(_set->engine.graphMatchNativeSymbol.empty());

@@ -213,7 +213,7 @@ specialization:
     block_waves:
       field: block_waves
 packs:
-- name: gfx950_conv_fwd_aot
+- name: bf16
   arch:
   - gfx950
   kernel_defaults:
@@ -281,6 +281,146 @@ packs:
     - {dtype: bf16, tile_m: 32, tile_n: 32, tile_k: 32, warp_m: 1, warp_n: 1, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: mem, epilogue: default, vector_size_a: 1, vector_size_b: 1, vector_size_c: 1, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: a19d8fa53eb5aeecee42f86232855c3fe6ce871f, layout: NHWC, knobs: instance}
     - {dtype: bf16, tile_m: 128, tile_n: 64, tile_k: 32, warp_m: 2, warp_n: 2, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: compv3, epilogue: cshuffle, vector_size_a: 8, vector_size_b: 8, vector_size_c: 4, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: b604f664962522fa17460431d4eb10234d732afa, layout: NHWC, knobs: instance}
     - {dtype: bf16, tile_m: 64, tile_n: 64, tile_k: 64, warp_m: 2, warp_n: 2, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: mem, epilogue: cshuffle, vector_size_a: 8, vector_size_b: 8, vector_size_c: 8, unroll_k: 1, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: ee66277efaa31ec317f45115139212a525d31b52, layout: NHWC, knobs: instance}
+  - name: gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}
+    metadata:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - kernel_family
+    - direct_variant
+    - filter_h
+    - filter_w
+    - stride_h
+    - stride_w
+    - pad_h
+    - pad_w
+    - dilation_h
+    - dilation_w
+    - block_w
+    - block_waves
+    spec_order:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    - kernel_family
+    - direct_variant
+    - filter_h
+    - filter_w
+    - stride_h
+    - stride_w
+    - pad_h
+    - pad_w
+    - dilation_h
+    - dilation_w
+    - block_w
+    - block_waves
+    spec_defaults: {}
+    knob_sets:
+      instance:
+      - {}
+    shapes:
+    - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: 023b14c719e2f2f8f6afe38d2ef9833a3e85f683, layout: NHWC, kernel_family: 1, direct_variant: std, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 4, block_waves: 1, knobs: instance}
+    - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: 41c9d65026e500f76ecbddc9452c972e5b4088ed, layout: NHWC, kernel_family: 1, direct_variant: std, filter_h: 5, filter_w: 5, stride_h: 2, stride_w: 2, pad_h: 2, pad_w: 2, dilation_h: 1, dilation_w: 1, block_w: 16, block_waves: 2, knobs: instance}
+    - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: cf100d174aea389ed5904cab4068d96634fa9ef3, layout: NHWC, kernel_family: 1, direct_variant: spatial, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 1, knobs: instance}
+    - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: dc6ea991953168a0b98967b106516fdc60959042, layout: NHWC, kernel_family: 1, direct_variant: spatial, filter_h: 7, filter_w: 7, stride_h: 2, stride_w: 2, pad_h: 3, pad_w: 3, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 4, knobs: instance}
+- name: fp16
+  arch:
+  - gfx950
+  kernel_defaults:
+    kind: rocke
+    source: builders/common/convolution_forward.py
+    builder: build_gfx950_conv_fwd_aot
+  variants:
+  - name: gfx950_conv_fwd_aot_{dtype}_{instance_id}
+    metadata:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    spec_order:
+    - dtype
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - wave_size
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - unroll_k
+    - async_dma
+    - async_chunk_a
+    - async_chunk_b
+    - grouped
+    - instance_id
+    - layout
+    spec_defaults: {}
+    knob_sets:
+      instance:
+      - {}
+    shapes:
     - {dtype: fp16, tile_m: 64, tile_n: 64, tile_k: 64, warp_m: 2, warp_n: 2, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: mem, epilogue: cshuffle, vector_size_a: 4, vector_size_b: 4, vector_size_c: 2, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: 2b2e4f5d672f9d9f194c5af658f166b345ae3149, layout: NHWC, knobs: instance}
     - {dtype: fp16, tile_m: 64, tile_n: 32, tile_k: 64, warp_m: 2, warp_n: 1, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: mem, epilogue: cshuffle, vector_size_a: 2, vector_size_b: 2, vector_size_c: 1, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 1, instance_id: 2e13942a39d8d277fd4341df6d0f211811802701, layout: NHWC, knobs: instance}
     - {dtype: fp16, tile_m: 64, tile_n: 64, tile_k: 64, warp_m: 2, warp_n: 2, warp_tile_m: 32, warp_tile_n: 32, warp_tile_k: 16, wave_size: 64, pipeline: mem, epilogue: cshuffle, vector_size_a: 8, vector_size_b: 8, vector_size_c: 8, unroll_k: 0, async_dma: 1, async_chunk_a: 8, async_chunk_b: 8, grouped: 1, instance_id: 2e61a9a1472e1d38b6602edb7cc2769eba3990d1, layout: NHWC, knobs: instance}
@@ -365,10 +505,6 @@ packs:
       instance:
       - {}
     shapes:
-    - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: 023b14c719e2f2f8f6afe38d2ef9833a3e85f683, layout: NHWC, kernel_family: 1, direct_variant: std, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 4, block_waves: 1, knobs: instance}
-    - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: 41c9d65026e500f76ecbddc9452c972e5b4088ed, layout: NHWC, kernel_family: 1, direct_variant: std, filter_h: 5, filter_w: 5, stride_h: 2, stride_w: 2, pad_h: 2, pad_w: 2, dilation_h: 1, dilation_w: 1, block_w: 16, block_waves: 2, knobs: instance}
-    - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: cf100d174aea389ed5904cab4068d96634fa9ef3, layout: NHWC, kernel_family: 1, direct_variant: spatial, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 1, knobs: instance}
-    - {dtype: bf16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: dc6ea991953168a0b98967b106516fdc60959042, layout: NHWC, kernel_family: 1, direct_variant: spatial, filter_h: 7, filter_w: 7, stride_h: 2, stride_w: 2, pad_h: 3, pad_w: 3, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 4, knobs: instance}
     - {dtype: fp16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: 1391e6d6aabd15bd79acd1c354761f44c9b8f4b0, layout: NHWC, kernel_family: 1, direct_variant: spatial, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 1, knobs: instance}
     - {dtype: fp16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: 4850fcf3a30d3227f089ea1febb2b53639c2dd05, layout: NHWC, kernel_family: 1, direct_variant: spatial, filter_h: 7, filter_w: 7, stride_h: 2, stride_w: 2, pad_h: 3, pad_w: 3, dilation_h: 1, dilation_w: 1, block_w: 0, block_waves: 4, knobs: instance}
     - {dtype: fp16, tile_m: 0, tile_n: 0, tile_k: 0, warp_m: 0, warp_n: 0, warp_tile_m: 0, warp_tile_n: 0, warp_tile_k: 0, wave_size: 64, pipeline: direct, epilogue: direct, vector_size_a: 0, vector_size_b: 0, vector_size_c: 0, unroll_k: 0, async_dma: 0, async_chunk_a: 0, async_chunk_b: 0, grouped: 0, instance_id: ac4f5eefab4dd228ba5f9539bd33b67b90442f6b, layout: NHWC, kernel_family: 1, direct_variant: std, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dilation_h: 1, dilation_w: 1, block_w: 4, block_waves: 1, knobs: instance}
