@@ -370,7 +370,7 @@ class BaseTuner(ABC):
             "strategy": self.strategy,
             "grid_div_x": self._get_grid_div_x(),
             "cache": str(self._get_cache_file_path()),
-            "problem_size": 10,
+            "problem_size": self.bytes_size,
             "lang": "C",
             "compiler": "hipcc",
             "compiler_options": self._get_compiler_options(),
