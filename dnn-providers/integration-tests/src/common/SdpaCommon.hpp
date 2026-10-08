@@ -5,6 +5,8 @@
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <optional>
 #include <ostream>
 #include <vector>
@@ -68,6 +70,42 @@ struct SdpaBwdTestCase
         return ss;
     }
 };
+
+/// Overwrites `o` and `stats` with the forward outputs of (q, k, v) under this
+/// test case's scale, band bounds and diagonal alignment.
+///
+/// An SDPA backward node takes O and the LSE as inputs and both the CPU reference
+/// and the backward kernels recompute P = exp(Q K^T * scale - lse) from them. Only
+/// the forward's own LSE makes that recomputation row-stochastic, so only then are
+/// dQ, dK and dV the gradients the engine is meant to produce. Filling O and the
+/// LSE from a random generator instead leaves P unnormalized by a factor that
+/// spans several orders of magnitude, which is numerically meaningless rather than
+/// merely a harder test case.
+///
+/// `stats` must be rank-4 [B, H_q, S_q, 1]; the CPU reference rejects any other
+/// rank, and that is the shape the frontend infers for the forward stats output.
+template <class DataType>
+void fillForwardOutputsForBackward(const hipdnn_data_sdk::utilities::TensorBase<DataType>& q,
+                                   const hipdnn_data_sdk::utilities::TensorBase<DataType>& k,
+                                   const hipdnn_data_sdk::utilities::TensorBase<DataType>& v,
+                                   hipdnn_data_sdk::utilities::TensorBase<DataType>& o,
+                                   hipdnn_data_sdk::utilities::TensorBase<float>& stats,
+                                   const SdpaBwdTestCase& tc)
+{
+    using hipdnn_test_sdk::utilities::CpuFpReferenceSdpa;
+
+    CpuFpReferenceSdpa::forward<DataType, DataType, DataType, DataType, float>(
+        q,
+        k,
+        v,
+        o,
+        tc.attnScaleValue,
+        /*attnMask=*/nullptr,
+        tc.leftBound,
+        tc.rightBound,
+        tc.topLeftAlignment,
+        &stats);
+}
 
 // Engine-agnostic backward coverage, ported verbatim from the ASM SDPA
 // provider-local suite. Small dims for fast CPU reference execution (backward

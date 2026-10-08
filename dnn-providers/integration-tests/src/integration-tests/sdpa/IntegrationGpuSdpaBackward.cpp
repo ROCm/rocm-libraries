@@ -3,10 +3,13 @@
 
 #ifdef HIPDNN_ENABLE_SDPA
 
+#include <memory>
 #include <utility>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
+#include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -26,14 +29,21 @@ template <typename DataType>
 class SdpaBackward : public IntegrationGraphVerificationHarness<DataType, SdpaBwdTestCase>
 {
 public:
-    struct GraphOutputs
+    // Inputs are kept alongside the gradients because initializeBundle() has to
+    // find Q, K, V, O and stats by UID after the graph has been built.
+    struct GraphTensors
     {
+        std::shared_ptr<graph::TensorAttributes> q;
+        std::shared_ptr<graph::TensorAttributes> k;
+        std::shared_ptr<graph::TensorAttributes> v;
+        std::shared_ptr<graph::TensorAttributes> o;
+        std::shared_ptr<graph::TensorAttributes> stats;
         std::shared_ptr<graph::TensorAttributes> dq;
         std::shared_ptr<graph::TensorAttributes> dk;
         std::shared_ptr<graph::TensorAttributes> dv;
     };
 
-    static std::pair<graph::Graph, GraphOutputs> buildGraph(hipdnnHandle_t handle,
+    static std::pair<graph::Graph, GraphTensors> buildGraph(hipdnnHandle_t handle,
                                                             const SdpaBwdTestCase& tc)
     {
         graph::Graph graphObj;
@@ -52,8 +62,10 @@ public:
         const auto& doDims = oDims;
         const auto& doStrides = oStrides;
 
-        // Stats (LSE) dims: [B, H_q, S_q, 1], the shape the frontend infers for the forward
-        // stats output and the one the CPU reference requires.
+        // Stats (LSE) dims: [B, H_q, S_q, 1]. That is the rank the CPU backward
+        // reference requires and the one the frontend infers for the forward
+        // stats output. The ASM backward engine reads only the batch and head
+        // strides, so either rank serves it.
         const std::vector<int64_t> statsDims{tc.qDims[0], tc.qDims[1], tc.qDims[2], 1};
         const auto statsStrides = generateStrides(statsDims);
 
@@ -108,26 +120,78 @@ public:
                                      + buildResult.get_message());
         }
 
-        return std::make_pair(std::move(graphObj), GraphOutputs{dq, dk, dv});
+        return std::make_pair(std::move(graphObj), GraphTensors{q, k, v, o, stats, dq, dk, dv});
     }
 
 protected:
+    using Harness = IntegrationGraphVerificationHarness<DataType, SdpaBwdTestCase>;
+
     void runGraphTest() override
     {
         const auto& testCase = this->GetParam();
 
-        auto [graphObj, outputs] = buildGraph(getSharedHandle(), testCase);
+        auto [graphObj, tensors] = buildGraph(getSharedHandle(), testCase);
+        _tensors = tensors;
 
-        this->registerValidator(outputs.dq, this->getTolerance(graphObj, outputs.dq));
-        this->registerValidator(outputs.dk, this->getTolerance(graphObj, outputs.dk));
-        this->registerValidator(outputs.dv, this->getTolerance(graphObj, outputs.dv));
+        this->registerValidator(tensors.dq, this->getTolerance(graphObj, tensors.dq));
+        this->registerValidator(tensors.dk, this->getTolerance(graphObj, tensors.dk));
+        this->registerValidator(tensors.dv, this->getTolerance(graphObj, tensors.dv));
 
         this->inputFillRecipes().setGlobalSeed(K_SEED);
         this->verifyGraph(graphObj);
     }
 
+    // Runs once per bundle, after the base class has filled every graph input.
+    // The reference bundle and the GPU bundle are filled from the same seeds, so
+    // both still start from identical Q, K, V and dO.
+    //
+    // The random fill alone leaves O and the LSE unrelated to Q, K and V. Both
+    // the CPU reference and the backward kernels then recompute
+    // P = exp(Q K^T * scale - lse) from an LSE that is not the forward's, so P is
+    // not row-stochastic and dS = P * (dP - D) loses its cancellation: bf16
+    // produces large absolute outliers and fp16 saturates. Deriving O and the LSE
+    // from the forward is what the provider-local ASM backward test has always
+    // done, and it is the only input regime in which these gradients are defined.
+    FillResult initializeBundle(const hipdnn_frontend::graph::Graph& graph,
+                                hipdnn_test_sdk::utilities::GraphTensorBundle& bundle) override
+    {
+        auto result = Harness::initializeBundle(graph, bundle);
+        if(!result.filled)
+        {
+            return result;
+        }
+
+        // UIDs are assigned by graph.build(), which verifyGraph() runs before this
+        // call, so they are only resolvable here.
+        auto& qTensor = bundle.getTensor(_tensors.q->get_uid());
+        auto& kTensor = bundle.getTensor(_tensors.k->get_uid());
+        auto& vTensor = bundle.getTensor(_tensors.v->get_uid());
+        auto& oTensor = bundle.getTensor(_tensors.o->get_uid());
+        auto& statsTensor = bundle.getTensor(_tensors.stats->get_uid());
+
+        const ShallowTensor<DataType> shallowQ(
+            qTensor.rawHostData(), qTensor.dims(), qTensor.strides());
+        const ShallowTensor<DataType> shallowK(
+            kTensor.rawHostData(), kTensor.dims(), kTensor.strides());
+        const ShallowTensor<DataType> shallowV(
+            vTensor.rawHostData(), vTensor.dims(), vTensor.strides());
+        ShallowTensor<DataType> shallowO(oTensor.rawHostData(), oTensor.dims(), oTensor.strides());
+        ShallowTensor<float> shallowStats(
+            statsTensor.rawHostData(), statsTensor.dims(), statsTensor.strides());
+
+        test_sdpa_common::fillForwardOutputsForBackward<DataType>(
+            shallowQ, shallowK, shallowV, shallowO, shallowStats, this->GetParam());
+
+        oTensor.markHostModified();
+        statsTensor.markHostModified();
+
+        return result;
+    }
+
 private:
     static constexpr unsigned int K_SEED = 0;
+
+    GraphTensors _tensors;
 };
 
 using IntegrationGpuSdpaBwdBfp16 = SdpaBackward<bfloat16>;
