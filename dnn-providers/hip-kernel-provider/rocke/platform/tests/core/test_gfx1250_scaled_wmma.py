@@ -10,7 +10,7 @@ from unittest import mock
 
 from rocke.core.arch import ArchTarget
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
-from rocke.core.backend import resolve_backend
+from rocke.core.backend import _cpp_strict, resolve_backend
 from rocke.core.isa.wmma_scale import ScaledWmmaLLVM
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
@@ -233,7 +233,12 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                 self.assertIn(f", {scale_ty} %", ll)
 
     def test_scaled_wmma_rejects_pre_llvm23_flavors(self):
-        error_type = RuntimeError if resolve_backend() == "cpp" else NotImplementedError
+        # A native rejection is retried in Python unless strict C++ is requested.
+        error_type = (
+            RuntimeError
+            if resolve_backend() == "cpp" and _cpp_strict()
+            else NotImplementedError
+        )
         for flavor in ("llvm20", "llvm22"):
             with (
                 self.subTest(flavor=flavor),
@@ -343,14 +348,14 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
             M=16,
             N=16,
             K=128,
-            dtype_b="bf8",
+            dtype_b="fp16",
             scale_dtype="e8m0",
             block_k=32,
             matrix_path="wmma_scale",
         )
         ok, why = is_valid_spec(bad_dtype)
         self.assertFalse(ok)
-        self.assertIn("requested operand and scale contract", why)
+        self.assertIn("A/B must be", why)
 
         bad_block = BlockScaledGemmSpec(
             name="bad_block",
