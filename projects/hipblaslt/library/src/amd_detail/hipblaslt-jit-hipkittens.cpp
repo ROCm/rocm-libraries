@@ -33,11 +33,6 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
         // The kernels address each tensor with 32-bit byte offsets.
         constexpr size_t tensorLimit = size_t(1) << 32;
 
-        std::vector<uint8_t> bytes(std::string_view text)
-        {
-            return {text.begin(), text.end()};
-        }
-
         Status unavailable(const std::string& cause)
         {
             return {Status::Code::Failed,
@@ -142,7 +137,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             std::error_code error;
             const auto      found = std::find_if(
                 candidates.begin(), candidates.end(), [&](const fs::path& directory) {
-                    return fs::is_regular_file(directory / "manifest.json", error);
+                    return fs::is_regular_file(directory / "manifest.msgpack", error);
                 });
             if(found == candidates.end())
                 return unavailable("headers not found at " + candidates.front().u8string()
@@ -151,14 +146,13 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             const auto& resources = detail::resources();
             std::vector<uint8_t> manifest;
             if(error
-               || !hipblaslt_jit::files::readFile(root / "manifest.json", fileLimit, manifest).ok()
-               || std::string_view(reinterpret_cast<const char*>(manifest.data()), manifest.size())
-                      != resources.manifest)
-                return unavailable((*found / "manifest.json").u8string()
+               || !hipblaslt_jit::files::readFile(root / "manifest.msgpack", fileLimit, manifest).ok()
+               || manifest != resources.manifest)
+                return unavailable((*found / "manifest.msgpack").u8string()
                                    + " is not the manifest of this build's headers");
             for(const auto& header : resources.headers)
             {
-                const auto path = *found / fs::u8path(header.path);
+                const auto path = *found / header.path;
                 const auto real = fs::canonical(path, error);
                 if(error || !fs::is_regular_file(real, error))
                     return unavailable(path.u8string() + " is missing");
@@ -166,13 +160,13 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                     return unavailable(path.u8string() + " leaves " + found->u8string());
                 hipblaslt_jit::BuildUnit file;
                 // Templates include the files relative to include/.
-                file.name = fs::u8path(header.path).lexically_relative("include").generic_string();
+                file.name = header.path.lexically_relative("include").generic_string();
                 if(!hipblaslt_jit::files::readFile(real, fileLimit, file.bytes).ok()
                    || file.bytes.size() != header.size
                    || sha256Hex(std::string_view(
                           reinterpret_cast<const char*>(file.bytes.data()), file.bytes.size()))
                           != header.sha256)
-                    return unavailable(path.u8string() + " does not match manifest.json");
+                    return unavailable(path.u8string() + " does not match the header manifest");
                 headers.push_back(std::move(file));
             }
             const auto rocm = hipblaslt_jit::code_object::rocmPath();
@@ -196,7 +190,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                         "HipKittens generates GEMM kernels only"};
             const auto& variants = detail::resources().variants;
             if(std::none_of(variants.begin(), variants.end(), [&](const detail::Variant& variant) {
-                   return variant.isa == target.isa;
+                   return variant.isa.gfx == target.isa;
                }))
                 return {Status::Code::TargetMismatch,
                         Stage::Configure,
@@ -222,12 +216,12 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                             "HipKittens kernels need tensors smaller than 4 GiB"};
             for(const auto& variant : variants)
             {
-                if(variant.isa != target.isa)
+                if(variant.isa.gfx != target.isa)
                     continue;
                 std::shared_ptr<Master> library;
                 try
                 {
-                    library = hipblaslt_jit::loadGemmLibrary(bytes(variant.entry));
+                    library = hipblaslt_jit::loadGemmLibrary(variant.entry);
                 }
                 catch(const std::exception&)
                 {
@@ -236,8 +230,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                 if(!library || library->solutions.size() != 1)
                     return {Status::Code::Failed,
                             Stage::Generate,
-                            "The HipKittens entry of " + std::string(variant.name)
-                                + " does not load"};
+                            "The HipKittens entry of " + variant.name + " does not load"};
                 if((*library->solutions.begin()->second->problemPredicate)(problem))
                     found.push_back(&variant);
             }
@@ -279,14 +272,12 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                        || std::find(skip.begin(), skip.end(), variant->kernelName) != skip.end())
                         continue;
                     hipblaslt_jit::GeneratedSolution solution;
-                    solution.entry = bytes(variant->entry);
-                    solution.kernelNames.assign(1, std::string(variant->kernelName));
-                    solution.hipFlags = variant->hipFlags;
-                    hipblaslt_jit::BuildUnit unit;
-                    unit.kind     = hipblaslt_jit::BuildUnit::Kind::Hip;
-                    unit.name     = std::string(variant->name) + ".hip";
-                    unit.bytes    = bytes(variant->source);
-                    unit.includes = m_headers;
+                    solution.entry       = variant->entry;
+                    solution.kernelNames = {variant->kernelName};
+                    solution.hipFlags    = variant->hipFlags;
+                    hipblaslt_jit::BuildUnit unit = variant->source;
+                    unit.kind                     = hipblaslt_jit::BuildUnit::Kind::Hip;
+                    unit.includes                 = m_headers;
                     solution.units.push_back(std::move(unit));
                     solutions.push_back(std::move(solution));
                 }

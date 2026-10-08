@@ -53,7 +53,7 @@ namespace
         {
             {
                 INFO(("variant is not gfx950"));
-                REQUIRE((variant.isa == "gfx950"));
+                REQUIRE((variant.isa.gfx == "gfx950"));
             }
             {
                 INFO((std::string(variant.kernelName) + " resources changed"));

@@ -22,7 +22,7 @@
 //
 // The MessagePack encoder is the one in clients/tests/jit/bundle_writer.cpp.
 //
-// usage: hipblaslt-hipkittens-write-entries --headers MANIFEST --source HIP --output CPP
+// usage: hipblaslt-hipkittens-write-entries --headers LIST --manifest MSGPACK --source HIP --output CPP
 namespace
 {
     // Every column, so a buffer-limit check accepts an offset anywhere in the matrix.
@@ -391,86 +391,65 @@ namespace
         std::string sha256;
     };
 
-    void skipSpace(const std::string& text, size_t& pos)
+    struct HeaderList
     {
-        while(pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos])))
-            ++pos;
-    }
-
-    // The next JSON string. The manifest's paths and hashes have no escapes.
-    std::string jsonString(const std::string& text, size_t& pos)
-    {
-        skipSpace(text, pos);
-        if(pos >= text.size() || text[pos] != '"')
-            throw std::runtime_error("manifest.json expected a string");
-        const auto end = text.find('"', pos + 1);
-        if(end == std::string::npos)
-            throw std::runtime_error("manifest.json has an unterminated string");
-        auto value = text.substr(pos + 1, end - pos - 1);
-        pos        = end + 1;
-        return value;
-    }
-
-    void jsonKey(const std::string& text, size_t& pos, const char* key)
-    {
-        const auto found = jsonString(text, pos);
-        if(found != key)
-            throw std::runtime_error(std::string("manifest.json expected ") + key);
-        skipSpace(text, pos);
-        if(pos >= text.size() || text[pos] != ':')
-            throw std::runtime_error(std::string("manifest.json expected ") + key);
-        ++pos;
-    }
-
-    std::vector<HeaderFile> headerFiles(const std::string& manifest)
-    {
-        const auto files = manifest.find("\"files\"");
-        if(files == std::string::npos)
-            throw std::runtime_error("manifest.json has no files");
-        auto pos = manifest.find('[', files);
-        if(pos == std::string::npos)
-            throw std::runtime_error("manifest.json has no files");
-        ++pos;
+        std::string             commit;
+        std::string             archiveSha256;
+        int64_t                 abi = 0;
         std::vector<HeaderFile> headers;
-        while(true)
+    };
+
+    // The build list cmake writes: one record per line, not the installed file.
+    HeaderList readHeaderList(const std::string& path)
+    {
+        std::ifstream in(path);
+        if(!in)
+            throw std::runtime_error("Cannot read " + path);
+        HeaderList  listed;
+        std::string line;
+        while(std::getline(in, line))
         {
-            skipSpace(manifest, pos);
-            if(pos < manifest.size() && manifest[pos] == ']')
-                break;
-            if(pos >= manifest.size() || manifest[pos] != '{')
-                throw std::runtime_error("manifest.json has a malformed files entry");
-            ++pos;
-            HeaderFile file;
-            jsonKey(manifest, pos, "path");
-            file.path = jsonString(manifest, pos);
-            skipSpace(manifest, pos);
-            if(pos >= manifest.size() || manifest[pos] != ',')
-                throw std::runtime_error("manifest.json has a malformed files entry");
-            ++pos;
-            jsonKey(manifest, pos, "size");
-            skipSpace(manifest, pos);
-            file.size = std::stoull(manifest.substr(pos));
-            pos       = manifest.find_first_not_of("0123456789", pos);
-            skipSpace(manifest, pos);
-            if(pos >= manifest.size() || manifest[pos] != ',')
-                throw std::runtime_error("manifest.json has a malformed files entry");
-            ++pos;
-            jsonKey(manifest, pos, "sha256");
-            file.sha256 = jsonString(manifest, pos);
-            if(file.sha256.size() != 64)
-                throw std::runtime_error("manifest sha256 is not 64 hex digits: " + file.path);
-            skipSpace(manifest, pos);
-            if(pos >= manifest.size() || manifest[pos] != '}')
-                throw std::runtime_error("manifest.json has a malformed files entry");
-            ++pos;
-            headers.push_back(std::move(file));
-            skipSpace(manifest, pos);
-            if(pos < manifest.size() && manifest[pos] == ',')
-                ++pos;
+            if(line.empty())
+                continue;
+            std::istringstream row(line);
+            std::string        kind;
+            row >> kind;
+            if(kind == "commit")
+                row >> listed.commit;
+            else if(kind == "archive_sha256")
+                row >> listed.archiveSha256;
+            else if(kind == "abi")
+                row >> listed.abi;
+            else if(kind == "file")
+            {
+                HeaderFile file;
+                row >> file.path >> file.size >> file.sha256;
+                if(!row || file.path.empty() || file.sha256.size() != 64)
+                    throw std::runtime_error("header list has a malformed file record");
+                listed.headers.push_back(std::move(file));
+            }
+            else
+                throw std::runtime_error("header list has an unknown record");
         }
-        if(headers.empty())
-            throw std::runtime_error("manifest.json lists no header files");
-        return headers;
+        if(listed.commit.empty() || listed.archiveSha256.empty() || listed.headers.empty())
+            throw std::runtime_error("header list is missing the commit or the files");
+        return listed;
+    }
+
+    std::vector<uint8_t> manifestBytes(const HeaderList& listed)
+    {
+        Array files;
+        for(const auto& header : listed.headers)
+            files.push_back(Map{{"path", header.path},
+                                {"size", static_cast<int64_t>(header.size)},
+                                {"sha256", header.sha256}});
+        const Map document{{"commit", listed.commit},
+                           {"archive_sha256", listed.archiveSha256},
+                           {"abi", listed.abi},
+                           {"files", std::move(files)}};
+        std::vector<uint8_t> bytes;
+        encode(document, bytes);
+        return bytes;
     }
 
     std::string readFile(const std::string& path)
@@ -515,10 +494,10 @@ namespace
         return out;
     }
 
-    std::string resourcesSource(const std::string&              manifest,
-                                const std::string&              source,
-                                const std::vector<HeaderFile>&  headers,
-                                const std::vector<Variant>&     described,
+    std::string resourcesSource(const std::vector<uint8_t>&              manifest,
+                                const std::string&                       source,
+                                const std::vector<HeaderFile>&           headers,
+                                const std::vector<Variant>&              described,
                                 const std::vector<std::vector<uint8_t>>& entries)
     {
         std::ostringstream out;
@@ -526,38 +505,53 @@ namespace
             << "#include \"hipblaslt-jit-hipkittens.hpp\"\n\n"
             << "namespace hipblaslt_ext::experimental::jit::hipkittens::detail\n{\n"
             << "    namespace\n    {\n";
-        writeBytes(out,
-                   "manifest",
-                   reinterpret_cast<const uint8_t*>(manifest.data()),
-                   manifest.size());
+        writeBytes(out, "manifest", manifest.data(), manifest.size());
         writeBytes(out, "source", reinterpret_cast<const uint8_t*>(source.data()), source.size());
         for(size_t i = 0; i < entries.size(); ++i)
             writeBytes(out, "entry" + std::to_string(i), entries[i].data(), entries[i].size());
-        out << "    }\n\n"
-            << "    const Resources& resources()\n    {\n"
-            << "        static const Resources value{\n"
-            << "            {reinterpret_cast<const char*>(manifest), sizeof(manifest)},\n"
-            << "            {\n";
+        out << "\n        Resources makeResources()\n        {\n"
+            << "            Resources resources;\n"
+            << "            resources.manifest.assign(manifest, manifest + sizeof(manifest));\n";
         for(const auto& header : headers)
-            out << "                {" << cxxString(header.path) << ", " << header.size << ", "
-                << cxxString(header.sha256) << "},\n";
-        out << "            },\n            {\n";
+        {
+            out << "            {\n"
+                << "                HeaderFile header;\n"
+                << "                header.path = " << cxxString(header.path) << ";\n"
+                << "                header.size = " << header.size << ";\n"
+                << "                header.sha256 = " << cxxString(header.sha256) << ";\n"
+                << "                resources.headers.push_back(std::move(header));\n"
+                << "            }\n";
+        }
         for(size_t i = 0; i < described.size(); ++i)
         {
             const auto& variant = described[i];
-            out << "                {" << cxxString(variant.name) << ",\n"
-                << "                 \"gfx950\",\n"
-                << "                 " << cxxString(variant.kernel) << ",\n"
-                << "                 {reinterpret_cast<const char*>(source), sizeof(source)},\n"
-                << "                 {reinterpret_cast<const char*>(entry" << i << "), sizeof(entry"
-                << i << ")},\n"
-                << "                 {";
+            out << "            {\n"
+                << "                Variant variant;\n"
+                << "                variant.name = " << cxxString(variant.name) << ";\n"
+                << "                variant.isa.gfx = \"gfx950\";\n"
+                << "                variant.isa.wavefrontSize = 64;\n"
+                << "                variant.kernelName = " << cxxString(variant.kernel) << ";\n"
+                << "                variant.source.name = " << cxxString(std::string(variant.name) + ".hip")
+                << ";\n"
+                << "                variant.source.kind = hipblaslt_jit::BuildUnit::Kind::Hip;\n"
+                << "                variant.source.bytes.assign(source, source + sizeof(source));\n"
+                << "                variant.entry.assign(entry" << i << ", entry" << i
+                << " + sizeof(entry" << i << "));\n"
+                << "                variant.hipFlags = {";
             for(size_t flag = 0; flag < variant.flags.size(); ++flag)
                 out << (flag ? ", " : "") << cxxString(variant.flags[flag]);
-            out << "},\n"
-                << "                 {84, 160000, " << variant.vgprs << ", 0}},\n";
+            out << "};\n"
+                << "                variant.resources = {84, 160000, " << variant.vgprs << ", 0};\n"
+                << "                resources.variants.push_back(std::move(variant));\n"
+                << "            }\n";
         }
-        out << "            }};\n        return value;\n    }\n}\n";
+        out << "            return resources;\n"
+            << "        }\n"
+            << "    }\n\n"
+            << "    const Resources& resources()\n    {\n"
+            << "        static const Resources value = makeResources();\n"
+            << "        return value;\n"
+            << "    }\n}\n";
         return out.str();
     }
 }
@@ -565,7 +559,7 @@ namespace
 int main(int argc, char** argv)
 try
 {
-    std::string headers, source, output;
+    std::string headers, manifestPath, source, output;
     for(int i = 1; i < argc; ++i)
     {
         const std::string arg = argv[i];
@@ -577,22 +571,33 @@ try
             destination = argv[i];
             return true;
         };
-        if(!take("--headers", headers) && !take("--source", source) && !take("--output", output))
+        if(!take("--headers", headers) && !take("--manifest", manifestPath) && !take("--source", source)
+           && !take("--output", output))
             throw std::runtime_error("Unknown argument " + arg);
     }
-    if(headers.empty() || source.empty() || output.empty())
+    if(headers.empty() || manifestPath.empty() || source.empty() || output.empty())
         throw std::runtime_error("Usage: hipblaslt-hipkittens-write-entries "
-                                 "--headers MANIFEST --source HIP --output CPP");
+                                 "--headers LIST --manifest MSGPACK --source HIP --output CPP");
 
-    const auto manifest = readFile(headers);
-    const auto hip      = readFile(source);
-    if(manifest.empty() || hip.empty())
-        throw std::runtime_error("The manifest or the HIP template is empty");
+    const auto listed = readHeaderList(headers);
+    const auto hip    = readFile(source);
+    if(hip.empty())
+        throw std::runtime_error("The HIP template is empty");
+    const auto manifest = manifestBytes(listed);
+    {
+        std::ofstream record(manifestPath, std::ios::binary);
+        if(!record)
+            throw std::runtime_error("Cannot write " + manifestPath);
+        record.write(reinterpret_cast<const char*>(manifest.data()),
+                     static_cast<std::streamsize>(manifest.size()));
+        if(!record)
+            throw std::runtime_error("Cannot write " + manifestPath);
+    }
     const auto described = variants();
     std::vector<std::vector<uint8_t>> entries;
     for(const auto& variant : described)
         entries.push_back(libraryEntry(variant));
-    const auto text = resourcesSource(manifest, hip, headerFiles(manifest), described, entries);
+    const auto text = resourcesSource(manifest, hip, listed.headers, described, entries);
     std::ofstream out(output, std::ios::binary);
     if(!out)
         throw std::runtime_error("Cannot write " + output);

@@ -45,33 +45,29 @@ file(GLOB_RECURSE _hk_files RELATIVE "${hipkittens_SOURCE_DIR}"
 list(APPEND _hk_files include/kittens.cuh include/pyutils/util.cuh)
 list(SORT _hk_files)
 
-# Stages the headers and a manifest.json listing each file's size and SHA256.
+# Stages the headers. The build writes manifest.msgpack beside them; that is
+# the record the runtime reads.
 set(_hk_stage "${CMAKE_CURRENT_BINARY_DIR}/hipkittens/${_hk_short}")
-set(_hk_entries)
+set(_hk_list "${CMAKE_CURRENT_BINARY_DIR}/hipkittens-header-list.txt")
+file(WRITE "${_hk_list}"
+"commit ${_hk_commit}
+archive_sha256 ${_hk_archive_sha256}
+abi ${_hk_abi}
+")
 foreach(_hk_file IN LISTS _hk_files)
     set(_hk_source "${hipkittens_SOURCE_DIR}/${_hk_file}")
     file(SHA256 "${_hk_source}" _hk_hash)
     file(SIZE "${_hk_source}" _hk_size)
     get_filename_component(_hk_dir "${_hk_file}" DIRECTORY)
     file(COPY "${_hk_source}" DESTINATION "${_hk_stage}/${_hk_dir}")
-    list(APPEND _hk_entries
-        "    {\"path\": \"${_hk_file}\", \"size\": ${_hk_size}, \"sha256\": \"${_hk_hash}\"}")
+    file(APPEND "${_hk_list}" "file ${_hk_file} ${_hk_size} ${_hk_hash}\n")
 endforeach()
-list(JOIN _hk_entries ",\n" _hk_entries)
-file(CONFIGURE OUTPUT "${_hk_stage}/manifest.json" @ONLY CONTENT
-"{
-  \"commit\": \"${_hk_commit}\",
-  \"archive_sha256\": \"${_hk_archive_sha256}\",
-  \"abi\": ${_hk_abi},
-  \"files\": [
-${_hk_entries}
-  ]
-}
-")
 
+set(_hk_manifest "${_hk_stage}/manifest.msgpack")
 add_custom_target(hipblaslt-hipkittens-headers
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${_hk_stage}" "$<TARGET_FILE_DIR:hipblaslt>/${_hk_relative}"
+    DEPENDS "${_hk_manifest}"
     VERBATIM)
 add_dependencies(hipblaslt hipblaslt-hipkittens-headers)
 
@@ -85,7 +81,7 @@ rocm_install(FILES "${hipkittens_SOURCE_DIR}/LICENSE"
     DESTINATION "${CMAKE_INSTALL_DOCDIR}/third-party/hipkittens"
     COMPONENT runtime)
 
-# The compiled-in resources: header manifest, the HIP template and the
+# The compiled-in resources: the header record, the HIP template and the
 # one-solution entries write_entries.cpp describes. TensileLite is not invoked.
 set(_hk_source "${PROJECT_SOURCE_DIR}/library/src/amd_detail")
 set(_hk_variant_dir "${_hk_source}/hipkittens")
@@ -93,14 +89,15 @@ set(_hk_resources "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-jit-hipkittens-resource
 add_executable(hipblaslt-hipkittens-write-entries "${_hk_variant_dir}/write_entries.cpp")
 target_compile_features(hipblaslt-hipkittens-write-entries PRIVATE cxx_std_17)
 add_custom_command(
-    OUTPUT "${_hk_resources}"
+    OUTPUT "${_hk_resources}" "${_hk_manifest}"
     COMMAND $<TARGET_FILE:hipblaslt-hipkittens-write-entries>
-            --headers "${_hk_stage}/manifest.json"
+            --headers "${_hk_list}"
+            --manifest "${_hk_manifest}"
             --source "${_hk_variant_dir}/gemm_tn_256x256x64_gfx950.hip"
             --output "${_hk_resources}"
     DEPENDS hipblaslt-hipkittens-write-entries
             "${_hk_variant_dir}/gemm_tn_256x256x64_gfx950.hip"
-            "${_hk_stage}/manifest.json"
+            "${_hk_list}"
     COMMENT "Writing the JIT HipKittens entries"
     VERBATIM)
 # hipblaslt is defined in another directory, which gets no rule for the output.
