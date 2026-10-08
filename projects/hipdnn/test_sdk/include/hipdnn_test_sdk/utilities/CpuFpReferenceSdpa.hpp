@@ -31,7 +31,7 @@ public:
     /// @param k                Key tensor   [B, Hkv, Skv, D]
     /// @param v                Value tensor [B, Hkv, Skv, Dv]
     /// @param o                Output tensor [B, H, Sq, Dv]
-    /// @param attnScaleValue   Optional scale factor; defaults to 1/sqrt(D)
+    /// @param attnScaleValue   Optional scale factor; 1.0 (no scaling) when unset, as in cuDNN
     /// @param attnMask         Optional additive attention mask with dims right-aligned
     ///                         to [B, H, Sq, Skv] (rank 1–4), with broadcasting on size-1 dims
     /// @param leftBound        Number of sequence elements to the left that are unmasked
@@ -161,10 +161,7 @@ public:
         const auto headsPerHeadK = numHeads / numHeadsK;
         const auto headsPerHeadV = numHeads / numHeadsV;
 
-        const auto scale = attnScaleValue.has_value()
-                               ? static_cast<ComputeDataType>(attnScaleValue.value())
-                               : (static_cast<ComputeDataType>(1.0)
-                                  / std::sqrt(static_cast<ComputeDataType>(headDim)));
+        const auto scale = static_cast<ComputeDataType>(attnScaleValue.value_or(1.0F));
 
         const std::vector<int64_t> parallelDims = {batch, numHeads, seqQ};
 
@@ -291,7 +288,7 @@ public:
     /// @param k              Key tensor   [B, Hkv, Skv, D]
     /// @param v              Value tensor [B, Hkv, Skv, Dv]
     /// @param o              Output tensor [B, H, Sq, Dv]
-    /// @param attnScaleValue Optional scale factor; defaults to 1/sqrt(D)
+    /// @param attnScaleValue Optional scale factor; 1.0 (no scaling) when unset, as in cuDNN
     /// @param attnMask       Optional additive attention mask with dims right-aligned
     ///                       to [B, H, Sq, Skv] (rank 1–4), with broadcasting on size-1 dims
     /// @param causalMask     When true, applies a lower-triangular causal mask so each
@@ -400,7 +397,7 @@ public:
     /// @param dQ               Output: gradient w.r.t. Q [B, H_q, Sq, D]
     /// @param dK               Output: gradient w.r.t. K [B, H_k, Skv, D]
     /// @param dV               Output: gradient w.r.t. V [B, H_v, Skv, Dv]
-    /// @param attnScaleValue   Optional scale factor; defaults to 1/sqrt(D)
+    /// @param attnScaleValue   Optional scale factor; 1.0 (no scaling) when unset, as in cuDNN
     /// @param lse              Optional log-sum-exp from forward [B, H_q, Sq, 1] (FP32).
     ///                         When provided, enables efficient softmax recomputation.
     ///                         When nullptr, recomputes softmax from scratch.
@@ -565,10 +562,7 @@ public:
 
         const auto headsPerHeadK = numHeadsQ / numHeadsK;
         const auto headsPerHeadV = numHeadsQ / numHeadsV;
-        const auto scale = attnScaleValue.has_value()
-                               ? static_cast<ComputeDataType>(attnScaleValue.value())
-                               : (static_cast<ComputeDataType>(1.0)
-                                  / std::sqrt(static_cast<ComputeDataType>(headDim)));
+        const auto scale = static_cast<ComputeDataType>(attnScaleValue.value_or(1.0F));
 
         // Accumulate gradients in FP32 to match GPU kernel behavior.
         // The GPU ASM kernel uses FP32 accumulators (A32 path) and only converts

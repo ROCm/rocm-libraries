@@ -1,8 +1,8 @@
 {% extends "common/base.h.jinja2" %}
 
 
-{% block target_tparams %}
-template<class Target, class value_type, class output_type>
+{% block tparams %}
+class value_type, class output_type
 {% endblock %}
 
 {% block params_type -%}transform_config_params{% endblock -%}

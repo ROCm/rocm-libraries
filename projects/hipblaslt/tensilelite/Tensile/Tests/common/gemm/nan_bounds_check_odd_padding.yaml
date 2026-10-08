@@ -1,7 +1,7 @@
 # Test for NaN bounds checking with odd-sized padding
 # Verifies that pointer alignment is correct when padding elements is odd
 TestParameters:
-  marks: [skip-gfx1250]
+  marks: [skip-gfx1250, skip-gfx1250-strict]
   
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0

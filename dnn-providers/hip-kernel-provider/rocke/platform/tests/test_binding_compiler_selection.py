@@ -50,6 +50,11 @@ result = lower_universal_gemm(spec, arch="gfx950", backend="both")
 comgr._assert_ir_flavor_matches_lib(result.llvm_text)
 assert lower_llvm._datalayout_for_flavor("llvm23") in result.llvm_text
 
+# Spec bindings added alongside the existing families share the same selection.
+conv_spec = {"problem": {"N": 1, "H": 16, "W": 32, "cpg": 16, "kpg": 128}}
+conv = rocke_engine.conv_direct_nongrouped_lower_llvm(conv_spec, arch="gfx950")
+assert lower_llvm._datalayout_for_flavor("llvm23") in conv
+
 # The direct serialized-IR binding also delegates AUTO, but explicit emission
 # does not need to query or load a compiler.
 b = IRBuilder("binding_offline_probe")

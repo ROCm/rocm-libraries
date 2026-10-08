@@ -67,9 +67,10 @@ The one registration a generated engine needs is the **kernel source**, and only
 
 | Group | Kinds | What happens |
 |---|---|---|
-| Compilation inputs | `hip`, `rocke` | Authored, lowered to a code object at pack time. The packer has exactly these two producer arms; anything else reaches its unsupported-kind raise. No CMake registration. |
+| Compilation inputs | `hip`, `rocke` | Authored, lowered to a code object at pack time. No CMake registration. |
+| Prebuilt input | `hsaco` | Authored as `{file, symbol}`, packed byte-for-byte: no compile, no CMake registration. `arch` is mandatory: list every arch the object runs on (a generic-target object lists all of them), on the kernel or inherited from its pack. |
 | Passthrough | `embedded_source` | Shipped as authored, no producer runs, no archive entry. **Needs the registration below.** |
-| Runtime descriptor forms | `hsaco`, `kpack` | Written *by* the packer, never authored. `hsaco` is its intermediate between compile and archive; `kpack` is the shipped runtime form. |
+| Runtime descriptor form | `kpack` | Written *by* the packer and shipped; the runtime sees only this. The packer's intermediate also uses `kind: hsaco` for compiled variants. |
 
 ```cmake
 # In P/src/tests/CMakeLists.txt, beside base's existing calls. Required ONLY for
@@ -91,11 +92,13 @@ kind; the packer copies none of these sources into the staged tree.
 
 Whole-engine checks cover shared KMDs and unchanged variants plus the new inventory. An
 addition whose suite is censused must run its
-`hip-kernel-provider-hkp-census-<arch>-<suite>` entry for **every** arch the owning pack
-target was wired for; an addition under an uncensused suite states its inventory through
-that suite's ordinary host run. [native-pack.md](native-pack.md) owns eligibility. Device
-proof must explicitly select and numerically verify the new candidate; passing the
-unchanged default is not extension acceptance.
+`hip-kernel-provider-hkp-census-<arch>-<suite>` entry for **every** arch that suite is
+registered at: the owning pack target's wired arches, narrowed by the call's `ARCHES`
+when it names any. The entry runs `hip_kernel_provider_census_tests`, the binary census
+suites are compiled into. An addition under an uncensused suite states its inventory
+through that suite's ordinary host run. [native-pack.md](native-pack.md) owns
+eligibility. Device proof must explicitly select and numerically verify the new
+candidate; passing the unchanged default is not extension acceptance.
 
 The handoff identifies retained IDs/references, changed/new files, baseline/final
 installations, whole-engine results and the addition's actual dispatch. RUNBOOK stage 5

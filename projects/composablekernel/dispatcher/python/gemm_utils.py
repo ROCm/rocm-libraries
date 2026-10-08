@@ -26,7 +26,7 @@ how it is compiled into a ``.so``.
 """
 
 from __future__ import annotations
-from dispatcher_common import unified_framework_flags
+from dispatcher_common import unified_framework_flags, arch_feature_defines
 
 import ctypes
 import functools
@@ -359,6 +359,12 @@ class GemmKernelConfig:
     pad_n: bool = True
     pad_k: bool = True
     persistent: bool = False
+    # Fixed A/B/C global vector widths (elements). All 0 = native widths; else
+    # the canonical triple from codegen_common.resolve_gemm_vector_sizes (use
+    # with_vector_sizes() to set it so the name matches the codegen's).
+    vector_size_a: int = 0
+    vector_size_b: int = 0
+    vector_size_c: int = 0
 
     # No silent default: the arch must be resolved (rocminfo-detected or passed
     # explicitly) before this config feeds the compiler. expand_sweep /
@@ -438,6 +444,59 @@ class GemmKernelConfig:
         return f"{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}"
 
     @property
+    def vector_sizes(self) -> Tuple[int, int, int]:
+        return (self.vector_size_a, self.vector_size_b, self.vector_size_c)
+
+    def _vector_args(self) -> Dict[str, Any]:
+        return dict(
+            dtype_a=self.dtype_a,
+            dtype_b=self.dtype_b,
+            dtype_c=self.dtype_c,
+            layout=self.layout,
+            tile=(self.tile_m, self.tile_n, self.tile_k),
+            waves=(self.wave_m, self.wave_n, self.wave_k),
+            warp_tile=(self.warp_tile_m, self.warp_tile_n, self.warp_tile_k),
+            gfx_arch=self.gfx_arch,
+        )
+
+    @property
+    def effective_vector_sizes(self) -> Tuple[int, int, int]:
+        """A/B/C widths the kernel really uses (native ones when unset)."""
+        if any(self.vector_sizes):
+            return self.vector_sizes
+        return _codegen_common().gemm_native_vector_sizes(
+            **self._vector_args(), epilogue=self.epilogue
+        )
+
+    def with_vector_sizes(
+        self, requested: Tuple[int, int, int]
+    ) -> Tuple["GemmKernelConfig", Optional[str]]:
+        """Copy with ``requested`` widths resolved exactly as the codegen does.
+
+        Returns ``(config, reject_reason)``; the reason is None when legal.
+        """
+        if not any(requested):
+            return replace(self, vector_size_a=0, vector_size_b=0, vector_size_c=0), None
+        vec, reason = _codegen_common().resolve_gemm_vector_sizes(
+            **self._vector_args(),
+            requested=requested,
+            pipeline=self.pipeline,
+            epilogue=self.epilogue,
+            variant=self.variant,
+        )
+        if reason:
+            reason = (
+                f"{self.tile_str} {self.pipeline}/{self.epilogue} "
+                f"vec{'_'.join(map(str, vec))}: {reason}"
+            )
+        # Fixed widths only serve misaligned extents, which always need padding.
+        pads = dict(pad_m=True, pad_n=True, pad_k=True) if any(vec) else {}
+        cfg = replace(
+            self, vector_size_a=vec[0], vector_size_b=vec[1], vector_size_c=vec[2], **pads
+        )
+        return cfg, reason
+
+    @property
     def name(self) -> str:
         """Registry / runtime lookup key.
 
@@ -463,6 +522,8 @@ class GemmKernelConfig:
             f"_{_cap(self.persistent)}"
             f"_{self.tile_str}_{self.wave_str}_{self.warp_tile_str}"
         )
+        if any(self.vector_sizes):
+            name += _codegen_common().gemm_vector_size_suffix(self.vector_sizes)
         if self.variant == "preshuffle":
             name += "_preshuffle"
             if self.permute_n:
@@ -521,6 +582,9 @@ class GemmKernelConfig:
                 "pad_n": [self.pad_n],
                 "pad_k": [self.pad_k],
                 "persistent": [self.persistent],
+                "vector_size_a": [self.vector_size_a],
+                "vector_size_b": [self.vector_size_b],
+                "vector_size_c": [self.vector_size_c],
             },
             # Top-level knob read by unified_gemm_codegen for the preshuffle
             # variant (selects shuffle_b_permuteN vs shuffle_b). Harmless for
@@ -568,6 +632,7 @@ class GemmKernelConfig:
             "epilogue": self.epilogue,
             "pad": [self.pad_m, self.pad_n, self.pad_k],
             "persistent": self.persistent,
+            "vector_sizes": list(self.vector_sizes),
             "gfx_arch": self.gfx_arch,
             "variant": self.variant,
             "name": self.name,
@@ -1186,6 +1251,16 @@ def _use_ocp_fp8():
 # int32, everything else stores in its own dtype.
 _OUTPUT_DTYPE = {"fp8": "fp16", "bf8": "fp16", "int8": "int32"}
 
+# A/B dtypes whose host buffers are plain numpy arrays (no bit-level encoding).
+_NATIVE_NP = {
+    "fp16": np.float16,
+    "fp32": np.float32,
+    "int8": np.int8,
+}
+# C host buffer dtypes. int32 is an accumulator/output type only (int8 GEMMs),
+# so it is kept out of the A/B allow-list above.
+_C_NP = {**_NATIVE_NP, "int32": np.int32, "bf16": np.uint16}
+
 
 def _output_dtype(dtype: str) -> str:
     return _OUTPUT_DTYPE.get(dtype, dtype)
@@ -1259,7 +1334,7 @@ class GpuGemmRunner:
         # Build A/B host buffers in the kernel's element dtype. The encode
         # helpers (bf16/fp8/bf8) already force a contiguous float32 source, so an
         # outer ascontiguousarray would only add a redundant copy; the native
-        # numpy dtypes (fp16/int8) still need it.
+        # numpy dtypes (fp16/fp32/int8) still need it.
         if dtype == "bf16":
             A_h = _fp32_to_bf16_u16(A_lay)
             B_h = _fp32_to_bf16_u16(B_lay)
@@ -1269,17 +1344,20 @@ class GpuGemmRunner:
         elif dtype == "bf8":
             A_h = _fp32_to_bf8_u8(A_lay, use_ocp=self._use_ocp)
             B_h = _fp32_to_bf8_u8(B_lay, use_ocp=self._use_ocp)
-        elif dtype == "int8":
-            A_h = np.ascontiguousarray(A_lay, dtype=np.int8)
-            B_h = np.ascontiguousarray(B_lay, dtype=np.int8)
-        else:  # fp16 (default)
-            A_h = np.ascontiguousarray(A_lay, dtype=np.float16)
-            B_h = np.ascontiguousarray(B_lay, dtype=np.float16)
+        elif dtype in _NATIVE_NP:
+            A_h = np.ascontiguousarray(A_lay, dtype=_NATIVE_NP[dtype])
+            B_h = np.ascontiguousarray(B_lay, dtype=_NATIVE_NP[dtype])
+        else:
+            # A silent fp16 fallback would hand the kernel buffers of the wrong
+            # element size (e.g. fp32 kernels would read fp16 data).
+            raise ValueError(
+                f"unsupported A/B dtype {dtype!r} in kernel {self._kernel_name!r}; "
+                "add it to _NATIVE_NP or an encode branch"
+            )
 
         # The C buffer's element size must equal sizeof(CDataType): fp8/bf8
         # accumulate into fp16, int8 into int32, otherwise the input dtype.
         out_dtype = _output_dtype(dtype)
-        _C_NP = {"fp16": np.float16, "bf16": np.uint16, "int32": np.int32}
         if out_dtype not in _C_NP:
             # A silent fp16 fallback would size the host C buffer wrong for an
             # unrecognized dtype (sizeof(CDataType) mismatch -> corrupt results
@@ -1295,7 +1373,7 @@ class GpuGemmRunner:
         # Decode the output back to a comparable numeric array.
         if out_dtype == "bf16":
             C_dec = _bf16_u16_to_fp32(C_h)
-        else:  # fp16 / int32 are already directly comparable
+        else:  # fp16 / fp32 / int32 are already directly comparable
             C_dec = C_h
         C_out = C_dec if lc == "r" else C_dec.T
 
@@ -2095,12 +2173,9 @@ def _build_compile_jobs(
         f"--offload-arch={config.gfx_arch}",
         f'-DGFX_ARCH="{config.gfx_arch}"',
         *unified_framework_flags(config.gfx_arch),
-        # Pin the fp8/bf8 encoding so BOTH compiler passes agree. Without this the
-        # device pass of config.hpp sees __gfx950__ and picks OCP while the host
-        # pass falls back to FNUZ -- and the numpy reference, which follows the
-        # arch (see numpy_dtype_for), then disagrees with the kernel by a factor
-        # of two. FNUZ archs need no define; the list is empty for them.
-        *_ocp_arch_defines(config.gfx_arch),
+        # Keep host/device fp8 encodings consistent and enable the target's
+        # WMMA/MX features, matching the CMake build.
+        *arch_feature_defines(config.gfx_arch),
         # Match Tile Engine's AMDGPU codegen flags exactly (see variant_flags /
         # _tile_engine_codegen_flags). Without them the kernel is compiled with
         # different inlining/register allocation, which changes occupancy;
@@ -2131,7 +2206,14 @@ def _build_compile_jobs(
     if not registry_bypass:
         link_cmd.append(str(static_lib))
     link_cmd += ["-o", str(lib_path)]
-    job = {"compile_cmd": compile_cmd, "link_cmd": link_cmd, "lib_path": str(lib_path)}
+    job = {
+        "compile_cmd": compile_cmd,
+        "link_cmd": link_cmd,
+        "lib_path": str(lib_path),
+        # Fixed-width instantiations of large tiles can exceed 600 seconds.
+        # Keep the native and linker limits unchanged.
+        "compile_timeout": 1200 if any(config.vector_sizes) else 300,
+    }
     return job, lib_path
 
 
@@ -2154,22 +2236,6 @@ def setup_multiple_gemm_dispatchers(
     if n == 0:
         return results
 
-    # Guard the compile path: every config's gfx_arch must be a concrete,
-    # supported arch before it reaches -DGFX_ARCH / --offload-arch / gpu_target.
-    # expand_sweep already resolves this, but a config built directly (gfx_arch
-    # left as None) would otherwise emit a literal "None" arch. Resolve/validate
-    # here too, defaulting a None to the rocminfo-detected arch (never gfx942).
-    _shared_arch: Optional[str] = None
-    resolved_configs: List[GemmKernelConfig] = []
-    for c in configs:
-        if c.gfx_arch:
-            resolved_configs.append(replace(c, gfx_arch=_resolve_arch(c.gfx_arch)))
-        else:
-            if _shared_arch is None:
-                _shared_arch = _get_arch()
-            resolved_configs.append(replace(c, gfx_arch=_shared_arch))
-    configs = resolved_configs
-
     # Hard-fail rather than build a runnable but WRONG kernel: a preshuffle config
     # with permute_n=True would compile a "_permuteN" kernel whose device pipeline
     # is not yet bridged (it mis-shuffles B -> wrong results; see BRIDGE_PERMUTE_N).
@@ -2187,6 +2253,22 @@ def setup_multiple_gemm_dispatchers(
                     f"that would mis-shuffle B ({c.name}). Flip BRIDGE_PERMUTE_N once "
                     "the permuteN pipeline is emitted in unified_gemm_codegen."
                 )
+
+    # Guard the compile path: every config's gfx_arch must be a concrete,
+    # supported arch before it reaches -DGFX_ARCH / --offload-arch / gpu_target.
+    # expand_sweep already resolves this, but a config built directly (gfx_arch
+    # left as None) would otherwise emit a literal "None" arch. Resolve/validate
+    # here too, defaulting a None to the rocminfo-detected arch (never gfx942).
+    _shared_arch: Optional[str] = None
+    resolved_configs: List[GemmKernelConfig] = []
+    for c in configs:
+        if c.gfx_arch:
+            resolved_configs.append(replace(c, gfx_arch=_resolve_arch(c.gfx_arch)))
+        else:
+            if _shared_arch is None:
+                _shared_arch = _get_arch()
+            resolved_configs.append(replace(c, gfx_arch=_shared_arch))
+    configs = resolved_configs
 
     max_workers = max_workers or min(multiprocessing.cpu_count(), 8)
 
@@ -2405,17 +2487,17 @@ _CODEGEN_DIR = Path(__file__).resolve().parent.parent / "codegen"
 
 
 @functools.lru_cache(maxsize=1)
-def _gfx1250_reject_reason_fn():
-    """codegen_common.gfx1250_pipeline_reject_reason, importable regardless of
-    whether a caller already put the codegen dir on ``sys.path``."""
+def _codegen_common():
+    """The codegen_common module, importable regardless of whether a caller
+    already put the codegen dir on ``sys.path``."""
     import sys  # noqa: WPS433 (local: only needed for this lazy import)
 
     codegen_dir = str(_CODEGEN_DIR)
     if codegen_dir not in sys.path:
         sys.path.append(codegen_dir)
-    from codegen_common import gfx1250_pipeline_reject_reason  # noqa: WPS433
+    import codegen_common  # noqa: WPS433
 
-    return gfx1250_pipeline_reject_reason
+    return codegen_common
 
 
 def _gfx1250_pipeline_supported(
@@ -2443,7 +2525,7 @@ def _gfx1250_pipeline_supported(
     8-bit warp_tile_k rule; an empty dtype skips it."""
     if pipeline not in ("comp_async", "comp_tdm", "comp_tdm_v2") and epilogue != "tdm":
         return True
-    reason = _gfx1250_reject_reason_fn()(
+    reason = _codegen_common().gfx1250_pipeline_reject_reason(
         arch,
         pipeline,
         epilogue,
@@ -2474,6 +2556,8 @@ def expand_sweep(
     b_elementwise_op: str = "PassThrough",
     cde_elementwise_op: str = "PassThrough",
     mabd_cli_overrides: Optional[Dict[str, Any]] = None,
+    vector_sizes: Optional[List[Tuple[int, int, int]]] = None,
+    rejects: Optional[Dict[str, int]] = None,
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -2498,6 +2582,12 @@ def expand_sweep(
     carries a concrete, supported ``gfx_arch`` -- the compile command's
     ``-DGFX_ARCH`` / ``--offload-arch`` never see ``None``. An explicit,
     unsupported arch raises ``ValueError``.
+
+    ``vector_sizes`` lists requested A/B/C global vector widths (0 = native);
+    default is the ``trait_config`` ``vector_size_a/b/c`` product, else native
+    only. Each base config is emitted once per distinct resolved triple; a
+    triple that is illegal for the tile is dropped and its reason counted in
+    ``rejects`` (when given).
     """
     # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
     # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
@@ -2535,6 +2625,12 @@ def expand_sweep(
     pad_ns = _expand_values(tr.get("pad_n"), [False])
     pad_ks = _expand_values(tr.get("pad_k"), [False])
     persistents = _expand_values(tr.get("persistent"), [False])
+    if vector_sizes is None:
+        vector_sizes = list(
+            itertools.product(
+                *(_expand_values(tr.get(f"vector_size_{x}"), [0]) for x in "abc")
+            )
+        )
 
     # Preshuffle B-shuffle permutation knob -- pinned to the single source of
     # truth BRIDGE_PERMUTE_N (see its definition for the full rationale). We
@@ -2712,6 +2808,10 @@ def expand_sweep(
             and wm * wn == 8
         ):
             continue
+        if _codegen_common().gfx1250_fp32_tile_reject_reason(
+            arch, dtype, tm, tn, wm * wn * wk
+        ):
+            continue
         if not _gfx1250_pipeline_supported(
             pipe,
             sched,
@@ -2781,12 +2881,20 @@ def expand_sweep(
                     elementwise_op=ew_op,
                     d_layout=d_layout_word,
                 )
-                if c.name in seen:
-                    continue
-                val = _cu.validate_kernel_config(c.to_ctypes_config())
-                if not val.is_valid:
-                    continue
-                seen.add(c.name)
-                configs.append(c)
+                val = None
+                for vec in vector_sizes:
+                    cv, reason = c.with_vector_sizes(tuple(vec))
+                    if reason:
+                        if rejects is not None:
+                            rejects[reason] = rejects.get(reason, 0) + 1
+                        continue
+                    if cv.name in seen:
+                        continue
+                    if val is None:
+                        val = _cu.validate_kernel_config(c.to_ctypes_config())
+                    if not val.is_valid:
+                        break
+                    seen.add(cv.name)
+                    configs.append(cv)
 
     return configs

@@ -23,8 +23,8 @@
 ################################################################################
 from functools import lru_cache
 
-from Tensile.Common.Constants import MAX_FILENAME_LENGTH
-from Tensile.Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
+from ..Common.Constants import MAX_FILENAME_LENGTH
+from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
 
 from .Problem import ProblemType
 
@@ -149,7 +149,13 @@ def getParameterValueAbbreviation(key, value):
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
   ck = state.get("CustomKernel")
-  if isinstance(ck, dict) and ck.get("name"):
+  # CustomKernel.name on a generated kernel is the assembly identity.
+  # Solution names (ignoreInternalArgs=False) still append the runtime
+  # dispatch tokens below: WGM, WGMXCCG, SU, SUM, SUS, GSUC, GSUWGMRR.
+  # Handwritten kernels have no parameter encoding, so the stamped name
+  # is the whole name for both callers.
+  generated = isinstance(ck, dict) and bool(ck.get("generated", False))
+  if isinstance(ck, dict) and ck.get("name") and (not generated or ignoreInternalArgs):
     return ck["name"]
   if state.get("CustomKernelName", ""):
     return state["CustomKernelName"]
@@ -175,6 +181,11 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
   requiredParametersTemp = set(requiredParameters.union(["GlobalSplitU"]))
+  if state.get("TileProcessingStrategy", "None") != "StreamK":
+    requiredParametersTemp.difference_update({"StreamKAtomic", "StreamKFixupTreeReduction", "DebugStreamK"})
+  if state.get("TileProcessingStrategy", "None") == "None":
+    requiredParametersTemp.difference_update({"WorkAssignment", "PersistentXCCMapping", "WorkQueueStealing"})
+
 
   if ignoreInternalArgs:
     if state["GlobalSplitU"] > 0 or state["GlobalSplitU"] == -1:
@@ -212,6 +223,8 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     components.append('CMS')
 
   components.append('SN')
+  if state.get("TileProcessingStrategy") == "DataParallel":
+    components.append(f'PLAV{state.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)}')
 
   # Skip SFA tag if using default wgm algo
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:

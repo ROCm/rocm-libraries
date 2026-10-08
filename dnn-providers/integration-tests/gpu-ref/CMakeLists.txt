@@ -36,6 +36,7 @@ add_library(
     src/GpuFpReferenceMatmul.cpp
     src/GpuFpReferenceSdpa.cpp
     src/GpuFpReferenceReduction.cpp
+    src/GpuFpReferenceSdpaRagged.cpp
     src/GpuFpReferenceRMSNorm.cpp
     src/GpuFpReferenceBatchnorm.cpp
     src/GpuFpReferenceRmsValidation.cpp
@@ -43,6 +44,7 @@ add_library(
     src/GpuIntReferenceValidation.cpp
     src/GpuReferenceValidationFactory.cpp
     src/GpuRefKernelCompiler.cpp
+    src/GpuRefLaunch.cpp
     src/GpuRefValidatorHelpers.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/kernels/GpuRefKernelSources.cpp
 )

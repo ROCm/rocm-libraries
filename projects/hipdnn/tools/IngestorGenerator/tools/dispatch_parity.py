@@ -36,6 +36,10 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import launch_surface  # noqa: E402
+
 
 class ParityError(RuntimeError):
     """The dispatcher could not be reached or asked. Never a shape-level decline."""
@@ -97,13 +101,27 @@ def _load_profile(path: str) -> dict:
 
 
 def _bind_provider(provider_root: str | None) -> None:
+    """Put the rocKE library on ``sys.path``, from wherever the tool was invoked.
+
+    A nonempty profile value wins over ``ROCKE_PROVIDER_ROOT``; the environment is
+    the fallback when the profile names none. Either may be absolute or carry a
+    ``~``. A RELATIVE value is repository-relative, resolved through
+    ``launch_surface.find_repo_root`` -- the same anchor every repo-relative path in
+    a profile already uses, and the reason this is not a second finder. Resolving
+    one against the current directory instead makes the profile correct from one
+    directory and broken from every other, including the generator's own.
+    """
     root = provider_root or os.environ.get("ROCKE_PROVIDER_ROOT")
     if not root:
         raise ParityError(
             "no provider_root in the profile and no ROCKE_PROVIDER_ROOT set; the "
             "dispatcher cannot be imported without the rocKE library."
         )
-    root = os.path.abspath(os.path.expanduser(root))
+    expanded = os.path.expanduser(root)
+    if os.path.isabs(expanded):
+        root = os.path.abspath(expanded)
+    else:
+        root = str(launch_surface.find_repo_root(Path(__file__).parent) / expanded)
     for sub in ("rocke/library", "rocke/platform/python"):
         candidate = os.path.join(root, sub)
         if not os.path.isdir(candidate):
@@ -446,7 +464,6 @@ def _compact(config: dict, knob_fields: list, profile: dict) -> str:
     Shared with the retrofit path (`factorise_config.py`) so the two cannot
     disagree about what a compact config means.
     """
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
     from factorise_config import FactoriseError, _round_trip, dump, factorise
 
     try:

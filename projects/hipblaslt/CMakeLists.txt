@@ -592,17 +592,6 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
         DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
         COMPONENT runtime
     )
-    # The gfx1250 v0 GEMM tree builds into its own directory (see
-    # device-library/CMakeLists.txt) but installs as one more subdir of the same
-    # library/ root. The property is only set when that tree is built.
-    get_property(_gfx1250v0_library_dir GLOBAL PROPERTY HIPBLASLT_GFX1250V0_LIBRARY_DIR)
-    if(_gfx1250v0_library_dir)
-        rocm_install(
-            DIRECTORY "${_gfx1250v0_library_dir}"
-            DESTINATION "${HIPBLASLT_TENSILE_LIBRARY_DIR}/library"
-            COMPONENT runtime
-        )
-    endif()
 endif()
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
@@ -766,11 +755,12 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMPONENT tests
     )
 
-    # Imported directly by unit tests, so these generators must ship at the
+    # Imported or executed directly by unit tests, so these must ship at the
     # tensilelite root, not under scripts/.
     install(
         FILES
             "${_tensilelite_src}/AMaxGenerator.py"
+            "${_tensilelite_src}/SoftmaxGenerator.py"
             "${_tensilelite_src}/LayerNormGenerator.py"
         DESTINATION "${_tensilelite_install_dest}"
         COMPONENT tests
@@ -929,11 +919,27 @@ if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
 endif()
 
 if(HIPBLASLT_ENABLE_COVERAGE)
-    target_compile_options(hipblaslt PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt PUBLIC -fprofile-instr-generate)
+    # HIP C++ compilation has separate host and device passes; ordinary C is host-only.
+    # Keep each host selector paired with its flag so CMake does not de-duplicate it.
+    target_compile_options(hipblaslt PRIVATE
+        -g
+        -O0
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fcoverage-mapping>"
+        "$<$<COMPILE_LANGUAGE:C>:-fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:C>:-fcoverage-mapping>"
+    )
+    target_link_options(hipblaslt PUBLIC "SHELL:-Xarch_host -fprofile-instr-generate")
 
-    target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt-clients-common PUBLIC -fprofile-instr-generate)
+    target_compile_options(hipblaslt-clients-common PRIVATE
+        -g
+        -O0
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fcoverage-mapping>"
+        "$<$<COMPILE_LANGUAGE:C>:-fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:C>:-fcoverage-mapping>"
+    )
+    target_link_options(hipblaslt-clients-common PUBLIC "SHELL:-Xarch_host -fprofile-instr-generate")
     target_compile_definitions(hipblaslt-clients-common PRIVATE CODE_COVERAGE)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
