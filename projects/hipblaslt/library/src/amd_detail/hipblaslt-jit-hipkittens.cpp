@@ -32,6 +32,8 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
         constexpr size_t fileLimit = size_t(1) << 20;
         // The kernels address each tensor with 32-bit byte offsets.
         constexpr size_t tensorLimit = size_t(1) << 32;
+        // Increment when a HipKittens solution can change.
+        constexpr uint32_t hipkittensVersion = 1;
 
         Status unavailable(const std::string& cause)
         {
@@ -222,11 +224,18 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                 {
                     library.reset();
                 }
-                if(!library || library->solutions.size() != 1)
+                if(!library || library->solutions.empty())
                     return {Status::Code::Failed,
                             Stage::Generate,
                             "The HipKittens entry of " + variant.name + " does not load"};
-                if((*library->solutions.begin()->second->problemPredicate)(problem))
+                const bool matches = std::any_of(
+                    library->solutions.begin(),
+                    library->solutions.end(),
+                    [&](const auto& entry) {
+                        return entry.second && entry.second->problemPredicate
+                               && (*entry.second->problemPredicate)(problem);
+                    });
+                if(matches)
                     found.push_back(&variant);
             }
             if(found.empty())
@@ -241,11 +250,8 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
         public:
             explicit HipKittensBackend(std::vector<hipblaslt_jit::Artifact> headers)
                 : m_headers(std::move(headers))
-                , m_info{"hipkittens", "HipKittens", {}}
+                , m_info{"hipkittens", "HipKittens", hipkittensVersion}
             {
-                // Compatibility is per solution. The backend version stays this
-                // literal so a rebuilt bundle still opens the same library directory.
-                m_info.version = "hipkittens";
             }
 
             const hipblaslt_jit::BackendInfo& info() const noexcept override
