@@ -290,7 +290,9 @@ namespace
         RowCells narrowed = cells;
         narrowed.values.pop_back();
         OverrideMap skipped;
-        EXPECT_EQ(loadInto(skipped, fileOf({rowOf(narrowed)})).accepted, 0u);
+        const auto  cut = loadInto(skipped, fileOf({rowOf(narrowed)}));
+        EXPECT_EQ(cut.accepted, 0u);
+        EXPECT_EQ(cut.rejected, 1u) << "the skipped row was not counted";
     }
 
     // Every column the writer emits reads back into the key and entry it came
@@ -869,23 +871,83 @@ namespace
         }
     }
 
-    // A row whose mode is missing, unreadable, or names a mode that writes no
-    // rows at all is damaged. Defaulting it would file an online winner,
-    // measured in place on a live dispatch, as a tune winner measured on
-    // scratch, and from then on the two are compared against each other.
-    TEST_F(TuningStore, RowWithoutAModeThatWritesRowsIsRejected)
+    // A mode cell that is there and does not read is damage rather than age,
+    // and defaulting it would file an online winner, measured in place on a
+    // live dispatch, as a tune winner measured on scratch, after which the two
+    // are compared against each other. A cell naming a mode that writes no
+    // rows at all is the same kind of damage.
+    TEST_F(TuningStore, RowWhoseModeDoesNotReadIsRejected)
     {
         const auto row = tunedRow(halfKey(), tunedEntry(7, "kernel"));
-
-        OverrideMap missing;
-        EXPECT_EQ(loadInto(missing, fileOf({withoutColumn(row, "tuning_mode")})).accepted, 0u);
 
         for(const char* value : {"", "TUNE", "2", "not-a-mode", "off", "cache"})
         {
             SCOPED_TRACE(std::string("tuning_mode=") + value);
             OverrideMap map;
-            EXPECT_EQ(loadInto(map, fileOf({withCell(row, "tuning_mode", value)})).accepted, 0u);
+            const auto  loaded = loadInto(map, fileOf({withCell(row, "tuning_mode", value)}));
+            EXPECT_EQ(loaded.accepted, 0u);
+            EXPECT_EQ(loaded.rejected, 1u);
         }
+    }
+
+    // tuning_mode was added to version 2 after builds had already written rows
+    // under that version, so a file from the build before it carries every
+    // other version 2 column and not this one. It is absent from both lines,
+    // which makes the row whole rather than short, so the width guard passes
+    // and the mode cell decides: refusing it there dropped every row in the
+    // file and reported loaded=0 without saying why.
+    //
+    // Such a row reads as tune, the only mode that recorded a search before
+    // online existed, which is what TuningSearch::mode defaults to.
+    TEST_F(TuningStore, RowWrittenBeforeTheModeColumnReadsAsTune)
+    {
+        const ProblemOverride key      = halfKey();
+        const TuningSearch    search   = rankedSearch(16);
+        const auto            previous = withoutColumn(
+            tunedRow(key, tunedEntry(7, "kernel", true, 1000, search)), "tuning_mode");
+
+        // The version is unchanged, which is why the row has to be readable:
+        // nothing in the file tells it apart from one this build wrote.
+        const auto cells = cellsOf(previous);
+        EXPECT_EQ(cells.values[columnIndex(cells, "schema_version")], "2");
+        EXPECT_EQ(std::find(cells.names.begin(), cells.names.end(), "tuning_mode"),
+                  cells.names.end());
+
+        OverrideMap map;
+        const auto  loaded = loadInto(map, fileOf({previous}));
+        EXPECT_EQ(loaded.accepted, 1u);
+        EXPECT_EQ(loaded.rejected, 0u);
+
+        const auto found = map.find(key);
+        ASSERT_EQ(found.size(), 1u);
+        EXPECT_EQ(found[0].solutionIndex, 7);
+        EXPECT_EQ(found[0].schemaVersion, TuningSchemaVersion::Current);
+        EXPECT_TRUE(found[0].complete);
+        EXPECT_EQ(found[0].budgetMs, 1000);
+
+        // The whole search record still reads, so the row is not a salvaged
+        // prefix, and the mode it reads as is tune.
+        ASSERT_TRUE(found[0].search.has_value());
+        EXPECT_EQ(found[0].search->mode, TuningMode::Tune);
+        EXPECT_TRUE(*found[0].search == search);
+    }
+
+    // A file every row of which is refused is what the count exists for:
+    // without it the load line reads loaded=0, which is also what an empty
+    // file reads as.
+    TEST_F(TuningStore, EveryRowRejectedIsCountedRatherThanReadAsAnEmptyFile)
+    {
+        const auto row = tunedRow(halfKey(), tunedEntry(7, "kernel"));
+
+        OverrideMap map;
+        const auto  loaded = loadInto(map,
+                                     fileOf({withCell(row, "schema_version", "99"),
+                                              withCell(row, "tuning_mode", "not-a-mode"),
+                                              withoutColumn(row, "gcnArchName"),
+                                              cutBefore(row, "rotating_mb")}));
+        EXPECT_EQ(loaded.accepted, 0u);
+        EXPECT_EQ(loaded.rejected, 4u);
+        EXPECT_EQ(map.size(), 0u);
     }
 
     // The two modes measure in regimes that do not compare, so neither ever

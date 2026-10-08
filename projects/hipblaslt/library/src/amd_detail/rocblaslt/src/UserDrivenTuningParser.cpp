@@ -301,10 +301,21 @@ namespace TensileLite
             break;
         }
 
+        const uint64_t rejected = TuningCounters::instance().rejected.load();
+
         std::ostringstream msg;
         msg << "mode=" << tuningModeName(tuning.mode()) << " path=" << tuning.cachePath()
             << " load=" << statusName
-            << " loaded=" << TuningCounters::instance().entriesLoaded.load();
+            << " loaded=" << TuningCounters::instance().entriesLoaded.load()
+            << " rejected=" << rejected;
+
+        // The one tally on this line that is a fault rather than a count, so
+        // it says so where it is read, the way the closing summary says it of
+        // unrecorded. loaded=0 on a file full of rows reads exactly like
+        // loaded=0 on an empty one otherwise.
+        if(rejected != 0)
+            msg << "; rejected rows were in the file but could not be read, so whatever tuning "
+                   "they hold is not in effect";
 
         if(status == TuningLoadStatus::NoPath)
             msg << "; set HIPBLASLT_TUNING_CACHE_PATH or tuning does nothing";
@@ -555,6 +566,7 @@ namespace TensileLite
         {
             const auto loaded = loadTuningRows(file, map, currentBuildStamp());
             TuningCounters::instance().entriesLoaded += loaded.accepted;
+            TuningCounters::instance().rejected += loaded.rejected;
 
             if(loaded.skippedUnnamed > 0)
                 log_error(__func__,
