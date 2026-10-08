@@ -7832,7 +7832,7 @@ inline hipsolverStatus_t hipsolver_potrs(testAPI_t               API,
 }
 /********************************************************/
 
-/******************** SYEVD/HEEVD ********************/
+/******************** STEDC ********************/
 // bufferSize
 inline hipsolverStatus_t hipsolver_stedc_bufferSize(testAPI_t           API,
                                                     hipsolverHandle_t   handle,

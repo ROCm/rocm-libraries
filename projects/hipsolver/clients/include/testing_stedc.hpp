@@ -222,10 +222,8 @@ template <bool CPU,
           typename I,
           typename Sd,
           typename Td,
-          typename Ud,
           typename Sh,
-          typename Th,
-          typename Uh>
+          typename Th>
 void stedc_initData(const hipsolverHandle_t  handle,
                     const hipsolverEigComp_t compz,
                     const I                  n,
@@ -233,11 +231,9 @@ void stedc_initData(const hipsolverHandle_t  handle,
                     Sd&                      dE,
                     Td&                      dC,
                     const I                  ldc,
-                    Ud& /* dInfo */,
-                    Sh& hD,
-                    Sh& hE,
-                    Th& hC,
-                    Uh& /* hInfo */)
+                    Sh&                      hD,
+                    Sh&                      hE,
+                    Th&                      hC)
 {
     if(CPU)
     {
@@ -482,7 +478,7 @@ void stedc_getError(const hipsolverHandle_t   handle,
     std::vector<int> iwork(liwork);
 
     // input data initialization
-    stedc_initData<true, true, T>(handle, compz, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
+    stedc_initData<true, true, T>(handle, compz, n, dD, dE, dC, ldc, hD, hE, hC);
 
     // execute computations
     // GPU lapack
@@ -651,7 +647,7 @@ void stedc_getPerfData(const hipsolverHandle_t   handle,
 
     if(!perf)
     {
-        stedc_initData<true, false, T>(handle, compz, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
+        stedc_initData<true, false, T>(handle, compz, n, dD, dE, dC, ldc, hD, hE, hC);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
@@ -671,12 +667,12 @@ void stedc_getPerfData(const hipsolverHandle_t   handle,
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    stedc_initData<true, false, T>(handle, compz, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
+    stedc_initData<true, false, T>(handle, compz, n, dD, dE, dC, ldc, hD, hE, hC);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        stedc_initData<false, true, T>(handle, compz, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
+        stedc_initData<false, true, T>(handle, compz, n, dD, dE, dC, ldc, hD, hE, hC);
 
         CHECK_ROCBLAS_ERROR(hipsolver_stedc(API,
                                             handle,
@@ -701,7 +697,7 @@ void stedc_getPerfData(const hipsolverHandle_t   handle,
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
-        stedc_initData<false, true, T>(handle, compz, n, dD, dE, dC, ldc, dInfo, hD, hE, hC, hInfo);
+        stedc_initData<false, true, T>(handle, compz, n, dD, dE, dC, ldc, hD, hE, hC);
 
         timer.start(stream);
         hipsolver_stedc(API,

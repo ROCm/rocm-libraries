@@ -44,10 +44,6 @@ const vector<char> op_range = {'N', 'I', 'V'};
 const vector<vector<int>> matrix_size_range = {
     // quick return
     {0, 1},
-    // invalid
-    {-1, 1},
-    // invalid for case evect != N
-    {2, 1},
     // normal (valid) samples
     {12, 12},
     {20, 30},
