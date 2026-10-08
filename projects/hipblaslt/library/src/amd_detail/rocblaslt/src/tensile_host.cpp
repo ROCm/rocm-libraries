@@ -3575,7 +3575,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         if(algo == nullptr)
         {
-            int returnAlgoCount;
+            int returnAlgoCount = 0;
             status = getBestSolutions(
                 prob, handle, gemmData, 1, &heuristicResult, &returnAlgoCount, prob.workspaceSize);
             if(returnAlgoCount == 0)
@@ -3651,6 +3651,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         }
 
         auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+        if(!solution)
+            return rocblaslt_status_not_implemented;
         if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -3775,6 +3777,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     }
     catch(const std::exception& e)
     {
+        log_error(__func__, e.what());
     }
     catch(...)
     {
@@ -3966,6 +3969,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
 
             data->algoIndex = *solutionIndex;
             auto solution   = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+            if(!solution)
+            {
+                log_error(__func__, "No solution for index", *solutionIndex);
+                return rocblaslt_status_invalid_value;
+            }
 
             if(data->problem.getParams().uniformSummationOrder())
                 warnUniformSummationOrderBypass(__func__, tuning != nullptr);
@@ -4033,6 +4041,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             data->algoIndex = *solutionIndex;
             auto solution
                 = library->getSolutionByIndex(data->problem.gemms[0], *hardware, *solutionIndex);
+            if(!solution)
+            {
+                log_error(__func__, "No solution for index", *solutionIndex);
+                return rocblaslt_status_invalid_value;
+            }
 
             if(!data->problem.gemms.empty()
                && data->problem.gemms[0].getParams().uniformSummationOrder())
@@ -4157,6 +4170,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
     }
     catch(const std::exception& e)
     {
+        log_error(__func__, e.what());
     }
     catch(...)
     {
@@ -4708,6 +4722,7 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int*                               returnAlgoCount,
                                   size_t                             maxWorkSpaceBytes)
 {
+    *returnAlgoCount = 0;
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
         return getRocRollerBestSolutions(handle,
@@ -4864,12 +4879,9 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
             }
         }
 
-        //workaround: findAllSolutions should get all solutions without duplications
-        bool duplicated_sol = false;
-        for(int j = 0; j < i; j++)
-            if(*(int*)(heuristicResults[j].algo.data) == solution->index)
-                duplicated_sol = true;
-        if(duplicated_sol)
+        //workaround: findAllSolutions should get all solutions without duplications.
+        //Sorting by index makes duplicates adjacent, so only the last kept entry can match.
+        if(i > 0 && *(int*)(heuristicResults[i - 1].algo.data) == solution->index)
         {
             ++duplicated_counts;
             continue;
@@ -5390,7 +5402,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
                                   std::shared_ptr<void>  gemmData,
-                                  const int              workspaceBytes,
+                                  const size_t           workspaceBytes,
                                   const int              requestedAlgoCount,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults)
 {

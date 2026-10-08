@@ -56,7 +56,7 @@ static void tap_valid_h(rocke_ir_builder_t* b,
                         rocke_value_t* c0,
                         rocke_value_t* c_st, /* NULL for stride==1 */
                         int stride,
-                        int Ho,
+                        rocke_value_t* p_Ho,
                         rocke_value_t** out_ho,
                         rocke_value_t** out_valid)
 {
@@ -65,8 +65,7 @@ static void tap_valid_h(rocke_ir_builder_t* b,
         /* Python: land(cmp_ge(hi_p_r, c0), cmp_lt(hi_p_r, const(Ho)))
          * ge is left arg → emitted first; const(Ho) is inside the right arg. */
         rocke_value_t* ge = rocke_b_cmp_ge(b, hi_p_r, c0);
-        rocke_value_t* c_Ho = rocke_b_const_i32(b, Ho);
-        rocke_value_t* lt = rocke_b_cmp_lt(b, hi_p_r, c_Ho);
+        rocke_value_t* lt = rocke_b_cmp_lt(b, hi_p_r, p_Ho);
         *out_ho = hi_p_r;
         *out_valid = rocke_b_land(b, ge, lt);
     }
@@ -78,8 +77,7 @@ static void tap_valid_h(rocke_ir_builder_t* b,
         /* Python inner land args: mod/eq are left, const(Ho)/lt are right */
         rocke_value_t* mod_v = rocke_b_mod(b, hi_p_r, c_st);
         rocke_value_t* eq = rocke_b_cmp_eq(b, mod_v, c0);
-        rocke_value_t* c_Ho = rocke_b_const_i32(b, Ho);
-        rocke_value_t* lt = rocke_b_cmp_lt(b, ho, c_Ho);
+        rocke_value_t* lt = rocke_b_cmp_lt(b, ho, p_Ho);
         rocke_value_t* inner = rocke_b_land(b, eq, lt);
         *out_ho = ho;
         *out_valid = rocke_b_land(b, ge, inner);
@@ -92,15 +90,14 @@ static void tap_valid_w(rocke_ir_builder_t* b,
                         rocke_value_t* c0,
                         rocke_value_t* c_st, /* NULL for stride==1 */
                         int stride,
-                        int Wo,
+                        rocke_value_t* p_Wo,
                         rocke_value_t** out_wo,
                         rocke_value_t** out_valid)
 {
     if(stride == 1)
     {
         rocke_value_t* ge = rocke_b_cmp_ge(b, wi_p_s, c0);
-        rocke_value_t* c_Wo = rocke_b_const_i32(b, Wo);
-        rocke_value_t* lt = rocke_b_cmp_lt(b, wi_p_s, c_Wo);
+        rocke_value_t* lt = rocke_b_cmp_lt(b, wi_p_s, p_Wo);
         *out_wo = wi_p_s;
         *out_valid = rocke_b_land(b, ge, lt);
     }
@@ -110,8 +107,7 @@ static void tap_valid_w(rocke_ir_builder_t* b,
         rocke_value_t* ge = rocke_b_cmp_ge(b, wi_p_s, c0);
         rocke_value_t* mod_v = rocke_b_mod(b, wi_p_s, c_st);
         rocke_value_t* eq = rocke_b_cmp_eq(b, mod_v, c0);
-        rocke_value_t* c_Wo = rocke_b_const_i32(b, Wo);
-        rocke_value_t* lt = rocke_b_cmp_lt(b, wo, c_Wo);
+        rocke_value_t* lt = rocke_b_cmp_lt(b, wo, p_Wo);
         rocke_value_t* inner = rocke_b_land(b, eq, lt);
         *out_wo = wo;
         *out_valid = rocke_b_land(b, ge, inner);
@@ -149,47 +145,34 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
     const int WAVE = spec->wave_size;
     const int THREADS = BLOCK_WAVES * WAVE;
     const int BLOCK_CH = BLOCK_WAVES * WAVE;
-    const int Ho = (p->H + 2 * p->PAD - p->KH) / p->stride + 1;
-    const int Wo = (p->W + 2 * p->PAD - p->KW) / p->stride + 1;
-    const int total_c = p->groups * p->cpg;
     const int total_k = p->groups * p->kpg;
     const int c_stride = p->stride;
+    /* AOT: Ho/Wo and the channel counts are kernargs -- see
+     * conv_abi.conv_direct_arg_names(). Only the filter extents,
+     * stride and PAD stay build-time (kernel capabilities). */
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
 
-    /* Params — io_type = _io_type(p.dtype): f16 or bf16 IR type. */
+    /* Params: the AOT kernarg block, in conv_abi dgrad order.
+     * io_type = _io_type(p.dtype): f16 or bf16 IR type. */
     const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
-    const rocke_type_t* ioptr = rocke_ptr_type(b, io_type, "global");
     const int is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0);
-    rocke_param_opts_t ro = {0};
-    ro.noalias = true;
-    ro.noalias_set = true;
-    ro.readonly = true;
-    ro.readonly_set = true;
-    ro.align = 16;
-    ro.align_set = true;
-    rocke_param_opts_t wo_opts = {0};
-    wo_opts.noalias = true;
-    wo_opts.noalias_set = true;
-    wo_opts.writeonly = true;
-    wo_opts.writeonly_set = true;
-    wo_opts.align = 16;
-    wo_opts.align_set = true;
-    rocke_param_opts_t none = {0};
-
-    rocke_value_t* A = rocke_b_param(b, "A", ioptr, &ro);
-    rocke_value_t* Bp = rocke_b_param(b, "B", ioptr, &ro);
-    rocke_value_t* D = rocke_b_param(b, "D", ioptr, &wo_opts);
-    rocke_value_t* A_bytes = rocke_b_param(b, "A_bytes", rocke_i32(), &none);
-    rocke_value_t* B_bytes = rocke_b_param(b, "B_bytes", rocke_i32(), &none);
-    rocke_value_t* D_bytes = rocke_b_param(b, "D_bytes", rocke_i32(), &none);
+    rocke_dconv_params_t params;
+    rocke_dconv_emit_params(b, &params, "dgrad", io_type);
+    rocke_value_t* A = params.A;
+    rocke_value_t* Bp = params.Bp;
+    rocke_value_t* D = params.D;
+    rocke_value_t* A_bytes = params.A_bytes;
+    rocke_value_t* B_bytes = params.B_bytes;
+    rocke_value_t* D_bytes = params.D_bytes;
 
     /* Constants — emitted in Python source order (lines 3579-3586):
      * c0, c1, c_total_c, c_total_k, c_half_bytes, c_wave, oob_sentinel, zero_f32 */
     rocke_value_t* c0 = rocke_b_const_i32(b, 0);
     rocke_value_t* c1 = rocke_b_const_i32(b, 1);
-    rocke_value_t* c_total_c = rocke_b_const_i32(b, total_c);
-    rocke_value_t* c_total_k = rocke_b_const_i32(b, total_k); /* emitted, unused in body */
+    /* AOT: the channel counts are kernargs. */
+    rocke_value_t* c_total_c = params.p_total_c;
+    rocke_value_t* c_total_k = params.p_total_k; /* declared, unused in body */
     rocke_value_t* c_half_bytes = rocke_b_const_i32(b, 2);
     rocke_value_t* c_wave = rocke_b_const_i32(b, WAVE);
     rocke_value_t* oob_sentinel = rocke_b_const_i32(b, (int32_t)(((int64_t)1 << 31) - 1));
@@ -221,16 +204,21 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
     rocke_value_t* b_rsrc = rocke_b_buffer_rsrc(b, Bp, B_bytes);
     rocke_value_t* d_rsrc = rocke_b_buffer_rsrc(b, D, D_bytes);
 
-    /* dY descriptor: A[N, Ho, Wo, total_k] NHWK */
+    /* dY descriptor: A[N, Ho, Wo, total_k] NHWK (k is contiguous). */
     const rocke_tensor_descriptor_t* dy_desc;
     {
-        static const char* const dy_coords[4] = {"n", "ho", "wo", "k"};
-        int dy_len[4];
-        dy_len[0] = p->N;
-        dy_len[1] = Ho;
-        dy_len[2] = Wo;
-        dy_len[3] = total_k;
-        dy_desc = rocke_tensor_descriptor_naive(b, "A", dy_len, 4, NULL, dy_coords, 4);
+        const char* dy_coords[4] = {"n", "ho", "wo", "k"};
+        rocke_value_t* dy_strides[4];
+        rocke_dynamic_tensor_descriptor_t* dy_dyn;
+        dy_strides[0] = params.p_A_stride_n;
+        dy_strides[1] = params.p_A_stride_hi;
+        dy_strides[2] = params.p_A_stride_wi;
+        dy_strides[3] = rocke_b_const_i32(b, 1);
+        dy_dyn
+            = rocke_tensor_descriptor_naive_dynamic(b, "dY_nhwk_direct", dy_coords, 4, dy_strides);
+        if(!dy_dyn)
+            return NULL;
+        dy_desc = &dy_dyn->base;
     }
     /* W descriptor: B[total_k, KH, KW, cpg] KRSC */
     const rocke_tensor_descriptor_t* b_desc;
@@ -243,22 +231,26 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
         b_len[3] = p->cpg;
         b_desc = rocke_tensor_descriptor_naive(b, "B", b_len, 4, NULL, b_coords, 4);
     }
-    /* dX descriptor: D[N, H, W, total_c] NHWC */
+    /* dX descriptor: D[N, H, W, total_c] NHWC. */
     const rocke_tensor_descriptor_t* d_desc;
     {
-        static const char* const d_coords[4] = {"n", "h", "w", "c"};
-        int d_len[4];
-        d_len[0] = p->N;
-        d_len[1] = p->H;
-        d_len[2] = p->W;
-        d_len[3] = total_c;
-        d_desc = rocke_tensor_descriptor_naive(b, "D", d_len, 4, NULL, d_coords, 4);
+        const char* d_coords[4] = {"n", "h", "w", "c"};
+        rocke_value_t* d_strides[4];
+        rocke_dynamic_tensor_descriptor_t* d_dyn;
+        d_strides[0] = params.p_D_stride_n;
+        d_strides[1] = params.p_D_stride_ho;
+        d_strides[2] = params.p_D_stride_wo;
+        d_strides[3] = rocke_b_const_i32(b, 1);
+        d_dyn = rocke_tensor_descriptor_naive_dynamic(b, "dX_nhwc_direct", d_coords, 4, d_strides);
+        if(!d_dyn)
+            return NULL;
+        d_desc = &d_dyn->base;
     }
 
     /* Stride between consecutive k_out values in W:
      * W[k+1, r, s, c] - W[k, r, s, c] = KH*KW*cpg * 2 bytes */
     rocke_value_t* k_stride_bytes = rocke_b_const_i32(b, p->KH * p->KW * p->cpg * 2);
-    rocke_value_t* c_Wi = rocke_b_const_i32(b, p->W);
+    rocke_value_t* c_Wi = params.p_Wi;
     rocke_value_t* c_kpg = rocke_b_const_i32(b, p->kpg);
 
     /* Python line 3630: c_st = b.const_i32(stride) if stride > 1 else None
@@ -266,7 +258,7 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
     rocke_value_t* c_st_hw = (c_stride > 1) ? rocke_b_const_i32(b, c_stride) : NULL;
 
     /* Runtime Hi-loop */
-    rocke_value_t* hi_bound = rocke_b_const_i32(b, p->H);
+    rocke_value_t* hi_bound = params.p_Hi;
     rocke_iter_arg_t hi_iarg;
     hi_iarg.name = "dg_hi_dummy";
     hi_iarg.init = rocke_b_const_i32(b, 0);
@@ -296,14 +288,14 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
             rocke_value_t* hi_p_r = rocke_b_add(b, hi_iv, rocke_b_const_i32(b, p->PAD - r_const));
             rocke_value_t* ho;
             rocke_value_t* r_valid;
-            tap_valid_h(b, hi_p_r, c0, c_st_hw, c_stride, Ho, &ho, &r_valid);
+            tap_valid_h(b, hi_p_r, c0, c_st_hw, c_stride, params.p_Ho, &ho, &r_valid);
 
             for(s_const = 0; s_const < p->KW; s_const++)
             {
                 rocke_value_t* wi_p_s = rocke_b_add(b, wi, rocke_b_const_i32(b, p->PAD - s_const));
                 rocke_value_t* wo;
                 rocke_value_t* s_valid;
-                tap_valid_w(b, wi_p_s, c0, c_st_hw, c_stride, Wo, &wo, &s_valid);
+                tap_valid_w(b, wi_p_s, c0, c_st_hw, c_stride, params.p_Wo, &wo, &s_valid);
 
                 /* Python: land(land(r_valid, s_valid), land(c_in_ok, wi_ok))
                  * Emit in Python order: r_s first, then c_wi, then outer land */
@@ -453,44 +445,29 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
     const int WAVE = spec->wave_size;
     const int THREADS = BLOCK_WAVES * WAVE;
     const int BLOCK_CH = BLOCK_WAVES * WAVE;
-    const int Ho = (p->H + 2 * p->PAD - p->KH) / p->stride + 1;
-    const int Wo = (p->W + 2 * p->PAD - p->KW) / p->stride + 1;
     const int c_stride = p->stride;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
 
-    /* Params — io_type = _io_type(p.dtype): f16 or bf16 IR type. */
+    /* Params: the AOT kernarg block, in conv_abi dgrad order.
+     * io_type = _io_type(p.dtype): f16 or bf16 IR type. */
     const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
-    const rocke_type_t* ioptr = rocke_ptr_type(b, io_type, "global");
     const int is_bf16 = (p->dtype && strcmp(p->dtype, "bf16") == 0);
-    rocke_param_opts_t ro = {0};
-    ro.noalias = true;
-    ro.noalias_set = true;
-    ro.readonly = true;
-    ro.readonly_set = true;
-    ro.align = 16;
-    ro.align_set = true;
-    rocke_param_opts_t wo_opts = {0};
-    wo_opts.noalias = true;
-    wo_opts.noalias_set = true;
-    wo_opts.writeonly = true;
-    wo_opts.writeonly_set = true;
-    wo_opts.align = 16;
-    wo_opts.align_set = true;
-    rocke_param_opts_t none = {0};
-
-    rocke_value_t* A = rocke_b_param(b, "A", ioptr, &ro);
-    rocke_value_t* Bp = rocke_b_param(b, "B", ioptr, &ro);
-    rocke_value_t* D = rocke_b_param(b, "D", ioptr, &wo_opts);
-    rocke_value_t* A_bytes = rocke_b_param(b, "A_bytes", rocke_i32(), &none);
-    rocke_value_t* B_bytes = rocke_b_param(b, "B_bytes", rocke_i32(), &none);
-    rocke_value_t* D_bytes = rocke_b_param(b, "D_bytes", rocke_i32(), &none);
+    rocke_dconv_params_t params;
+    rocke_dconv_emit_params(b, &params, "dgrad", io_type);
+    rocke_value_t* A = params.A;
+    rocke_value_t* Bp = params.Bp;
+    rocke_value_t* D = params.D;
+    rocke_value_t* A_bytes = params.A_bytes;
+    rocke_value_t* B_bytes = params.B_bytes;
+    rocke_value_t* D_bytes = params.D_bytes;
 
     /* Constants — Python order (lines 3873-3879):
      * c0, c1, c_groups, c_half_bytes, c_wave, oob_sentinel, zero_f32 */
     rocke_value_t* c0 = rocke_b_const_i32(b, 0);
     rocke_value_t* c1 = rocke_b_const_i32(b, 1);
-    rocke_value_t* c_groups = rocke_b_const_i32(b, p->groups);
+    /* AOT: the group count is a kernarg. */
+    rocke_value_t* c_groups = params.p_groups;
     rocke_value_t* c_half_bytes = rocke_b_const_i32(b, 2);
     rocke_value_t* c_wave = rocke_b_const_i32(b, WAVE);
     rocke_value_t* oob_sentinel = rocke_b_const_i32(b, (int32_t)(((int64_t)1 << 31) - 1));
@@ -521,16 +498,20 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
     rocke_value_t* b_rsrc = rocke_b_buffer_rsrc(b, Bp, B_bytes);
     rocke_value_t* d_rsrc = rocke_b_buffer_rsrc(b, D, D_bytes);
 
-    /* dY descriptor: A[N, Ho, Wo, groups] NHWK */
+    /* dY descriptor: A[N, Ho, Wo, groups] NHWK. */
     const rocke_tensor_descriptor_t* dy_desc;
     {
-        static const char* const dy_coords[4] = {"n", "ho", "wo", "ch"};
-        int dy_len[4];
-        dy_len[0] = p->N;
-        dy_len[1] = Ho;
-        dy_len[2] = Wo;
-        dy_len[3] = p->groups;
-        dy_desc = rocke_tensor_descriptor_naive(b, "A", dy_len, 4, NULL, dy_coords, 4);
+        const char* dy_coords[4] = {"n", "ho", "wo", "ch"};
+        rocke_value_t* dy_strides[4];
+        rocke_dynamic_tensor_descriptor_t* dy_dyn;
+        dy_strides[0] = params.p_A_stride_n;
+        dy_strides[1] = params.p_A_stride_hi;
+        dy_strides[2] = params.p_A_stride_wi;
+        dy_strides[3] = rocke_b_const_i32(b, 1);
+        dy_dyn = rocke_tensor_descriptor_naive_dynamic(b, "dY_nhwc_dw", dy_coords, 4, dy_strides);
+        if(!dy_dyn)
+            return NULL;
+        dy_desc = &dy_dyn->base;
     }
     /* W descriptor: B[groups, KH, KW, 1] KRSC */
     const rocke_tensor_descriptor_t* b_desc;
@@ -543,16 +524,20 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
         b_len[3] = 1;
         b_desc = rocke_tensor_descriptor_naive(b, "B", b_len, 4, NULL, b_coords, 4);
     }
-    /* dX descriptor: D[N, H, W, groups] NHWC */
+    /* dX descriptor: D[N, H, W, groups] NHWC. */
     const rocke_tensor_descriptor_t* d_desc;
     {
-        static const char* const d_coords[4] = {"n", "h", "w", "ch"};
-        int d_len[4];
-        d_len[0] = p->N;
-        d_len[1] = p->H;
-        d_len[2] = p->W;
-        d_len[3] = p->groups;
-        d_desc = rocke_tensor_descriptor_naive(b, "D", d_len, 4, NULL, d_coords, 4);
+        const char* d_coords[4] = {"n", "h", "w", "ch"};
+        rocke_value_t* d_strides[4];
+        rocke_dynamic_tensor_descriptor_t* d_dyn;
+        d_strides[0] = params.p_D_stride_n;
+        d_strides[1] = params.p_D_stride_ho;
+        d_strides[2] = params.p_D_stride_wo;
+        d_strides[3] = rocke_b_const_i32(b, 1);
+        d_dyn = rocke_tensor_descriptor_naive_dynamic(b, "dX_nhwc_dw", d_coords, 4, d_strides);
+        if(!d_dyn)
+            return NULL;
+        d_desc = &d_dyn->base;
     }
 
     /* Preload W[ch, r, s, 0] into f32 registers (KH * KW per lane).
@@ -589,14 +574,14 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
         }
     }
 
-    rocke_value_t* c_Wi = rocke_b_const_i32(b, p->W);
+    rocke_value_t* c_Wi = params.p_Wi;
 
     /* Python: c_st = b.const_i32(stride) if stride > 1 else None
      * Emitted once before the Hi-loop so tap_valid calls reuse it. */
     rocke_value_t* c_st_hw = (c_stride > 1) ? rocke_b_const_i32(b, c_stride) : NULL;
 
     /* Runtime Hi-loop */
-    rocke_value_t* hi_bound = rocke_b_const_i32(b, p->H);
+    rocke_value_t* hi_bound = params.p_Hi;
     rocke_iter_arg_t hi_iarg;
     hi_iarg.name = "dg_dw_dummy";
     hi_iarg.init = rocke_b_const_i32(b, 0);
@@ -626,14 +611,14 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
             rocke_value_t* hi_p_r = rocke_b_add(b, hi_iv, rocke_b_const_i32(b, p->PAD - r_const));
             rocke_value_t* ho;
             rocke_value_t* r_valid;
-            tap_valid_h(b, hi_p_r, c0, c_st_hw, c_stride, Ho, &ho, &r_valid);
+            tap_valid_h(b, hi_p_r, c0, c_st_hw, c_stride, params.p_Ho, &ho, &r_valid);
 
             for(s_const = 0; s_const < p->KW; s_const++)
             {
                 rocke_value_t* wi_p_s = rocke_b_add(b, wi, rocke_b_const_i32(b, p->PAD - s_const));
                 rocke_value_t* wo;
                 rocke_value_t* s_valid;
-                tap_valid_w(b, wi_p_s, c0, c_st_hw, c_stride, Wo, &wo, &s_valid);
+                tap_valid_w(b, wi_p_s, c0, c_st_hw, c_stride, params.p_Wo, &wo, &s_valid);
 
                 /* Python: land(land(r_valid, s_valid), land(ch_in_range, wi_ok)) */
                 rocke_value_t* r_s_and = rocke_b_land(b, r_valid, s_valid);
