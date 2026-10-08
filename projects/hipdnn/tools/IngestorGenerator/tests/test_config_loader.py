@@ -1132,10 +1132,41 @@ def _parse(text):
     return yaml.load(text, Loader=_DuplicateKeySafeLoader)  # nosec B506
 
 
+def _duplicate_key_loaders():
+    from codegen import config_loader
+
+    loaders = [pytest.param(config_loader._PyDuplicateKeySafeLoader, id="python")]
+    if getattr(yaml, "__with_libyaml__", False):
+        loaders.append(
+            pytest.param(config_loader._CDuplicateKeySafeLoader, id="libyaml")
+        )
+    return loaders
+
+
+def test_the_config_loader_parses_with_libyaml_when_pyyaml_has_it():
+    from codegen import config_loader
+
+    if getattr(yaml, "__with_libyaml__", False):
+        assert issubclass(config_loader._DuplicateKeySafeLoader, yaml.CSafeLoader)
+    else:
+        assert config_loader._DuplicateKeySafeLoader is (
+            config_loader._PyDuplicateKeySafeLoader
+        )
+
+
 class TestRepeatedYamlKeys:
     """Stock PyYAML keeps the last of two equal mapping keys and drops the other
     silently, so the value an author reads first is not the one generated. Merge keys,
-    aliases and YAML's scalar resolution stay what stock SafeLoader makes of them."""
+    aliases and YAML's scalar resolution stay what stock SafeLoader makes of them.
+
+    Every case runs over both parsers: libyaml's, which the loader takes when PyYAML
+    was built with it, and the pure-Python fallback."""
+
+    @pytest.fixture(autouse=True, params=_duplicate_key_loaders())
+    def _loader(self, request, monkeypatch):
+        from codegen import config_loader
+
+        monkeypatch.setattr(config_loader, "_DuplicateKeySafeLoader", request.param)
 
     def _load(self, tmp_path, text):
         path = tmp_path / "c.yaml"
