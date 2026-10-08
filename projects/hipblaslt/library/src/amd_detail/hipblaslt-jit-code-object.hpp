@@ -11,8 +11,8 @@
 // In-process code-object construction through AMD comgr. build and inspect are
 // noexcept: failures, including allocation failure, are reported through Status
 // and a log carrying the comgr diagnostics of every stage that ran. Assembly,
-// HIP compilation and linking stay inside the implementation. Only the Target
-// string helpers may throw (std::bad_alloc).
+// HIP compilation and linking stay inside the implementation. The Target
+// string functions may throw (std::bad_alloc).
 namespace hipblaslt_jit::code_object
 {
     enum class Status
@@ -27,23 +27,6 @@ namespace hipblaslt_jit::code_object
 
     const char* toString(Status status) noexcept;
 
-    struct Target
-    {
-        // Processor name without features, for example "gfx950" or "gfx1250".
-        std::string gfx;
-        // Target-ID features, for example {"sramecc+", "xnack-"}. Empty means "any";
-        // the assembly's .amdgcn_target directive must name the same features.
-        std::vector<std::string> features;
-        // 0 selects the processor default (64 for gfx9, otherwise 32).
-        int wavefrontSize = 0;
-
-        // Parses "gfx950:sramecc+:xnack-" (hipDeviceProp_t::gcnArchName form).
-        static Target fromTargetId(const std::string& targetId, int wavefrontSize = 0);
-        std::string   targetId() const; // gfx950:sramecc+:xnack-
-        std::string   isaName() const; // amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-
-        int           resolvedWavefrontSize() const;
-    };
-
     enum class HipPipeline
     {
         // COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC -> CODEGEN_BC_TO_RELOCATABLE, with IR
@@ -57,6 +40,9 @@ namespace hipblaslt_jit::code_object
     {
         // 4, 5 or 6. Applies to assembly and HIP sources.
         int codeObjectVersion = 5;
+        // 32 or 64 for assembly, or 0 for the processor default (64 before
+        // gfx10, otherwise 32). HIP always keeps the processor default.
+        int wavefrontSize = 0;
         // Rewrites the target ID in ".amdgcn_target" / "amdhsa.target" to
         // Target::targetId(), as TensileLite's assembler does before assembling.
         bool                     retargetAssembly = false;
@@ -89,7 +75,7 @@ namespace hipblaslt_jit::code_object
     {
         Status                  status = Status::InternalError;
         std::string             log;
-        hipblaslt_jit::Artifact codeObject; // Kind::CodeObject when ok
+        hipblaslt_jit::Artifact artifact; // Relocatable or Executable when ok
         bool                    ok() const noexcept
         {
             return status == Status::Success;
@@ -112,20 +98,21 @@ namespace hipblaslt_jit::code_object
         }
     };
 
-    // Assembles or compiles bundle.mainKernel, with bundle.includes, and links
-    // one executable code object. bundle.helpers are not compiled here.
-    // Target::wavefrontSize applies to assembly; HIP keeps the processor default.
+    // build and compileRelocatable read only the bundle's mainKernel, includes
+    // and hipFlags; target and options stand for the rest of the bundle.
+
+    // Assembles or compiles bundle.mainKernel and links one Executable.
     Result build(const hipblaslt_jit::SourceCodeBundle& bundle,
                  const Target&                          target,
                  const Options&                         options) noexcept;
 
-    // The relocatable for bundle.mainKernel. The helper library stores these
-    // bytes; the solution library stores the executable link produces.
+    // The Relocatable for bundle.mainKernel. The helper library stores these
+    // bytes; the solution library stores the Executable link produces.
     Result compileRelocatable(const hipblaslt_jit::SourceCodeBundle& bundle,
                               const Target&                          target,
                               const Options&                         options) noexcept;
 
-    // Links relocatable bytes into one executable code object.
+    // Links Relocatables into one Executable.
     Result linkRelocatables(const std::vector<hipblaslt_jit::Artifact>& objects,
                             const Target&                               target,
                             const Options&                              options) noexcept;

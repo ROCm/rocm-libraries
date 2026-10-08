@@ -133,9 +133,9 @@ namespace hipblaslt_jit
             document.backendVersion    = key.backendVersion;
             document.comgr             = key.comgr;
             document.rocmPath          = key.rocmPath;
-            document.targetId          = key.targetId;
-            document.isa               = key.isa;
-            document.libraryArch       = key.libraryArch;
+            document.targetId          = key.target.targetId();
+            document.isa               = key.target.processorName();
+            document.libraryArch       = key.target.libraryArch();
             document.codeObjectVersion = key.codeObjectVersion;
             document.schema            = jitLibrarySchema;
             document.wavefrontSize     = key.wavefrontSize;
@@ -148,11 +148,11 @@ namespace hipblaslt_jit
         // directory: compatibility is decided per solution.
         bool directoryAgrees(const msgpack_io::CacheKeyDocument& stored, const CacheKey& key)
         {
-            if(stored.hasIsa && stored.isa != key.isa)
+            if(stored.hasIsa && stored.isa != key.target.processorName())
                 return false;
-            if(stored.hasTargetId && stored.targetId != key.targetId)
+            if(stored.hasTargetId && stored.targetId != key.target.targetId())
                 return false;
-            if(stored.hasLibraryArch && stored.libraryArch != key.libraryArch)
+            if(stored.hasLibraryArch && stored.libraryArch != key.target.libraryArch())
                 return false;
             if(stored.hasWavefront && stored.wavefrontSize != key.wavefrontSize)
                 return false;
@@ -285,9 +285,7 @@ namespace hipblaslt_jit
                                          compilerEnvironment(environ)};
 #endif
         CacheKey key;
-        key.targetId          = target.targetId;
-        key.isa               = target.isa;
-        key.libraryArch       = target.libraryArch;
+        key.target            = target;
         key.wavefrontSize     = target.wavefrontSize;
         key.backendId         = backend.id;
         key.backendVersion    = backend.version;
@@ -302,9 +300,11 @@ namespace hipblaslt_jit
     {
         // One path component. Toolchain identity (comgr, ROCm path, compiler
         // environment) is recorded in the cache key and is not part of the name.
-        auto name = filesystemLiteral(isa) + "_" + filesystemLiteral(targetId) + "_"
-                    + filesystemLiteral(libraryArch) + "_wf" + std::to_string(wavefrontSize) + "_"
-                    + filesystemLiteral(backendId) + "_" + std::to_string(backendVersion);
+        auto name = filesystemLiteral(target.processorName()) + "_"
+                    + filesystemLiteral(target.targetId()) + "_"
+                    + filesystemLiteral(target.libraryArch()) + "_wf"
+                    + std::to_string(wavefrontSize) + "_" + filesystemLiteral(backendId) + "_"
+                    + std::to_string(backendVersion);
         if(name == "." || name == "..")
             name.insert(name.begin(), 'x');
         return name;
@@ -476,26 +476,26 @@ namespace hipblaslt_jit
             files::FileIdentity                               masterFile, mappingFile;
             std::map<int, TensileLite::hip::SolutionAdapter*> adapters;
 
-            fs::path masterPath(const std::string& isa) const
+            fs::path masterPath(const Target& target) const
             {
-                return path / ("TensileLibrary_lazy_" + isa + ".dat");
+                return path / ("TensileLibrary_lazy_" + target.processorName() + ".dat");
             }
-            fs::path mappingPath(const std::string& isa) const
+            fs::path mappingPath(const Target& target) const
             {
-                return path / ("TensileLiteLibrary_lazy_" + isa + "_Mapping.dat");
+                return path / ("TensileLiteLibrary_lazy_" + target.processorName() + "_Mapping.dat");
             }
 
             // Loads this slice's master and mapping only. Callers hold mutex.
-            Status refresh(const std::string& isa)
+            Status refresh(const Target& target)
             {
-                const auto masterNow  = files::identify(masterPath(isa));
-                const auto mappingNow = files::identify(mappingPath(isa));
+                const auto masterNow  = files::identify(masterPath(target));
+                const auto mappingNow = files::identify(mappingPath(target));
                 if(loaded && masterNow == masterFile && mappingNow == mappingFile)
                     return {};
                 std::shared_ptr<GemmMaster> library;
                 if(masterNow.exists)
                 {
-                    const auto file = masterPath(isa).string();
+                    const auto file = masterPath(target).string();
                     library         = std::dynamic_pointer_cast<GemmMaster>(
                         TensileLite::LoadLibraryFilePreload<TensileLite::ContractionProblemGemm>(
                             file, {}));
@@ -526,7 +526,6 @@ namespace hipblaslt_jit
         };
 
         fs::path    path;
-        std::string isa;
         CacheKey    identity;
         Status      failure; // a cache-key.msgpack this directory cannot use
         // The helper-only library: a TensileLite lazy library of helper code
@@ -604,7 +603,9 @@ namespace hipblaslt_jit
             if(legacy)
                 return legacy.get();
             std::error_code error;
-            if(!fs::is_regular_file(path / ("TensileLibrary_lazy_" + isa + ".dat"), error))
+            const auto      master
+                = path / ("TensileLibrary_lazy_" + identity.target.processorName() + ".dat");
+            if(!fs::is_regular_file(master, error))
                 return nullptr;
             legacy       = std::make_unique<Slice>();
             legacy->path = path;
@@ -712,7 +713,6 @@ namespace hipblaslt_jit
         {
             auto opened      = std::make_unique<Directory>();
             opened->path     = schemaDirectory() / name;
-            opened->isa      = key.isa;
             opened->identity = key;
             for(const auto& path : {opened->path, opened->staging()})
                 if(auto status = files::privateDirectory(path); !status.ok())
@@ -757,7 +757,8 @@ namespace hipblaslt_jit
         if(!directory)
             return failed(Stage::Build, "The JIT solution library has no helper library");
 
-        const auto prefix = filesystemLiteral(helperName);
+        const auto& target = directory->identity.target;
+        const auto  prefix = filesystemLiteral(helperName);
         auto       locate = [&](Directory::Slice*& slice) -> Status {
             slice = nullptr;
             std::lock_guard<std::mutex> guard(directory->sliceMutex);
@@ -776,10 +777,10 @@ namespace hipblaslt_jit
             if(auto status = locate(slice); !status.ok())
                 return status;
             std::error_code error;
-            if(!fs::is_regular_file(slice->masterPath(directory->isa), error))
+            if(!fs::is_regular_file(slice->masterPath(target), error))
                 return {};
             std::lock_guard<std::mutex> lock(slice->mutex);
-            if(auto status = slice->refresh(directory->isa); !status.ok())
+            if(auto status = slice->refresh(target); !status.ok())
                 return status;
             if(!slice->master)
                 return {};
@@ -804,7 +805,7 @@ namespace hipblaslt_jit
             if(auto status = files::readFile(object, fileLimit, bytes); !status.ok())
                 return status;
             found.name  = helperName;
-            found.kind  = Artifact::Kind::CodeObject;
+            found.kind  = Artifact::Kind::Relocatable;
             found.bytes = std::move(bytes);
             present     = true;
             return {};
@@ -820,9 +821,8 @@ namespace hipblaslt_jit
         if(auto status = compile(compiled); !status.ok())
             return status;
         compiled.name = helperName;
-        compiled.kind = Artifact::Kind::CodeObject;
-        if(compiled.bytes.empty())
-            return failed(Stage::Build, "Helper " + helperName + " produced no code object");
+        if(compiled.kind != Artifact::Kind::Relocatable || compiled.bytes.empty())
+            return failed(Stage::Build, "Helper " + helperName + " produced no relocatable");
 
         Directory::Slice* slice = nullptr;
         if(auto status = locate(slice); !status.ok())
@@ -861,7 +861,7 @@ namespace hipblaslt_jit
 
         std::vector<uint8_t> entry;
         if(auto status = msgpack_io::rewriteEntryIndex(
-               committed::helperEntry(helperName, directory->isa), 0, index, entry);
+               committed::helperEntry(helperName, target.processorName()), 0, index, entry);
            !status.ok())
             return status;
         if(!validEntry(entry, index, helperName))
@@ -880,22 +880,22 @@ namespace hipblaslt_jit
             return status;
 
         std::vector<uint8_t> master;
-        if(fs::is_regular_file(slice->masterPath(directory->isa), error))
-            if(auto status = files::readFile(slice->masterPath(directory->isa), fileLimit, master);
+        if(fs::is_regular_file(slice->masterPath(target), error))
+            if(auto status = files::readFile(slice->masterPath(target), fileLimit, master);
                !status.ok())
                 return status;
         if(auto status = msgpack_io::appendMasterRows(
                master, {{std::vector<size_t>{}, fields.predicate, prefix}}, bytes);
            !status.ok())
             return status;
-        if(auto status = files::writeAtomically(staging, slice->masterPath(directory->isa), bytes);
+        if(auto status = files::writeAtomically(staging, slice->masterPath(target), bytes);
            !status.ok())
             return status;
 
         std::map<int32_t, std::string> mapping;
-        if(fs::is_regular_file(slice->mappingPath(directory->isa), error))
+        if(fs::is_regular_file(slice->mappingPath(target), error))
         {
-            if(auto status = files::readFile(slice->mappingPath(directory->isa), fileLimit, bytes);
+            if(auto status = files::readFile(slice->mappingPath(target), fileLimit, bytes);
                !status.ok())
                 return status;
             if(auto status = msgpack_io::readMapping(bytes, mapping); !status.ok())
@@ -905,12 +905,12 @@ namespace hipblaslt_jit
         if(auto status = msgpack_io::writeMapping(mapping, bytes); !status.ok())
             return status;
         if(auto status
-           = files::writeAtomically(staging, slice->mappingPath(directory->isa), bytes);
+           = files::writeAtomically(staging, slice->mappingPath(target), bytes);
            !status.ok())
             return status;
         {
             std::lock_guard<std::mutex> lockSlice(slice->mutex);
-            if(auto status = slice->refresh(directory->isa); !status.ok())
+            if(auto status = slice->refresh(target); !status.ok())
                 return status;
         }
         out = std::move(compiled);
@@ -971,7 +971,7 @@ namespace hipblaslt_jit
             if(slice)
             {
                 std::lock_guard<std::mutex> lock(slice->mutex);
-                if(auto status = slice->refresh(directory->isa); !status.ok())
+                if(auto status = slice->refresh(directory->identity.target); !status.ok())
                     return status;
                 master = slice->master;
             }
@@ -1016,7 +1016,9 @@ namespace hipblaslt_jit
     Status JitLibrary::publish(const CacheKey&                           key,
                                int                                       device,
                                const TensileLite::ContractionProblemGemm& problem,
-                               const SupportedSolutions&                 solutions,
+                               const Artifact&                           executable,
+                               const std::vector<uint8_t>&               record,
+                               const std::vector<int>&                   solutions,
                                std::vector<int32_t>&                     indices)
     {
         indices.clear();
@@ -1026,39 +1028,34 @@ namespace hipblaslt_jit
             Directory* directory = nullptr;
             if(auto status = attach(key, device, directory); !status.ok())
                 return status;
-            // Each supported solution is added to the library with its code object.
+            const auto& target = directory->identity.target;
+            if(executable.bytes.empty() || executable.kind != Artifact::Kind::Executable)
+                return failed(Stage::Publish, "A built solution has no executable");
+            if(record.empty())
+                return failed(Stage::Publish, "A built solution has no TensileLite record");
+            // Each solution is added to the library with the executable.
             struct Candidate
             {
-                const Artifact*      object = nullptr;
                 std::vector<uint8_t> entry;
                 std::string          kernel;
             };
             std::vector<Candidate> candidates;
-            for(const auto& supported : solutions)
+            for(const auto local : solutions)
             {
-                if(supported.first.codeObject.bytes.empty()
-                   || supported.first.codeObject.kind != Artifact::Kind::CodeObject)
-                    return failed(Stage::Publish, "A built solution has no code object");
-                if(supported.first.record.empty())
-                    return failed(Stage::Publish, "A built solution has no TensileLite record");
-                for(const auto local : supported.second)
-                {
-                    Candidate candidate{&supported.first.codeObject};
-                    // Read the solution TensileLite already parsed. Publishing adds
-                    // that solution; the library holds many.
-                    const auto solution = solutionIn(supported.first.record, local);
-                    if(!solution || solution->kernelName.empty())
-                        return failed(Stage::Publish,
-                                      "A built solution record has no kernel at local index "
-                                          + std::to_string(local));
-                    candidate.kernel = solution->kernelName;
-                    // The stored entry's index bytes are not written by TensileLite.
-                    if(auto status = msgpack_io::rewriteEntryIndex(
-                           supported.first.record, local, 0, candidate.entry);
-                       !status.ok())
-                        return status;
-                    candidates.push_back(std::move(candidate));
-                }
+                Candidate candidate;
+                // Read the solution TensileLite already parsed. Publishing adds
+                // that solution; the library holds many.
+                const auto solution = solutionIn(record, local);
+                if(!solution || solution->kernelName.empty())
+                    return failed(Stage::Publish,
+                                  "A built solution record has no kernel at local index "
+                                      + std::to_string(local));
+                candidate.kernel = solution->kernelName;
+                // The stored entry's index bytes are not written by TensileLite.
+                if(auto status = msgpack_io::rewriteEntryIndex(record, local, 0, candidate.entry);
+                   !status.ok())
+                    return status;
+                candidates.push_back(std::move(candidate));
             }
             if(candidates.empty())
                 return {};
@@ -1092,18 +1089,18 @@ namespace hipblaslt_jit
                     return failed(Stage::Publish, allocator.u8string() + " is below the JIT range");
             }
             std::map<int32_t, std::string> mapping;
-            if(fs::exists(slice->mappingPath(directory->isa), error))
+            if(fs::exists(slice->mappingPath(target), error))
             {
-                if(auto status = files::readFile(slice->mappingPath(directory->isa), fileLimit, bytes);
+                if(auto status = files::readFile(slice->mappingPath(target), fileLimit, bytes);
                    !status.ok())
                     return status;
                 if(auto status = msgpack_io::readMapping(bytes, mapping); !status.ok())
                     return status;
             }
             std::vector<std::string> rowPrefixes;
-            if(fs::exists(slice->masterPath(directory->isa), error))
+            if(fs::exists(slice->masterPath(target), error))
             {
-                if(auto status = files::readFile(slice->masterPath(directory->isa), fileLimit, master);
+                if(auto status = files::readFile(slice->masterPath(target), fileLimit, master);
                    !status.ok())
                     return status;
                 if(auto status = msgpack_io::readMasterPrefixes(master, rowPrefixes); !status.ok())
@@ -1171,16 +1168,15 @@ namespace hipblaslt_jit
                     return status;
             }
 
-            // The solution code object is already linked with any helpers. The
-            // helper library holds those helpers; this library stores the executable.
+            // The executable is already linked with any helpers. The helper
+            // library holds those helpers; this library stores the executable.
             for(const auto& placement : placements)
                 if(placement.fresh)
                 {
                     const auto object = slice->path / (placement.prefix + ".co");
                     if(auto status = ensureEntryParents(slice->path, object); !status.ok())
                         return status;
-                    if(auto status = files::writeAtomically(
-                           staging, object, candidates[placement.source].object->bytes);
+                    if(auto status = files::writeAtomically(staging, object, executable.bytes);
                        !status.ok())
                         return status;
                 }
@@ -1218,7 +1214,7 @@ namespace hipblaslt_jit
                 if(auto status = msgpack_io::writeMapping(mapping, bytes); !status.ok())
                     return status;
                 if(auto status
-                   = files::writeAtomically(staging, slice->mappingPath(directory->isa), bytes);
+                   = files::writeAtomically(staging, slice->mappingPath(target), bytes);
                    !status.ok())
                     return status;
                 std::map<int32_t, std::string> indexMap;
@@ -1249,7 +1245,7 @@ namespace hipblaslt_jit
                 if(auto status = msgpack_io::appendMasterRows(master, rows, bytes); !status.ok())
                     return status;
                 if(auto status
-                   = files::writeAtomically(staging, slice->masterPath(directory->isa), bytes);
+                   = files::writeAtomically(staging, slice->masterPath(target), bytes);
                    !status.ok())
                     return status;
             }
@@ -1257,7 +1253,7 @@ namespace hipblaslt_jit
 
             {
                 std::lock_guard<std::mutex> guard(slice->mutex);
-                if(auto status = slice->refresh(directory->isa); !status.ok())
+                if(auto status = slice->refresh(target); !status.ok())
                     return status;
             }
             for(auto placement : placementOf)
@@ -1316,7 +1312,7 @@ namespace hipblaslt_jit
                         continue;
                     std::lock_guard<std::mutex> lock(slice->mutex);
                     if(reload)
-                        if(auto status = slice->refresh(directory->isa); !status.ok())
+                        if(auto status = slice->refresh(directory->identity.target); !status.ok())
                         {
                             reloadFailure = std::move(status);
                             continue;

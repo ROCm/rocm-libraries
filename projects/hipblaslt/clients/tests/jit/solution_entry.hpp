@@ -28,10 +28,10 @@ namespace hipblaslt_jit_test
     // custom.config block.
     struct Assembly
     {
-        std::string kernel;
-        std::string target; // the .amdgcn_target ID, e.g. "gfx950"
-        int         kernArgsVersion           = -1;
-        int         persistentLoopArgsVersion = 0; // written for DataParallel kernels only
+        std::string           kernel;
+        hipblaslt_jit::Target target; // the .amdgcn_target ID, e.g. gfx950
+        int                   kernArgsVersion           = -1;
+        int                   persistentLoopArgsVersion = 0; // written for DataParallel kernels only
     };
 
     inline Assembly readAssembly(const std::string& text)
@@ -44,23 +44,25 @@ namespace hipblaslt_jit_test
             return true;
         };
         Assembly           result;
+        std::string        targetId;
         std::istringstream lines(text);
         for(std::string line, rest; std::getline(lines, line);)
         {
             if(after(line, ".amdhsa_kernel ", rest) && result.kernel.empty())
                 result.kernel = rest;
             else if(after(line, ".amdgcn_target \"amdgcn-amd-amdhsa--", rest))
-                result.target = rest.substr(0, rest.find('"'));
+                targetId = rest.substr(0, rest.find('"'));
             else if(after(line, "    KernArgsVersion: ", rest))
                 result.kernArgsVersion = std::stoi(rest);
             else if(after(line, "    PersistentLoopArgsVersion: ", rest))
                 result.persistentLoopArgsVersion = std::stoi(rest);
         }
+        const auto target = hipblaslt_jit::Target::fromTargetId(targetId);
         {
-            INFO(("The assembly names no kernel, target or KernArgsVersion"));
-            REQUIRE((
-                !result.kernel.empty() && !result.target.empty() && result.kernArgsVersion >= 0));
+            INFO(("The assembly names no kernel, known target or KernArgsVersion"));
+            REQUIRE((!result.kernel.empty() && target && result.kernArgsVersion >= 0));
         }
+        result.target = *target;
         return result;
     }
 
@@ -263,7 +265,7 @@ namespace hipblaslt_jit_test
             {"DirectToLdsA", false}, {"DirectToLdsB", false}, {"NumLoadsCoalescedA", 1},
             {"NumLoadsCoalescedB", 1}, {"VectorWidthA", 1}, {"VectorWidthB", 1},
             {"LocalSplitU", 1}, {"WaveGroup", Array{1, 1}}};
-        const auto processor = kernel.target.substr(0, kernel.target.find(':'));
+        const auto processor = kernel.target.processorName();
         const Map  solution{
             {"name", kernel.kernel + s.nameSuffix}, {"kernelName", kernel.kernel}, {"index", index},
             {"debugKernel", false},
@@ -310,16 +312,15 @@ namespace hipblaslt_jit_test
         std::string solutionName;
     };
 
-    // A described solution set: its source, the TensileLite record JitLibrary
+    // A described solution set: its source, naming the kernels the executable
+    // must define but not the device target, the TensileLite record JitLibrary
     // stores, and the K values at which the library should hold each solution.
     struct Prepared
     {
         std::string                     arch;
         std::string                     name;
-        std::string                     compilerTarget;
         hipblaslt_jit::SourceCodeBundle source;
         std::vector<uint8_t>            record;
-        std::vector<std::string>        kernelNames;
         std::vector<Publication>        publications;
     };
 
@@ -338,7 +339,7 @@ namespace hipblaslt_jit_test
             const auto kernel = readAssembly(text);
             {
                 INFO((file.path().filename().u8string() + " is not " + target + " assembly"));
-                REQUIRE((kernel.target.substr(0, kernel.target.find(':')) == target));
+                REQUIRE((kernel.target.processorName() == target));
             }
             assembly.emplace(kernel.kernel, kernel);
             units.push_back({file.path().filename().u8string(),
@@ -368,13 +369,12 @@ namespace hipblaslt_jit_test
         Prepared prepared;
         prepared.arch              = target;
         prepared.name              = name;
-        prepared.compilerTarget    = kernels.front().target;
         prepared.record            = libraryEntry(bundle, kernels);
         prepared.source.mainKernel = std::move(units.front());
+        auto& kernelNames          = prepared.source.kernelNames;
         for(const auto& kernel : kernels)
-            if(std::find(prepared.kernelNames.begin(), prepared.kernelNames.end(), kernel.kernel)
-               == prepared.kernelNames.end())
-                prepared.kernelNames.push_back(kernel.kernel);
+            if(std::find(kernelNames.begin(), kernelNames.end(), kernel.kernel) == kernelNames.end())
+                kernelNames.push_back(kernel.kernel);
         for(size_t i = 0; i < bundle.solutions.size(); ++i)
         {
             Publication publication;

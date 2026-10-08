@@ -56,12 +56,9 @@ TEST_CASE("a published JIT solution launches", "[jit-gpu]")
         INFO(("Cannot query the current HIP device"));
         REQUIRE((hipGetDeviceProperties(&properties, device) == hipSuccess));
     }
-    hj::DeviceTarget target;
+    hj::DeviceTarget target{hipblaslt_jit_test::deviceTarget(properties)};
     target.device        = device;
     target.properties    = properties;
-    target.targetId      = properties.gcnArchName;
-    target.isa           = target.targetId.substr(0, target.targetId.find(':'));
-    target.libraryArch   = target.isa;
     target.wavefrontSize = properties.warpSize;
     target.cuCount       = properties.multiProcessorCount;
     target.hardware      = TensileLite::hip::GetDevice(properties, device);
@@ -70,10 +67,10 @@ TEST_CASE("a published JIT solution launches", "[jit-gpu]")
     const auto prepared = hipblaslt_jit_test::prepareSolutions(fs::u8path(HIPBLASLT_JIT_DATA));
     const hipblaslt_jit_test::Prepared* plain = nullptr;
     for(const auto& item : prepared)
-        if(item.arch == target.isa && item.name == "plain")
+        if(item.arch == target.processorName() && item.name == "plain")
             plain = &item;
     {
-        INFO(("No committed plain assembly for " + target.isa));
+        INFO(("No committed plain assembly for " + target.processorName()));
         REQUIRE((plain != nullptr && !plain->publications.empty()));
     }
     const auto& publication = plain->publications.front();
@@ -89,21 +86,21 @@ TEST_CASE("a published JIT solution launches", "[jit-gpu]")
     backend.version = 1;
     const auto key  = hj::CacheKey::make(target, backend, hj::jitCodeObjectVersion);
 
-    hj::CompiledCode built;
-    hj::BuildRequest request{target.targetId, hj::jitCodeObjectVersion, scratch, plain->kernelNames};
-    const auto       builtStatus = hj::makeComgrBuilder()->build(plain->source, request, built);
+    auto source   = plain->source;
+    source.target = target;
+    hj::Artifact executable;
+    auto builtStatus = hj::makeComgrBuilder()->build(source, hj::BuildKind::Executable, executable);
+    hj::keepBuildLog(builtStatus, scratch);
     {
-        INFO(("The build for " + target.targetId + " failed: " + builtStatus.message));
+        INFO(("The build for " + target.targetId() + " failed: " + builtStatus.message));
         REQUIRE((builtStatus.ok()));
     }
-    built.record = plain->record;
 
-    hj::JitLibrary             library(libraryRoot);
-    const auto                 problem = hipblaslt_jit_test::fp16Gemm(false, publication.k);
-    std::vector<int32_t>       published;
-    hj::SupportedSolutions     solutions{{built, std::vector<int>{publication.local}}};
-    const auto                 publishedStatus
-        = library.publish(key, device, problem, solutions, published);
+    hj::JitLibrary       library(libraryRoot);
+    const auto           problem = hipblaslt_jit_test::fp16Gemm(false, publication.k);
+    std::vector<int32_t> published;
+    const auto           publishedStatus = library.publish(
+        key, device, problem, executable, plain->record, {publication.local}, published);
     {
         INFO(("publish: " + publishedStatus.message));
         REQUIRE((publishedStatus.ok()));

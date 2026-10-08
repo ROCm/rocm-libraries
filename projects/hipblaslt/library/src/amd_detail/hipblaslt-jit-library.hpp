@@ -47,7 +47,7 @@ namespace hipblaslt_jit
     // directory, and other keys' directories are never read or deleted.
     struct CacheKey
     {
-        std::string                        targetId, isa, libraryArch;
+        Target                             target; // with the device's asicRevision
         int                                wavefrontSize = 0;
         std::string                        backendId;
         uint32_t                           backendVersion = 0;
@@ -190,16 +190,18 @@ namespace hipblaslt_jit
                       const std::vector<std::string>&           excludeKernels,
                       std::vector<int32_t>&                     indices);
 
-        // Returns one index per supported solution, in order. A backend contributes
-        // one SourceCodeBundle; publishing adds that solution to this library.
-        // A solution already published for the same kernel and sizes keeps its
-        // index. solutions are code-object artifacts plus the TensileLite record
-        // this library extends. The problem's ContractionSolution::ProblemType
-        // is what problemTypeKey stores.
+        // Returns one index per solution, in order. A backend contributes one
+        // SourceCodeBundle; publishing adds the Executable built from it, with
+        // the solutions at the local indices of its TensileLite record, to this
+        // library. A solution already published for the same kernel and sizes
+        // keeps its index. The problem's ContractionSolution::ProblemType is
+        // what problemTypeKey stores.
         Status publish(const CacheKey&                           key,
                        int                                       device,
                        const TensileLite::ContractionProblemGemm& problem,
-                       const SupportedSolutions&                 solutions,
+                       const Artifact&                           executable,
+                       const std::vector<uint8_t>&               record,
+                       const std::vector<int>&                   solutions,
                        std::vector<int32_t>&                     indices);
 
         // The library that maps index on device, and the adapter that loads its
@@ -209,11 +211,11 @@ namespace hipblaslt_jit
         // when the index is newer than this process has seen. Empty, with why
         // set, otherwise.
         View resolve(int device, int32_t index, Status& why);
-        // The helper relocatable stored for key's backend and helperName. A hit
+        // The helper Relocatable stored for key's backend and helperName. A hit
         // returns the object from this library's helper library and does not
-        // call compile. A miss calls compile once and publishes that object
-        // through the same TensileLite library path as a solution. Fails,
-        // without calling compile, when this library cannot be used.
+        // call compile. A miss calls compile once and publishes the Relocatable
+        // it returns through the same TensileLite library path as a solution.
+        // Fails, without calling compile, when this library cannot be used.
         Status acquireHelper(const CacheKey&                            key,
                              int                                        device,
                              const std::string&                         helperName,
