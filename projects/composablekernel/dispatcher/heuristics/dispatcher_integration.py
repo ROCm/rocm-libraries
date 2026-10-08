@@ -27,6 +27,7 @@ Usage:
     best_spec = heuristic(M=1024, N=1024, K=1024, kernel_pool=KERNEL_POOL)
 """
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -34,6 +35,14 @@ from typing import Optional
 
 from data_pipeline import parse_kernel_name
 from predict import Predictor
+
+# codegen_common owns arch normalisation for the whole dispatcher tree and
+# imports stdlib only. The sys.path hop matches feature_engine_vec.py and
+# ml_heuristic_sweep.py, which reach into sibling dispatcher directories the
+# same way.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "codegen"))
+
+from codegen_common import normalize_gfx_arch  # noqa: E402
 
 
 LAYOUT_TO_DISPATCHER = {
@@ -265,12 +274,14 @@ def _same_arch(a, b) -> bool:
     ``hipDeviceProp_t::gcnArchName`` report ``gfx950:sramecc+:xnack-``, which
     _check_arch accepts, so comparing raw strings rejects a legitimate caller
     for naming the same architecture the model did.
+
+    Stripping is delegated to ``codegen_common.normalize_gfx_arch``, whose own
+    docstring requires it: "everything under ``dispatcher/`` must call this
+    rather than open-coding ``split(\\":\\")``". This module had its own copy,
+    which is precisely how the model-side and codegen-side notions of "same
+    arch" would drift the next time a suffix form is added.
     """
-    return _normalize(a) == _normalize(b)
-
-
-def _normalize(arch) -> str:
-    return str(arch).split(":", 1)[0]
+    return normalize_gfx_arch(str(a)) == normalize_gfx_arch(str(b))
 
 
 def _resolve_arch(predictor, arch: Optional[str], kernel_pool: list) -> Optional[str]:
