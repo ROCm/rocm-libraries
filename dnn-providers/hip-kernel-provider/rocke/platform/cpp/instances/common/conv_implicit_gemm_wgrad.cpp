@@ -36,6 +36,7 @@
 #include <cstring> /* strcmp, memset, memcpy */
 
 #include "rocke/error_boundary.hpp"
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_* */
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_abi.h"
@@ -209,14 +210,13 @@ int rocke_wgrad_conv_streamk_ctas(const rocke_implicit_gemm_conv_wgrad_spec_t* s
     return 0;
 }
 
-/* Python wgrad_streamk_partition (arch defaults to gfx950, as in Python). */
-rocke_streamk_iter_partition_t
-    rocke_wgrad_conv_streamk_partition(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
-                                       rocke_status_t* out_status)
+/* Python wgrad_streamk_partition (a NULL arch is gfx950, Python's default). */
+rocke_streamk_iter_partition_t rocke_wgrad_conv_streamk_partition(
+    const rocke_implicit_gemm_conv_wgrad_spec_t* s, const char* arch, rocke_status_t* out_status)
 {
     rocke_streamk_iter_partition_t zero;
     memset(&zero, 0, sizeof(zero));
-    const int pool = rocke_wgrad_conv_streamk_ctas(s, NULL);
+    const int pool = rocke_wgrad_conv_streamk_ctas(s, arch);
     if(pool <= 0)
     {
         if(out_status)
@@ -236,10 +236,11 @@ rocke_streamk_iter_partition_t
 }
 
 rocke_status_t rocke_wgrad_conv_streamk_grid(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
+                                             const char* arch,
                                              int out[3])
 {
     rocke_status_t st = ROCKE_OK;
-    rocke_streamk_iter_partition_t part = rocke_wgrad_conv_streamk_partition(s, &st);
+    rocke_streamk_iter_partition_t part = rocke_wgrad_conv_streamk_partition(s, arch, &st);
     if(st != ROCKE_OK || out == NULL)
         return ROCKE_ERR_VALUE;
     out[0] = rocke_streamk_iter_plan(&part).grid_size;
@@ -248,10 +249,13 @@ rocke_status_t rocke_wgrad_conv_streamk_grid(const rocke_implicit_gemm_conv_wgra
     return ROCKE_OK;
 }
 
-rocke_status_t rocke_wgrad_conv_streamk_workspace_layout(
-    const rocke_implicit_gemm_conv_wgrad_spec_t* s, size_t* flags_bytes, size_t* partials_bytes)
+rocke_status_t
+    rocke_wgrad_conv_streamk_workspace_layout(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
+                                              const char* arch,
+                                              size_t* flags_bytes,
+                                              size_t* partials_bytes)
 {
-    if(flags_bytes == NULL || partials_bytes == NULL)
+    if(s == NULL || flags_bytes == NULL || partials_bytes == NULL)
         return ROCKE_ERR_VALUE;
     *flags_bytes = 0;
     *partials_bytes = 0;
@@ -259,7 +263,7 @@ rocke_status_t rocke_wgrad_conv_streamk_workspace_layout(
     if(strcmp(red, "linear") != 0 && strcmp(red, "tree") != 0)
         return ROCKE_OK;
     rocke_status_t st = ROCKE_OK;
-    rocke_streamk_iter_partition_t part = rocke_wgrad_conv_streamk_partition(s, &st);
+    rocke_streamk_iter_partition_t part = rocke_wgrad_conv_streamk_partition(s, arch, &st);
     if(st != ROCKE_OK)
         return st;
     const rocke_streamk_iter_plan_t plan = rocke_streamk_iter_plan(&part);
@@ -270,7 +274,8 @@ rocke_status_t rocke_wgrad_conv_streamk_workspace_layout(
     return ROCKE_OK;
 }
 
-size_t rocke_wgrad_conv_streamk_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
+size_t rocke_wgrad_conv_streamk_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
+                                                const char* arch)
 {
     if(s == NULL || !wgrad_streamk_on(s))
         return 0;
@@ -285,7 +290,8 @@ size_t rocke_wgrad_conv_streamk_workspace_bytes(const rocke_implicit_gemm_conv_w
     }
     size_t flags_bytes = 0;
     size_t partials_bytes = 0;
-    if(rocke_wgrad_conv_streamk_workspace_layout(s, &flags_bytes, &partials_bytes) != ROCKE_OK)
+    if(rocke_wgrad_conv_streamk_workspace_layout(s, arch, &flags_bytes, &partials_bytes)
+       != ROCKE_OK)
         return 0;
     return flags_bytes + partials_bytes;
 }
@@ -535,6 +541,56 @@ static bool wgrad_streamk_gates(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
 #undef SK_REJECT
 }
 
+/* Python wgrad_group_merge_available, with byte-identical reason strings.
+ * Python checks it right after the arch lookup, before any other gate. */
+static bool wgrad_group_merge_available(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
+                                        char* reason,
+                                        size_t reason_cap)
+{
+#define GM_REJECT(...)                                 \
+    do                                                 \
+    {                                                  \
+        if(reason && reason_cap)                       \
+            snprintf(reason, reason_cap, __VA_ARGS__); \
+        return false;                                  \
+    } while(0)
+    const int gm = s->group_merge;
+    if(gm == 1)
+        return true;
+    /* Python _GROUP_MERGE_DEGREES */
+    if(gm != 2 && gm != 4 && gm != 8 && gm != 16 && gm != 32 && gm != 64)
+        GM_REJECT("group_merge must be 1 or one of (2, 4, 8, 16, 32, 64); got %d", gm);
+    const rocke_conv_problem_t* p = &s->problem;
+    if(p->groups % gm != 0)
+        GM_REJECT("group_merge %d does not divide groups %d: a workgroup would own a "
+                  "partial group",
+                  gm,
+                  p->groups);
+    const int cpg = rocke_conv_problem_cpg(p);
+    const int kpg = rocke_conv_problem_kpg(p);
+    if(cpg != 1 || kpg != 1)
+        GM_REJECT("group_merge is implemented for depthwise only (cpg == kpg == 1); got "
+                  "cpg=%d kpg=%d. The merged index math is correct for wider groups but is "
+                  "not covered, so it is gated off.",
+                  cpg,
+                  kpg);
+    if(s->wave_size != 64)
+        GM_REJECT("group_merge is MFMA-only (wave_size 64); got wave_size=%d", s->wave_size);
+    if(s->split_k > 1 && !s->two_stage)
+        GM_REJECT("group_merge with split_k=%d needs the two-stage path (two_stage=True); "
+                  "the packed-atomic split-K epilogue cannot drop off-diagonal group pairs",
+                  s->split_k);
+    /* grid_M / grid_N: the merged GEMM extents, kpg*Gm and Z*Y*X*cpg*Gm. */
+    const int grid_M = kpg * gm;
+    const int grid_N = (p->is_3d ? p->Z : 1) * p->Y * p->X * cpg * gm;
+    if(grid_M > s->tile_m)
+        GM_REJECT("merged GEMM-M %d (kpg*%d) exceeds tile_m %d", grid_M, gm, s->tile_m);
+    if(grid_N > s->tile_n)
+        GM_REJECT("merged GEMM-N %d (Z*Y*X*cpg*%d) exceeds tile_n %d", grid_N, gm, s->tile_n);
+    return true;
+#undef GM_REJECT
+}
+
 bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
                                                   const char* arch,
                                                   char* reason,
@@ -556,35 +612,23 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     if(arch == NULL)
         arch = "gfx950";
 
-    /* groups > 1 is only ported on the stream-K path, which folds the group
-     * into its linear tile index; the grid-per-group path stays Python-only. */
-    const bool sk_on = wgrad_streamk_on(s);
-    if(s->problem.groups != 1 && !sk_on)
+    /* The gates below run in Python is_valid_wgrad_spec's order -- arch lookup,
+     * group_merge, geometry, block size, vec_c, wave size, stream-K -- so a
+     * spec that fails several of them is rejected with the same reason by
+     * both engines. */
+
+    /* Python: ArchTarget.from_gfx(arch) -> KeyError. The forward validator
+     * checks the arch first and reproduces str(KeyError) verbatim, so an
+     * unknown arch is handed to it for the reason text. */
+    const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
+    if(target == NULL)
     {
-        if(reason && reason_cap)
-            snprintf(reason,
-                     reason_cap,
-                     "grouped convolution (groups=%d > 1) is not supported for wgrad",
-                     s->problem.groups);
-        return false;
+        rocke_implicit_gemm_conv_spec_t probe = rocke_implicit_gemm_conv_spec_default();
+        return rocke_implicit_gemm_conv_is_valid_spec(&probe, arch, reason, reason_cap);
     }
-    if(!wgrad_streamk_gates(s, arch, reason, reason_cap))
+
+    if(!wgrad_group_merge_available(s, reason, reason_cap))
         return false;
-    if(s->group_merge != 1 && !sk_on)
-    {
-        if(reason && reason_cap)
-            snprintf(reason,
-                     reason_cap,
-                     "group_merge=%d is not supported for wgrad in the C port",
-                     s->group_merge);
-        return false;
-    }
-    if(s->problem.groups > 1 && rocke_conv_problem_is_pointwise(&s->problem))
-    {
-        if(reason && reason_cap)
-            snprintf(reason, reason_cap, "grouped pointwise (1x1) wgrad is not yet supported");
-        return false;
-    }
 
     /* geometry */
     if(s->tile_m % (s->warp_m * s->warp_tile_m))
@@ -605,11 +649,72 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
             snprintf(reason, reason_cap, "tile_k not divisible by warp_tile_k");
         return false;
     }
-    int block_size = rocke_wgrad_conv_spec_block_size(s);
-    if(block_size > 1024)
+    const int block_size = rocke_wgrad_conv_spec_block_size(s);
+    const int max_tpb = rocke_archtarget_max_threads_per_block(target);
+    if(block_size > max_tpb)
     {
         if(reason && reason_cap)
-            snprintf(reason, reason_cap, "block_size %d > 1024", block_size);
+            snprintf(reason,
+                     reason_cap,
+                     "block_size %d > %d (hardware cap) on %s",
+                     block_size,
+                     max_tpb,
+                     arch);
+        return false;
+    }
+
+    /* vector_size_c > 1 needs the cshuffle epilogue. Mirrors Python
+     * is_valid_wgrad_spec (and the dgrad port's gate). */
+    {
+        const char* epi = s->epilogue ? s->epilogue : "default";
+        if(s->has_vector_size_c && s->vector_size_c > 1 && strcmp(epi, "default") == 0)
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "default epilogue is not supported with vector size c: %d",
+                         s->vector_size_c);
+            return false;
+        }
+    }
+
+    if(s->wave_size != target->wave_size)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "spec wave_size %d != %s wave_size %d",
+                     s->wave_size,
+                     arch,
+                     target->wave_size);
+        return false;
+    }
+
+    if(!wgrad_streamk_gates(s, arch, reason, reason_cap))
+        return false;
+
+    /* C-port-only gates, after every gate Python shares: grouped wgrad
+     * (groups > 1) and group merging are only ported on the stream-K path,
+     * which folds the group into its linear tile index; the grid-per-group
+     * path stays Python-only. This is an intentional divergence -- Python
+     * accepts these specs, the C port rejects them. */
+    const bool sk_on = wgrad_streamk_on(s);
+    if(s->problem.groups != 1 && !sk_on)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "grouped convolution (groups=%d > 1) is not supported for wgrad",
+                     s->problem.groups);
+        return false;
+    }
+    if(s->group_merge != 1 && !sk_on)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "group_merge=%d is not supported for wgrad in the C port",
+                     s->group_merge);
         return false;
     }
 
@@ -919,6 +1024,16 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                          s->warp_tile_k);
             return false;
         }
+    }
+
+    /* Python checks this between the MMA atom and the LDS budget, both of
+     * which the forward validator below owns; checking it just before is the
+     * closest order the delegation allows. */
+    if(s->problem.groups > 1 && rocke_conv_problem_is_pointwise(&s->problem))
+    {
+        if(reason && reason_cap)
+            snprintf(reason, reason_cap, "grouped pointwise (1x1) wgrad is not yet supported");
+        return false;
     }
 
     /* Delegate the MMA-atom + LDS + WMMA gates to the forward validator via an

@@ -2273,6 +2273,20 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
     s.chiplet_wgm = dict_int(d, "chiplet_wgm", s.chiplet_wgm);
     s.chiplet_num_xcds = dict_int(d, "chiplet_num_xcds", s.chiplet_num_xcds);
     s.chiplet_chunk_size = dict_int(d, "chiplet_chunk_size", s.chiplet_chunk_size);
+    /* Optional ints: absent or None keeps Python's None (has_* = false).
+     * Only the fields the C builder or validator honours are read: the C wgrad
+     * builder does not apply lds_k_pad or vector_size_a/b, so reading them
+     * would tag the kernel name (e.g. "pad<N>") without changing its body. */
+    if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
+    {
+        s.has_waves_per_eu = true;
+        s.waves_per_eu = d["waves_per_eu"].cast<int>();
+    }
+    if(d.contains("vector_size_c") && !d["vector_size_c"].is_none())
+    {
+        s.has_vector_size_c = true;
+        s.vector_size_c = d["vector_size_c"].cast<int>();
+    }
     {
         std::string v;
         if(dict_str(d, "name", v))
@@ -3902,24 +3916,26 @@ PYBIND11_MODULE(rocke_engine, m)
         [](const py::dict& d, const std::string& arch) -> py::dict {
             std::deque<std::string> store;
             rocke_implicit_gemm_conv_wgrad_spec_t s = conv_wgrad_build_spec(d, store);
-            /* Resolve the auto pool (-1) for `arch` up front, as Python
-             * wgrad_streamk_launch does, so every helper below sees it. */
-            const int pool = rocke_wgrad_conv_streamk_ctas(&s, arch_or_default(arch));
-            if(pool > 0)
-                s.streamk_ctas = pool;
+            /* Every helper resolves an auto pool (-1) for `arch` itself, as the
+             * Python wgrad_streamk_*(spec, arch=arch) twins do. Errors are
+             * ValueError, matching Python. */
+            const char* a = arch_or_default(arch);
             int grid[3] = {0, 0, 0};
-            if(rocke_wgrad_conv_streamk_grid(&s, grid) != ROCKE_OK)
-                throw std::runtime_error(
+            if(rocke_wgrad_conv_streamk_grid(&s, a, grid) != ROCKE_OK)
+                throw py::value_error(
                     "rocke_engine.conv_wgrad_streamk_host: needs streamk != 'off' and "
                     "streamk_ctas == -1 or > 0");
             size_t flags_bytes = 0;
             size_t partials_bytes = 0;
-            rocke_wgrad_conv_streamk_workspace_layout(&s, &flags_bytes, &partials_bytes);
+            if(rocke_wgrad_conv_streamk_workspace_layout(&s, a, &flags_bytes, &partials_bytes)
+               != ROCKE_OK)
+                throw py::value_error(
+                    "rocke_engine.conv_wgrad_streamk_host: invalid stream-K workspace layout");
             py::dict out;
             out["grid"] = py::make_tuple(grid[0], grid[1], grid[2]);
             out["flags_bytes"] = flags_bytes;
             out["partials_bytes"] = partials_bytes;
-            out["workspace_bytes"] = rocke_wgrad_conv_streamk_workspace_bytes(&s);
+            out["workspace_bytes"] = rocke_wgrad_conv_streamk_workspace_bytes(&s, a);
             out["is_deterministic"] = rocke_wgrad_conv_spec_is_deterministic(&s);
             return out;
         },

@@ -11,23 +11,37 @@ rather than as an opaque numeric miss).
 The shapes are chosen to exercise the partitioner, not the GEMM: several
 stream-K CTAs per tile (multi-round linear/tree fixups), a data-parallel plus
 stream-K mix, a grouped problem whose last M tile is partial, and a small CTA
-pool so the stream-K path is taken at these sizes. The linear and tree fixups
-are also run repeatedly and must be bit-identical across launches -- the only
-check that catches a missing release/acquire on the partial hand-off. Before
-every launch the partial slots and dW are poisoned with NaN bytes (only the
-flags are zeroed, as the contract requires), so a consumer that reads a slot
-before its producer's release lands sees NaN rather than the previous
-launch's bit-identical partial.
+pool so the stream-K path is taken at these sizes. A shape large enough to
+split under the default (per-CU) pool runs every reduction too.
 
-Requires a gfx942/gfx950 GPU and torch; skips cleanly otherwise. Host-side
-coverage lives in ``test_conv_wgrad_streamk.py``.
+The linear and tree fixups are also run repeatedly and must be bit-identical
+across launches. Before every launch the partial slots and dW are poisoned
+with NaN bytes (only the flags are zeroed, as the contract requires), so a
+consumer that reads a slot before its producer's partial is visible sees NaN
+rather than the previous launch's bit-identical partial. That catches a
+missing *release* on the producer side. It does not catch a missing
+*acquire*: the consumer's partial loads are data- and control-dependent on
+the spin exit and no stale cache line exists to observe, so a relaxed spin
+still reads the right bytes on this hardware. The acquire side is pinned by
+codegen instead -- ``TestConvWgradStreamKFlagOrderingIR`` checks the lowered
+``.ll`` (host-only), ``TestConvWgradStreamKFlagOrderingIsa`` the gfx942/gfx950
+ISA (COMGR + ``llvm-objdump``, no GPU; skips when either is missing).
+
+The numeric cases require a gfx942/gfx950 GPU and torch and skip cleanly
+otherwise. Host-side coverage lives in ``test_conv_wgrad_streamk.py``.
 """
 
 from __future__ import annotations
 
 import ctypes
 import importlib.util
+import os
+import re
+import shutil
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 
 from rocke.runtime.hip_module import get_device_arch
 
@@ -301,8 +315,20 @@ class TestConvWgradStreamKNumerics(unittest.TestCase):
     def test_default_pool(self):
         # streamk_ctas=-1: one CTA per CU for linear/tree, the occupancy-sized
         # pool (several CTAs per CU) for the reductions that never wait.
-        for name in ("dp_plus_sk", "multi_partner"):
-            problem, _ = _problems()[name]
+        # dp_plus_sk / multi_partner have far fewer tiles than that pool, so
+        # they run all-DP; "splits" (17 x 27 = 459 tiles) is the one that
+        # actually takes a linear/tree/workspace/atomic fixup at the default
+        # pool (on gfx950: 256 linear/tree CTAs, 1024 atomic/workspace CTAs).
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_implicit_gemm_wgrad import wgrad_streamk_partition
+
+        shapes = {
+            name: _problems()[name][0] for name in ("dp_plus_sk", "multi_partner")
+        }
+        shapes["splits"] = ConvProblem(
+            N=2, Hi=12, Wi=12, C=192, K=1056, Y=3, X=3, pH=1, pW=1
+        )
+        for name, problem in shapes.items():
             for mode in ("dp_sk", "persistent"):
                 for reduction, dtype_d in _REDUCTIONS:
                     spec = _spec(
@@ -313,6 +339,10 @@ class TestConvWgradStreamKNumerics(unittest.TestCase):
                         ctas=-1,
                     )
                     with self.subTest(shape=name, mode=mode, reduction=reduction):
+                        if name == "splits":
+                            part = wgrad_streamk_partition(spec, arch=GPU_ARCH)
+                            self.assertGreater(part.sk_ctas, 0, part)
+                            self.assertGreater(part.sk_tiles, 0, part)
                         _check(self, spec)
 
 
@@ -401,7 +431,12 @@ class TestConvWgradStreamKAot(unittest.TestCase):
 
 @unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
 class TestConvWgradStreamKDeterminism(unittest.TestCase):
-    """Linear and tree fold partials in a fixed order: dW is bit-exact."""
+    """Linear and tree fold partials in a fixed order: dW is bit-exact.
+
+    With the partial slots NaN-poisoned this also catches a missing release on
+    the partial hand-off, but not a missing acquire -- see the module
+    docstring and ``TestConvWgradStreamKFlagOrderingIR``/``...Isa``.
+    """
 
     def test_repeat_launches_are_bit_identical(self):
         import torch
@@ -419,6 +454,240 @@ class TestConvWgradStreamKDeterminism(unittest.TestCase):
                             torch.equal(out, outs[0]),
                             f"launch {i} differs from launch 0",
                         )
+
+
+# --------------------------------------------------------------------------
+# Flag hand-off ordering, pinned in codegen.
+#
+# The repeat-launch test above catches a missing release but cannot catch a
+# missing acquire (see the module docstring), so the acquire -- and, for
+# symmetry, the release -- is asserted on the code a real linear and tree
+# kernel lowers to. Host-only: no GPU is needed for either level.
+
+_FLAG_ARCHES = ("gfx950", "gfx942")
+_FLAG_KERNELS = (
+    ("dp_sk", "linear"),
+    ("dp_sk", "tree"),
+    ("persistent", "linear"),
+    ("persistent", "tree"),
+)
+
+
+def _flag_comgr_input(arch: str, mode: str, reduction: str):
+    """The lowered ``.ll`` + COMGR target of a real stream-K fixup kernel.
+
+    Always the Python engine (the C++ engine is byte-identical by contract and
+    its extension may not be importable), and lowered with ``arch`` as the
+    target rather than the detected GPU, so the gfx942 code is checked on a
+    gfx950 host and vice versa.
+    """
+    from rocke.helpers.compile import lower_kernel_for_comgr
+
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
+    from kernels.common.conv_implicit_gemm_wgrad import (
+        WgradConvSpec,
+        build_implicit_gemm_conv_wgrad,
+    )
+
+    edge = 32 if arch == "gfx950" else 16
+    spec = WgradConvSpec(
+        problem=ConvProblem(N=8, Hi=16, Wi=16, C=16, K=96, Y=3, X=3, pH=1, pW=1),
+        data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp16"),
+        tile_m=64,
+        tile_n=64,
+        tile_k=64,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=edge,
+        warp_tile_n=edge,
+        warp_tile_k=16,
+        streamk=mode,
+        streamk_reduction=reduction,
+        streamk_ctas=16,
+    )
+    kernel = build_implicit_gemm_conv_wgrad(spec, arch=arch)
+    return lower_kernel_for_comgr(kernel, arch=arch, backend="python")
+
+
+def _ll_blocks(ll: str) -> dict:
+    """``{label: [instruction lines]}`` of every basic block in ``ll``."""
+    blocks, cur = {}, None
+    for line in ll.splitlines():
+        m = re.match(r"^([A-Za-z0-9_.$-]+):", line)
+        if m:
+            cur = blocks.setdefault(m.group(1), [])
+        elif cur is not None and line.startswith("  "):
+            cur.append(line.strip())
+    return blocks
+
+
+def _gep_base(ll: str, ptr: str) -> str:
+    """Base pointer of the ``getelementptr`` that defines ``ptr``."""
+    m = re.search(
+        rf"^\s*{re.escape(ptr)} = getelementptr\b[^,]*, ptr addrspace\(1\) (%[\w.]+),",
+        ll,
+        re.MULTILINE,
+    )
+    return m.group(1) if m else ""
+
+
+def _assert_flag_ll(test, ll: str) -> None:
+    """Acquire on every flag spin, fence + release on every flag publish."""
+    blocks = _ll_blocks(ll)
+    load_re = re.compile(
+        r"^(%[\w.]+) = load atomic i32, ptr addrspace\(1\) (%[\w.]+) (.*), align 4$"
+    )
+    store_re = re.compile(
+        r"^store atomic i32 1, ptr addrspace\(1\) (%[\w.]+) (.*), align 4$"
+    )
+    spins = publishes = 0
+    for label, insts in blocks.items():
+        for i, inst in enumerate(insts):
+            m = load_re.match(inst)
+            if m:
+                spins += 1
+                test.assertEqual(_gep_base(ll, m.group(2)), "%sk_flags", inst)
+                test.assertEqual(m.group(3), 'syncscope("agent") acquire', inst)
+                # A spin: the block re-branches to itself until the flag hits.
+                test.assertRegex(
+                    insts[-1], rf"^br i1 .*label %{re.escape(label)}\b", label
+                )
+                continue
+            m = store_re.match(inst)
+            if m:
+                publishes += 1
+                test.assertEqual(_gep_base(ll, m.group(1)), "%sk_flags", inst)
+                test.assertEqual(m.group(2), 'syncscope("agent") release', inst)
+                # The nearest preceding memory op is the agent release fence,
+                # and every partial store of the block is ordered before it.
+                mem = [
+                    j
+                    for j in range(i)
+                    if re.match(
+                        r"^(fence|store|%[\w.]+ = (load|atomicrmw))\b", insts[j]
+                    )
+                ]
+                test.assertTrue(mem, f"{label}: flag store with no fence before it")
+                test.assertEqual(
+                    insts[mem[-1]], 'fence syncscope("agent") release', label
+                )
+                test.assertTrue(
+                    any(re.match(r"^store float ", insts[j]) for j in mem[:-1]),
+                    f"{label}: no partial store before the release fence",
+                )
+    test.assertGreater(spins, 0, "no flag-wait spin loop in the kernel")
+    test.assertGreater(publishes, 0, "no flag publish in the kernel")
+
+
+def _objdump() -> str | None:
+    for candidate in (
+        os.environ.get("LLVM_OBJDUMP"),
+        os.path.join(os.environ.get("ROCM_PATH", "/opt/rocm"), "llvm/bin/llvm-objdump"),
+        shutil.which("llvm-objdump"),
+    ):
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _isa_lines(objdump: str, comgr_input, arch: str) -> list:
+    from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+
+    hsaco, _ = build_hsaco_from_llvm_ir(
+        comgr_input.llvm_text,
+        isa=comgr_input.isa,
+        options=list(comgr_input.options),
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "streamk.hsaco"
+        path.write_bytes(hsaco)
+        text = subprocess.run(
+            [objdump, "-d", f"--mcpu={arch}", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    lines = (ln.split("//")[0].strip() for ln in text.splitlines())
+    return [ln for ln in lines if ln and not ln.endswith(">:")]
+
+
+_SC1_LOAD = re.compile(r"^global_load_dword\b.*\bsc1\b")
+_SC1_STORE = re.compile(r"^global_store_dword\b.*\bsc1\b")
+
+
+def _assert_flag_isa(test, isa: list) -> None:
+    """gfx94x agent-scope acquire/release: ``buffer_inv sc1`` after each spin
+    load, ``buffer_wbl2 sc1`` + ``s_waitcnt vmcnt(0)`` before each flag store.
+    """
+    spins = [i for i, ln in enumerate(isa) if _SC1_LOAD.match(ln)]
+    stores = [i for i, ln in enumerate(isa) if _SC1_STORE.match(ln)]
+    test.assertTrue(spins, "no sc1 flag load in the ISA")
+    test.assertTrue(stores, "no sc1 flag store in the ISA")
+    for i in spins:
+        # Up to the spin's back-branch: wait for the load, then invalidate so
+        # the partial loads after the exit cannot hit a stale line.
+        end = next(
+            (j for j in range(i + 1, len(isa)) if isa[j].startswith("s_cbranch")),
+            len(isa),
+        )
+        body = isa[i + 1 : end]
+        test.assertIn("buffer_inv sc1", body, f"spin at {i}: no acquire invalidate")
+        test.assertLess(
+            body.index("s_waitcnt vmcnt(0)"),
+            body.index("buffer_inv sc1"),
+            f"spin at {i}: buffer_inv before the flag load completed",
+        )
+    for i in stores:
+        # Back to the last partial store: write back L2 and drain every
+        # outstanding store before the flag goes out.
+        start = max(
+            (
+                j
+                for j in range(i)
+                if isa[j].startswith(("global_store", "buffer_store", "global_atomic"))
+            ),
+            default=-1,
+        )
+        window = isa[start + 1 : i]
+        test.assertIn("buffer_wbl2 sc1", window, f"flag store at {i}: no writeback")
+        test.assertIn(
+            "s_waitcnt vmcnt(0)", window, f"flag store at {i}: stores not drained"
+        )
+
+
+class TestConvWgradStreamKFlagOrderingIR(unittest.TestCase):
+    """The lowered ``.ll`` of real linear/tree kernels orders the hand-off."""
+
+    def test_acquire_spin_and_release_publish(self):
+        for arch in _FLAG_ARCHES:
+            for mode, reduction in _FLAG_KERNELS:
+                with self.subTest(arch=arch, mode=mode, reduction=reduction):
+                    ll = _flag_comgr_input(arch, mode, reduction).llvm_text
+                    _assert_flag_ll(self, ll)
+
+
+class TestConvWgradStreamKFlagOrderingIsa(unittest.TestCase):
+    """The same kernels' gfx942/gfx950 ISA keeps the cache maintenance.
+
+    Offline compile (COMGR) + ``llvm-objdump``; no GPU. Skips when either
+    tool is unavailable.
+    """
+
+    def test_acquire_invalidate_and_release_writeback(self):
+        from rocke.runtime import comgr
+
+        objdump = _objdump()
+        if objdump is None:
+            self.skipTest("llvm-objdump not found (LLVM_OBJDUMP / ROCM_PATH / PATH)")
+        try:
+            comgr._resolve_lib()
+        except (comgr.ComgrError, OSError) as e:
+            self.skipTest(f"COMGR not loadable: {str(e)[:200]}")
+        for arch in _FLAG_ARCHES:
+            for mode, reduction in _FLAG_KERNELS:
+                with self.subTest(arch=arch, mode=mode, reduction=reduction):
+                    c = _flag_comgr_input(arch, mode, reduction)
+                    _assert_flag_isa(self, _isa_lines(objdump, c, arch))
 
 
 if __name__ == "__main__":

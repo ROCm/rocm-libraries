@@ -39,6 +39,10 @@ _DENSE = ConvProblem(N=2, Hi=12, Wi=12, C=32, K=96, Y=3, X=3, pH=1, pW=1)
 _GROUPED = ConvProblem(N=2, Hi=10, Wi=10, C=48, K=120, Y=3, X=3, pH=1, pW=1, groups=3)
 # Depthwise: the only shape group merging admits, so its stream-K gate is reached.
 _DW = ConvProblem(N=2, Hi=8, Wi=8, C=16, K=16, Y=3, X=3, pH=1, pW=1, groups=16)
+# 17 x 27 = 459 output tiles at 64x64: more than the default pool of either
+# stream-K arch (256 CTAs on gfx950, 304 on gfx942 for linear/tree), so an
+# auto-pool launch really splits tiles and needs flags and partial slots.
+_SPLITS = ConvProblem(N=2, Hi=12, Wi=12, C=192, K=1056, Y=3, X=3, pH=1, pW=1)
 
 
 def _spec(problem=_DENSE, *, dtype_d="fp16", edge=32, **kw) -> WgradConvSpec:
@@ -218,8 +222,7 @@ class TestStreamKValidator(unittest.TestCase):
             self.assertIn(why, str(cm.exception))
 
     # (label, problem, arch, spec overrides). Each rejected config trips one
-    # gate only, so the engines' differing check order cannot pick a different
-    # reason.
+    # gate only; _MULTI below covers configs that trip several.
     _AGREEMENT = [
         ("ok_dp_sk_linear", _DENSE, "gfx950", {}),
         (
@@ -270,12 +273,55 @@ class TestStreamKValidator(unittest.TestCase):
                 self.assertEqual(label.startswith("ok_"), want[0], want[1])
                 got = eng.conv_wgrad_is_valid_spec(_spec_dict(spec), arch)
                 self.assertEqual(tuple(got), want)
-        # A wave64 spec on gfx1250 trips Python's wave-size check before the
-        # stream-K arch gate, which the C port has no counterpart of; the
-        # reasons differ but both engines reject it.
-        spec = _spec()
-        self.assertFalse(is_valid_wgrad_spec(spec, "gfx1250")[0])
-        self.assertFalse(eng.conv_wgrad_is_valid_spec(_spec_dict(spec), "gfx1250")[0])
+
+    # Configs that fail more than one gate: the C port runs the gates in
+    # Python's order, so both report the first one Python reaches.
+    _MULTI = [
+        ("ctas_zero+tile_m", _DENSE, "gfx950", dict(streamk_ctas=0, tile_m=96)),
+        (
+            "block_4096+ctas_zero",
+            _DENSE,
+            "gfx950",
+            dict(warp_m=8, warp_n=8, tile_m=256, tile_n=256, streamk_ctas=0),
+        ),
+        ("unknown_arch", _DENSE, "gfx9999", {}),
+        ("unknown_arch+tile_m", _DENSE, "gfx9999", dict(tile_m=96)),
+        ("wave32_on_gfx950+ctas", _DENSE, "gfx950", dict(wave_size=32, streamk_ctas=-5)),
+        ("wave64_on_gfx1250", _DENSE, "gfx1250", {}),
+        ("async_dma", _DENSE, "gfx950", dict(async_dma=True)),
+        ("async_dma_off", _DENSE, "gfx950", dict(async_dma=True, streamk="off")),
+        ("vec_c+ctas", _DENSE, "gfx950", dict(vector_size_c=4, streamk_ctas=-5)),
+        ("vec_c_off", _DENSE, "gfx950", dict(vector_size_c=4, streamk="off")),
+        ("group_merge_degree", _DW, "gfx950", dict(group_merge=3)),
+        ("group_merge+tile_m", _DW, "gfx950", dict(group_merge=2, tile_m=96)),
+        ("gfx90a+split_k", _DENSE, "gfx90a", dict(split_k=4)),
+    ]
+
+    def test_cpp_validity_agrees_multi_failure(self):
+        eng = _engine()
+        for label, problem, arch, kw in self._MULTI:
+            spec = _spec(problem, **kw)
+            want = is_valid_wgrad_spec(spec, arch)
+            with self.subTest(label):
+                self.assertFalse(want[0])
+                got = eng.conv_wgrad_is_valid_spec(_spec_dict(spec), arch)
+                self.assertEqual(tuple(got), want)
+
+    def test_cpp_rejects_grouped_non_streamk(self):
+        # Intentional divergence: grouped wgrad is only ported on the stream-K
+        # path, so the C port rejects a grouped spec Python accepts -- but only
+        # after every gate the two share.
+        eng = _engine()
+        spec = _spec(_GROUPED, streamk="off")
+        self.assertEqual(is_valid_wgrad_spec(spec, "gfx950"), (True, "ok"))
+        ok, why = eng.conv_wgrad_is_valid_spec(_spec_dict(spec), "gfx950")
+        self.assertFalse(ok)
+        self.assertIn("grouped convolution (groups=3 > 1)", why)
+        bad = _spec(_GROUPED, streamk="off", tile_m=96)
+        self.assertEqual(
+            tuple(eng.conv_wgrad_is_valid_spec(_spec_dict(bad), "gfx950")),
+            is_valid_wgrad_spec(bad, "gfx950"),
+        )
 
     def test_cpp_rejects_group_merge_with_the_same_reason(self):
         eng = _engine()
@@ -351,6 +397,27 @@ class TestStreamKHostPlan(unittest.TestCase):
         ws = _spec(streamk_reduction="workspace")
         self.assertEqual(wgrad_streamk_workspace_nbytes(ws), 8 * 96 * 288 * 4)
 
+    def test_launch_rejects_bad_pool(self):
+        from kernels.common.conv_implicit_gemm_wgrad import wgrad_streamk_launch
+
+        for ctas in (0, -2, -3):
+            with self.subTest(ctas=ctas), self.assertRaisesRegex(
+                ValueError, "streamk_ctas must be -1"
+            ):
+                wgrad_streamk_launch(_spec(streamk_ctas=ctas))
+        self.assertEqual(wgrad_streamk_launch(_spec(streamk_ctas=-1)).pool, 256)
+        self.assertEqual(
+            wgrad_streamk_launch(_spec(streamk_ctas=-1), arch="gfx942").pool, 304
+        )
+
+    def test_cpp_host_rejects_bad_pool(self):
+        eng = _engine()
+        for ctas in (0, -3):
+            with self.subTest(ctas=ctas), self.assertRaises(ValueError):
+                eng.conv_wgrad_streamk_host(_spec_dict(_spec(streamk_ctas=ctas)))
+        with self.assertRaises(ValueError):
+            eng.conv_wgrad_streamk_host(_spec_dict(_spec(streamk="off")))
+
     def test_signature_tracks_reduction(self):
         names = lambda s: [p["name"] for p in wgrad_streamk_signature(s)]  # noqa: E731
         plain = [n for n, _ in conv_arg_names(direction="wgrad")]
@@ -396,9 +463,15 @@ class TestStreamKHostPlan(unittest.TestCase):
         from kernels.common.conv_implicit_gemm_wgrad import wgrad_streamk_default_pool
         from rocke.helpers.split_k import _ARCH_NUM_CUS
 
+        from rocke.core.arch.target import known_arches
+
         eng = _engine()
-        # Every arch of the Python CU table, plus one it does not list.
-        for arch in [*_ARCH_NUM_CUS, "gfx90a"]:
+        # Both directions: every arch of the Python CU table, and every arch
+        # rocke knows of plus a few it does not -- a key only the C table has
+        # would make the C pool differ from Python's 256-CU fallback there.
+        arches = {*_ARCH_NUM_CUS, *known_arches(), "gfx90a", "gfx908", "gfx1100"}
+        arches |= {"gfx1200", "gfx9999"}
+        for arch in sorted(arches):
             for reduction in ("linear", "tree", "atomic", "workspace"):
                 with self.subTest(arch=arch, r=reduction):
                     self.assertEqual(
@@ -410,8 +483,9 @@ class TestStreamKHostPlan(unittest.TestCase):
         # streamk_ctas=-1 (the spec default) resolves to the arch's CU-based
         # pool in both engines.
         eng = _engine()
+        split = 0
         for arch, edge in (("gfx950", 32), ("gfx942", 16)):
-            for problem in (_DENSE, _GROUPED):
+            for problem in (_DENSE, _GROUPED, _SPLITS):
                 for mode in ("dp_sk", "persistent"):
                     for reduction, dtype_d in (
                         ("linear", "fp16"),
@@ -443,6 +517,15 @@ class TestStreamKHostPlan(unittest.TestCase):
                                 got["workspace_bytes"],
                                 wgrad_streamk_workspace_nbytes(spec, arch=arch),
                             )
+                            if problem is _SPLITS and reduction in ("linear", "tree"):
+                                # 459 tiles over the default pool: every CTA is a
+                                # stream-K CTA, so both regions are non-empty.
+                                pool = 256 if arch == "gfx950" else 304
+                                self.assertEqual(got["grid"][0], pool)
+                                self.assertEqual(flags, pool * 4 * 4)
+                                self.assertEqual(partials, pool * 64 * 64 * 4)
+                                split += 1
+        self.assertEqual(split, 2 * 2 * 2)
         # Without an arch both engines default to gfx950.
         spec = _spec(streamk="persistent", streamk_ctas=-1)
         got = eng.conv_wgrad_streamk_host(_spec_dict(spec))

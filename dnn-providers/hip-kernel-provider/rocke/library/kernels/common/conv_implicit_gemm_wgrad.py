@@ -1239,6 +1239,12 @@ def wgrad_streamk_launch(spec: "WgradConvSpec", *, arch: str = "gfx950"):
 
     if spec.streamk == "off":
         raise ValueError("wgrad_streamk_launch requires streamk != 'off'")
+    # Same contract as the validator and the C port (rocke_wgrad_conv_streamk_ctas):
+    # -1 is auto, anything else not > 0 is an error rather than the auto pool.
+    if spec.streamk_ctas == 0 or spec.streamk_ctas < -1:
+        raise ValueError(
+            f"streamk_ctas must be -1 (auto) or > 0 (got {spec.streamk_ctas})"
+        )
     pool = (
         spec.streamk_ctas
         if spec.streamk_ctas > 0

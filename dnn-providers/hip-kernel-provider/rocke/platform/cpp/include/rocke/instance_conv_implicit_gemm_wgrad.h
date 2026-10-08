@@ -185,7 +185,9 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      *   streamk_ctas      CTA pool the stream-K remainder is spread over;
      *                     a launch parameter, not part of the kernel, so the
      *                     builder accepts -1 (auto) (unlike split_k=-1); the
-     *                     host helpers need it resolved to > 0.
+     *                     rocke_wgrad_conv_streamk_* host helpers resolve -1
+     *                     to the per-arch default pool of the arch they are
+     *                     given (rocke_wgrad_conv_streamk_default_pool).
      * "off" keeps every existing config byte-identical.  Stream-K folds the
      * conv groups into GEMM-M, so it is the one path on which this port
      * accepts groups > 1. */
@@ -262,26 +264,38 @@ int rocke_wgrad_conv_streamk_default_pool(const char* reduction, const char* arc
  * count. A NULL arch is gfx950. */
 int rocke_wgrad_conv_streamk_ctas(const rocke_implicit_gemm_conv_wgrad_spec_t* s, const char* arch);
 
-/* Python wgrad_streamk_partition(spec): the iteration partition the kernel and
- * its launch grid share.  Requires streamk != "off" and streamk_ctas == -1
- * (auto, resolved for gfx950 like Python's default arch; resolve it with
- * rocke_wgrad_conv_streamk_ctas for another arch) or > 0; otherwise
- * *out_status (if non-NULL) is ROCKE_ERR_VALUE and the result is zeroed. */
-rocke_streamk_iter_partition_t
-    rocke_wgrad_conv_streamk_partition(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
-                                       rocke_status_t* out_status);
+/* The helpers below take the target arch because an auto pool
+ * (streamk_ctas == -1) resolves to a per-arch CU count; every one of them
+ * resolves it the same way, so the grid, the workspace and the kernarg
+ * partition block of one launch always agree. A NULL arch is gfx950, the
+ * default of the Python twins (wgrad_streamk_*(spec, arch="gfx950")). */
 
-/* Python wgrad_streamk_grid(spec): one-dimensional launch grid. */
+/* Python wgrad_streamk_partition(spec, arch=arch): the iteration partition the
+ * kernel and its launch grid share.  Requires a non-NULL spec with
+ * streamk != "off" and streamk_ctas == -1 (auto) or > 0; otherwise
+ * *out_status (if non-NULL) is ROCKE_ERR_VALUE and the result is zeroed. */
+rocke_streamk_iter_partition_t rocke_wgrad_conv_streamk_partition(
+    const rocke_implicit_gemm_conv_wgrad_spec_t* s, const char* arch, rocke_status_t* out_status);
+
+/* Python wgrad_streamk_grid(spec, arch=arch): one-dimensional launch grid.
+ * ROCKE_ERR_VALUE when the partition is invalid or out is NULL. */
 rocke_status_t rocke_wgrad_conv_streamk_grid(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
+                                             const char* arch,
                                              int out[3]);
 
-/* Python wgrad_streamk_workspace_layout(spec): (flags_bytes, partials_bytes) of
- * a linear/tree kernel; both 0 for the atomic and workspace reductions. */
-rocke_status_t rocke_wgrad_conv_streamk_workspace_layout(
-    const rocke_implicit_gemm_conv_wgrad_spec_t* s, size_t* flags_bytes, size_t* partials_bytes);
+/* Python wgrad_streamk_workspace_layout(spec, arch=arch): (flags_bytes,
+ * partials_bytes) of a linear/tree kernel; both 0 for the atomic and workspace
+ * reductions. ROCKE_ERR_VALUE for a NULL argument or an invalid partition. */
+rocke_status_t
+    rocke_wgrad_conv_streamk_workspace_layout(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
+                                              const char* arch,
+                                              size_t* flags_bytes,
+                                              size_t* partials_bytes);
 
-/* Python wgrad_streamk_workspace_nbytes(spec). */
-size_t rocke_wgrad_conv_streamk_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
+/* Python wgrad_streamk_workspace_nbytes(spec, arch=arch); 0 for a NULL spec,
+ * streamk == "off", or an invalid partition. */
+size_t rocke_wgrad_conv_streamk_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
+                                                const char* arch);
 
 /* spec.wg_K: output spatial positions (N * Ho * Wo [* Do]). */
 int rocke_wgrad_conv_spec_wg_K(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
