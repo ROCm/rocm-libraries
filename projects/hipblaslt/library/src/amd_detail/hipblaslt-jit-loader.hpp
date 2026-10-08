@@ -56,8 +56,7 @@ namespace hipblaslt_jit
         std::shared_ptr<const TensileBundle> tensile;
         int                                  index = 0; // the local solution index
 
-        std::string_view operationKind() const noexcept override;
-        int              solutionIndex() const noexcept override
+        int solutionIndex() const noexcept override
         {
             return index;
         }
@@ -70,7 +69,7 @@ namespace hipblaslt_jit
             return tensile->library->solutions.at(index)->kernelName;
         }
         hipblasStatus_t
-            support(const OperationRequest&, size_t, size_t&, Diagnostics&) const override;
+            support(const GemmRequest&, size_t, size_t&, Diagnostics&) const override;
     };
 
     // Loads CustomKernel entries from any backend into TensileGemmBundles.
