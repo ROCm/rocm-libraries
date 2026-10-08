@@ -39,7 +39,7 @@ from pathlib import Path
 _GOLDEN = (
     Path(__file__).resolve().parent / "golden" / "mla_prefill_gfx942_ir_sha256.json"
 )
-_FLAVORS = ("llvm20", "llvm22")
+_FLAVORS = ("llvm20", "llvm22", "llvm23")
 _ARCH = "gfx942"
 _SCHEMA = "mla_prefill_gfx942.ir_golden_sha256/v1"
 
