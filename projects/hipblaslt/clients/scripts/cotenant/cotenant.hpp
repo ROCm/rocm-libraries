@@ -19,8 +19,6 @@ namespace hipblaslt_cotenant
 
 #else
 
-#include <unistd.h>
-
 #include <algorithm>
 #include <chrono>
 #include <cstdarg>
@@ -30,6 +28,12 @@ namespace hipblaslt_cotenant
 #include <string>
 #include <thread>
 
+// The clients provide hipblaslt_cerr; the standalone kernel build does not.
+#if __has_include("hipblaslt_ostream.hpp")
+#include "hipblaslt_ostream.hpp"
+#define HIPBLASLT_COTENANT_USE_OSTREAM
+#endif
+
 namespace hipblaslt_cotenant
 {
     inline void check(hipError_t status)
@@ -38,16 +42,21 @@ namespace hipblaslt_cotenant
             throw std::runtime_error(std::string("cotenant: ") + hipGetErrorString(status));
     }
 
-    // Unbuffered stderr write; the clients poison stdio stream identifiers.
+    // printf-style log. The clients poison stdio identifiers, so they log through
+    // hipblaslt_cerr; the standalone binary writes to stderr directly.
     inline void log(const char* fmt, ...)
     {
-        char    buf[512];
         va_list args;
         va_start(args, fmt);
+#ifdef HIPBLASLT_COTENANT_USE_OSTREAM
+        char      buf[512];
         const int n = std::vsnprintf(buf, sizeof(buf), fmt, args);
-        va_end(args);
         if(n > 0)
-            (void)!::write(2, buf, std::min<size_t>(n, sizeof(buf) - 1));
+            hipblaslt_cerr << std::string(buf, std::min<size_t>(n, sizeof(buf) - 1));
+#else
+        std::vfprintf(stderr, fmt, args);
+#endif
+        va_end(args);
     }
 
     template <bool Stoppable>
