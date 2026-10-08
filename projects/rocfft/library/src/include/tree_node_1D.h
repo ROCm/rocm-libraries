@@ -94,7 +94,7 @@ protected:
 public:
     bool                CreateDeviceResources() override;
     std::vector<size_t> CollapsibleDims() override;
-    bool                UseOutputLengthForPadding() const override
+    bool                OutputLengthMatchesOutStride() const override
     {
         // with embedded r2c, stockham nodes will change length, so the
         // output length is different from the input length.
@@ -219,7 +219,7 @@ public:
     {
         return true;
     }
-    bool UseOutputLengthForPadding() const override
+    bool OutputLengthMatchesOutStride() const override
     {
         return true;
     }

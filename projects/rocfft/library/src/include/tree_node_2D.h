@@ -77,7 +77,7 @@ protected:
 
 public:
     bool CreateDeviceResources() override;
-    bool UseOutputLengthForPadding() const override
+    bool OutputLengthMatchesOutStride() const override
     {
         return ebtype != EmbeddedType::NONE;
     }

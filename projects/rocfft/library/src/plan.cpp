@@ -5691,7 +5691,7 @@ void TreeNode::DetermineBufferMemory(size_t& tmpBufSize,
     if(nodeType == NT_LEAF)
     {
         auto outputPtrDiff
-            = compute_ptrdiff(UseOutputLengthForPadding() ? GetOutputLength() : length,
+            = compute_ptrdiff(LengthForOutStride(),
                               (typeBlue == BT_MULTI_KERNEL_FUSED) ? outStrideBlue : outStride,
                               batch,
                               (typeBlue == BT_MULTI_KERNEL_FUSED) ? oDistBlue : oDist);

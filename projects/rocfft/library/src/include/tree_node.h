@@ -876,12 +876,19 @@ public:
     {
         return outputLength.empty() ? length : outputLength;
     }
-    // Padding needs matching stride + length to make its decisions.
-    // For most nodes, outStride + length can be used together.  For
-    // some nodes, outputLength is what matches outStride.
-    virtual bool UseOutputLengthForPadding() const
+    // Which length vector outStride is ordered against.  For most nodes
+    // outStride can be used together with length.  Nodes that reorder or
+    // resize their output pair it with outputLength instead.  Everything that
+    // combines a length with outStride - padding, buffer sizing, index range -
+    // has to agree on this, so prefer LengthForOutStride() below.
+    virtual bool OutputLengthMatchesOutStride() const
     {
         return false;
+    }
+    // The length vector that pairs with outStride.
+    std::vector<size_t> LengthForOutStride() const
+    {
+        return OutputLengthMatchesOutStride() ? GetOutputLength() : length;
     }
 
     virtual bool KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) = 0;
@@ -1117,11 +1124,8 @@ public:
         // launch (see powX.cpp) and don't affect kernel index arithmetic.
         const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;
         const auto& io_dist   = io == io_data_label::INPUT ? iDist : oDist;
-        // outputLength is in plan order for nodes like SBCC, whose length is
-        // rotated in lockstep with the strides, so it only pairs with
-        // outStride on the nodes that say so.
-        const auto out_length = UseOutputLengthForPadding() ? GetOutputLength() : length;
-        const auto io_length  = io == io_data_label::INPUT ? length : out_length;
+        // inStride always pairs with length, outStride does not on every node.
+        const auto io_length = io == io_data_label::INPUT ? length : LengthForOutStride();
 
         // compute_ptrdiff returns the buffer size (one-past-the-end).
         auto ptrdiff = compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
