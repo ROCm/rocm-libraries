@@ -4,8 +4,8 @@ from typing import Mapping, Optional
 from rocisa.code import Module, Label
 from rocisa.instruction import SMulI32, SAddU64, VMovB32, VAddU32, VAddCOU32, \
     VAddCCOU32, VAddNCU64, VLShiftRightB32, VMulLOU32, VMulHIU32, GlobalPrefetchB8, \
-    VCmpGtU32, VCndMaskB32, SSubI32, SMovB32, SAddU32, SAddCU32, SAndB32, SBranch, \
-    SCBranchSCC1, SCMovB32, SLShiftRightB32
+    VCmpGtU32, VCndMaskB32, SSubI32, SMovB32, SMovB64, SAddU32, SAddCU32, SAndB32, SBranch, \
+    SCBranchSCC0, SCBranchSCC1, SCMovB32, SCmpEQU32, SLShiftRightB32, SLoadB64, SWaitCnt
 from rocisa.container import sgpr, vgpr, RegisterContainer, VCC, GLOBALModifiers, ContinuousRegister
 from rocisa.functions import vectorMultiply64Bpe, scalarMultiplyBpe, vectorStaticDivideAndRemainder, \
     scalarStaticRemainder
@@ -286,21 +286,24 @@ class GL2PrefetchLoad(GL2Prefetch):
                 mod.add(VAddCCOU32(vgpr(vgprAddrNameHi), VCC(), vgpr(vgprAddrNameHi), 0, VCC()))
                 mod.add(vectorMultiply64Bpe(vgprAddrName, vgprAddrName, bpe, tmpVgprIdx, comment="scale by bpe"))
 
-            # base address + MT offset (in units of bytes)
+            # MT offset (in units of bytes). Added to the addresses here because
+            # resolving a pointer-array base below needs all four tmp sgprs.
             mod.add(scalarMultiplyBpe(tmpSgprIdx0, tmpSgprIdx0, bpe))
             if isMX or tlu:
-                mod.add(SAddU32(sgpr(tmpSgprIdx0), sgpr("Address%s"%tc), sgpr(tmpSgprIdx0), comment="base address + MT offset"))
-                mod.add(SAddCU32(sgpr(tmpSgprIdx1), sgpr("Address%s+1"%tc), 0))
+                mod.add(SMovB32(sgpr(tmpSgprIdx1), 0, comment="MT offset hi"))
             else:
                 mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
                     sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx1),
                     sgpr(tmpSgprIdx0), perpStride,
                     tmpVgprIdx, comment="*= stride"))
-                mod.add(SAddU64(sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx0, 2), sgpr("Address%s"%tc, 2), comment="base address + MT offset"))
-                
+            for i in range(nl):
+                dst = f"{vgprAddrBaseName}_{i}"
+                mod.add(VAddNCU64(vgpr(dst, 2), vgpr(dst, 2), sgpr(tmpSgprIdx0, 2), comment="+ MT offset"))
+
+            mod.add(SMovB64(dst=sgpr(tmpSgprIdx0, 2), src=sgpr("Address%s"%tc, 2), comment="base address"))
             # strided batch offset
             if kernel["ProblemType"]["Batched"]:
-                assert kernel["ProblemType"]["StridedBatched"], "Currently GL2Prefetch does not support general batch"
+                assert kernel["ProblemType"]["StridedBatched"], "GL2Prefetch does not support StridedBatched=False"
                 for batchIdx in kernel["ProblemType"]["IndicesBatch"]:
                     # packed index check
                     if batchIdx in kernel["ProblemType"]["IndicesFree"] or batchIdx not in tp['ia']:
@@ -313,6 +316,11 @@ class GL2PrefetchLoad(GL2Prefetch):
                         sgpr("WorkGroup2"), sgpr(tmpSgprIdx2),
                         tmpVgprIdx, comment="batch offset * wg2"))
                     mod.add(SAddU64(sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx2, 2)))
+                # Same condition as _resolveTDMGlobalAddr: MX scales and metadata
+                # stay direct pointers with a batch stride.
+                if tc in ("A", "B") and kernel["ProblemType"]["SupportUserArgs"] \
+                        and not kernel["ProblemType"]["GroupedGemm"]:
+                    mod.add(self.resolvePointerArrayBase(writer, tc, tmpSgprIdx0, tmpSgprIdx2))
             # GSU chunk offset. Must precede the PGR pre-skip: it consumes the
             # unscaled increment and leaves behind the chunk-strided one that the
             # pre-skip and every in-loop increment then use.
@@ -327,6 +335,49 @@ class GL2PrefetchLoad(GL2Prefetch):
 
         writer.vgprPool.checkIn(tmpVgprIdx)
         writer.vgprPool.checkIn(tmpVgprCoalIdx)
+        return mod
+
+    def resolvePointerArrayBase(self, writer: "KernelWriterAssembly", tc: str, \
+                                baseSgprIdx: int, tmpSgprIdx: int) -> Module:
+        """Under ArgType == 3 Address{tc} is a pointer array: overwrite the strided
+        base in sgpr[baseSgprIdx:+1] with Address{tc}[WorkGroup2] + batchOffset{tc}.
+
+        gfx1250 XNACK replay re-reads the base of an outstanding scalar load, so
+        each load's base is disjoint from its destination, and the pointer load is
+        drained before the batchOffset load overwrites its base pair.
+        """
+        mod = Module(f"gl2 prefetch general batched base of {tc}")
+        doneLabel = Label(writer.labels.getNameInc(f"GL2PrefetchBatchBase{tc}_End"), "")
+
+        writer.cmpNamedArgTypeEq(mod, 3, "ArgType == 3 for General Batched GEMM")
+        mod.add(SCBranchSCC0(labelName=doneLabel.getLabelName(), comment="strided batch keeps the strided base"))
+        # A/B may be null when K == 0 or alpha == 0 (alpha == 0 zeroes SizesSum), and
+        # nothing is prefetched then. Alpha itself is not tested: with the bias reduced
+        # from A/B, SizesSum is kept and the prefetch still reads A/B.
+        mod.add(SMovB32(dst=sgpr(tmpSgprIdx), src=1, comment="check summation size"))
+        for i in range(writer.states.numSgprSizesSum):
+            mod.add(SMulI32(dst=sgpr(tmpSgprIdx), src0=sgpr(f"SizesSum+{i}"), src1=sgpr(tmpSgprIdx), \
+                comment="check summation size"))
+        mod.add(SCmpEQU32(src0=sgpr(tmpSgprIdx), src1=0, comment="skip pointer dereference when summation size is zero"))
+        mod.add(SCBranchSCC1(labelName=doneLabel.getLabelName()))
+
+        mod.add(SMulI32(dst=sgpr(tmpSgprIdx), src0=sgpr("WorkGroup2"), src1=8, \
+            comment=f"offset of {tc}[batch] in the pointer array"))
+        mod.add(SAddU32(dst=sgpr(tmpSgprIdx), src0=sgpr(tmpSgprIdx), src1=sgpr(f"Address{tc}+0"), \
+            comment=f"&{tc}[batch] (low)"))
+        mod.add(SAddCU32(dst=sgpr(tmpSgprIdx + 1), src0=sgpr(f"Address{tc}+1"), src1=0, \
+            comment=f"&{tc}[batch] (high)"))
+        mod.add(SLoadB64(dst=sgpr(baseSgprIdx, 2), base=sgpr(tmpSgprIdx, 2), soffset=0, \
+            comment=f"base = {tc}[batch]"))
+        mod.add(SWaitCnt(kmcnt=0, comment=f"wait for {tc}[batch]"))
+        batchOffsetKernArgOffset: int = writer.states.batchOffsetAKernArgOffset if tc == "A" \
+            else writer.states.batchOffsetBKernArgOffset
+        mod.add(SLoadB64(dst=sgpr(tmpSgprIdx, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), \
+            comment=f"batchOffset{tc}"))
+        mod.add(SWaitCnt(kmcnt=0, comment=f"wait for batchOffset{tc}"))
+        mod.add(SAddU64(sgpr(baseSgprIdx, 2), sgpr(baseSgprIdx, 2), sgpr(tmpSgprIdx, 2), \
+            comment=f"base += batchOffset{tc}"))
+        mod.add(doneLabel)
         return mod
 
     def issueLoad(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:

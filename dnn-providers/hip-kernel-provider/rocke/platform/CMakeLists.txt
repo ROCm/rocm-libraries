@@ -163,6 +163,9 @@ file(GLOB_RECURSE ROCKE_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_D
 list(FILTER ROCKE_CORE_SOURCES EXCLUDE REGEX "/cpp/bindings/")
 
 add_library(rocke_core STATIC ${ROCKE_CORE_SOURCES})
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+target_link_libraries(rocke_core PUBLIC ${CMAKE_DL_LIBS} Threads::Threads)
 target_include_directories(rocke_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cpp/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
@@ -242,6 +245,13 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/"
 install(EXPORT ckcTargets
         FILE ckcTargets.cmake
         NAMESPACE ckc::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ckcConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/ckcConfig.cmake"
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ckcConfig.cmake"
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
 
 if(ROCKE_INSTALL_PYTHON_PACKAGE)
@@ -469,6 +479,13 @@ if(ROCKE_INSTALL_TESTS)
     # is not installed -- and an unresolvable import is a collection error that
     # aborts the whole installed pytest session, not one skipped test).
     # Include run_all.py: installed runner unit tests import it as a dependency.
+    # Linux detector fixtures link a stdin wrapper against the production archive.
+    # Keep it with the pytest assets so TheRock's test artifact captures it even
+    # though the library artifact excludes lib/*.a.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      install(FILES "$<TARGET_FILE:rocke_core>"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests")
+    endif()
     # cmake-lint: disable=E1122
     block()
       install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"
@@ -478,6 +495,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "*.c" EXCLUDE
               PATTERN "*.cpp" EXCLUDE
               PATTERN "differential" EXCLUDE
+              PATTERN "test_engine_linkage.py" EXCLUDE
               PATTERN "test_wavescope_sidecar.py" EXCLUDE
               PATTERN "test_lds_analyzer.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE)
@@ -526,7 +544,7 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"PYTHONPATH=.\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=.;ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}\"\n"
              "  TIMEOUT 300)\n")
     endif()
 
