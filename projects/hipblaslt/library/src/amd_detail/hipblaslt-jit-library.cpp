@@ -258,7 +258,8 @@ namespace hipblaslt_jit
         }
 
         // Helper code objects for one backend directory, keyed by helper name.
-        class DirectoryHelpers final : public HelperCache
+        // The files live in the JIT library. This is not a cache the builder owns.
+        class DirectoryHelpers
         {
         public:
             DirectoryHelpers(fs::path root, std::string backendId, fs::path staging)
@@ -268,7 +269,7 @@ namespace hipblaslt_jit
             {
             }
 
-            Artifact find(const std::string& helperName) const override
+            Artifact find(const std::string& helperName) const
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
                 Artifact                    out;
@@ -277,7 +278,7 @@ namespace hipblaslt_jit
                 return present ? out : Artifact{};
             }
 
-            Status publish(const Artifact& helper) override
+            Status publish(const Artifact& helper)
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
                 return publishUnlocked(helper);
@@ -285,7 +286,7 @@ namespace hipblaslt_jit
 
             Status acquire(const std::string&                       helperName,
                            const std::function<Status(Artifact&)>& compile,
-                           Artifact&                                out) override
+                           Artifact&                                out)
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
                 bool                        present = false;
@@ -637,7 +638,7 @@ namespace hipblaslt_jit
         std::string isa;
         CacheKey    identity;
         Status      failure; // a cache-key.msgpack this directory cannot use
-        std::shared_ptr<HelperCache> helpers;
+        std::unique_ptr<DirectoryHelpers> helpers;
 
         std::mutex                                  sliceMutex;
         std::map<std::string, std::unique_ptr<Slice>> slices;
@@ -821,7 +822,7 @@ namespace hipblaslt_jit
             opened->path     = schemaDirectory() / name;
             opened->isa      = key.isa;
             opened->identity = key;
-            opened->helpers  = std::make_shared<DirectoryHelpers>(
+            opened->helpers  = std::make_unique<DirectoryHelpers>(
                 opened->path, key.backendId, opened->staging());
             for(const auto& path : {opened->path, opened->staging()})
                 if(auto status = files::privateDirectory(path); !status.ok())
@@ -851,13 +852,18 @@ namespace hipblaslt_jit
         return why;
     }
 
-    std::shared_ptr<HelperCache> JitLibrary::helperCache(const CacheKey& key, int device, Status& why)
+    Status JitLibrary::acquireHelper(const CacheKey&                         key,
+                                     int                                     device,
+                                     const std::string&                      helperName,
+                                     const std::function<Status(Artifact&)>& compile,
+                                     Artifact&                               out)
     {
         Directory* directory = nullptr;
-        why                   = attach(key, device, directory);
-        if(!why.ok() || !directory)
-            return {};
-        return directory->helpers;
+        if(auto status = attach(key, device, directory); !status.ok())
+            return status;
+        if(!directory || !directory->helpers)
+            return failed(Stage::Build, "The JIT solution library has no helper cache");
+        return directory->helpers->acquire(helperName, compile, out);
     }
 
     void JitLibrary::discover(int device)

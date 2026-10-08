@@ -179,43 +179,71 @@ namespace hipblaslt_jit
         outcome.summary = std::move(status.message);
 
         BuildRequest build{target.targetId, generation.codeObjectVersion, scratch->path()};
-        const bool   needsHelpers = std::any_of(
-            generated.begin(), generated.end(), [](const SourceCodeBundle& source) {
-                return !source.helpers.empty();
-            });
-        if(needsHelpers && c.backend)
-        {
-            Status cacheStatus;
-            build.helpers = JitLibrary::process().helperCache(
-                CacheKey::make(target, c.backend->info(), generation.codeObjectVersion),
-                target.device,
-                cacheStatus);
-            if(!build.helpers)
-            {
-                record(Stage::Build,
-                       cacheStatus.ok() ? Status{Status::Code::Failed,
-                                                 Stage::Build,
-                                                 "The JIT solution library has no helper cache"}
-                                        : std::move(cacheStatus));
-                scratch->keep();
-                return outcome;
-            }
-        }
+        const auto   libraryKey
+            = c.backend ? CacheKey::make(target, c.backend->info(), generation.codeObjectVersion)
+                        : CacheKey{};
         SupportedSolutions supported;
         size_t             solutions = 0;
         for(const auto& source : generated)
         {
             if(solutions == count)
                 break;
+            SourceCodeBundle      mainOnly = source;
+            std::vector<Artifact> helperObjects;
+            mainOnly.helpers.clear();
+            Status helperStatus;
+            for(const auto& helper : source.helpers)
+            {
+                if(!c.backend)
+                {
+                    helperStatus = {Status::Code::Failed,
+                                    Stage::Build,
+                                    "A helper kernel needs a backend to name its library cache"};
+                    break;
+                }
+                Artifact stored;
+                helperStatus = JitLibrary::process().acquireHelper(
+                    libraryKey, target.device, helper.name, [&](Artifact& out) {
+                        SourceCodeBundle one;
+                        one.mainKernel = helper;
+                        one.includes   = source.includes;
+                        one.hipFlags   = source.hipFlags;
+                        CompiledCode compiled;
+                        BuildRequest oneBuild{
+                            target.targetId, generation.codeObjectVersion, scratch->path()};
+                        const auto built = c.builder->build(one, oneBuild, compiled);
+                        if(!built.ok())
+                            return built;
+                        out      = std::move(compiled.codeObject);
+                        out.name = helper.name;
+                        out.kind = Artifact::Kind::CodeObject;
+                        return Status{};
+                    }, stored);
+                if(!helperStatus.ok())
+                    break;
+                helperObjects.push_back(std::move(stored));
+            }
+            if(!helperStatus.ok())
+            {
+                const auto stage = helperStatus.stage;
+                record(stage, std::move(helperStatus));
+                if(stage == Stage::Configure)
+                {
+                    scratch->keep();
+                    return outcome;
+                }
+                continue;
+            }
             build.kernelNames = c.backend->kernelNames(source);
             CompiledCode code;
-            status = guarded([&] { return c.builder->build(source, build, code); });
+            status = guarded([&] { return c.builder->build(mainOnly, build, code); });
             if(!status.ok())
             {
                 record(Stage::Build, std::move(status));
                 continue;
             }
-            code.record = c.backend->solutionRecord(source);
+            code.helpers = std::move(helperObjects);
+            code.record  = c.backend->solutionRecord(source);
             std::vector<int> indices;
             status = guarded([&] {
                 return c.loader->support(code, request, target, workspaceLimit, indices);
