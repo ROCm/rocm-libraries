@@ -324,8 +324,6 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
          "PrefetchGlobalRead in (1,2) without UseSubtileImpl"),
         (state.get("StreamKFixupTreeReduction", 0) == 1, "StreamKFixupTreeReduction=1"),
         (not state.get("ProblemType", {}).get("OutputAmaxD", False), "OutputAmaxD=False"),
-        (not (state.get("ProblemType", {}).get("Gradient", False)
-              and state.get("ProblemType", {}).get("UseBias", False)), "no bias-gradient reduction"),
         (not state.get("DebugStreamK", 0), "DebugStreamK=0"),
     )
     for supported, requirement in constraints:
@@ -6770,7 +6768,9 @@ class Solution(collections.abc.Mapping):
         # Don't need to calculate lds bias
         if tile01 > -1:
           maxKId = state["WavefrontSize"] // ((state["MatrixInstM"] if (tile01 == 0) else state["MatrixInstN"]) * state["MatrixInstB"])
-          for dataType in state["ProblemType"]["BiasDataTypeList"]:
+          biasTypes = ([state["ProblemType"]["ComputeDataType"]] if isStreamKSpatialCluster(state)
+                       else state["ProblemType"]["BiasDataTypeList"])
+          for dataType in biasTypes:
             epilogueSize = max(epilogueSize, int(state["MacroTile%d"%tile01] * maxKId * dataType.numBytes())) # TODO- GetTurn ?
       else:
         epilogueSize = int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * vecDT.bias(0).turn)
