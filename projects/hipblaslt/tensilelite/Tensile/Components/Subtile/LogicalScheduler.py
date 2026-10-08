@@ -5077,7 +5077,16 @@ class LogicalScheduler:
 
     def _planCapturedTerminalMfmas(self, emitted_3d, captures, storeModule,
                                    requiredCycles):
-        """Move only producers with a safe generated gap in every runtime path."""
+        """Move only producers with a safe generated gap in every runtime path.
+
+        requiredCycles is MfmaToAccReadLatency: the separation a consumer must
+        leave after an MFMA before reading its accumulator, in cycles. Note it
+        is matched against a count of intervening *instructions* rather than a
+        cycle count. That is deliberate and conservative -- each instruction
+        issues in at least one cycle -- but it means a gap can qualify on
+        instruction count while being tighter in cycles than the name suggests,
+        never the reverse.
+        """
         mfmaEms, allInsts = self._plsinTerminalMfmas(emitted_3d)
         if not allInsts or not captures or requiredCycles <= 0:
             return 0
@@ -5157,9 +5166,12 @@ class LogicalScheduler:
                 for anchorPos, gap in gapList:
                     if anchorPos >= readPos:
                         continue
-                    cycles = sum(1 for item in flat[anchorPos + 1:readPos]
-                                 if isinstance(item, Instruction))
-                    if cycles >= requiredCycles:
+                    # Instructions, not cycles: a conservative stand-in, since
+                    # each issues in at least one cycle, so N of them span at
+                    # least N cycles.
+                    instsBetween = sum(1 for item in flat[anchorPos + 1:readPos]
+                                       if isinstance(item, Instruction))
+                    if instsBetween >= requiredCycles:
                         chosen = gap
                 return chosen
 
@@ -5186,9 +5198,9 @@ class LogicalScheduler:
                             continue
                         if cvtCountByGap.get(id(gap), 0) >= cvtQuotaPerGap:
                             continue
-                        cycles = sum(1 for item in flat[anchorPos + 1:readPos]
-                                     if isinstance(item, Instruction))
-                        if cycles >= requiredCycles:
+                        instsBetween = sum(1 for item in flat[anchorPos + 1:readPos]
+                                           if isinstance(item, Instruction))
+                        if instsBetween >= requiredCycles:
                             chosen = gap
                     if chosen is not None:
                         cvtCountByGap[id(chosen)] = cvtCountByGap.get(id(chosen), 0) + 1
