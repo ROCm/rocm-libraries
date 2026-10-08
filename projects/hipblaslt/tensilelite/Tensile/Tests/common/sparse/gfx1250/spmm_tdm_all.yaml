@@ -430,7 +430,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          # - [16, 16, 64, 1,  1,  1, 1,  1, 1]
+          # - [16, 16, 128, 1,  1,  1, 1,  1, 1]
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
         - DepthU: [128, 256]
@@ -504,7 +504,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          # - [16, 16, 64, 1,  1,  1, 1,  1, 1]
+          # - [16, 16, 128, 1,  1,  1, 1,  1, 1]
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
         - DepthU: [128, 256]
@@ -578,7 +578,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          # - [16, 16, 64, 1,  1,  1, 1,  1, 1]
+          # - [16, 16, 128, 1,  1,  1, 1,  1, 1]
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
         - DepthU: [128, 256]
@@ -718,7 +718,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          # - [16, 16, 64, 1,  1,  1, 1,  1, 1]
+          # - [16, 16, 128, 1,  1,  1, 1,  1, 1]
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
         - DepthU: [128, 256]
