@@ -731,6 +731,51 @@ namespace hipblaslt_jit::code_object
             return error ? std::filesystem::path(info.dli_fname) : path;
         }
 #endif
+
+        std::vector<Relocatable> objectsOf(const hipblaslt_jit::SourceCodeBundle& bundle,
+                                           const Target&                          target,
+                                           const Options&                         options,
+                                           std::string&                           log)
+        {
+            if(bundle.mainKernel.name.empty() || bundle.mainKernel.bytes.empty())
+                fail(Status::InvalidArgument, "no sources supplied");
+            if(bundle.mainKernel.kind == hipblaslt_jit::Artifact::Kind::CodeObject)
+                fail(Status::InvalidArgument, "the main kernel is already a code object");
+            Options               merged = options;
+            std::set<std::string> includeNames;
+            for(const auto& include : merged.includes)
+                includeNames.insert(include.name);
+            for(const auto& include : bundle.includes)
+            {
+                if(include.name.empty())
+                    fail(Status::InvalidArgument, "include name must not be empty");
+                if(includeNames.insert(include.name).second)
+                    merged.includes.push_back(include);
+            }
+            std::vector<hipblaslt_jit::Artifact> assembly, hip;
+            merged.compilerFlags.insert(
+                merged.compilerFlags.end(), bundle.hipFlags.begin(), bundle.hipFlags.end());
+            if(bundle.mainKernel.kind == hipblaslt_jit::Artifact::Kind::Hip)
+                hip.push_back(bundle.mainKernel);
+            else
+                assembly.push_back(bundle.mainKernel);
+            std::vector<Relocatable> objects;
+            if(!assembly.empty())
+            {
+                auto assembled = assembleImpl(assembly, target, merged, log);
+                for(auto& object : assembled.objects)
+                    objects.push_back(std::move(object));
+            }
+            if(!hip.empty())
+            {
+                auto hipTarget          = target;
+                hipTarget.wavefrontSize = 0;
+                auto compiled           = compileHipImpl(hip, hipTarget, merged, log);
+                for(auto& object : compiled.objects)
+                    objects.push_back(std::move(object));
+            }
+            return objects;
+        }
     }
 
     const char* toString(Status status) noexcept
@@ -791,46 +836,42 @@ namespace hipblaslt_jit::code_object
                  const Options&                          options) noexcept
     {
         return guarded<Result>([&](std::string& log) {
-            if(bundle.mainKernel.name.empty() || bundle.mainKernel.bytes.empty())
-                fail(Status::InvalidArgument, "no sources supplied");
-            if(bundle.mainKernel.kind == hipblaslt_jit::Artifact::Kind::CodeObject)
-                fail(Status::InvalidArgument, "the main kernel is already a code object");
-            Options               merged = options;
-            std::set<std::string> includeNames;
-            for(const auto& include : merged.includes)
-                includeNames.insert(include.name);
-            for(const auto& include : bundle.includes)
-            {
-                if(include.name.empty())
-                    fail(Status::InvalidArgument, "include name must not be empty");
-                if(includeNames.insert(include.name).second)
-                    merged.includes.push_back(include);
-            }
-            std::vector<hipblaslt_jit::Artifact> assembly, hip;
-            merged.compilerFlags.insert(
-                merged.compilerFlags.end(), bundle.hipFlags.begin(), bundle.hipFlags.end());
-            if(bundle.mainKernel.kind == hipblaslt_jit::Artifact::Kind::Hip)
-                hip.push_back(bundle.mainKernel);
-            else
-                assembly.push_back(bundle.mainKernel);
-            std::vector<Relocatable> objects;
-            if(!assembly.empty())
-            {
-                auto assembled = assembleImpl(assembly, target, merged, log);
-                for(auto& object : assembled.objects)
-                    objects.push_back(std::move(object));
-            }
-            if(!hip.empty())
-            {
-                auto hipTarget          = target;
-                hipTarget.wavefrontSize = 0;
-                auto compiled           = compileHipImpl(hip, hipTarget, merged, log);
-                for(auto& object : compiled.objects)
-                    objects.push_back(std::move(object));
-            }
+            auto objects = objectsOf(bundle, target, options, log);
             auto linkTarget          = target;
             linkTarget.wavefrontSize = 0;
-            return linkImpl(objects, linkTarget, merged, log);
+            return linkImpl(objects, linkTarget, options, log);
+        });
+    }
+
+    Result compileRelocatable(const hipblaslt_jit::SourceCodeBundle& bundle,
+                              const Target&                          target,
+                              const Options&                         options) noexcept
+    {
+        return guarded<Result>([&](std::string& log) {
+            auto objects = objectsOf(bundle, target, options, log);
+            if(objects.size() != 1 || objects.front().bytes.empty())
+                fail(Status::NoOutput, "compilation did not produce one relocatable");
+            hipblaslt_jit::Artifact object;
+            object.name  = objects.front().name.empty() ? bundle.mainKernel.name
+                                                        : objects.front().name;
+            object.kind  = hipblaslt_jit::Artifact::Kind::CodeObject;
+            object.bytes = std::move(objects.front().bytes);
+            return Result{Status::Success, {}, std::move(object)};
+        });
+    }
+
+    Result linkRelocatables(const std::vector<hipblaslt_jit::Artifact>& objects,
+                            const Target&                               target,
+                            const Options&                              options) noexcept
+    {
+        return guarded<Result>([&](std::string& log) {
+            std::vector<Relocatable> relocatables;
+            relocatables.reserve(objects.size());
+            for(const auto& object : objects)
+                relocatables.push_back({object.name, object.bytes});
+            auto linkTarget          = target;
+            linkTarget.wavefrontSize = 0;
+            return linkImpl(relocatables, linkTarget, options, log);
         });
     }
 

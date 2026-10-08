@@ -113,12 +113,22 @@ namespace hipblaslt_jit::code_object
     };
 
     // Assembles or compiles bundle.mainKernel, with bundle.includes, and links
-    // one executable code object. ComgrBuilder compiles helpers itself, asking
-    // JitLibrary before it does, so they are not compiled here.
+    // one executable code object. bundle.helpers are not compiled here.
     // Target::wavefrontSize applies to assembly; HIP keeps the processor default.
     Result build(const hipblaslt_jit::SourceCodeBundle& bundle,
                  const Target&                          target,
                  const Options&                         options) noexcept;
+
+    // The relocatable for bundle.mainKernel. The helper library stores these
+    // bytes; the solution library stores the executable link produces.
+    Result compileRelocatable(const hipblaslt_jit::SourceCodeBundle& bundle,
+                              const Target&                          target,
+                              const Options&                         options) noexcept;
+
+    // Links relocatable bytes into one executable code object.
+    Result linkRelocatables(const std::vector<hipblaslt_jit::Artifact>& objects,
+                            const Target&                               target,
+                            const Options&                              options) noexcept;
 
     ObjectCheck inspect(const void* elf, std::size_t size) noexcept;
     ObjectCheck inspect(const std::vector<uint8_t>& elf) noexcept;

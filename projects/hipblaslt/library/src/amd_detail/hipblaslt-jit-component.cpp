@@ -211,7 +211,8 @@ namespace hipblaslt_jit
                         CompiledCode compiled;
                         BuildRequest oneBuild{
                             target.targetId, generation.codeObjectVersion, scratch->path()};
-                        const auto built = c.builder->build(one, oneBuild, compiled);
+                        oneBuild.relocatable = true;
+                        const auto built     = c.builder->build(one, oneBuild, compiled);
                         if(!built.ok())
                             return built;
                         out      = std::move(compiled.codeObject);
@@ -235,6 +236,7 @@ namespace hipblaslt_jit
                 continue;
             }
             build.kernelNames = c.backend->kernelNames(source);
+            build.linkInputs  = std::move(helperObjects);
             CompiledCode code;
             status = guarded([&] { return c.builder->build(mainOnly, build, code); });
             if(!status.ok())
@@ -242,8 +244,7 @@ namespace hipblaslt_jit
                 record(Stage::Build, std::move(status));
                 continue;
             }
-            code.helpers = std::move(helperObjects);
-            code.record  = c.backend->solutionRecord(source);
+            code.record = c.backend->solutionRecord(source);
             std::vector<int> indices;
             status = guarded([&] {
                 return c.loader->support(code, request, target, workspaceLimit, indices);

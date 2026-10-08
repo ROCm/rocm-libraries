@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 #include "library_fixture.hpp"
 #include "solution_entry.hpp"
+#include "hipblaslt-jit-replay-catalog.hpp"
+#include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -186,5 +188,22 @@ TEST_CASE("a published JIT solution launches", "[jit-gpu]")
     {
         INFO(("the launched kernel did not complete"));
         REQUIRE((hipDeviceSynchronize() == hipSuccess));
+    }
+}
+
+TEST_CASE("a helper entry loads as a TensileLite solution", "[jit-cpu]")
+{
+    const auto bytes = hipblaslt_jit::committed::helperEntry("helper_scale", "gfx950");
+    const auto library = std::dynamic_pointer_cast<hipblaslt_jit::GemmMaster>(
+        TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(bytes));
+    {
+        INFO(("The helper entry did not load as a solution library"));
+        REQUIRE((library != nullptr));
+    }
+    const auto found = library->solutions.find(0);
+    {
+        INFO(("The helper entry has no solution 0"));
+        REQUIRE((found != library->solutions.end() && found->second
+                 && found->second->kernelName == "helper_scale"));
     }
 }
