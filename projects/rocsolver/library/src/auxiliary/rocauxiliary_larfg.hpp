@@ -162,6 +162,9 @@ ROCSOLVER_KERNEL void set_taubeta(T* tauA,
 template <typename T, typename I>
 bool larfg_use_kernel(const hipDeviceProp_t& props, const I n)
 {
+/*! \brief Overrides the size at which rocSOLVER switches from
+    the kernel to the BLAS implementation when executing LARFG.
+    Define LARFG_SSKER_MAX_N to set a constant switch value. */
 #ifndef LARFG_SSKER_MAX_N
     //
     // Use measured bounds for tested devices, otherwise use default bounds.

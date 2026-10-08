@@ -60,7 +60,7 @@
 /*! \brief Determines the default size at which rocSOLVER switches from
     the kernel to the BLAS implementation when executing LARFG. This is used
     when a configuration has no set switch size (see larfg_use_kernel).
-    Overriden by LARFG_SSKER_MAX_N. */
+    Overridden by LARFG_SSKER_MAX_N. */
 #ifndef LARFG_SSKER_DEFAULT_MAX_N
 #define LARFG_SSKER_DEFAULT_MAX_N 98304
 #endif
