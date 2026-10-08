@@ -22,6 +22,10 @@
 #include "rocfft/rocfft.h"
 #include "stockham_gen_base.h"
 
+// How a partial-pass kernel lays out the off-dimension points it owns in LDS.
+// The SBRR gives each transform its own LDS column and strides between columns
+// to reach the off-dimension; the SBCC interleaves the off-dimension into the
+// column, so a thread's points are contiguous.
 enum class LDSColumnPattern
 {
     NON_INTERLEAVED,
