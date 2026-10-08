@@ -66,7 +66,39 @@ if(NOT HIPBLASLT_ENABLE_YAML)
             # msgpack BIN, and mapRawBytes has no YAML implementation.
             "${CMAKE_CURRENT_SOURCE_DIR}/IndexedLibraryLoad_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/MessagePackWriting_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/SolutionState_test.cpp"
     )
+
+    # SolutionState_test reads the solution state from the metadata note of
+    # each committed JIT test kernel.
+    set(JIT_KERNEL_SOURCES
+        "gfx90a/plain/sources/Cijk_Ailk_Bljk_HHS_BH_MT16x16x16_MI16x16x1_SN_LD8o0J2kRSAfWwkXhY4TRGnZEgIpreJSG7l9ugobCrSio=.s"
+        "gfx942/plain/sources/Cijk_Ailk_Bljk_HHS_BH_MT16x16x16_MI16x16x1_SN_LD8FToh8dUfkUq7xkODH4qErpo3OUHGD4h3KSmJd4Hjb8=.s"
+        "gfx950/plain/sources/Cijk_Ailk_Bljk_HHS_BH_MT16x16x16_MI16x16x1_SN_LDN0zJfaQLd2kQv63oThWj7iikfbvmsZur9TRrDKvGnYo=.s"
+    )
+    set(SOLUTION_STATE_OBJECTS)
+    file(MAKE_DIRECTORY "${TEST_DATA_DIR}/solution-state")
+    foreach(SOURCE ${JIT_KERNEL_SOURCES})
+        string(REGEX MATCH "^gfx[0-9a-f]+" ARCH "${SOURCE}")
+        set(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../../clients/tests/jit/data/${SOURCE}")
+        set(OBJECT "${TEST_DATA_DIR}/solution-state/${ARCH}.o")
+        add_custom_command(
+            OUTPUT "${OBJECT}"
+            COMMAND ${CMAKE_CXX_COMPILER}
+                -x assembler
+                -target amdgcn-amd-amdhsa
+                "-mcpu=${ARCH}"
+                -mcode-object-version=4
+                -c "${SOURCE}"
+                -o "${OBJECT}"
+            DEPENDS "${SOURCE}"
+            COMMENT "Assembling the ${ARCH} JIT test kernel"
+            VERBATIM
+        )
+        list(APPEND SOLUTION_STATE_OBJECTS "${OBJECT}")
+    endforeach()
+    add_custom_target(tensilelite-tests-solution-state DEPENDS ${SOLUTION_STATE_OBJECTS})
+    add_dependencies(tensilelite-tests tensilelite-tests-solution-state)
 endif()
 
 if(HIPBLASLT_ENABLE_YAML)
