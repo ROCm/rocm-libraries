@@ -37,8 +37,15 @@ class Tuner(BaseTuner):
         super().__init__(args)
 
     def _get_restrictions(self):
+        min_total_threads = 32768
+
         def validate(params):
             g_size = params["grid_size"]
+            b_size = params["block_size_x"]
+
+            if b_size * g_size < min_total_threads:
+                return False
+
             return g_size > 0 and g_size & (g_size - 1) == 0
 
         return validate
