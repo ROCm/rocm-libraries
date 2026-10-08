@@ -28,7 +28,8 @@ file, so both arms walk the same problems in the same order.
     compile on a cache miss. Per problem and arm: first-launch wall time,
     steady-state latency (HIP events, median over rounds), max_abs against an
     fp32 reference, and host cost of the cache-key call. Per arm: compiled
-    binary count.
+    binary count. Python's garbage collector is off inside each worker and
+    runs between problems, so a collection pass never lands in a timed region.
 
 Outputs go to ``--out``: per-arm raw data plus ``summary.md`` and a CSV.
 Measured numbers belong on the ticket or the access-controlled record, never
@@ -49,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gc
 import hashlib
 import itertools
 import json
@@ -542,12 +544,18 @@ def _worker_ab(args) -> None:
     num_cus = args.num_cus or torch.cuda.get_device_properties(0).multi_processor_count
     stream = int(torch.cuda.current_stream().cuda_stream)
     rows = []
+    # A collection pass inside a timed loop stalls the host while the GPU idles,
+    # which reads as a per-launch slowdown, and where the collector fires
+    # depends on each arm's allocation history. Keep it off and collect between
+    # problems instead, as timeit does.
+    gc.disable()
     for idx, (label, problem) in enumerate(
         _ab_sweep(au.UnifiedAttentionProblem, arch, num_cus)
     ):
         path = _route(au, problem)
         if path is None:
             continue
+        gc.collect()
         data = _make_inputs(problem, seed=idx)
 
         def call():
@@ -605,15 +613,20 @@ def _worker_ab(args) -> None:
             )
         )
         del data, ref
-    from rocke.core.backend import resolve_backend
+    from rocke.core.backend import cpp_fallbacks, resolve_backend
 
+    # Report the lowering that ran, not the configured one: without the
+    # rocke_engine extension every cpp lowering falls back to Python.
+    backend = resolve_backend()
+    if backend == "cpp" and cpp_fallbacks():
+        backend = f"python (cpp fell back on {len(cpp_fallbacks())} kernels)"
     Path(args.result).write_text(
         json.dumps(
             dict(
                 arch=arch,
                 root=str(Path(args.root).resolve()),
                 git=_git_head(args.root),
-                backend=resolve_backend(),
+                backend=backend,
                 num_cus=num_cus,
                 binaries=_binaries(au),
                 rows=rows,
@@ -740,7 +753,14 @@ def _git_head(root: str) -> str:
             else ""
         )
     except (OSError, subprocess.CalledProcessError):
-        return "unknown"
+        # No git metadata (an exported tree, or a container that mounts only
+        # part of the checkout): fingerprint the dispatcher source instead so
+        # the arms stay identifiable.
+        src = Path(root) / "library" / "kernels" / "common" / "attention_unified.py"
+        try:
+            return "src:" + hashlib.sha256(src.read_bytes()).hexdigest()[:12]
+        except OSError:
+            return "unknown"
 
 
 def _spawn(worker: str, root: str, result: Path, extra: List[str]) -> None:
