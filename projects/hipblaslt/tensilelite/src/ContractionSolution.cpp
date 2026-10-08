@@ -2945,7 +2945,15 @@ namespace TensileLite
     {
         validatePersistentLoopArgsVersion();
         if(usesStreamKSpatialCluster())
-            throw std::runtime_error("StreamK scheduling ABI 2 requires generated argument packing");
+        {
+            if(!launch.clusterSchedule.enabled || launch.argsVersion != 2
+               || launch.reduction != origami::reduction_t::tree)
+                throw std::runtime_error("Invalid resolved StreamK cluster schedule");
+            if(inputs.Synchronizer == nullptr)
+                throw std::runtime_error("StreamK cluster multicast requires a non-null flag buffer");
+            if(launch.workspaceBytes != 0 && inputs.ws == nullptr)
+                throw std::runtime_error("StreamK cluster multicast requires its resolved partial workspace");
+        }
         KernelInvocation rv;
         rv.isSingleCall = true;
         rv.args = KernelArguments(T_Debug);
@@ -3025,6 +3033,15 @@ namespace TensileLite
                     skItersPerWG = skTotalTiles * itersPerTile / max(uint32_t(1), static_cast<uint32_t>(launch.grid));
                 }
             }
+        }
+
+        if(usesStreamKSpatialCluster())
+        {
+            skMagicNumberItersPerTile = magicNumber(2, itersPerTile, &skMagicShiftItersPerTile);
+            if(internalArgsSupport.perTileExtraIters && problem.getParams().uniformSummationOrder())
+                skMagicShiftItersPerTile |= 0x20000000u;
+            skItersPerWG = launch.clusterSchedule.split.skItersPerWG;
+            skTotalTiles = launch.clusterSchedule.split.skTiles;
         }
 
         rv.workGroupSize.x = customKernel.threads.x;
@@ -3130,7 +3147,9 @@ namespace TensileLite
                                                  "] launches one GSU slice per tile"));
 
         bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
-        if(internalArgsSupport.persistentLoopArgsVersion == 1 && enableCluster)
+        if(usesStreamKSpatialCluster())
+            rv.numWorkGroups = spatialClusterLaunch(launch.grid, sizeMapping.clusterDim);
+        else if(internalArgsSupport.persistentLoopArgsVersion == 1 && enableCluster)
         {
             // DataParallel version-1 cluster kernels fold hardware clusters into
             // cluster ranks. Match the generated-kernel launch.
@@ -3183,9 +3202,9 @@ namespace TensileLite
             = sizeMapping.isStreamK() && launch.reduction == origami::reduction_t::parallel;
         bool useWSStride = gsuWSStride || skWSStride;
         size_t startStrideCD = problemType.useInitialStridesCD ? 0 : 1;
-        const bool usesDataParallelArgsV1 = internalArgsSupport.persistentLoopArgsVersion == 1;
-        const size_t descriptorStrideAB = usesDataParallelArgsV1 && problemType.useInitialStridesAB ? 0 : 1;
-        const size_t descriptorStrideCD = usesDataParallelArgsV1 ? startStrideCD : 1;
+        const bool usesPersistentDescriptor = internalArgsSupport.persistentLoopArgsVersion != 0;
+        const size_t descriptorStrideAB = usesPersistentDescriptor && problemType.useInitialStridesAB ? 0 : 1;
+        const size_t descriptorStrideCD = usesPersistentDescriptor ? startStrideCD : 1;
         bool         sparseA = problemType.sparse == 1;
         bool         sparseB = problemType.sparse == 2;
         auto const&  descriptorA = sparseA ? problem.compressed() : problem.a();
@@ -3338,7 +3357,7 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleA1:
                 {
-                    size_t batchStride = usesDataParallelArgsV1 ? problem.mxsa().strides()[descriptorStrideAB + 1]
+                    size_t batchStride = usesPersistentDescriptor ? problem.mxsa().strides()[descriptorStrideAB + 1]
                         : preSwizzledScaleBatchStride(problem.mxsa(), "StrideScaleA1");
                     rv.args.appendCustomType("StrideScaleA1", batchStride, arg.type);
                     break;
@@ -3351,7 +3370,7 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleB1:
                 {
-                    size_t batchStride = usesDataParallelArgsV1 ? problem.mxsb().strides()[descriptorStrideAB + 1]
+                    size_t batchStride = usesPersistentDescriptor ? problem.mxsb().strides()[descriptorStrideAB + 1]
                         : preSwizzledScaleBatchStride(problem.mxsb(), "StrideScaleB1");
                     rv.args.appendCustomType("StrideScaleB1", batchStride, arg.type);
                     break;
@@ -3404,7 +3423,7 @@ namespace TensileLite
                     rv.args.append("alpha", inputs.alpha, problem.alphaType());
                     break;
                 case CustomArgSemantic::Beta:
-                    if(internalArgsSupport.persistentLoopArgsVersion == 1 && !problemType.useBeta)
+                    if(usesPersistentDescriptor && !problemType.useBeta)
                         rv.args.append("beta", 0.0f, problem.betaType());
                     else
                         rv.args.append("beta", inputs.beta, problem.betaType());
@@ -3452,7 +3471,7 @@ namespace TensileLite
                 case CustomArgSemantic::AddressA:
                     rv.args.template append<void const*>(
                         "AddressA",
-                        usesDataParallelArgsV1
+                        usesPersistentDescriptor
                             ? (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchA)
                                    ? static_cast<void const*>(inputs.batchA)
                                    : aAddress)
@@ -3461,7 +3480,7 @@ namespace TensileLite
                 case CustomArgSemantic::AddressB:
                     rv.args.template append<void const*>(
                         "AddressB",
-                        usesDataParallelArgsV1
+                        usesPersistentDescriptor
                             ? (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchB)
                                    ? static_cast<void const*>(inputs.batchB)
                                    : bAddress)
@@ -3487,7 +3506,7 @@ namespace TensileLite
                     else
                         rv.args.template append<void const*>(
                             "AddressC",
-                            usesDataParallelArgsV1 && (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchC))
+                            usesPersistentDescriptor && (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchC))
                                 ? static_cast<void const*>(inputs.batchC) : inputs.c);
                     break;
                 }
@@ -3511,7 +3530,7 @@ namespace TensileLite
                     else
                         rv.args.template append<void const*>(
                             "AddressD",
-                            usesDataParallelArgsV1 && (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchD))
+                            usesPersistentDescriptor && (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchD))
                                 ? static_cast<void const*>(inputs.batchD) : inputs.d);
                     break;
                 }
@@ -3571,7 +3590,7 @@ namespace TensileLite
                     else
                         rv.args.template append<void const*>(
                             "AddressBias",
-                            usesDataParallelArgsV1 && !problemType.stridedBatched
+                            usesPersistentDescriptor && !problemType.stridedBatched
                                 ? static_cast<void const*>(inputs.batchBias) : inputs.bias);
                     break;
                 case CustomArgSemantic::AddressGateResidual:
@@ -3644,7 +3663,9 @@ namespace TensileLite
                         = calculateAutoWGM(problem, &hardware, launch.grid);
                     auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
                         = calculateAutoStaggerU(problem, &hardware, launch.grid, autoWGM);
-                    kernelArgs<T_Debug, true>(1, 0, rv.args, getNumWorkGroups(rv),
+                    kernelArgs<T_Debug, true>(1, 0, rv.args,
+                                             usesStreamKSpatialCluster()
+                                                 ? launch.clusterSchedule.physicalGrid : getNumWorkGroups(rv),
                                              &hardware, problem.getParams(),
                                              autoWGM, autoWGMXCC, autoWGMXCCCHUNK,
                                              autoWGMXCCSPLITK,
@@ -3665,7 +3686,8 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::NumWorkGroups:
                     if(!appendedInternalArgs)
-                        rv.args.appendCustomType("NumWorkGroups", getNumWorkGroups(rv), arg.type);
+                        rv.args.appendCustomType("NumWorkGroups", usesStreamKSpatialCluster()
+                            ? launch.clusterSchedule.physicalGrid : getNumWorkGroups(rv), arg.type);
                     break; // handled by InternalArgs via kernelArgs when present
 
                 // ---- DataParallel scheduling args ----
@@ -5192,10 +5214,55 @@ namespace TensileLite
                || sizeMapping.streamKAtomic || sizeMapping.prefetchAcrossPersistent
                || !supportedShape)
                 throw std::runtime_error("StreamK cluster multicast requires static non-atomic scheduling, a supported spatial cluster, and PAP off");
-            if(!customKernel.name.empty() && !customKernel.generated)
-                throw std::runtime_error("External custom kernels do not support StreamK scheduling ABI 2");
-            if(problemType.outputAmaxD || (problemType.useGradient && problemType.useBias))
-                throw std::runtime_error("StreamK cluster multicast does not support amax or bias-gradient reductions");
+            if(problemType.outputAmaxD)
+                throw std::runtime_error("StreamK cluster multicast does not support amax reductions");
+            if(problemType.useGradient && problemType.useBias)
+                throw std::runtime_error("StreamK cluster multicast does not support bias-gradient reductions");
+            if(customKernel.name.empty() || customKernel.generated)
+                return;
+
+            const std::array<CustomArgSemantic, 6> semantics{
+                CustomArgSemantic::ItersPerTile, CustomArgSemantic::MagicNumberItersPerTile,
+                CustomArgSemantic::MagicShiftItersPerTile, CustomArgSemantic::SKItersPerWG,
+                CustomArgSemantic::SKGrid, CustomArgSemantic::SKTilesAndSplit};
+            size_t count = 0, previous = 0, workspace = 0, flags = 0;
+            for(size_t i = 0; i < customKernel.args.size(); ++i)
+            {
+                const auto& arg = customKernel.args[i];
+                if(std::find(semantics.begin(), semantics.end(), arg.semantic) != semantics.end())
+                {
+                    if(count >= semantics.size() || arg.semantic != semantics[count]
+                       || arg.type != CustomArgType::uint32 || arg.padding != 0
+                       || (count != 0 && i != previous + 1))
+                        throw std::runtime_error("Invalid StreamK version-2 scheduling arguments");
+                    previous = i;
+                    ++count;
+                }
+                else if(arg.semantic == CustomArgSemantic::AddressWorkspace
+                        || arg.semantic == CustomArgSemantic::AddressFlags)
+                {
+                    if(arg.type != CustomArgType::address || arg.padding != 0)
+                        throw std::runtime_error("StreamK version-2 workspace and flags must be pointers");
+                    (arg.semantic == CustomArgSemantic::AddressWorkspace ? workspace : flags)++;
+                }
+                else if(arg.semantic == CustomArgSemantic::PersistentGrid
+                        || arg.semantic == CustomArgSemantic::TotalIters
+                        || arg.semantic == CustomArgSemantic::AddressSynchronizer
+                        || arg.semantic == CustomArgSemantic::Synchronizer
+                        || arg.semantic == CustomArgSemantic::GSUSync)
+                    throw std::runtime_error("StreamK version-2 descriptor contains incompatible scheduling arguments");
+            }
+            if(count != semantics.size() || workspace != 1 || flags != 1
+               || customKernel.workspaceType != CustomWorkspaceType::StreamKWithReduction
+               || customKernel.workspaceSizePerElemC == 0
+               || customKernel.workspaceSizePerElemC != sizeMapping.workspaceSizePerElemC
+               || customKernel.macrotile.x != sizeMapping.macroTile.x
+               || customKernel.macrotile.y != sizeMapping.macroTile.y
+               || customKernel.macrotile.z != sizeMapping.depthU
+               || customKernel.threads.x != sizeMapping.workGroupSize.x
+               || customKernel.threads.y != sizeMapping.workGroupSize.y
+               || customKernel.threads.z != sizeMapping.workGroupSize.z)
+                throw std::runtime_error("StreamK version-2 descriptor must match the compiled geometry and partial workspace");
             return;
         }
         if(customKernel.name.empty())
