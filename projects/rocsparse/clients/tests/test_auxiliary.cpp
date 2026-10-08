@@ -532,7 +532,7 @@ TEST(auxiliary_pre_checkin, HybMatGetSetInfo)
     const rocsparse_int           set_coo_nnz   = 5;
     const rocsparse_datatype      set_data_type = rocsparse_datatype_f64_c;
 
-    // The HYB takes ownership of these; rocsparse_destroy_hyb_mat frees them.
+    // The caller keeps ownership of these and frees them after the HYB is destroyed.
     rocsparse_int* set_ell_col_ind;
     void*          set_ell_val;
     rocsparse_int* set_coo_row_ind;
@@ -666,6 +666,11 @@ TEST(auxiliary_pre_checkin, HybMatGetSetInfo)
     ASSERT_EQ(rocsparse_destroy_hyb_mat(copy), rocsparse_status_success);
 
     ASSERT_EQ(rocsparse_destroy_hyb_mat(hyb), rocsparse_status_success);
+    EXPECT_EQ(hipFree(set_ell_col_ind), hipSuccess);
+    EXPECT_EQ(hipFree(set_ell_val), hipSuccess);
+    EXPECT_EQ(hipFree(set_coo_row_ind), hipSuccess);
+    EXPECT_EQ(hipFree(set_coo_col_ind), hipSuccess);
+    EXPECT_EQ(hipFree(set_coo_val), hipSuccess);
 }
 
 TEST(auxiliary_pre_checkin, HybMatSetInfoInvalidArguments)
@@ -831,9 +836,11 @@ TEST(auxiliary_pre_checkin, HybMatSetInfoInvalidArguments)
     EXPECT_EQ(get_ell_width, 3);
 
     ASSERT_EQ(rocsparse_destroy_hyb_mat(hyb), rocsparse_status_success);
+    EXPECT_EQ(hipFree(wide_col), hipSuccess);
+    EXPECT_EQ(hipFree(wide_val), hipSuccess);
 }
 
-TEST(auxiliary_pre_checkin, HybMatSetInfoReplaceBuffers)
+TEST(auxiliary_pre_checkin, HybMatSetInfoKeepsCallerArrays)
 {
     rocsparse_hyb_mat hyb;
     ASSERT_EQ(rocsparse_create_hyb_mat(&hyb), rocsparse_status_success);
@@ -856,8 +863,6 @@ TEST(auxiliary_pre_checkin, HybMatSetInfoReplaceBuffers)
     ASSERT_NE(coo_col, nullptr);
     ASSERT_NE(ell_val, nullptr);
     ASSERT_NE(coo_val, nullptr);
-    void* ell_val_p = ell_val;
-    void* coo_val_p = coo_val;
 
     ASSERT_EQ(rocsparse_hyb_mat_set_info(hyb,
                                          m,
@@ -866,33 +871,15 @@ TEST(auxiliary_pre_checkin, HybMatSetInfoReplaceBuffers)
                                          ell_nnz,
                                          ell_width,
                                          ell_col,
-                                         ell_val_p,
+                                         ell_val,
                                          coo_nnz,
                                          coo_row,
                                          coo_col,
-                                         coo_val_p,
+                                         coo_val,
                                          data_type),
               rocsparse_status_success);
 
-    // Passing an index pointer hyb already holds must not free it.
-    ASSERT_EQ(rocsparse_hyb_mat_set_info(hyb,
-                                         m,
-                                         n,
-                                         partition,
-                                         ell_nnz,
-                                         ell_width,
-                                         ell_col,
-                                         ell_val_p,
-                                         coo_nnz,
-                                         coo_row,
-                                         coo_col,
-                                         coo_val_p,
-                                         data_type),
-              rocsparse_status_success);
-    EXPECT_TRUE(hyb_test_indices_match(ell_col, 2, 11));
-    EXPECT_TRUE(hyb_test_indices_match(coo_row, 2, 21));
-    EXPECT_TRUE(hyb_test_indices_match(coo_col, 2, 31));
-
+    // Replacing the index arrays does not free the caller's previous ones.
     rocsparse_int* ell_col_b = hyb_test_device_indices(2, 12);
     rocsparse_int* coo_row_b = hyb_test_device_indices(2, 22);
     rocsparse_int* coo_col_b = hyb_test_device_indices(2, 32);
@@ -906,18 +893,23 @@ TEST(auxiliary_pre_checkin, HybMatSetInfoReplaceBuffers)
                                          ell_nnz,
                                          ell_width,
                                          ell_col_b,
-                                         ell_val_p,
+                                         ell_val,
                                          coo_nnz,
                                          coo_row_b,
                                          coo_col_b,
-                                         coo_val_p,
+                                         coo_val,
                                          data_type),
               rocsparse_status_success);
+    EXPECT_TRUE(hyb_test_indices_match(ell_col, 2, 11));
+    EXPECT_TRUE(hyb_test_indices_match(coo_row, 2, 21));
+    EXPECT_TRUE(hyb_test_indices_match(coo_col, 2, 31));
 
     const rocsparse_int* got_ell_col = nullptr;
+    const void*          got_ell_val = nullptr;
+    rocsparse_int        got_coo_nnz = -1;
     const rocsparse_int* got_coo_row = nullptr;
     const rocsparse_int* got_coo_col = nullptr;
-    const void*          got_ell_val = nullptr;
+    const void*          got_coo_val = nullptr;
     ASSERT_EQ(rocsparse_hyb_mat_get_info(hyb,
                                          nullptr,
                                          nullptr,
@@ -926,28 +918,20 @@ TEST(auxiliary_pre_checkin, HybMatSetInfoReplaceBuffers)
                                          nullptr,
                                          &got_ell_col,
                                          &got_ell_val,
-                                         nullptr,
+                                         &got_coo_nnz,
                                          &got_coo_row,
                                          &got_coo_col,
-                                         nullptr,
+                                         &got_coo_val,
                                          nullptr),
               rocsparse_status_success);
     EXPECT_EQ(got_ell_col, ell_col_b);
+    EXPECT_EQ(got_ell_val, ell_val);
     EXPECT_EQ(got_coo_row, coo_row_b);
     EXPECT_EQ(got_coo_col, coo_col_b);
-    EXPECT_EQ(got_ell_val, ell_val);
-    EXPECT_TRUE(hyb_test_indices_match(got_ell_col, 2, 12));
-    EXPECT_TRUE(hyb_test_indices_match(got_coo_row, 2, 22));
-    EXPECT_TRUE(hyb_test_indices_match(got_coo_col, 2, 32));
-    std::vector<float> ell_got(2, 0.0f);
-    ASSERT_EQ(hipMemcpy(ell_got.data(), got_ell_val, sizeof(float) * 2, hipMemcpyDeviceToHost),
-              hipSuccess);
-    EXPECT_FLOAT_EQ(ell_got[0], 1.5f);
-    EXPECT_FLOAT_EQ(ell_got[1], 1.5f);
+    EXPECT_EQ(got_coo_val, coo_val);
 
-    // Move the COO row array into the column field. It must stay readable.
-    rocsparse_int* coo_row_c = hyb_test_device_indices(2, 23);
-    ASSERT_NE(coo_row_c, nullptr);
+    // The same array may be set in two fields: nothing is freed, so nothing is
+    // freed twice.
     ASSERT_EQ(rocsparse_hyb_mat_set_info(hyb,
                                          m,
                                          n,
@@ -955,32 +939,15 @@ TEST(auxiliary_pre_checkin, HybMatSetInfoReplaceBuffers)
                                          ell_nnz,
                                          ell_width,
                                          ell_col_b,
-                                         ell_val_p,
+                                         ell_val,
                                          coo_nnz,
-                                         coo_row_c,
                                          coo_row_b,
-                                         coo_val_p,
+                                         coo_row_b,
+                                         coo_val,
                                          data_type),
               rocsparse_status_success);
-    EXPECT_TRUE(hyb_test_indices_match(coo_row_b, 2, 22));
-    ASSERT_EQ(rocsparse_hyb_mat_get_info(hyb,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         &got_coo_row,
-                                         &got_coo_col,
-                                         nullptr,
-                                         nullptr),
-              rocsparse_status_success);
-    EXPECT_EQ(got_coo_row, coo_row_c);
-    EXPECT_EQ(got_coo_col, coo_row_b);
 
-    // A zero COO count with null arrays releases the COO arrays.
+    // A zero COO count with null arrays clears the COO part.
     ASSERT_EQ(rocsparse_hyb_mat_set_info(hyb,
                                          m,
                                          n,
@@ -988,24 +955,20 @@ TEST(auxiliary_pre_checkin, HybMatSetInfoReplaceBuffers)
                                          ell_nnz,
                                          ell_width,
                                          ell_col_b,
-                                         ell_val_p,
+                                         ell_val,
                                          0,
                                          nullptr,
                                          nullptr,
                                          nullptr,
                                          data_type),
               rocsparse_status_success);
-    rocsparse_int got_coo_nnz = -1;
-    const void*   got_coo_val = reinterpret_cast<const void*>(1);
-    got_coo_row               = reinterpret_cast<const rocsparse_int*>(1);
-    got_coo_col               = reinterpret_cast<const rocsparse_int*>(1);
     ASSERT_EQ(rocsparse_hyb_mat_get_info(hyb,
                                          nullptr,
                                          nullptr,
                                          nullptr,
                                          nullptr,
                                          nullptr,
-                                         &got_ell_col,
+                                         nullptr,
                                          nullptr,
                                          &got_coo_nnz,
                                          &got_coo_row,
@@ -1017,78 +980,26 @@ TEST(auxiliary_pre_checkin, HybMatSetInfoReplaceBuffers)
     EXPECT_EQ(got_coo_row, nullptr);
     EXPECT_EQ(got_coo_col, nullptr);
     EXPECT_EQ(got_coo_val, nullptr);
-    EXPECT_EQ(got_ell_col, ell_col_b);
-    EXPECT_TRUE(hyb_test_indices_match(ell_col_b, 2, 12));
 
+    // Destroying the HYB leaves every caller array allocated and readable.
     ASSERT_EQ(rocsparse_destroy_hyb_mat(hyb), rocsparse_status_success);
-}
+    EXPECT_TRUE(hyb_test_indices_match(ell_col_b, 2, 12));
+    EXPECT_TRUE(hyb_test_indices_match(coo_row_b, 2, 22));
+    EXPECT_TRUE(hyb_test_indices_match(coo_col_b, 2, 32));
+    std::vector<float> ell_got(2, 0.0f);
+    ASSERT_EQ(hipMemcpy(ell_got.data(), ell_val, sizeof(float) * 2, hipMemcpyDeviceToHost),
+              hipSuccess);
+    EXPECT_FLOAT_EQ(ell_got[0], 1.5f);
+    EXPECT_FLOAT_EQ(ell_got[1], 1.5f);
 
-TEST(auxiliary_pre_checkin, HybMatSetInfoRejectsAliasedArrays)
-{
-    rocsparse_hyb_mat hyb;
-    ASSERT_EQ(rocsparse_create_hyb_mat(&hyb), rocsparse_status_success);
-
-    const rocsparse_int           m         = 2;
-    const rocsparse_int           n         = 2;
-    const rocsparse_hyb_partition partition = rocsparse_hyb_partition_user;
-    const int64_t                 ell_nnz   = 2;
-    const rocsparse_int           ell_width = 1;
-    const rocsparse_int           coo_nnz   = 1;
-    const rocsparse_datatype      data_type = rocsparse_datatype_f32_r;
-
-    rocsparse_int* shared = nullptr;
-    ASSERT_EQ(hipMalloc(&shared, sizeof(rocsparse_int) * 4), hipSuccess);
-    rocsparse_int* ell_col = shared;
-    rocsparse_int* coo_col = shared;
-    rocsparse_int* coo_row = hyb_test_device_indices(1, 1);
-    float*         ell_val = hyb_test_device_floats(2, 1.0f);
-    float*         coo_val = hyb_test_device_floats(1, 1.0f);
-    ASSERT_NE(coo_row, nullptr);
-    ASSERT_NE(ell_val, nullptr);
-    ASSERT_NE(coo_val, nullptr);
-    void* ell_val_p = ell_val;
-    void* coo_val_p = coo_val;
-
-    const rocsparse_status status = rocsparse_hyb_mat_set_info(hyb,
-                                                               m,
-                                                               n,
-                                                               partition,
-                                                               ell_nnz,
-                                                               ell_width,
-                                                               ell_col,
-                                                               ell_val_p,
-                                                               coo_nnz,
-                                                               coo_row,
-                                                               coo_col,
-                                                               coo_val_p,
-                                                               data_type);
-    EXPECT_EQ(status, rocsparse_status_invalid_pointer);
-
-    rocsparse_int        got_m   = -1;
-    const rocsparse_int* got_ell = reinterpret_cast<const rocsparse_int*>(1);
-    ASSERT_EQ(rocsparse_hyb_mat_get_info(hyb,
-                                         &got_m,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         &got_ell,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr),
-              rocsparse_status_success);
-    EXPECT_EQ(got_m, 0);
-    EXPECT_EQ(got_ell, nullptr);
-
-    // The call did not take ownership, so the caller still frees these.
-    EXPECT_EQ(hipFree(shared), hipSuccess);
+    EXPECT_EQ(hipFree(ell_col), hipSuccess);
     EXPECT_EQ(hipFree(coo_row), hipSuccess);
+    EXPECT_EQ(hipFree(coo_col), hipSuccess);
+    EXPECT_EQ(hipFree(ell_col_b), hipSuccess);
+    EXPECT_EQ(hipFree(coo_row_b), hipSuccess);
+    EXPECT_EQ(hipFree(coo_col_b), hipSuccess);
     EXPECT_EQ(hipFree(ell_val), hipSuccess);
     EXPECT_EQ(hipFree(coo_val), hipSuccess);
-    ASSERT_EQ(rocsparse_destroy_hyb_mat(hyb), rocsparse_status_success);
 }
 
 TEST(auxiliary_pre_checkin, HybMatCsr2hybGetInfoAndHybmv)
@@ -1197,7 +1108,8 @@ TEST(auxiliary_pre_checkin, HybMatCsr2hybGetInfoAndHybmv)
     EXPECT_FLOAT_EQ(hy[0], 3.0f);
     EXPECT_FLOAT_EQ(hy[1], 8.0f);
 
-    // csr2hyb on the same hyb frees the arrays get_info returned.
+    // The arrays passed back above were allocated by csr2hyb, so hyb still
+    // owns them: csr2hyb on the same hyb frees them.
     ASSERT_EQ(
         rocsparse_scsr2hyb(
             handle, 0, 0, descr, nullptr, nullptr, nullptr, hyb, 0, rocsparse_hyb_partition_user),
@@ -1269,7 +1181,50 @@ TEST(auxiliary_pre_checkin, HybMatCsr2hybGetInfoAndHybmv)
     EXPECT_FLOAT_EQ(hy[0], 3.0f);
     EXPECT_FLOAT_EQ(hy[1], 8.0f);
 
+    // csr2hyb on a HYB holding caller arrays allocates its own and does not
+    // free the caller's. rocsparse_destroy_hyb_mat frees only the new ones.
+    ASSERT_EQ(rocsparse_scsr2hyb(handle,
+                                 m,
+                                 n,
+                                 descr,
+                                 d_val,
+                                 d_row_ptr,
+                                 d_col_ind,
+                                 built,
+                                 1,
+                                 rocsparse_hyb_partition_user),
+              rocsparse_status_success);
+    got_ell_col = nullptr;
+    ASSERT_EQ(rocsparse_hyb_mat_get_info(built,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         &got_ell_col,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr),
+              rocsparse_status_success);
+    EXPECT_NE(got_ell_col, nullptr);
+    EXPECT_NE(got_ell_col, d_ell_col);
+
     ASSERT_EQ(rocsparse_destroy_hyb_mat(built), rocsparse_status_success);
+    rocsparse_int ell_col_after[2] = {-1, -1};
+    float         ell_val_after[2] = {-1.0f, -1.0f};
+    ASSERT_EQ(hipMemcpy(ell_col_after, d_ell_col, sizeof(ell_col_after), hipMemcpyDeviceToHost),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(ell_val_after, d_ell_val, sizeof(ell_val_after), hipMemcpyDeviceToHost),
+              hipSuccess);
+    EXPECT_EQ(ell_col_after[0], 0);
+    EXPECT_EQ(ell_col_after[1], 1);
+    EXPECT_FLOAT_EQ(ell_val_after[0], 1.0f);
+    EXPECT_FLOAT_EQ(ell_val_after[1], 2.0f);
+    ASSERT_EQ(hipFree(d_ell_col), hipSuccess);
+    ASSERT_EQ(hipFree(d_ell_val), hipSuccess);
     ASSERT_EQ(hipFree(dx), hipSuccess);
     ASSERT_EQ(hipFree(dy), hipSuccess);
     ASSERT_EQ(hipFree(d_row_ptr), hipSuccess);

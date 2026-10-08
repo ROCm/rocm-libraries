@@ -67,31 +67,36 @@ namespace rocsparse
             hyb->data_type_T = rocsparse_datatype_f64_c;
         }
 
-        if(hyb->ell_col_ind)
+        if(hyb->ell_col_ind_owned)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->ell_col_ind, handle->stream));
-            hyb->ell_col_ind = nullptr;
         }
-        if(hyb->ell_val)
+        hyb->ell_col_ind       = nullptr;
+        hyb->ell_col_ind_owned = false;
+        if(hyb->ell_val_owned)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->ell_val, handle->stream));
-            hyb->ell_val = nullptr;
         }
-        if(hyb->coo_row_ind)
+        hyb->ell_val       = nullptr;
+        hyb->ell_val_owned = false;
+        if(hyb->coo_row_ind_owned)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_row_ind, handle->stream));
-            hyb->coo_row_ind = nullptr;
         }
-        if(hyb->coo_col_ind)
+        hyb->coo_row_ind       = nullptr;
+        hyb->coo_row_ind_owned = false;
+        if(hyb->coo_col_ind_owned)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_col_ind, handle->stream));
-            hyb->coo_col_ind = nullptr;
         }
-        if(hyb->coo_val)
+        hyb->coo_col_ind       = nullptr;
+        hyb->coo_col_ind_owned = false;
+        if(hyb->coo_val_owned)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_val, handle->stream));
-            hyb->coo_val = nullptr;
         }
+        hyb->coo_val       = nullptr;
+        hyb->coo_val_owned = false;
 
         return rocsparse_status_success;
     }
@@ -260,6 +265,8 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
             &hyb->ell_col_ind, sizeof(rocsparse_int) * hyb->ell_nnz, handle->stream));
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMallocAsync(&hyb->ell_val, sizeof(T) * hyb->ell_nnz, handle->stream));
+        hyb->ell_col_ind_owned = true;
+        hyb->ell_val_owned     = true;
     }
 
     // Allocate workspace
@@ -336,6 +343,9 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
             &hyb->coo_col_ind, sizeof(rocsparse_int) * hyb->coo_nnz, handle->stream));
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMallocAsync(&hyb->coo_val, sizeof(T) * hyb->coo_nnz, handle->stream));
+        hyb->coo_row_ind_owned = true;
+        hyb->coo_col_ind_owned = true;
+        hyb->coo_val_owned     = true;
     }
 
     dim3 csr2ell_blocks((m - 1) / CSR2ELL_DIM + 1);

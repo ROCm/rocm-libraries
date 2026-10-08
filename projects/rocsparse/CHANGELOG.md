@@ -7,7 +7,7 @@ Documentation for rocSPARSE is available at
 
 ### Added
 * Added support for the `gfx1250-strict` architecture.
-* Added `rocsparse_hyb_mat_get_info` and `rocsparse_hyb_mat_set_info` to get and set the fields of a `HYB` matrix, where `set_info` adopts `hipMallocAsync` arrays only on success, sets every field in one call so a `HYB` matrix can be built from existing arrays without `csr2hyb`, requires distinct pointers and `ell_nnz == m * ell_width`, accepts only real and complex single- and double-precision values, and device-synchronizes before releasing an array it replaces.
+* Added `rocsparse_hyb_mat_get_info` and `rocsparse_hyb_mat_set_info` to get and set the fields of a `HYB` matrix. `set_info` sets every field in one call so a `HYB` matrix can be built from existing arrays without `csr2hyb`. Like `rocsparse_csr_set_pointers`, it does not take ownership of the arrays: the caller frees them, and `rocsparse_destroy_hyb_mat` and `csr2hyb` free only the arrays rocSPARSE allocated.
 
 ### Resolved issues
 * Fixed an overflow issue in `rocsparse_roti` and the generic `rocsparse_rot` routine. When using 64-bit indices and `nnz` >= `2^32`, a 32-bit element-index calculation could overflow, leaving some elements unrotated and causing low-index elements to be processed with incorrect data. The kernel now computes element indices in 64-bit arithmetic and uses a grid-stride loop with the launch grid clamped to the device limit.
