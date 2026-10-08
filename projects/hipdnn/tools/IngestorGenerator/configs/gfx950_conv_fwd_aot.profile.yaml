@@ -21,7 +21,7 @@ delegates_to_existing_plan: false
 engine:
   name: hipkernel:Gfx950ConvFwdAot
   sdk_version: "1.0.0"
-  knobs: [tile_k]
+  knobs: [tile_k, kernel_family]
   heuristic: native
 
 # Instances are matched per problem by capability, so "dispatch" resolves the problem
@@ -70,12 +70,26 @@ kmd_fields:
   - {name: grouped, type: int}
   - {name: instance_id, type: string}
   - {name: layout, type: string}
+  # Direct depthwise instances; implicit-GEMM descriptors leave them to the builder default.
+  - {name: kernel_family, type: int, default_value: 0, builder_default: true}
+  - {name: direct_variant, type: string, default_value: none, builder_default: true}
+  - {name: filter_h, type: int, default_value: 0, builder_default: true}
+  - {name: filter_w, type: int, default_value: 0, builder_default: true}
+  - {name: stride_h, type: int, default_value: 0, builder_default: true}
+  - {name: stride_w, type: int, default_value: 0, builder_default: true}
+  - {name: pad_h, type: int, default_value: 0, builder_default: true}
+  - {name: pad_w, type: int, default_value: 0, builder_default: true}
+  - {name: dilation_h, type: int, default_value: 0, builder_default: true}
+  - {name: dilation_w, type: int, default_value: 0, builder_default: true}
+  - {name: block_w, type: int, default_value: 0, builder_default: true}
+  - {name: block_waves, type: int, default_value: 0, builder_default: true}
 
 vocabulary:
   dtype: {fp16: fp16, bf16: bf16}
   layout: {NHWC: NHWC}
-  pipeline: {mem: mem, compv3: compv3, compv4: compv4, basic: basic}
-  epilogue: {cshuffle: cshuffle, default: default}
+  pipeline: {mem: mem, compv3: compv3, compv4: compv4, basic: basic, direct: direct}
+  epilogue: {cshuffle: cshuffle, default: default, direct: direct}
+  direct_variant: {none: none, std: std, spatial: spatial}
 
 launch_surface:
   - name: instance_contract
@@ -89,6 +103,18 @@ launch_surface:
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:aotInstanceLaunch
     kmd_fields: [vector_size_a, vector_size_b, vector_size_c, async_dma, async_chunk_a, async_chunk_b, grouped, tile_m, tile_n, warp_m, warp_n]
     guard: The forward subset of rocKE's KernelCache.supports_problem. The A/B widths divide C/groups, the D width divides K/groups, async chunks divide C/groups, a grouped graph needs a grouped binary, and every grid axis fits 65535; implicitGemmKernargs refuses a reduction Y*X*C/groups at or above 2^23. library/tests/test_convolution_forward_aot_packaging.py checks the Python predicate against supports_problem.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdGeometry.cpp
+  - name: direct_instance_contract
+    python_source: builders/common/convolution_forward.py:supports_gfx950_conv_fwd_aot
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:aotInstance
+    kmd_fields: [kernel_family, direct_variant, filter_h, filter_w, stride_h, stride_w, pad_h, pad_w, dilation_h, dilation_w, block_w, block_waves]
+    guard: aotInstance reads kernel_family first. A direct instance must hold the direct identity's placeholders (0 tuning, vector, flag and chunk fields; "direct" pipeline and epilogue) and a std or spatial variant; an implicit-GEMM instance must leave every direct field at its KMD default. Unknown families or variants and missing fields refuse the kernel.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdMatchers.cpp
+  - name: direct_served_problems
+    python_source: builders/common/convolution_forward.py:gfx950_conv_fwd_aot_serves
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:directInstanceLaunch
+    kmd_fields: [direct_variant, filter_h, filter_w, stride_h, stride_w, pad_h, pad_w, dilation_h, dilation_w, block_w, block_waves]
+    guard: The exact-shape engine's direct rule. directProblemSupported (pure depthwise, one stride and padding, no dilation, odd filter with "same" padding, rows covered), then the compiled filter, stride, padding and dilation must be the graph's (directServes), then directLaunchGeometry (spatial below 64 groups, block bounds, every grid axis within 65535). library/tests/test_convolution_forward_aot_packaging.py checks the Python predicate against rocKE's supports_problem plus the per-shape validator.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdGeometry.cpp
   - name: kernargs_and_execution
     python_source: kernels/common/conv_abi.py:conv_arg_names

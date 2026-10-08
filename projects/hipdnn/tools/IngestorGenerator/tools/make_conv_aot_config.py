@@ -9,9 +9,11 @@ capabilities admit. The input is a JSON list whose entries are either an identit
 dict (``KernelIdentity.to_dict()``) or an object carrying one under ``"identity"``;
 other keys of such an object are ignored here.
 
-Every entry must be a gfx950 forward implicit-GEMM identity in fp16 or bf16 that the
-packaged launch supports. Anything else is listed with its reason and the tool
-exits non-zero, unless ``--skip-unsupported`` is given. Entries are de-duplicated by
+Every entry must be a gfx950 forward identity in fp16 or bf16 that the packaged
+launch supports: an implicit-GEMM identity of the AOT sweep, or a ``direct_depthwise``
+(std) or ``direct_depthwise_spatial`` identity of the direct sweep
+(``benchmarks/common/direct_kernel_sweep.py``). Anything else is listed with its
+reason and the tool exits non-zero, unless ``--skip-unsupported`` is given. Entries are de-duplicated by
 ``instance_id`` (``KernelIdentity.stable_hash()``), which is the key that ties a
 packaged kernel back to the identity it was built from.
 
@@ -92,10 +94,44 @@ _CONSTANT = (
     "max_sub_gemms",
     "knobs",
 )
-#: Spec field order of Gfx950ConvFwdAotSpec; also the descriptor spec order.
+#: Spec field order of an implicit-GEMM Gfx950ConvFwdAotSpec; also its descriptor
+#: spec order.
 SPEC_ORDER = ("dtype",) + _CARRIED + ("instance_id", "layout")
-_STRING_FIELDS = ("dtype", "pipeline", "epilogue", "instance_id", "layout")
-_INT_FIELDS = tuple(f for f in SPEC_ORDER if f not in _STRING_FIELDS)
+#: The direct fields Gfx950ConvFwdAotSpec appends. Their KMD default_value is the
+#: dataclass default (builder_default), so implicit-GEMM descriptors omit them.
+DIRECT_FIELDS = {
+    "kernel_family": 0,
+    "direct_variant": "none",
+    "filter_h": 0,
+    "filter_w": 0,
+    "stride_h": 0,
+    "stride_w": 0,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 0,
+    "dilation_w": 0,
+    "block_w": 0,
+    "block_waves": 0,
+}
+#: Spec field order of a direct instance.
+DIRECT_SPEC_ORDER = SPEC_ORDER + tuple(DIRECT_FIELDS)
+_STRING_FIELDS = (
+    "dtype",
+    "pipeline",
+    "epilogue",
+    "instance_id",
+    "layout",
+    "direct_variant",
+)
+_INT_FIELDS = tuple(f for f in DIRECT_SPEC_ORDER if f not in _STRING_FIELDS)
+#: Direct-sweep algorithm -> the instance's direct_variant, for the algorithms the
+#: exact-shape engine's direct launch runs.
+DIRECT_ALGORITHMS = {"direct_depthwise": "std", "direct_depthwise_spatial": "spatial"}
+#: The knob keys each direct algorithm's identity carries.
+_DIRECT_KNOBS = {
+    "direct_depthwise": ("block_w", "block_waves"),
+    "direct_depthwise_spatial": ("block_waves",),
+}
 
 
 def _bind_rocke(rocke_root: Path) -> None:
@@ -105,15 +141,39 @@ def _bind_rocke(rocke_root: Path) -> None:
             sys.path.insert(0, path)
 
 
+def spec_order(spec) -> tuple:
+    """The descriptor spec order of ``spec``'s family."""
+    return DIRECT_SPEC_ORDER if spec.is_direct else SPEC_ORDER
+
+
 def instance_spec(identity_dict: dict):
     """``(Gfx950ConvFwdAotSpec, "")`` for a supported identity, else ``(None, reason)``."""
     from benchmarks.common.kernel_cache import KernelIdentity
-    from builders.common.convolution_forward import (
-        Gfx950ConvFwdAotSpec,
-        supports_gfx950_conv_fwd_aot,
-    )
 
     identity = KernelIdentity.from_dict(identity_dict)
+    if identity.direction == "direct_fwd":
+        return _direct_instance_spec(identity)
+    return _implicit_instance_spec(identity)
+
+
+def _carried_values(identity) -> dict:
+    values = {name: getattr(identity, name) for name in _CARRIED}
+    for name in ("unroll_k", "async_dma", "grouped"):
+        values[name] = int(values[name])
+    return values
+
+
+def _checked(spec):
+    from builders.common.convolution_forward import supports_gfx950_conv_fwd_aot
+
+    ok, reason = supports_gfx950_conv_fwd_aot(spec)
+    return (spec, "") if ok else (None, reason)
+
+
+def _implicit_instance_spec(identity):
+    from benchmarks.common.kernel_cache import KernelIdentity
+    from builders.common.convolution_forward import Gfx950ConvFwdAotSpec
+
     defaults = KernelIdentity(
         arch=identity.arch,
         direction=identity.direction,
@@ -154,37 +214,114 @@ def instance_spec(identity_dict: dict):
                 f"{name}={getattr(identity, name)!r} is not packaged "
                 f"(only {getattr(defaults, name)!r})"
             )
-    values = {name: getattr(identity, name) for name in _CARRIED}
-    for name in ("unroll_k", "async_dma", "grouped"):
-        values[name] = int(values[name])
     spec = Gfx950ConvFwdAotSpec(
-        dtype=identity.dtype_a, instance_id=identity.stable_hash(), **values
+        dtype=identity.dtype_a,
+        instance_id=identity.stable_hash(),
+        **_carried_values(identity),
     )
-    ok, reason = supports_gfx950_conv_fwd_aot(spec)
-    if not ok:
-        return None, reason
-    return spec, ""
+    return _checked(spec)
+
+
+def _direct_instance_spec(identity):
+    """A forward direct identity: the direct sweep must be able to build it, and
+    the exact-shape engine's direct launch must run its kernel unchanged."""
+    from benchmarks.common.direct_kernel_sweep import direct_job_for_identity
+    from builders.common.convolution_forward import Gfx950ConvFwdAotSpec
+
+    if identity.arch != "gfx950":
+        return None, f"not a gfx950 forward direct identity ({identity.arch})"
+    variant = DIRECT_ALGORITHMS.get(identity.algorithm)
+    if variant is None:
+        return None, (
+            f"direct algorithm {identity.algorithm!r} has no packaged launch "
+            f"(supported: {sorted(DIRECT_ALGORITHMS)})"
+        )
+    if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
+        return None, "mixed operand dtypes are not packaged"
+    if (identity.cpg, identity.kpg) != (1, 1):
+        return None, f"cpg={identity.cpg}, kpg={identity.kpg} is not depthwise"
+    # Every other field must be what the direct grid writes for these caps and
+    # knobs; the sweep's own round trip refuses anything else, after asking the
+    # kernel's validator.
+    try:
+        direct_job_for_identity(identity)
+    except (LookupError, TypeError, ValueError) as exc:
+        return None, str(exc)
+    knobs = json.loads(identity.knobs) if identity.knobs else {}
+    if tuple(sorted(knobs)) != _DIRECT_KNOBS[identity.algorithm]:
+        return None, (
+            f"knobs {sorted(knobs)} are not {list(_DIRECT_KNOBS[identity.algorithm])}"
+        )
+    spec = Gfx950ConvFwdAotSpec(
+        dtype=identity.dtype_a,
+        instance_id=identity.stable_hash(),
+        **_carried_values(identity),
+        kernel_family=1,
+        direct_variant=variant,
+        filter_h=identity.filter_h,
+        filter_w=identity.filter_w,
+        stride_h=identity.stride_h,
+        stride_w=identity.stride_w,
+        pad_h=identity.pad_h,
+        pad_w=identity.pad_w,
+        dilation_h=identity.dilation_h,
+        dilation_w=identity.dilation_w,
+        block_w=int(knobs.get("block_w", 0)),
+        block_waves=int(knobs["block_waves"]),
+    )
+    return _checked(spec)
+
+
+def _variant(name: str, order: tuple, specs: list) -> dict:
+    shapes = []
+    for spec in specs:
+        shape = {field: getattr(spec, field) for field in order}
+        shape["knobs"] = "instance"
+        shapes.append(shape)
+    return {
+        "name": name,
+        "metadata": list(order),
+        "spec_order": list(order),
+        "spec_defaults": {},
+        "knob_sets": {"instance": [{}]},
+        "shapes": shapes,
+    }
 
 
 def build_config(specs: list) -> dict:
-    """The generator config for ``specs`` (already validated, de-duplicated)."""
+    """The generator config for ``specs`` (already validated, de-duplicated).
+
+    Implicit-GEMM instances keep their own variant and leave the direct fields to
+    their builder_default; direct instances are a second variant stating them.
+    """
     kmd = [
         {"name": name, "type": "int" if name in _INT_FIELDS else "string"}
         for name in SPEC_ORDER
+    ] + [
+        {
+            "name": name,
+            "type": "int" if name in _INT_FIELDS else "string",
+            "default_value": default,
+            "builder_default": True,
+        }
+        for name, default in DIRECT_FIELDS.items()
     ]
-    metadata = list(SPEC_ORDER)
-    shapes = []
-    for spec in specs:
-        shape = {name: getattr(spec, name) for name in SPEC_ORDER}
-        shape["knobs"] = "instance"
-        shapes.append(shape)
+    metadata = list(DIRECT_SPEC_ORDER)
+    variants = []
+    for name, order, family in (
+        ("gfx950_conv_fwd_aot_{dtype}_{instance_id}", SPEC_ORDER, False),
+        ("gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}", DIRECT_SPEC_ORDER, True),
+    ):
+        members = [s for s in specs if s.is_direct == family]
+        if members:
+            variants.append(_variant(name, order, members))
     return {
         "dialect": "packaged",
         "authored_subpath": "rocKE/gfx950_conv_fwd_aot",
         "engine": {
             "name": "hipkernel:Gfx950ConvFwdAot",
             "sdk_version": "1.0.0",
-            "knobs": ["tile_k"],
+            "knobs": ["tile_k", "kernel_family"],
             "heuristic": "native",
         },
         "kmd_fields": kmd,
@@ -205,16 +342,7 @@ def build_config(specs: list) -> dict:
                     "source": "builders/common/convolution_forward.py",
                     "builder": "build_gfx950_conv_fwd_aot",
                 },
-                "variants": [
-                    {
-                        "name": "gfx950_conv_fwd_aot_{dtype}_{instance_id}",
-                        "metadata": metadata,
-                        "spec_order": list(SPEC_ORDER),
-                        "spec_defaults": {},
-                        "knob_sets": {"instance": [{}]},
-                        "shapes": shapes,
-                    }
-                ],
+                "variants": variants,
             }
         ],
     }

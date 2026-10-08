@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -355,8 +356,8 @@ std::optional<ConvLaunch> implicitGemmLaunch(const MatchedProblem& matched,
     return ConvLaunch{*launch, *kernargs};
 }
 
-/// Mirrors _direct_error in rocke/library/builders/common/convolution_forward.py and the
-/// padding rule of rocKE's direct validators: see conv::directProblemSupported. Everything
+/// Mirrors _direct_serves in rocke/library/builders/common/convolution_forward.py and the
+/// padding rule of rocKE's direct validators: see conv::directInstanceLaunch. Everything
 /// the guard declines stays on implicit GEMM.
 std::optional<ConvLaunch> directLaunch(const MatchedProblem& matched,
                                        const KernelDefinition& kernel,
@@ -365,11 +366,6 @@ std::optional<ConvLaunch> directLaunch(const MatchedProblem& matched,
                                        int64_t blockW,
                                        int64_t blockWaves)
 {
-    const auto& p = matched.problem;
-    if(!conv::directProblemSupported(p) || !conv::directServes(build, p))
-    {
-        return std::nullopt;
-    }
     // The implicit-GEMM fields a direct kernel does not read hold exact placeholders, so
     // a forced tile_k of 64 or 128 never selects one and no descriptor is ambiguous.
     for(const auto* field : GEMM_TUNING_FIELDS)
@@ -384,13 +380,15 @@ std::optional<ConvLaunch> directLaunch(const MatchedProblem& matched,
     {
         return std::nullopt;
     }
-    const auto launch = conv::directLaunchGeometry(
-        p, matched.geometry, variant, blockW, blockWaves, conv::DIRECT_WAVE_SIZE);
+    const auto launch = conv::directInstanceLaunch(
+        matched.problem,
+        matched.geometry,
+        {conv::directCapabilities(build), variant, blockW, blockWaves});
     if(!launch)
     {
         return std::nullopt;
     }
-    return ConvLaunch{*launch, conv::directKernargs(p, matched.geometry)};
+    return ConvLaunch{*launch, conv::directKernargs(matched.problem, matched.geometry)};
 }
 
 /// The launch when @p kernel is packaged code that computes this graph under a launch
@@ -448,23 +446,17 @@ bool kernelMatches(const MatchContext& context,
 }
 
 /// Whether @p kernel is gfx950_conv_fwd_direct_spec_for_request's choice with no
-/// overrides: spatial with one wave below 64 groups, otherwise std block_w 4, one wave.
+/// overrides for the group count it was built for (see conv::isDefaultDirectArm).
 bool isDefaultDirectArm(const KernelDefinition& kernel)
 {
     const auto groups = intMetadata(kernel, "groups");
-    if(!groups)
-    {
-        return false;
-    }
-    if(*groups < conv::DIRECT_WAVE_SIZE)
-    {
-        return metadataEquals(kernel, "direct_variant", std::string("spatial"))
-               && metadataEquals(kernel, "block_w", int64_t{0})
-               && metadataEquals(kernel, "block_waves", conv::DEFAULT_DIRECT_BLOCK_WAVES);
-    }
-    return metadataEquals(kernel, "direct_variant", std::string("std"))
-           && metadataEquals(kernel, "block_w", conv::DEFAULT_DIRECT_BLOCK_W)
-           && metadataEquals(kernel, "block_waves", conv::DEFAULT_DIRECT_BLOCK_WAVES);
+    const auto* variantName = stringMetadata(kernel, "direct_variant");
+    const auto variant
+        = variantName == nullptr ? std::nullopt : conv::parseDirectVariant(*variantName);
+    const auto blockW = intMetadata(kernel, "block_w");
+    const auto blockWaves = intMetadata(kernel, "block_waves");
+    return groups && variant && blockW && blockWaves
+           && conv::isDefaultDirectArm(*groups, *variant, *blockW, *blockWaves);
 }
 
 /// How well @p kernel's build-time specialization suits @p matched, in [0, 0.85): the
@@ -542,10 +534,10 @@ double
 
 // ---- hipkernel:Gfx950ConvFwdAot: shape-generic AOT instances ----
 //
-// Each kernel is one rocKE forward KernelIdentity: its metadata holds tuning and
-// capability fields only, and the problem reaches the kernel as AOT arguments computed
-// from the graph. Matching is therefore a capability check (conv::aotInstanceLaunch),
-// not an equality on the geometry.
+// Each kernel is one rocKE forward KernelIdentity, implicit GEMM or direct depthwise: its
+// metadata holds tuning and capability fields only, and the problem reaches the kernel as
+// AOT arguments computed from the graph. Matching is therefore a capability check
+// (conv::aotInstanceLaunch, conv::directInstanceLaunch), not an equality on the geometry.
 
 constexpr std::string_view AOT_GRAPH_MATCHER_SYMBOL = "hipkernel.gfx950_conv_fwd_aot.graph_match";
 constexpr std::string_view AOT_KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_conv_fwd_aot.kernel_match";
@@ -566,16 +558,21 @@ constexpr std::array<const char*, 13> AOT_INT_FIELDS{"tile_m",
                                                      "vector_size_c",
                                                      "async_chunk_a",
                                                      "async_chunk_b"};
+constexpr std::array<const char*, 3> AOT_FLAG_FIELDS{"unroll_k", "async_dma", "grouped"};
+/// What a direct instance compiles in, in conv::DirectCapabilities order.
+constexpr std::array<const char*, 8> AOT_DIRECT_FIELDS{
+    "filter_h", "filter_w", "stride_h", "stride_w", "pad_h", "pad_w", "dilation_h", "dilation_w"};
 
-/// The instance @p kernel describes, when its metadata is a complete instance with a
-/// launch contract this pack reviewed: wave64, a reviewed pipeline (unroll_k and
-/// async_dma change only the K loop), and a default or cshuffle epilogue. Unlike the
-/// exact-shape engine, the store width is the identity's vector_size_c, not derived.
-std::optional<conv::AotInstance> aotInstance(const KernelDefinition& kernel)
+/// One instance of either family: an implicit-GEMM identity or a direct depthwise one.
+using AotKernel = std::variant<conv::AotInstance, conv::DirectInstance>;
+
+/// The implicit-GEMM instance @p kernel describes: a reviewed pipeline (unroll_k and
+/// async_dma change only the K loop), a default or cshuffle epilogue, and positive
+/// tuning. Unlike the exact-shape engine, the store width is the identity's
+/// vector_size_c, not derived.
+std::optional<conv::AotInstance> aotImplicitGemmInstance(const KernelDefinition& kernel)
 {
-    if(kernel.source.kind != KernelSourceKind::KPACK
-       || !metadataEquals(kernel, "layout", std::string("NHWC"))
-       || !metadataEquals(kernel, "wave_size", int64_t{64}) || !hasReviewedPipeline(kernel)
+    if(!hasReviewedPipeline(kernel)
        || (!metadataEquals(kernel, "epilogue", std::string("default"))
            && !metadataEquals(kernel, "epilogue", std::string("cshuffle"))))
     {
@@ -592,11 +589,10 @@ std::optional<conv::AotInstance> aotInstance(const KernelDefinition& kernel)
         }
         values[i] = *value;
     }
-    std::array<bool, 3> flags{};
-    const std::array<const char*, 3> flagFields{"unroll_k", "async_dma", "grouped"};
-    for(size_t i = 0; i < flagFields.size(); ++i)
+    std::array<bool, AOT_FLAG_FIELDS.size()> flags{};
+    for(size_t i = 0; i < AOT_FLAG_FIELDS.size(); ++i)
     {
-        const auto value = intMetadata(kernel, flagFields[i]);
+        const auto value = intMetadata(kernel, AOT_FLAG_FIELDS[i]);
         if(!value || (*value != 0 && *value != 1))
         {
             return std::nullopt;
@@ -616,6 +612,120 @@ std::optional<conv::AotInstance> aotInstance(const KernelDefinition& kernel)
                              flags[2]};
 }
 
+/// The direct depthwise instance @p kernel describes. Its implicit-GEMM fields hold the
+/// values rocKE's direct sweep writes into a direct identity (0, and "direct" for the
+/// pipeline and epilogue), so a forced tile_k of 64 or 128 never selects one. The variant
+/// and block knobs are checked where they are used, by conv::directLaunchGeometry.
+std::optional<conv::DirectInstance> aotDirectInstance(const KernelDefinition& kernel,
+                                                      conv::DirectVariant variant,
+                                                      int64_t blockW,
+                                                      int64_t blockWaves)
+{
+    if(variant == conv::DirectVariant::NONE
+       || !metadataEquals(kernel, "pipeline", std::string("direct"))
+       || !metadataEquals(kernel, "epilogue", std::string("direct")))
+    {
+        return std::nullopt;
+    }
+    const auto isZero
+        = [&](const char* field) { return metadataEquals(kernel, field, int64_t{0}); };
+    if(!std::all_of(AOT_INT_FIELDS.begin(), AOT_INT_FIELDS.end(), isZero)
+       || !std::all_of(AOT_FLAG_FIELDS.begin(), AOT_FLAG_FIELDS.end(), isZero))
+    {
+        return std::nullopt;
+    }
+    std::array<int64_t, AOT_DIRECT_FIELDS.size()> compiled{};
+    for(size_t i = 0; i < AOT_DIRECT_FIELDS.size(); ++i)
+    {
+        const auto value = intMetadata(kernel, AOT_DIRECT_FIELDS[i]);
+        if(!value)
+        {
+            return std::nullopt;
+        }
+        compiled[i] = *value;
+    }
+    return conv::DirectInstance{{compiled[0],
+                                 compiled[1],
+                                 compiled[2],
+                                 compiled[3],
+                                 compiled[4],
+                                 compiled[5],
+                                 compiled[6],
+                                 compiled[7]},
+                                variant,
+                                blockW,
+                                blockWaves};
+}
+
+/// The instance @p kernel describes, when its metadata is a complete instance of either
+/// family with a launch contract this pack reviewed. kernel_family is read first, so
+/// neither family's checks run on the other's placeholders. As in kernelFits, both value
+/// sets are closed and a missing field (the loader completes them from the KMD defaults)
+/// is malformed metadata.
+std::optional<AotKernel> aotInstance(const KernelDefinition& kernel)
+{
+    if(kernel.source.kind != KernelSourceKind::KPACK
+       || !metadataEquals(kernel, "layout", std::string("NHWC"))
+       || !metadataEquals(kernel, "wave_size", int64_t{64}))
+    {
+        return std::nullopt;
+    }
+    const auto familyValue = intMetadata(kernel, "kernel_family");
+    const auto family = familyValue ? conv::parseKernelFamily(*familyValue) : std::nullopt;
+    const auto* variantName = stringMetadata(kernel, "direct_variant");
+    const auto variant
+        = variantName == nullptr ? std::nullopt : conv::parseDirectVariant(*variantName);
+    const auto blockW = intMetadata(kernel, "block_w");
+    const auto blockWaves = intMetadata(kernel, "block_waves");
+    if(!family || !variant || !blockW || !blockWaves)
+    {
+        return std::nullopt;
+    }
+    if(*family == conv::KernelFamily::DIRECT_DEPTHWISE)
+    {
+        return aotDirectInstance(kernel, *variant, *blockW, *blockWaves);
+    }
+    // An implicit-GEMM instance leaves every direct field at its KMD default, so no
+    // descriptor carries a direct arm that this branch would launch as implicit GEMM.
+    if(*variant != conv::DirectVariant::NONE || *blockW != 0 || *blockWaves != 0)
+    {
+        return std::nullopt;
+    }
+    if(!std::all_of(AOT_DIRECT_FIELDS.begin(), AOT_DIRECT_FIELDS.end(), [&](const char* field) {
+           return metadataEquals(kernel, field, int64_t{0});
+       }))
+    {
+        return std::nullopt;
+    }
+    return aotImplicitGemmInstance(kernel);
+}
+
+/// The launch of @p instance on @p matched, through the family's own capability check
+/// and ABI (conv::aotInstanceLaunch or conv::directInstanceLaunch).
+std::optional<ConvLaunch> aotInstanceLaunch(const MatchedProblem& matched,
+                                            const AotKernel& instance)
+{
+    if(const auto* direct = std::get_if<conv::DirectInstance>(&instance))
+    {
+        const auto launch = conv::directInstanceLaunch(matched.problem, matched.geometry, *direct);
+        if(!launch)
+        {
+            return std::nullopt;
+        }
+        return ConvLaunch{*launch, conv::directKernargs(matched.problem, matched.geometry)};
+    }
+    const auto launch = conv::aotInstanceLaunch(
+        matched.problem, matched.geometry, std::get<conv::AotInstance>(instance));
+    const auto kernargs
+        = launch ? conv::implicitGemmKernargs(matched.problem, matched.geometry, *launch)
+                 : std::nullopt;
+    if(!kernargs)
+    {
+        return std::nullopt;
+    }
+    return ConvLaunch{*launch, *kernargs};
+}
+
 std::optional<ConvLaunch> aotKernelFits(const MatchedProblem& matched,
                                         const KernelDefinition& kernel)
 {
@@ -625,15 +735,7 @@ std::optional<ConvLaunch> aotKernelFits(const MatchedProblem& matched,
     {
         return std::nullopt;
     }
-    const auto launch = conv::aotInstanceLaunch(matched.problem, matched.geometry, *instance);
-    const auto kernargs
-        = launch ? conv::implicitGemmKernargs(matched.problem, matched.geometry, *launch)
-                 : std::nullopt;
-    if(!kernargs)
-    {
-        return std::nullopt;
-    }
-    return ConvLaunch{*launch, *kernargs};
+    return aotInstanceLaunch(matched, *instance);
 }
 
 bool aotKernelMatches(const MatchContext& context,
@@ -648,19 +750,29 @@ double aotScore(const MatchContext& context,
                 const BoundTokens& /*bound*/,
                 const KernelDefinition& kernel)
 {
-    // Deterministic fallback only; see conv::aotInstanceScore. Only kernels the kernel
-    // matcher admitted are scored, so a refusal here is a contract violation, ranked last.
+    // Deterministic fallback only. Only kernels the kernel matcher admitted are scored,
+    // so a refusal here is a contract violation, ranked last. As in score(), a direct
+    // instance ranks above every implicit-GEMM one (conv::aotInstanceScore stays below
+    // 2) and the default direct arm first. An instance carries no build group count, so
+    // the default arm is the one for the graph's.
     const auto matched = matchProblem(context);
     const auto instance = aotInstance(kernel);
-    const auto launch
-        = matched && instance
-              ? conv::aotInstanceLaunch(matched->problem, matched->geometry, *instance)
-              : std::nullopt;
+    const auto launch = matched && instance ? aotInstanceLaunch(*matched, *instance) : std::nullopt;
     if(!launch)
     {
         return -1.0;
     }
-    return conv::aotInstanceScore(matched->problem, matched->geometry, *instance, *launch);
+    if(const auto* direct = std::get_if<conv::DirectInstance>(&*instance))
+    {
+        return conv::isDefaultDirectArm(
+                   matched->problem.groups, direct->variant, direct->blockW, direct->blockWaves)
+                   ? 4.0
+                   : 3.0;
+    }
+    return conv::aotInstanceScore(matched->problem,
+                                  matched->geometry,
+                                  std::get<conv::AotInstance>(*instance),
+                                  launch->geometry);
 }
 
 /// How one engine of this pack admits a kernel for a matched graph and launches it:

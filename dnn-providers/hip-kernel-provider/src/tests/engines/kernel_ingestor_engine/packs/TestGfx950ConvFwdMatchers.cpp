@@ -1410,7 +1410,49 @@ KernelDefinition aotKernel(AotWidths widths = {},
                        {"async_chunk_a", int64_t{0}},
                        {"async_chunk_b", int64_t{0}},
                        {"grouped", grouped},
-                       {"instance_id", std::string(40, 'a')}};
+                       {"instance_id", std::string(40, 'a')},
+                       // The descriptor loader completes these from their KMD defaults.
+                       {"kernel_family", int64_t{0}},
+                       {"direct_variant", std::string("none")},
+                       {"filter_h", int64_t{0}},
+                       {"filter_w", int64_t{0}},
+                       {"stride_h", int64_t{0}},
+                       {"stride_w", int64_t{0}},
+                       {"pad_h", int64_t{0}},
+                       {"pad_w", int64_t{0}},
+                       {"dilation_h", int64_t{0}},
+                       {"dilation_w", int64_t{0}},
+                       {"block_w", int64_t{0}},
+                       {"block_waves", int64_t{0}}};
+    return kernel;
+}
+
+/// A direct depthwise instance as make_conv_aot_config.py emits it: the identity's
+/// placeholders in the implicit-GEMM fields, then what the binary compiles in. A
+/// "same"-padded square filter, as the direct sweep builds.
+KernelDefinition aotDirectKernel(const std::string& variant,
+                                 int64_t filter = 3,
+                                 int64_t stride = 1,
+                                 int64_t blockW = 4,
+                                 int64_t blockWaves = 1,
+                                 const std::string& dtype = "fp16")
+{
+    auto kernel = aotKernel({0, 0, 0}, 0, dtype, 0, 0);
+    for(const auto* field :
+        {"tile_k", "warp_m", "warp_n", "warp_tile_m", "warp_tile_n", "warp_tile_k"})
+    {
+        kernel.metadata[field] = int64_t{0};
+    }
+    kernel.metadata["pipeline"] = std::string("direct");
+    kernel.metadata["epilogue"] = std::string("direct");
+    kernel.metadata["kernel_family"] = int64_t{1};
+    kernel.metadata["direct_variant"] = variant;
+    kernel.metadata["filter_h"] = kernel.metadata["filter_w"] = filter;
+    kernel.metadata["stride_h"] = kernel.metadata["stride_w"] = stride;
+    kernel.metadata["pad_h"] = kernel.metadata["pad_w"] = (filter - 1) / 2;
+    kernel.metadata["dilation_h"] = kernel.metadata["dilation_w"] = int64_t{1};
+    kernel.metadata["block_w"] = variant == "spatial" ? int64_t{0} : blockW;
+    kernel.metadata["block_waves"] = blockWaves;
     return kernel;
 }
 
@@ -1564,6 +1606,246 @@ TEST(TestGfx950ConvFwdAotScore, PrefersLessTilePaddingAndRanksRefusalsLast)
     shape.c = 12;
     const GraphFixture refused(buildGraph(convSpec(shape)), gfx950Properties());
     EXPECT_LT(scoreKernel(GFX950_CONV_FWD_AOT, refused.context(), aotKernel()), 0.0);
+}
+
+TEST(TestGfx950ConvFwdAotDirectKernelMatcher, ServesAnyImageBatchAndGroupCountWithItsFilter)
+{
+    // N, Hi, Wi and the group count are kernel arguments; one binary serves them all.
+    const auto spatial = aotDirectKernel("spatial");
+    const auto std3 = aotDirectKernel("std");
+    for(const auto& shape : {depthwiseShape(32, 14, 14, 3, 1, 1),
+                             depthwiseShape(5, 9, 21, 3, 1, 1),
+                             depthwiseShape(63, 7, 7, 3, 1, 1),
+                             depthwiseShape(8, 64, 64, 3, 1, 1)})
+    {
+        SCOPED_TRACE(shape.groups);
+        auto batched = shape;
+        batched.n = 3;
+        const GraphFixture fixture(buildGraph(convSpec(batched)), gfx950Properties());
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), spatial));
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), std3));
+        // Neither engine admits the other's direct descriptors.
+        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, fixture.context(), std3));
+        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), stdKernel(shape)));
+    }
+    // Spatial serves G < 64 only; std serves either side of it.
+    for(const auto groups : {int64_t{64}, int64_t{96}, int64_t{256}})
+    {
+        SCOPED_TRACE(groups);
+        const GraphFixture fixture(buildGraph(convSpec(depthwiseShape(groups, 14, 14, 3, 1, 1))),
+                                   gfx950Properties());
+        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), spatial));
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), std3));
+    }
+    // The filter, stride and padding are compiled in.
+    const GraphFixture strided(buildGraph(convSpec(depthwiseShape(96, 17, 17, 3, 2, 1))),
+                               gfx950Properties());
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, strided.context(), std3));
+    EXPECT_TRUE(
+        matchesKernel(GFX950_CONV_FWD_AOT, strided.context(), aotDirectKernel("std", 3, 2)));
+    const GraphFixture wide(buildGraph(convSpec(depthwiseShape(96, 21, 15, 7, 2, 3))),
+                            gfx950Properties());
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, wide.context(), aotDirectKernel("std", 5, 2)));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, wide.context(), aotDirectKernel("std", 7, 2)));
+    auto padded = aotDirectKernel("std", 7, 2);
+    padded.metadata["pad_h"] = padded.metadata["pad_w"] = int64_t{2};
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, wide.context(), padded));
+    // Only the dtype it was built for.
+    EXPECT_FALSE(matchesKernel(
+        GFX950_CONV_FWD_AOT, wide.context(), aotDirectKernel("std", 7, 2, 4, 1, "bf16")));
+}
+
+TEST(TestGfx950ConvFwdAotDirectKernelMatcher, DeclinesEveryGraphOutsideTheGuardedContract)
+{
+    // The exact-shape engine's direct guard: each graph is served by an implicit-GEMM
+    // instance, while a direct instance compiled for its filter, stride and padding is not.
+    const auto base = depthwiseShape(32, 14, 14, 3, 1, 1);
+    const std::vector<std::pair<const char*, std::function<void(ConvShape&)>>> cases{
+        {"sH != sW",
+         [](auto& s) {
+             s.w = 15;
+             s.sW = 2;
+         }},
+        {"dilation 2",
+         [](auto& s) {
+             s.dH = s.dW = 2;
+             s.pH = s.pW = 2;
+         }},
+        {"channel multiplier", [](auto& s) { s.k = 64; }},
+        {"grouped, not depthwise", [](auto& s) { s.groups = 4; }},
+        {"dense", [](auto& s) { s.groups = 1; }}};
+    for(const auto& [name, change] : cases)
+    {
+        SCOPED_TRACE(name);
+        auto shape = base;
+        change(shape);
+        const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+        ASSERT_TRUE(matchesGraph(GFX950_CONV_FWD_AOT, fixture.context()));
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotKernel({1, 1, 1})));
+        for(const auto& kernel : {aotDirectKernel("spatial"), aotDirectKernel("std")})
+        {
+            EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel));
+        }
+    }
+    // z carries N for both direct variants.
+    for(const auto n : {int64_t{65535}, int64_t{65536}})
+    {
+        SCOPED_TRACE(n);
+        auto shape = depthwiseShape(2, 3, 3, 3, 1, 1);
+        shape.n = n;
+        const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+        EXPECT_EQ(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotDirectKernel("spatial")),
+                  n == 65535);
+    }
+}
+
+TEST(TestGfx950ConvFwdAotDirectKernelMatcher, FamilyFieldsAndPlaceholdersMustAgree)
+{
+    const auto shape = depthwiseShape(32, 14, 14, 3, 1, 1);
+    const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+    const auto implicit = aotKernel({1, 1, 1});
+    ASSERT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), implicit));
+    for(const auto& base : {aotDirectKernel("spatial"), aotDirectKernel("std")})
+    {
+        ASSERT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), base));
+        // A direct instance holds the direct identity's placeholders exactly.
+        const std::vector<std::pair<const char*, MetadataValue>> violations{
+            {"tile_m", int64_t{64}},
+            {"tile_k", int64_t{64}},
+            {"vector_size_a", int64_t{1}},
+            {"async_chunk_b", int64_t{8}},
+            {"grouped", int64_t{1}},
+            {"unroll_k", int64_t{1}},
+            {"pipeline", std::string("none")},
+            {"epilogue", std::string("cshuffle")},
+            {"wave_size", int64_t{32}},
+            {"layout", std::string("NCHW")},
+            {"kernel_family", int64_t{2}},
+            {"kernel_family", int64_t{0}},
+            {"kernel_family", std::string("1")},
+            {"direct_variant", std::string("none")},
+            {"direct_variant", std::string("STD")},
+            {"dilation_h", int64_t{2}},
+            {"block_waves", int64_t{0}},
+            {"block_waves", int64_t{17}}};
+        for(const auto& [field, value] : violations)
+        {
+            SCOPED_TRACE(field);
+            auto kernel = base;
+            kernel.metadata[field] = value;
+            EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel));
+        }
+        for(const auto& field : base.metadata)
+        {
+            if(field.first == "instance_id")
+            {
+                continue; // Tracking only; the launch never reads it.
+            }
+            SCOPED_TRACE(field.first);
+            auto kernel = base;
+            kernel.metadata.erase(field.first);
+            EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel));
+        }
+    }
+    // std needs a positive block width; spatial derives its own and must carry 0.
+    auto spatialWidth = aotDirectKernel("spatial");
+    spatialWidth.metadata["block_w"] = int64_t{4};
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), spatialWidth));
+    EXPECT_FALSE(
+        matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), aotDirectKernel("std", 3, 1, 0)));
+
+    // An implicit-GEMM instance leaves every direct field at its KMD default.
+    for(const auto* field :
+        {"filter_h", "stride_w", "pad_h", "dilation_w", "block_w", "block_waves"})
+    {
+        SCOPED_TRACE(field);
+        auto kernel = implicit;
+        kernel.metadata[field] = int64_t{1};
+        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel));
+    }
+    auto variant = implicit;
+    variant.metadata["direct_variant"] = std::string("std");
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), variant));
+    // Nor can an implicit-GEMM tuning pose as family 1.
+    auto relabeled = aotDirectKernel("std");
+    for(const auto* field : {"tile_m",
+                             "tile_n",
+                             "tile_k",
+                             "warp_m",
+                             "warp_n",
+                             "warp_tile_m",
+                             "warp_tile_n",
+                             "warp_tile_k",
+                             "vector_size_a",
+                             "vector_size_b",
+                             "vector_size_c"})
+    {
+        relabeled.metadata[field] = implicit.metadata.at(field);
+    }
+    relabeled.metadata["pipeline"] = std::string("mem");
+    relabeled.metadata["epilogue"] = std::string("cshuffle");
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), relabeled));
+}
+
+TEST(TestGfx950ConvFwdAotScore, DirectInstancesRankFirstAndTheGraphsDefaultArmHighest)
+{
+    // G < 64: spatial with one wave is the default arm; G >= 64: std block_w 4, one wave.
+    // An instance has no build group count, so the graph's decides.
+    const auto scoreOf = [](const GraphFixture& fixture, const KernelDefinition& kernel) {
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel));
+        return scoreKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel);
+    };
+    const GraphFixture small(buildGraph(convSpec(depthwiseShape(32, 14, 14, 3, 1, 1))),
+                             gfx950Properties());
+    const auto smallDefault = scoreOf(small, aotDirectKernel("spatial"));
+    const auto implicitSmall = scoreOf(small, aotKernel({1, 1, 1}));
+    for(const auto& other : {aotDirectKernel("spatial", 3, 1, 0, 2),
+                             aotDirectKernel("std"),
+                             aotDirectKernel("std", 3, 1, 16, 4)})
+    {
+        const auto otherScore = scoreOf(small, other);
+        EXPECT_GT(smallDefault, otherScore);
+        EXPECT_GT(otherScore, implicitSmall);
+    }
+
+    const GraphFixture large(buildGraph(convSpec(depthwiseShape(96, 14, 14, 3, 1, 1))),
+                             gfx950Properties());
+    const auto largeDefault = scoreOf(large, aotDirectKernel("std"));
+    for(const auto& other :
+        {aotDirectKernel("std", 3, 1, 16, 1), aotDirectKernel("std", 3, 1, 4, 2)})
+    {
+        const auto otherScore = scoreOf(large, other);
+        EXPECT_GT(largeDefault, otherScore);
+        EXPECT_GT(otherScore, scoreOf(large, aotKernel({1, 1, 1})));
+    }
+    // Refused graphs rank last.
+    const GraphFixture dense(buildGraph(), gfx950Properties());
+    EXPECT_LT(scoreKernel(GFX950_CONV_FWD_AOT, dense.context(), aotDirectKernel("std")), 0.0);
+}
+
+TEST(TestGfx950ConvFwdAotDispatch, DirectInstancePassesTheContractAndReachesCodeLoading)
+{
+    const auto shape = depthwiseShape(96, 14, 14, 3, 1, 1);
+    const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+    const auto bound = matchesGraph(GFX950_CONV_FWD_AOT, fixture.context());
+    ASSERT_TRUE(bound);
+    const auto& handler = dispatchHandler(GFX950_CONV_FWD_AOT);
+    EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, aotDirectKernel("std")), 0U);
+    try
+    {
+        // The descriptor names no archive, so loading is the first step that can fail.
+        handler.prepare(fixture.context(), *bound, aotDirectKernel("std"));
+        FAIL() << "Preparation loaded a kernel from an empty archive path";
+    }
+    catch(const std::exception& error)
+    {
+        const std::string message = error.what();
+        EXPECT_EQ(message.find("convolution contract"), std::string::npos) << message;
+        EXPECT_EQ(message.find("packed NHWK output"), std::string::npos) << message;
+    }
+    // A spatial instance cannot serve 96 groups, so it is refused before any code loads.
+    EXPECT_THROW(handler.prepare(fixture.context(), *bound, aotDirectKernel("spatial")),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 } // namespace

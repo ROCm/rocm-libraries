@@ -79,6 +79,14 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "gfx950_conv_fwd_aot_bf16_a19d8fa53eb5aeecee42f86232855c3fe6ce871f",
                  "gfx950_conv_fwd_aot_bf16_b604f664962522fa17460431d4eb10234d732afa",
                  "gfx950_conv_fwd_aot_bf16_ee66277efaa31ec317f45115139212a525d31b52",
+                 "gfx950_conv_fwd_aot_dw_bf16_023b14c719e2f2f8f6afe38d2ef9833a3e85f683",
+                 "gfx950_conv_fwd_aot_dw_bf16_41c9d65026e500f76ecbddc9452c972e5b4088ed",
+                 "gfx950_conv_fwd_aot_dw_bf16_cf100d174aea389ed5904cab4068d96634fa9ef3",
+                 "gfx950_conv_fwd_aot_dw_bf16_dc6ea991953168a0b98967b106516fdc60959042",
+                 "gfx950_conv_fwd_aot_dw_fp16_1391e6d6aabd15bd79acd1c354761f44c9b8f4b0",
+                 "gfx950_conv_fwd_aot_dw_fp16_4850fcf3a30d3227f089ea1febb2b53639c2dd05",
+                 "gfx950_conv_fwd_aot_dw_fp16_ac4f5eefab4dd228ba5f9539bd33b67b90442f6b",
+                 "gfx950_conv_fwd_aot_dw_fp16_cc0658dde3c5d19753e494156c61b1c2aca837b8",
                  "gfx950_conv_fwd_aot_fp16_2b2e4f5d672f9d9f194c5af658f166b345ae3149",
                  "gfx950_conv_fwd_aot_fp16_2e13942a39d8d277fd4341df6d0f211811802701",
                  "gfx950_conv_fwd_aot_fp16_2e61a9a1472e1d38b6602edb7cc2769eba3990d1",
@@ -206,8 +214,10 @@ TEST_F(TestGfx950ConvFwdAotPacks, DeclaresTheConfiguredSdkVersion)
 
 TEST_F(TestGfx950ConvFwdAotPacks, ExposesTheConfiguredKnobs)
 {
-    ASSERT_EQ(_set->engine.knobs.size(), 1U);
+    ASSERT_EQ(_set->engine.knobs.size(), 2U);
     EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "tile_k"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "kernel_family"),
               _set->engine.knobs.end());
 }
 

@@ -648,17 +648,43 @@ inline bool directProblemSupported(const Problem& problem)
            && directRowsCovered(problem);
 }
 
-/// Whether a direct depthwise binary compiled for @p build computes @p problem, which
-/// directProblemSupported already admitted. N, Hi, Wi and the group count are kernel
-/// arguments for both variants (the spatial one derives its 64 / groups columns per
-/// wave at runtime); the filter, stride and padding shape the unrolled tap loop and are
-/// compiled in, so they (and the dilation the kernels do not take) must be the build's.
-inline bool directServes(const Problem& build, const Problem& problem)
+/// What a direct depthwise binary compiles in: the filter, stride and padding shape the
+/// unrolled tap loop, and the kernels take no dilation. N, Hi, Wi and the group count are
+/// kernel arguments for both variants (the spatial one derives its 64 / groups columns
+/// per wave at runtime), so they are not capabilities.
+struct DirectCapabilities
 {
-    return build.y == problem.y && build.x == problem.x && build.strideH == problem.strideH
-           && build.strideW == problem.strideW && build.padH == problem.padH
-           && build.padW == problem.padW && build.dilationH == problem.dilationH
-           && build.dilationW == problem.dilationW;
+    int64_t y;
+    int64_t x;
+    int64_t strideH;
+    int64_t strideW;
+    int64_t padH;
+    int64_t padW;
+    int64_t dilationH;
+    int64_t dilationW;
+};
+
+/// The capabilities of a direct binary compiled for @p build.
+inline DirectCapabilities directCapabilities(const Problem& build)
+{
+    return DirectCapabilities{build.y,
+                              build.x,
+                              build.strideH,
+                              build.strideW,
+                              build.padH,
+                              build.padW,
+                              build.dilationH,
+                              build.dilationW};
+}
+
+/// Whether a direct depthwise binary with @p compiled computes @p problem, which
+/// directProblemSupported already admitted: every compiled value must be the graph's.
+inline bool directServes(const DirectCapabilities& compiled, const Problem& problem)
+{
+    return compiled.y == problem.y && compiled.x == problem.x && compiled.strideH == problem.strideH
+           && compiled.strideW == problem.strideW && compiled.padH == problem.padH
+           && compiled.padW == problem.padW && compiled.dilationH == problem.dilationH
+           && compiled.dilationW == problem.dilationW;
 }
 
 /// Grid and block for a direct depthwise kernel. Mirrors Gfx950ConvFwdSpec.grid()/block()
@@ -718,6 +744,54 @@ inline std::optional<LaunchGeometry> directLaunchGeometry(const Problem& problem
                           static_cast<unsigned int>(gridY),
                           static_cast<unsigned int>(problem.n),
                           static_cast<unsigned int>(blockWaves * waveSize)};
+}
+
+/// One direct depthwise binary as both engines describe it: what it compiled in, and the
+/// variant and block knobs its grid follows. Mirrors the direct fields of
+/// Gfx950ConvFwdAotSpec in rocke/library/builders/common/convolution_forward.py; the
+/// exact-shape engine reads the compiled values from its build problem instead.
+struct DirectInstance
+{
+    DirectCapabilities compiled;
+    DirectVariant variant;
+    int64_t blockW; ///< Output columns per block for std; 0 for spatial, which derives it.
+    int64_t blockWaves;
+};
+
+/// The launch of @p instance on @p problem, or std::nullopt when the binary cannot compute
+/// it. Mirrors _direct_serves in convolution_forward.py: the direct guard
+/// (directProblemSupported), the compiled filter, stride and padding (directServes), and
+/// directLaunchGeometry's variant rules and 65535 grid bound. directKernargs then holds no
+/// further refusal.
+inline std::optional<LaunchGeometry> directInstanceLaunch(const Problem& problem,
+                                                          const Geometry& geometry,
+                                                          const DirectInstance& instance)
+{
+    if(!directProblemSupported(problem) || !directServes(instance.compiled, problem))
+    {
+        return std::nullopt;
+    }
+    return directLaunchGeometry(problem,
+                                geometry,
+                                instance.variant,
+                                instance.blockW,
+                                instance.blockWaves,
+                                DIRECT_WAVE_SIZE);
+}
+
+/// Whether @p variant, @p blockW and @p blockWaves are gfx950_conv_fwd_direct_spec_for_request's
+/// choice with no overrides for @p groups: spatial with one wave below 64 groups, otherwise
+/// std with block_w 4 and one wave.
+inline bool
+    isDefaultDirectArm(int64_t groups, DirectVariant variant, int64_t blockW, int64_t blockWaves)
+{
+    if(groups < DIRECT_WAVE_SIZE)
+    {
+        return variant == DirectVariant::SPATIAL && blockW == 0
+               && blockWaves == DEFAULT_DIRECT_BLOCK_WAVES;
+    }
+    return variant == DirectVariant::STD && blockW == DEFAULT_DIRECT_BLOCK_W
+           && blockWaves == DEFAULT_DIRECT_BLOCK_WAVES;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd
