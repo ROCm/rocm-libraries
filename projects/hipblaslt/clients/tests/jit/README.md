@@ -31,10 +31,10 @@ The CTest tests are:
 
 - `jit-cpu`: `jit-source-bundle` and `jit-builder`. A build with
   `HIPBLASLT_ENABLE_JIT=OFF` has `jit-source-bundle` and `jit-disabled`.
-- `jit-gpu`: `jit-publish` and `jit-loader`, when `GPU_TARGETS` include an
-  architecture with committed assembly. CTest runs `jit-publish` before
-  `jit-loader`. A build with `HIPBLASLT_ENABLE_YAML=ON` does not have them,
-  because the library entry is MsgPack.
+- `jit-gpu`: `jit-publish`, `jit-loader` and `jit-launch`, when `GPU_TARGETS`
+  include an architecture with committed assembly. CTest runs `jit-publish`
+  before `jit-loader`. A build with `HIPBLASLT_ENABLE_YAML=ON` does not have
+  them, because the library entry is MsgPack.
 
 ## What each test checks
 
@@ -45,6 +45,7 @@ The CTest tests are:
 | `jit-builder` | The comgr builder, without a GPU, building the hand-written HIP kernel `builder_test_kernel.hip` for each committed assembly target, then each assembly file linked with that kernel into one code object; each code object defines its kernels and has the builder's code-object version, and a kernel name it does not define fails the build |
 | `jit-publish` | Builds the device's committed assembly and publishes it into the JIT solution library: `plain` for K=512, and `plain-pair`'s two solutions for K=1024 and K=256. Indices are at least `2^30` |
 | `jit-loader` | Loads that library, finds each published solution and the pre-generated kernel, resolves the kernel from its code object, and finds nothing for a transposed A. An entry whose solutions are not 0 to N-1 is rejected. Launches no kernel |
+| `jit-launch` | Compiles the device's committed `plain` assembly, publishes that code object, retrieves it with `findTopSolutions` and `getSolutionByIndex`, and launches the kernel through the TensileLite solution adapter |
 
 ## Test arguments
 
