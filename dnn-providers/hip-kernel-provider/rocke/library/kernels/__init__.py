@@ -54,7 +54,7 @@ from .gfx950.attention_dense import (  # noqa: F401
 # gfx942 dense flash-attention prefill. Exposed under its own arch module
 # alias to avoid shadowing the gfx950 exports above (same symbol names). Reach it via
 # ``kernels.attention_dense_gfx942`` or ``from kernels.gfx942 import attention_dense``;
-# dispatch selects it opt-in via spec_id="gfx942_attention_dense".
+# dispatch selects it opt-in via spec_id="gfx942_dense".
 from .gfx942 import attention_dense as attention_dense_gfx942  # noqa: F401
 
 
@@ -205,8 +205,17 @@ from .common.conv_direct_grouped import (  # noqa: F401
     DirectConvProblem,
     DirectConv4cSpec,
     DirectConv16cSpec,
+    DirectDepthwiseSpec,
+    DirectDepthwiseSpatialSpec,
+    DirectDepthwiseColSpec,
     build_direct_conv_4c,
     build_direct_conv_16c,
+    build_direct_depthwise,
+    build_direct_depthwise_spatial,
+    build_direct_depthwise_col,
+    is_valid_depthwise_spec,
+    is_valid_depthwise_spatial_spec,
+    is_valid_depthwise_col_spec,
 )
 from .common.img2col import (  # noqa: F401
     Img2ColSpec,

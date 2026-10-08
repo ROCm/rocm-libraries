@@ -210,7 +210,7 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
                                   std::shared_ptr<void>  gemmData,
-                                  const int              workspaceBytes,
+                                  const size_t           workspaceBytes,
                                   const int              requestedAlgoCount,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
 

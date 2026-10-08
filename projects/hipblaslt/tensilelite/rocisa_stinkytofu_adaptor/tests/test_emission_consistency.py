@@ -340,7 +340,8 @@ def emit_path2_rocisa_stinkyasm(build_snippet: str, *,
 
 
 def emit_path3_adapter_logical(build_snippet: str, *,
-                               arch_tuple=(12, 5, 0)) -> str:
+                               arch_tuple=(12, 5, 0),
+                               force_scaled: bool = False) -> str:
     """Path 3 -- stinkytofu adapter + logical IR pipeline + ``emitAssembly``.
 
     ``ROCISA_BACKEND=stinkytofu`` swaps ``rocisa.*`` for our adapter, so
@@ -348,10 +349,15 @@ def emit_path3_adapter_logical(build_snippet: str, *,
     ``VMovB32`` / ``vgpr`` objects. ``to_stinky_asm(list(arch))`` runs
     the C++ ``CompositeInstructionLoweringPass`` + ``ToStinkyAsmPass``
     via ``lower_logical_module``.
+
+    ``force_scaled`` drives ``rocIsa::setForceScaledWMMA`` (the gfx1250
+    low-precision scaled-WMMA toggle): True reproduces the strict/v0
+    build, False (default) the base gfx1250 build.
     """
     script = (
         _INIT_PREAMBLE.format(arch_tuple=arch_tuple,
                               caps_blob=_caps_blob(arch_tuple))
+        + f"_ri.setForceScaledWMMA({bool(force_scaled)})\n"
         + build_snippet
         + textwrap.dedent(f"""\
 
@@ -1635,7 +1641,13 @@ class TestDSStoreB96Emission(unittest.TestCase, _ThreePathEqualityCase):
 
 
 class TestWmmaF6Gfx1250Scaled(unittest.TestCase):
-    """gfx1250 F6 WMMA lowers to the forceScaledWMMA form.
+    """gfx1250 F6 WMMA mnemonic is gated on the forceScaledWMMA toggle.
+
+    All three gfx1250 steppings share ISA (12,5,0) and the same caps, so the
+    only thing that selects the scaled form is ``rocIsa::setForceScaledWMMA``
+    (true for gfx1250-strict / gfx1250v0, false for base gfx1250). This pins
+    the adapter mnemonic against *both* toggle values so the base-vs-strict
+    split can't silently regress back to always-scaled.
 
     Three-path equality is *not* usable here: native rocisa probes the
     assembler for ``HasWMMA_f8f6f4`` / ``HasWMMA_V3`` and reports 0 in a
@@ -1659,17 +1671,41 @@ class TestWmmaF6Gfx1250Scaled(unittest.TestCase):
             neg=False, comment="wmma f6 probe"))
     """)
 
-    EXPECTED = (
+    # Strict/v0: forceScaledWMMA on -> v_wmma_scale_* with ", 0, 0" scales.
+    EXPECTED_SCALED = (
         "v_wmma_scale_f32_16x16x128_f8f6f4 v[0:7], v[8:15], v[16:23], v[0:7], "
         "0, 0 matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6"
         " // wmma f6 probe\n"
     )
 
+    # Base gfx1250: toggle off -> plain v_wmma_*, no scale operands. The
+    # matrix_*_fmt modifiers are caps-gated (HasWMMA_f8f6f4), so they stay.
+    EXPECTED_PLAIN = (
+        "v_wmma_f32_16x16x128_f8f6f4 v[0:7], v[8:15], v[16:23], v[0:7]"
+        " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6"
+        " // wmma f6 probe\n"
+    )
+
     @unittest.skipUnless(_STINKY_OK, "needs the stinkytofu Python binding")
     def test_adapter_emits_forced_scaled_wmma(self):
+        """Strict/v0 build (toggle on) keeps the scaled mnemonic."""
         got = emit_path3_adapter_logical(
-            self.BUILD_MODULE_SNIPPET, arch_tuple=self.ARCH_TUPLE)
-        self.assertEqual(got, self.EXPECTED, f"\n[adapter] {got!r}")
+            self.BUILD_MODULE_SNIPPET, arch_tuple=self.ARCH_TUPLE,
+            force_scaled=True)
+        self.assertEqual(got, self.EXPECTED_SCALED, f"\n[adapter] {got!r}")
+
+    @unittest.skipUnless(_STINKY_OK, "needs the stinkytofu Python binding")
+    def test_adapter_base_gfx1250_emits_plain_wmma(self):
+        """Base gfx1250 (toggle off) emits the plain, unscaled mnemonic."""
+        got = emit_path3_adapter_logical(
+            self.BUILD_MODULE_SNIPPET, arch_tuple=self.ARCH_TUPLE,
+            force_scaled=False)
+        self.assertEqual(got, self.EXPECTED_PLAIN, f"\n[adapter] {got!r}")
+
+    @unittest.skipUnless(_STINKY_OK, "needs the stinkytofu Python binding")
+    def test_toggle_changes_mnemonic(self):
+        """The toggle actually flips the output (regression guard)."""
+        self.assertNotEqual(self.EXPECTED_SCALED, self.EXPECTED_PLAIN)
 
 
 # ===========================================================================
