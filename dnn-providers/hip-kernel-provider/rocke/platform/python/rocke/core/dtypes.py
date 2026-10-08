@@ -51,6 +51,11 @@ _DTYPE_ALIASES = {
     "int4": "i4",
     "i32": "i32",
     "int32": "i32",
+    # Unsigned integers (logical types; no unsigned arithmetic yet).
+    "u8": "u8",
+    "uint8": "u8",
+    "u4": "u4",
+    "uint4": "u4",
 }
 
 
@@ -100,6 +105,8 @@ _DTYPE_INFO = {
             (
                 ("i4", 4),
                 ("i8", 8),
+                ("u4", 4),
+                ("u8", 8),
                 ("i16", 16),
                 ("i32", 32),
                 ("i64", 64),

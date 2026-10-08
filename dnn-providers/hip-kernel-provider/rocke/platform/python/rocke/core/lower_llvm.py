@@ -1032,7 +1032,8 @@ def _llvm_type(t: Type) -> str:
         return "ptr addrspace(3)"
     if t.name == "i1":
         return "i1"
-    if t.name == "i8":
+    if t.name in ("i8", "u8"):
+        # LLVM integers carry no sign; signedness lives in the operations.
         return "i8"
     if t.name == "i16":
         return "i16"

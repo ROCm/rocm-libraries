@@ -115,8 +115,15 @@ the operand names RDNA integer WMMA instructions use, and signedness is an opera
 of those instructions, not a property of the data. `i4` is a logical type with no
 LLVM rendering, like `fp4e2m1`; its values travel packed.
 
+**Unsigned integers.** `u8` and `u4` are logical types (Python engine only, §6): they
+name unsigned data so integer matrix instructions with a per-operand signedness
+flag can be selected for it. There is no unsigned arithmetic yet -- comparison,
+division, extension and conversion of unsigned values, and native `u16`/`u32`
+types, are a gap that needs its own lowering. `u8` renders as LLVM `i8` (LLVM
+integers carry no sign); `u4`, like `i4`, travels packed.
+
 **Types that are entirely absent from the vocabulary:** unsigned
-`u8/u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
+`u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
 references them.
 
 TF32 source anchors: [Python type and builders](../../python/rocke/core/ir.py),
@@ -221,7 +228,7 @@ Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 | `i8` | 3 | 2 | 2 | 2 | 1 | 2 | **67%** | [P] |
 | `i64` | 3 | — | — | 1 | 1 | — | **56%** | [P] |
 | `i16` | 3 | — | — | 2 | 1 | — | **67%** | [P] |
-| `u8` | 0 | 0 | 0 | 0 | 0 | — | **0%** | [M] |
+| `u8` | 1 | 0 | 0 | 0 | 0 | — | **7%** | [M] |
 | `u16/u32/u64` | 0 | 0 | 0 | 0 | 0 | — | **0%** | [M] |
 | **Compute mode (not a storage type)** | | | | | | | | |
 | `bf16-mode` (reduced-precision compute over `f32`) | 0 | 3 | 2 | 3 | 0 | 1 | **50%** | [P][M] |
@@ -325,9 +332,10 @@ mode. The missing selector and precision contract are described in §2.5.
   (guarded), so vector-width predicate init must be open-coded.
 - **`i64` C4=1** — 8-byte LDS works and addressing is fine, but there is no
   `global_store_vN` and no zero-vec. It is an addressing type with no matrix atom.
-- **`u8` — 0 at every layer.** `UINT8` appears in the hipDNN enum
+- **`u8` C1=1, 0 elsewhere.** A logical type in the Python engine only, with no
+  arithmetic, conversion or memory helpers yet. `UINT8` appears in the hipDNN enum
   (`GpuReferenceValidationFactory.cpp:31`), but only in a reference-validation
-  switch; no rocKE surface accepts it. Note that the silicon is not the
+  switch. Note that the silicon is not the
   constraint: the RDNA/GFX12 WMMA integer atom is `IU8`, whose per-operand
   signedness selects make it an *unsigned* int8 matmul as well as a signed one
   (§4A).
@@ -585,5 +593,6 @@ names the C++ files a mirror must change.
 | `F64` scalar type: constants, arithmetic, `cvt_f32_to_f64` / `cvt_f64_to_f32`, global and LDS loads and stores | `core/ir.py`, `core/lower_llvm.py`, `core/dtypes.py` | `cpp/core/dtypes.cpp`, `cpp/core/ir/core_types.cpp`, `cpp/core/ir/ir_arith.cpp`, `cpp/core/ir/ir_mem.cpp` (vector load/store widths), `cpp/core/lower_llvm/core.cpp`, `cpp/core/lower_llvm/convert.cpp` (`fpext`/`fptrunc` choice), `cpp/core/lower_llvm/control.cpp` (vector float add/sub/mul), `cpp/core/lower_llvm/mem.cpp` (element sizes) |
 | `zero_vec` of `i16` and `f64` | `IRBuilder.zero_vec` | `cpp/core/ir/ir_arith.cpp` |
 | LDS loads and stores of `i16` and `f64` (`smem_load_vN`, `smem_store_vN`) | `core/ir.py`, LDS element sizes in `core/lower_llvm.py` | `cpp/core/ir/ir_tile.cpp`, `cpp/core/lower_llvm/mem.cpp` |
+| `U8` and `U4` logical types | `core/ir.py`, `core/dtypes.py`, `_llvm_type` in `core/lower_llvm.py` | `cpp/include/rocke/ir.h`, `cpp/core/ir/core_types.cpp`, `cpp/core/dtypes.cpp`, `cpp/core/lower_llvm/core.cpp` |
 | `I4` logical type | `core/ir.py` | `cpp/include/rocke/ir.h`, `cpp/core/ir/core_types.cpp`, `cpp/core/dtypes.cpp` |
 | `iu8` / `iu4` as spellings of `i8` / `i4`; gfx1151 and gfx11-generic integer WMMA rows record `i8` / `i4` operands (the C++ engine still treats `iu8` / `iu4` as their own dtypes and finds no op for an `i8` / `i4` query) | `core/dtypes.py`, `core/arch/data/arch_specs.json` | `cpp/core/dtypes.cpp`, `cpp/core/arch/data.cpp` (embedded catalog rows) |

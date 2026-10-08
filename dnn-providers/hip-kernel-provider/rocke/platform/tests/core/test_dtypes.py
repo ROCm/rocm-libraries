@@ -194,3 +194,36 @@ def test_f64_is_a_public_logical_type():
     assert dtype_info("f64").encoded_bits == 64
     assert rocke.F64 is rocke.core.F64 is F64
     assert "F64" in rocke.__all__ and "F64" in rocke.core.__all__
+
+
+def test_u8_and_u4_are_logical_unsigned_types():
+    # Types only: they name unsigned data for matrix instructions with a signedness flag.
+    import rocke
+    from rocke.core.ir import U4, U8, IRBuilder, PtrType
+    from rocke.core.lower_llvm import _llvm_type, _lower_kernel_to_llvm_python
+    from rocke.tests.ir_validity import assert_target_accepts
+
+    for spelling, ir_type, bits in (
+        ("u8", U8, 8),
+        ("uint8", U8, 8),
+        ("u4", U4, 4),
+        ("uint4", U4, 4),
+    ):
+        assert dtype_to_ir_type(spelling) is ir_type
+        assert dtype_info(spelling).encoded_bits == bits
+        assert dtype_info(spelling).category.value == "integer"
+    assert U8 != I8
+    assert rocke.U8 is U8 and rocke.U4 is U4
+    assert _llvm_type(U8) == "i8"  # LLVM integers carry no sign
+    with pytest.raises(NotImplementedError, match="no LLVM mapping for type u4"):
+        _llvm_type(U4)
+    assert storage_ir_type("u4") is I8
+    b = IRBuilder("u8_pointer")
+    src = b.param("SRC", PtrType(U8, "global"))
+    dst = b.param("DST", PtrType(U8, "global"))
+    tid = b.thread_id_x()
+    b.global_store(dst, tid, b.global_load(src, tid, U8))
+    # The C++ engine does not mirror this yet.
+    assert_target_accepts(
+        _lower_kernel_to_llvm_python(b.kernel, arch="gfx90a"), "gfx90a"
+    )
