@@ -431,6 +431,14 @@ def _direct_builders():
                 dc.DirectDepthwiseSpec(problem=pr), arch=_ARCH
             ),
         ),
+        (
+            "depthwise_tiled",
+            dict(cpg=1, kpg=1, groups=32),
+            "fwd",
+            lambda pr: dc.build_direct_depthwise_tiled(
+                dc.DirectDepthwiseTiledSpec(problem=pr), arch=_ARCH
+            ),
+        ),
         # Fewer groups than a wave; the multiples below keep it that way while
         # changing the W positions each wave covers.
         (

@@ -332,6 +332,33 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
         std::move(provenance));
 }
 
+/// The engine for @p set over a state manager already built from it, e.g. the one
+/// loadValidatedDescriptorSets built while validating that set. @p set supplies the UED,
+/// the engine-prediction bindings and the selector identity; its packs already belong to
+/// @p stateManager and are not copied.
+/// @throws std::invalid_argument @p stateManager is null.
+template <typename THandle, typename TSettings, typename TContext>
+std::unique_ptr<IEngine<THandle, TSettings, TContext>>
+    makeEngine(const DescriptorSet& set,
+               std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager,
+               const IDeviceResolver<THandle>& deviceResolver)
+{
+    // GenericEngine dereferences the state manager while constructing, so a null one
+    // would be undefined behaviour there rather than an error a caller can catch.
+    if(stateManager == nullptr)
+    {
+        throw std::invalid_argument("kernel ingestor engine requires a state manager");
+    }
+    return std::make_unique<GenericEngine<THandle, TSettings, TContext>>(
+        set.engine,
+        std::move(stateManager),
+        deviceResolver,
+        set.enginePredictionsByMetric,
+        set.unavailableEnginePredictionArches,
+        engineSelectorRevision(set),
+        enginePredictionProvenance(set));
+}
+
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

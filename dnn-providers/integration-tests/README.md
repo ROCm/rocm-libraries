@@ -228,14 +228,31 @@ is chosen with `--verification-mode` (or `HIPDNN_TEST_VERIFICATION_MODE`):
 
 | Mode | Behavior |
 |------|----------|
-| `auto` (default) | golden → GPU ref → CPU ref → skip, in that order |
+| `auto` (default) | golden → GPU ref → CPU ref, in that order; **FAIL if none can verify** |
 | `golden` | compare against DVC-fetched golden tensors only; **FAIL if a bundle has none** |
-| `gpu` | compute the reference on the GPU ref executor |
-| `cpu` | compute the reference on the CPU ref executor |
+| `gpu` | compute the reference on the GPU ref executor; **FAIL if it cannot run the op** |
+| `cpu` | compute the reference on the CPU ref executor; **FAIL if it cannot run the op** |
 
 `auto` is the mode with a fallback chain. An explicit mode is a demand for a
 specific oracle, so `golden` on a bundle with no golden data is a failure, not a
 skip — `dvc pull` the op, or use `auto`.
+
+A reference that cannot run an op declines, and the chain moves on. A reference
+that errors is listed under "REFERENCE EXECUTOR ERRORS" and the chain also moves on,
+but if it was the last one tried (the only one in `gpu`/`cpu` mode, the CPU
+reference in `auto`), the bundle FAILs. That FAIL is a broken oracle, not a
+coverage gap: its message is the reference error, and the bundle is not listed
+under "UNVERIFIABLE BUNDLES".
+
+A bundle the engine ran but no oracle can verify FAILs too, with an
+`Unverifiable: ...; tried: ...` message naming each oracle and why it could not
+help, and it is listed under "UNVERIFIABLE BUNDLES". An engine whose output nothing
+checks is untested, so this is not a SKIP. To quarantine such a bundle until it has
+golden data or a reference, exclude it in the provider's
+`test_categories_integration.yaml` (see
+[Per-provider category filtering](#per-provider-category-filtering)) with a comment
+saying why. Other `Unverifiable:` outcomes (inputs that cannot be filled, a bundle
+with no outputs) are not about the oracle and stay SKIPs.
 
 Each verification test body prints the oracle that graded it, between its
 `[ RUN ]` and result lines, and the coverage summary totals them:
