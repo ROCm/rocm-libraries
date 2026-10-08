@@ -18,8 +18,9 @@ One `*.opmeta.json` per operation under `projects/hipdnn/tools/corpus_gen/operat
 | normalization | `batchnorm_inference`, `batchnorm_fwd_training`, `batchnorm_bwd`, `batchnorm_activation_bwd`, `layernorm_fwd`, `layernorm_bwd`, `rmsnorm_fwd`, `rmsnorm_bwd` |
 | elementwise / other | `pointwise`, `pointwise_unary`, `reduction`, `resample_fwd`, `resample_bwd` |
 
-Pick the operation whose graph the engine's **UMD `match_symbol`** accepts. The engine name is
-not evidence: the example `hkp_example:tiled_attention` UED
+Pick the operation whose graph the engine accepts: for a descriptor engine, its UED's graph
+matcher (`graph_match.native`, plus any `scope: graph` UMD); for an opaque engine, its plan
+builders. The engine name is not evidence: the example `hkp_example:tiled_attention` UED
 (`dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors/rocKE/gfx942_tiled_attention/`)
 has `graph_match` `hipkernel.pointwise.graph_match` and its UMD matches
 `hipkernel.pointwise.add_match`, so it serves `pointwise` graphs (two operands, identical
@@ -33,7 +34,8 @@ ones it serves.
 ## 2. Facets (`--keep`)
 
 `--keep q.<p>=<v>` keeps only problems with that facet, where `p` is a key of the operation
-file's `parameters` and `v` one of its values. Different parameters conjoin; the same
+file's `parameters` and `v` a value it takes, compared as text with the value as printed: an
+enum one of its `values`, an integer in decimal, a bool `true` or `false`. Different parameters conjoin; the same
 parameter repeated widens it. Examples:
 
 - `sdpa_fwd` for a bf16, head-dim-128, non-causal engine:

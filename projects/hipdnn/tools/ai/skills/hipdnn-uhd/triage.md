@@ -32,7 +32,7 @@ there too, it is the kernel.
 | a compile error in the build | fix it on the branch |
 | engine missing from `hipdnn_list_engines`, or `is not registered by any loaded plugin` | the UED `name` is wrong, or its descriptors are not built and staged for this arch (see [onboarding.md](onboarding.md)) |
 | `VIOLATION:` from `hipdnn_validate_descriptors <per-arch root> --expect-engine <engine>`; the loader's `the model is not used and kernels rank by priority, then id` or `the model is not used -- ranking degrades to static_order` | fix the UED/KMD/UMD (undeclared knob, dangling uuid, bad arch key, duplicate tuple), then retrain |
-| corpus_gen `Generated 0 problems` / exit 2 | the engine does not run on this arch, the wrong operation or `--keep` facets, or the UMD matches nothing on this arch; rerun one operation with `HIPDNN_LOG_LEVEL=info --count 1` into a scratch directory and quote the engine's refusal (`Device string does not match ...`) |
+| corpus_gen `Generated 0 problems` / exit 2 | the engine does not run on this arch, the wrong operation or `--keep` facets, or its graph matcher or UMDs admit nothing on this arch; rerun one operation with `HIPDNN_LOG_LEVEL=info --count 1` into a scratch directory and quote the engine's refusal (its plan builder's log line) |
 | `deterministic catalog: all N problem(s)…` | every problem has one candidate: nothing for an L2 to rank; train the L1 |
 | `the benchmark produced no successful valid timings` | every kernel failed to build or run, or was numerically invalid |
 | rows with `numerically_valid: false`; promote refuses an invalid marker | fix the kernel or narrow the UMD; retraining cannot fix it |
@@ -58,7 +58,7 @@ there too, it is the kernel.
 | `--output-dir must not exist; generation never overwrites a previous run` | write each run to a new directory |
 | `generate requires a true problem holdout: 0 < --eval-fraction < 1` | pass a fraction in range, `--eval-benchmarks`, or `--recall` for a closed shape set |
 | corpus_gen refuses a pack-coverage engine | pass `--kdp-root` |
-| every graph fails collection with `kpack_open failed for '<plugin dir>/arch_content/asm_sdpa/...'` | the build staged no kernel archive for this arch ([data.md](data.md), "Kernel archives") |
+| every graph fails collection, the engine's load error naming a kernel file or archive under `<plugin dir>/arch_content/` | the build staged no kernels for this arch ([data.md](data.md), "Kernel files") |
 | a Python traceback from `uhd_gen` | a tool bug; report it with the command and the checkout's SHA |
 
 ## Harmless noise
@@ -78,7 +78,7 @@ when the engine is meant to serve those workloads.
 | every config `config_not_applicable` | one engine's folder handed in as the tree instead of the per-arch root that owns `kpack/` |
 | validation passes but the model has no effect | a benchmark winner record outranks the model: run with an empty `HIPDNN_CACHE_DIR` |
 | an opaque model installs but is never read | it was trained under an id other than the one the provider declares |
-| a candidate dropped into `HIPDNN_DESCRIPTOR_RUNTIME_DIR` "validates" | the runtime keeps the shipped document for a shipped id; validate with `HIPDNN_DESCRIPTOR_DIR` on a copy ([validate.md](validate.md)) |
+| a candidate dropped into `HIPDNN_DESCRIPTOR_RUNTIME_DIR` "validates" | the runtime keeps the build's document for an id the build defines; validate with `HIPDNN_DESCRIPTOR_DIR` on a copy ([validate.md](validate.md)) |
 | the model loads but scores nothing (static order) | a dotless feature name, or a `$kernel.*` axis missing from the UED knobs / KMD fields |
 | regret suspiciously low | a holdout leak: `eval_problem_keys` intersect `training_problem_keys` |
 | the model splits on `device.*` | device identity used as a feature |

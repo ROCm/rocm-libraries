@@ -5,9 +5,9 @@
 
 Standard library only, plus `python3 -m uhd_gen promote` for a descriptor engine.
 
-Exercising a model the build does not ship -- collecting an engine's L1 under the L2 it will
-ship with, validating a candidate -- needs the build's descriptor tree with those models in
-place of the shipped ones, as the ONLY tree the runtime reads. `HIPDNN_DESCRIPTOR_DIR`
+Exercising a model the build does not hold -- collecting an engine's L1 under the L2 it will
+be installed with, validating a candidate -- needs the build's descriptor tree with those
+models in place of the incumbent ones, as the ONLY tree the runtime reads. `HIPDNN_DESCRIPTOR_DIR`
 replaces the search roots rather than adding one, so the tree must be the whole per-arch root
 that owns `kpack/`: a copy of one engine's folder leaves every kernel unresolvable (every
 configuration then reports `config_not_applicable`).
@@ -18,8 +18,8 @@ which a symlink back into the build always does. Then per model
 
 * **opaque** (an engine binding its model by an id declared in provider code): every document
   carrying the declared id is removed and the candidate dropped in. A second document under
-  a shipped id is refused by the loader, and the shipped one stands -- which is also why
-  `HIPDNN_DESCRIPTOR_RUNTIME_DIR` cannot test a candidate;
+  an id the build already defines is refused by the loader, and the build's one stands --
+  which is also why `HIPDNN_DESCRIPTOR_RUNTIME_DIR` cannot test a candidate;
 * **descriptor** (an engine binding through its UED's role map): `uhd_gen promote` installs
   the model and rebinds the role map -- only the entry of the model's own metric is replaced.
 

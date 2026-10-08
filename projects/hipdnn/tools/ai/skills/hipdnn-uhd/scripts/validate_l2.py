@@ -11,7 +11,7 @@ catalog sweeps); this asks whether the runtime READS the candidate at all. A ran
 refuses still lets the engine run (it ranks by priority, then id, and logs why), so a plan that
 builds proves nothing. For every graph the engine runs twice with `--collect-immediate`:
 
-  shipped    the build's own tree;
+  incumbent  the build's own tree;
   candidate  a copy of it with the model promoted into the engine's UED, as the only tree the
              runtime reads (candidate_tree.py).
 
@@ -116,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     base = {k: v for k, v in os.environ.items()
             if k not in ("HIPDNN_DESCRIPTOR_DIR", "HIPDNN_DESCRIPTOR_RUNTIME_DIR", "HIPDNN_CACHE_DIR")}
     # INFO, not warn: the record-served line is INFO; refusals are errors and print either way.
-    sides = {"shipped": dict(base, HIPDNN_LOG_LEVEL="info"),
+    sides = {"incumbent": dict(base, HIPDNN_LOG_LEVEL="info"),
              "candidate": dict(base, HIPDNN_LOG_LEVEL="info", HIPDNN_DESCRIPTOR_DIR=str(farm))}
     rows = []
     for index, graph in enumerate(graphs):

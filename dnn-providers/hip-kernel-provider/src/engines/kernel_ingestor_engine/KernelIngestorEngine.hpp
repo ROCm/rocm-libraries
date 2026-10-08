@@ -59,11 +59,11 @@ const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescripto
 std::unique_ptr<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>>
     takeDiscoveredStateManager(const hipdnn_plugin_sdk::ingestor::DescriptorId& engineId);
 
-/// Test-only. Rescans the descriptor tree through the same path discovery takes and
-/// refills every takeDiscoveredStateManager() slot with the state manager that scan built.
+/// Test-only. Re-validates descriptorCatalog() through the same path discovery takes and
+/// refills every takeDiscoveredStateManager() slot with the state manager that pass built.
 /// Thread-safe against concurrent takes.
-/// @throws std::logic_error the rescan does not reproduce discoverDescriptorSets() in
-///         order (e.g. the search directories changed); the slots are left unchanged.
+/// @throws std::logic_error the pass does not reproduce discoverDescriptorSets() in order;
+///         the slots are left unchanged.
 void rediscoverStateManagersForTesting();
 
 /// The device resolver every descriptor-backed engine in this provider shares.

@@ -12,8 +12,8 @@ dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_g
   - `GPU_TARGETS` in its `CMakeCache.txt` includes the device's arch;
   - `CMAKE_HOME_DIRECTORY` there is the checkout's path as you see it (a build configured at
     another mount point loads its libraries from that path and fails to start);
-  - `<build>/lib/hipdnn_plugins/engines/` holds the provider plugin and a non-empty
-    `arch_content/`;
+  - `<build>/lib/hipdnn_plugins/engines/` holds the plugin of the engine's provider, and a
+    non-empty `arch_content/` when that provider stages descriptors or kernels there;
   - its tools are as new as the sources they are built from: no commit touching them is
     newer than the binaries
     (`git log -1 --format=%ci -- projects/hipdnn dnn-providers ':!projects/hipdnn/tools/ai'
@@ -22,34 +22,31 @@ dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_g
     A `hipdnn_corpus_gen` older than the checkout reads the current `corpus_gen/operations/`
     with `no declaration for operation` or `metadata error` lines.
 - **Building.** From the checkout root (relative paths in this skill are from there), with
-  the `hip-kernel-provider` preset (hipDNN plus the provider in one build). The checkout must
-  be writable: the build generates headers into it (flatc, under
-  `projects/hipdnn/flatbuffers_sdk/include/`) and builds rocKE in place
-  (`dnn-providers/hip-kernel-provider/rocke/`), all untracked. On a read-only checkout the
-  build stops at flatc with `Unable to generate C++ for ...`; build from a writable clone.
+  the superbuild preset that builds hipDNN together with the engine's provider (one per
+  provider in `CMakePresets.json`, e.g. `hip-kernel-provider`), for the device's arch, with
+  the kernel ingestor on (the UHD tools and runtime build only with it):
   ```bash
-  cmake --preset hip-kernel-provider -B <build> -G Ninja -DGPU_TARGETS=<arch> \
-    -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
-    -DENABLE_CLANG_TIDY=OFF -DENABLE_CLANG_FORMAT=OFF
+  cmake --preset <provider preset> -B <build> -G Ninja -DGPU_TARGETS=<arch> \
+    -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DENABLE_CLANG_TIDY=OFF -DENABLE_CLANG_FORMAT=OFF
   cmake --build <build> -- -k 0
   ```
-  The ingestor packs rocKE kernels, so it needs `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`. If
-  configure stops with `comgr loaded '<library>' instead of the requested '<stub>'`, add
-  `-DHIPKERNELPROVIDER_ROCKE_COMGR_LIB=<library>`. Build everything (`ALL` stages the
-  descriptors). Some test binaries can fail to link (`hipdnn_gpu_ref_tests`,
-  `hipdnn_golden_data_tests`, `hipdnn_integration_tests*`), so the build may exit non-zero;
-  `-k 0` builds everything else. The build is usable when it has `bin/hipdnn_corpus_gen`,
-  `bin/hipdnn_bench`, `bin/hipdnn_uhd_features`, `bin/hipdnn_list_engines`,
-  `bin/hipdnn_validate_descriptors`, the provider plugin under
-  `<build>/lib/hipdnn_plugins/engines/` and a non-empty `arch_content/` beside it. Configure's
-  `hipDNN: SDPA support disabled` is about the frontend's SDPA API; the tools and the SDPA
-  engines do not need it.
-- **Kernel archives.** AITER's `ASM_SDPA_ENGINE` loads its kernels from
-  `<plugin dir>/arch_content/asm_sdpa/<arch>/hip_kernel_provider_sdpa_<arch>.kpack`, which the
-  build stages beside the plugin for the archs `ASM_SDPA_GPU_ARCHS` lists
-  (`dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/CMakeLists.txt`). Without
-  that archive every graph fails at collection with `kpack_open failed`, although the shape
-  set (which only asks whether the engine applies) succeeded.
+  Add what the provider's own configure step asks for; it stops with the option to set. For
+  the hip-kernel-provider that is `-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON` (its ingestor packs
+  rocKE kernels) and, when configure reports `comgr loaded '<library>' instead of the
+  requested '<stub>'`, `-DHIPKERNELPROVIDER_ROCKE_COMGR_LIB=<library>`. The checkout must be
+  writable: the build generates untracked files into it (e.g. FlatBuffers headers), and on a
+  read-only checkout it fails early; build from a writable clone. Build everything (`ALL`
+  stages descriptors and kernels). Test binaries that fail to link do not matter here, so the
+  build may exit non-zero; `-k 0` builds everything else. The build is usable when it has
+  `bin/hipdnn_corpus_gen`, `bin/hipdnn_bench`, `bin/hipdnn_uhd_features`,
+  `bin/hipdnn_list_engines`, `bin/hipdnn_validate_descriptors` and the provider's plugin under
+  `<build>/lib/hipdnn_plugins/engines/`. Configure's `hipDNN: SDPA support disabled` is about
+  the frontend's SDPA API; the tools and the engines do not need it.
+- **Kernel files.** An engine that loads prebuilt kernels reads them from where its provider's
+  build stages them beside the plugin (under `<plugin dir>/arch_content/`), for the archs that
+  build lists; the provider's `CMakeLists.txt` names both. Without them every graph fails at
+  collection with the engine's load error naming the missing file, although the shape set
+  (which only asks whether the engine applies) succeeded.
 - **uhd_gen** needs LightGBM, pandas and pyarrow. Run it from the checkout with
   `PYTHONPATH=<checkout>/projects/hipdnn/tools`, or install it into your own environment with
   `pip install -e projects/hipdnn/tools/uhd_gen`. Pass
@@ -76,8 +73,8 @@ dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_g
   your granted CPUs as `--cpuset-cpus $(taskset -cp $$ | awk '{print $NF}')`. Check `rocminfo`
   inside the container lists the gfx agent before running any tool: without the render
   group the GPU is invisible, and every engine appears to serve nothing.
-- After any CMake reconfigure of the hip-kernel-provider build, rebuild its descriptor
-  staging targets before trusting an engine result: a reconfigure empties
+- After any CMake reconfigure of a provider that stages descriptors, rebuild its staging
+  targets (or build `ALL`) before trusting an engine result: a reconfigure can empty
   `lib/hipdnn_plugins/engines/arch_content/`, and every engine then declines every graph.
 - Plugin directories are passed as absolute paths; `hipdnn_list_engines --plugin-dir <abs>`
   prints each registered engine as `NAME (0xHEX)`.
@@ -115,7 +112,8 @@ One directory the user names (default `~/uhd-work`), laid out so a key is its pa
 | models | `models/<model>/` (one `uhd_gen generate` output each) |
 | archived sets | `archive/` (a set moved here counts for nothing) |
 
-Engine names carry `:` (`hipkernel:Gfx950ConvFwd`); write it as `-` in paths. The revision
+Write any `:` in an engine name (UED names are scoped, e.g. `hipkernel:Gfx950AttentionDense`)
+as `-` in paths. The revision
 segment is the selector revision with `/` as `-`.
 
 - **Shape sets accumulate.** Sets are numbered in order (`set-0001`, `set-0002`, ...). A new
@@ -161,7 +159,7 @@ segment is the selector revision with `/` as `-`.
 
    | Source | Flags | Notes |
    |---|---|---|
-   | hipdnn_bench / §8.3 CSVs | `--csv <files>` with `--engine`, `--engine-id`, `--role`, `--arch`, `--selector-revision` | CSV rows carry no binding, so all of it is stated; the dataset directory names the device. `--expand-descriptor kernel.descriptor --scope-by kernel.solver_id` splits a configuration string into per-solver positional columns so a catalog ranker can tell configurations apart; `--resolve-duplicates` / `--best-column` decide repeated rows |
+   | hipdnn_bench / §8.3 CSVs | `--csv <files>` with `--engine`, `--engine-id`, `--arch`, `--selector-revision`, `--collected-at`, `--contribution-id`, and `--role` when it is not `sort_kernel_catalog` | CSV rows carry no binding, so all of it is stated; the dataset directory names the device. Where a column holds a configuration string, `--expand-descriptor <that column> --scope-by <the column naming its schema>` splits it into positional columns so a catalog ranker can tell configurations apart (e.g. `kernel.descriptor` scoped by `kernel.solver_id`); `--resolve-duplicates` / `--best-column` decide repeated rows |
    | an old generate folder | `--generation <dir>` | its measurements, converted rather than re-measured |
    | raw collections | `--collection <dirs>` | as step 3 |
 
@@ -186,8 +184,9 @@ segment is the selector revision with `/` as `-`.
 An engine whose measurements come from another source only converts and trains: no shape
 set, collection or validation. Its rows name no label or features, so they are stated at
 generate: `--target`, `--objective`, `--features` and, for a two-layer ranker,
-`--group-by-feature` (e.g. `kernel.solver_id`). Use numeric problem columns, the solver id
-and the expanded `kernel.descriptor.s<solver>_f<i>` slots as features.
+`--group-by-feature` (the column naming a candidate's group, e.g. `kernel.solver_id`). Use the
+source's numeric problem columns, its group column and the positional columns
+`--expand-descriptor` produced as features.
 
 ## Decision rules
 
@@ -211,7 +210,7 @@ already) and its counts; for training, the contributions read and the model dire
 |---|---|
 | `dataset disagrees on selector_revision` / binding differs | the source was measured under another binding: another dataset |
 | `knob addressing contradicts the dataset` | the source encodes a knob differently from the rows stored; find which is stale |
-| CSV: carries no binding | pass `--engine`, `--engine-id`, `--role`, `--arch`, `--selector-revision` |
+| `--csv needs ...: the rows carry no binding` | pass the flags it names (`--engine`, `--engine-id`, `--arch`, `--selector-revision`, `--collected-at`, `--contribution-id`) |
 | generate: no training data | nothing collected or converted for that engine/device/role at that revision |
 | generate: contribution not in the dataset | it is in another revision's or role's dataset, or is holdout/eval |
 | every engine declines every graph | the descriptor staging was emptied by a reconfigure: rebuild the staging targets |

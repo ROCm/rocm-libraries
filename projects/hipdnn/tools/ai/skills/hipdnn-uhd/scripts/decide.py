@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Stage V for a UHD: decide, from what the engine answered, whether a model may ship.
+"""Stage V for a UHD: decide, from what the engine answered, whether a model may be installed.
 
 validate_l1.py / validate_l2.py ask the engine about every held-out graph; this turns those
 answers into a verdict. Standard library only.
@@ -17,12 +17,13 @@ An engine predictor (L1) has these gates, each guarding a failure that is otherw
 * **selector_revision** -- the revision the engine reports now is the one the model was
   trained against. The engine refuses a stale model at load time on a user's machine;
   refusing it here is cheaper.
-* **accuracy** -- candidate median |error| against measured is no worse than the shipped
+* **accuracy** -- candidate median |error| against measured is no worse than the incumbent
   model's by more than `max_regression` (5% by default when measured). Accuracy for both
   models is reported side by side, over the same graphs.
 
-A model the branch ships none of yet (a new engine, or a new arch of one) has nothing to
-regress against. Say so (`--no-shipped-baseline`), never infer it from the shipped side
+Where the checkout binds no model of the role for the arch yet (a new engine, or a new arch
+of one), there is nothing to regress against. Say so (`--no-incumbent`), never infer it from
+the incumbent side
 answering nothing -- that is a failure to compare, and stays inconclusive. The accuracy gate
 then asks only that the candidate was scored, and the report says `baseline: "none"`.
 
@@ -30,9 +31,9 @@ A catalog ranker (L2) has `available`, `read`, `winner_records` and `regret`
 (`decide_catalog`).
 
     decide.py l1 --rows rows.json --candidate-dir <model dir> --out report.json
-        [--max-regression 0.05] [--min-available 1.0] [--no-shipped-baseline]
+        [--max-regression 0.05] [--min-available 1.0] [--no-incumbent]
     decide.py l2 --rows rows.json --candidate-report <eval_report.json>
-        [--shipped-report <eval_report.json>] [--baseline model|native|none]
+        [--incumbent-report <eval_report.json>] [--baseline model|native|none]
         [--max-regression 0.0] --out report.json
 
 Exits 0 when every gate passes, 1 otherwise; the report says which gate failed and why.
@@ -49,7 +50,7 @@ from typing import Any, Optional
 
 AVAILABLE = "available"
 
-#: The default tolerance an L1 is held to against the model the branch ships.
+#: The default tolerance an L1 is held to against the incumbent model.
 DEFAULT_L1_MAX_REGRESSION = 0.05
 
 
@@ -118,7 +119,7 @@ def decide(
     min_available: float = 1.0,
     max_regression: Optional[float] = None,
     min_graphs: int = 1,
-    shipped_baseline: bool = True,
+    incumbent_baseline: bool = True,
 ) -> dict[str, Any]:
     """The validation report. `passed` is True only if every enabled gate holds."""
     rows = document.get("rows") or []
@@ -193,10 +194,10 @@ def decide(
     metrics: dict[str, Any] = {}
     if measured:
         # Each model against the run it predicts. A descriptor engine's candidate L1 predicts the
-        # selection its L2 makes, the shipped one the selection the build ships, and validate_l1.py
-        # measures both (`measured_shipped`); an opaque engine has one selection for both.
+        # selection its L2 makes, the incumbent one the selection the build makes, and validate_l1.py
+        # measures both (`measured_incumbent`); an opaque engine has one selection for both.
         def truth(row: dict[str, Any], side: str) -> Optional[float]:
-            own = row.get("measured_shipped") if side == "shipped" else None
+            own = row.get("measured_incumbent") if side == "incumbent" else None
             if own is not None:
                 return own.get("value") if own.get("ok") else None
             return row["measured"]["value"]
@@ -206,28 +207,28 @@ def decide(
                              if (r.get(side) or {}).get("status") == AVAILABLE
                              and truth(r, side) is not None])
 
-        for side in ("candidate", "shipped"):
+        for side in ("candidate", "incumbent"):
             metrics[side] = scored(side, executed)
         # The comparison on the graphs both models answered.
         both = [r for r in executed
                 if (r.get("candidate") or {}).get("status") == AVAILABLE
-                and (r.get("shipped") or {}).get("status") == AVAILABLE
-                and truth(r, "shipped") is not None]
-        metrics["paired"] = {side: scored(side, both) for side in ("candidate", "shipped")}
-        metrics["shipped_truth"] = ("its own selection" if any("measured_shipped" in r for r in rows)
+                and (r.get("incumbent") or {}).get("status") == AVAILABLE
+                and truth(r, "incumbent") is not None]
+        metrics["paired"] = {side: scored(side, both) for side in ("candidate", "incumbent")}
+        metrics["incumbent_truth"] = ("its own selection" if any("measured_incumbent" in r for r in rows)
                                     else "the candidate's selection")
-        if not shipped_baseline:
-            # Nothing ships to pair with: the candidate on every graph it answered.
-            metrics["paired"] = {"candidate": metrics["candidate"], "shipped": None,
+        if not incumbent_baseline:
+            # No incumbent to pair with: the candidate on every graph it answered.
+            metrics["paired"] = {"candidate": metrics["candidate"], "incumbent": None,
                                  "baseline": "none"}
 
     if max_regression is not None:
         paired = metrics.get("paired") or {}
         new = (paired.get("candidate") or {}).get("median_abs_pct_error")
-        old = (paired.get("shipped") or {}).get("median_abs_pct_error")
+        old = (paired.get("incumbent") or {}).get("median_abs_pct_error")
         if not measured:
             gate = {"passed": False, "problems": ["max_regression needs measured graphs"]}
-        elif not shipped_baseline:
+        elif not incumbent_baseline:
             scored_graphs = (paired.get("candidate") or {}).get("graphs") or 0
             gate = {"passed": new is not None and scored_graphs >= min_graphs, "baseline": "none",
                     "candidate_median_abs_pct_error": new, "scored_graphs": scored_graphs,
@@ -235,15 +236,15 @@ def decide(
                     ["the candidate predicted none of the measured graphs"]}
         elif old is None:
             gate = {"passed": False, "problems": [
-                "the shipped model could not be scored on paired graphs; regression is inconclusive"]}
+                "the incumbent model could not be scored on paired graphs; regression is inconclusive"]}
         else:
             allowed = old * (1.0 + max_regression)
             gate = {"passed": new is not None and new <= allowed,
                     "candidate_median_abs_pct_error": new,
-                    "shipped_median_abs_pct_error": old, "allowed": allowed,
+                    "incumbent_median_abs_pct_error": old, "allowed": allowed,
                     "problems": [] if new is not None and new <= allowed else
                     [f"candidate median error {new} exceeds {allowed:.3f} "
-                     f"(shipped {old:.3f} + {100 * max_regression:.0f}%)"]}
+                     f"(incumbent {old:.3f} + {100 * max_regression:.0f}%)"]}
         gates["accuracy"] = gate
 
     return {
@@ -255,11 +256,11 @@ def decide(
         "measured": measured,
         "metric": metric,
         "declared_id": declared_id,
-        "baseline": "shipped" if shipped_baseline else "none",
+        "baseline": "incumbent" if incumbent_baseline else "none",
     }
 
 
-#: Absolute slack on mean top-1 regret before a candidate counts as worse than the shipped
+#: Absolute slack on mean top-1 regret before a candidate counts as worse than the incumbent
 #: ranker: regret is a fraction of the best measured time, and two rankers within this of
 #: each other are within measurement noise of the same choices.
 CATALOG_REGRET_SLACK = 0.005
@@ -269,7 +270,7 @@ def decide_catalog(
     rows_doc: dict[str, Any],
     *,
     candidate_report: Optional[dict[str, Any]],
-    shipped_report: Optional[dict[str, Any]],
+    incumbent_report: Optional[dict[str, Any]],
     min_available: float = 1.0,
     max_regression: Optional[float] = None,
     baseline_kind: Optional[str] = None,
@@ -279,7 +280,7 @@ def decide_catalog(
     Four gates:
 
     * `available` -- the engine ran under the candidate tree on at least `min_available` of the
-      held-out graphs it runs under the shipped tree. A graph the shipped tree cannot run either
+      held-out graphs it runs under the build's own tree. A graph that tree cannot run either
       is the engine's failure, not the candidate's: it is reported (`engine_failures`) and left
       out, and an engine that runs none of them fails the gate, since then nothing was tested;
     * `read` -- the runtime did not say, on any graph, that it is not using the model. A refused
@@ -290,13 +291,13 @@ def decide_catalog(
       decided says nothing about the model. validate_l2.py gives every run an empty cache, so
       this catches a record the build itself carries rather than one an earlier run wrote;
     * `regret` -- on a held-out catalog collection (every candidate timed), the candidate's mean
-      top-1 regret is no worse than the shipped ranker's by more than `max_regression` (relative)
+      top-1 regret is no worse than the incumbent ranker's by more than `max_regression` (relative)
       plus a noise slack. Native code requires paired actual GPU times; missing or failed
-      baseline evaluation is inconclusive and cannot pass. With no ranker shipped at all
+      baseline evaluation is inconclusive and cannot pass. With no incumbent ranker at all
       (`baseline_kind="none"`, decided from the build) the candidate need only be scored.
     """
     rows = rows_doc.get("rows") or []
-    runnable = [r for r in rows if (r.get("shipped") or {}).get("ok")]
+    runnable = [r for r in rows if (r.get("incumbent") or {}).get("ok")]
     ran = [r for r in runnable if (r.get("candidate") or {}).get("ok")]
     refused = [r for r in rows if (r.get("candidate") or {}).get("refusals")]
     gates: dict[str, Any] = {}
@@ -305,9 +306,9 @@ def decide_catalog(
     problems = []
     if not runnable:
         problems.append(f"the engine ran none of the {len(rows)} held-out graph(s) even under the "
-                        f"shipped tree; nothing about the candidate was tested")
+                        f"build's own tree; nothing about the candidate was tested")
     elif not passed:
-        problems.append(f"{len(runnable) - len(ran)} of {len(runnable)} graph(s) the shipped tree "
+        problems.append(f"{len(runnable) - len(ran)} of {len(runnable)} graph(s) the build's own tree "
                         f"runs failed under the candidate tree")
     gates["available"] = {"passed": passed, "fraction": fraction, "graphs": len(rows),
                           "runnable": len(runnable), "ran": len(ran),
@@ -324,8 +325,8 @@ def decide_catalog(
     def mean_regret(report: Optional[dict[str, Any]]) -> Optional[float]:
         return (((report or {}).get("metrics") or {}).get("top1_regret") or {}).get("mean")
 
-    baseline_kind = baseline_kind or ("model" if shipped_report is not None else "missing")
-    new, old = mean_regret(candidate_report), mean_regret(shipped_report)
+    baseline_kind = baseline_kind or ("model" if incumbent_report is not None else "missing")
+    new, old = mean_regret(candidate_report), mean_regret(incumbent_report)
     valid_new = isinstance(new, (int, float)) and math.isfinite(new) and new >= 0
     valid_old = isinstance(old, (int, float)) and math.isfinite(old) and old >= 0
     if not valid_new:
@@ -336,10 +337,10 @@ def decide_catalog(
         ratios = []
         for row in ran:
             candidate = row["candidate"].get("avgTimeMs")
-            shipped = row["shipped"].get("avgTimeMs")
+            incumbent = row["incumbent"].get("avgTimeMs")
             if all(isinstance(v, (int, float)) and math.isfinite(v) and v > 0
-                   for v in (candidate, shipped)):
-                ratios.append(candidate / shipped)
+                   for v in (candidate, incumbent)):
+                ratios.append(candidate / incumbent)
         ratio = sum(ratios) / len(ratios) if ratios else None
         allowed = 1.0 + (max_regression or 0.0) + CATALOG_REGRET_SLACK
         complete = bool(ran) and len(ratios) == len(ran)
@@ -355,22 +356,22 @@ def decide_catalog(
                 "problems": []}
     elif baseline_kind != "model" or not valid_old:
         gate = {"passed": False, "candidate_mean_regret": new, "baseline": baseline_kind,
-                "problems": ["the shipped ranker is absent or could not be evaluated; "
+                "problems": ["the incumbent ranker is absent or could not be evaluated; "
                              "regression is inconclusive"]}
     else:
         allowed = old * (1.0 + (max_regression or 0.0)) + CATALOG_REGRET_SLACK
         gate = {"passed": new <= allowed, "candidate_mean_regret": new,
-                "shipped_mean_regret": old, "allowed": allowed,
+                "incumbent_mean_regret": old, "allowed": allowed,
                 "problems": [] if new <= allowed else
                 [f"candidate mean top-1 regret {new:.4f} exceeds {allowed:.4f} "
-                 f"(shipped {old:.4f})"]}
+                 f"(incumbent {old:.4f})"]}
     gates["regret"] = gate
     return {
         "schema": "hipdnn_uhd.catalog_validation_report/1",
         "passed": all(g["passed"] for g in gates.values()),
         "gates": gates,
         "metrics": {"candidate": candidate_report and candidate_report.get("metrics"),
-                    "shipped": shipped_report and shipped_report.get("metrics")},
+                    "incumbent": incumbent_report and incumbent_report.get("metrics")},
         "graphs": len(rows),
         "baseline": baseline_kind,
         "install": rows_doc.get("install"),
@@ -378,16 +379,16 @@ def decide_catalog(
 
 
 def comparison_warning(role: str, metrics: Optional[dict[str, Any]]) -> Optional[str]:
-    """What a user installing the model should hear about it against the model the branch
-    ships, from the report's `metrics`; None when the candidate is no worse.
+    """What a user installing the model should hear about it against the incumbent model,
+    from the report's `metrics`; None when the candidate is no worse.
 
     Worse at all is said, not only worse past the gate's tolerance: the user is choosing to
-    replace that model. A comparison that could not be made is said too -- the shipped model
+    replace that model. A comparison that could not be made is said too -- the incumbent model
     answered nothing, or there is none -- because a pass then says nothing about regression."""
     if not metrics:
         return None
     if metrics.get("baseline") == "none":
-        return "not compared: the branch ships no model of this role for this arch yet"
+        return "not compared: the checkout binds no model of this role for this arch yet"
     if role == "sort_kernel_catalog":
         if metrics.get("baseline") == "native":
             ratio = (metrics.get("paired") or {}).get("mean_time_ratio")
@@ -395,24 +396,24 @@ def comparison_warning(role: str, metrics: Optional[dict[str, Any]]) -> Optional
                 return "native ranker comparison is inconclusive: no paired GPU timings"
             return f"slower than native ranker: mean paired time ratio {ratio:.4f}" if ratio > 1 else None
         new = (metrics.get("candidate") or {}).get("mean")
-        old = (metrics.get("shipped") or {}).get("mean")
+        old = (metrics.get("incumbent") or {}).get("mean")
         if new is None:
             return None
         if old is None:
-            return "not compared with the ranker the branch ships: there was none to score"
+            return "not compared with the incumbent ranker: there was none to score"
         if new > old:
-            return (f"worse than the ranker the branch ships: mean top-1 regret {new:.4f} vs "
+            return (f"worse than the incumbent ranker: mean top-1 regret {new:.4f} vs "
                     f"{old:.4f}")
         return None
     new = (metrics.get("candidate") or {}).get("median_abs_pct_error")
-    old = (metrics.get("shipped") or {}).get("median_abs_pct_error")
+    old = (metrics.get("incumbent") or {}).get("median_abs_pct_error")
     if new is None:
         return None
     if old is None:
-        return ("not compared with the model the branch ships: it answered none of the held-out "
+        return ("not compared with the incumbent model: it answered none of the held-out "
                 "graphs the candidate did")
     if new > old:
-        return (f"less accurate than the model the branch ships: median |error| {new:.2f}% vs "
+        return (f"less accurate than the incumbent model: median |error| {new:.2f}% vs "
                 f"{old:.2f}%")
     return None
 
@@ -432,13 +433,13 @@ def main(argv: list[str] | None = None) -> int:
     l1.add_argument("--candidate-dir", type=Path, required=True)
     l1.add_argument("--min-available", type=float, default=1.0)
     l1.add_argument("--max-regression", type=float, default=DEFAULT_L1_MAX_REGRESSION)
-    l1.add_argument("--no-shipped-baseline", action="store_true",
-                    help="the branch ships no model of this role for this arch")
+    l1.add_argument("--no-incumbent", action="store_true",
+                    help="the checkout binds no model of this role for this arch")
     l1.add_argument("--out", type=Path, required=True)
     l2 = sub.add_parser("l2", help="a catalog ranker")
     l2.add_argument("--rows", type=Path, required=True)
     l2.add_argument("--candidate-report", type=Path, required=True)
-    l2.add_argument("--shipped-report", type=Path)
+    l2.add_argument("--incumbent-report", type=Path)
     l2.add_argument("--baseline", choices=("model", "native", "none"))
     l2.add_argument("--min-available", type=float, default=1.0)
     l2.add_argument("--max-regression", type=float)
@@ -454,19 +455,19 @@ def main(argv: list[str] | None = None) -> int:
                 "selector_revision"),
             min_available=args.min_available,
             max_regression=args.max_regression if rows.get("measured") else None,
-            shipped_baseline=not args.no_shipped_baseline)
+            incumbent_baseline=not args.no_incumbent)
         note = comparison_warning("predict_engine", report["metrics"].get("paired"))
     else:
         load = lambda path: json.loads(path.read_text(encoding="utf-8")) if path else None
         report = decide_catalog(
             rows, candidate_report=load(args.candidate_report),
-            shipped_report=load(args.shipped_report), min_available=args.min_available,
+            incumbent_report=load(args.incumbent_report), min_available=args.min_available,
             max_regression=args.max_regression, baseline_kind=args.baseline)
         regret = report["gates"]["regret"]
         note = comparison_warning("sort_kernel_catalog", {
             "baseline": report["baseline"],
             "candidate": {"mean": regret.get("candidate_mean_regret")},
-            "shipped": {"mean": regret.get("shipped_mean_regret")},
+            "incumbent": {"mean": regret.get("incumbent_mean_regret")},
             "paired": {"mean_time_ratio": regret.get("mean_time_ratio")}})
     report["comparison"] = note
     args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

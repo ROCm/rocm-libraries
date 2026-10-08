@@ -595,12 +595,13 @@ FeatureCheck checkKernelModel(const DescriptorSet& set,
 /// RFC 0019 §6.3 over every role-bound model. A failure is logged as an ERROR so it fails
 /// the run.
 nlohmann::json validateModels(const DescriptorCatalog& catalog,
-                              const std::vector<DescriptorSet>& sets,
+                              const std::vector<ValidatedSet<ValidatorHandle>>& validatedSets,
                               const nlohmann::json& samples)
 {
     auto checks = nlohmann::json::array();
-    for(const auto& set : sets)
+    for(const auto& validated : validatedSets)
     {
+        const auto& set = validated.set;
         std::unordered_set<std::string> fields;
         for(const auto& field : set.schema.fields)
         {

@@ -172,12 +172,12 @@ def test_the_cli_slices_every_operation_once_and_resolves_graph_files(slicing, t
 
 
 def _rows(n=10, *, candidate_status="available", revision="rev-A", candidate_bias=1.05,
-          shipped_bias=1.30, measured=True, metric="tflops"):
+          incumbent_bias=1.30, measured=True, metric="tflops"):
     rows = []
     for i in range(n):
         truth = 100.0 + 10 * i
         row = {"graph": f"g{i}.fb",
-               "shipped": {"status": "available", "value": truth * shipped_bias,
+               "incumbent": {"status": "available", "value": truth * incumbent_bias,
                            "metric": "tflops", "selector_revision": revision},
                "candidate": {"status": candidate_status, "value": truth * candidate_bias,
                              "metric": metric, "selector_revision": revision}}
@@ -198,13 +198,13 @@ def _decide_l1(decide, document, **kwargs):
     return decide.decide(document, declared_id=DECLARED_ID, candidate_id=DECLARED_ID, **kwargs)
 
 
-def test_a_good_candidate_passes_and_is_compared_with_the_shipped_model(decide):
+def test_a_good_candidate_passes_and_is_compared_with_the_incumbent_model(decide):
     report = _decide_l1(decide, _document(_rows()),
                         max_regression=decide.DEFAULT_L1_MAX_REGRESSION)
     assert report["passed"], report["gates"]
     paired = report["metrics"]["paired"]
     assert paired["candidate"]["median_abs_pct_error"] == pytest.approx(5.0)
-    assert paired["shipped"]["median_abs_pct_error"] == pytest.approx(30.0)
+    assert paired["incumbent"]["median_abs_pct_error"] == pytest.approx(30.0)
     assert paired["candidate"]["spearman"] == pytest.approx(1.0)
 
 
@@ -254,36 +254,36 @@ def test_an_answer_that_names_no_metric_fails(decide):
 
 
 def test_a_less_accurate_candidate_fails_the_default_tolerance(decide):
-    worse = _document(_rows(candidate_bias=1.5, shipped_bias=1.1))
+    worse = _document(_rows(candidate_bias=1.5, incumbent_bias=1.1))
     assert _decide_l1(decide, worse)["passed"], "no tolerance, no accuracy gate"
     report = _decide_l1(decide, worse, max_regression=decide.DEFAULT_L1_MAX_REGRESSION)
     assert not report["passed"] and not report["gates"]["accuracy"]["passed"]
 
 
-def test_with_nothing_shipped_the_candidate_needs_only_to_be_scored(decide):
+def test_with_no_incumbent_the_candidate_needs_only_to_be_scored(decide):
     rows = _rows()
     for row in rows:
-        row["shipped"] = {"status": "unavailable"}
-    report = _decide_l1(decide, _document(rows), max_regression=0.05, shipped_baseline=False)
+        row["incumbent"] = {"status": "unavailable"}
+    report = _decide_l1(decide, _document(rows), max_regression=0.05, incumbent_baseline=False)
     assert report["passed"] and report["baseline"] == "none"
     assert not _decide_l1(decide, _document(rows), max_regression=0.05)["passed"], \
-        "a shipped side that answers nothing is inconclusive unless nothing ships"
+        "an incumbent that answers nothing is inconclusive unless there is none"
 
 
-def test_each_l1_is_scored_against_the_selection_it_ships_beside(decide):
-    def row(graph, measured, measured_shipped, candidate, shipped):
+def test_each_l1_is_scored_against_the_selection_it_is_installed_beside(decide):
+    def row(graph, measured, measured_incumbent, candidate, incumbent):
         return {"graph": graph, "measured": {"ok": True, "value": measured},
-                "measured_shipped": {"ok": True, "value": measured_shipped},
+                "measured_incumbent": {"ok": True, "value": measured_incumbent},
                 "candidate": {"status": "available", "value": candidate,
                               "selector_revision": "r", "metric": "tflops"},
-                "shipped": {"status": "available", "value": shipped,
+                "incumbent": {"status": "available", "value": incumbent,
                             "selector_revision": "r", "metric": "tflops"}}
     rows = {"measured": True, "metric": "tflops", "tree": {"unique": True, "byte_equal": True},
             "rows": [row("a", 100, 50, 100, 50), row("b", 200, 80, 200, 80)]}
     report = decide.decide(rows, declared_id="c", candidate_id="c",
                            candidate_selector_revision="r")
-    assert report["metrics"]["shipped"]["median_abs_pct_error"] == 0.0
-    assert report["metrics"]["shipped_truth"] == "its own selection"
+    assert report["metrics"]["incumbent"]["median_abs_pct_error"] == 0.0
+    assert report["metrics"]["incumbent_truth"] == "its own selection"
 
 
 def test_too_few_graphs_is_not_a_pass(decide):
@@ -296,8 +296,8 @@ REFUSED = ("[error] uhd: engine 'e' ranks on [dtype], which its UED does not exp
            " the model is not used and kernels rank by priority, then id")
 
 
-def _l2_row(name, shipped, candidate, refusal=None):
-    return {"graph": f"/g/{name}.fb", "shipped": {"ok": shipped, "refusals": []},
+def _l2_row(name, incumbent, candidate, refusal=None):
+    return {"graph": f"/g/{name}.fb", "incumbent": {"ok": incumbent, "refusals": []},
             "candidate": {"ok": candidate, "refusals": [refusal] if refusal else []}}
 
 
@@ -305,65 +305,65 @@ def _report(mean):
     return {"metrics": {"top1_regret": {"mean": mean}}}
 
 
-def test_a_graph_the_shipped_tree_cannot_run_is_the_engines_failure(decide):
+def test_a_graph_the_build_tree_cannot_run_is_the_engines_failure(decide):
     rows = {"rows": [_l2_row("a", True, True), _l2_row("b", False, False)],
-            "winner_records": {"shipped": 0, "candidate": 0}}
+            "winner_records": {"incumbent": 0, "candidate": 0}}
     report = decide.decide_catalog(rows, candidate_report=_report(0.01),
-                                   shipped_report=_report(0.02))
+                                   incumbent_report=_report(0.02))
     gate = report["gates"]["available"]
     assert gate["passed"] and (gate["runnable"], gate["engine_failures"]) == (1, 1)
     assert report["passed"]
 
 
-def test_the_candidate_failing_where_the_shipped_tree_runs_fails_availability(decide):
+def test_the_candidate_failing_where_the_build_tree_runs_fails_availability(decide):
     rows = {"rows": [_l2_row("a", True, True), _l2_row("b", True, False)], "winner_records": {}}
     gate = decide.decide_catalog(rows, candidate_report=_report(0.0),
-                                 shipped_report=None)["gates"]["available"]
+                                 incumbent_report=None)["gates"]["available"]
     assert not gate["passed"] and "1 of 2" in gate["problems"][0]
 
 
 def test_a_ranker_the_runtime_declines_fails_even_though_every_plan_built(decide):
     rows = {"rows": [_l2_row("a", True, True, REFUSED)], "winner_records": {}}
-    report = decide.decide_catalog(rows, candidate_report=_report(0.0), shipped_report=None)
+    report = decide.decide_catalog(rows, candidate_report=_report(0.0), incumbent_report=None)
     assert report["gates"]["available"]["passed"] and not report["gates"]["read"]["passed"]
     assert not report["passed"]
 
 
 def test_a_selection_a_winner_record_made_is_inconclusive(decide):
-    rows = {"rows": [_l2_row("a", True, True)], "winner_records": {"shipped": 0, "candidate": 1}}
-    report = decide.decide_catalog(rows, candidate_report=_report(0.0), shipped_report=None)
+    rows = {"rows": [_l2_row("a", True, True)], "winner_records": {"incumbent": 0, "candidate": 1}}
+    report = decide.decide_catalog(rows, candidate_report=_report(0.0), incumbent_report=None)
     assert not report["gates"]["winner_records"]["passed"]
 
 
-def test_regret_is_judged_against_the_shipped_ranker_with_slack(decide):
+def test_regret_is_judged_against_the_incumbent_ranker_with_slack(decide):
     rows = {"rows": [_l2_row("a", True, True)], "winner_records": {}}
     ok = decide.decide_catalog(rows, candidate_report=_report(0.024),
-                               shipped_report=_report(0.02))
+                               incumbent_report=_report(0.02))
     worse = decide.decide_catalog(rows, candidate_report=_report(0.03),
-                                  shipped_report=_report(0.02))
+                                  incumbent_report=_report(0.02))
     assert ok["gates"]["regret"]["passed"] and not worse["gates"]["regret"]["passed"]
 
 
 def test_a_native_ranker_is_compared_by_paired_gpu_time(decide):
     rows = {"rows": [_l2_row("a", True, True), _l2_row("b", True, True)], "winner_records": {}}
     for row in rows["rows"]:
-        row["shipped"]["avgTimeMs"] = 1.0
+        row["incumbent"]["avgTimeMs"] = 1.0
         row["candidate"]["avgTimeMs"] = 100.0
-    report = decide.decide_catalog(rows, candidate_report=_report(0.0), shipped_report=None,
+    report = decide.decide_catalog(rows, candidate_report=_report(0.0), incumbent_report=None,
                                    baseline_kind="native")
     assert not report["passed"] and report["gates"]["regret"]["mean_time_ratio"] == 100.0
     for row in rows["rows"]:
         row["candidate"]["avgTimeMs"] = 1.0
-    assert decide.decide_catalog(rows, candidate_report=_report(0.0), shipped_report=None,
+    assert decide.decide_catalog(rows, candidate_report=_report(0.0), incumbent_report=None,
                                  baseline_kind="native")["passed"]
 
 
-def test_a_first_ranker_needs_only_to_be_scored_when_nothing_ships(decide):
+def test_a_first_ranker_needs_only_to_be_scored_when_there_is_no_incumbent(decide):
     rows = {"rows": [_l2_row("a", True, True)], "winner_records": {}}
-    first = decide.decide_catalog(rows, candidate_report=_report(0.02), shipped_report=None,
+    first = decide.decide_catalog(rows, candidate_report=_report(0.02), incumbent_report=None,
                                   baseline_kind="none")
     assert first["passed"] and first["gates"]["regret"]["baseline"] == "none"
-    assert not decide.decide_catalog(rows, candidate_report=None, shipped_report=None,
+    assert not decide.decide_catalog(rows, candidate_report=None, incumbent_report=None,
                                      baseline_kind="none")["passed"]
 
 
@@ -401,12 +401,12 @@ def test_a_call_that_never_answers_is_recorded_not_waited_on(l2_job, tmp_path):
 
 def _installed_tree(tmp_path: Path) -> tuple:
     root = tmp_path / "installed"
-    shipped = root / "asm_sdpa" / "predict_engine" / "gfx950"
-    shipped.mkdir(parents=True)
-    document = {"version": "1.0", "id": DECLARED_ID, "name": "shipped", "adapter": "tree_data",
-                "tree_data": {"artifact": "asm_sdpa_engine_tflops.bin"}}
-    (shipped / "asm_sdpa_engine_tflops.uhd.json").write_text(json.dumps(document))
-    (shipped / "asm_sdpa_engine_tflops.bin").write_bytes(b"shipped")
+    incumbent = root / "opaque_engine" / "predict_engine" / "gfx950"
+    incumbent.mkdir(parents=True)
+    document = {"version": "1.0", "id": DECLARED_ID, "name": "incumbent", "adapter": "tree_data",
+                "tree_data": {"artifact": "engine_tflops.bin"}}
+    (incumbent / "engine_tflops.uhd.json").write_text(json.dumps(document))
+    (incumbent / "engine_tflops.bin").write_bytes(b"incumbent")
     (root / "other").mkdir()
     (root / "other" / "unrelated.uhd.json").write_text(json.dumps({"id": "other"}))
     (root / "kpack").mkdir()
@@ -438,10 +438,10 @@ def test_the_candidate_is_the_only_document_carrying_the_declared_id(tree, tmp_p
     tree.build_farm(root, farm)
     install = tree.install_opaque(farm, candidate, DECLARED_ID)
     assert tree.carrying(farm, DECLARED_ID) == [farm / install["installed"]]
-    assert any(p.endswith("asm_sdpa_engine_tflops.bin") for p in install["removed"])
+    assert any(p.endswith("engine_tflops.bin") for p in install["removed"])
     assert (farm / "other" / "unrelated.uhd.json").is_file()
-    assert (root / "asm_sdpa" / "predict_engine" / "gfx950" /
-            "asm_sdpa_engine_tflops.bin").read_bytes() == b"shipped", "the build is untouched"
+    assert (root / "opaque_engine" / "predict_engine" / "gfx950" /
+            "engine_tflops.bin").read_bytes() == b"incumbent", "the build is untouched"
     with pytest.raises(SystemExit, match="built once"):
         tree.build_farm(root, farm)
 
@@ -454,13 +454,13 @@ args = sys.argv[1:]
 graph = args[args.index("--graph") + 1]
 index = int(os.path.basename(graph).split(".")[0][1:])
 truth = 100.0 + 10 * index
-binding = {"engine": "ASM_SDPA_ENGINE", "selector_revision": "rev-A", "arch": "gfx950",
+binding = {"engine": "OPAQUE_ENGINE", "selector_revision": "rev-A", "arch": "gfx950",
            "role": "predict_engine", "trained_against": {"selector_revision": "rev-A"},
            "metric": "tflops"}
 if "--collect-immediate" in args:
     flops = 1e12
     print(json.dumps({"engine_id": int(args[args.index("--engine-id") + 1]),
-                      "engine_name": "ASM_SDPA_ENGINE", "graph_id": f"graph-{index}",
+                      "engine_name": "OPAQUE_ENGINE", "graph_id": f"graph-{index}",
                       "device_id": "gpu#0", "arch": "gfx950", "selection_mode": "immediate",
                       "timing_statistic": "robustMeanMs", "is_valid": True, "binding": binding,
                       "features": {"graph.flops": flops, "device.cu_count": 256},
@@ -508,4 +508,4 @@ def test_the_l1_run_and_its_verdict_end_to_end(tmp_path):
     assert verdict.returncode == 0, report["gates"]
     paired = report["metrics"]["paired"]
     assert paired["candidate"]["median_abs_pct_error"] == pytest.approx(2.0)
-    assert paired["shipped"]["median_abs_pct_error"] == pytest.approx(25.0)
+    assert paired["incumbent"]["median_abs_pct_error"] == pytest.approx(25.0)

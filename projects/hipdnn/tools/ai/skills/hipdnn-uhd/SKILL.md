@@ -33,8 +33,8 @@ skill's installed directory.
 |---|---|
 | [`eval_slice.py`](scripts/eval_slice.py) | a set's evaluation slice; the union `--eval-benchmarks` reads; a regime-even sample; the slice's stored rows |
 | [`candidate_tree.py`](scripts/candidate_tree.py) | a real copy of the build's descriptor tree with candidate models installed |
-| [`validate_l1.py`](scripts/validate_l1.py) | per graph: measured, shipped prediction, candidate prediction |
-| [`validate_l2.py`](scripts/validate_l2.py) | per graph: the engine run under shipped and candidate trees, with the runtime's refusals |
+| [`validate_l1.py`](scripts/validate_l1.py) | per graph: measured, incumbent prediction, candidate prediction |
+| [`validate_l2.py`](scripts/validate_l2.py) | per graph: the engine run under the build's tree and the candidate tree, with the runtime's refusals |
 | [`decide.py`](scripts/decide.py) | the Stage V gates from those rows |
 
 ## Rules for every page

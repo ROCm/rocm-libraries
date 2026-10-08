@@ -1390,12 +1390,36 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(TestKernelIngestorStateManager, MakeEngineRejectsANullStateManager)
 {
     const StubDeviceResolver resolver;
+    DescriptorSet set;
+    set.engine = makeEngineWithKnobs({});
 
     EXPECT_THROW((makeEngine<StubHandle, StubSettings, StubContext>(
-                     makeEngineWithKnobs({}),
-                     std::unique_ptr<KernelIngestorStateManager<StubHandle>>{},
-                     resolver)),
+                     set, std::unique_ptr<KernelIngestorStateManager<StubHandle>>{}, resolver)),
                  std::invalid_argument);
+}
+
+/// An engine over a prebuilt state manager still carries the set's `predict_engine`
+/// bindings: a model the loader refused reports distrust, not a missing model.
+TEST(TestKernelIngestorStateManager, MakeEngineOverAPrebuiltStateManagerKeepsPredictionBindings)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    DescriptorSet set;
+    set.engine = makeEngineWithKnobs({BLOCK_SIZE});
+    set.unavailableEnginePredictionArches = {{"tflops", {"default"}}};
+
+    const auto engine
+        = makeEngine<StubHandle, StubSettings, StubContext>(set, makeStubStateManager(), resolver);
+
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x6D));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+    const auto prediction
+        = engine->getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(prediction.status, PredictionStatus::INVALID) << prediction.reason;
+    EXPECT_NE(prediction.reason.find("missing or incompatible"), std::string::npos)
+        << prediction.reason;
 }
 
 } // namespace

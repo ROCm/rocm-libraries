@@ -9,21 +9,21 @@ rule the model was trained against) and `uhd_gen promote` for a descriptor engin
 For every graph it asks the engine three questions:
 
   measured   `--collect-immediate`: the engine runs its own selection and is timed.
-  shipped    `--predict-engine` against the build's own tree: the model that ships now.
+  incumbent  `--predict-engine` against the build's own tree: the model it binds now.
   candidate  `--predict-engine` with HIPDNN_DESCRIPTOR_DIR on a copy of that tree in which the
              candidate is the only document carrying the engine's declared id.
 
 The copy is the point. An opaque engine binds its model by an id declared in provider code,
-and the shipped model already carries that id. The runtime's additive directory cannot install
-a second document under it -- a file redefining a shipped id is refused and the shipped
-definition stands (DescriptorLoader.hpp) -- so a candidate dropped there is silently never
-read and "validation" would score the shipped model. HIPDNN_DESCRIPTOR_DIR replaces the tree
+and the incumbent model already carries that id. The runtime's additive directory cannot
+install a second document under it -- a file redefining an id the build defines is refused
+and the build's definition stands (DescriptorLoader.hpp) -- so a candidate dropped there is
+silently never read and "validation" would score the incumbent model. HIPDNN_DESCRIPTOR_DIR replaces the tree
 instead; the copy dereferences links so kernels and packs stay inside the tree the runtime
 reads (candidate_tree.py).
 
 A descriptor engine's L1 (`--promote`, in order: the L2 its rows were measured under, then
 the candidate) predicts the selection its L2 makes, so its truth is measured under the
-candidate tree; the shipped model's truth is measured under the build's own tree.
+candidate tree; the incumbent model's truth is measured under the build's own tree.
 
 Writes the rows; `decide.py l1` turns them into the verdict.
 
@@ -195,9 +195,9 @@ def main(argv: list[str] | None = None) -> int:
             row["measured"] = measurement(ask(command(graph, "--collect-immediate"), truth_env,
                                               args.timeout), args.metric)
             if args.promote:
-                row["measured_shipped"] = measurement(
+                row["measured_incumbent"] = measurement(
                     ask(command(graph, "--collect-immediate"), base_env, args.timeout), args.metric)
-        for side, env in (("shipped", base_env), ("candidate", candidate_env)):
+        for side, env in (("incumbent", base_env), ("candidate", candidate_env)):
             row[side] = prediction(ask(command(graph, "--predict-engine"), env, args.timeout))
         rows.append(row)
         if index % 25 == 0:

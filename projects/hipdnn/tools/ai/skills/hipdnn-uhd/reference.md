@@ -50,7 +50,7 @@ The split holds out problems, not rows, by a seeded SHA-256 of the problem key.
 
 | Prefix | Meaning | Action |
 |---|---|---|
-| `MODEL DOES NOT BEAT STATIC ORDER` | §11.4 MUST 2: mean regret not better than the shipped priority/id order | do not promote |
+| `MODEL DOES NOT BEAT STATIC ORDER` | §11.4 MUST 2: mean regret not better than the engine's declared priority/id order | do not promote |
 | `REGIME REGRESSION AGAINST STATIC ORDER` | §11.4 MUST 3: at least one regime is worse than static order | hold or retrain for that regime |
 | `HELD-OUT SLICE COMPROMISED` | evaluated problems are among the recorded training problems | retrain on the train slice |
 | `NO HELD-OUT SLICE` | `--eval-fraction 1.0` scored the training problems | re-evaluate with the recorded fraction |
@@ -62,7 +62,7 @@ The split holds out problems, not rows, by a seeded SHA-256 of the problem key.
 
 §11.4 MUST 4 (regression against a previous UHD for the same engine and arch) and
 item 5 (scoring time against `native`) are listed under `not_implemented`, not
-warned. The skill does the MUST 4 comparison itself, scoring the shipped model on the same rows.
+warned. The skill does the MUST 4 comparison itself, scoring the incumbent model on the same rows.
 
 Reference points, explicitly not thresholds (§11.4): p95 top-1 regret under 10%;
 calibrated scores: mean relative absolute error under 15%, |signed bias| under 5%.

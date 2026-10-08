@@ -295,3 +295,24 @@ def test_an_immediate_pick_checked_numerically_wrong_never_trains(tmp_path, eval
         == 0
     )
     assert _manifest(output)["num_samples"] == len(rows) - 1
+
+
+def test_train_prints_the_promote_command_for_its_output(tmp_path, evaluator, capsys):
+    """The printed command runs as written: the directory the model is in, and python3."""
+    corpus = _l1_corpus(tmp_path / "corpus.json", metric="tflops")
+    output = tmp_path / "model"
+    assert _l1_train(corpus, output, "--feature-evaluator", evaluator) == 0
+    printed = capsys.readouterr().out
+    assert f"Install: python3 -m uhd_gen promote --model-dir {output} " in printed
+
+    assert (
+        _l1_train(
+            corpus,
+            tmp_path / "quiet",
+            "--feature-evaluator",
+            evaluator,
+            "--no-install-hint",
+        )
+        == 0
+    )
+    assert "Install:" not in capsys.readouterr().out

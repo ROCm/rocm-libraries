@@ -55,13 +55,18 @@ supplies the installed-model evidence; this page makes the quality judgement exp
    check them against `training_problem_keys` and say so if any are present.
    `--additional-model-dir` ranks another model on the same rows.
 4. **The previous model** (§11.4 MUST 4, which `uhd_gen evaluate` does not compute): the
-   model the branch ships for the same engine, arch, role and metric, scored on the same
-   rows (`--model-dir` on the shipped model's directory in the checkout, or
-   `--additional-model-dir`). An opaque engine's shipped model carries no training manifest,
-   and `uhd_gen evaluate` refuses it (`binding must be a JSON object`); its comparison is
-   Stage V's paired accuracy ([validate.md](validate.md)), which asks both models on the
-   same graphs. Whether the shipped model trained on the slice graphs is not recorded with
-   it: say the comparison may favour it.
+   incumbent -- the model the checkout already binds for the same engine, arch, role and
+   metric, if any -- scored on the same rows (`--model-dir` on its directory in the
+   checkout, or `--additional-model-dir`). Find it by its id: the UUID the UED's role map
+   names for the arch key and metric (an opaque engine: the id its binding declares), then
+   the `*.uhd.json` with that `id` in the checkout's descriptor sources; its directory is the
+   model directory. An L1 incumbent installed without the training manifest `uhd_gen` writes
+   beside a model (`train_manifest.json`) is refused by `uhd_gen evaluate` (`binding must be
+   a JSON object`); compare it through Stage V's paired accuracy instead
+   ([validate.md](validate.md)), which asks both models on the same graphs. A `native` L2
+   incumbent has no model to score offline. Unless
+   the incumbent's own manifest lists its training graphs, whether it trained on the slice
+   is unknown: say the comparison may favour it.
 
 ## Decision rules
 
@@ -90,7 +95,7 @@ Decide one of **promotable**, **hold**, **retrain** or **grow**, and say which r
   absolute error under 15%, |signed bias| under 5%; for rankers, p95 top-1 regret under 10%.
 
 **Promotable** = holdout `held_out`, no `DOES NOT BEAT STATIC ORDER`, any regime regression
-accepted by the user, and not worse than the shipped model on the same graphs. Installing it
+accepted by the user, and not worse than the incumbent on the same graphs. Installing it
 then needs a passing Stage V ([validate.md](validate.md)). A model trained on one product serves every
 product of its arch once installed; say which products it was measured on.
 
@@ -99,7 +104,7 @@ product of its arch once installed; say which products it was measured on.
 Model directory, engine, device, role, metric/objective, the dataset and contributions it
 trained on; how it was scored and on how many problems; L2: mean/p95 regret for the model,
 static order and random, regret tail, recall strict/tie-aware, regimes losing to static
-order; L1: MAE, relative error, bias, RMSE; the shipped model on the same rows; every
+order; L1: MAE, relative error, bias, RMSE; the incumbent on the same rows; every
 warning verbatim; the verdict and the rule that decided it.
 
 ## Common failures

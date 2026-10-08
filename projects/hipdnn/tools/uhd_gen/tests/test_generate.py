@@ -592,7 +592,7 @@ def test_an_opaque_time_model_over_a_corpus_without_flops_skips_one_bad_graph(
 
 @pytest.mark.parametrize("collect_only", [False, True])
 def test_graph_failures_over_the_budget_fail_the_run_and_keep_what_measured(
-    monkeypatch, tmp_path, evaluator, caplog, collect_only
+    monkeypatch, tmp_path, evaluator, caplog, collect_only, capsys
 ):
     """The run fails listing the failures; the graphs that did measure train later, from
     the collection the run kept, without the bench."""
@@ -633,7 +633,16 @@ def test_graph_failures_over_the_budget_fail_the_run_and_keep_what_measured(
     arguments = _l1_args(graphs, tree, tmp_path / "trained", evaluator, "--no-promote")
     position = arguments.index("--graphs")
     arguments[position : position + 2] = ["--dataset", str(dataset)]
+    capsys.readouterr()
     assert main(arguments) == 0
+    # The model's final directory, not the stage it was trained in before the rename.
+    hints = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("Install:")
+    ]
+    assert hints and all(".uhd-generate-" not in hint for hint in hints), hints
+    assert f"--model-dir {tmp_path / 'trained'}" in hints[0]
     corpus = json.loads(
         (tmp_path / "trained" / "corpus.json").read_text(encoding="utf-8")
     )
