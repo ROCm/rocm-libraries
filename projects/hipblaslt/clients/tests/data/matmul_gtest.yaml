@@ -1901,6 +1901,40 @@ Tests:
   unit_check: 0
   norm_check: 1
 
+- name: matmul_bias_gelu_aux_bf16_fp32
+  category: pre_checkin
+  function:
+    matmul: [ *hpa_bf16_precision, *single_precision ]
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  activation_type: gelu
+  bias_vector: [0, 1]
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1250'
+
+- name: matmul_bias_gelu_aux_bf16_fp32_large
+  category: pre_checkin
+  function:
+    matmul: [ *hpa_bf16_precision, *single_precision ]
+  M: 768
+  N: 4096
+  K: 768
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: 0.0
+  use_e: 1
+  activation_type: gelu
+  bias_vector: 1
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '1250'
+
 - name: matmul_bias_gelu_aux_fp8_fnuz_TN
   category: pre_checkin
   function:
