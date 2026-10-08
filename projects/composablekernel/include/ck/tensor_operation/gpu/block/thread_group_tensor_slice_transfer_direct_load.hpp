@@ -9,6 +9,8 @@
 #include "ck/tensor_description/cluster_descriptor.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 
+#include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer_util.hpp"
+
 namespace ck {
 
 /**
@@ -258,38 +260,12 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
             src_coord_valid_(Number<idx_1d>{}) =
                 coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc, src_coord_);
 
-            constexpr auto move_on_dim = [&]() constexpr {
-                StaticallyIndexedArray<bool, nDim> move_on_dim_;
-
-                static_for<0, nDim, 1>{}([&](auto i) {
-                    move_on_dim_(i) = ordered_dst_access_idx[i] < dst_access_lengths[i] - 1;
-
-                    static_for<i + 1, nDim, 1>{}([&](auto j) {
-                        move_on_dim_(i) &= ordered_dst_access_idx[j] == dst_access_lengths[j] - 1;
-                    });
-                });
-
-                return move_on_dim_;
-            }();
+            constexpr auto move_on_dim =
+                Helper::ComputeMoveOnDim(ordered_dst_access_idx, dst_access_lengths);
 
             // Decide whether to move forward or backward.
-            constexpr auto forward_sweep = [&]() {
-                StaticallyIndexedArray<bool, nDim> forward_sweep_;
-
-                forward_sweep_(I0) = true;
-
-                static_for<1, nDim, 1>{}([&](auto i) {
-                    index_t tmp = ordered_dst_access_idx[I0];
-
-                    static_for<1, i, 1>{}([&](auto j) {
-                        tmp = tmp * dst_access_lengths[j] + ordered_dst_access_idx[j];
-                    });
-
-                    forward_sweep_(i) = tmp % 2 == 0;
-                });
-
-                return forward_sweep_;
-            }();
+            constexpr auto forward_sweep =
+                Helper::ComputeForwardSweep(ordered_dst_access_idx, dst_access_lengths);
 
             static_for<0, nDim, 1>{}([&](auto i) {
                 if constexpr(move_on_dim[i])
@@ -373,38 +349,13 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
             const auto dst_offset = __builtin_amdgcn_readfirstlane(dst_coord_.GetOffset());
             src_buf.template DirectCopyToLds<remove_cvref_t<decltype(dst_buf)>, ScalarPerVector>(
                 dst_buf, src_offset, dst_offset, is_src_valid);
-            constexpr auto move_on_dim = [&]() constexpr {
-                StaticallyIndexedArray<bool, nDim> move_on_dim_;
 
-                static_for<0, nDim, 1>{}([&](auto i) {
-                    move_on_dim_(i) = ordered_dst_access_idx[i] < dst_access_lengths[i] - 1;
-
-                    static_for<i + 1, nDim, 1>{}([&](auto j) {
-                        move_on_dim_(i) &= ordered_dst_access_idx[j] == dst_access_lengths[j] - 1;
-                    });
-                });
-
-                return move_on_dim_;
-            }();
+            constexpr auto move_on_dim =
+                Helper::ComputeMoveOnDim(ordered_dst_access_idx, dst_access_lengths);
 
             // Decide whether to move forward or backward.
-            constexpr auto forward_sweep = [&]() {
-                StaticallyIndexedArray<bool, nDim> forward_sweep_;
-
-                forward_sweep_(I0) = true;
-
-                static_for<1, nDim, 1>{}([&](auto i) {
-                    index_t tmp = ordered_dst_access_idx[I0];
-
-                    static_for<1, i, 1>{}([&](auto j) {
-                        tmp = tmp * dst_access_lengths[j] + ordered_dst_access_idx[j];
-                    });
-
-                    forward_sweep_(i) = tmp % 2 == 0;
-                });
-
-                return forward_sweep_;
-            }();
+            constexpr auto forward_sweep =
+                Helper::ComputeForwardSweep(ordered_dst_access_idx, dst_access_lengths);
 
             static_for<0, nDim, 1>{}([&](auto i) {
                 if constexpr(move_on_dim[i])
@@ -491,38 +442,13 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
             const auto dst_offset = __builtin_amdgcn_readfirstlane(dst_coord_.GetOffset());
             src_buf.template DirectCopyToLds<remove_cvref_t<decltype(dst_buf)>, ScalarPerVector>(
                 dst_buf, src_offset, dst_offset, is_src_valid);
-            constexpr auto move_on_dim = [&]() constexpr {
-                StaticallyIndexedArray<bool, nDim> move_on_dim_;
 
-                static_for<0, nDim, 1>{}([&](auto i) {
-                    move_on_dim_(i) = ordered_dst_access_idx[i] < dst_access_lengths[i] - 1;
-
-                    static_for<i + 1, nDim, 1>{}([&](auto j) {
-                        move_on_dim_(i) &= ordered_dst_access_idx[j] == dst_access_lengths[j] - 1;
-                    });
-                });
-
-                return move_on_dim_;
-            }();
+            constexpr auto move_on_dim =
+                Helper::ComputeMoveOnDim(ordered_dst_access_idx, dst_access_lengths);
 
             // Decide whether to move forward or backward.
-            constexpr auto forward_sweep = [&]() {
-                StaticallyIndexedArray<bool, nDim> forward_sweep_;
-
-                forward_sweep_(I0) = true;
-
-                static_for<1, nDim, 1>{}([&](auto i) {
-                    index_t tmp = ordered_dst_access_idx[I0];
-
-                    static_for<1, i, 1>{}([&](auto j) {
-                        tmp = tmp * dst_access_lengths[j] + ordered_dst_access_idx[j];
-                    });
-
-                    forward_sweep_(i) = tmp % 2 == 0;
-                });
-
-                return forward_sweep_;
-            }();
+            constexpr auto forward_sweep =
+                Helper::ComputeForwardSweep(ordered_dst_access_idx, dst_access_lengths);
 
             static_for<0, nDim, 1>{}([&](auto i) {
                 if constexpr(move_on_dim[i])
@@ -569,6 +495,8 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
     }
 
     private:
+    using Helper = ThreadwiseTransferHelper_Serpentine;
+
     static constexpr auto thread_cluster_desc_ =
         make_cluster_descriptor(ThreadClusterLengths{}, ThreadClusterArrangeOrder{});
 

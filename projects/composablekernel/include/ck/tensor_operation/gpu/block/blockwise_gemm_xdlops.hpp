@@ -572,71 +572,70 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
         auto b_thread_buf = make_static_buffer<AddressSpaceEnum::Vgpr, ElementDataTypeB>(
             b_thread_desc_.GetElementSpaceSize());
 
-        static_for<0, KRepeat, 1>{}([&](auto k) {
-            static_for<0, NRepeat, 1>{}([&](auto n0) {
-                // read B
-                b_thread_copy_.Run(b_block_desc_n0_n1_n2_k,
-                                   make_tuple(n0, I0, I0, Number<k * KPack>{}),
-                                   b_block_buf,
-                                   b_thread_desc_,
-                                   make_tuple(n0, I0, k, I0),
-                                   b_thread_buf);
+        static_ford<Sequence<KRepeat, NRepeat>>{}([&](auto kn) {
+            constexpr auto k  = Number<kn[Number<0>{}]>{};
+            constexpr auto n0 = Number<kn[Number<1>{}]>{};
+            // read B
+            b_thread_copy_.Run(b_block_desc_n0_n1_n2_k,
+                               make_tuple(n0, I0, I0, Number<k * KPack>{}),
+                               b_block_buf,
+                               b_thread_desc_,
+                               make_tuple(n0, I0, k, I0),
+                               b_thread_buf);
 
-                if constexpr(n0 == 0)
-                {
-                    static_for<0, MRepeat, 1>{}([&](auto m0) {
-                        // read A
-                        a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
-                                           make_tuple(m0, I0, I0, Number<k * KPack>{}),
-                                           a_block_buf,
-                                           a_thread_desc_,
-                                           make_tuple(m0, I0, k, I0),
-                                           a_thread_buf);
-                    });
-                }
-
-                wait_dscnt();
-                __builtin_amdgcn_sched_barrier(0);
-
+            if constexpr(n0 == 0)
+            {
                 static_for<0, MRepeat, 1>{}([&](auto m0) {
-                    vector_type<ElementDataTypeA, KPack> a_thread_vec;
-                    vector_type<ElementDataTypeB, KPack> b_thread_vec;
-
-                    auto loadA =
-                        thread_buf_to_vec_loader<decltype(a_thread_vec),
-                                                 decltype(a_thread_buf),
-                                                 decltype(a_thread_desc_),
-                                                 ElementDataTypeA,
-                                                 Number<m0>,
-                                                 Number<0>,
-                                                 decltype(k),
-                                                 index_expression::Ik>{a_thread_vec, a_thread_buf};
-                    auto loadB =
-                        thread_buf_to_vec_loader<decltype(b_thread_vec),
-                                                 decltype(b_thread_buf),
-                                                 decltype(b_thread_desc_),
-                                                 ElementDataTypeB,
-                                                 Number<n0>,
-                                                 Number<0>,
-                                                 decltype(k),
-                                                 index_expression::Ik>{b_thread_vec, b_thread_buf};
-
-                    static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
-
-                    using mfma_input_type_a =
-                        typename vector_type<ElementDataTypeA, xdlops_gemm.K1PerXdlops>::type;
-                    using mfma_input_type_b =
-                        typename vector_type<ElementDataTypeB, xdlops_gemm.K1PerXdlops>::type;
-
-                    constexpr index_t c_offset =
-                        c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
-
-                    xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type_a>(),
-                                    b_thread_vec.template AsType<mfma_input_type_b>(),
-                                    c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
+                    // read A
+                    a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
+                                       make_tuple(m0, I0, I0, Number<k * KPack>{}),
+                                       a_block_buf,
+                                       a_thread_desc_,
+                                       make_tuple(m0, I0, k, I0),
+                                       a_thread_buf);
                 });
-                __builtin_amdgcn_sched_barrier(0);
+            }
+
+            wait_dscnt();
+            __builtin_amdgcn_sched_barrier(0);
+
+            static_for<0, MRepeat, 1>{}([&](auto m0) {
+                vector_type<ElementDataTypeA, KPack> a_thread_vec;
+                vector_type<ElementDataTypeB, KPack> b_thread_vec;
+
+                auto loadA =
+                    thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                             decltype(a_thread_buf),
+                                             decltype(a_thread_desc_),
+                                             ElementDataTypeA,
+                                             Number<m0>,
+                                             Number<0>,
+                                             decltype(k),
+                                             index_expression::Ik>{a_thread_vec, a_thread_buf};
+                auto loadB =
+                    thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                             decltype(b_thread_buf),
+                                             decltype(b_thread_desc_),
+                                             ElementDataTypeB,
+                                             Number<n0>,
+                                             Number<0>,
+                                             decltype(k),
+                                             index_expression::Ik>{b_thread_vec, b_thread_buf};
+
+                static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
+
+                using mfma_input_type_a =
+                    typename vector_type<ElementDataTypeA, xdlops_gemm.K1PerXdlops>::type;
+                using mfma_input_type_b =
+                    typename vector_type<ElementDataTypeB, xdlops_gemm.K1PerXdlops>::type;
+
+                constexpr index_t c_offset = c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+
+                xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type_a>(),
+                                b_thread_vec.template AsType<mfma_input_type_b>(),
+                                c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
             });
+            __builtin_amdgcn_sched_barrier(0);
         });
     }
 
