@@ -136,9 +136,13 @@ jobs:
           echo "target=${target} profile=${profile} config=${config}"
           echo "host_cores=${cores} xdist_workers=${workers} cpu_thread_budget=${budget}"
           "${ROCM_PATH}/bin/mirage" --version
-          grep -a -m2 -oE 'git (revision|commit): [^[:cntrl:]]+' "${ROCM_PATH}/lib/librocjitsu.so" || true
+          grep -a -oE 'git (revision|commit): [^[:cntrl:]]+' "${ROCM_PATH}/lib/librocjitsu.so" | sort -u || true
           python -c 'import sys; print(sys.version)'
-          python -m pip freeze > "${REPORT_DIR}/python-packages.txt"
+          # The test venv has no pip, so list packages through importlib.
+          python - > "${REPORT_DIR}/python-packages.txt" <<'PY'
+          from importlib.metadata import distributions
+          print("\n".join(sorted(f"{d.metadata['Name']}=={d.version}" for d in distributions())))
+          PY
 
       - name: Run rocjitsu tensilelite tests
         id: tests
