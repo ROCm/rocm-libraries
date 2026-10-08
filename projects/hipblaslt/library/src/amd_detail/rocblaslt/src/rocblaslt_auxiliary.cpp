@@ -601,6 +601,12 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
 
+    if(adaptive_sm_count_applies(handle, matmul_descr))
+    {
+        problem.sm_count_target   = int32_t(handle->adaptiveSmCountForQuery());
+        problem.adaptive_sm_count = true;
+    }
+
     if(scaleAlphaVec)
     {
         // Fill owned storage with "1" for the compute type, and repoint alpha into it.
@@ -2410,6 +2416,23 @@ rocblaslt_status
                                                        : heuristicResultsArray,
                                       returnAlgoCount,
                                       pref->max_workspace_bytes);
+        }
+
+        // Tag the top Tensile result with the hint it was ranked for so a launch
+        // under a different adaptive hint can re-select. Only this result gets
+        // the enlarged workspaceSize; AlgoCheck reports the plain size.
+        if(prob.adaptive_sm_count && !override_success && *returnAlgoCount > 0
+           && heuristicResultsArray[0].state == rocblaslt_status_success
+           && *(int*)heuristicResultsArray[0].algo.data >= 0)
+        {
+            auto& r0 = heuristicResultsArray[0];
+            rocblaslt::adaptive_sm::tagAlgo(r0.algo.data, uint32_t(prob.sm_count_target));
+            // Size for any hint so a caller allocating workspaceSize does not
+            // force a re-selected or re-gridded launch onto a smaller config.
+            const size_t bound
+                = adaptiveSmWorkspaceBound(prob, handle, tensile_data, *(int*)r0.algo.data);
+            r0.workspaceSize
+                = std::max(r0.workspaceSize, std::min(bound, pref->max_workspace_bytes));
         }
 
         if(override_success)

@@ -2786,6 +2786,29 @@ namespace TensileLite
                                inputs.fusedA2ADrain,
                                static_cast<uint32_t>(problem.fusedA2AExtent()));
 
+        // CU-occupancy probe tail args (8-aligned ProbeAddr, see Signature.py).
+        // !groupedGemm mirrors the codegen gate. A padded launch grows only the
+        // dispatch; every other kernarg keeps the real grid.
+        uint32_t probePadGrid = 0;
+        if(internalArgsSupport.occupancyProbe && !problemType.groupedGemm)
+        {
+            auto const& params     = problem.getParams();
+            size_t      launchGrid = static_cast<size_t>(rv.numWorkGroups.x) * rv.numWorkGroups.y
+                                * rv.numWorkGroups.z;
+            const uint32_t minGrid   = params.occupancyProbeMinGrid();
+            void*          probeAddr = params.occupancyProbeAddr();
+            if(probeAddr && launchGrid < minGrid)
+            {
+                if(params.occupancyProbePad() && rv.numWorkGroups.y == 1 && rv.numWorkGroups.z == 1)
+                    probePadGrid = minGrid;
+                else
+                    probeAddr = nullptr;
+            }
+            rv.args.appendAligned<void*>("ProbeAddr", probeAddr);
+            rv.args.append<uint32_t>("ProbeEpoch", params.occupancyProbeEpoch());
+            rv.args.append<uint32_t>("ProbeGrid", static_cast<uint32_t>(launchGrid));
+        }
+
         if(problemType.stochasticRounding)
         {
             // generate seed from random generator
@@ -2794,6 +2817,12 @@ namespace TensileLite
             std::uniform_int_distribution<uint32_t> distribution(0, 0xFFFFFFFF);
             uint32_t                                seed = distribution(gen);
             rv.args.append<uint32_t>("RNDSeed", seed);
+        }
+        // Logs and profilers report the padded dispatch grid.
+        if(probePadGrid)
+        {
+            rv.numWorkGroups.x = probePadGrid;
+            rv.numWorkItems.x  = rv.workGroupSize.x * probePadGrid;
         }
         rv.codeObjectFile = codeObjectFilename.load();
         return rv;

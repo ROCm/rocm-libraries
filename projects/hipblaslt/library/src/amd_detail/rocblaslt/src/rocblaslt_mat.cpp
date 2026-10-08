@@ -184,6 +184,22 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
         return skStatus;
     }
 
+    int32_t    smCountTarget = effective_sm_count_target(handle, matmul_descr, nullptr);
+    const bool adaptive      = adaptive_sm_count_applies(handle, matmul_descr);
+    void*      probeAddr     = nullptr;
+    uint32_t   probeEpoch    = 0;
+    bool       probePad      = false;
+    bool       probeLaunch   = false;
+    if(adaptive)
+        smCountTarget = handle->adaptiveSmCountForLaunch(
+            stream,
+            rocblaslt::adaptive_sm::tinyProblem(
+                m, n, k, matD->batch_count, rocblaslt_adaptive_sm_config()),
+            &probeAddr,
+            &probeEpoch,
+            &probePad,
+            &probeLaunch);
+
     RocblasltContractionProblem problem{opA,
                                         opB,
                                         m,
@@ -249,9 +265,15 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         batch_mode,
                                         matmul_descr->bias_stride,
                                         matmul_descr->streamk_tile_scheduling_ext,
-                                        effective_sm_count_target(handle, matmul_descr, nullptr),
+                                        smCountTarget,
                                         effective_uniform_summation_order(handle, matmul_descr)};
-    problem.streamKFlags = streamKFlags;
+    problem.streamKFlags             = streamKFlags;
+    problem.adaptive_sm_count        = adaptive;
+    problem.occupancy_probe_addr     = probeAddr;
+    problem.occupancy_probe_epoch    = probeEpoch;
+    problem.occupancy_probe_min_grid = uint32_t(handle->properties.multiProcessorCount);
+    problem.occupancy_probe_pad      = probePad;
+    problem.occupancy_probe_launch   = probeLaunch;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     problem.fused_epilogue      = matmul_descr->fused_epilogue;

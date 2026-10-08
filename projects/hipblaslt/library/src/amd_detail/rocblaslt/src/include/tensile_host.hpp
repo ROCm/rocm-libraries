@@ -195,6 +195,14 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
                         int                                requestedAlgoCount,
                         size_t                             maxWorkSpaceBytes);
 
+// Workspace that covers `solutionIndex` and the launch-time adaptive
+// re-selection of `prob` under every hint the estimator can publish. The
+// heuristic query reports it for the tagged result[0] only.
+size_t adaptiveSmWorkspaceBound(RocblasltContractionProblem const& prob,
+                                rocblaslt_handle                   handle,
+                                std::shared_ptr<void>              gemmData,
+                                int                                solutionIndex);
+
 /*******************************************************************************
  * getBestSolutions() calls finTopSolutions from Tensile and converts to       *
  * rocblaslt_matmul_heuristic_result                                           *

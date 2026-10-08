@@ -409,3 +409,65 @@ TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormal
         EXPECT_FLOAT_EQ(value<float>(custom.args, "beta"), useBeta ? -1.25f : 0.0f);
     }
 }
+
+TEST(PersistentArgumentLayout, OccupancyProbeTailArgs)
+{
+    auto problem = persistentProblem();
+    auto device  = persistentDevice(7);
+    int  probe   = 0;
+
+    ContractionSolution plain;
+    configurePersistentSolution(plain, 3, 1);
+    auto plainCall = plain.generateSingleCall<true>(
+        problem, persistentInputs(), device, plain.resolvePersistentSettings(problem, device), GSUSettings{});
+    EXPECT_FALSE(hasArgument(plainCall.args, "ProbeAddr"));
+    EXPECT_FALSE(hasArgument(plainCall.args, "ProbeEpoch"));
+    EXPECT_FALSE(hasArgument(plainCall.args, "ProbeGrid"));
+
+    ContractionSolution solution;
+    configurePersistentSolution(solution, 3, 1);
+    solution.internalArgsSupport.occupancyProbe = true;
+    // {addr, minGrid, pad} -> {probe address passed, dispatch grid}
+    struct Case
+    {
+        void*    addr;
+        uint32_t minGrid;
+        bool     pad;
+        bool     expectAddr;
+        uint32_t expectDispatch;
+    };
+    for(auto c : std::vector<Case>{{&probe, 0, false, true, 7},
+                                   {&probe, 7, false, true, 7},
+                                   {&probe, 8, false, false, 7},
+                                   {&probe, 7, true, true, 7},
+                                   {&probe, 256, true, true, 256},
+                                   {nullptr, 256, true, false, 7}})
+    {
+        SCOPED_TRACE(::testing::Message() << c.addr << " " << c.minGrid << " " << c.pad);
+        problem.setParams().setOccupancyProbe(c.addr, 41 + c.minGrid, c.minGrid, c.pad);
+        auto launch = solution.resolvePersistentSettings(problem, device);
+        auto call   = solution.generateSingleCall<true>(
+            problem, persistentInputs(), device, launch, GSUSettings{});
+        auto const& args = call.args;
+        EXPECT_EQ(launch.grid, 7u);
+        EXPECT_EQ(call.numWorkGroups.x, c.expectDispatch);
+        EXPECT_EQ(call.numWorkGroups.y, 1u);
+        EXPECT_EQ(call.numWorkGroups.z, 1u);
+        EXPECT_EQ(call.numWorkItems.x, call.workGroupSize.x * c.expectDispatch);
+        // Grid-derived kernargs keep the real grid.
+        EXPECT_EQ(value<uint32_t>(args, "numWorkGroups"), 7u);
+        EXPECT_EQ(value<uint32_t>(args, "ProbeGrid"), 7u);
+        EXPECT_EQ(value<void*>(args, "ProbeAddr"), c.expectAddr ? c.addr : nullptr);
+        EXPECT_EQ(value<uint32_t>(args, "ProbeEpoch"), 41 + c.minGrid);
+        auto addrOffset = offset(args, "ProbeAddr");
+        EXPECT_EQ(addrOffset % 8, 0u);
+        EXPECT_GE(addrOffset, plainCall.args.size());
+        EXPECT_LT(addrOffset, plainCall.args.size() + 8);
+        EXPECT_EQ(offset(args, "ProbeEpoch"), addrOffset + 8);
+        EXPECT_EQ(offset(args, "ProbeGrid"), addrOffset + 12);
+        EXPECT_EQ(args.size(), addrOffset + 16);
+        // Everything before the probe args matches the unpadded launch.
+        EXPECT_EQ(bytes(args, 0, plainCall.args.size()),
+                  bytes(plainCall.args, 0, plainCall.args.size()));
+    }
+}

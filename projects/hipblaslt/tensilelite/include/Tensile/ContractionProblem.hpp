@@ -202,6 +202,37 @@ namespace TensileLite
             return m_smCountTarget;
         }
 
+        // CU-occupancy probe target for kernels built with SupportOccupancyProbe.
+        // A launch with a grid below minGrid gets a null probe address, unless
+        // padToMinGrid: then its dispatch grows to minGrid with probe-only WGs.
+        void setOccupancyProbe(void* addr, uint32_t epoch, uint32_t minGrid, bool padToMinGrid)
+        {
+            m_occupancyProbeAddr    = addr;
+            m_occupancyProbeEpoch   = epoch;
+            m_occupancyProbeMinGrid = minGrid;
+            m_occupancyProbePad     = padToMinGrid;
+        }
+
+        void* occupancyProbeAddr() const
+        {
+            return m_occupancyProbeAddr;
+        }
+
+        uint32_t occupancyProbeEpoch() const
+        {
+            return m_occupancyProbeEpoch;
+        }
+
+        uint32_t occupancyProbeMinGrid() const
+        {
+            return m_occupancyProbeMinGrid;
+        }
+
+        bool occupancyProbePad() const
+        {
+            return m_occupancyProbePad;
+        }
+
     private:
         int16_t          m_gsu            = 0; // default value
         bool             m_gsuc           = false; // default value
@@ -216,6 +247,10 @@ namespace TensileLite
         int              m_streamKTileSchedulingMode = 0; // SK5 hybrid mode tri-state (OFF default)
         int              m_smCountTarget = 0;
         bool             m_uniformSummationOrder = false; // default value
+        void*            m_occupancyProbeAddr    = nullptr;
+        uint32_t         m_occupancyProbeEpoch   = 0;
+        uint32_t         m_occupancyProbeMinGrid = 0;
+        bool             m_occupancyProbePad     = false;
     };
 
     /**

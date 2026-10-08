@@ -869,8 +869,16 @@ class InternalArgsSupport:
                    wgm = isp['SupportCustomWGM'],
                    staggerU = isp['SupportCustomStaggerU'],
                    perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
+                   occupancyProbe = isp.get('SupportOccupancyProbe', False),
                    useUniversalArgs = isp['UseUniversalArgs'],
                    useSFC = useSFC)
+
+    def state(self):
+        rv = {key: getattr(self, key) for key in self.StateKeys}
+        # Emitted only when set so libraries built without the probe are unchanged.
+        if getattr(self, 'occupancyProbe', False):
+            rv['occupancyProbe'] = True
+        return rv
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):
