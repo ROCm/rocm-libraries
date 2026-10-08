@@ -661,15 +661,30 @@ class GSUOn(GSU):
         kernel["_GlobalAccumulation"] = gsuAccumBackup
         writer.states.bpeCexternal = bpeCexternalBackup
 
-        if acclen > 16384:
-            with writer.allocTmpSgpr(3, tag="GSU On noLoadLoop_tmpSgprInfo") as tmpSgprInfo:
-                module.add(writer.longBranchScc0(gsuLabel, posNeg=1, tmpSgprInfo=tmpSgprInfo, comment="branch if GSU != 1"))
-        else:
-            module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="branch if GSU != 1"))
+        gsuPlaceHolders = []
+        gsuPlaceTargets = []
+        gsuPlaceOperations = []
+
+        label_name = gsuLabel.getLabelName().replace("label_", "")
+        place_holder = "%d_%s_placeholder"%(len(gsuPlaceHolders), label_name)
+        gsuPlaceHolders.append(place_holder)
+        gsuPlaceTargets.append(label_name)
+        gsuPlaceOperations.append("SCBranchSCC0")
+        gsuModel = Module(place_holder)
+        gsuModel.addComment1("branch if GSU != 1")
+        module.add(gsuModel)
+        module.addSpaceLine()
+
+        #if acclen > 16384:
+        #    with writer.allocTmpSgpr(3, tag="GSU On noLoadLoop_tmpSgprInfo") as tmpSgprInfo:
+        #        module.add(writer.longBranchScc0(gsuLabel, posNeg=1, tmpSgprInfo=tmpSgprInfo, comment="branch if GSU != 1 %d"%acclen))
+        #else:
+        #    module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="branch if GSU != 1 %d"%acclen))
 
         if noLoadLoopModules != None:
             module.add(noLoadLoopModules)
         module.add(gsuLabel)
+        writer.updateBranchPlaceHolder(module, gsuPlaceHolders, gsuPlaceTargets, gsuPlaceOperations)
 
         return module
 
