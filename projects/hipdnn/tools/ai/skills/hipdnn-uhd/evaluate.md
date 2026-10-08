@@ -44,7 +44,7 @@ supplies the installed-model evidence; this page makes the quality judgement exp
       `holdout_integrity: held_out` is the evidence that none was trained on.
 3. **Score on other rows**, with the tools of the hipDNN `build` the model was trained with:
    ```bash
-   python -m uhd_gen.dataset export --from <dataset dir> --out rows.json \
+   python3 -m uhd_gen.dataset export --from <dataset dir> --out rows.json \
      (--contribution <ids> | --purpose eval) [--metric <metric>]
    python3 -m uhd_gen evaluate --input rows.json --model-dir <model dir> \
      --eval-fraction 1.0 --feature-evaluator <build>/bin/hipdnn_uhd_features \

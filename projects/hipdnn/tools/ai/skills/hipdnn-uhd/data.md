@@ -3,7 +3,7 @@
 Everything here runs on the local machine, against the local build and GPU. Measurements are
 **converted** once into a stored dataset, and every step that trains or scores **reads** the
 dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`
-(`projects/hipdnn/tools/uhd_gen`) and `python -m uhd_gen.dataset`.
+(`projects/hipdnn/tools/uhd_gen`) and `python3 -m uhd_gen.dataset`.
 
 ## The tools
 
@@ -14,13 +14,19 @@ dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_g
     another mount point loads its libraries from that path and fails to start);
   - `<build>/lib/hipdnn_plugins/engines/` holds the provider plugin and a non-empty
     `arch_content/`;
-  - its tools are as new as the checkout's sources: no commit touching `projects/hipdnn` or
-    `dnn-providers` is newer than the tools
-    (`git log -1 --format=%ci -- projects/hipdnn dnn-providers` against the binaries' times).
+  - its tools are as new as the sources they are built from: no commit touching them is
+    newer than the binaries
+    (`git log -1 --format=%ci -- projects/hipdnn dnn-providers ':!projects/hipdnn/tools/ai'
+    ':!projects/hipdnn/docs' ':!*.md'` against the binaries' times; skills and docs build
+    nothing).
     A `hipdnn_corpus_gen` older than the checkout reads the current `corpus_gen/operations/`
     with `no declaration for operation` or `metadata error` lines.
 - **Building.** From the checkout root (relative paths in this skill are from there), with
-  the `hip-kernel-provider` preset (hipDNN plus the provider in one build):
+  the `hip-kernel-provider` preset (hipDNN plus the provider in one build). The checkout must
+  be writable: the build generates headers into it (flatc, under
+  `projects/hipdnn/flatbuffers_sdk/include/`) and builds rocKE in place
+  (`dnn-providers/hip-kernel-provider/rocke/`), all untracked. On a read-only checkout the
+  build stops at flatc with `Unable to generate C++ for ...`; build from a writable clone.
   ```bash
   cmake --preset hip-kernel-provider -B <build> -G Ninja -DGPU_TARGETS=<arch> \
     -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
@@ -35,7 +41,9 @@ dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_g
   `-k 0` builds everything else. The build is usable when it has `bin/hipdnn_corpus_gen`,
   `bin/hipdnn_bench`, `bin/hipdnn_uhd_features`, `bin/hipdnn_list_engines`,
   `bin/hipdnn_validate_descriptors`, the provider plugin under
-  `<build>/lib/hipdnn_plugins/engines/` and a non-empty `arch_content/` beside it.
+  `<build>/lib/hipdnn_plugins/engines/` and a non-empty `arch_content/` beside it. Configure's
+  `hipDNN: SDPA support disabled` is about the frontend's SDPA API; the tools and the SDPA
+  engines do not need it.
 - **Kernel files.** An engine that loads kernel files at run time looks for them at the
   install path, so from a build tree point it at the build's copy, for every step that runs
   the engine (collection, validation, `hipdnn_bench`): for AITER's `ASM_SDPA_ENGINE`,
@@ -56,8 +64,13 @@ dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_g
     --group-add $(getent group render | cut -d: -f3) \
     -v <checkout>:<checkout> -w <checkout> <image> ...
   ```
-  On a machine whose GPUs are shared out (a scheduler grants you some), pass the granted set
-  in (`-e ROCR_VISIBLE_DEVICES`), since the container sees every device. Check `rocminfo`
+  On a machine whose GPUs are shared out (a scheduler grants you some), the container sees
+  every GPU whose device node it is given, and an index such as `ROCR_VISIBLE_DEVICES` counts
+  within your grant, not within the container's view. Give it only your GPU's nodes: read
+  its PCI address where the grant applies (`amd-smi list`, outside the container), and pass
+  `/dev/kfd` with `$(readlink -f /dev/dri/by-path/pci-<address>-render)` and
+  `$(readlink -f /dev/dri/by-path/pci-<address>-card)` instead of all of `/dev/dri`; pass
+  your granted CPUs as `--cpuset-cpus` (`taskset -cp $$`). Check `rocminfo`
   inside the container lists the gfx agent before running any tool: without the render
   group the GPU is invisible, and every engine appears to serve nothing.
 - After any CMake reconfigure of the hip-kernel-provider build, rebuild its descriptor
@@ -133,15 +146,15 @@ segment is the selector revision with `/` as `-`.
 
 1. **What is stored**: list `datasets/`; each `dataset_manifest.json` lists every
    contribution with its date, devices, purpose and origin. A model's
-   `models/<model>/generation/generation_manifest.json` names the dataset and contributions it
+   `models/<model>/generation_manifest.json` names the dataset and contributions it
    trained on, and under `models[i]` its `training_problem_keys` / `eval_problem_keys`.
 2. **Measure more**: [generate.md](generate.md) makes a set, collects it and adds each collection.
 3. **Add a collection**:
-   `python -m uhd_gen.dataset add --into <dataset dir> --collection <collection dir>...
+   `python3 -m uhd_gen.dataset add --into <dataset dir> --collection <collection dir>...
    --corpus-id <set>`. The binding (engine, role, revision) comes from the collection; one
    that contradicts the dataset is refused whole. Adding the same contribution again adds
    nothing.
-4. **Convert measurements made elsewhere** with `python -m uhd_gen.dataset add --into ...`:
+4. **Convert measurements made elsewhere** with `python3 -m uhd_gen.dataset add --into ...`:
 
    | Source | Flags | Notes |
    |---|---|---|

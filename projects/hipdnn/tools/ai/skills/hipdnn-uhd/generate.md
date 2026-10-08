@@ -4,7 +4,7 @@ One engine, one device, all on the local machine:
 
 shape set (`hipdnn_corpus_gen`, asks the engine on the GPU) → evaluation slice
 (`eval_slice.py choose`) → per role: collect (`uhd_gen generate --collect-only`, timed on the
-GPU) → store (`python -m uhd_gen.dataset add`) → train (`uhd_gen generate --dataset`, scored
+GPU) → store (`python3 -m uhd_gen.dataset add`) → train (`uhd_gen generate --dataset`, scored
 on the slice).
 
 The store layout, the device key, the tools and the slice are in [data.md](data.md);
@@ -101,7 +101,11 @@ Read it from the checkout:
    descriptor engine's packs are a source (`--kdp-root` with the engine's installed
    directory); a closed shape set requires them and is not searched. Exit 0 is a set (a
    warning when the engine serves fewer than `--count`); 2 is an empty set; 3 is a short set
-   the engine was not shown to exhaust. Move a set that did not exit 0 to `archive/`
+   the engine was not shown to exhaust. In its summary, `<op>: N problems` is every problem
+   the search found the engine serves, and `Generated M problems` the set after the cut to
+   `--count`; `K of T declared regime combinations not tried (maxSkeleton bound)` means the
+   first pass tried `--max-skeleton` (default 512) of the operation's declared combinations,
+   which is expected. Move a set that did not exit 0 to `archive/`
    ([data.md](data.md)). On exit 2, rerun one operation with `HIPDNN_LOG_LEVEL=info --count 1`
    into a scratch directory, its log to a file, and look for the engine's own lines
    (`grep isApplicable`): a refusal such as `Device string does not match` says why it serves
@@ -136,7 +140,7 @@ Read it from the checkout:
    `collection_manifest.json`. The engine reports one selector revision for all its operations.
    The directory's name becomes the contribution id in the dataset, which `--contribution`
    selects by.
-6. **Store**: `python -m uhd_gen.dataset add --into <store>/datasets/<engine>/<device>/<revision>/<role>[/under-<L2 id>]
+6. **Store**: `python3 -m uhd_gen.dataset add --into <store>/datasets/<engine>/<device>/<revision>/<role>[/under-<L2 id>]
    --collection <collections> --corpus-id <set>`.
 7. **Train** (CPU):
    ```bash

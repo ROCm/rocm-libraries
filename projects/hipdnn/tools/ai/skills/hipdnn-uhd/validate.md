@@ -54,7 +54,7 @@ python3 $UHD/scripts/decide.py l1 --rows rows.json --candidate-dir <model dir> -
 
 1. Offline regret on the held-out graphs' stored catalog sweeps:
    ```bash
-   python -m uhd_gen.dataset export --from <L2 dataset dir> --out exported.json \
+   python3 -m uhd_gen.dataset export --from <L2 dataset dir> --out exported.json \
      --contribution <the model's contribution ids> --metric <metric>
    python3 $UHD/scripts/eval_slice.py rows exported.json <slices> --out slice_rows.json
    python3 -m uhd_gen evaluate --input slice_rows.json --model-dir <model dir> \
