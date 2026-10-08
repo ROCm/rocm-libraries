@@ -139,6 +139,22 @@ void testing_bsrsv2_bad_arg(const Arguments& argus)
                                                                        info,
                                                                        &size));
 
+    // The true rocsparse buffer size for this problem exceeds INT_MAX bytes; it must not be
+    // silently narrowed into a (wrapped or negative) int and reported as success.
+    {
+        int huge_mb  = 1 << 30;
+        int huge_nnz = 1 << 30;
+        int huge_size = -1;
+        hipsparseStatus_t huge_status = hipsparseXbsrsv2_bufferSize(
+            handle, dirA, transA, huge_mb, huge_nnz, descr, dval, dptr, dcol, 1, info, &huge_size);
+        if(huge_status == HIPSPARSE_STATUS_SUCCESS)
+        {
+            // An int cannot represent the true size, so success implies silent truncation.
+            EXPECT_TRUE(false) << "bufferSize > INT_MAX reported success with truncated size "
+                               << huge_size;
+        }
+    }
+
     verify_hipsparse_status_invalid_pointer(hipsparseXbsrsv2_analysis(handle,
                                                                       dirA,
                                                                       transA,
