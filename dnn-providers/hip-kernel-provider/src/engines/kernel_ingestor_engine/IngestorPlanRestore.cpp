@@ -5,12 +5,9 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <algorithm>
-#include <optional>
 #include <string>
 #include <utility>
 
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
@@ -31,40 +28,19 @@ namespace
 
 using serialization::IngestorPlanRefusal;
 
-// The registered name of the engine with this id, when the handle's engine manager has
-// loaded that engine.
-std::optional<std::string> loadedEngineName(const Handle& handle, int64_t engineId)
-{
-    if(handle.container == nullptr)
-    {
-        return std::nullopt;
-    }
-
-    const auto engineIds = handle.getEngineManager().getAllEngineIds();
-    if(std::find(engineIds.begin(), engineIds.end(), engineId) == engineIds.end())
-    {
-        return std::nullopt;
-    }
-    const auto name = hipdnn_data_sdk::utilities::tryGetEngineNameFromId(engineId);
-    if(!name.has_value())
-    {
-        return std::nullopt;
-    }
-    return std::string(*name);
-}
-
 } // namespace
 
-IngestorPlanRestoreResult restoreIngestorPlan(const uint8_t* data,
-                                              size_t size,
-                                              const Handle& handle,
-                                              const IngestorPlanRestoreEnvironment& environment)
+std::unique_ptr<hipdnn_plugin_sdk::IPlan<Handle>>
+    restoreIngestorPlan(const uint8_t* data,
+                        size_t size,
+                        const Handle& handle,
+                        const IngestorPlanRestoreEnvironment& environment)
 {
-    if(!environment.loadedEngineName || environment.deviceResolver == nullptr)
+    if(environment.deviceResolver == nullptr)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "an ingestor plan restore needs an engine name lookup and a device resolver");
+            "an ingestor plan restore needs a device resolver");
     }
 
     // Header, body digest, verifier and field structure.
@@ -72,25 +48,6 @@ IngestorPlanRestoreResult restoreIngestorPlan(const uint8_t* data,
     const std::string kernel
         = "saved kernel " + hipdnn_plugin_sdk::ingestor::toString(payload.kernelDescriptorId);
     const std::string dispatch = serialization::ingestorPlanMessageText(payload.dispatchSymbol);
-
-    const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId(payload.engineName);
-    const std::string engineIdText = hipdnn_data_sdk::utilities::formatEngineIdHex(engineId);
-    const std::string savedEngineName = serialization::ingestorPlanMessageText(payload.engineName);
-    const auto loadedName = environment.loadedEngineName(engineId);
-    if(!loadedName.has_value())
-    {
-        serialization::refuseIngestorPlan(
-            IngestorPlanRefusal::INCOMPATIBLE,
-            "no engine named '" + savedEngineName + "' (id " + engineIdText + ") is loaded for "
-                + kernel + "; install and load the descriptor set that defines the engine");
-    }
-    if(*loadedName != payload.engineName)
-    {
-        serialization::refuseIngestorPlan(IngestorPlanRefusal::INCOMPATIBLE,
-                                          "the loaded engine with id " + engineIdText
-                                              + " is named '" + *loadedName + "', not '"
-                                              + savedEngineName + "' as " + kernel + " names");
-    }
 
     const auto deviceOrdinal = environment.deviceResolver->deviceId(handle);
     if(deviceOrdinal < 0)
@@ -145,20 +102,17 @@ IngestorPlanRestoreResult restoreIngestorPlan(const uint8_t* data,
                                               + "' does not support restoring " + kernel);
     }
 
-    return {
-        std::make_unique<RestoredIngestorPlan<Handle>>(*handler,
-                                                       std::move(prepared),
-                                                       static_cast<size_t>(payload.workspaceBytes),
-                                                       kernel + " (dispatch '" + dispatch + "')"),
-        engineId};
+    return std::make_unique<RestoredIngestorPlan<Handle>>(
+        *handler,
+        std::move(prepared),
+        static_cast<size_t>(payload.workspaceBytes),
+        kernel + " (dispatch '" + dispatch + "')");
 }
 
-IngestorPlanRestoreResult
+std::unique_ptr<hipdnn_plugin_sdk::IPlan<Handle>>
     restoreIngestorPlan(const uint8_t* data, size_t size, const Handle& handle)
 {
     IngestorPlanRestoreEnvironment environment;
-    environment.loadedEngineName
-        = [&handle](int64_t engineId) { return loadedEngineName(handle, engineId); };
     environment.deviceResolver = &deviceResolver();
     return restoreIngestorPlan(data, size, handle, environment);
 }

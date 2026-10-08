@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
-#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -24,7 +23,6 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
-#include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -32,31 +30,25 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
-#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
-#include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "core/Container.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
-#include "core/Settings.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
-#include "engines/kernel_ingestor_engine/detail/EngineIdRecordingEngine.hpp"
-#include "engines/kernel_ingestor_engine/serialization/IngestorPlanTestUtilities.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/ConvFwdTestGraphs.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
 /**
  * @file TestKernelIngestorEngine.cpp
- * @brief Tests registerNativeIngestorSymbols(), makePointwiseAddEngine(), the computed
- *        execution plan serialization note and the engine that records the engine ID on
- *        each execution context;
+ * @brief Tests registerNativeIngestorSymbols(), makePointwiseAddEngine() and the computed
+ *        execution plan serialization note;
  *        GenericEngine itself is covered by the SDK's suite. The ingestor engine tests go
  *        through Container and EngineManager, since makePointwiseAddEngine() takes no
  *        injectable seams.
@@ -68,13 +60,11 @@ using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using hip_kernel_provider::core::Container;
-using hip_kernel_provider::kernel_ingestor_engine::detail::EngineIdRecordingEngine;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
 using hipdnn_plugin_sdk::ingestor::DescriptorSet;
 using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::MockEngineConfig;
-using hipdnn_test_sdk::utilities::MockGraph;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 constexpr const char* SCRATCH_LABEL = "ingestorengine";
@@ -106,47 +96,6 @@ void stubAsThisEnginesConfig(MockEngineConfig& config)
     EXPECT_CALL(config, engineId())
         .WillRepeatedly(::testing::Return(
             hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName)));
-}
-
-// The engine that an EngineIdRecordingEngine wraps.
-class MockIngestorEngine : public hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>
-{
-public:
-    MOCK_METHOD(int64_t, id, (), (const, override));
-    MOCK_METHOD(bool,
-                isApplicable,
-                (Handle & handle,
-                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph),
-                (const, override));
-    MOCK_METHOD(void,
-                getDetails,
-                (Handle & handle,
-                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-                 hipdnnPluginConstData_t& detailsOut),
-                (const, override));
-    MOCK_METHOD(size_t,
-                getMaxWorkspaceSize,
-                (const Handle& handle,
-                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig),
-                (const, override));
-    MOCK_METHOD(void,
-                initializeExecutionContext,
-                (const Handle& handle,
-                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-                 Context& executionContext),
-                (const, override));
-};
-
-int64_t wrappedEngineId()
-{
-    return hipdnn_data_sdk::utilities::engineNameToId("hipkernel:TestOnlyWrappedEngine");
-}
-
-int64_t configEngineId()
-{
-    return hipdnn_data_sdk::utilities::engineNameToId("hipkernel:TestOnlyConfigEngine");
 }
 
 // registerNativeIngestorSymbols(): idempotent across repeated calls
@@ -615,147 +564,6 @@ TEST(TestKernelIngestorEngine, EveryHandlerOfANotedEngineSavesAndRestores)
     }
     EXPECT_GT(probed, 0U) << "no engine that reports the note was found";
 }
-
-// ---------------------------------------------------------------------------
-// The engine that records the engine ID on each execution context
-// ---------------------------------------------------------------------------
-
-TEST(TestKernelIngestorEngine, EngineIdRecordingEngineRecordsTheConfigEngineId)
-{
-    auto inner = std::make_unique<MockIngestorEngine>();
-    const MockIngestorEngine& mock = *inner;
-    ON_CALL(mock, id()).WillByDefault(::testing::Return(wrappedEngineId()));
-
-    const Handle handle;
-    const MockGraph graph;
-    const MockEngineConfig config;
-    EXPECT_CALL(config, engineId()).WillRepeatedly(::testing::Return(configEngineId()));
-    Context context;
-
-    EXPECT_CALL(mock,
-                initializeExecutionContext(::testing::Ref(handle),
-                                           ::testing::Ref(graph),
-                                           ::testing::Ref(config),
-                                           ::testing::Ref(context)))
-        .Times(1);
-
-    const EngineIdRecordingEngine wrapper(std::move(inner));
-    wrapper.initializeExecutionContext(handle, graph, config, context);
-
-    EXPECT_EQ(context.engineId(), std::optional<int64_t>(configEngineId()));
-}
-
-TEST(TestKernelIngestorEngine, EngineIdRecordingEngineForwardsEveryQuery)
-{
-    auto inner = std::make_unique<MockIngestorEngine>();
-    const MockIngestorEngine& mock = *inner;
-
-    Handle handle;
-    const MockGraph graph;
-    const MockEngineConfig config;
-    const uint8_t detailsByte = 0;
-    const hipdnnPluginConstData_t sentinelDetails{&detailsByte, 3};
-
-    EXPECT_CALL(mock, id()).WillOnce(::testing::Return(wrappedEngineId()));
-    EXPECT_CALL(mock, isApplicable(::testing::Ref(handle), ::testing::Ref(graph)))
-        .WillOnce(::testing::Return(true));
-    EXPECT_CALL(mock, getDetails(::testing::Ref(handle), ::testing::Ref(graph), ::testing::_))
-        .WillOnce(::testing::SetArgReferee<2>(sentinelDetails));
-    EXPECT_CALL(
-        mock,
-        getMaxWorkspaceSize(::testing::Ref(handle), ::testing::Ref(graph), ::testing::Ref(config)))
-        .WillOnce(::testing::Return(size_t{4096}));
-
-    const EngineIdRecordingEngine wrapper(std::move(inner));
-
-    EXPECT_EQ(wrapper.id(), wrappedEngineId());
-    EXPECT_TRUE(wrapper.isApplicable(handle, graph));
-
-    hipdnnPluginConstData_t details{};
-    wrapper.getDetails(handle, graph, details);
-    EXPECT_EQ(details.ptr, sentinelDetails.ptr);
-    EXPECT_EQ(details.size, sentinelDetails.size);
-
-    EXPECT_EQ(wrapper.getMaxWorkspaceSize(handle, graph, config), 4096U);
-}
-
-TEST(TestKernelIngestorEngine, EngineIdRecordingEngineRecordsNothingWhenTheBuildThrows)
-{
-    auto inner = std::make_unique<MockIngestorEngine>();
-    const MockIngestorEngine& mock = *inner;
-
-    const Handle handle;
-    const MockGraph graph;
-    const MockEngineConfig config;
-    EXPECT_CALL(config, engineId()).WillRepeatedly(::testing::Return(configEngineId()));
-    Context context;
-
-    EXPECT_CALL(mock,
-                initializeExecutionContext(::testing::_, ::testing::_, ::testing::_, ::testing::_))
-        .WillOnce(::testing::Throw(hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "test build refusal")));
-
-    const EngineIdRecordingEngine wrapper(std::move(inner));
-    serialization::expectPluginException(
-        [&] { wrapper.initializeExecutionContext(handle, graph, config, context); },
-        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-        "",
-        "test build refusal");
-
-    EXPECT_FALSE(context.engineId().has_value());
-}
-
-TEST(TestKernelIngestorEngine, EngineIdRecordingEngineRefusesANullEngine)
-{
-    serialization::expectPluginInternalError(
-        [] { static_cast<void>(std::make_unique<EngineIdRecordingEngine>(nullptr)); },
-        "needs an engine to wrap");
-}
-
-TEST(TestKernelIngestorEngine, ContextsOfIngestorEnginesRecordTheEngineId)
-{
-    // Compiles the selected kernel through hiprtc, so needs a device.
-    SKIP_IF_NO_DEVICES();
-
-    Container container;
-    auto& engineManager = container.getEngineManager();
-    const Handle handle;
-
-    const auto graph = buildPointwiseGraph();
-    MockEngineConfig engineConfig;
-    stubAsThisEnginesConfig(engineConfig);
-
-    Context context;
-    ASSERT_NO_THROW(
-        engineManager.initializeExecutionContext(handle, wrap(graph), engineConfig, context));
-    ASSERT_TRUE(context.hasValidPlan());
-    EXPECT_EQ(context.engineId(),
-              std::optional<int64_t>(
-                  hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName)));
-}
-
-#ifdef HIPDNN_ENGINE_HIP_MLOPS
-// No HIP_MLOPS plan builder accepts the pointwise graph. The engine then builds no plan and
-// does not throw. The builders decide from the graph alone, so no device is necessary.
-TEST(TestKernelIngestorEngine, ContextsOfHipMlopsRecordNoEngineId)
-{
-    Container container;
-    auto& engineManager = container.getEngineManager();
-    const Handle handle;
-
-    const auto graph = buildPointwiseGraph();
-    const MockEngineConfig engineConfig;
-    EXPECT_CALL(engineConfig, isValid()).WillRepeatedly(::testing::Return(false));
-    EXPECT_CALL(engineConfig, engineId())
-        .WillRepeatedly(::testing::Return(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_ID));
-
-    Context context;
-    ASSERT_NO_THROW(
-        engineManager.initializeExecutionContext(handle, wrap(graph), engineConfig, context));
-    EXPECT_FALSE(context.hasValidPlan());
-    EXPECT_FALSE(context.engineId().has_value());
-}
-#endif
 
 } // namespace
 

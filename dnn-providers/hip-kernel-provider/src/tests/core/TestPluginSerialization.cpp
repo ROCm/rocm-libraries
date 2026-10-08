@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -16,7 +15,6 @@
 
 #include <hip/hip_runtime_api.h>
 
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -37,7 +35,6 @@
 #include "engines/kernel_ingestor_engine/RestoredIngestorPlan.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdPackedCase.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
-#include "engines/kernel_ingestor_engine/serialization/IngestorPlanCodec.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 
 /**
@@ -63,20 +60,15 @@ using hipdnn_test_sdk::utilities::ScopedDirectory;
 namespace packs = hip_kernel_provider::kernel_ingestor_engine::testing;
 
 using packs::makeStubPlan;
+using packs::NO_WINNER_PHRASE;
+using packs::NOT_AN_INGESTOR_ENGINE_PHRASE;
 using packs::runPlan;
 
 constexpr const char* SCRATCH_LABEL = "pluginserialization";
-constexpr const char* NOT_AN_INGESTOR_ENGINE_PHRASE = "does not support saving execution plans";
-constexpr const char* NO_WINNER_PHRASE = "has not chosen a kernel yet";
 
 const packs::PackedPlanCase& convFwdCase()
 {
     return packs::CONV_FWD_PACKED_PLAN_CASE;
-}
-
-int64_t convFwdEngineId()
-{
-    return hipdnn_data_sdk::utilities::engineNameToId(std::string(convFwdCase().engineName));
 }
 
 // A handle whose container loads the engines of the unit descriptor root.
@@ -169,18 +161,12 @@ TEST(TestPluginSerialization, HooksRejectNullArguments)
     EXPECT_EQ(created, nullptr);
 }
 
-TEST(TestPluginSerialization, SaveRefusesAnEngineIdWithoutARegisteredName)
+TEST(TestPluginSerialization, SaveRefusesAPlanNoIngestorEngineBuilt)
 {
     const auto handle = makeHandleWithContainer();
-    const packs::StubDispatchHandler handler;
     Context context;
-    context.setPlan(makeStubPlan(handler, 0x03));
-    const int64_t unregisteredEngineId
-        = hipdnn_data_sdk::utilities::engineNameToId("hipkernel:TestOnlyUnservedEngine");
-    ASSERT_FALSE(
-        hipdnn_data_sdk::utilities::tryGetEngineNameFromId(unregisteredEngineId).has_value());
+    context.setPlan(std::make_unique<packs::NonIngestorPlan>());
 
-    context.setEngineId(unregisteredEngineId);
     hipdnnPluginConstData_t serialized{};
     const std::string message
         = expectHookRefusal(save(*handle, context, serialized),
@@ -190,13 +176,11 @@ TEST(TestPluginSerialization, SaveRefusesAnEngineIdWithoutARegisteredName)
     EXPECT_EQ(message.find(NO_WINNER_PHRASE), std::string::npos) << message;
 }
 
-TEST(TestPluginSerialization, SaveRefusesAContextWithoutAnEngineId)
+TEST(TestPluginSerialization, SaveRefusesAContextWithoutAPlan)
 {
     const auto handle = makeHandleWithContainer();
-    const packs::StubDispatchHandler handler;
     Context context;
-    context.setPlan(makeStubPlan(handler, 0x04));
-    ASSERT_FALSE(context.engineId().has_value());
+    ASSERT_FALSE(context.hasValidPlan());
 
     const uint8_t byte = 0;
     hipdnnPluginConstData_t serialized{&byte, 7};
@@ -215,7 +199,6 @@ TEST(TestPluginSerialization, SaveRefusesABenchmarkPlanWithoutAWinner)
     const auto handle = makeHandleWithContainer();
     const packs::StubDispatchHandler handler;
     const auto context = makeBenchmarkContext(handler, *handle);
-    context->setEngineId(convFwdEngineId());
 
     hipdnnPluginConstData_t serialized{};
     const std::string message
@@ -233,7 +216,6 @@ TEST(TestPluginSerialization, SaveRefusesARestoredPlan)
     Context context;
     context.setPlan(std::make_unique<RestoredIngestorPlan<Handle>>(
         handler, std::make_unique<PreparedDispatch>(), 0, "restored test plan"));
-    context.setEngineId(convFwdEngineId());
 
     hipdnnPluginConstData_t serialized{};
     const std::string message
@@ -248,20 +230,19 @@ TEST(TestPluginSerialization, SaveLeavesTheOutputUntouchedOnRefusal)
 {
     const auto handle = makeHandleWithContainer();
     const packs::StubDispatchHandler handler;
-    const auto context = makeBenchmarkContext(handler, *handle);
+    const auto benchmarkContext = makeBenchmarkContext(handler, *handle);
     const uint8_t byte = 0;
 
-    // Capture refuses the plan.
-    context->setEngineId(convFwdEngineId());
+    // A benchmarking plan without a chosen kernel.
     hipdnnPluginConstData_t serialized{&byte, 7};
-    EXPECT_EQ(save(*handle, *context, serialized), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+    EXPECT_EQ(save(*handle, *benchmarkContext, serialized), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
     EXPECT_EQ(serialized.ptr, static_cast<const void*>(&byte));
     EXPECT_EQ(serialized.size, 7U);
 
-    // The engine name lookup refuses the plan.
-    context->setEngineId(
-        hipdnn_data_sdk::utilities::engineNameToId("hipkernel:TestOnlyUnservedEngine"));
-    EXPECT_EQ(save(*handle, *context, serialized), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+    // A plan that no ingestor engine built.
+    Context nonIngestorContext;
+    nonIngestorContext.setPlan(std::make_unique<packs::NonIngestorPlan>());
+    EXPECT_EQ(save(*handle, nonIngestorContext, serialized), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
     EXPECT_EQ(serialized.ptr, static_cast<const void*>(&byte));
     EXPECT_EQ(serialized.size, 7U);
 }
@@ -360,11 +341,6 @@ public:
         return static_cast<const Context*>(_context)->plan();
     }
 
-    std::optional<int64_t> engineId() const
-    {
-        return static_cast<const Context*>(_context)->engineId();
-    }
-
 private:
     Handle* _handle;
     hipdnnEnginePluginExecutionContext_t _context = nullptr;
@@ -393,7 +369,6 @@ TEST(TestPluginSerialization, RoundTripsAKpackPlanThroughTheHooks)
 
     auto context = std::make_unique<Context>();
     context->setPlan(std::move(built.plan));
-    context->setEngineId(convFwdEngineId());
 
     const auto loadHandle = makeHandleWithContainer();
     ScopedSerializedContext serialized(*loadHandle);
@@ -401,10 +376,6 @@ TEST(TestPluginSerialization, RoundTripsAKpackPlanThroughTheHooks)
         << lastPluginError();
     ASSERT_NE(serialized.data().ptr, nullptr);
     ASSERT_GT(serialized.data().size, 0U);
-
-    const auto payload = serialization::decodeIngestorPlan(
-        static_cast<const uint8_t*>(serialized.data().ptr), serialized.data().size);
-    EXPECT_EQ(payload.engineName, std::string(packedCase.engineName));
 
     // Destroy the original plan and drop the cached modules, so that no code object of the
     // original plan stays loaded.
@@ -417,7 +388,6 @@ TEST(TestPluginSerialization, RoundTripsAKpackPlanThroughTheHooks)
               HIPDNN_PLUGIN_STATUS_SUCCESS)
         << lastPluginError();
     ASSERT_NE(restored.context(), nullptr);
-    EXPECT_EQ(restored.engineId(), std::optional<int64_t>(convFwdEngineId()));
 
     for(int run = 0; run < 2; ++run)
     {

@@ -35,7 +35,6 @@
 
 #include "compilation/KpackModuleCache.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
-#include "engines/kernel_ingestor_engine/detail/EngineIdRecordingEngine.hpp"
 #endif
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
@@ -133,18 +132,15 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                          if(auto stateManager
                             = kernel_ingestor_engine::takeDiscoveredStateManager(set.engine.id))
                          {
-                             return std::make_unique<
-                                 kernel_ingestor_engine::detail::EngineIdRecordingEngine>(
-                                 hipdnn_plugin_sdk::ingestor::makeEngine<Handle, Settings, Context>(
+                             return hipdnn_plugin_sdk::ingestor::
+                                 makeEngine<Handle, Settings, Context>(
                                      kernel_ingestor_engine::engineWithComputedBehaviorNotes(set),
                                      std::move(stateManager),
-                                     kernel_ingestor_engine::deviceResolver()));
+                                     kernel_ingestor_engine::deviceResolver());
                          }
-                         return std::make_unique<
-                             kernel_ingestor_engine::detail::EngineIdRecordingEngine>(
-                             hipdnn_plugin_sdk::ingestor::makeEngine<Handle, Settings, Context>(
-                                 kernel_ingestor_engine::withComputedBehaviorNotes(set),
-                                 kernel_ingestor_engine::deviceResolver()));
+                         return hipdnn_plugin_sdk::ingestor::makeEngine<Handle, Settings, Context>(
+                             kernel_ingestor_engine::withComputedBehaviorNotes(set),
+                             kernel_ingestor_engine::deviceResolver());
                      }
                      catch(const std::exception& error)
                      {

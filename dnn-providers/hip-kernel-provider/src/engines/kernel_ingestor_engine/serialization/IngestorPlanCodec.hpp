@@ -24,10 +24,10 @@ namespace hip_kernel_provider::kernel_ingestor_engine::serialization
 /// Returns the header and the FlatBuffer body of `payload`.
 ///
 /// Throws `HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR` when the payload breaks a rule the caller
-/// owns: a source kind that is not a `KernelSourceKind` value, an empty `engineName`,
-/// `providerVersion`, `symbol` or `dispatchSymbol`, or a `sha256` that is not 64 lowercase
-/// hex characters. Throws `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE` when the code object is too
-/// large for the format.
+/// owns: a source kind that is not a `KernelSourceKind` value, an empty `providerVersion`,
+/// `symbol` or `dispatchSymbol`, or a `sha256` that is not 64 lowercase hex characters.
+/// Throws `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE` when the code object is too large for the
+/// format.
 std::vector<uint8_t> encodeIngestorPlan(const IngestorPlanPayload& payload);
 
 /// Reads the payload bytes at `data`. `data` needs no particular alignment.
@@ -40,8 +40,8 @@ std::vector<uint8_t> encodeIngestorPlan(const IngestorPlanPayload& payload);
 /// 5. The structure rules that the verifier does not check (`INVALID_VALUE`).
 /// 6. The runtime pass-by-value tensor list is empty (`NOT_APPLICABLE`).
 ///
-/// The caller runs the checks that need the provider: identity, GPU, handler, signature and
-/// module load.
+/// The caller runs the checks that need the provider: GPU, handler, signature and module
+/// load.
 IngestorPlanPayload decodeIngestorPlan(const uint8_t* data, size_t size);
 
 /// Returns `text` for use in an error message. Text longer than 80 characters is cut, and

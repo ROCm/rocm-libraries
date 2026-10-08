@@ -34,7 +34,6 @@ table KernelImage {
 }
 
 table ExecutionPlan {
-  engine_name: string (required);
   kernel_descriptor_id: Uuid (required);
   workspace_bytes: ulong = null;
   runtime_pass_by_value_uids: [long] (required);

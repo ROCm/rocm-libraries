@@ -15,7 +15,6 @@
 
 #include <hip/hip_runtime_api.h>
 
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -79,26 +78,18 @@ namespace fixtures = hip_kernel_provider::testing;
 namespace packs = hip_kernel_provider::kernel_ingestor_engine::testing;
 
 using packs::makeStubPlan;
+using packs::NO_WINNER_PHRASE;
+using packs::NOT_AN_INGESTOR_ENGINE_PHRASE;
 using packs::PackedPlan;
 using packs::PackedPlanCase;
 
 constexpr const char* SCRATCH_LABEL = "ingestorplancapture";
-constexpr const char* ENGINE_NAME = "hipkernel:capture_test_engine";
 
-int64_t testEngineId()
+auto captureOf(const hipdnn_plugin_sdk::IPlan<Handle>& plan)
 {
-    return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
-}
-
-// The text of the refusal for a benchmarking plan without a chosen kernel.
-constexpr const char* NO_WINNER_PHRASE = "has not chosen a kernel yet";
-
-// Saves `plan` under the test engine id and the engine name `name`.
-auto captureOf(const hipdnn_plugin_sdk::IPlan<Handle>& plan, std::string name = ENGINE_NAME)
-{
-    return [&plan, engineName = std::move(name)]() {
+    return [&plan]() {
         const Handle handle;
-        static_cast<void>(captureIngestorPlan(plan, handle, testEngineId(), engineName));
+        static_cast<void>(captureIngestorPlan(plan, handle));
     };
 }
 
@@ -136,9 +127,20 @@ TEST(TestIngestorPlanCapture, RefusesABenchmarkPlanWithoutAWinner)
     const Handle handle;
     const BenchmarkPlan<Handle> plan(std::move(candidates), handle);
 
-    expectSaveRefusal(plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, NO_WINNER_PHRASE);
     expectSaveRefusal(plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "execute it once");
     expectSaveRefusal(plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "benchmarking off");
+    const std::string message
+        = expectSaveRefusal(plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, NO_WINNER_PHRASE);
+    EXPECT_EQ(message.find(NOT_AN_INGESTOR_ENGINE_PHRASE), std::string::npos) << message;
+}
+
+TEST(TestIngestorPlanCapture, RefusesAPlanNoIngestorEngineBuilt)
+{
+    const packs::NonIngestorPlan plan;
+
+    const std::string message = expectSaveRefusal(
+        plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, NOT_AN_INGESTOR_ENGINE_PHRASE);
+    EXPECT_EQ(message.find(NO_WINNER_PHRASE), std::string::npos) << message;
 }
 
 TEST(TestIngestorPlanCapture, RefusesAHandlerThatSavesNothing)
@@ -155,19 +157,6 @@ TEST(TestIngestorPlanCapture, RefusesAnAliasThatIsNotRegisteredToTheHandler)
     const auto plan = makeStubPlan(handler, 0x04);
 
     serialization::expectPluginInternalError(captureOf(*plan), "is not registered to this handler");
-}
-
-TEST(TestIngestorPlanCapture, RefusesAnEngineNameWithoutTheEngineId)
-{
-    const packs::StubDispatchHandler handler;
-    const auto plan = makeStubPlan(handler, 0x05);
-
-    const std::string message = serialization::expectPluginInternalError(
-        captureOf(*plan, "hipkernel:another_engine"), "does not give the id");
-    EXPECT_NE(message.find("hipkernel:another_engine"), std::string::npos) << message;
-    EXPECT_NE(message.find(hipdnn_data_sdk::utilities::formatEngineIdHex(testEngineId())),
-              std::string::npos)
-        << message;
 }
 
 TEST(TestIngestorPlanCapture, RefusesARestoredPlan)
@@ -218,10 +207,8 @@ TEST_P(TestIngestorPlanCaptureKpack, CapturesAKpackPlan)
     const auto& plan = built.plan;
 
     const Handle handle;
-    const IngestorPlanPayload payload
-        = captureIngestorPlan(*plan, handle, testEngineId(), ENGINE_NAME);
+    const IngestorPlanPayload payload = captureIngestorPlan(*plan, handle);
 
-    EXPECT_EQ(payload.engineName, ENGINE_NAME);
     EXPECT_EQ(payload.kernelDescriptorId, kernel.kernelId);
     EXPECT_EQ(payload.workspaceBytes, param.workspaceBytes);
     EXPECT_EQ(payload.workspaceBytes, plan->getWorkspaceSize(handle));
@@ -300,7 +287,7 @@ TEST_P(TestIngestorPlanCaptureGate, AppliesTheSourceKindGate)
                          << built.deviceProperties.gcnArchName << ")";
         }
 
-        const auto payload = captureIngestorPlan(*built.plan, handle, testEngineId(), ENGINE_NAME);
+        const auto payload = captureIngestorPlan(*built.plan, handle);
         EXPECT_EQ(payload.sourceKind, KernelSourceKind::KPACK);
         return;
     }
@@ -426,7 +413,7 @@ TEST(TestIngestorPlanCapture, CapturesTheBenchmarkWinnersOwnWorkspace)
     plan.execute(handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get());
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-    const auto payload = captureIngestorPlan(plan, handle, testEngineId(), ENGINE_NAME);
+    const auto payload = captureIngestorPlan(plan, handle);
     EXPECT_EQ(payload.kernelDescriptorId, smallKernel.kernelId);
     EXPECT_EQ(payload.workspaceBytes, 0U);
 }

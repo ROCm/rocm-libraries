@@ -6,13 +6,9 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
-#include <optional>
-#include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginHelpers.hpp>
@@ -23,10 +19,9 @@
 #include "engines/kernel_ingestor_engine/IngestorPlanCapture.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPlanRestore.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanCodec.hpp"
-#include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 
-// Saves only the plans that an ingestor engine built. Capture refuses a restored plan, a
-// benchmarking plan without a chosen kernel, and a kernel whose source kind cannot be saved.
+// Saves only the plans that an ingestor engine built. A context without a plan gets the
+// non-ingestor refusal.
 hipdnnPluginStatus_t hipdnnEnginePluginSerializeExecutionContext(
     hipdnnEnginePluginHandle_t handle,
     hipdnnEnginePluginExecutionContext_t executionContext,
@@ -45,23 +40,13 @@ hipdnnPluginStatus_t hipdnnEnginePluginSerializeExecutionContext(
         const auto& typedContext = *static_cast<const Context*>(executionContext);
 
         namespace kie = hip_kernel_provider::kernel_ingestor_engine;
-        const std::optional<int64_t> engineId = typedContext.engineId();
-        std::optional<std::string_view> engineName;
-        if(engineId.has_value())
+        if(!typedContext.hasValidPlan())
         {
-            engineName = hipdnn_data_sdk::utilities::tryGetEngineNameFromId(*engineId);
-        }
-        if(!engineId.has_value() || !engineName.has_value())
-        {
-            kie::serialization::refuseIngestorPlanSave(
-                kie::serialization::IngestorPlanRefusal::INCOMPATIBLE,
-                "this plan was not built by an ingestor engine; its engine does not support "
-                "saving execution plans");
+            kie::refuseNonIngestorPlanSave();
         }
 
-        const std::vector<uint8_t> encoded
-            = kie::serialization::encodeIngestorPlan(kie::captureIngestorPlan(
-                typedContext.plan(), typedHandle, *engineId, std::string(*engineName)));
+        const std::vector<uint8_t> encoded = kie::serialization::encodeIngestorPlan(
+            kie::captureIngestorPlan(typedContext.plan(), typedHandle));
 
         // The destroy hook frees this buffer with delete[].
         // NOLINTNEXTLINE(modernize-avoid-c-arrays)
@@ -113,7 +98,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextFromSerialized(
         hipdnn_plugin_sdk::throwIfNull(executionContext);
 
         const auto& typedHandle = *static_cast<const Handle*>(handle);
-        auto restored = hip_kernel_provider::kernel_ingestor_engine::restoreIngestorPlan(
+        auto plan = hip_kernel_provider::kernel_ingestor_engine::restoreIngestorPlan(
             static_cast<const uint8_t*>(serializedContext->ptr),
             serializedContext->size,
             typedHandle);
@@ -121,8 +106,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextFromSerialized(
         auto* context = new Context;
         try
         {
-            context->setPlan(std::move(restored.plan));
-            context->setEngineId(restored.engineId);
+            context->setPlan(std::move(plan));
         }
         catch(...)
         {

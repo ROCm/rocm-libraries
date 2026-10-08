@@ -8,8 +8,8 @@
 #include <string>
 #include <utility>
 
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/ingestor/BenchmarkPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
@@ -25,20 +25,16 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 
 using serialization::IngestorPlanRefusal;
 
-serialization::IngestorPlanPayload captureIngestorPlan(const hipdnn_plugin_sdk::IPlan<Handle>& plan,
-                                                       const Handle& handle,
-                                                       int64_t engineId,
-                                                       const std::string& engineName)
+void refuseNonIngestorPlanSave()
 {
-    if(hipdnn_data_sdk::utilities::engineNameToId(engineName) != engineId)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "engine name '" + engineName + "' does not give the id "
-                + hipdnn_data_sdk::utilities::formatEngineIdHex(engineId)
-                + " of the engine that built the plan");
-    }
+    serialization::refuseIngestorPlanSave(IngestorPlanRefusal::INCOMPATIBLE,
+                                          "this plan was not built by an ingestor engine; its "
+                                          "engine does not support saving execution plans");
+}
 
+serialization::IngestorPlanPayload captureIngestorPlan(const hipdnn_plugin_sdk::IPlan<Handle>& plan,
+                                                       const Handle& handle)
+{
     if(dynamic_cast<const RestoredIngestorPlan<Handle>*>(&plan) != nullptr)
     {
         serialization::refuseIngestorPlanSave(
@@ -50,10 +46,15 @@ serialization::IngestorPlanPayload captureIngestorPlan(const hipdnn_plugin_sdk::
     const auto* saveable = plan.saveablePlan();
     if(saveable == nullptr)
     {
-        serialization::refuseIngestorPlanSave(
-            IngestorPlanRefusal::INCOMPATIBLE,
-            "the plan has not chosen a kernel yet; execute it once, or build it with "
-            "benchmarking off, then save");
+        if(dynamic_cast<const hipdnn_plugin_sdk::ingestor::BenchmarkPlan<Handle>*>(&plan)
+           != nullptr)
+        {
+            serialization::refuseIngestorPlanSave(
+                IngestorPlanRefusal::INCOMPATIBLE,
+                "the plan has not chosen a kernel yet; execute it once, or build it with "
+                "benchmarking off, then save");
+        }
+        refuseNonIngestorPlanSave();
     }
 
     const auto& kernel = saveable->kernel();
@@ -96,7 +97,6 @@ serialization::IngestorPlanPayload captureIngestorPlan(const hipdnn_plugin_sdk::
     auto code = prepared->kernelCode().readCodeObject();
 
     serialization::IngestorPlanPayload payload;
-    payload.engineName = engineName;
     payload.kernelDescriptorId = kernel.kernelId;
     payload.workspaceBytes = saveable->getWorkspaceSize(handle);
     payload.dispatchSymbol = std::move(inputs->dispatchSymbol);

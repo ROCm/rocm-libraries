@@ -6,7 +6,6 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
-#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -19,9 +18,6 @@
 
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
-
-// The engine of the packed Pointwise set.
-inline constexpr std::string_view POINTWISE_PACKED_ENGINE = "hipkernel:pointwise_packed";
 
 inline flatbuffers::FlatBufferBuilder buildPointwisePackedGraph()
 {
@@ -42,7 +38,6 @@ inline void expectPointwisePackedOutput(const std::vector<uint8_t>& output)
 // The packed Pointwise set, with the kernel of block size 256.
 inline constexpr PackedPlanCase POINTWISE_PACKED_PLAN_CASE{
     "Pointwise",
-    POINTWISE_PACKED_ENGINE,
     POINTWISE_B256_DESCRIPTOR,
     &POINTWISE_ADD,
     OUTPUT_UID,

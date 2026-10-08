@@ -3,19 +3,16 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -26,7 +23,6 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
-#include "core/Container.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPlanRestore.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -61,14 +57,6 @@ using serialization::IngestorPlanPayload;
 
 namespace packs = hip_kernel_provider::kernel_ingestor_engine::testing;
 
-constexpr const char* LOADED_ENGINE_NAME = "hipkernel:restore_test_engine";
-constexpr const char* UNLOADED_ENGINE_NAME = "hipkernel:restore_test_absent_engine";
-// Any registered engine name that this provider does not load works here.
-constexpr const char* REGISTERED_UNLOADED_ENGINE_NAME
-    = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME;
-// The fake engine lookup reports another name for the id of this name.
-constexpr const char* RENAMED_ENGINE_NAME = "hipkernel:restore_test_renamed_engine";
-constexpr const char* OTHER_LOADED_NAME = "hipkernel:restore_test_other_engine";
 constexpr const char* DEVICE_ARCH = "gfx90a:sramecc+:xnack-";
 constexpr const char* FOREIGN_TARGET = "gfx942";
 constexpr const char* UNKNOWN_ALIAS = "hipkernel.conv_fwd.dispatch.v9";
@@ -99,27 +87,6 @@ private:
     DeviceProperties _properties;
 };
 
-// The id of an engine name, in the hex form refusal messages use.
-std::string engineIdHexOf(const std::string& engineName)
-{
-    return hipdnn_data_sdk::utilities::formatEngineIdHex(
-        hipdnn_data_sdk::utilities::engineNameToId(engineName));
-}
-
-// Knows two loaded engines. The engine with the id of RENAMED_ENGINE_NAME has another name.
-std::optional<std::string> fakeLoadedEngineName(int64_t engineId)
-{
-    if(engineId == hipdnn_data_sdk::utilities::engineNameToId(LOADED_ENGINE_NAME))
-    {
-        return std::string(LOADED_ENGINE_NAME);
-    }
-    if(engineId == hipdnn_data_sdk::utilities::engineNameToId(RENAMED_ENGINE_NAME))
-    {
-        return std::string(OTHER_LOADED_NAME);
-    }
-    return std::nullopt;
-}
-
 // The ten arguments the conv-forward pack launches with: three pointers and seven ints.
 std::vector<KernelArgument> convFwdSignature()
 {
@@ -133,7 +100,6 @@ std::vector<KernelArgument> convFwdSignature()
 IngestorPlanPayload validConvFwdPayload()
 {
     IngestorPlanPayload payload;
-    payload.engineName = LOADED_ENGINE_NAME;
     payload.kernelDescriptorId.fill(0x42);
     payload.workspaceBytes = 0;
     payload.dispatchSymbol = std::string(CONV_FWD_DISPATCH_SYMBOL_V1);
@@ -164,9 +130,8 @@ protected:
                                                               = FakeDeviceResolver()) const
     {
         IngestorPlanRestoreEnvironment environment;
-        environment.loadedEngineName = fakeLoadedEngineName;
         environment.deviceResolver = &resolver;
-        return restoreIngestorPlan(encoded.data(), encoded.size(), _handle, environment).plan;
+        return restoreIngestorPlan(encoded.data(), encoded.size(), _handle, environment);
     }
 
     void expectRefusal(const IngestorPlanPayload& payload,
@@ -198,7 +163,6 @@ TEST_F(TestIngestorPlanRestoreChecks, SurfacesAnUnreadableVersion)
 TEST_F(TestIngestorPlanRestoreChecks, RunsTheDecoderBeforeAnyLoadCheck)
 {
     auto payload = validConvFwdPayload();
-    payload.engineName = UNLOADED_ENGINE_NAME;
     payload.target = FOREIGN_TARGET;
     payload.dispatchSymbol = UNKNOWN_ALIAS;
     auto encoded = serialization::encodeIngestorPlan(payload);
@@ -207,62 +171,6 @@ TEST_F(TestIngestorPlanRestoreChecks, RunsTheDecoderBeforeAnyLoadCheck)
     expectIngestorPlanRefusal([&]() { static_cast<void>(restore(encoded)); },
                               HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
                               "body digest mismatch");
-}
-
-TEST_F(TestIngestorPlanRestoreChecks, RefusesAnEngineThatIsNotLoaded)
-{
-    auto payload = validConvFwdPayload();
-    payload.engineName = UNLOADED_ENGINE_NAME;
-
-    expectRefusal(payload,
-                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-                  std::string("no engine named '") + UNLOADED_ENGINE_NAME + "'");
-    expectRefusal(
-        payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, engineIdHexOf(UNLOADED_ENGINE_NAME));
-    expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "descriptor set");
-    expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "424242");
-}
-
-TEST_F(TestIngestorPlanRestoreChecks, RefusesALoadedEngineWithAnotherName)
-{
-    auto payload = validConvFwdPayload();
-    payload.engineName = RENAMED_ENGINE_NAME;
-
-    expectRefusal(payload,
-                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-                  std::string("is named '") + OTHER_LOADED_NAME + "', not '" + RENAMED_ENGINE_NAME
-                      + "'");
-    expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, engineIdHexOf(RENAMED_ENGINE_NAME));
-    expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "424242");
-}
-
-TEST_F(TestIngestorPlanRestoreChecks, TheProviderLookupRefusesAnEngineThatIsNotLoaded)
-{
-    ASSERT_TRUE(hipdnn_data_sdk::utilities::tryGetEngineNameFromId(
-                    hipdnn_data_sdk::utilities::engineNameToId(REGISTERED_UNLOADED_ENGINE_NAME))
-                    .has_value());
-
-    Handle withContainer;
-    withContainer.container = std::make_shared<hip_kernel_provider::core::Container>();
-    const Handle withoutContainer;
-    const std::array<const Handle*, 2> handles{&withContainer, &withoutContainer};
-
-    for(const Handle* handle : handles)
-    {
-        for(const char* engineName : {REGISTERED_UNLOADED_ENGINE_NAME, UNLOADED_ENGINE_NAME})
-        {
-            auto payload = validConvFwdPayload();
-            payload.engineName = engineName;
-            const auto encoded = serialization::encodeIngestorPlan(payload);
-
-            expectIngestorPlanRefusal(
-                [&]() {
-                    static_cast<void>(restoreIngestorPlan(encoded.data(), encoded.size(), *handle));
-                },
-                HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-                std::string("no engine named '") + engineName + "'");
-        }
-    }
 }
 
 TEST_F(TestIngestorPlanRestoreChecks, RefusesWhenTheHandleNamesNoDevice)
@@ -294,6 +202,7 @@ TEST_F(TestIngestorPlanRestoreChecks, RefusesAnUnknownAlias)
     expectRefusal(payload,
                   HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
                   std::string("no dispatch handler is registered under '") + UNKNOWN_ALIAS + "'");
+    expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "424242");
 }
 
 TEST_F(TestIngestorPlanRestoreChecks, RefusesAHandlerWithoutRestoreSupport)
@@ -366,12 +275,6 @@ INSTANTIATE_TEST_SUITE_P(
     ,
     TestIngestorPlanRestoreCheckOrder,
     ::testing::Values(
-        OrderCase{"EngineBeforeTarget",
-                  [](IngestorPlanPayload& payload) {
-                      payload.engineName = UNLOADED_ENGINE_NAME;
-                      payload.target = FOREIGN_TARGET;
-                  },
-                  "no engine named"},
         OrderCase{"TargetBeforeAlias",
                   [](IngestorPlanPayload& payload) {
                       payload.target = FOREIGN_TARGET;

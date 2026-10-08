@@ -61,8 +61,6 @@ enum class IngestorPlanKind : uint16_t
 /// The contents of a saved single-kernel plan.
 struct IngestorPlanPayload
 {
-    /// The human-readable name of the engine that built the plan. Its hash is the engine id.
-    std::string engineName;
     hipdnn_plugin_sdk::ingestor::DescriptorId kernelDescriptorId{};
     uint64_t workspaceBytes = 0;
     /// UIDs of the tensors the plan takes by value at execution.
@@ -106,7 +104,7 @@ inline bool sameKernelSignature(const std::vector<hipdnn_plugin_sdk::ingestor::K
 
 inline bool operator==(const IngestorPlanPayload& lhs, const IngestorPlanPayload& rhs)
 {
-    return lhs.engineName == rhs.engineName && lhs.kernelDescriptorId == rhs.kernelDescriptorId
+    return lhs.kernelDescriptorId == rhs.kernelDescriptorId
            && lhs.workspaceBytes == rhs.workspaceBytes
            && lhs.runtimePassByValueUids == rhs.runtimePassByValueUids
            && lhs.dispatchSymbol == rhs.dispatchSymbol && lhs.launchValues == rhs.launchValues

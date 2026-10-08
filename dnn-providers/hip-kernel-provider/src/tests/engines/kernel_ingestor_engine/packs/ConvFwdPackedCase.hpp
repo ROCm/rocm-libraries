@@ -88,7 +88,6 @@ inline void expectConvFwdPackedOutput(const std::vector<uint8_t>& output)
 // The packed ConvFwd set, with the kernel of block size 64.
 inline constexpr PackedPlanCase CONV_FWD_PACKED_PLAN_CASE{
     "ConvFwd",
-    CONV_FWD.engineName,
     CONV_FWD_DESCRIPTOR,
     &CONV_FWD,
     CONV_Y_UID,

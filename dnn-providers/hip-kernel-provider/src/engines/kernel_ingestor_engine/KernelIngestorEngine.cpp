@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>

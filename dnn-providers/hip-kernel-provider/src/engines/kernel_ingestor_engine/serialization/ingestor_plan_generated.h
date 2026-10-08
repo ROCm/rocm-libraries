@@ -1154,7 +1154,6 @@ inline ::flatbuffers::Offset<KernelImage> CreateKernelImageDirect(
 
 struct ExecutionPlanT : public ::flatbuffers::NativeTable {
   typedef ExecutionPlan TableType;
-  std::string engine_name{};
   std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid> kernel_descriptor_id{};
   ::flatbuffers::Optional<uint64_t> workspace_bytes = ::flatbuffers::nullopt;
   std::vector<int64_t> runtime_pass_by_value_uids{};
@@ -1171,20 +1170,13 @@ struct ExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef ExecutionPlanT NativeTableType;
   typedef ExecutionPlanBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
-    VT_ENGINE_NAME = 4,
-    VT_KERNEL_DESCRIPTOR_ID = 6,
-    VT_WORKSPACE_BYTES = 8,
-    VT_RUNTIME_PASS_BY_VALUE_UIDS = 10,
-    VT_DISPATCH_DATA = 12,
-    VT_KERNEL_IMAGE = 14,
-    VT_PROVIDER_VERSION = 16
+    VT_KERNEL_DESCRIPTOR_ID = 4,
+    VT_WORKSPACE_BYTES = 6,
+    VT_RUNTIME_PASS_BY_VALUE_UIDS = 8,
+    VT_DISPATCH_DATA = 10,
+    VT_KERNEL_IMAGE = 12,
+    VT_PROVIDER_VERSION = 14
   };
-  const ::flatbuffers::String *engine_name() const {
-    return GetPointer<const ::flatbuffers::String *>(VT_ENGINE_NAME);
-  }
-  ::flatbuffers::String *mutable_engine_name() {
-    return GetPointer<::flatbuffers::String *>(VT_ENGINE_NAME);
-  }
   const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_descriptor_id() const {
     return GetStruct<const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *>(VT_KERNEL_DESCRIPTOR_ID);
   }
@@ -1223,8 +1215,6 @@ struct ExecutionPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyOffsetRequired(verifier, VT_ENGINE_NAME) &&
-           verifier.VerifyString(engine_name()) &&
            VerifyFieldRequired<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid>(verifier, VT_KERNEL_DESCRIPTOR_ID, 1) &&
            VerifyField<uint64_t>(verifier, VT_WORKSPACE_BYTES, 8) &&
            VerifyOffsetRequired(verifier, VT_RUNTIME_PASS_BY_VALUE_UIDS) &&
@@ -1246,9 +1236,6 @@ struct ExecutionPlanBuilder {
   typedef ExecutionPlan Table;
   ::flatbuffers::FlatBufferBuilder &fbb_;
   ::flatbuffers::uoffset_t start_;
-  void add_engine_name(::flatbuffers::Offset<::flatbuffers::String> engine_name) {
-    fbb_.AddOffset(ExecutionPlan::VT_ENGINE_NAME, engine_name);
-  }
   void add_kernel_descriptor_id(const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_descriptor_id) {
     fbb_.AddStruct(ExecutionPlan::VT_KERNEL_DESCRIPTOR_ID, kernel_descriptor_id);
   }
@@ -1274,7 +1261,6 @@ struct ExecutionPlanBuilder {
   ::flatbuffers::Offset<ExecutionPlan> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = ::flatbuffers::Offset<ExecutionPlan>(end);
-    fbb_.Required(o, ExecutionPlan::VT_ENGINE_NAME);
     fbb_.Required(o, ExecutionPlan::VT_KERNEL_DESCRIPTOR_ID);
     fbb_.Required(o, ExecutionPlan::VT_RUNTIME_PASS_BY_VALUE_UIDS);
     fbb_.Required(o, ExecutionPlan::VT_DISPATCH_DATA);
@@ -1286,7 +1272,6 @@ struct ExecutionPlanBuilder {
 
 inline ::flatbuffers::Offset<ExecutionPlan> CreateExecutionPlan(
     ::flatbuffers::FlatBufferBuilder &_fbb,
-    ::flatbuffers::Offset<::flatbuffers::String> engine_name = 0,
     const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_descriptor_id = nullptr,
     ::flatbuffers::Optional<uint64_t> workspace_bytes = ::flatbuffers::nullopt,
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> runtime_pass_by_value_uids = 0,
@@ -1300,25 +1285,21 @@ inline ::flatbuffers::Offset<ExecutionPlan> CreateExecutionPlan(
   builder_.add_dispatch_data(dispatch_data);
   builder_.add_runtime_pass_by_value_uids(runtime_pass_by_value_uids);
   builder_.add_kernel_descriptor_id(kernel_descriptor_id);
-  builder_.add_engine_name(engine_name);
   return builder_.Finish();
 }
 
 inline ::flatbuffers::Offset<ExecutionPlan> CreateExecutionPlanDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
-    const char *engine_name = nullptr,
     const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_descriptor_id = nullptr,
     ::flatbuffers::Optional<uint64_t> workspace_bytes = ::flatbuffers::nullopt,
     const std::vector<int64_t> *runtime_pass_by_value_uids = nullptr,
     ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData> dispatch_data = 0,
     ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelImage> kernel_image = 0,
     const char *provider_version = nullptr) {
-  auto engine_name__ = engine_name ? _fbb.CreateString(engine_name) : 0;
   auto runtime_pass_by_value_uids__ = runtime_pass_by_value_uids ? _fbb.CreateVector<int64_t>(*runtime_pass_by_value_uids) : 0;
   auto provider_version__ = provider_version ? _fbb.CreateString(provider_version) : 0;
   return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateExecutionPlan(
       _fbb,
-      engine_name__,
       kernel_descriptor_id,
       workspace_bytes,
       runtime_pass_by_value_uids__,
@@ -1741,7 +1722,6 @@ inline ::flatbuffers::Offset<KernelImage> CreateKernelImage(::flatbuffers::FlatB
 
 inline bool operator==(const ExecutionPlanT &lhs, const ExecutionPlanT &rhs) {
   return
-      (lhs.engine_name == rhs.engine_name) &&
       ((lhs.kernel_descriptor_id == rhs.kernel_descriptor_id) || (lhs.kernel_descriptor_id && rhs.kernel_descriptor_id && *lhs.kernel_descriptor_id == *rhs.kernel_descriptor_id)) &&
       (lhs.workspace_bytes == rhs.workspace_bytes) &&
       (lhs.runtime_pass_by_value_uids == rhs.runtime_pass_by_value_uids) &&
@@ -1756,8 +1736,7 @@ inline bool operator!=(const ExecutionPlanT &lhs, const ExecutionPlanT &rhs) {
 
 
 inline ExecutionPlanT::ExecutionPlanT(const ExecutionPlanT &o)
-      : engine_name(o.engine_name),
-        kernel_descriptor_id((o.kernel_descriptor_id) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid(*o.kernel_descriptor_id) : nullptr),
+      : kernel_descriptor_id((o.kernel_descriptor_id) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid(*o.kernel_descriptor_id) : nullptr),
         workspace_bytes(o.workspace_bytes),
         runtime_pass_by_value_uids(o.runtime_pass_by_value_uids),
         dispatch_data((o.dispatch_data) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchDataT(*o.dispatch_data) : nullptr),
@@ -1766,7 +1745,6 @@ inline ExecutionPlanT::ExecutionPlanT(const ExecutionPlanT &o)
 }
 
 inline ExecutionPlanT &ExecutionPlanT::operator=(ExecutionPlanT o) FLATBUFFERS_NOEXCEPT {
-  std::swap(engine_name, o.engine_name);
   std::swap(kernel_descriptor_id, o.kernel_descriptor_id);
   std::swap(workspace_bytes, o.workspace_bytes);
   std::swap(runtime_pass_by_value_uids, o.runtime_pass_by_value_uids);
@@ -1785,7 +1763,6 @@ inline ExecutionPlanT *ExecutionPlan::UnPack(const ::flatbuffers::resolver_funct
 inline void ExecutionPlan::UnPackTo(ExecutionPlanT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
   (void)_o;
   (void)_resolver;
-  { auto _e = engine_name(); if (_e) _o->engine_name = _e->str(); }
   { auto _e = kernel_descriptor_id(); if (_e) _o->kernel_descriptor_id = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid>(new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid(*_e)); }
   { auto _e = workspace_bytes(); _o->workspace_bytes = _e; }
   { auto _e = runtime_pass_by_value_uids(); if (_e) { _o->runtime_pass_by_value_uids.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->runtime_pass_by_value_uids[_i] = _e->Get(_i); } } else { _o->runtime_pass_by_value_uids.resize(0); } }
@@ -1802,7 +1779,6 @@ inline ::flatbuffers::Offset<ExecutionPlan> CreateExecutionPlan(::flatbuffers::F
   (void)_rehasher;
   (void)_o;
   struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const ExecutionPlanT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
-  auto _engine_name = _fbb.CreateString(_o->engine_name);
   auto _kernel_descriptor_id = _o->kernel_descriptor_id ? _o->kernel_descriptor_id.get() : nullptr;
   auto _workspace_bytes = _o->workspace_bytes;
   auto _runtime_pass_by_value_uids = _fbb.CreateVector(_o->runtime_pass_by_value_uids);
@@ -1811,7 +1787,6 @@ inline ::flatbuffers::Offset<ExecutionPlan> CreateExecutionPlan(::flatbuffers::F
   auto _provider_version = _fbb.CreateString(_o->provider_version);
   return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateExecutionPlan(
       _fbb,
-      _engine_name,
       _kernel_descriptor_id,
       _workspace_bytes,
       _runtime_pass_by_value_uids,

@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,7 +14,6 @@
 
 #include <hip/hip_runtime_api.h>
 
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
@@ -27,7 +25,6 @@
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPlanCapture.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPlanRestore.hpp"
-#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/PackedPlanTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdPackedCase.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwisePackedCase.hpp"
@@ -44,9 +41,6 @@
  *
  * Every case reads a copy of the packed set in a scratch directory. Other suites corrupt
  * or delete the staged archives.
- *
- * The unit binary does not load the engine of the packed Pointwise set, so restore runs
- * with an engine lookup that knows only the engine of the plan under test.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -65,11 +59,6 @@ using packs::runPlan;
 
 constexpr const char* SCRATCH_LABEL = "ingestorplanroundtrip";
 
-int64_t engineIdOf(const PackedPlanCase& packedCase)
-{
-    return hipdnn_data_sdk::utilities::engineNameToId(std::string(packedCase.engineName));
-}
-
 // Builds a plan over the registered handler of `packedCase` from a copy of its packed set
 // in `scratch`, on its round-trip graph, with the inputs filled. `built.plan` stays null
 // when nothing was packed for device 0.
@@ -87,22 +76,11 @@ void buildFilledPlan(const PackedPlanCase& packedCase,
     }
 }
 
-// Restores `encoded` with this provider's device resolver and an engine lookup that knows
-// only the engine of `packedCase`.
+// Restores `encoded` with this provider's device resolver.
 std::unique_ptr<hipdnn_plugin_sdk::IPlan<Handle>> restore(const std::vector<uint8_t>& encoded,
-                                                          const Handle& handle,
-                                                          const PackedPlanCase& packedCase)
+                                                          const Handle& handle)
 {
-    IngestorPlanRestoreEnvironment environment;
-    environment.loadedEngineName = [&packedCase](int64_t candidate) -> std::optional<std::string> {
-        if(candidate == engineIdOf(packedCase))
-        {
-            return std::string(packedCase.engineName);
-        }
-        return std::nullopt;
-    };
-    environment.deviceResolver = &deviceResolver();
-    return restoreIngestorPlan(encoded.data(), encoded.size(), handle, environment).plan;
+    return restoreIngestorPlan(encoded.data(), encoded.size(), handle);
 }
 
 // ---------------------------------------------------------------------------
@@ -133,8 +111,8 @@ TEST_P(TestIngestorPlanRoundTripKpack, RestoredPlanComputesWhatTheOriginalComput
     packedCase.expectExactOutput(original);
 
     const size_t originalWorkspaceBytes = built.plan->getWorkspaceSize(originalHandle);
-    const auto encoded = serialization::encodeIngestorPlan(captureIngestorPlan(
-        *built.plan, originalHandle, engineIdOf(packedCase), std::string(packedCase.engineName)));
+    const auto encoded
+        = serialization::encodeIngestorPlan(captureIngestorPlan(*built.plan, originalHandle));
 
     // Destroy the original plan and drop the cached modules, so that no code object of the
     // original plan stays loaded.
@@ -142,7 +120,7 @@ TEST_P(TestIngestorPlanRoundTripKpack, RestoredPlanComputesWhatTheOriginalComput
     resetIngestorModuleCachesForTesting();
 
     const Handle restoreHandle;
-    const auto restored = restore(encoded, restoreHandle, packedCase);
+    const auto restored = restore(encoded, restoreHandle);
     ASSERT_NE(restored, nullptr);
 
     EXPECT_EQ(restored->getWorkspaceSize(restoreHandle), originalWorkspaceBytes);
@@ -173,15 +151,15 @@ TEST_P(TestIngestorPlanRoundTripKpack, RestoresWithoutTheArchive)
     ASSERT_NO_FATAL_FAILURE(runPlan(*built.plan, handle, built.tensors, original));
     packedCase.expectExactOutput(original);
 
-    const auto encoded = serialization::encodeIngestorPlan(captureIngestorPlan(
-        *built.plan, handle, engineIdOf(packedCase), std::string(packedCase.engineName)));
+    const auto encoded
+        = serialization::encodeIngestorPlan(captureIngestorPlan(*built.plan, handle));
 
     const auto archive = built.archive();
     ASSERT_TRUE(std::filesystem::remove(archive)) << archive;
     resetIngestorModuleCachesForTesting();
     const size_t cachedBefore = packs::packModuleCacheEntries();
 
-    const auto restored = restore(encoded, handle, packedCase);
+    const auto restored = restore(encoded, handle);
     ASSERT_NE(restored, nullptr);
     std::vector<uint8_t> output;
     ASSERT_NO_FATAL_FAILURE(runPlan(*restored, handle, built.tensors, output));
@@ -214,8 +192,7 @@ void captureConvFwd(const ScopedDirectory& scratch, PackedPlan& built, IngestorP
         return;
     }
     const Handle handle;
-    payload = captureIngestorPlan(
-        *built.plan, handle, engineIdOf(packedCase), std::string(packedCase.engineName));
+    payload = captureIngestorPlan(*built.plan, handle);
 }
 
 // Reads and clears both HIP error values after a refused restore. A value that HIP sets
@@ -250,7 +227,7 @@ TEST(TestIngestorPlanRoundTrip, RefusesBytesTheDriverRejectsAtRestore)
     const Handle handle;
 
     const std::string refusal = serialization::expectIngestorPlanRefusal(
-        [&]() { static_cast<void>(restore(encoded, handle, packs::CONV_FWD_PACKED_PLAN_CASE)); },
+        [&]() { static_cast<void>(restore(encoded, handle)); },
         HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
         "hipModuleLoadData");
     // HIP records the refused module load as the last error, and the restore leaves it there.
@@ -277,12 +254,11 @@ TEST(TestIngestorPlanRoundTrip, RefusesASymbolTheCodeObjectLacks)
     const auto encoded = serialization::encodeIngestorPlan(payload);
     const Handle handle;
 
-    serialization::expectIngestorPlanRefusal(
-        [&]() { static_cast<void>(restore(encoded, handle, packs::CONV_FWD_PACKED_PLAN_CASE)); },
-        HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-        "hipModuleGetFunction");
+    serialization::expectIngestorPlanRefusal([&]() { static_cast<void>(restore(encoded, handle)); },
+                                             HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                                             "hipModuleGetFunction");
     const std::string refusal = serialization::expectIngestorPlanRefusal(
-        [&]() { static_cast<void>(restore(encoded, handle, packs::CONV_FWD_PACKED_PLAN_CASE)); },
+        [&]() { static_cast<void>(restore(encoded, handle)); },
         HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
         "NoSuchKernel");
     consumeRefusedHipError(refusal);

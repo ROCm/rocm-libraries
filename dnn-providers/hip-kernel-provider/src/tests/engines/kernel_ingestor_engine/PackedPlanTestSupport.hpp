@@ -50,14 +50,18 @@ inline constexpr const char* POINTWISE_B64_DESCRIPTOR = "packed_pointwise_add.kd
 // The packed ConvFwd descriptor with block size 64.
 inline constexpr const char* CONV_FWD_DESCRIPTOR = "conv_fwd_f16_block64.ukd.json";
 
+// The text of the save refusal for a benchmarking plan without a chosen kernel.
+inline constexpr const char* NO_WINNER_PHRASE = "has not chosen a kernel yet";
+// The text of the save refusal for a plan that no ingestor engine built.
+inline constexpr const char* NOT_AN_INGESTOR_ENGINE_PHRASE
+    = "does not support saving execution plans";
+
 // One packed set: where it is staged, the plan the tests build from it, and the exact
 // result that plan computes.
 struct PackedPlanCase
 {
     // The test instance name.
     std::string_view name;
-    // The engine that restores a plan of this set.
-    std::string_view engineName;
     // The descriptor of the kernel the tests build a plan for.
     const char* descriptor;
     const PackSymbols* pack;
@@ -240,6 +244,24 @@ inline std::unique_ptr<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>
         fixture.context(),
         bound);
 }
+
+// A plan of an engine other than an ingestor engine. It has no saveable plan, and it does not
+// execute.
+class NonIngestorPlan final : public hipdnn_plugin_sdk::IPlan<Handle>
+{
+public:
+    size_t getWorkspaceSize(const Handle& /*handle*/) const override
+    {
+        return 0;
+    }
+
+    void execute(const Handle& /*handle*/,
+                 const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                 uint32_t /*numDeviceBuffers*/,
+                 void* /*workspace*/) const override
+    {
+    }
+};
 
 // The number of entries in the kpack module caches of all packs.
 inline size_t packModuleCacheEntries()

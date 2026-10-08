@@ -119,10 +119,6 @@ fb::SourceKind checkWriterInputs(const IngestorPlanPayload& payload)
         throwInternal("source kind " + std::to_string(static_cast<int>(payload.sourceKind))
                       + " is not a known kernel source kind");
     }
-    if(payload.engineName.empty())
-    {
-        throwInternal("the engine name is empty");
-    }
     if(payload.providerVersion.empty())
     {
         throwInternal("the provider version is empty");
@@ -388,7 +384,6 @@ void checkIngestorPlanCompatibility(const fb::ExecutionPlan& plan)
 IngestorPlanPayload toIngestorPlanPayload(const fb::ExecutionPlan& plan, CheckedFields fields)
 {
     IngestorPlanPayload payload;
-    payload.engineName = plan.engine_name()->str();
     for(size_t index = 0; index < payload.kernelDescriptorId.size(); ++index)
     {
         payload.kernelDescriptorId[index]
@@ -458,13 +453,11 @@ std::vector<uint8_t> encodeIngestorPlan(const IngestorPlanPayload& payload)
     const auto uids = builder.CreateVector(payload.runtimePassByValueUids);
 
     const auto providerVersion = builder.CreateString(payload.providerVersion);
-    const auto engineName = builder.CreateString(payload.engineName);
 
     const fb::Uuid kernelDescriptorId{
         flatbuffers::span<const uint8_t, KERNEL_DESCRIPTOR_ID_SIZE>(payload.kernelDescriptorId)};
 
     fb::ExecutionPlanBuilder plan(builder);
-    plan.add_engine_name(engineName);
     plan.add_kernel_descriptor_id(&kernelDescriptorId);
     plan.add_workspace_bytes(payload.workspaceBytes);
     plan.add_runtime_pass_by_value_uids(uids);
