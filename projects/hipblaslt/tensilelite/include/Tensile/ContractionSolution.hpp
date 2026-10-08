@@ -749,9 +749,10 @@ namespace TensileLite
         size_t kGranularity = 1;
 
         // Launch limits. maxGrid: workgroups the dynamic grid policy may launch
-        // (CUs x occupancy). splitCUs: CUs the split is sized for, origami's
-        // cu_count for the static grid. flagSlots: flag-region entries left
-        // after the per-XCD queue counters.
+        // (CUs x occupancy). splitCUs: CUs the split is sized for, like origami's
+        // cu_count for the static grid: device CUs within maxGrid, capped by
+        // smCountTarget. flagSlots: flag-region entries left after the per-XCD
+        // queue counters.
         size_t maxGrid          = 0;
         size_t splitCUs         = 0;
         size_t flagSlots        = 0;
