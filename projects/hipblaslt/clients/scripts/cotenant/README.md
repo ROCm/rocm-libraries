@@ -73,11 +73,15 @@ residency without polling driver internals or guessing a settle time.
 4. kills the cotenant when the command exits or the script is interrupted.
 
 Pass `--cus 0` to run the command with no cotenant at all — the uncontended
-baseline. Otherwise `--cus` must be at least 1 and less than the device CU count
+baseline. Otherwise `--cus` must be at least 1 and at most the device CU count
 (reported by `rocminfo`). This bound applies at every max-occupancy setting.
-Very high contention can still stall a GEMM despite leaving some CUs available.
-If this happens, reduce the workgroup count or increase max occupancy to reserve
-less LDS per workgroup. This applies to both launcher and same-process use.
+Very high contention can stall a GEMM, either because too few CUs remain or because
+the LDS left on each CU is smaller than the GEMM workgroups need. On an MI355X
+(256 CUs, f16 4096³), `--cus 128` and `--cus 200` at max occupancy 3 and `--cus 256`
+at max occupancy 6 ran, while `--cus 255` at max occupancy 1 and `--cus 256` at
+max occupancy 3 stalled. The outcome depends on the GEMM kernel. If a run stalls,
+reduce the workgroup count or increase max occupancy to reserve less LDS per
+workgroup. This applies to both launcher and same-process use.
 
 Useful flags: `--device N` (sets `HIP_VISIBLE_DEVICES`), `--wait` (max seconds to
 wait for `READY`), `--grace` (extra settle time after residency, default 0).
@@ -90,7 +94,7 @@ To run the same cotenant in `hipblaslt-bench` on a separate, nonblocking stream:
 hipblaslt-bench --cotenant-cus 64 --cotenant-max-occupancy 4 -m 4096 -n 4096 -k 4096
 ```
 
-`--cotenant-cus` defaults to 0 (disabled); otherwise it must be less than the
+`--cotenant-cus` defaults to 0 (disabled); otherwise it must not exceed the
 selected device's CU count. `--cotenant-max-occupancy` defaults to 1 and uses
 the same LDS calculation and 1–64 range as the launcher. Use the benchmark's
 `--device` option to select the GPU.

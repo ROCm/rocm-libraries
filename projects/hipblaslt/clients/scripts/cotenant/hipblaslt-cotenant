@@ -294,10 +294,6 @@ def main() -> int:
         )
     elif args.cus > total_cus:
         sys.exit(f"ERROR: --cus {args.cus} exceeds the device CU count ({total_cus}).")
-    elif args.cus == total_cus:
-        sys.exit(
-            f"ERROR: --cus must be less than the device CU count ({total_cus})."
-        )
 
     binary = resolve_binary(arch, env, args.binary)
 

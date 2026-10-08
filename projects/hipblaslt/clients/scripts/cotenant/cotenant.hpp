@@ -116,9 +116,9 @@ namespace hipblaslt_cotenant
         check(hipGetDevice(&dev));
         hipDeviceProp_t prop{};
         check(hipGetDeviceProperties(&prop, dev));
-        if(n_cus < 1 || n_cus >= prop.multiProcessorCount)
+        if(n_cus < 1 || n_cus > prop.multiProcessorCount)
             throw std::runtime_error(
-                "cotenant: workgroup count must be >= 1 and < device CU count ("
+                "cotenant: workgroup count must be in [1, device CU count] ("
                 + std::to_string(prop.multiProcessorCount) + ")");
         if(max_occupancy < 1 || max_occupancy > 64)
             throw std::runtime_error("cotenant: max occupancy must be in [1, 64]");

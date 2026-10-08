@@ -699,7 +699,7 @@ try
 
         ("cotenant-cus",
          value<int32_t>(&hipblaslt_bench_options::cotenant_cus())->default_value(0),
-         "Cotenant workgroup count on a separate stream; 0 disables it. Must be less than the device CU count.")
+         "Cotenant workgroup count on a separate stream; 0 (default) disables it. Must not exceed the device CU count. With max occupancy > 1, workgroups may share CUs.")
 
         ("cotenant-max-occupancy",
          value<int32_t>(&hipblaslt_bench_options::cotenant_max_occupancy())->default_value(1),
@@ -1029,8 +1029,8 @@ try
         throw std::invalid_argument("Invalid Device ID");
     set_device(device_id);
 
-    if(hipblaslt_bench_options::cotenant_cus() >= props.multiProcessorCount)
-        throw std::invalid_argument("cotenant-cus must be less than the device CU count ("
+    if(hipblaslt_bench_options::cotenant_cus() > props.multiProcessorCount)
+        throw std::invalid_argument("cotenant-cus must not exceed the device CU count ("
                                     + std::to_string(props.multiProcessorCount) + ").");
 
     auto perf_monitor = EfficiencyMonitor::create();
