@@ -18,8 +18,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
+#include <functional>
+#include <future>
 #include <hip/hip_runtime_api.h>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -1037,6 +1041,213 @@ namespace
 
         EXPECT_EQ(tuner().selectCandidate(key, problem, ranked, false, /*retained=*/true), expected)
             << "a heuristic query was denied the measured winner";
+    }
+
+    /**
+     * A thread that runs one piece of work at a time, on demand.
+     *
+     * The offer that pairs a selection visit with the launch it asked for is
+     * held on the thread selection answered, so WHICH thread acts is the
+     * variable the two cases below are about and WHEN it acts must not be.
+     * Ordering the run() calls from the test body makes the interleaving total
+     * and fixed: no sleeps, no retries, no spinning on a flag, and the same
+     * sequence on every machine. A plain std::thread per step would not do, as
+     * the offer has to survive from one of this thread's steps to the next.
+     */
+    class Worker
+    {
+    public:
+        Worker()
+            : m_thread([this] { loop(); })
+        {
+        }
+
+        ~Worker()
+        {
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_stop = true;
+            }
+            m_wake.notify_one();
+            m_thread.join();
+        }
+
+        Worker(const Worker&)            = delete;
+        Worker& operator=(const Worker&) = delete;
+
+        // Runs work on this worker and does not return until it is done, so
+        // the caller's next statement is strictly after it.
+        void run(std::function<void()> work)
+        {
+            std::packaged_task<void()> task(std::move(work));
+            std::future<void>          done = task.get_future();
+
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_task = &task;
+            }
+
+            m_wake.notify_one();
+            done.get();
+        }
+
+    private:
+        void loop()
+        {
+            for(;;)
+            {
+                std::packaged_task<void()>* task = nullptr;
+
+                {
+                    std::unique_lock<std::mutex> lock(m_mutex);
+                    m_wake.wait(lock, [this] { return m_task != nullptr || m_stop; });
+
+                    if(m_task == nullptr)
+                        return;
+
+                    task   = m_task;
+                    m_task = nullptr;
+                }
+
+                (*task)();
+            }
+        }
+
+        std::mutex                  m_mutex;
+        std::condition_variable     m_wake;
+        std::packaged_task<void()>* m_task = nullptr;
+        bool                        m_stop = false;
+        std::thread                 m_thread;
+    };
+
+    // agents_inc-t0pu, the sample a sibling could steal.
+    //
+    // The offer used to be one slot on the problem, matched at the measurement
+    // hook on the solution index alone, so any launch of that index under the
+    // same resolution key claimed it -- and the key deliberately merges
+    // problems that differ in epilogue, bias, strides or scaling, whose own
+    // rank 0 is very often a candidate of this exploration's. The sample taken
+    // was then a measurement of a different problem's kernel filed under this
+    // problem's candidate, which is agents_inc-7j3o reached under concurrency.
+    //
+    // Both halves are asserted, because the old slot got both wrong at once:
+    // the thief must be refused, AND the launch the offer was made to must
+    // still be able to claim it afterwards.
+    TEST(OnlineTuner, AnotherThreadCannotClaimTheOfferThisOneWasMade)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+
+        constexpr size_t key = 0x101D;
+
+        const size_t registering = identityOf(key, 0);
+        const size_t merged      = identityOf(key, 1);
+
+        const std::vector<int> ranked{251, 252, 253};
+
+        Worker registrant;
+        Worker sibling;
+
+        registrant.run([&] {
+            ASSERT_EQ(hipSetDevice(device.id()), hipSuccess);
+            ASSERT_EQ(tuner().selectCandidate(key, registering, ranked), 0)
+                << "the registrant was not offered its first candidate";
+        });
+
+        // The sibling is refused a candidate of its own, as it always was, and
+        // then dispatches its own rank 0 -- which is the solution index the
+        // registrant was just offered.
+        hipEvent_t stolenStart = nullptr;
+        hipEvent_t stolenStop  = nullptr;
+
+        sibling.run([&] {
+            ASSERT_EQ(hipSetDevice(device.id()), hipSuccess);
+            ASSERT_EQ(tuner().selectCandidate(key, merged, ranked), -1);
+
+            EXPECT_FALSE(tuner().beginMeasurement(key, ranked[0], stolenStart, stolenStop))
+                << "a merged sibling on another thread took the sample the "
+                   "registrant's offer was made for";
+        });
+
+        // And the offer is still there to be claimed by the launch it was made
+        // to, which is the half a thief also destroys.
+        registrant.run([&] {
+            hipEvent_t start = nullptr;
+            hipEvent_t stop  = nullptr;
+
+            ASSERT_TRUE(tuner().beginMeasurement(key, ranked[0], start, stop))
+                << "the registrant was refused the launch its own offer named";
+
+            device.bracket(start, stop);
+            tuner().harvestPending(key);
+        });
+
+        // The sample landed, so the exploration moved on to the next candidate
+        // rather than still owing the first one.
+        EXPECT_EQ(tuner().selectCandidate(key, registering, ranked), 1)
+            << "the registrant's sample was not credited";
+    }
+
+    // agents_inc-t0pu's other two halves, which are the same defect read
+    // forwards instead of backwards: the slot was dropped at the top of every
+    // selection visit, above the merged-sibling guard, so a sibling CANCELLED
+    // an offer the registrant had not consumed yet. The registrant's launch
+    // then went unsampled while its visit had already been spent, and enough
+    // sibling traffic starved the exploration into resolving with no winner at
+    // all -- for a shape that measures perfectly well.
+    //
+    // So this drives the whole exploration with a sibling's visit between
+    // every one of the registrant's, from another thread, and asks for the one
+    // thing starvation takes away: a winner.
+    TEST(OnlineTuner, SiblingVisitsDoNotStarveTheRegistrantOfItsWinner)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+
+        constexpr size_t key = 0x101E;
+
+        const size_t registering = identityOf(key, 0);
+        const size_t merged      = identityOf(key, 1);
+
+        const std::vector<int> ranked{261, 262, 263};
+
+        Worker sibling;
+
+        ASSERT_EQ(hipSetDevice(device.id()), hipSuccess);
+
+        int visits = 0;
+        for(; visits < kCallCeiling && !tuner().resolution(key); ++visits)
+        {
+            // Between the registrant's visit and its launch, every time.
+            const int position = tuner().selectCandidate(key, registering, ranked);
+
+            sibling.run([&] {
+                ASSERT_EQ(hipSetDevice(device.id()), hipSuccess);
+                ASSERT_EQ(tuner().selectCandidate(key, merged, ranked), -1);
+            });
+
+            if(position < 0)
+                continue;
+
+            hipEvent_t start = nullptr;
+            hipEvent_t stop  = nullptr;
+
+            ASSERT_TRUE(tuner().beginMeasurement(key, ranked[position], start, stop))
+                << "a sibling's visit cancelled the offer the registrant held, on visit " << visits;
+
+            device.bracket(start, stop);
+            tuner().harvestPending(key);
+        }
+
+        const OnlineTuner::Resolution* resolved = tuner().resolution(key);
+        ASSERT_NE(resolved, nullptr) << "exploration never ended";
+        EXPECT_GE(resolved->winner(), 0)
+            << "sibling traffic starved a measurable shape into resolving with no winner";
+        EXPECT_GT(resolved->winnerTimeUs(), 0.0f) << "a winner with no measured time";
     }
 
     // The event pool is on a process-wide singleton and the device is per

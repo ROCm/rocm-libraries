@@ -35,6 +35,47 @@ namespace rocblaslt
 
         constexpr const char* c_tracePrefix = "[hipblaslt-online-tune]";
 
+        /**
+         * The offer selectCandidate() last made to THIS THREAD.
+         *
+         * Not a field of ProblemState, and that is the whole point: the offer
+         * is a pairing between one selection visit and the launch it asked
+         * for, and a problem can have one of those outstanding per thread in
+         * the library. See the offer paragraph on ProblemState for what the
+         * per-problem slot this replaces could and could not express.
+         *
+         * m_candidate < 0 is "nothing offered" and is the only empty state; a
+         * key of zero is a perfectly ordinary hash. m_registration is the
+         * serial OnlineTuner stamped on the registration the offer was made
+         * from, so a stale offer can never be matched against a later
+         * candidate list that happens to reuse the key.
+         *
+         * ITS LIFETIME IS ONE RULE: dropped by any selection visit this thread
+         * makes and renewed only where that visit is answered with a candidate.
+         * A visit is the thread saying it is about to dispatch, so whatever it
+         * was offered before is stale however the guards answer this one -- in
+         * particular when they turn it away as a merged sibling, because the
+         * sibling's launch is the very next thing the thread does.
+         *
+         * On the dispatch path that makes the pairing exact. selectCandidate()
+         * and beginMeasurement() are the same hipblasLtMatmul call on this
+         * thread with nothing of this tuner's in between, so the offer the
+         * launch claims is the one this call's own visit made, and no caller on
+         * any thread can take it. On the heuristic path the application holds
+         * the algo and dispatches it when and where it likes, so the library
+         * can only say that this thread was offered this candidate for this
+         * registration -- see the offer paragraph on ProblemState for the one
+         * case that leaves open.
+         */
+        struct ThreadOffer
+        {
+            size_t m_key          = 0;
+            size_t m_registration = 0;
+            int    m_candidate    = -1;
+        };
+
+        thread_local ThreadOffer t_offer;
+
         int positionOf(const std::vector<int>& rankedSolutionIndices, int solutionIndex)
         {
             if(solutionIndex < 0)
@@ -118,8 +159,6 @@ namespace rocblaslt
      * a sibling exempt from spending the budget still cleared the counter
      * exploration needs in order to end; and the offer dropped above the same
      * guard, so a sibling cancelled an offer the registrant had not consumed.
-     * This change is the first of the two; the offer is still a slot per
-     * problem below and is still dropped above both markers.
      *
      * THE RULE IS IN TWO PARTS, BECAUSE THE GUARDS ANSWER TWO QUESTIONS.
      *
@@ -142,8 +181,9 @@ namespace rocblaslt
      * The code below is laid out in exactly those two steps, with a marked line
      * for each and no write to this problem's state above either of them --
      * except registerProblem(), which creates the registrant rather than
-     * spending anything of its, and the offer drop, which is agents_inc-t0pu
-     * and is marked where it stands.
+     * spending anything of its. The one write that is above both is the drop of
+     * THIS THREAD's offer, which belongs to no problem and is explained where
+     * it stands.
      *
      * A SIXTH GUARD GOES ABOVE MARKER A IF IT SAYS "NOT THIS EXPLORATION'S",
      * AND BETWEEN A AND B IF IT SAYS "NOT A ROTATION VISIT". There is nowhere
@@ -188,22 +228,27 @@ namespace rocblaslt
         if(capturing)
             return -1;
 
+        // Dropped before anything else can hand out a new one. An offer is good
+        // for the single launch the visit it was made to is about to issue, and
+        // this is a different visit; one this thread never dispatched must not
+        // be left lying around for its next dispatch to claim -- including a
+        // merged sibling's dispatch, which is the next thing this thread does
+        // when the guards below turn it away.
+        //
+        // ABOVE BOTH MARKERS, AND NOT AN EXCEPTION TO THEM: the offer is this
+        // THREAD's and not this exploration's, so dropping it is not writing
+        // another problem's state. The thread is about to dispatch something;
+        // whatever it was last offered is stale whoever that dispatch belongs
+        // to. Renewed at the bottom, and only where this visit is answered with
+        // a candidate. See ThreadOffer.
+        //
+        // Deliberately below the resolved branch, which is the ~100 ns steady
+        // state and must stay a load and a compare.
+        t_offer.m_candidate = -1;
+
         std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
 
         ProblemState& state = m_problems[problemKey];
-
-        // Dropped before anything else can hand out a new one. An offer is good
-        // for the single launch the visit it was made to is about to issue, and
-        // this is a different visit; one the caller never dispatched must not be
-        // left lying around for the next arrival to claim.
-        //
-        // KNOWN VIOLATION OF THE RULE ABOVE, and the one thing left above the
-        // markers that is not registration: a merged sibling's visit drops an
-        // offer that is not its to drop, so it cancels one the registrant has
-        // not consumed. The slot cannot express the pairing it is for --
-        // agents_inc-t0pu -- so moving this line is not the fix and the fix is
-        // not this change's.
-        state.m_offered = -1;
 
         // ------------------------------------------------------------------
         // Step 1. Whose exploration is this?
@@ -268,8 +313,9 @@ namespace rocblaslt
         // early on whatever samples had been taken by then. It takes the branch
         // below once there is a winner, like every other caller.
         //
-        // Above marker A, and that placement is agents_inc-89f3: a visit that
-        // is not this exploration's writes none of this exploration's state. Reached only when there is a registrant
+        // Above marker A, and that placement is agents_inc-89f3 and
+        // agents_inc-t0pu: a visit that is not this exploration's writes none
+        // of this exploration's state. Reached only when there is a registrant
         // to compare against -- the two branches above are the cases where
         // there is not.
         else if(!state.m_resolved && state.m_problem != problem)
@@ -326,7 +372,7 @@ namespace rocblaslt
         // of it is coming and an offer would only be there for something else
         // to claim.
         if(position >= 0)
-            state.m_offered = candidate;
+            t_offer = {problemKey, state.m_registration, candidate};
 
         return position;
     }
@@ -455,7 +501,7 @@ namespace rocblaslt
                 return false;
             }
 
-            if(measurableCandidate(iter->second, solutionIndex) < 0)
+            if(measurableCandidate(iter->second, problemKey, solutionIndex) < 0)
                 return false;
         }
 
@@ -466,7 +512,7 @@ namespace rocblaslt
             return false;
 
         ProblemState& state     = iter->second;
-        const int     candidate = measurableCandidate(state, solutionIndex);
+        const int     candidate = measurableCandidate(state, problemKey, solutionIndex);
         if(candidate < 0)
             return false;
 
@@ -487,8 +533,9 @@ namespace rocblaslt
         // Spent. The offer buys one sample, so a second launch claiming the
         // same one would issue a candidate twice on a single visit of it, and a
         // launch arriving after the caller's own is by definition not the one
-        // selection asked for.
-        state.m_offered = -1;
+        // selection asked for. This thread's offer and no other's, which is why
+        // nothing here needs the lock the surrounding state does.
+        t_offer.m_candidate = -1;
 
         state.m_pending.push_back({start, stop, candidate, device});
         ++state.m_issued[candidate];
@@ -510,6 +557,10 @@ namespace rocblaslt
         // it over would only make the two take turns discarding each other's
         // samples.
         state.m_problem = problem;
+
+        // Names this candidate list, so an offer outstanding on some thread
+        // from an earlier one cannot be claimed against it. See ThreadOffer.
+        state.m_registration = ++m_registrations;
 
         state.m_candidates.assign(rankedSolutionIndices.begin(),
                                   rankedSolutionIndices.begin() + count);
@@ -555,23 +606,33 @@ namespace rocblaslt
         return next;
     }
 
-    // The launch selectCandidate() asked for on this visit, and nothing else.
+    // The launch selectCandidate() asked THIS THREAD for, and nothing else.
     // Searching the candidate list for the index instead would accept a merged
     // sibling's own pick, which is a different problem's launch wearing a
-    // candidate's number; see ProblemState::m_offered. The issued count is
-    // re-tested because nextCandidate() picked the offer, and under contention
-    // another visit's offer can have overwritten it in between -- a dropped
-    // sample, never a double-issued one.
-    int OnlineTuner::measurableCandidate(const ProblemState& state, int solutionIndex) const
+    // candidate's number; see the offer paragraph on ProblemState.
+    //
+    // The key and the registration are both tested, so an offer made for
+    // another problem, or from a candidate list this one has since replaced,
+    // is not an offer here. The issued count is re-tested because
+    // nextCandidate() picked the offer, and another thread exploring the same
+    // problem can have taken that candidate's last repeat in between -- a
+    // dropped sample, never a sample over the repeat count.
+    int OnlineTuner::measurableCandidate(const ProblemState& state,
+                                         size_t              problemKey,
+                                         int                 solutionIndex) const
     {
-        if(state.m_resolved || state.m_gaveUp || state.m_offered < 0)
+        if(state.m_resolved || state.m_gaveUp)
             return -1;
 
-        if(state.m_candidates[state.m_offered] != solutionIndex
-           || state.m_issued[state.m_offered] >= m_repeats)
+        if(t_offer.m_candidate < 0 || t_offer.m_key != problemKey
+           || t_offer.m_registration != state.m_registration)
             return -1;
 
-        return state.m_offered;
+        if(state.m_candidates[t_offer.m_candidate] != solutionIndex
+           || state.m_issued[t_offer.m_candidate] >= m_repeats)
+            return -1;
+
+        return t_offer.m_candidate;
     }
 
     // The rotation issues at most repeats() launches per candidate, so a whole

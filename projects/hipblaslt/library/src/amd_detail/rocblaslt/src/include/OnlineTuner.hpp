@@ -408,12 +408,15 @@ namespace rocblaslt
      * and nothing is owed. Problems that selectCandidate() has not registered
      * are never measured.
      *
-     * Nor is any dispatch other than the one selectCandidate() last asked this
-     * caller for. The solution index alone does not identify it: a problem the
+     * Nor is any dispatch other than the one selectCandidate() last asked THIS
+     * THREAD for. The solution index alone does not identify it: a problem the
      * resolution key merges with the one being explored is left its own
      * ordering, and its own pick is very often a candidate of that exploration
      * that still owes samples, so timing it would credit one problem with a
-     * launch of another. See ProblemState::m_offered.
+     * launch of another. The offer is held on the thread selection answered
+     * rather than on the problem, because one problem can have as many offers
+     * outstanding as there are threads in the library; see the offer paragraph
+     * on ProblemState for what that does and does not close.
      */
         bool beginMeasurement(size_t      problemKey,
                               int         solutionIndex,
@@ -469,15 +472,15 @@ namespace rocblaslt
         // bounds how long exploration may run, and a problem that has not
         // started exploring must not be able to exhaust it.
         //
-        // m_problem and m_offered are what make the samples below comparable
+        // m_problem and the offer are what make the samples below comparable
         // with one another, which is the one thing resolve() assumes and the
         // key alone does not give. The resolution key deliberately merges
         // problems differing in epilogue, bias, strides or scaling -- all of
         // which move a kernel's runtime -- so an unattributed sample set is a
         // set of measurements of different things, and picking the smallest of
         // them says which sibling dispatched rather than which kernel is
-        // faster. The two fields answer that in the two places it can go
-        // wrong, and each is needed:
+        // faster. The two answer that in the two places it can go wrong, and
+        // each is needed:
         //
         // m_problem is the problem that registered the candidate list, at the
         // granularity the solution library caches its rankings at -- the same
@@ -487,16 +490,49 @@ namespace rocblaslt
         // installs no record, and is served the measured winner through its own
         // ranking once there is one.
         //
-        // m_offered is the candidate selectCandidate() last asked this visit's
-        // caller to dispatch, and the only launch beginMeasurement() will time.
-        // Refusing the sibling a candidate is not enough on its own, because it
-        // still dispatches its own ranking's pick, and that is very often a
-        // candidate of this problem's that still owes samples -- matching on
-        // the solution index alone would take the sample anyway. The offer is
-        // dropped at the next visit and consumed by the first launch that
-        // claims it, so a sample is only taken for a dispatch selection asked
-        // for, on the visit it asked -- which is true of one thread and is
-        // agents_inc-t0pu of several.
+        // The offer is the candidate selectCandidate() last asked a caller to
+        // dispatch, and the only launch beginMeasurement() will time. Refusing
+        // the sibling a candidate is not enough on its own, because it still
+        // dispatches its own ranking's pick, and that is very often a candidate
+        // of this problem's that still owes samples -- matching on the solution
+        // index alone would take the sample anyway.
+        //
+        // IT IS DELIBERATELY NOT A FIELD HERE. What it has to express is a
+        // pairing between two events -- this selection visit, that launch --
+        // and the number of those outstanding under one resolution key at any
+        // moment is the number of threads in the library, not one.
+        // hipblasLtMatmul is documented as callable from many threads and
+        // streams, so a single slot per problem is both losable, because the
+        // next visit overwrites it, and claimable by a launch it was never
+        // made to. That is a cardinality mismatch and not a window that can be
+        // narrowed. The offer therefore lives on the thread selection answered
+        // -- see t_offer in OnlineTuner.cpp -- and m_registration below is what
+        // ties it to one registration of one problem.
+        //
+        // What that delivers, exactly, because the previous version of this
+        // comment claimed a pairing the code did not keep. On the dispatch path
+        // (hipblasLtMatmul with algo == nullptr) selection and launch are the
+        // same library call on the same thread with nothing of this tuner's in
+        // between, and every selection visit a thread makes drops the offer it
+        // was holding, so the offer a launch claims is the one that call's own
+        // visit made and no caller on any thread can take it. That is exact.
+        //
+        // On the heuristic path it is not. The application holds the algo and
+        // dispatches it when and where it likes, so a launch can arrive with no
+        // selection visit of that thread in between, and the library has
+        // nothing to pair with beyond "this thread was offered this candidate
+        // for this registration". A merged sibling dispatched from that same
+        // thread, with a caller-supplied algo, can still claim the offer. It
+        // takes one thread holding two heuristic answers under one resolution
+        // key and dispatching the older of them, and it costs one sample of one
+        // candidate. Closing it needs the offer carried ON the algo, which is a
+        // public type and so a decision and not a fix: agents_inc-hu5r.
+        //
+        // m_registration is a process-wide serial taken at registerProblem(),
+        // so an offer names one registration and not merely one key. Without it
+        // an offer outstanding across reloadForTest(), or across a problem that
+        // resolved and was re-registered, could be matched against a candidate
+        // list it was never made from.
         //
         // m_dispatchesSinceSelection is how a problem the library is never
         // asked about again still comes to an end.
@@ -553,15 +589,15 @@ namespace rocblaslt
             std::vector<std::vector<float>> m_samples;
             std::vector<int>                m_issued;
             std::vector<PendingMeasurement> m_pending;
-            size_t                          m_problem   = 0;
-            int                             m_offered   = -1;
-            int                             m_coldCalls = 0;
-            int                             m_calls     = 0;
-            int                             m_declined  = 0;
-            int                             m_winner    = -1;
-            float                           m_winnerUs  = 0.0f;
-            bool                            m_gaveUp    = false;
-            bool                            m_resolved  = false;
+            size_t                          m_problem      = 0;
+            size_t                          m_registration = 0;
+            int                             m_coldCalls    = 0;
+            int                             m_calls        = 0;
+            int                             m_declined     = 0;
+            int                             m_winner       = -1;
+            float                           m_winnerUs     = 0.0f;
+            bool                            m_gaveUp       = false;
+            bool                            m_resolved     = false;
             std::atomic<int>                m_dispatchesSinceSelection{0};
         };
 
@@ -590,7 +626,9 @@ namespace rocblaslt
                              ProblemState&           state,
                              const std::vector<int>& rankedSolutionIndices);
         int  nextCandidate(const ProblemState& state) const;
-        int  measurableCandidate(const ProblemState& state, int solutionIndex) const;
+        int  measurableCandidate(const ProblemState& state,
+                                 size_t              problemKey,
+                                 int                 solutionIndex) const;
         int  inFlightCap(const ProblemState& state) const;
         int  visitBudget(const ProblemState& state) const;
         int  abandonBudget(const ProblemState& state) const;
@@ -607,6 +645,13 @@ namespace rocblaslt
         int  m_repeats   = 0;
         int  m_coldCalls = 0;
         bool m_verbose   = false;
+
+        // Stamped onto every registration so a thread-held offer names one
+        // registration of one problem and not merely one key. Written under the
+        // write lock; never reset, including by reloadForTest(), which is the
+        // point -- an offer a test's earlier problem left on some thread must
+        // not match the problem that replaces it.
+        size_t m_registrations = 0;
 
         // Keyed by device, because a HIP event belongs to the device that
         // created it: hipEventRecord onto another device's stream is refused
