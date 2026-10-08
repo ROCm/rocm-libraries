@@ -3,7 +3,7 @@
 
 // Exercises the JIT solution library: cache keys, directory
 // checks, the stock TensileLite loader reading what the library writes,
-// exact-size lookup, index allocation, a crash after every publication step,
+// exact-size lookup, index allocation, a library whose publish stopped early,
 // concurrent publishers in separate processes, and the rejection of fused GEMM
 // and all-to-all.
 
@@ -881,85 +881,125 @@ namespace
                      "dropped\n";
     }
 
-    hj::PublishStep crashStep;
-
-    void crashes(const Context& ctx)
+    // Puts bytes back with the same atomic replace publish uses.
+    void restore(const fs::path& staging, const fs::path& target, const std::vector<uint8_t>& bytes)
     {
-        using Step = hj::PublishStep;
-        const std::pair<Step, const char*> steps[]
-            = {{Step::Staged, "staged"},
-               {Step::Locked, "locked"},
-               {Step::Allocated, "allocated"},
-               {Step::CodeObjects, "code objects"},
-               {Step::Entries, "entries"},
-               {Step::Mapping, "mapping"},
-               {Step::Master, "master"},
-               {Step::Unlocked, "unlocked"}};
-        const auto key = testKey(ctx);
-        for(const auto& [step, name] : steps)
-        {
-            const auto root = ctx.fresh(std::string("crash-") + name);
-            {
-                hj::JitLibrary library(root);
-                publish(library, key, gemm(256), {ctx.entry});
-            }
-            std::cout.flush();
-            const auto child = ::fork();
-            {
-                INFO(("fork failed"));
-                REQUIRE((child >= 0));
-            }
-            if(child == 0)
-            {
-                crashStep          = step;
-                hj::publishStepHook = [](Step reached) {
-                    if(reached == crashStep)
-                        ::_exit(3);
-                };
-                hj::JitLibrary       library(root);
-                std::vector<int32_t> indices;
-                static_cast<void>(library.publish(key, 0, gemm(512), {built(ctx.entry)}, indices));
-                ::_exit(4);
-            }
-            int status = 0;
-            {
-                INFO((std::string("The publisher did not stop after ") + name));
-                REQUIRE((::waitpid(child, &status, 0) == child && WIFEXITED(status)
-                    && WEXITSTATUS(status) == 3));
-            }
+        ok(hj::files::writeAtomically(staging, target, bytes), "restore " + target.filename().string());
+    }
 
-            const auto directory = hj::JitLibrary(root).directory(key);
-            consistent(directory, ctx.hardware, ctx.arch);
+    // A publish that stopped is the files it had already replaced: the allocator,
+    // then the mapping, then the master. Lookup reads the master. A later publish
+    // reuses an index the mapping already names, and otherwise takes the next
+    // allocator value, leaving a gap when the allocator moved first.
+    void interrupted(const Context& ctx)
+    {
+        enum class Stop
+        {
+            BeforeStore,
+            AfterAllocator,
+            AfterMapping,
+            AfterMaster,
+        };
+        const std::pair<Stop, const char*> stops[]
+            = {{Stop::BeforeStore, "before-store"},
+               {Stop::AfterAllocator, "after-allocator"},
+               {Stop::AfterMapping, "after-mapping"},
+               {Stop::AfterMaster, "after-master"}};
+        const auto key = testKey(ctx);
+        for(const auto& [stop, name] : stops)
+        {
+            const auto     root = ctx.fresh(std::string("interrupt-") + name);
             hj::JitLibrary library(root);
             {
-                INFO((std::string("A crash after ") + name + " lost a published entry"));
+                INFO((std::string(name) + " lost the first solution"));
+                REQUIRE((publish(library, key, gemm(256), {ctx.entry}) == std::vector<int32_t>{base}));
+            }
+            const auto directory = library.directory(key);
+            const auto slice     = directory / "slices" / hj::sliceKey(gemm(256));
+            const auto staging   = directory / "staging";
+            const auto master    = slice / lazyMaster(ctx.arch);
+            const auto mapping   = slice / lazyMapping(ctx.arch);
+            const auto indices   = directory / "indices.msgpack";
+            const auto allocator = directory.parent_path() / "allocator.dat";
+            const auto savedMaster    = read(master);
+            const auto savedMapping   = read(mapping);
+            const auto savedIndices   = read(indices);
+            const auto savedAllocator = read(allocator);
+            if(stop != Stop::BeforeStore)
+            {
+                INFO((std::string(name) + " did not publish the second solution"));
+                REQUIRE((publish(library, key, gemm(512), {ctx.entry})
+                    == std::vector<int32_t>{base + 1}));
+            }
+            if(stop != Stop::AfterMaster)
+                restore(staging, master, savedMaster);
+            if(stop == Stop::BeforeStore || stop == Stop::AfterAllocator)
+            {
+                restore(staging, mapping, savedMapping);
+                restore(staging, indices, savedIndices);
+            }
+            if(stop == Stop::BeforeStore)
+                restore(staging, allocator, savedAllocator);
+
+            consistent(directory, ctx.hardware, ctx.arch);
+            {
+                INFO((std::string(name) + " lost a solution that was already in the master"));
                 REQUIRE((ctx.find(library, key, gemm(256)) == std::vector<int32_t>{base}));
             }
-            const bool visible = step >= Step::Master;
             {
-                INFO((std::string("A crash after ") + name + " left the wrong lookup result"));
-                REQUIRE((ctx.find(library, key, gemm(512)).size() == (visible ? 1u : 0u)));
+                INFO((std::string(name) + " showed a solution the master does not name"));
+                REQUIRE((ctx.find(library, key, gemm(512)).size()
+                    == (stop == Stop::AfterMaster ? 1u : 0u)));
             }
-            const int32_t expected = step < Step::Allocated ? base + 1
-                                     : step < Step::Mapping ? base + 2
-                                                            : base + 1;
-            const auto again = publish(library, key, gemm(512), {ctx.entry});
+            const int32_t expected = stop == Stop::AfterAllocator ? base + 2 : base + 1;
+            const auto    again    = publish(library, key, gemm(512), {ctx.entry});
             {
-                INFO((std::string("Republishing after ") + name + " returned " + text(again)));
+                INFO((std::string(name) + " republished as " + text(again)));
                 REQUIRE((again == std::vector<int32_t>{expected}));
             }
             {
-                INFO((std::string("Republishing after ") + name + " is not found"));
+                INFO((std::string(name) + " republish is not found"));
                 REQUIRE((ctx.find(library, key, gemm(512)) == again));
             }
             {
-                INFO((std::string("The lock was not released after ") + name));
+                INFO((std::string(name) + " did not accept another solution"));
                 REQUIRE((publish(library, key, gemm(1024), {ctx.entry})[0] == expected + 1));
             }
             consistent(directory, ctx.hardware, ctx.arch);
         }
-        std::cout << "PASS a publisher killed after every step leaves a consistent library that "
-                     "the next publisher completes\n";
+
+        const auto lockRoot = ctx.fresh("dead-lock");
+        const auto lockKey  = testKey(ctx);
+        {
+            hj::JitLibrary library(lockRoot);
+            publish(library, lockKey, gemm(256), {ctx.entry});
+        }
+        const auto lockFile = hj::JitLibrary(lockRoot).directory(lockKey).parent_path() / "lock";
+        std::cout.flush();
+        const auto child = ::fork();
+        {
+            INFO(("fork failed"));
+            REQUIRE((child >= 0));
+        }
+        if(child == 0)
+        {
+            hj::files::FileLock held;
+            if(!hj::files::FileLock::acquire(lockFile, std::chrono::seconds(5), held).ok())
+                ::_exit(4);
+            ::_exit(3);
+        }
+        int status = 0;
+        {
+            INFO(("The lock holder did not exit"));
+            REQUIRE((::waitpid(child, &status, 0) == child && WIFEXITED(status)
+                && WEXITSTATUS(status) == 3));
+        }
+        {
+            hj::JitLibrary library(lockRoot);
+            INFO(("A lock held by an exited process blocked publication"));
+            REQUIRE((publish(library, lockKey, gemm(512), {ctx.entry})[0] == base + 1));
+        }
+        std::cout << "PASS a partial library stays consistent, and a lock dies with its process\n";
     }
 
     void refresh(const Context& ctx)
@@ -1324,7 +1364,7 @@ void runLibrary(const fs::path& scratch, int writers, int perWriter)
         dedupeAndOrder(ctx);
         mismatch(ctx);
         allocator(ctx);
-        crashes(ctx);
+        interrupted(ctx);
         refresh(ctx);
         fusedA2A(ctx);
     }
