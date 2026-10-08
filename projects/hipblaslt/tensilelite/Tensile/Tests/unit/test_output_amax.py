@@ -56,11 +56,17 @@ def _assert_scalar_scales_ready_before_use(assembly):
         ), f"scalar scale {register} is used before its memory load completes"
 
 
-@pytest.mark.parametrize("stream_k", [1, 2, 3, 4, 5])
-def test_streamk_amax_combination_rejected_before_derivation(stream_k, capsys):
+@pytest.mark.parametrize("strategy, assignment", [
+    ("DataParallel", "StaticGrid"),
+    ("StreamK", "StaticGrid"),
+    ("StreamK", "DynamicWorkQueue"),
+    ("StreamK", "Hybrid"),
+])
+def test_persistent_amax_combination_rejected_before_derivation(strategy, assignment, capsys):
     from Tensile.SolutionStructs import Solution
 
-    state = {"StreamK": stream_k, "ProblemType": {"OutputAmaxD": True}, "Valid": True}
+    state = {"TileProcessingStrategy": strategy, "WorkAssignment": assignment,
+             "ProblemType": {"OutputAmaxD": True}, "Valid": True}
     Solution.assignDerivedParameters(state, False, True, False, None, None)
     assert state["Valid"] is False
     assert "one final-output tile per workgroup" in capsys.readouterr().out

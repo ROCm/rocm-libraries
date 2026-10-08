@@ -43,6 +43,29 @@ namespace dag {
 // scheduler drains, rather than rebuilding their own view of it.
 struct RegionDAG;
 
+// WMMAs per TDM stage of a basic block: WMMAs / tensor_load groups (a group ends at a WMMA).
+// A stage under minStageWmmas (PrefetchLeadMinStageWmmas) has no room for a prefetch lead, so
+// the block runs as if PrefetchLeadWmmas = 0. Blocks without WMMAs or tensor_loads keep it.
+struct StageWmmaCounter {
+    int wmmas = 0;
+    int groups = 0;
+    bool wmmaSinceTensorLoad = true;
+    void add(const StinkyInstruction& inst) {
+        if (inst.getHwInstDesc() == nullptr) return;
+        if (isMatrixInstruction(inst)) {
+            ++wmmas;
+            wmmaSinceTensorLoad = true;
+        } else if (isTensorLoad(inst)) {
+            if (wmmaSinceTensorLoad) ++groups;
+            wmmaSinceTensorLoad = false;
+        }
+    }
+    int effectiveLead(int lead, int minStageWmmas) const {
+        const bool shortStage = groups > 0 && wmmas > 0 && wmmas < minStageWmmas * groups;
+        return lead > 0 && shortStage ? 0 : lead;
+    }
+};
+
 // REMOVED: Local buildUseDefChain() has been replaced by stinkytofu::buildUseDefChain()
 // from BuildDefUseChain.hpp. All callers now use the shared implementation.
 
@@ -152,12 +175,13 @@ struct BBScheduleState {
     // successor BBs in a loop. Kept separate from dsResiduals.
     int globalReadInflightCount = 0;  // credits still in flight at BB end
     int globalReadResidual = 0;       // max remaining drain latency among them
-    // Cross-BB ds_load (LDS return queue) credit state, same shape as the
-    // global-read pair above. Carried to successor BBs in a loop so a fresh
-    // region doesn't model the LDS queue as empty when hardware still has the
-    // prior iteration's tail draining.
-    int dsReadInflightCount = 0;  // credits still in flight at BB end
-    int dsReadResidual = 0;       // max remaining drain latency among them
+    // Cross-BB ds_load (LDS return queue) credit state: each credit's own
+    // remaining drain latency at BB end (InFlightQueue::residuals()), carried
+    // to successor BBs in a loop so a fresh region doesn't model the LDS queue
+    // as empty when hardware still has the prior iteration's tail draining.
+    // Kept as the full per-entry list, not collapsed to a count/worst-case
+    // pair, so seeding doesn't overstate how long every entry has left.
+    std::vector<int> dsReadResiduals;
 };
 
 // Cache for cross-BB scheduling state. Lives in the scheduler's run() scope
@@ -226,6 +250,12 @@ class ReadyQueue {
         (void)regionEnd;
         (void)blockBegin;
         (void)deps;
+    }
+
+    // Hook called for every instruction appended to the BB's final order, in order: picks,
+    // filler instructions, and the side-effect instructions between regions.
+    virtual void onScheduled(const StinkyInstruction& inst) {
+        (void)inst;
     }
 
     // Hook called after a basic block has been fully scheduled. When the queue is

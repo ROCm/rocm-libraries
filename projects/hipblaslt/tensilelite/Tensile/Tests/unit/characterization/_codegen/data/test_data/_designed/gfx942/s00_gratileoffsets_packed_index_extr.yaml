@@ -1,0 +1,83 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S00 graTileOffsets: swizzled-A + LocalSplitU (LSU) path (gfx942).
+#
+# Target: Tensile/KernelWriterAssembly.py graTileOffsets isSwizzled=True branch,
+#   specifically the LSU sub-block:
+#       3649    tmpVgprRes = None
+#       3656    module.add(vectorStaticDivide(wave_id, "Serial", ...))
+#   These require SwizzleTensorA (isSwizzled) AND LocalSplitU>1 (WorkGroup[2]>1).
+#
+#   NOTE: the packed-index targets (len(PackedIndices)>1) are unreachable from a
+#   plain GEMM ProblemType (single free index per tensor) -> Category B for emit.
+#
+# Derived from Tensile/Tests/common/gemm/swizzleA.yaml (HSS TN SWIZZLED_A).
+# ForkParameters trimmed: WorkGroup LSU=2 only, GSU=1 -> few solutions.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # HSS TN SWIZZLED_A, LSU=2
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      SwizzleTensorA: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   2, 4,  2,2 ] # MT = 64x128, wave 2x2
+          - [16, 16, 16, 1,  1,   4, 4,  2,2 ] # MT = 128x128, wave 2x2
+        - WorkGroup:
+          - [16, 16, 2] # LSU=2, minDU=64
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [-1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [64]
+        - VectorWidthA: [1]
+        - VectorWidthB: [-1]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        - StaggerUMapping: [0]
+        - WorkGroupMappingXCC: [8]
+        - ScheduleIterAlg: [3]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [false]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - LocalReadVectorWidth: [8]
+        - DirectToVgprA: [true]
+        - UseSgprForGRO: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]

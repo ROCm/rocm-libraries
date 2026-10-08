@@ -1,0 +1,10 @@
+{
+  "claims": {
+    "hipkernel:Gfx950AttentionDense": {
+      "gfx950": [
+        "linux"
+      ]
+    }
+  },
+  "version": 1
+}

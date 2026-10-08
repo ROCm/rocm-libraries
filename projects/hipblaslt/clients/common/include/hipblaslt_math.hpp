@@ -125,17 +125,20 @@ inline __device__ __host__ hipblaslt_bf6x16 negate(hipblaslt_bf6x16 x)
 }
 #endif
 
+// FNUZ has no negative zero: 0x80 is NaN, so zero and NaN keep their encoding.
 template <>
 inline __device__ __host__ hipblaslt_f8_fnuz negate(hipblaslt_f8_fnuz x)
 {
-    x.__x ^= 0x80;
+    if(x.__x & 0x7f)
+        x.__x ^= 0x80;
     return x;
 }
 
 template <>
 inline __device__ __host__ hipblaslt_bf8_fnuz negate(hipblaslt_bf8_fnuz x)
 {
-    x.__x ^= 0x80;
+    if(x.__x & 0x7f)
+        x.__x ^= 0x80;
     return x;
 }
 
@@ -165,22 +168,6 @@ template <>
 inline __device__ __host__ std::complex<double> negate(std::complex<double> x)
 {
     return std::complex<double>(-x. real(), -x. imag());
-}
-
-// Helper function to reduce intermediate precision and the output type are the same as the input type.
-template <typename TxDLi, typename TxDLo, typename Ti>
-inline void type_to_xdl_math_op_type(Ti* in, size_t s)
-{
-    //To filter out the case that input type is not supported by xDL Math Op.
-    //Currently, xDL Math Op supports in:float -> intermediat:xf32 -> out:float
-    constexpr bool needCast = !std::is_same<TxDLi, Ti>() && std::is_same<TxDLo, Ti>();
-    if(!needCast)
-        return;
-
-    //Cast input type to xDl math op type, using type alians to avoid the casting error.
-    using castType = std::conditional_t<needCast, TxDLi, Ti>;
-    for(size_t i = 0; i < s; i++)
-        in[i] = static_cast<Ti>(static_cast<castType>(in[i]));
 }
 
 template <typename T>

@@ -1,0 +1,101 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+GlobalParameters:
+  Architecture: gfx1250
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4
+  PruneSparseMode: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: B
+      ComputeDataType: S
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: e8
+      DataTypeMXSB: e8
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 3, 1, 4]
+          - [16, 16, 128, 1, 1, 2, 8, 4, 1]
+          - [16, 16, 128, 1, 1, 3, 8, 4, 1]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 6, 2, 2]
+          - [16, 16, 128, 1, 1, 6, 6, 2, 2]
+
+        - HalfPLR: [0]
+        - PrefetchGL2: [0]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - ClusterDim: [[1,1]]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - VectorWidthA: [-1,2]
+        - VectorWidthB: [-1]
+        - LDSSegmentInterleave: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True,False]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [2]
+        - GlobalSplitU: [-1,1,2,3,4]
+        - GlobalSplitUCoalesced: [True]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [True]
+        - GlobalSplitUAlgorithm: [AtomicDest]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [510,  512, 1, 32768]
+          - Exact: [512,  512, 1, 32768]
+          - Exact: [514,  512, 1, 32768]
+          - Exact: [512,  514, 1, 32768]
+          - Exact: [512,  510, 1, 32768]
+        - ActivationArgs:
+          - [Enum: none]

@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # not supported by arch
 
 
 GlobalParameters:
@@ -65,8 +65,9 @@ BenchmarkProblems:
     - GlobalSplitUAlgorithm: ["MultipleBuffer"] # Default Value: ['MultipleBuffer'] # Range: ['SingleBuffer', 'MultipleBuffer', 'MultipleBufferSingleKernel']
     - GlobalReadVectorWidthA: [-1, -2, 4, 6, 8, 16] # Default Value: [-1] # Range: [-2, -1, ..., 16, 32]
     - GlobalReadVectorWidthB: [-1, -2, 4, 6, 8, 16] # Default Value: [-1] # Range: [-2, -1, ..., 16, 32]
-    - StreamK: [3] # Default Value: [0] # Range: [0, 1, 2, 3]
-    - StreamKXCCMapping: [0, 4, 8] # Default Value: [0] # Range: [0, 2, ..., 7, 8]
+    - TileProcessingStrategy: [StreamK]
+    - WorkAssignment: [StaticGrid] # Default Value: [0] # Range: [0, 1, 2, 3]
+    - PersistentXCCMapping: [0, 4, 8] # Default Value: [0] # Range: [0, 2, ..., 7, 8]
     - ClusterLocalRead: [0, 1] # Default Value: [1] # Range: [0, 1]
     - NonTemporalA: [0, 4] # Default Value: [0] # Range: [0, 1, ..., 6, 7]
     - NonTemporalB: [0, 4] # Default Value: [0] # Range: [0, 1, ..., 6, 7]

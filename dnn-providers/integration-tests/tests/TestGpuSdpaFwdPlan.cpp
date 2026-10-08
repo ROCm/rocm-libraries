@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -22,6 +23,7 @@
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 namespace
 {
@@ -196,9 +198,9 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);
     Tensor<float> v(DIMS);
-    q.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/11);
-    k.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/22);
-    v.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/33);
+    fillWithRandomValues(q, -1.0f, 1.0f, /*seed=*/11);
+    fillWithRandomValues(k, -1.0f, 1.0f, /*seed=*/22);
+    fillWithRandomValues(v, -1.0f, 1.0f, /*seed=*/33);
 
     Tensor<float> oPlan(DIMS);
     Tensor<float> lsePlan(lseDims);
