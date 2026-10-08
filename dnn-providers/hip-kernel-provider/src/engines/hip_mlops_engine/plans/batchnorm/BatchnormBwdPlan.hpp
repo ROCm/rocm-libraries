@@ -114,7 +114,6 @@ private:
     bool _usesSavedStats = false;
     int _kernelVariant = -1;
     double _epsilon = 0.0;
-    float _invInChannelSliceSize = 0.0f;
     float _activationAlpha = 0.0f;
     float _activationBeta = 0.0f;
 };

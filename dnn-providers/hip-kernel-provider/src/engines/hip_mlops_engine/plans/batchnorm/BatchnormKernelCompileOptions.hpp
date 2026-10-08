@@ -69,6 +69,12 @@ private:
         add("HIP_PLUGIN_BN_BATCHES", 1);
         add("HIP_PLUGIN_BN_BATCH_ELEMENTS", std::string("HIP_PLUGIN_BN_BATCHES"));
         add("HIP_PLUGIN_BN_SPATIAL_SIZE", 1);
+        add("HIP_PLUGIN_BN_GRPS0", 1);
+        add("HIP_PLUGIN_BN_GRPS1", 1);
+        add("HIP_PLUGIN_BN_GRPS2", 1);
+        add("HIP_PLUGIN_BN_GRP0_FINAL", 1);
+        add("HIP_PLUGIN_BN_GRP1_FINAL", 1);
+        add("HIP_PLUGIN_BN_GRP2_FINAL", 1);
     }
 };
 

@@ -382,8 +382,8 @@ __forceinline__ __device__ void running_stash(const FpPrecType_C* __restrict pre
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::neuron_op_type NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::pasthru>::type* = nullptr>
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          typename std::enable_if<NrnOpType == ActivationMode::PASTHRU>::type* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
                                                              FpPrecType const&,
                                                              FpPrecType const&)
@@ -392,8 +392,8 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::neuron_op_type NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::pasthru>::type* = nullptr>
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          typename std::enable_if<NrnOpType == ActivationMode::PASTHRU>::type* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
                                                                  FpPrecType const&,
                                                                  FpPrecType const&,
@@ -405,8 +405,8 @@ __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType cons
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::neuron_op_type NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::relu>::type* = nullptr>
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          typename std::enable_if<NrnOpType == ActivationMode::RELU>::type* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
                                                              FpPrecType const&,
                                                              FpPrecType const&)
@@ -415,8 +415,8 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::neuron_op_type NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::relu>::type* = nullptr>
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          typename std::enable_if<NrnOpType == ActivationMode::RELU>::type* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
                                                                  FpPrecType const& xnorm,
                                                                  FpPrecType const& scale,
@@ -429,8 +429,8 @@ __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType cons
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::neuron_op_type NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::clipped_relu>::type* = nullptr>
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          typename std::enable_if<NrnOpType == ActivationMode::CLIPPED_RELU>::type* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
                                                              FpPrecType const& _alpha,
                                                              FpPrecType const&)
@@ -439,8 +439,8 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::neuron_op_type NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::clipped_relu>::type* = nullptr>
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          typename std::enable_if<NrnOpType == ActivationMode::CLIPPED_RELU>::type* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
                                                                  FpPrecType const& xnorm,
                                                                  FpPrecType const& scale,
@@ -453,8 +453,8 @@ __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType cons
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::neuron_op_type NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::clamp>::type* = nullptr>
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          typename std::enable_if<NrnOpType == ActivationMode::CLAMP>::type* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
                                                              FpPrecType const& _alpha,
                                                              FpPrecType const& _beta)
@@ -463,8 +463,8 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
 }
 
 template <typename FpPrecType,
-          hip_kernel_provider::neuron_op_type NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::clamp>::type* = nullptr>
+          hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
+          typename std::enable_if<NrnOpType == ActivationMode::CLAMP>::type* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
                                                                  FpPrecType const& xnorm,
                                                                  FpPrecType const& scale,

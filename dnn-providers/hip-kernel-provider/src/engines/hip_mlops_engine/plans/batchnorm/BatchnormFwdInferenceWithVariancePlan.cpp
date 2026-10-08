@@ -181,13 +181,13 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
                                                            + std::to_string(xDims->size()));
     }
 
-    auto inCstride = static_cast<unsigned int>(spatialSize);
+    auto inSpatialSize = static_cast<unsigned int>(spatialSize);
 
     // Detect layout: NLC/NHWC/NDHWC has C dimension (index 1) with stride 1, NCL/NCHW/NCDHW has stride L/H*W/D*H*W
     const bool isLayoutChannelLast = isChannelLastLayout(_inferenceParams.x());
 
     // Calculate vector size based on layout
-    auto vectorsize = computeVectorSize(isLayoutChannelLast, channels, inCstride);
+    auto vectorsize = computeVectorSize(isLayoutChannelLast, channels, inSpatialSize);
 
     // Calculate block and grid dimensions
     size_t xlocalsize = 0;
@@ -205,7 +205,7 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
                     * xlocalsize;
 
         ylocalsize = maxLocalsize / xlocalsize;
-        ygridsize = (inCstride + ylocalsize - 1) / ylocalsize * ylocalsize;
+        ygridsize = (inSpatialSize + ylocalsize - 1) / ylocalsize * ylocalsize;
     }
     else
     {
@@ -213,7 +213,7 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
         xgridsize = ((static_cast<size_t>(channels) + xlocalsize - 1) / xlocalsize) * xlocalsize;
 
         ylocalsize = maxLocalsize;
-        ygridsize = ((inCstride / vectorsize + ylocalsize - 1) / ylocalsize) * ylocalsize;
+        ygridsize = ((inSpatialSize / vectorsize + ylocalsize - 1) / ylocalsize) * ylocalsize;
     }
 
     zlocalsize = 1;
@@ -264,6 +264,9 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
     options.update("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
     options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
+    options.update("HIP_PLUGIN_BN_BATCHES", batches);
+    options.update("HIP_PLUGIN_BN_CHANNELS", channels);
+    options.update("HIP_PLUGIN_BN_SPATIAL_SIZE", spatialSize);
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", options);
@@ -277,9 +280,6 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
                                  static_cast<unsigned int>(zgridsize / zlocalsize));
 
     // Store kernel launch parameters
-    _channels = static_cast<unsigned int>(channels);
-    _inCstride = inCstride;
-    _batchCount = static_cast<unsigned int>(batches);
     _channelStride = static_cast<unsigned int>(channelStride);
     _spatialStride = static_cast<unsigned int>(spatialStride);
     _batchStride = static_cast<unsigned int>(batchStride);
@@ -334,9 +334,6 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const Handle& handle,
                                 scaleBuffer.ptr,
                                 biasBuffer.ptr,
                                 epsilon,
-                                _channels,
-                                _inCstride,
-                                _batchCount,
                                 _channelStride,
                                 _spatialStride,
                                 _batchStride,
@@ -356,9 +353,6 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const Handle& handle,
                                 scaleBuffer.ptr,
                                 biasBuffer.ptr,
                                 epsilon,
-                                _channels,
-                                _inCstride,
-                                _batchCount,
                                 _channelStride,
                                 _spatialStride,
                                 _batchStride,

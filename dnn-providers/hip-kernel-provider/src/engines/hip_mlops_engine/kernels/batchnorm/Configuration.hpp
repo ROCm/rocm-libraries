@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "HipKernelActivation.hpp"
 #include "VectorTypes.hpp"
 #include <type_traits>
 
@@ -16,14 +17,6 @@ enum class type_strategy : int
     fp32,
     fpmix,
     bfpmix,
-};
-
-enum class neuron_op_type : int
-{
-    pasthru = 0, // x
-    relu = 3, // max(0, x)
-    clipped_relu = 7, // min(alpha, max(0, x))
-    clamp = 10,
 };
 
 namespace detail
@@ -63,7 +56,7 @@ struct proto_config
                   : (UseFp32 ? type_strategy::fp32
                              : (UseFpmix ? type_strategy::fpmix : type_strategy::bfpmix));
     static constexpr bool use_amdgcn = UseAMDGCN;
-    static constexpr auto neuron_op = static_cast<neuron_op_type>(NrnOpId);
+    static constexpr auto neuron_op = static_cast<ActivationMode>(NrnOpId);
 };
 
 } // namespace detail
@@ -81,10 +74,7 @@ using config = detail::proto_config<HIP_PLUGIN_LAYOUT_CHANNEL_LAST,
 } // namespace hip_kernel_provider
 
 // hip_kernel_provider batchnorm configs
-namespace hip_kernel_provider
-{
-
-namespace batchnorm
+namespace hip_kernel_provider::batchnorm
 {
 
 enum class architecture : int
@@ -153,6 +143,8 @@ template <typename HipKernelConfig,
           typename FltMax,
           typename Bf16Max,
           typename LaunchDim,
+          typename LaunchDimFinal,
+          typename LaunchGroups,
           typename Architecture,
           int Variant,
           int BatchElements,
@@ -165,7 +157,8 @@ template <typename HipKernelConfig,
           int LoopUnrollMaxSpatial,
           int LDSGCNSize,
           int LDSSize,
-          int UseNodpp>
+          int UseNodpp,
+          int UseSaved>
 struct proto_config
 {
     static_assert(UseNodpp == 0 || UseNodpp == 1, "UseNodpp must be 0 or 1");
@@ -192,6 +185,8 @@ struct proto_config
                      : Bf16Max::
                            value); // According to the old FloatTypes mechanism (on which this is based), for mixed-precision cases the max value is defined as the max of the smaller type
     static constexpr auto launch_dim = LaunchDim{};
+    static constexpr auto launch_dim_final = LaunchDimFinal{};
+    static constexpr auto launch_groups = LaunchGroups{};
     static constexpr unsigned int tensor_size
         = static_cast<unsigned int>(Batches * Channels * SpatialSize);
 
@@ -208,6 +203,7 @@ struct proto_config
     static constexpr unsigned int spatial_size = static_cast<unsigned int>(SpatialSize);
     static constexpr unsigned int channel_slice_size
         = static_cast<unsigned int>(Batches * SpatialSize);
+    static constexpr float i_channel_slice_size = 1.0f / static_cast<float>(channel_slice_size);
     static constexpr unsigned int batch_size = static_cast<unsigned int>(Channels * SpatialSize);
     static constexpr int stash_method = StashMethod;
     static constexpr int loop_unroll_max_batch = LoopUnrollMaxBatch;
@@ -216,6 +212,7 @@ struct proto_config
     static constexpr unsigned int lds_size = static_cast<unsigned int>(LDSSize);
     static constexpr bool use_nodpp
         = input_type_strategy == type_strategy::fpmix ? false : static_cast<bool>(UseNodpp);
+    static constexpr bool use_saved = static_cast<bool>(UseSaved);
     static constexpr int variant = Variant;
     static constexpr auto target_arch = Architecture::value;
     static constexpr bool use_amdgcn
@@ -268,6 +265,11 @@ using config = hip_kernel_provider::batchnorm::detail::proto_config<
     hip_kernel_provider::batchnorm::detail::bf16_max,
     hip_kernel_provider::batchnorm::detail::
         launch_dimension<HIP_PLUGIN_BN_GRP0, HIP_PLUGIN_BN_GRP1, HIP_PLUGIN_BN_GRP2>,
+    hip_kernel_provider::batchnorm::detail::launch_dimension<HIP_PLUGIN_BN_GRP0_FINAL,
+                                                             HIP_PLUGIN_BN_GRP1_FINAL,
+                                                             HIP_PLUGIN_BN_GRP2_FINAL>,
+    hip_kernel_provider::batchnorm::detail::
+        launch_dimension<HIP_PLUGIN_BN_GRPS0, HIP_PLUGIN_BN_GRPS1, HIP_PLUGIN_BN_GRPS2>,
     hip_kernel_provider::batchnorm::detail::architecture_switch<HIP_PLUGIN_GFX103X,
                                                                 HIP_PLUGIN_GFX110X,
                                                                 HIP_PLUGIN_GFX120X,
@@ -283,8 +285,7 @@ using config = hip_kernel_provider::batchnorm::detail::proto_config<
     HIP_PLUGIN_BN_LOOP_UNROLL_MAX_SPATIAL,
     HIP_PLUGIN_BN_LDSGCN_SIZE,
     HIP_PLUGIN_BN_LDS_SIZE,
-    HIP_PLUGIN_BN_NODPP>;
+    HIP_PLUGIN_BN_NODPP,
+    HIP_PLUGIN_BN_USESAVED>;
 
-} // namespace batchnorm
-
-} // namespace hip_kernel_provider
+} // namespace hip_kernel_provider::batchnorm
