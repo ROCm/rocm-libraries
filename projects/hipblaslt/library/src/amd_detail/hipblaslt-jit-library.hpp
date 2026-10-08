@@ -208,9 +208,16 @@ namespace hipblaslt_jit
         // when the index is newer than this process has seen. Empty, with why
         // set, otherwise.
         View resolve(int device, int32_t index, Status& why);
-        // The helper cache for key's backend id. Empty, with why set, when this
-        // library cannot be used. ComgrBuilder asks it before compiling a helper.
-        std::shared_ptr<HelperCache> helperCache(const CacheKey& key, int device, Status& why);
+        // The helper code object stored for key's backend and helperName. A hit
+        // returns that object and does not call compile. A miss calls compile
+        // once, stores the code object beside this library's slices, and returns
+        // it. The same backend id and helper name always name the same file.
+        // Fails, without calling compile, when this library cannot be used.
+        Status acquireHelper(const CacheKey&                            key,
+                             int                                        device,
+                             const std::string&                         helperName,
+                             const std::function<Status(Artifact&)>&    compile,
+                             Artifact&                                  out);
         std::shared_ptr<TensileLite::ContractionSolution> solutionByIndex(
             int device, const TensileLite::Hardware& hardware, int32_t index, Status& why);
 

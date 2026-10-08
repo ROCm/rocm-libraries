@@ -115,8 +115,11 @@ namespace hipblaslt_jit
                 auto assemblyTarget          = target;
                 assemblyTarget.wavefrontSize = wavefrontSize;
 
-                // Helpers first. A cache hit reuses the code object. A miss compiles
-                // once, publishes it, and only then is the main kernel compiled.
+                // Helpers left on the bundle are compiled here. JitLibrary is the
+                // helper cache: a caller that has a library acquires each helper
+                // from it and does not leave that source on the bundle. This
+                // builder keeps no cache of its own. comgr's file cache is not
+                // a substitute.
                 auto compileHelper = [&](const Artifact& helper, Artifact& out) -> Status {
                     if(helper.name.empty() || helper.kind != Artifact::Kind::Hip)
                         return failure(request, "A helper source has no HIP name", {});
@@ -144,14 +147,7 @@ namespace hipblaslt_jit
                 for(const auto& helper : source.helpers)
                 {
                     Artifact builtHelper;
-                    Status   helperStatus;
-                    if(request.helpers)
-                        helperStatus = request.helpers->acquire(
-                            helper.name,
-                            [&](Artifact& out) { return compileHelper(helper, out); },
-                            builtHelper);
-                    else
-                        helperStatus = compileHelper(helper, builtHelper);
+                    const auto helperStatus = compileHelper(helper, builtHelper);
                     if(!helperStatus.ok())
                         return helperStatus;
                     built.helpers.push_back(std::move(builtHelper));
@@ -176,19 +172,20 @@ namespace hipblaslt_jit
                                        + std::to_string(metadata.codeObjectVersion) + ", not "
                                        + std::to_string(request.codeObjectVersion),
                                    linked.log);
-                const auto& names
-                    = request.kernelNames.empty() ? metadata.kernelNames : request.kernelNames;
-                if(names.empty())
-                    return failure(request, "Built code object defines no kernel", linked.log);
-                for(const auto& name : names)
-                    if(std::find(metadata.kernelNames.begin(), metadata.kernelNames.end(), name)
-                       == metadata.kernelNames.end())
-                        return failure(request,
-                                       "Built code object does not define kernel " + name,
-                                       linked.log);
+                const auto& names = metadata.kernelNames;
+                if(!request.kernelNames.empty())
+                {
+                    for(const auto& name : request.kernelNames)
+                        if(std::find(names.begin(), names.end(), name) == names.end())
+                            return failure(request,
+                                           "Built code object does not define kernel " + name,
+                                           linked.log);
+                }
                 built.codeObject      = std::move(linked.codeObject);
                 built.codeObject.kind = Artifact::Kind::CodeObject;
-                built.codeObject.name = names.front();
+                built.codeObject.name = names.empty() ? source.mainKernel.name
+                                      : request.kernelNames.empty() ? names.front()
+                                                                    : request.kernelNames.front();
                 return {};
             }
 
