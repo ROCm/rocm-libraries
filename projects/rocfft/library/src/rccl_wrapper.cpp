@@ -68,8 +68,7 @@ struct rocfft_rccl_comm_t::Impl
         {
             if(rank >= devices.size())
                 throw std::out_of_range("device_state_t constructor: rank is out of range");
-            device_id = *std::next(devices.begin(), rank);
-            rocfft_scoped_device dev(device_id);
+            rocfft_scoped_device dev(*std::next(devices.begin(), rank));
             stream.alloc();
             auto nccl_ret = ncclCommInitRank(
                 &comm, static_cast<int>(devices.size()), unique_id, static_cast<int>(rank));
@@ -86,7 +85,6 @@ struct rocfft_rccl_comm_t::Impl
             {
                 if(comm)
                 {
-                    rocfft_scoped_device dev(device_id);
                     // destroy is local after a successful finalize; otherwise
                     // abort, since destroy would finalize ungrouped and hang
                     auto nccl_ret = group_finalized ? ncclCommDestroy(comm) : ncclCommAbort(comm);
@@ -125,12 +123,12 @@ struct rocfft_rccl_comm_t::Impl
         // must be called for all ranks inside one RCCL group: finalize is an
         // intra-node collective and hangs if ranks are finalized one by one
         // from the same thread
+        // NOTE: a non-RCCL throw here would hang the partial group!
         void finalize()
         {
             if(!comm)
                 return;
-            rocfft_scoped_device dev(device_id);
-            auto                 nccl_ret = ncclCommFinalize(comm);
+            auto nccl_ret = ncclCommFinalize(comm);
             if(nccl_ret != ncclSuccess)
                 throw rocfft_rccl_exception_t("ncclCommFinalize failed", nccl_ret);
         }
@@ -138,7 +136,6 @@ struct rocfft_rccl_comm_t::Impl
         // set by Impl once the grouped finalize of all ranks has succeeded
         bool group_finalized = false;
 
-        int                 device_id;
         hipStream_wrapper_t stream;
         ncclComm_t          comm = nullptr;
     };
