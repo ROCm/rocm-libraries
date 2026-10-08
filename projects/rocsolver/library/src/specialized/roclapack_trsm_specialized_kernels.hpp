@@ -189,9 +189,10 @@ ROCSOLVER_BEGIN_NAMESPACE
     determined by the values of ldb1 and ldb2. Whether L/U is transposed or not is
     determined by the values of lda1 and lda2.
 
-    Call this kernel with 'batch_count' groups in z, and enough
-    groups in y to cover all the 'ny' right/left-hand-sides (columns/rows of B).
-    There should be only one group in x with hipBlockDim_x = nx.
+    Call this kernel with 'batch_count' groups in x, and enough
+    groups in y to cover all the 'ny' right/left-hand-sides (columns/rows of B),
+    with hipBlockDim_x = nx. The batch goes on x because grid.z, like grid.y, can be
+    capped at 65536.
     Size of shared memory per group should be:
     lmemsize = hipBlockDim_y * sizeof(T);
 
@@ -212,7 +213,7 @@ ROCSOLVER_KERNEL void unit_forward_substitution_kernel(const I nx,
                                                        const rocblas_stride shiftB,
                                                        const rocblas_stride strideB)
 {
-    I bid = hipBlockIdx_z;
+    I bid = hipBlockIdx_x;
     I x = hipThreadIdx_x;
     I ty = hipThreadIdx_y;
     I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
@@ -264,7 +265,7 @@ ROCSOLVER_KERNEL void conj_unit_forward_substitution_kernel(const I nx,
                                                             const rocblas_stride shiftB,
                                                             const rocblas_stride strideB)
 {
-    I bid = hipBlockIdx_z;
+    I bid = hipBlockIdx_x;
     I x = hipThreadIdx_x;
     I ty = hipThreadIdx_y;
     I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
@@ -316,7 +317,7 @@ ROCSOLVER_KERNEL void nonunit_forward_substitution_kernel(const I nx,
                                                           const rocblas_stride shiftB,
                                                           const rocblas_stride strideB)
 {
-    I bid = hipBlockIdx_z;
+    I bid = hipBlockIdx_x;
     I x = hipThreadIdx_x;
     I ty = hipThreadIdx_y;
     I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
@@ -373,7 +374,7 @@ ROCSOLVER_KERNEL void conj_nonunit_forward_substitution_kernel(const I nx,
                                                                const rocblas_stride shiftB,
                                                                const rocblas_stride strideB)
 {
-    I bid = hipBlockIdx_z;
+    I bid = hipBlockIdx_x;
     I x = hipThreadIdx_x;
     I ty = hipThreadIdx_y;
     I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
@@ -430,9 +431,10 @@ ROCSOLVER_KERNEL void conj_nonunit_forward_substitution_kernel(const I nx,
     determined by the values of ldb1 and ldb2. Whether L/U is transposed or not is
     determined by the values of lda1 and lda2.
 
-    Call this kernel with 'batch_count' groups in z, and enough
-    groups in y to cover all the 'ny' right/left-hand-sides (columns/rows of B).
-    There should be only one group in x with hipBlockDim_x = nx.
+    Call this kernel with 'batch_count' groups in x, and enough
+    groups in y to cover all the 'ny' right/left-hand-sides (columns/rows of B),
+    with hipBlockDim_x = nx. The batch goes on x because grid.z, like grid.y, can be
+    capped at 65536.
     Size of shared memory per group should be:
     lmemsize = hipBlockDim_y * sizeof(T);
 
@@ -453,7 +455,7 @@ ROCSOLVER_KERNEL void unit_backward_substitution_kernel(const I nx,
                                                         const rocblas_stride shiftB,
                                                         const rocblas_stride strideB)
 {
-    I bid = hipBlockIdx_z;
+    I bid = hipBlockIdx_x;
     I x = hipThreadIdx_x;
     I ty = hipThreadIdx_y;
     I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
@@ -505,7 +507,7 @@ ROCSOLVER_KERNEL void conj_unit_backward_substitution_kernel(const I nx,
                                                              const rocblas_stride shiftB,
                                                              const rocblas_stride strideB)
 {
-    I bid = hipBlockIdx_z;
+    I bid = hipBlockIdx_x;
     I x = hipThreadIdx_x;
     I ty = hipThreadIdx_y;
     I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
@@ -557,7 +559,7 @@ ROCSOLVER_KERNEL void nonunit_backward_substitution_kernel(const I nx,
                                                            const rocblas_stride shiftB,
                                                            const rocblas_stride strideB)
 {
-    I bid = hipBlockIdx_z;
+    I bid = hipBlockIdx_x;
     I x = hipThreadIdx_x;
     I ty = hipThreadIdx_y;
     I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
@@ -614,7 +616,7 @@ ROCSOLVER_KERNEL void conj_nonunit_backward_substitution_kernel(const I nx,
                                                                 const rocblas_stride shiftB,
                                                                 const rocblas_stride strideB)
 {
-    I bid = hipBlockIdx_z;
+    I bid = hipBlockIdx_x;
     I x = hipThreadIdx_x;
     I ty = hipThreadIdx_y;
     I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
@@ -872,7 +874,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
         dimx = nx;
         dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
         blocks = (ny - 1) / dimy + 1;
-        grid = dim3(1, blocks, batch_count);
+        grid = dim3(batch_count, blocks, 1);
         threads = dim3(dimx, dimy, 1);
         lmemsize = dimy * sizeof(T);
 
@@ -908,7 +910,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, batch_count);
+            grid = dim3(batch_count, blocks, 1);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -948,7 +950,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, batch_count);
+            grid = dim3(batch_count, blocks, 1);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -966,7 +968,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
         dimx = nx;
         dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
         blocks = (ny - 1) / dimy + 1;
-        grid = dim3(1, blocks, batch_count);
+        grid = dim3(batch_count, blocks, 1);
         threads = dim3(dimx, dimy, 1);
         lmemsize = dimy * sizeof(T);
 
@@ -1001,7 +1003,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, batch_count);
+            grid = dim3(batch_count, blocks, 1);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -1042,7 +1044,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, batch_count);
+            grid = dim3(batch_count, blocks, 1);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -1135,7 +1137,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
         dimx = nx;
         dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
         blocks = (ny - 1) / dimy + 1;
-        grid = dim3(1, blocks, batch_count);
+        grid = dim3(batch_count, blocks, 1);
         threads = dim3(dimx, dimy, 1);
         lmemsize = dimy * sizeof(T);
 
@@ -1171,7 +1173,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, batch_count);
+            grid = dim3(batch_count, blocks, 1);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -1211,7 +1213,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, batch_count);
+            grid = dim3(batch_count, blocks, 1);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -1229,7 +1231,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
         dimx = nx;
         dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
         blocks = (ny - 1) / dimy + 1;
-        grid = dim3(1, blocks, batch_count);
+        grid = dim3(batch_count, blocks, 1);
         threads = dim3(dimx, dimy, 1);
         lmemsize = dimy * sizeof(T);
 
@@ -1264,7 +1266,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, batch_count);
+            grid = dim3(batch_count, blocks, 1);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -1305,7 +1307,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, batch_count);
+            grid = dim3(batch_count, blocks, 1);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
