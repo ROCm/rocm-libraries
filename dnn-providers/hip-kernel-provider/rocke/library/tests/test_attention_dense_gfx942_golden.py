@@ -80,6 +80,7 @@ def _cases():
         captured automatically on the next re-bless -- no per-lever edits here."""
     from kernels.gfx942.attention_dense import (
         AttentionDenseSpec,
+        Gfx942AttentionDenseSpec,
         build_attention_dense,
     )
     from dispatch.attention import AttentionRequest, attention_tuning_spec
@@ -99,7 +100,10 @@ def _cases():
     def mk(**over):
         d = dict(base)
         d.update(over)
-        return lambda: build_attention_dense(AttentionDenseSpec(**d), arch=_ARCH)
+        spec_type = (
+            Gfx942AttentionDenseSpec if d.get("emit_lse", False) else AttentionDenseSpec
+        )
+        return lambda: build_attention_dense(spec_type(**d), arch=_ARCH)
 
     def mk_dispatch(**over):
         """Build via the gfx942 dispatch spec so the case tracks the SHIPPED config
