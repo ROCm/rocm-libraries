@@ -664,3 +664,77 @@ class TestArchNormalizationMatchesCodegen(unittest.TestCase):
                     self.assertEqual(normalize_gfx_arch(arch), canonical(arch))
         finally:
             builtins.__import__ = real_import
+
+
+# --- Build-failure reasons --------------------------------------------------
+# The JIT build workers already compute a reason for every codegen/compile
+# failure; what they do with it decides whether a broken toolchain is
+# diagnosable. develop #2700 produced 64 lines of "build_fail " with nothing
+# after them because the reason was computed and dropped. These tests pin the
+# worker end: the reason carries the compiler's own message, and it is bounded
+# so one CK template failure cannot bury the summary.
+import tempfile  # noqa: E402
+from unittest import mock  # noqa: E402
+
+import ctypes_utils as _cu  # noqa: E402
+
+
+def _hipcc_job():
+    """Minimal _run_hipcc_subprocess job; subprocess.run is always mocked."""
+    with tempfile.TemporaryDirectory() as d:
+        return {
+            "compile_cmd": ["hipcc", "-c", "k.cpp"],
+            "link_cmd": ["hipcc", "-shared", "k.o"],
+            "lib_path": str(Path(d) / "libk.so"),
+            "compile_timeout": 300,
+        }
+
+
+class TestBuildFailureReasons(unittest.TestCase):
+    def test_compile_failure_reports_the_compiler_message(self):
+        # develop #2700 verbatim: HIP_CLANG_PATH pointed at a directory the
+        # TheRock image does not have, so hipcc could not find clang++. That one
+        # line is the whole diagnosis.
+        res = mock.Mock(returncode=1, stderr="clang++: not found")
+        with mock.patch("subprocess.run", return_value=res):
+            ok, path, reason = _cu._run_hipcc_subprocess(_hipcc_job())
+        self.assertFalse(ok)
+        self.assertIsNone(path)
+        self.assertEqual(reason, "Compile failed: clang++: not found")
+
+    def test_link_failure_is_distinguishable_from_compile_failure(self):
+        # Same .so, very different fix (missing symbol vs bad flag), so the
+        # prefix has to survive.
+        def run(cmd, **kwargs):
+            if "-shared" in cmd:
+                return mock.Mock(returncode=1, stderr="undefined symbol: foo")
+            return mock.Mock(returncode=0, stderr="")
+
+        with mock.patch("subprocess.run", side_effect=run):
+            ok, _, reason = _cu._run_hipcc_subprocess(_hipcc_job())
+        self.assertFalse(ok)
+        self.assertTrue(reason.startswith("Link failed: "), reason)
+        self.assertIn("undefined symbol: foo", reason)
+
+    def test_huge_stderr_is_clipped_with_a_marker(self):
+        # A CK template failure is tens of kilobytes. Unbounded, 64 of those
+        # make the summary unreadable and bloat the archived JSON.
+        huge = "e" * 50_000
+        res = mock.Mock(returncode=1, stderr=huge)
+        with mock.patch("subprocess.run", return_value=res):
+            _, _, reason = _cu._run_hipcc_subprocess(_hipcc_job())
+        self.assertLess(len(reason), _cu._STDERR_REASON_CHARS + 300)
+        self.assertIn("clipped", reason)
+        self.assertIn("50000 chars total", reason)
+        self.assertTrue(reason.startswith("Compile failed: eeee"), reason[:40])
+
+    def test_message_shorter_than_the_limit_is_untouched(self):
+        # The old codegen path clipped at 200 chars, shorter than one clang
+        # diagnostic plus its file:line prefix, so errors were cut mid-word.
+        msg = "x" * 400
+        self.assertEqual(_cu._clip_stderr(msg), msg)
+        self.assertNotIn("clipped", _cu._clip_stderr(msg))
+
+    def test_empty_stderr_does_not_become_none(self):
+        # subprocess with text=True can hand back None if stderr was not piped.
+        self.assertEqual(_cu._clip_stderr(None), "")

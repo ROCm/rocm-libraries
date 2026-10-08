@@ -1056,6 +1056,30 @@ def _run_codegen_subprocess(args: Dict[str, Any]) -> CodegenResult:
         )
 
 
+# How much subprocess stderr a build-failure reason carries.
+#
+# Both ends of the previous behaviour were wrong. The hipcc paths below returned
+# the WHOLE stderr, and a CK template failure is tens of kilobytes -- one of
+# those in a 64-config sweep buries the summary and bloats the archived JSON.
+# The codegen path clipped to 200 characters, which is shorter than a single
+# clang diagnostic line plus its file:line prefix, so the actual error was
+# routinely cut mid-word. 2000 keeps the first few diagnostics, which is where
+# the cause is; everything after that is the template instantiation backtrace.
+_STDERR_REASON_CHARS = 2000
+
+
+def _clip_stderr(text: str, limit: int = _STDERR_REASON_CHARS) -> str:
+    """First ``limit`` characters of a subprocess stderr, marked if clipped.
+
+    The marker is the point: a silently truncated compiler error reads like a
+    complete one, and somebody will go looking for a diagnostic that was cut.
+    """
+    text = text or ""
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}... [clipped, {len(text)} chars total]"
+
+
 def _run_hipcc_subprocess(args: dict) -> Tuple[bool, Optional[Path], str]:
     """Module-level function to run hipcc compilation in parallel."""
     import subprocess
@@ -1074,11 +1098,11 @@ def _run_hipcc_subprocess(args: dict) -> Tuple[bool, Optional[Path], str]:
             timeout=args.get("compile_timeout", 300),
         )
         if res_c.returncode != 0:
-            return False, None, f"Compile failed: {res_c.stderr}"
+            return False, None, f"Compile failed: {_clip_stderr(res_c.stderr)}"
 
         res_l = subprocess.run(link_cmd, capture_output=True, text=True, timeout=300)
         if res_l.returncode != 0:
-            return False, None, f"Link failed: {res_l.stderr}"
+            return False, None, f"Link failed: {_clip_stderr(res_l.stderr)}"
 
         return True, lib_path, ""
     except subprocess.TimeoutExpired:
@@ -1136,7 +1160,7 @@ def _generate_single_kernel_subprocess(args: dict) -> Tuple[bool, Optional[str],
             os.unlink(config_file)
 
             if res.returncode != 0:
-                return False, None, f"Codegen failed: {res.stderr[:200]}"
+                return False, None, f"Codegen failed: {_clip_stderr(res.stderr)}"
 
             # Only this call's output is in gen_dir, so the match is exact.
             pattern = args["hpp_glob_pattern"]
