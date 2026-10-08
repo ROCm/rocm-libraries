@@ -267,7 +267,11 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
         )
         records.append(record)
 
-    write_op_manifest(op_dir, arch, OP, env.provenance(arch), records)
+    # Every CDNA kernel is FlyDSL's own; none comes from AITER, so its pin is not
+    # part of how these bytes came to be.
+    provenance = env.provenance(arch)
+    provenance.pop("aiter_kernels_commit", None)
+    write_op_manifest(op_dir, arch, OP, provenance, records)
     source_md = refresh_source_md(op_dir)
     print(f"wrote {len(records)} object(s) to {op_dir}")
     print(f"refreshed {source_md}")

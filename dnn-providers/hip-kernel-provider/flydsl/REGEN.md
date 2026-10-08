@@ -97,7 +97,7 @@ cd dnn-providers/hip-kernel-provider/flydsl
 # Compile into a scratch directory -- must be empty or nonexistent, since the
 # generator writes files rather than clearing the directory, so an object left
 # by an earlier run with a different instance list would survive and be compared.
-for op in rmsnorm sdpa; do
+for op in rmsnorm sdpa_rdna; do
   PYTHONDONTWRITEBYTECODE=1 \
     $PY -m generators.gen_$op --arch gfx11-generic --out-dir "$REGEN_OUT"
 done
@@ -128,7 +128,7 @@ PY
 The manifests and the provenance record must also come out identical:
 
 ```bash
-for op in rmsnorm sdpa; do
+for op in rmsnorm sdpa_rdna; do
   diff "$CONTENT/$op/gfx11-generic/manifest.json" "$REGEN_OUT/$op/gfx11-generic/manifest.json"
   diff "$CONTENT/$op/gfx11-generic.SOURCE.md"     "$REGEN_OUT/$op/gfx11-generic.SOURCE.md"
 done
@@ -137,6 +137,10 @@ done
 Expected, and the state of the tree as committed: **108/108 byte-identical** (12
 RMSNorm, 96 SDPA), all four diffs empty. Repeat with `gfx12-generic` in place of
 `gfx11-generic` throughout: **108/108** there too.
+
+The CDNA SDPA op is built per arch rather than per family. The same three steps,
+with `sdpa_cdna` as the only op and `gfx950`, then `gfx942`, as the target:
+**2/2** for each.
 
 `manifest.json` agreeing is the stronger of the two checks — it carries the
 `toolchain` block, so an identical manifest means the *recorded* toolchain and
@@ -175,7 +179,21 @@ for ARCH in gfx11-generic gfx12-generic; do
   # (3) Verify the set. This is the same invocation the build runs before packing.
   $PY gen_descriptors.py --arch $ARCH --check
 done
+
+# The CDNA SDPA kernels are MFMA code, built per arch: FlyDSL's dual-wave kernel
+# for gfx950 and its generic kernel for gfx942. gen_sdpa_cdna refuses any other
+# arch before compiling.
+for ARCH in gfx950 gfx942; do
+  $PY -m generators.gen_sdpa_cdna --arch $ARCH
+  $PY gen_descriptors.py --arch $ARCH
+  $PY gen_descriptors.py --arch $ARCH --check
+done
 ```
+
+The CDNA kernels take FlyDSL's `fx.Tensor` arguments, so `gen_sdpa_cdna` traces
+each from torch `meta` tensors -- shapes and strides with no storage. No GPU is
+touched, and the object is identical to one traced from device tensors, because
+every tensor is lowered with a dynamic layout.
 
 **Why `gfx11-generic`.** It is an LLVM *generic* target: one object set that the
 loader accepts on every RDNA3 and RDNA3.5 part -- gfx1100, gfx1101, gfx1102,
@@ -275,14 +293,18 @@ about which compiler built it.
 
 ## 5. Checking the vendored sources against upstream
 
-`kernels_src/` is a vendored copy of ten kernel modules from two upstreams. Nine
-come from FlyDSL; the attention kernel comes from AITER, which carries FlyDSL
-kernels upstream FlyDSL does not. Two carry deliberate modifications recorded in
-their own headers: `kernels_src/kernels/norm/rmsnorm_kernel.py` (three) and
+`kernels_src/` is a vendored copy of fourteen kernel modules from two upstreams.
+Thirteen come from FlyDSL; the RDNA attention kernel comes from AITER, which
+carries FlyDSL kernels upstream FlyDSL does not. Deliberate modifications are
+recorded beside the code: `kernels_src/kernels/norm/rmsnorm_kernel.py` (three) and
 `kernels_src/kernels/attention_rdna/flash_attn_func_rdna.py` (sixteen — the gfx11
-port and the runtime arguments that let a few objects cover many shapes). Each
-file's header names the upstream and path it came from, and the tool reads that
-header to decide what to diff it against. To see what has drifted:
+port and the runtime arguments that let a few objects cover many shapes) in their
+own headers, and the CDNA attention files in
+`kernels_src/kernels/attention_cdna/README.md` (an import path, and a runtime row
+guard). Each file's header names the upstream and path it came from -- the
+renamed `attention_rdna/` and `attention_cdna/` packages both map back to
+upstream's `kernels/attention/` -- and the tool reads that header to decide what
+to diff it against. To see what has drifted:
 
 ```bash
 python3 tools/diff_upstream.py --upstream /path/to/FlyDSL --aiter /path/to/aiter --commit
@@ -293,16 +315,28 @@ Expected against the pinned checkouts, and the state of the tree as committed:
 ```
 FlyDSL (v0.3.4.1-19-g89ad52f) at the pinned commit 89ad52fbbb9e
 AITER at the pinned commit 8253efc40595
+=== kernels/attention_cdna/__init__.py
+  …
+=== kernels/attention_cdna/flash_attn_generic.py
+  …
+=== kernels/attention_cdna/flash_attn_gfx950.py
+  …
+=== kernels/attention_cdna/flash_attn_utils.py
+  …
+=== kernels/attention_rdna/__init__.py
+  …
 === kernels/attention_rdna/flash_attn_func_rdna.py
   …
 === kernels/norm/rmsnorm_kernel.py
   …
-8/10 vendored files identical to upstream after normalization; 2 differ, 0 absent upstream, 0 not compared
+7/14 vendored files identical to upstream after normalization; 7 differ, 0 absent upstream, 0 not compared
 ```
 
-Without `--aiter`, the attention file is reported as not compared rather than as
-absent. The two differing files are the point of the tool, not a failure — read
-each one's hunks against its header's recorded modifications. Anything that header does not
+Without `--aiter`, the RDNA attention file is reported as not compared rather
+than as absent. The differing files are the point of the tool, not a failure —
+read each one's hunks against its recorded modifications. Every one of them
+differs at least by the provenance header it carries; the two `__init__.py`
+files differ by nothing else. Anything that header does not
 account for is drift: either a local edit nobody wrote down, or an upstream
 re-vendor that did not update the pins in `generators/_flydsl_env.py`. Exit
 status reports whether the comparison held together, not whether files matched:

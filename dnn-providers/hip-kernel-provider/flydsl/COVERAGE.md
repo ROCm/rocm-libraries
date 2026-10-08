@@ -8,8 +8,10 @@ SPDX-License-Identifier:  MIT
 Two packs, built once for each of two LLVM generic targets -- `gfx11-generic`
 (RDNA3 / RDNA3.5: gfx1100–gfx1103, gfx1150–gfx1153) and `gfx12-generic` (RDNA4:
 gfx1200, gfx1201) -- and shipped to every member: **RMSNorm forward** (12 kernel
-objects per family, §1–§4) and **SDPA forward** (96 per family, §5). The gfx12
-set is built and checked but not yet run on a gfx12 device (§5.4). Every graph a pack accepts is
+objects per family, §1–§4) and **SDPA forward** (96 per family, §5). A third,
+**SDPA forward on CDNA** (§7), is a separate engine built per arch for gfx950 and
+gfx942 from FlyDSL's own CDNA kernels; it is a first, deliberately narrow object
+set that proves the path end to end. Every graph a pack accepts is
 computed by one of its objects; everything else is **declined**, so another
 engine gets the plan.
 
@@ -451,6 +453,93 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64, non-causal 128 without a bias and the generic tier up to 64, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 66 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
 | **gfx12-generic** | the same table, built from the same sources for RDNA4 | **108** | shipped; GPU suites pass on gfx1201 |
 | **Total, both families** | | **216** | |
+| SDPA forward, CDNA (§7) | per arch: kernel family × causal (2) at bf16, 32/8 heads, `head_dim` 128 | 2 per arch | shipped, `gfx950` and `gfx942`; GPU suites pass on both |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime
 feature, is part of adding the feature.
+
+---
+
+## 7. SDPA forward on CDNA — `hipkernel:flydsl_sdpa_cdna`
+
+A separate engine from §5, with its own descriptors, native symbols and dispatch
+handler, so the RDNA kernels' knobs, argument list and launch geometry never
+meet the CDNA ones. The kernels are FlyDSL's own MFMA flash-attention forwards,
+vendored whole under
+[`kernels_src/kernels/attention_cdna/`](kernels_src/kernels/attention_cdna/README.md),
+whose README lists the two modifications (an import path, and a runtime row
+guard in the cooperative K/V loads that FlyDSL 0.3.4 cannot trace in a helper).
+The native half is
+[`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp).
+
+The objects are built **per arch**, not per generic family: CDNA has no generic
+target that spans gfx942 and gfx950, and the two get different kernels.
+
+| Arch | Kernel (`kernel`) | Tile | Workgroup | Grid |
+|---|---|---|---|---|
+| gfx950 | `dualwave` — `flash_attn_gfx950.py`, software-pipelined, two waves per 32 query rows | `block_m` 256 | 512 threads | (query heads, query blocks, batch) |
+| gfx942 | `generic` — `flash_attn_generic.py` | `block_m` 128 | 256 threads | batch × query tiles × query heads, flattened |
+
+### 7.1 What is baked, and what is not
+
+This first set is the pipeline proof: the kernels as upstream builds them, with
+everything upstream bakes still baked.
+
+| Baked per object | Runtime kernel argument |
+|---|---|
+| dtype (`bf16`) | batch |
+| query heads (32) and KV heads (8) | sequence length (one value: `Sq == Skv`) |
+| `head_dim` (128) | |
+| causal (bottom-right), or none | |
+| scale `1/√head_dim` | |
+| contiguous BSHD strides | |
+
+Two objects per arch, causal and non-causal. Each tensor is passed as FlyDSL's
+`fx.Tensor`: an 8-byte pointer followed by a 40-byte by-value layout (four i32
+extents, then the i64 strides of the three non-unit-stride dimensions);
+`gen_sdpa_cdna.py` asserts every object's argument list against its family's
+before writing it, and the dispatcher marshals by that position list.
+
+### 7.2 What a graph must be
+
+One SDPA-forward node, and:
+
+| Condition | Why |
+|---|---|
+| Q, K, V, O rank 4, device operands, **not ragged**, **contiguous BSHD** (strides `(S·H·D, D, H·D, 1)` on the logical B, H, S, D axes) | The kernels address each operand by a baked token pitch; no other layout reads correctly. |
+| One dtype for all four; an object exists only for `bf16` | The graph matcher accepts `HALF` as well, and the kernel matcher then finds no object. |
+| `Sq == Skv`; `Hq % Hk == 0`; V shaped as K, O as Q | The kernels take one sequence length. |
+| Heads and `head_dim` equal to an object's baked values | Checked by the kernel matcher against each candidate's metadata. |
+| No mask, or causal: top-left, bottom-right or `right_bound == 0` | With equal lengths the three are the same mask, the kernels' own. Any `left_bound` or other band declines. |
+| Scale absent, or `attn_scale_value` within 1e-6 relative of `1/√head_dim`; no scale tensor | The scale is baked. |
+| Declined outright: bias, padding / varlen, dropout, paged KV, block masks, sinks, FP8 descales, ALiBi, softmax stats / LSE output, a non-`AUTO` implementation | The objects are built without them. |
+| Batch pitch and grid within int32 | 32-bit addressing. |
+
+### 7.3 What comes next, and the rule it follows
+
+Each feature that widens this set goes through §6's gate: a runtime argument only
+if, unused, it costs nothing against a compiled-out build; otherwise a
+model-determined compile-time axis. In order:
+
+| | What it takes |
+|---|---|
+| Runtime scale, head counts and strides | Kernel arguments in place of the baked values; the largest win in objects served per object shipped. |
+| LSE output | Upstream's kernels already carry the LSE operand. |
+| `Sq ≠ Skv`, bottom-right and top-left causal separately, windows | Upstream's kernels take `seq_len_kv` separately; the mask needs the diagonal offset. |
+| `head_dim` 64 and f16 | Both kernels build them; rows in the instance table. |
+| Varlen, paged KV | Both kernels already take cumulative sequence offsets and a block table, passed unused today. |
+| Additive bias | The dual-wave kernel takes a bias operand; the generic one has none, so gfx942 needs a kernel change. |
+
+Then the instance set is chosen by the provider's AOT selection process
+(build every candidate, tune, cover, prune) rather than by hand.
+
+### 7.4 Where each claim is checked
+
+| Claim | Checked by |
+|---|---|
+| The objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 |
+| Each object has its family's argument layout, workgroup size and arch, and spills no registers | `gen_sdpa_cdna.py`, before the object is written |
+| The vendored kernels match FlyDSL but for their recorded modifications | `tools/diff_upstream.py` ([REGEN.md](REGEN.md) §5) |
+| Each arch's shard ships one object per class, one kernel family, each with its family's signature | `TestFlydslSdpaCdnaPacks`, and the shard census that runs it for gfx950 and gfx942 |
+| The accept/decline rules above, the causal binding, and candidate selection | `TestFlydslSdpaCdnaGraphAccepts`, `TestFlydslSdpaCdnaGraphDeclines`, `TestFlydslSdpaCdnaBinding`, `TestFlydslSdpaCdnaKernelMatch` |
+| The staged objects compute attention — non-causal, causal, a batch with a ragged tail, a longer sequence — against a reference | `TestGpuFlydslSdpaCdnaDispatch`, on gfx950 and gfx942 |

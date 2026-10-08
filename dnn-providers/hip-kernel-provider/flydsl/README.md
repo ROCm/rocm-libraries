@@ -13,9 +13,10 @@ This directory holds the kernels, the generators that produce them, and the
 descriptors that make them selectable. The matching C++ — the code that decides
 whether a graph may run on them and how to launch them — lives one level up, one
 file per op:
-[`FlydslRmsNormNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormNative.cpp)
+[`FlydslRmsNormNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormNative.cpp),
+[`FlydslSdpaRdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaNative.cpp)
 and
-[`FlydslSdpaRdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaNative.cpp).
+[`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp).
 
 **Nothing here is compiled by the build.** The `.hsaco` objects are committed
 artifacts; the provider's shared packer packs and stages them. That is the central fact about this
@@ -32,15 +33,13 @@ way to check it, or it is just bytes someone once vouched for.
 
 ## What ships
 
-Two ops, 108 kernel objects per family, built once for each of two LLVM generic
-targets and shipped to every part each covers:
+For RDNA, two ops, 108 kernel objects per family, built once for each of two
+LLVM generic targets and shipped to every part each covers:
 
 - **`gfx11-generic`** -- RDNA3 / RDNA3.5: gfx1100, gfx1101, gfx1102, gfx1103,
   gfx1150, gfx1151, gfx1152 and gfx1153. Verified on gfx1151.
 - **`gfx12-generic`** -- RDNA4: gfx1200 and gfx1201. Built from the same kernel
-  sources, which carry both WMMA operand layouts, and checked by everything that
-  can run without the hardware (signatures, register use, ELF target, shard
-  contents); **not yet run on a gfx12 device**.
+  sources, which carry both WMMA operand layouts. Verified on gfx1201.
 
 Each member's shard carries its family's bytes (see [REGEN.md §3](REGEN.md) for
 why one object set per family is enough, and what it needs).
@@ -68,6 +67,14 @@ arguments, so each object serves every shape and layout of its class. Inference
 only; not yet served: padding / varlen. Status
 against hipDNN's Tier 0 / Tier 1 and every declined feature with its effort are
 in [COVERAGE.md §5](COVERAGE.md).
+
+**SDPA forward on CDNA** (`hipkernel:flydsl_sdpa_cdna`), a separate engine with
+objects built per arch: FlyDSL's own dual-wave MFMA kernel on **gfx950** and its
+generic MFMA kernel on **gfx942**, two objects each (causal and non-causal, bf16,
+32 query / 8 KV heads, `head_dim` 128). It is the first, narrow set that carries
+these kernels through the whole path -- generation, packing, selection and
+launch -- and is verified on both arches; the order in which it widens is in
+[COVERAGE.md §7](COVERAGE.md). The RDNA SDPA kernels stay RDNA-only.
 
 ## How it reaches hipDNN
 
@@ -124,8 +131,8 @@ Two flags, and the difference between them matters:
   ships FlyDSL objects for a requested architecture. Everything conditional
   keys on **this one**.
 
-The gap between them is real: with `GPU_TARGETS=gfx942` the option is ON and yet
-nothing ships, because no gfx942 kernels are checked in. That configuration
+The gap between them is real: with `GPU_TARGETS=gfx90a` the option is ON and yet
+nothing ships, because no gfx90a kernels are checked in. That configuration
 reports **dormant** and continues — it is not an error to build for an
 architecture this directory does not serve. Keying the engine TUs, the test TUs
 and the census on the outcome rather than the intent is what makes that
@@ -169,7 +176,7 @@ provider tree; everything else is relative to this directory.
 | `generators/_codeobject.py` | reads and verifies a compiled object (target, ELF generic machine), shared by every generator |
 | `generators/arch_families.json`, `_arch_families.py` | the generic targets and their member arches; read by the generators and `CMakeLists.txt` |
 | `generators/_generic_targets.py` | the FlyDSL 0.3.4 shim that lets MLIR lower for a generic target |
-| `generators/gen_rmsnorm.py`, `gen_sdpa_rdna.py` | compile one op's rows into objects + manifest + `<target>.SOURCE.md` |
+| `generators/gen_rmsnorm.py`, `gen_sdpa_rdna.py`, `gen_sdpa_cdna.py` | compile one op's rows into objects + manifest + `<target>.SOURCE.md` |
 | `gen_descriptors.py` | derives descriptors from the objects; `--check` re-verifies |
 | `tools/diff_upstream.py` | vendored sources vs. their upstream checkouts, black-normalized |
 | `tools/check_shards.py` | after the pack: every member's shard ships exactly the checked-in objects |
@@ -199,8 +206,9 @@ it is generated output inside the per-target folders.**
 ```
 
 `<target>` is a generic family (`gfx11-generic`, `gfx12-generic`) or a concrete
-arch (`gfx1151`); both can sit side by side under one op, each its own folder
-and summary, as the provider grows arch-specific objects beside a family set.
+arch (`gfx950`, `gfx942` for the CDNA SDPA op); both can sit side by side under
+one op, each its own folder and summary, as the provider grows arch-specific
+objects beside a family set.
 
 The per-target folders are laid out to move to DVC as they are -- one DVC
 pointer per `<op>/<target>/`, with `<target>.SOURCE.md` beside it in git -- once
@@ -229,7 +237,7 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: currently 108/108 identical per family
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 108/108 per RDNA family, 2/2 per CDNA arch
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (hsaco UKDs)
