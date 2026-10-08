@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -127,22 +127,22 @@ ROCSOLVER_BEGIN_NAMESPACE
         if(isunit)                                                                                \
             ROCSOLVER_LAUNCH_KERNEL(conj_unit_forward_substitution_kernel<T>, grid, threads,      \
                                     lmemsize, stream, nx, ny, A, lda1, lda2, shiftA + offA,       \
-                                    strideA, B, ldb1, ldb2, shiftB + offB, strideB, batch_count); \
+                                    strideA, B, ldb1, ldb2, shiftB + offB, strideB);              \
         else                                                                                      \
             ROCSOLVER_LAUNCH_KERNEL(conj_nonunit_forward_substitution_kernel<T>, grid, threads,   \
                                     lmemsize, stream, nx, ny, A, lda1, lda2, shiftA + offA,       \
-                                    strideA, B, ldb1, ldb2, shiftB + offB, strideB, batch_count); \
+                                    strideA, B, ldb1, ldb2, shiftB + offB, strideB);              \
     }                                                                                             \
     else                                                                                          \
     {                                                                                             \
         if(isunit)                                                                                \
             ROCSOLVER_LAUNCH_KERNEL(unit_forward_substitution_kernel<T>, grid, threads, lmemsize, \
                                     stream, nx, ny, A, lda1, lda2, shiftA + offA, strideA, B,     \
-                                    ldb1, ldb2, shiftB + offB, strideB, batch_count);             \
+                                    ldb1, ldb2, shiftB + offB, strideB);                          \
         else                                                                                      \
             ROCSOLVER_LAUNCH_KERNEL(nonunit_forward_substitution_kernel<T>, grid, threads,        \
                                     lmemsize, stream, nx, ny, A, lda1, lda2, shiftA + offA,       \
-                                    strideA, B, ldb1, ldb2, shiftB + offB, strideB, batch_count); \
+                                    strideA, B, ldb1, ldb2, shiftB + offB, strideB);              \
     }
 
 #define BACKWARD_SUBSTITUTIONS                                                                     \
@@ -151,22 +151,22 @@ ROCSOLVER_BEGIN_NAMESPACE
         if(isunit)                                                                                 \
             ROCSOLVER_LAUNCH_KERNEL(conj_unit_backward_substitution_kernel<T>, grid, threads,      \
                                     lmemsize, stream, nx, ny, A, lda1, lda2, shiftA + offA,        \
-                                    strideA, B, ldb1, ldb2, shiftB + offB, strideB, batch_count);  \
+                                    strideA, B, ldb1, ldb2, shiftB + offB, strideB);               \
         else                                                                                       \
             ROCSOLVER_LAUNCH_KERNEL(conj_nonunit_backward_substitution_kernel<T>, grid, threads,   \
                                     lmemsize, stream, nx, ny, A, lda1, lda2, shiftA + offA,        \
-                                    strideA, B, ldb1, ldb2, shiftB + offB, strideB, batch_count);  \
+                                    strideA, B, ldb1, ldb2, shiftB + offB, strideB);               \
     }                                                                                              \
     else                                                                                           \
     {                                                                                              \
         if(isunit)                                                                                 \
             ROCSOLVER_LAUNCH_KERNEL(unit_backward_substitution_kernel<T>, grid, threads, lmemsize, \
                                     stream, nx, ny, A, lda1, lda2, shiftA + offA, strideA, B,      \
-                                    ldb1, ldb2, shiftB + offB, strideB, batch_count);              \
+                                    ldb1, ldb2, shiftB + offB, strideB);                           \
         else                                                                                       \
             ROCSOLVER_LAUNCH_KERNEL(nonunit_backward_substitution_kernel<T>, grid, threads,        \
                                     lmemsize, stream, nx, ny, A, lda1, lda2, shiftA + offA,        \
-                                    strideA, B, ldb1, ldb2, shiftB + offB, strideB, batch_count);  \
+                                    strideA, B, ldb1, ldb2, shiftB + offB, strideB);               \
     }
 
 /*************************************************************
@@ -210,57 +210,44 @@ ROCSOLVER_KERNEL void unit_forward_substitution_kernel(const I nx,
                                                        const I ldb1,
                                                        const I ldb2,
                                                        const rocblas_stride shiftB,
-                                                       const rocblas_stride strideB,
-                                                       const I batch_count)
+                                                       const rocblas_stride strideB)
 {
-    I const bid_start = hipBlockIdx_z;
-    I const bid_inc = hipGridDim_z;
+    I bid = hipBlockIdx_z;
+    I x = hipThreadIdx_x;
+    I ty = hipThreadIdx_y;
+    I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
 
-    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
+    // batch instance
+    T* A = load_ptr_batch(AA, bid, shiftA, strideA);
+    T* B = load_ptr_batch(BB, bid, shiftB, strideB);
+
+    // shared mem setup
+    extern __shared__ double lmem[];
+    T* b = reinterpret_cast<T*>(lmem);
+    T c;
+
+    if(y < ny)
     {
-        I x = hipThreadIdx_x;
-        I ty = hipThreadIdx_y;
-        I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
-
-        // batch instance
-        T* A = load_ptr_batch(AA, bid, shiftA, strideA);
-        T* B = load_ptr_batch(BB, bid, shiftB, strideB);
-
-        // shared mem setup
-        extern __shared__ double lmem[];
-        T* b = reinterpret_cast<T*>(lmem);
-        T c;
-
-        // NOTE: __syncthreads() must be called the same number of times by
-        // every thread in the block (active or not), so the barriers below
-        // are kept unconditional; only the data operations are guarded by
-        // 'active'.
-        bool const active = (y < ny);
         I ida = x * lda1;
         I idb = x * ldb1 + y * ldb2;
 
         // read data
-        if(active)
-            c = B[idb];
+        c = B[idb];
 
         // solve for all y's
         for(I k = 0; k < nx - 1; ++k)
         {
             __syncthreads();
-            if(active && x == k)
+            if(x == k)
                 b[ty] = c;
             __syncthreads();
 
-            if(active)
-                c -= (x > k) ? A[ida + k * lda2] * b[ty] : 0;
+            c -= (x > k) ? A[ida + k * lda2] * b[ty] : 0;
         }
 
         // move results back to global
-        if(active)
-            B[idb] = c;
-
-        __syncthreads();
-    } // end for bid
+        B[idb] = c;
+    }
 }
 
 template <typename T, typename I, typename U>
@@ -275,59 +262,44 @@ ROCSOLVER_KERNEL void conj_unit_forward_substitution_kernel(const I nx,
                                                             const I ldb1,
                                                             const I ldb2,
                                                             const rocblas_stride shiftB,
-                                                            const rocblas_stride strideB,
-                                                            const I batch_count)
+                                                            const rocblas_stride strideB)
 {
-    I const bid_start = hipBlockIdx_z;
-    I const bid_inc = hipGridDim_z;
+    I bid = hipBlockIdx_z;
+    I x = hipThreadIdx_x;
+    I ty = hipThreadIdx_y;
+    I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
 
-    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
+    // batch instance
+    T* A = load_ptr_batch(AA, bid, shiftA, strideA);
+    T* B = load_ptr_batch(BB, bid, shiftB, strideB);
+
+    // shared mem setup
+    extern __shared__ double lmem[];
+    T* b = reinterpret_cast<T*>(lmem);
+    T c;
+
+    if(y < ny)
     {
-        I const x = hipThreadIdx_x;
-        I const ty = hipThreadIdx_y;
-        I const y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
-
-        // batch instance
-        T const* const A = load_ptr_batch(AA, bid, shiftA, strideA);
-        T* const B = load_ptr_batch(BB, bid, shiftB, strideB);
-
-        // shared mem setup
-        extern __shared__ double lmem[];
-        T* const b = reinterpret_cast<T*>(lmem);
-        T c{};
-
-        // NOTE: __syncthreads() must be called the same number of times by
-        // every thread in the block (active or not), so the barriers below
-        // are kept unconditional; only the data operations are guarded by
-        // 'active'.
-        bool const active = (y < ny);
-        I const ida = x * lda1;
-        I const idb = x * ldb1 + y * ldb2;
+        I ida = x * lda1;
+        I idb = x * ldb1 + y * ldb2;
 
         // read data
-        if(active)
-            c = B[idb];
+        c = B[idb];
 
         // solve for all y's
         for(I k = 0; k < nx - 1; ++k)
         {
             __syncthreads();
-            if(active && x == k)
+            if(x == k)
                 b[ty] = c;
             __syncthreads();
 
-            if(active)
-                c -= (x > k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
+            c -= (x > k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
         }
 
         // move results back to global
-        if(active)
-            B[idb] = c;
-
-        // Shared memory is not overwritten until the next iteration's first substitution barrier.
-
-        __syncthreads();
-    } // end for bid
+        B[idb] = c;
+    }
 }
 
 template <typename T, typename I, typename U>
@@ -342,62 +314,49 @@ ROCSOLVER_KERNEL void nonunit_forward_substitution_kernel(const I nx,
                                                           const I ldb1,
                                                           const I ldb2,
                                                           const rocblas_stride shiftB,
-                                                          const rocblas_stride strideB,
-                                                          const I batch_count)
+                                                          const rocblas_stride strideB)
 {
-    I const bid_start = hipBlockIdx_z;
-    I const bid_inc = hipGridDim_z;
+    I bid = hipBlockIdx_z;
+    I x = hipThreadIdx_x;
+    I ty = hipThreadIdx_y;
+    I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
 
-    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
+    // batch instance
+    T* A = load_ptr_batch(AA, bid, shiftA, strideA);
+    T* B = load_ptr_batch(BB, bid, shiftB, strideB);
+
+    // shared mem setup
+    extern __shared__ double lmem[];
+    T* b = reinterpret_cast<T*>(lmem);
+    T c, d;
+
+    if(y < ny)
     {
-        I x = hipThreadIdx_x;
-        I ty = hipThreadIdx_y;
-        I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
-
-        // batch instance
-        T* A = load_ptr_batch(AA, bid, shiftA, strideA);
-        T* B = load_ptr_batch(BB, bid, shiftB, strideB);
-
-        // shared mem setup
-        extern __shared__ double lmem[];
-        T* b = reinterpret_cast<T*>(lmem);
-        T c, d;
-
-        // NOTE: __syncthreads() must be called the same number of times by
-        // every thread in the block (active or not), so the barriers below
-        // are kept unconditional; only the data operations are guarded by
-        // 'active'.
-        bool const active = (y < ny);
         I ida = x * lda1;
         I idb = x * ldb1 + y * ldb2;
 
         // read data
-        if(active)
-            c = B[idb];
+        c = B[idb];
 
         // solve for all y's
         for(I k = 0; k < nx - 1; ++k)
         {
             __syncthreads();
-            if(active && x == k)
+            if(x == k)
             {
                 c = c / A[x * (lda1 + lda2)];
                 b[ty] = c;
             }
             __syncthreads();
 
-            if(active)
-                c -= (x > k) ? A[ida + k * lda2] * b[ty] : 0;
+            c -= (x > k) ? A[ida + k * lda2] * b[ty] : 0;
         }
-        if(active && x == nx - 1)
+        if(x == nx - 1)
             c = c / A[x * (lda1 + lda2)];
 
         // move results back to global
-        if(active)
-            B[idb] = c;
-
-        __syncthreads();
-    } // end for bid
+        B[idb] = c;
+    }
 }
 
 template <typename T, typename I, typename U>
@@ -412,62 +371,49 @@ ROCSOLVER_KERNEL void conj_nonunit_forward_substitution_kernel(const I nx,
                                                                const I ldb1,
                                                                const I ldb2,
                                                                const rocblas_stride shiftB,
-                                                               const rocblas_stride strideB,
-                                                               const I batch_count)
+                                                               const rocblas_stride strideB)
 {
-    I const bid_start = hipBlockIdx_z;
-    I const bid_inc = hipGridDim_z;
+    I bid = hipBlockIdx_z;
+    I x = hipThreadIdx_x;
+    I ty = hipThreadIdx_y;
+    I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
 
-    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
+    // batch instance
+    T* A = load_ptr_batch(AA, bid, shiftA, strideA);
+    T* B = load_ptr_batch(BB, bid, shiftB, strideB);
+
+    // shared mem setup
+    extern __shared__ double lmem[];
+    T* b = reinterpret_cast<T*>(lmem);
+    T c, d;
+
+    if(y < ny)
     {
-        I x = hipThreadIdx_x;
-        I ty = hipThreadIdx_y;
-        I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
-
-        // batch instance
-        T* A = load_ptr_batch(AA, bid, shiftA, strideA);
-        T* B = load_ptr_batch(BB, bid, shiftB, strideB);
-
-        // shared mem setup
-        extern __shared__ double lmem[];
-        T* b = reinterpret_cast<T*>(lmem);
-        T c, d;
-
-        // NOTE: __syncthreads() must be called the same number of times by
-        // every thread in the block (active or not), so the barriers below
-        // are kept unconditional; only the data operations are guarded by
-        // 'active'.
-        bool const active = (y < ny);
         I ida = x * lda1;
         I idb = x * ldb1 + y * ldb2;
 
         // read data
-        if(active)
-            c = B[idb];
+        c = B[idb];
 
         // solve for all y's
         for(I k = 0; k < nx - 1; ++k)
         {
             __syncthreads();
-            if(active && x == k)
+            if(x == k)
             {
                 c = c / conj(A[x * (lda1 + lda2)]);
                 b[ty] = c;
             }
             __syncthreads();
 
-            if(active)
-                c -= (x > k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
+            c -= (x > k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
         }
-        if(active && x == nx - 1)
+        if(x == nx - 1)
             c = c / conj(A[x * (lda1 + lda2)]);
 
         // move results back to global
-        if(active)
-            B[idb] = c;
-
-        __syncthreads();
-    } // end for bid
+        B[idb] = c;
+    }
 }
 
 // **************** backward substitution kernels ************************//
@@ -505,57 +451,44 @@ ROCSOLVER_KERNEL void unit_backward_substitution_kernel(const I nx,
                                                         const I ldb1,
                                                         const I ldb2,
                                                         const rocblas_stride shiftB,
-                                                        const rocblas_stride strideB,
-                                                        const I batch_count)
+                                                        const rocblas_stride strideB)
 {
-    I const bid_start = hipBlockIdx_z;
-    I const bid_inc = hipGridDim_z;
+    I bid = hipBlockIdx_z;
+    I x = hipThreadIdx_x;
+    I ty = hipThreadIdx_y;
+    I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
 
-    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
+    // batch instance
+    T* A = load_ptr_batch(AA, bid, shiftA, strideA);
+    T* B = load_ptr_batch(BB, bid, shiftB, strideB);
+
+    // shared mem setup
+    extern __shared__ double lmem[];
+    T* b = reinterpret_cast<T*>(lmem);
+    T c;
+
+    if(y < ny)
     {
-        I x = hipThreadIdx_x;
-        I ty = hipThreadIdx_y;
-        I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
-
-        // batch instance
-        T* A = load_ptr_batch(AA, bid, shiftA, strideA);
-        T* B = load_ptr_batch(BB, bid, shiftB, strideB);
-
-        // shared mem setup
-        extern __shared__ double lmem[];
-        T* b = reinterpret_cast<T*>(lmem);
-        T c;
-
-        // NOTE: __syncthreads() must be called the same number of times by
-        // every thread in the block (active or not), so the barriers below
-        // are kept unconditional; only the data operations are guarded by
-        // 'active'.
-        bool const active = (y < ny);
         I ida = x * lda1;
         I idb = x * ldb1 + y * ldb2;
 
         // read data
-        if(active)
-            c = B[idb];
+        c = B[idb];
 
         // solve for all y's
         for(I k = nx - 1; k > 0; --k)
         {
             __syncthreads();
-            if(active && x == k)
+            if(x == k)
                 b[ty] = c;
             __syncthreads();
 
-            if(active)
-                c -= (x < k) ? A[ida + k * lda2] * b[ty] : 0;
+            c -= (x < k) ? A[ida + k * lda2] * b[ty] : 0;
         }
 
         // move results back to global
-        if(active)
-            B[idb] = c;
-
-        __syncthreads();
-    } // end for bid
+        B[idb] = c;
+    }
 }
 
 template <typename T, typename I, typename U>
@@ -570,57 +503,44 @@ ROCSOLVER_KERNEL void conj_unit_backward_substitution_kernel(const I nx,
                                                              const I ldb1,
                                                              const I ldb2,
                                                              const rocblas_stride shiftB,
-                                                             const rocblas_stride strideB,
-                                                             const I batch_count)
+                                                             const rocblas_stride strideB)
 {
-    I const bid_start = hipBlockIdx_z;
-    I const bid_inc = hipGridDim_z;
+    I bid = hipBlockIdx_z;
+    I x = hipThreadIdx_x;
+    I ty = hipThreadIdx_y;
+    I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
 
-    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
+    // batch instance
+    T* A = load_ptr_batch(AA, bid, shiftA, strideA);
+    T* B = load_ptr_batch(BB, bid, shiftB, strideB);
+
+    // shared mem setup
+    extern __shared__ double lmem[];
+    T* b = reinterpret_cast<T*>(lmem);
+    T c;
+
+    if(y < ny)
     {
-        I x = hipThreadIdx_x;
-        I ty = hipThreadIdx_y;
-        I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
-
-        // batch instance
-        T* A = load_ptr_batch(AA, bid, shiftA, strideA);
-        T* B = load_ptr_batch(BB, bid, shiftB, strideB);
-
-        // shared mem setup
-        extern __shared__ double lmem[];
-        T* b = reinterpret_cast<T*>(lmem);
-        T c;
-
-        // NOTE: __syncthreads() must be called the same number of times by
-        // every thread in the block (active or not), so the barriers below
-        // are kept unconditional; only the data operations are guarded by
-        // 'active'.
-        bool const active = (y < ny);
         I ida = x * lda1;
         I idb = x * ldb1 + y * ldb2;
 
         // read data
-        if(active)
-            c = B[idb];
+        c = B[idb];
 
         // solve for all y's
         for(I k = nx - 1; k > 0; --k)
         {
             __syncthreads();
-            if(active && x == k)
+            if(x == k)
                 b[ty] = c;
             __syncthreads();
 
-            if(active)
-                c -= (x < k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
+            c -= (x < k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
         }
 
         // move results back to global
-        if(active)
-            B[idb] = c;
-
-        __syncthreads();
-    } // end for bid
+        B[idb] = c;
+    }
 }
 
 template <typename T, typename I, typename U>
@@ -635,62 +555,49 @@ ROCSOLVER_KERNEL void nonunit_backward_substitution_kernel(const I nx,
                                                            const I ldb1,
                                                            const I ldb2,
                                                            const rocblas_stride shiftB,
-                                                           const rocblas_stride strideB,
-                                                           const I batch_count)
+                                                           const rocblas_stride strideB)
 {
-    I const bid_start = hipBlockIdx_z;
-    I const bid_inc = hipGridDim_z;
+    I bid = hipBlockIdx_z;
+    I x = hipThreadIdx_x;
+    I ty = hipThreadIdx_y;
+    I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
 
-    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
+    // batch instance
+    T* A = load_ptr_batch(AA, bid, shiftA, strideA);
+    T* B = load_ptr_batch(BB, bid, shiftB, strideB);
+
+    // shared mem setup
+    extern __shared__ double lmem[];
+    T* b = reinterpret_cast<T*>(lmem);
+    T c, d;
+
+    if(y < ny)
     {
-        I x = hipThreadIdx_x;
-        I ty = hipThreadIdx_y;
-        I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
-
-        // batch instance
-        T* A = load_ptr_batch(AA, bid, shiftA, strideA);
-        T* B = load_ptr_batch(BB, bid, shiftB, strideB);
-
-        // shared mem setup
-        extern __shared__ double lmem[];
-        T* b = reinterpret_cast<T*>(lmem);
-        T c, d;
-
-        // NOTE: __syncthreads() must be called the same number of times by
-        // every thread in the block (active or not), so the barriers below
-        // are kept unconditional; only the data operations are guarded by
-        // 'active'.
-        bool const active = (y < ny);
         I ida = x * lda1;
         I idb = x * ldb1 + y * ldb2;
 
         // read data
-        if(active)
-            c = B[idb];
+        c = B[idb];
 
         // solve for all y's
         for(I k = nx - 1; k > 0; --k)
         {
             __syncthreads();
-            if(active && x == k)
+            if(x == k)
             {
                 c = c / A[x * (lda1 + lda2)];
                 b[ty] = c;
             }
             __syncthreads();
 
-            if(active)
-                c -= (x < k) ? A[ida + k * lda2] * b[ty] : 0;
+            c -= (x < k) ? A[ida + k * lda2] * b[ty] : 0;
         }
-        if(active && x == 0)
+        if(x == 0)
             c = c / A[x * (lda1 + lda2)];
 
         // move results back to global
-        if(active)
-            B[idb] = c;
-
-        __syncthreads();
-    } // end for bid
+        B[idb] = c;
+    }
 }
 
 template <typename T, typename I, typename U>
@@ -705,62 +612,49 @@ ROCSOLVER_KERNEL void conj_nonunit_backward_substitution_kernel(const I nx,
                                                                 const I ldb1,
                                                                 const I ldb2,
                                                                 const rocblas_stride shiftB,
-                                                                const rocblas_stride strideB,
-                                                                const I batch_count)
+                                                                const rocblas_stride strideB)
 {
-    I const bid_start = hipBlockIdx_z;
-    I const bid_inc = hipGridDim_z;
+    I bid = hipBlockIdx_z;
+    I x = hipThreadIdx_x;
+    I ty = hipThreadIdx_y;
+    I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
 
-    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
+    // batch instance
+    T* A = load_ptr_batch(AA, bid, shiftA, strideA);
+    T* B = load_ptr_batch(BB, bid, shiftB, strideB);
+
+    // shared mem setup
+    extern __shared__ double lmem[];
+    T* b = reinterpret_cast<T*>(lmem);
+    T c, d;
+
+    if(y < ny)
     {
-        I x = hipThreadIdx_x;
-        I ty = hipThreadIdx_y;
-        I y = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
-
-        // batch instance
-        T* A = load_ptr_batch(AA, bid, shiftA, strideA);
-        T* B = load_ptr_batch(BB, bid, shiftB, strideB);
-
-        // shared mem setup
-        extern __shared__ double lmem[];
-        T* b = reinterpret_cast<T*>(lmem);
-        T c, d;
-
-        // NOTE: __syncthreads() must be called the same number of times by
-        // every thread in the block (active or not), so the barriers below
-        // are kept unconditional; only the data operations are guarded by
-        // 'active'.
-        bool const active = (y < ny);
         I ida = x * lda1;
         I idb = x * ldb1 + y * ldb2;
 
         // read data
-        if(active)
-            c = B[idb];
+        c = B[idb];
 
         // solve for all y's
         for(I k = nx - 1; k > 0; --k)
         {
             __syncthreads();
-            if(active && x == k)
+            if(x == k)
             {
                 c = c / conj(A[x * (lda1 + lda2)]);
                 b[ty] = c;
             }
             __syncthreads();
 
-            if(active)
-                c -= (x < k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
+            c -= (x < k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
         }
-        if(active && x == 0)
+        if(x == 0)
             c = c / conj(A[x * (lda1 + lda2)]);
 
         // move results back to global
-        if(active)
-            B[idb] = c;
-
-        __syncthreads();
-    } // end for bid
+        B[idb] = c;
+    }
 }
 
 /*************************************************************
@@ -942,7 +836,6 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
     T minone = -1; // constant -1 in host
 
     I dimx, dimy, blocks, nextpiv;
-    I const max_blocks = 64 * 1024;
     dim3 grid, threads;
     size_t lmemsize;
 
@@ -979,7 +872,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
         dimx = nx;
         dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
         blocks = (ny - 1) / dimy + 1;
-        grid = dim3(1, blocks, std::min(max_blocks, batch_count));
+        grid = dim3(1, blocks, batch_count);
         threads = dim3(dimx, dimy, 1);
         lmemsize = dimy * sizeof(T);
 
@@ -1015,7 +908,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, std::min(max_blocks, batch_count));
+            grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -1055,7 +948,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, std::min(max_blocks, batch_count));
+            grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -1073,7 +966,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
         dimx = nx;
         dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
         blocks = (ny - 1) / dimy + 1;
-        grid = dim3(1, blocks, std::min(max_blocks, batch_count));
+        grid = dim3(1, blocks, batch_count);
         threads = dim3(dimx, dimy, 1);
         lmemsize = dimy * sizeof(T);
 
@@ -1108,7 +1001,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, std::min(max_blocks, batch_count));
+            grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -1149,7 +1042,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, std::min(max_blocks, batch_count));
+            grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -1206,7 +1099,6 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
     T minone = -1; // constant -1 in host
 
     I dimx, dimy, blocks, nextpiv;
-    I const max_blocks = 64 * 1024;
     dim3 grid, threads;
     size_t lmemsize;
 
@@ -1243,7 +1135,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
         dimx = nx;
         dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
         blocks = (ny - 1) / dimy + 1;
-        grid = dim3(1, blocks, std::min(max_blocks, batch_count));
+        grid = dim3(1, blocks, batch_count);
         threads = dim3(dimx, dimy, 1);
         lmemsize = dimy * sizeof(T);
 
@@ -1279,7 +1171,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, std::min(max_blocks, batch_count));
+            grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -1319,7 +1211,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, std::min(max_blocks, batch_count));
+            grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -1337,7 +1229,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
         dimx = nx;
         dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
         blocks = (ny - 1) / dimy + 1;
-        grid = dim3(1, blocks, std::min(max_blocks, batch_count));
+        grid = dim3(1, blocks, batch_count);
         threads = dim3(dimx, dimy, 1);
         lmemsize = dimy * sizeof(T);
 
@@ -1372,7 +1264,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, std::min(max_blocks, batch_count));
+            grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
@@ -1413,7 +1305,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
             dimx = nx;
             dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
-            grid = dim3(1, blocks, std::min(max_blocks, batch_count));
+            grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
             lmemsize = dimy * sizeof(T);
 
