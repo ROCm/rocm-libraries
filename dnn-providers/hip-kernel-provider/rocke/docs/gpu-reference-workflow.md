@@ -145,21 +145,24 @@ python -m pytest library/tests/test_reference_common.py \
   "library/tests/test_${REFERENCE_OPERATION}_reference_contract.py" -q
 ```
 
-For the GPU pytest suite, set the operation/architecture-specific environment
-variables to select the candidate bundle and lock. For convolution/gfx942:
+For the GPU pytest suite, pass the candidate bundle and lock explicitly:
 
 ```bash
-ROCKE_TEST_CONV_REFERENCE_BUNDLE_GFX942="$REFERENCE_WORK/bundle" \
-ROCKE_TEST_CONV_REFERENCE_LOCK_GFX942="$REFERENCE_WORK/bundle/qualification-lock.json" \
-ROCKE_TEST_REQUIRE_CONV_GPU=1 \
-python -m pytest library/tests/test_conv_pinned_reference.py \
-  --rocke-reference-operation conv --rocke-reference-arch gfx942 -v -rs
+python -m pytest "library/tests/test_${REFERENCE_OPERATION}_pinned_reference.py" \
+  --rocke-reference-operation "$REFERENCE_OPERATION" \
+  --rocke-reference-arch "$REFERENCE_ARCH" \
+  --rocke-reference-bundle "$REFERENCE_WORK/bundle" \
+  --rocke-reference-lock "$REFERENCE_WORK/bundle/qualification-lock.json" -v -rs
 ```
 
-Use `SDPA`/`sdpa` for SDPA and the matching uppercase architecture suffix for
-other enrolled targets. These are runtime test overrides, not CMake installation
-options. Check that numerical cases and the changed-current-output,
-changed-baseline-output, and suppressed-launch controls all execute.
+Explicit operation/architecture selection makes the suite required, including
+failure on a missing bundle. Bundle and lock overrides require that selection; a lock
+override also requires a bundle path. Without a lock override, verification uses
+the committed lock. Without either path override, tests use the standard bundle
+location and committed lock. The selected operation's GPU fixture alone consumes
+these paths. They do not change what CMake installs. Check that numerical cases
+and the changed-current-output, changed-baseline-output, and suppressed-launch
+controls all execute.
 
 ## 5. Review, pack, and publish the replacement
 

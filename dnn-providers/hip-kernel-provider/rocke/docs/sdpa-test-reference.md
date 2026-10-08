@@ -117,8 +117,9 @@ answers or fetches a reference during verification.
 The same cases can be run through pytest:
 
 ```bash
-ROCKE_TEST_SDPA_REFERENCE_BUNDLE_GFX942=<qualified-bundle-directory> \
-  python -m pytest library/tests/test_sdpa_pinned_reference.py -v -rs
+python -m pytest library/tests/test_sdpa_pinned_reference.py \
+  --rocke-reference-operation sdpa --rocke-reference-arch gfx942 \
+  --rocke-reference-bundle <qualified-bundle-directory> -v -rs
 ```
 
 The GPU suite also checks three failure paths: perturbing the final current
@@ -206,11 +207,17 @@ Normal provider CI uses the defaults. The settings are:
 | Setting | Type | Purpose |
 |---|---|---|
 | `ROCKE_INSTALL_TEST_GPU_REFERENCES` | CMake Boolean | Install all published GPU reference bundles and enroll their GPU tests |
-| `ROCKE_TEST_SDPA_REFERENCE_BUNDLE_<ARCH>` | Environment variable | Select the bundle pytest reads for one runtime environment |
-| `ROCKE_TEST_REQUIRE_SDPA_GPU` | Environment variable | Set to `1` by installed CTest to fail on missing required prerequisites |
+| `--rocke-reference-operation`, `--rocke-reference-arch` | Pytest options | Select the operation and GPU architecture |
+| `--rocke-reference-bundle` | Pytest option | Select a bundle for the selected operation/architecture |
+| `--rocke-reference-lock` | Pytest option | Select an explicit candidate lock instead of the committed lock |
 
-Runtime bundle overrides use uppercase architecture suffixes such as `GFX942`.
-They select the bundle pytest reads; they do not change what CMake installs.
+Explicit operation/architecture selection makes the suite required, including
+failure on a missing bundle. CTest supplies these options. Architecture-lane
+selection still uses the detected GPU and CI's `AMDGPU_FAMILIES`/`AMDGPU_TARGETS`.
+Bundle and lock overrides require explicit operation and architecture options.
+A lock override also requires a bundle path. For candidate qualification and
+verification, follow the [reference workflow](gpu-reference-workflow.md).
+These options select what pytest reads; they do not change what CMake installs.
 CMake packages the standard archives for all operation/architecture pairs in
 `platform/cmake/PublishedGpuReferences.cmake`, and pytest finds the installed target
 bundle by default.

@@ -357,6 +357,8 @@ from reference_common.pytest_support import start_reference_session, select_refe
 def pytest_addoption(parser):
     parser.addoption("--rocke-reference-arch")
     parser.addoption("--rocke-reference-operation")
+    parser.addoption("--rocke-reference-bundle")
+    parser.addoption("--rocke-reference-lock")
 def pytest_sessionstart(session):
     start_reference_session(session.config)
 def pytest_collection_modifyitems(config, items):
@@ -433,6 +435,106 @@ def test_reference_local_run_without_a_gpu_fails():
 
     with pytest.raises(RuntimeError, match="required gfx942 GPU unavailable"):
         architecture_available("gfx942", ("gfx942", "gfx94x"), None, "")
+
+
+@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+@pytest.mark.parametrize("candidate", [False, True])
+def test_reference_fixture_selects_explicit_paths(
+    operation, candidate, tmp_path, monkeypatch
+):
+    from contextlib import closing
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from rocke.runtime import hip_module
+
+    gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    options = {
+        "--rocke-reference-operation": operation if candidate else None,
+        "--rocke-reference-bundle": tmp_path if candidate else None,
+        "--rocke-reference-lock": (
+            tmp_path / "candidate-lock.json" if candidate else None
+        ),
+    }
+    monkeypatch.setattr(hip_module, "get_device_arch", lambda: "gfx942")
+    monkeypatch.setattr(
+        gpu_tests, "default_bundle_path", lambda *args, **kwargs: tmp_path
+    )
+    calls = []
+
+    def load(bundle, lock, *, architecture):
+        calls.append((bundle, lock, architecture))
+        return {"candidate": candidate}
+
+    monkeypatch.setattr(gpu_tests, "load_bundle", load)
+    config = SimpleNamespace(getoption=options.get)
+    with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
+        target, bundle, manifest = next(fixture)
+        assert (target.NAME, bundle, manifest) == (
+            "gfx942",
+            tmp_path,
+            {"candidate": candidate},
+        )
+    assert calls == [(tmp_path, options["--rocke-reference-lock"], "gfx942")]
+    if candidate:
+        options["--rocke-reference-operation"] = (
+            "conv" if operation == "sdpa" else "sdpa"
+        )
+        calls.clear()
+        with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
+            with pytest.raises(pytest.skip.Exception, match="another operation"):
+                next(fixture)
+        assert not calls
+
+
+@pytest.mark.parametrize(
+    "options, message",
+    [
+        (
+            {"--rocke-reference-bundle": "candidate"},
+            "explicit operation and architecture",
+        ),
+        (
+            {
+                "--rocke-reference-operation": "sdpa",
+                "--rocke-reference-arch": "gfx942",
+                "--rocke-reference-lock": "lock.json",
+            },
+            "requires a reference bundle",
+        ),
+    ],
+)
+def test_reference_path_options_require_explicit_scope(options, message):
+    from types import SimpleNamespace
+    from reference_common.pytest_support import start_reference_session
+
+    with pytest.raises(pytest.UsageError, match=message):
+        start_reference_session(SimpleNamespace(getoption=options.get))
+
+
+@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+@pytest.mark.parametrize("selected", [False, True])
+def test_reference_missing_bundle_fails_only_when_selected(
+    operation, selected, tmp_path, monkeypatch
+):
+    from contextlib import closing
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from rocke.runtime import hip_module
+
+    gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    monkeypatch.setattr(hip_module, "get_device_arch", lambda: "gfx942")
+    monkeypatch.setattr(
+        gpu_tests, "default_bundle_path", lambda *args, **kwargs: tmp_path / "missing"
+    )
+    options = {"--rocke-reference-operation": operation if selected else None}
+    config = SimpleNamespace(getoption=options.get)
+    with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
+        with pytest.raises(
+            pytest.fail.Exception if selected else pytest.skip.Exception
+        ):
+            next(fixture)
 
 
 @pytest.mark.parametrize("operation", ["sdpa", "conv"])

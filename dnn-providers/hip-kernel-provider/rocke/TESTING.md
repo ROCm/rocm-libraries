@@ -137,10 +137,12 @@ the strategy's biggest holes live (see
   installed reference suite. To package the references in a superbuild, fetch
   the bundle and explicitly pass `-DROCKE_INSTALL_TEST_GPU_REFERENCES=ON`.
   Existing build directories retain their cached option value.
-  To select a bundle for a pytest run without installing it, set the environment
-  variable `ROCKE_TEST_SDPA_REFERENCE_BUNDLE_GFX942`. Normal installed CI leaves
-  that override unset and finds the packaged bundle automatically. CTest sets
-  `ROCKE_TEST_REQUIRE_SDPA_GPU=1` to enforce required execution. Standalone
+  To select a bundle for a pytest run without installing it, pass
+  `--rocke-reference-bundle` with `--rocke-reference-operation` and
+  `--rocke-reference-arch`. Use `--rocke-reference-lock` for a candidate lock.
+  Normal installed CI omits path overrides and finds the packaged bundle
+  automatically. CTest's explicit operation/architecture selection makes the
+  suite required, including failure on a missing bundle. Standalone
   platform builds do not enable archive staging by default.
   For source verification, run
   `python library/tests/run_sdpa_reference.py verify --arch gfx942 --bundle <qualified-bundle> --current-root .`

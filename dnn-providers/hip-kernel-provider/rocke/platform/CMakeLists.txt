@@ -482,7 +482,7 @@ if(ROCKE_INSTALL_TESTS)
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
                "set_tests_properties(rocke_${_operation}_gpu_${_arch}_pytest PROPERTIES\n"
                "  LABELS \"ckc\\;python\\;${_operation}\\;gpu\\;quick\"\n"
-               "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library;ROCKE_TEST_REQUIRE_${_operation_upper}_GPU=1\"\n"
+               "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
                "  SKIP_RETURN_CODE 77\n"
                "  TIMEOUT 300)\n")
       endforeach()
