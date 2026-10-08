@@ -2271,7 +2271,7 @@ rocblaslt_status rocblaslt_matmul_is_algo_supported(rocblaslt_handle        hand
     }
 
     // Check if pointer is valid
-    if(alpha == nullptr || beta == nullptr)
+    if(alpha == nullptr || beta == nullptr || algo == nullptr || workspaceSizeInBytes == nullptr)
     {
         log_error(__func__, "invalid data pointer");
         return rocblaslt_status_invalid_pointer;
