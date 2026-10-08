@@ -720,6 +720,13 @@ namespace TensileLite
         // they were not written by the running build.
         uint64_t skippedUnnamed = 0;
 
+        // Rows that were there and could not be read at all: a value line that
+        // does not line up with its header, a schema version this build does
+        // not know, or a key or search cell missing or damaged. Counted so
+        // that a file which parses to nothing can say so, instead of reading
+        // the way an empty one does.
+        uint64_t rejected = 0;
+
         // The file's "Git Version:" line, or empty when it has none.
         std::string fileBuildStamp;
 

@@ -167,12 +167,20 @@ namespace TensileLite
         // winner's own line names them with the path.
         std::atomic<uint64_t> unrecorded{0};
 
+        // Rows a tuning file held that could not be read. The read-side
+        // counterpart of unrecorded above: that one says a winner never
+        // reached the file, this one says the file's own rows never reached
+        // the map. Without it a file every row of which is refused reports
+        // loaded=0, which is also what an empty file reports.
+        std::atomic<uint64_t> rejected{0};
+
         std::string summary() const
         {
-            return "loaded=" + std::to_string(entriesLoaded.load()) + " hits="
-                   + std::to_string(hits.load()) + " misses=" + std::to_string(misses.load())
-                   + " invalidated=" + std::to_string(invalidated.load()) + " tuned="
-                   + std::to_string(tuned.load()) + " skipped=" + std::to_string(skipped.load())
+            return "loaded=" + std::to_string(entriesLoaded.load()) + " rejected="
+                   + std::to_string(rejected.load()) + " hits=" + std::to_string(hits.load())
+                   + " misses=" + std::to_string(misses.load()) + " invalidated="
+                   + std::to_string(invalidated.load()) + " tuned=" + std::to_string(tuned.load())
+                   + " skipped=" + std::to_string(skipped.load())
                    + " unrecorded=" + std::to_string(unrecorded.load());
         }
     };

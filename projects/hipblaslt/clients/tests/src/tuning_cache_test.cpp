@@ -1363,6 +1363,34 @@ namespace
             << missing;
     }
 
+    // loaded=0 on a file whose every row was refused reads exactly like
+    // loaded=0 on an empty one, so the line counts what it could not read and
+    // says that is what happened.
+    TEST_F(TuningCache_pre_checkin, StartupLineReportsRowsItCouldNotRead)
+    {
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "external logging environment redirects tuning output";
+
+        // A schema version this build does not know, which is the one kind of
+        // damage a future file is actually likely to carry.
+        const auto [header, value]
+            = rowLines(Row{m_identities[1].index, m_identities[1].kernelName});
+        writeRawTuningFile(m_path, m_stamp, "schema_version," + header + "\n99," + value + "\n");
+        useCache(m_path);
+
+        std::string notice;
+        {
+            CerrCapture capture;
+            int         selected = -1;
+            ASSERT_TRUE(runGemm(&selected));
+            notice = capture.str();
+        }
+        EXPECT_NE(notice.find("load=ok loaded=0 rejected=1"), std::string::npos) << notice;
+        EXPECT_NE(notice.find("could not be read"), std::string::npos) << notice;
+    }
+
     // Replay is the steady state, so it must be silent per call.
     TEST_F(TuningCache_pre_checkin, RepeatedCacheHitsAddNoOutput)
     {

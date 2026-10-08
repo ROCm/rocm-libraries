@@ -339,13 +339,32 @@ namespace TensileLite
         // whether tune mode revisits the row.
         bool hasRequiredSearchColumns(const std::map<std::string, std::string>& row)
         {
-            // Strict like every other versioned cell, and for the same reason:
-            // defaulting an absent or damaged mode would file an online row,
-            // measured in place on a live dispatch, as a tune row measured on
-            // scratch, and the two are then compared against each other.
-            const auto mode = tuningModeFromName(str(row, "tuning_mode"));
-            if(!mode || (*mode != TuningMode::Tune && *mode != TuningMode::Online))
-                return false;
+            // tuning_mode was added to version 2 after builds had already
+            // written rows under that version, so a row from one of those
+            // carries every other version 2 column and not this one. Absent
+            // therefore means "written before the column existed", and before
+            // it existed tune was the only mode that recorded a search, which
+            // is what TuningSearch::mode already defaults to.
+            //
+            // A cell that is there and does not read is damage rather than
+            // age, and is still refused: defaulting that one would file an
+            // online row, measured in place on a live dispatch, as a tune row
+            // measured on scratch, and the two are then compared against each
+            // other. An interrupted write cannot arrive here as an absent
+            // column, because it leaves the value line narrower than its
+            // header and loadTuningRows refuses a short row outright.
+            //
+            // That is the rule for the next column added to a version already
+            // in the field: default it to what rows written before it
+            // recorded, honour the default when the cell is absent, and
+            // validate it when it is there. The columns below predate no row
+            // of this version, so they stay required.
+            if(has(row, "tuning_mode"))
+            {
+                const auto mode = tuningModeFromName(str(row, "tuning_mode"));
+                if(!mode || (*mode != TuningMode::Tune && *mode != TuningMode::Online))
+                    return false;
+            }
 
             for(const char* name : {"budget_ms", "search_workspace"})
             {
@@ -513,7 +532,12 @@ namespace TensileLite
             entry.budgetMs = *exactNum(row, "budget_ms");
 
             TuningSearch search;
-            search.mode           = *tuningModeFromName(str(row, "tuning_mode"));
+
+            // Absent on a row written before the column was added to this
+            // version; the default is what such a row recorded.
+            if(has(row, "tuning_mode"))
+                search.mode = *tuningModeFromName(str(row, "tuning_mode"));
+
             search.allKernels     = *exactNum(row, "search_all_kernels") != 0;
             search.maxCandidates  = static_cast<int32_t>(*exactNum(row, "search_max_candidates"));
             search.workspaceBytes = static_cast<size_t>(*exactNum(row, "search_workspace"));
@@ -734,11 +758,17 @@ namespace TensileLite
             // line alone. splitCsv yields no cell after a final comma, so a row
             // cut just after one is short as well.
             if(names.size() != values.size())
+            {
+                loaded.rejected++;
                 continue;
+            }
 
             auto parsed = problemFromEntries(zipRow(names, values));
             if(!parsed)
+            {
+                loaded.rejected++;
                 continue;
+            }
 
             auto& [key, entry] = *parsed;
 
