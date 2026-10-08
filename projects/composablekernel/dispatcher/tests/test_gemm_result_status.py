@@ -154,7 +154,7 @@ class TestSearchSpaceCountsSkip(unittest.TestCase):
             elementwise_op=None,
         )
 
-    def _run(self, statuses, gpu_problem=None, json_path=None):
+    def _run(self, statuses, gpu_problem=None, json_path=None, hip_error=""):
         sweep = self.sweep
         cfgs = [SimpleNamespace(name=f"k{i}") for i in range(len(statuses))]
         sos = [Path(f"k{i}.so") for i in range(len(statuses))]
@@ -186,7 +186,7 @@ class TestSearchSpaceCountsSkip(unittest.TestCase):
         ), mock.patch.object(
             sweep, "hip_device_problem", return_value=gpu_problem
         ), mock.patch.object(
-            sweep, "hip_last_error", return_value=""
+            sweep, "hip_last_error", return_value=hip_error
         ), mock.patch("builtins.print"):
             rc = sweep.run(self._args(json_path))
         return rc, verified
@@ -221,6 +221,26 @@ class TestSearchSpaceCountsSkip(unittest.TestCase):
         self.assertEqual(data["gpu_problem"], "no /dev/kfd")
         self.assertEqual(data["n_not_run"], 2)
         self.assertEqual([k["status"] for k in data["kernels"]], ["not_run"] * 2)
+
+    def test_pending_hip_error_is_recorded_with_the_run_failure(self):
+        # A bare "status=-1" is what made develop #2687 unreadable: it collapses
+        # every hipMalloc/hipMemcpy/launch failure and every non-"not supported"
+        # C++ exception into one integer. When HIP left an error pending, name it.
+        hip_error = "hipErrorIllegalAddress: an illegal memory access was encountered"
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.json"
+            rc, _ = self._run([STATUS_ERROR], json_path=out, hip_error=hip_error)
+            data = json.loads(out.read_text())
+        self.assertEqual(rc, 1)
+        self.assertEqual(data["kernels"][0]["error"], f"status=-1 ({hip_error})")
+
+    def test_run_failure_without_a_pending_hip_error_stays_bare(self):
+        # The empty string must not become "status=-1 ()".
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.json"
+            self._run([STATUS_ERROR], json_path=out, hip_error="")
+            data = json.loads(out.read_text())
+        self.assertEqual(data["kernels"][0]["error"], "status=-1")
 
 
 if __name__ == "__main__":
