@@ -125,14 +125,14 @@ TEST(TestApplicabilityKnobs, MinOffloadVariantsDefaultsAndParses)
 {
     const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
 
-    EXPECT_EQ(parseMinOffloadVariants(""), 200u);
+    EXPECT_EQ(parseMinOffloadVariants(""), DEFAULT_MIN_OFFLOAD_VARIANTS);
     EXPECT_EQ(parseMinOffloadVariants("0"), 0u);
     EXPECT_EQ(parseMinOffloadVariants("1000000000"), 1000000000u);
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0u) << recorder.getRecordedLogsAsString();
 
     const ScopedEnvironmentVariableSetter guard(APPLICABILITY_MIN_OFFLOAD_VARIANTS_ENV_NAME);
     hipdnn_data_sdk::utilities::unsetEnv(APPLICABILITY_MIN_OFFLOAD_VARIANTS_ENV_NAME);
-    EXPECT_EQ(minOffloadVariantsFromEnv(), 200u);
+    EXPECT_EQ(minOffloadVariantsFromEnv(), DEFAULT_MIN_OFFLOAD_VARIANTS);
 }
 
 TEST(TestApplicabilityKnobs, MinOffloadVariantsJunkFallsBackToTheDefaultWithAWarning)
@@ -142,7 +142,7 @@ TEST(TestApplicabilityKnobs, MinOffloadVariantsJunkFallsBackToTheDefaultWithAWar
         SCOPED_TRACE(raw);
         const auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
 
-        EXPECT_EQ(parseMinOffloadVariants(raw), 200u);
+        EXPECT_EQ(parseMinOffloadVariants(raw), DEFAULT_MIN_OFFLOAD_VARIANTS);
         EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, raw))
             << recorder.getRecordedLogsAsString();
     }

@@ -286,7 +286,7 @@ Diagnostic. The least work, in kernel variants, a call must be able to hand to o
 
 | Value      | Description                                            |
 |------------|--------------------------------------------------------|
-| (unset)    | `200` variants, about 50 µs of work (the default) |
+| (unset)    | `50` variants (the default) |
 | `<n>`, n ≥ 0 | Offload when at least `n` variants can be offloaded; `0` offloads whenever two engines are pending |
 
 Anything that is not a non-negative integer is ignored, treated as unset, and logs a warning naming the variable and the value.

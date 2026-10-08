@@ -33,8 +33,8 @@ static constexpr const char* APPLICABILITY_MIN_OFFLOAD_VARIANTS_ENV_NAME
 
 static constexpr std::size_t DEFAULT_APPLICABILITY_MAX_THREADS = 1;
 
-/// About 50 µs at the measured 0.26 µs per variant.
-static constexpr std::size_t DEFAULT_MIN_OFFLOAD_VARIANTS = 200;
+/// The smallest offload measured to beat staying inline on gfx950 dense-attention packs.
+static constexpr std::size_t DEFAULT_MIN_OFFLOAD_VARIANTS = 50;
 
 /// Upper bound on total threads when HIPDNN_APPLICABILITY_MAX_THREADS is auto.
 static constexpr std::size_t AUTO_APPLICABILITY_MAX_THREADS = 9;
