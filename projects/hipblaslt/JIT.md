@@ -72,14 +72,14 @@ code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
   features the device has; it is then rewritten to the device's full target
   ID. Assembly units that declare different wavefront sizes are rejected.
 - HIP source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
-  `--rocm-path` and a content-derived `-cuid`. A HIP helper is its own code
-  object. `JitLibrary` is the helper cache, keyed by backend id and helper
-  name. A hit reuses the code object stored in the library. A miss compiles
-  it once, stores it in the library, and then compiles the main kernel. A
-  build with no library compiles each helper and does not keep a second cache.
-  comgr's `AMD_COMGR_CACHE` stays comgr's; it cannot be stored in the library.
-  The ROCm path is `HIP_PATH` when set, otherwise the prefix of the loaded HIP
-  runtime.
+  `--rocm-path` and a `-cuid` taken from the source name. A HIP helper is its
+  own code object. The helper library stores that relocatable. A hit reuses
+  it. A miss compiles it once and publishes it into the helper library. The
+  solution library then stores one executable: the main kernel linked with
+  those helpers. A build with no library compiles and links each helper and
+  does not keep a second cache. comgr's `AMD_COMGR_CACHE` stays comgr's; it
+  cannot be stored in the library. The ROCm path is `HIP_PATH` when set,
+  otherwise the prefix of the loaded HIP runtime.
 - Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` links the main kernel
   into one code object, with `-Xlinker --build-id=sha1`. The helper code
   objects and the main kernel are ready to add to `JitLibrary`.
