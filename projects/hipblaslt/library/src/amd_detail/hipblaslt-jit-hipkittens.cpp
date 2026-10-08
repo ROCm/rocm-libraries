@@ -178,16 +178,11 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
         }
 
         // The target's variants whose entry solves the request, or why none can.
-        Status candidates(const hipblaslt_jit::OperationRequest&  request,
-                          const hipblaslt_jit::DeviceTarget&      target,
-                          std::vector<const detail::Variant*>&    found)
+        Status candidates(const hipblaslt_jit::GemmRequest&    request,
+                          const hipblaslt_jit::DeviceTarget&    target,
+                          std::vector<const detail::Variant*>&  found)
         {
             found.clear();
-            const auto* gemm = dynamic_cast<const jit::detail::GemmRequest*>(&request);
-            if(!gemm)
-                return {Status::Code::NotSupported,
-                        Stage::Generate,
-                        "HipKittens generates GEMM kernels only"};
             const auto& variants = detail::resources().variants;
             if(std::none_of(variants.begin(), variants.end(), [&](const detail::Variant& variant) {
                    return variant.isa.gfx == target.isa;
@@ -195,7 +190,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                 return {Status::Code::TargetMismatch,
                         Stage::Configure,
                         "HipKittens has no kernel for " + target.isa};
-            const auto problem = hipblaslt_jit::lowerForJit(*gemm);
+            const auto problem = hipblaslt_jit::RocblasltToTensileContractionProblemGemm(request);
             try
             {
                 hipblaslt_jit::canonicalGemm(problem);
