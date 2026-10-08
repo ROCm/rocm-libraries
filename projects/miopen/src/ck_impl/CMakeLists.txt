@@ -5,47 +5,16 @@
 # Libraries keep per-arch naming for runtime selection while supporting
 # two CK linkage modes:
 #   - MIOPEN_CK_UNBUNDLE_PER_ARCH=ON: link per-arch unbundled CK archives.
-#   - MIOPEN_CK_UNBUNDLE_PER_ARCH=OFF: link full CK device archive/target.
+#   - MIOPEN_CK_UNBUNDLE_PER_ARCH=OFF: link the CK conv library built for this plugin's
+#     target, or the unified CK device archive when CK has no per-target libraries.
 
 if(NOT MIOPEN_USE_COMPOSABLEKERNEL)
     return()
 endif()
 
-# Strip target features (e.g. ":sramecc+:xnack-") to get the base arch name.
-# The loader uses the same stripping logic when looking up the .so.
-function(ck_impl_base_arch ARCH OUT_VAR)
-    string(FIND "${ARCH}" ":" _colon_pos)
-    if(_colon_pos GREATER -1)
-        string(SUBSTRING "${ARCH}" 0 ${_colon_pos} _base)
-    else()
-        set(_base "${ARCH}")
-    endif()
-    set(${OUT_VAR} "${_base}" PARENT_SCOPE)
-endfunction()
-
-# GPU base archs for which MIOpen has CK grouped conv kernels.
-# Note: this is narrower than CK's own supported arch list — e.g. gfx103x and
-# gfx11x are CK-capable but MIOpen does not yet provide CK grouped conv kernels
-# for them. Add arches here when MIOpen adds grouped conv support for them.
-set(_CK_SUPPORTED_ARCHS
-    gfx908 gfx90a gfx942 gfx950
-    gfx1100 gfx1101 gfx1102
-    gfx1150 gfx1151 gfx1152 gfx1153
-    gfx1200 gfx1201 gfx1250 gfx1250-strict
-)
-
-# Filter GPU_TARGETS to only those with MIOpen CK grouped conv support.
-set(_CK_FILTERED_TARGETS)
-foreach(_gpu_target IN LISTS GPU_TARGETS)
-    ck_impl_base_arch("${_gpu_target}" _base)
-    if(_base IN_LIST _CK_SUPPORTED_ARCHS)
-        list(APPEND _CK_FILTERED_TARGETS "${_gpu_target}")
-    else()
-        message(STATUS "MIOpen CK: skipping ${_gpu_target} (no MIOpen CK grouped conv support for this arch)")
-    endif()
-endforeach()
-
-if(NOT _CK_FILTERED_TARGETS)
+# MIOPEN_CK_PLUGIN_TARGETS (top-level CMakeLists.txt) holds the full target ids that get a
+# plugin, one per base arch.
+if(NOT MIOPEN_CK_PLUGIN_TARGETS)
     message(STATUS "MIOpen CK: no supported GPU targets found in GPU_TARGETS; "
                    "skipping CK grouped conv library build.")
     return()
@@ -69,11 +38,9 @@ set(CK_IMPL_SOURCES
 
 # Collect plugin target names for the MIOpen_with_plugins proxy (see src/CMakeLists.txt).
 set(CK_PLUGIN_TARGETS)
-foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
+foreach(gpu_target IN LISTS MIOPEN_CK_PLUGIN_TARGETS)
     ck_impl_base_arch("${gpu_target}" arch_base)
-    if(MIOPEN_CK_UNBUNDLE_PER_ARCH)
-        miopen_sanitize_arch("${gpu_target}" arch_safe)
-    endif()
+    miopen_sanitize_arch("${gpu_target}" arch_safe)
 
     set(lib_name "MIOpenCKGroupedConv_${arch_base}")
 
@@ -82,6 +49,14 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     endif()
 
     list(APPEND CK_PLUGIN_TARGETS ${lib_name})
+    if(MIOPEN_CK_UNBUNDLE_PER_ARCH)
+        set(_ck_link_desc "ck_conv_${arch_safe}")
+    elseif(MIOPEN_CK_PER_TARGET)
+        set(_ck_link_desc "device_conv_operations_${arch_safe}")
+    else()
+        set(_ck_link_desc "unified device_conv_operations (fallback)")
+    endif()
+    message(STATUS "MIOpen CK: ${lib_name} links ${_ck_link_desc}")
     add_library(${lib_name} SHARED ${CK_IMPL_SOURCES})
 
     # Place the library alongside MIOpen in the build tree so the
@@ -133,9 +108,14 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
 
     # Choose CK linkage mode:
     #   - Per-arch unbundled archive
-    #   - Full CK device_conv_operations archive/target
+    #   - This target's own CK conv library (CK built or installed per-target)
+    #   - Unified CK device_conv_operations (CK without per-target libraries)
     if(MIOPEN_CK_UNBUNDLE_PER_ARCH)
         target_link_libraries(${lib_name} PRIVATE ck_conv_${arch_safe})
+    elseif(MIOPEN_CK_PER_TARGET AND MIOPEN_BUILD_CK)
+        target_link_libraries(${lib_name} PRIVATE device_conv_operations_${arch_safe})
+    elseif(MIOPEN_CK_PER_TARGET)
+        target_link_libraries(${lib_name} PRIVATE composable_kernel::device_conv_operations_${arch_safe})
     elseif(MIOPEN_BUILD_CK)
         target_link_libraries(${lib_name} PRIVATE device_conv_operations)
     else()
