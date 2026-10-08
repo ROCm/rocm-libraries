@@ -9,6 +9,10 @@ Documentation for rocRAND is available at
 
 * Added `__restrict__` qualifiers to the device API benchmark, enabling better compiler optimization.
 
+### Resolved Issues
+
+* Internal kernels are no longer exported from `librocrand.so`.
+
 ## rocRAND 5.1.0 for ROCm 10.1.0
 
 ### Optimized
