@@ -482,7 +482,10 @@ Note this layout is different from `ConvProblem`:
 
 - `H`/`W` are input spatial; `Ho`/`Wo` are derived output spatial;
 - `KH`/`KW` not `R`/`S`;
-- single `PAD` and `stride` ints (no separate `pH`/`pW`/`sH`/`sW`/`dH`/`dW`); dilation is implicitly 1.
+- single `PAD` and `stride` ints (no separate `pH`/`pW`/`sH`/`sW`);
+- dilation is `dil_h`/`dil_w` (default 1; `Ho`/`Wo` use the dilated extent
+  `(KH-1)*dil_h + 1`). Only the non-grouped forward kernel computes a dilated
+  convolution; every other variant rejects one (`dilation_reason`).
 
 ### 16c Kernel
 
@@ -646,6 +649,51 @@ Streams the input rows through the same runtime `scf_for_iter` as
 
 Parity gate: configs 10 (stride=1, groups=3) and 11 (stride=2, groups=3) in
 `tests/instances/parity/conv_direct_grouped_emit.{c,py}`.
+
+### Depthwise Tiled Kernel (`DirectDepthwiseTiledSpec`)
+
+`DirectDepthwiseTiledSpec` / `build_direct_depthwise_tiled`. Output-stationary
+depthwise forward for any group count and filters up to 31x31.
+
+```python
+@dataclass(frozen=True)
+class DirectDepthwiseTiledSpec:
+    problem: DirectConvProblem
+    name: str = "direct_depthwise_tiled"
+    block_w: int = 8        # output columns per block
+    block_h: int = 4        # output rows per block
+    block_waves: int = 1    # waves per block (64 channels each)
+    unroll_rows: bool = False
+    wave_size: int = 64
+```
+
+The row-streaming `DirectDepthwiseSpec` holds all `KH x KW` weights and `KH`
+accumulator slots per column and unrolls `KH` rows per loop iteration: its
+registers and loop body grow with `KH^2 * KW`, so past 11x11 it spills heavily
+(a 31x31 case was observed with ~5000 spilled VGPRs) and compiles slowly. This
+kernel is linear in the filter width:
+
+- a block owns a `block_h x block_w` output tile; the grid also splits the
+  output rows: `(ceil(Wo/block_w), ceil(C/block_ch), N * ceil(Ho/block_h))`;
+- a runtime loop walks the filter rows `r`, holding one weight row (the next
+  one prefetched) and the input rows `ho*stride - PAD + r` of the tile;
+- with stride 1, iteration `r+1` reads the rows of iteration `r` shifted by
+  one, so `block_h - 1` rows are carried and one row is loaded per iteration;
+  stride `s` splits the filter rows into `s` phases with a window each;
+- `unroll_rows` unrolls the (baked) filter-row loop so the scheduler overlaps
+  rows; the validator caps the unrolled body at `_DW_TILED_UNROLL_MAX_FMAS`.
+
+Outputs are indexed directly, so it is not tied to "same" padding. Constraints
+(`is_valid_depthwise_tiled_spec` / `rocke_direct_depthwise_tiled_is_valid_spec`):
+`cpg == kpg == 1`, `KH, KW <= 32`, `stride <= KH`, no dilation, `Ho, Wo >= 1`,
+and `live_regs = block_h*block_w + block_h*n_cols + 2*KW <= 256`
+(`n_cols = (block_w-1)*stride + KW`). The register budget and the unroll cap
+bound the compile cost of both rolled and unrolled configurations.
+
+The sweeps skip a row-streaming config that would spill
+(`depthwise_stream_register_reason`) and leave its shape to this kernel.
+
+Parity gate: configs 57-62 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`.
 
 ## Direct Non-grouped Convolution
 

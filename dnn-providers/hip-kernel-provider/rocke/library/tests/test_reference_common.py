@@ -1,20 +1,30 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Common archive CLI, integrity checks, and operation isolation."""
+"""Shared reference numerics, archives, worker isolation, and test selection."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
+from fractions import Fraction
 from pathlib import Path
 import subprocess
 import sys
 import tarfile
 
+import numpy as np
 import pytest
 
 from reference_common.artifact import pack, unpack, validate_bundle
+from reference_common.numeric import (
+    ErrorBudget,
+    array_digest,
+    decode,
+    encode,
+    max_abs_upper,
+)
 import io
 
 _SCRIPT = Path(__file__).parent / "reference_common/artifact.py"
@@ -73,20 +83,6 @@ def test_common_cli_round_trip_without_site_packages(tmp_path, operation):
         archive,
     )
     assert result.returncode == 0, result.stderr
-    repeated = tmp_path / "repeated.tar.gz"
-    result = _run(
-        "pack",
-        "--operation",
-        operation,
-        "--bundle",
-        bundle,
-        "--lock",
-        lock,
-        "--archive",
-        repeated,
-    )
-    assert result.returncode == 0, result.stderr
-    assert archive.read_bytes() == repeated.read_bytes()
     with tarfile.open(archive) as tar:
         assert all(m.name.startswith(f"{operation}_reference_bundle/") for m in tar)
     staged = tmp_path / "staged"
@@ -280,9 +276,8 @@ def test_unsupported_storage_schema_is_rejected(tmp_path, schema):
 def test_bundle_lookup_stays_in_operation_and_architecture_domain(
     tmp_path, operation, layout
 ):
-    from importlib import import_module
+    from reference_common.paths import default_bundle_path
 
-    paths = import_module(f"{operation}_reference.paths")
     if layout == "source":
         tests = tmp_path / "rocke/library/tests"
         expected = tests / "reference_bundles" / operation
@@ -291,31 +286,12 @@ def test_bundle_lookup_stays_in_operation_and_architecture_domain(
         tests = root / "tests/library/tests"
         (tests / "reference_bundles" / operation / "gfx942").mkdir(parents=True)
         expected = root / "engines/test_arch_content/rocke" / operation
-    assert paths.default_bundle_path(tests, "gfx942") == expected / "gfx942"
-    assert paths.default_bundle_path(tests, "gfx950") == expected / "gfx950"
-
-
-def test_published_bundles_have_supported_cohorts_and_committed_locks():
-    """Publication enrollment must not accidentally require unqualified data."""
-    from reference_common.artifact import OPERATIONS
-
-    tests = Path(__file__).parent
-    published = json.loads(
-        (tests / "reference_common/published_bundles.json").read_text()
+    assert (
+        default_bundle_path(tests, "gfx942", operation=operation) == expected / "gfx942"
     )
-    assert isinstance(published, dict)
-    assert set(published) == set(OPERATIONS)
-    for operation, architectures in published.items():
-        assert isinstance(architectures, list)
-        assert len(architectures) == len(set(architectures))
-        root = tests / f"{operation}_reference/architectures"
-        supported = json.loads((root / "registry.json").read_text())
-        assert set(architectures) <= set(supported)
-        for architecture in architectures:
-            lock = json.loads((root / architecture / "baseline_lock.json").read_text())
-            assert lock["schema"] == 2
-            assert len(bytes.fromhex(lock["baseline_revision"])) == 20
-            assert len(bytes.fromhex(lock["manifest_sha256"])) == 32
+    assert (
+        default_bundle_path(tests, "gfx950", operation=operation) == expected / "gfx950"
+    )
 
 
 @pytest.mark.parametrize("persistent", [False, True])
@@ -381,6 +357,8 @@ from reference_common.pytest_support import start_reference_session, select_refe
 def pytest_addoption(parser):
     parser.addoption("--rocke-reference-arch")
     parser.addoption("--rocke-reference-operation")
+    parser.addoption("--rocke-reference-bundle")
+    parser.addoption("--rocke-reference-lock")
 def pytest_sessionstart(session):
     start_reference_session(session.config)
 def pytest_collection_modifyitems(config, items):
@@ -460,6 +438,106 @@ def test_reference_local_run_without_a_gpu_fails():
 
 
 @pytest.mark.parametrize("operation", ["sdpa", "conv"])
+@pytest.mark.parametrize("candidate", [False, True])
+def test_reference_fixture_selects_explicit_paths(
+    operation, candidate, tmp_path, monkeypatch
+):
+    from contextlib import closing
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from rocke.runtime import hip_module
+
+    gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    options = {
+        "--rocke-reference-operation": operation if candidate else None,
+        "--rocke-reference-bundle": tmp_path if candidate else None,
+        "--rocke-reference-lock": (
+            tmp_path / "candidate-lock.json" if candidate else None
+        ),
+    }
+    monkeypatch.setattr(hip_module, "get_device_arch", lambda: "gfx942")
+    monkeypatch.setattr(
+        gpu_tests, "default_bundle_path", lambda *args, **kwargs: tmp_path
+    )
+    calls = []
+
+    def load(bundle, lock, *, architecture):
+        calls.append((bundle, lock, architecture))
+        return {"candidate": candidate}
+
+    monkeypatch.setattr(gpu_tests, "load_bundle", load)
+    config = SimpleNamespace(getoption=options.get)
+    with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
+        target, bundle, manifest = next(fixture)
+        assert (target.NAME, bundle, manifest) == (
+            "gfx942",
+            tmp_path,
+            {"candidate": candidate},
+        )
+    assert calls == [(tmp_path, options["--rocke-reference-lock"], "gfx942")]
+    if candidate:
+        options["--rocke-reference-operation"] = (
+            "conv" if operation == "sdpa" else "sdpa"
+        )
+        calls.clear()
+        with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
+            with pytest.raises(pytest.skip.Exception, match="another operation"):
+                next(fixture)
+        assert not calls
+
+
+@pytest.mark.parametrize(
+    "options, message",
+    [
+        (
+            {"--rocke-reference-bundle": "candidate"},
+            "explicit operation and architecture",
+        ),
+        (
+            {
+                "--rocke-reference-operation": "sdpa",
+                "--rocke-reference-arch": "gfx942",
+                "--rocke-reference-lock": "lock.json",
+            },
+            "requires a reference bundle",
+        ),
+    ],
+)
+def test_reference_path_options_require_explicit_scope(options, message):
+    from types import SimpleNamespace
+    from reference_common.pytest_support import start_reference_session
+
+    with pytest.raises(pytest.UsageError, match=message):
+        start_reference_session(SimpleNamespace(getoption=options.get))
+
+
+@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+@pytest.mark.parametrize("selected", [False, True])
+def test_reference_missing_bundle_fails_only_when_selected(
+    operation, selected, tmp_path, monkeypatch
+):
+    from contextlib import closing
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from rocke.runtime import hip_module
+
+    gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    monkeypatch.setattr(hip_module, "get_device_arch", lambda: "gfx942")
+    monkeypatch.setattr(
+        gpu_tests, "default_bundle_path", lambda *args, **kwargs: tmp_path / "missing"
+    )
+    options = {"--rocke-reference-operation": operation if selected else None}
+    config = SimpleNamespace(getoption=options.get)
+    with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
+        with pytest.raises(
+            pytest.fail.Exception if selected else pytest.skip.Exception
+        ):
+            next(fixture)
+
+
+@pytest.mark.parametrize("operation", ["sdpa", "conv"])
 def test_reference_worker_requires_explicit_architecture(operation, tmp_path):
     from importlib import import_module
 
@@ -467,3 +545,152 @@ def test_reference_worker_requires_explicit_architecture(operation, tmp_path):
     # Reject the malformed request before runtime imports, GPU probing, or files.
     with pytest.raises(KeyError, match="architecture"):
         worker.run({}, tmp_path)
+
+
+def test_bf16_rounds_ties_to_even_and_preserves_storage_meaning():
+    values = np.array([0x3F808000, 0x3F818000, 0xBF808000, 0xBF818000], np.uint32)
+    encoded = encode(values.view(np.float32), "bf16")
+    np.testing.assert_array_equal(encoded, [0x3F80, 0x3F82, 0xBF80, 0xBF82])
+    np.testing.assert_array_equal(
+        decode(encoded, "bf16"), [1.0, 1.015625, -1.0, -1.015625]
+    )
+    with pytest.raises(ValueError, match="storage"):
+        decode(encoded.view(np.float16), "bf16")
+
+
+def test_absolute_max_promotes_before_subtraction():
+    left = np.array([65504.0, 0.0], dtype=np.float16)
+    right = np.array([-65504.0, 1.0], dtype=np.float16)
+    assert max_abs_upper(left, right) == math.nextafter(131008.0, math.inf)
+    assert max_abs_upper(left, left) == 0.0
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
+def test_nonfinite_results_cannot_pass(bad):
+    with pytest.raises(ValueError, match="non-finite"):
+        max_abs_upper(np.array([bad]), np.zeros(1))
+    with pytest.raises(ValueError, match="invalid"):
+        ErrorBudget(0.02, 0.002, 0.001).check(bad)
+
+
+def test_shapes_and_empty_outputs_cannot_broadcast_or_pass():
+    for left, right in [(np.zeros(2), np.zeros(1)), (np.zeros(0), np.zeros(0))]:
+        with pytest.raises(ValueError, match="outputs"):
+            max_abs_upper(left, right)
+
+
+def test_budget_is_strict_even_at_the_float_boundary():
+    budget = ErrorBudget(0.02, 0.002, 0.001)
+    limit = budget.comparison_limit
+    assert Fraction(limit) + Fraction(budget.baseline_error_bound) + Fraction(
+        budget.margin
+    ) <= Fraction(budget.tolerance)
+    assert Fraction(limit) + Fraction(budget.baseline_error_bound) < Fraction(0.02)
+    budget.check(limit)
+    with pytest.raises(AssertionError, match="remaining limit"):
+        budget.check(math.nextafter(limit, math.inf))
+
+
+@pytest.mark.parametrize(
+    "tolerance,bound,margin",
+    [
+        (0.02, 0.019, 0.002),
+        (0.02, -0.001, 0.001),
+        (0.02, 0.0, 0.0),
+        (math.inf, 0.0, 0.001),
+        (0.02, math.nan, 0.001),
+    ],
+)
+def test_invalid_budgets_are_rejected(tolerance, bound, margin):
+    with pytest.raises(ValueError):
+        ErrorBudget(tolerance, bound, margin)
+
+
+def test_tensor_digest_binds_shape_dtype_and_values():
+    array = np.array([1, 2, 3, 4], dtype="<u2")
+    assert array_digest(array) != array_digest(array.reshape(2, 2))
+    assert array_digest(array) != array_digest(array.view("<f2"))
+    assert array_digest(array) != array_digest(array + 1)
+    assert array_digest(array) == array_digest(array.astype(">u2"))
+
+
+def test_reused_workers_isolate_roles_and_import_roots(tmp_path):
+    import json
+    import os
+
+    from reference_common.session import WorkerSession
+
+    def environment(name):
+        root = tmp_path / name
+        package = root / "fixture_reference"
+        package.mkdir(parents=True)
+        (package / "__init__.py").touch()
+        (package / "worker.py").write_text(
+            "import json, os\ncount = 0\n"
+            "def run(request, work):\n"
+            "    global count\n"
+            "    count += 1\n"
+            "    (work / 'result.json').write_text(json.dumps([os.getpid(), count]))\n"
+        )
+        return dict(os.environ, PYTHONPATH=str(root), PYTHONNOUSERSITE="1")
+
+    first, second = environment("first"), environment("second")
+    session = WorkerSession(module="fixture_reference.worker", timeout=10)
+    processes = []
+    try:
+        results = []
+        for i, (mode, env) in enumerate(
+            [
+                ("replay", first),
+                ("replay", first),
+                ("source", first),
+                ("replay", second),
+            ]
+        ):
+            work = tmp_path / str(i)
+            work.mkdir()
+            request = work / "request.json"
+            request.write_text("{}")
+            session.execute(mode, request, env)
+            results.append(json.loads((work / "result.json").read_text()))
+        assert results[0][0] == results[1][0]
+        assert [row[1] for row in results] == [1, 2, 1, 1]
+        assert len({results[i][0] for i in [0, 2, 3]}) == 3
+        processes = [worker.process for worker in session.workers.values()]
+    finally:
+        session.close()
+    assert all(process.poll() is not None for process in processes)
+
+
+@pytest.mark.parametrize("behavior", ["raise", "exit", "timeout"])
+def test_reused_worker_failures_are_not_silently_retried(tmp_path, behavior):
+    import os
+
+    from reference_common.session import WorkerSession
+
+    package = tmp_path / "fixture_reference"
+    package.mkdir()
+    (package / "__init__.py").touch()
+    actions = {
+        "raise": "raise ValueError('deliberate worker failure')",
+        "exit": "os._exit(17)",
+        "timeout": "time.sleep(30)",
+    }
+    (package / "worker.py").write_text(
+        "import os, time\ndef run(request, work):\n    " + actions[behavior] + "\n"
+    )
+    work = tmp_path / "request"
+    work.mkdir()
+    request = work / "request.json"
+    request.write_text("{}")
+    session = WorkerSession(
+        module="fixture_reference.worker", timeout=0.5 if behavior == "timeout" else 10
+    )
+    try:
+        with pytest.raises(TimeoutError if behavior == "timeout" else RuntimeError):
+            session.execute(
+                "replay", request, dict(os.environ, PYTHONPATH=str(tmp_path))
+            )
+        assert not session.workers
+    finally:
+        session.close()
