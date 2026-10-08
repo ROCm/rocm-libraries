@@ -26,7 +26,8 @@ import sys
 
 # Each entry matches a mangled symbol name as emitted by `nm -D`.
 ALLOWLIST = [
-    # extern "C" public API (demangled == mangled, no leading _Z)
+    # extern "C" public API. Coarse prefix: admits any `hiptensor`-prefixed export, including
+    # the test-only hiptensor*Reference helpers. Internal C++ (`_ZN9hiptensor...`) is still caught.
     re.compile(r"^hiptensor"),
     # hiptensor::HiptensorOptions (shared singleton) + its LazySingleton plumbing
     re.compile(r"^_ZN9hiptensor16HiptensorOptions"),
@@ -43,9 +44,9 @@ ALLOWLIST = [
     re.compile(r"^__"),
 ]
 
-# `nm` symbol types that represent an exported DEFINED symbol in the dynamic table.
-# T/t = text (code), W/w = weak, D/d = data, B/b = bss, R/r = read-only data, V/v = weak object.
-EXPORTED_TYPES = set("TtWwDdBbRrVv")
+# nm type codes for an externally exported defined symbol (global/weak; locals excluded).
+# T = text (code), D = data, B = bss, R = read-only data, W = weak, V = weak object.
+EXPORTED_TYPES = set("TDBRWV")
 
 
 def is_allowed(name: str) -> bool:

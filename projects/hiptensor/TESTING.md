@@ -223,7 +223,7 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 |---|---|---|---|
 | Build | Yes | CI / DevOps | `cmake --build` on all supported GPU_TARGETS |
 | Unit tests | Yes | Component team | All `00_unit/` binaries pass |
-| ABI export surface | Yes | Component team | `abi_exported_symbols` CTest + `.github/workflows/abi_visibility.yml`; Linux-only, no GPU |
+| ABI export surface | Yes | Component team | `abi_exported_symbols` CTest (runs in the standard tier); Linux-only, no GPU |
 | Integration / smoke tests | Yes | Component team | `ctest -L '^standard$'` on at least one supported ASIC |
 | Static analysis | No | — | Not currently gated |
 | Formatting checks | No | — | `clang-format` is available but not enforced in CI |

@@ -196,6 +196,9 @@ create_hiptensor_shared_library()
 # own copy here instead.
 # The shared singletons (HiptensorOptions, Logger) are NOT here: they are exported from the
 # .so so the harness and the library share one instance.
+#
+# These sources are deliberately compiled twice: into libhiptensor.so (hidden) and here (for
+# the tests). Keeping them in the .so would re-export the symbols and defeat the baseline.
 if(HIPTENSOR_BUILD_TESTS)
     set(HIPTENSOR_HOST_REFERENCE_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/data_types.cpp
