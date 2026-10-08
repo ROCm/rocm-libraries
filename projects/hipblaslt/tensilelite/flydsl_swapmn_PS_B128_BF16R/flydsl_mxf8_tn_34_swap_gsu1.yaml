@@ -1,0 +1,100 @@
+GlobalParameters: {RotatingBufferSize: 384, SyncsPerBenchmark: 1, NumElementsToValidate: 0,
+  NumElementsToValidateWinner: 0, KernelTime: false, BoundsCheck: 0, ValidationPrintValids: false,
+  PruneSparseMode: 0, DataInitTypeB: 12, DataInitTypeA: 13, DataInitTypeD: 2, DataInitTypeMXSB: 3,
+  DataInitTypeMXSA: 3, DataInitTypeAlpha: 1, DataInitTypeBeta: 0, NumWarmups: 2, EnqueuesPerSync: 1000,
+  PrintWinnersOnly: true, Architecture: gfx1250, KeepBuildTmp: true, PrintLevel: 2}
+BenchmarkProblems:
+- - OperationType: GEMM
+    Batched: true
+    ComputeDataType: 0
+    DataType: 15
+    DataTypeA: 15
+    DataTypeB: 15
+    DataTypeE: 7
+    DataTypeMXSA: 22
+    DataTypeMXSB: 22
+    DestDataType: 7
+    HighPrecisionAccumulate: true
+    IndexAssignmentsA: [3, 0, 2]
+    IndexAssignmentsB: [3, 1, 2]
+    IndexAssignmentsLD: [4, 5, 6, 7]
+    MXBlockB: [128]
+    MXBlockA: [128, 128]
+    MacDataTypeA: 15
+    MacDataTypeB: 15
+    NumIndicesC: 3
+    TransposeA: true
+    TransposeB: false
+    SwizzleTensorA: true
+  - InitialSolutionParameters: null
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - ActivationFuncCall: [false]
+    - AssertFree1ElementMultiple: [4]
+    - AssertFree0ElementMultiple: [128]
+    - AssertSummationElementMultiple: [128]
+    - ClusterDim:
+      - [4, 4]
+    - DepthU: [512]
+    - DirectToLdsMetadata: [0]
+    - DtlPlusLdsBuf: [0]
+    - ExpandPointerSwap: [false]
+    - ForceDisableShadowInit: [true]
+    - GlobalReadVectorWidthB: [1]
+    - GlobalReadVectorWidthA: [1]
+    - GlobalSplitU: [1]
+    - GlobalSplitUAlgorithm: [MultipleBuffer]
+    - GlobalSplitUCoalesced: [true]
+    - GlobalSplitUWorkGroupMappingRoundRobin: [true]
+    - InitCIterWmma: [1]
+    - LDSSegmentInterleave: [1]
+    - LdsBlockSizePerPadB: [2048]
+    - LdsBlockSizePerPadA: [0]
+    - LdsBlockSizePerPadMXSB: [0]
+    - LdsBlockSizePerPadMXSA: [0]
+    - LdsBlockSizePerPadMetadata: [0]
+    - LdsPadB: [16]
+    - LdsPadA: [0]
+    - LdsPadMXSB: [0]
+    - LdsPadMXSA: [0]
+    - LocalReadVectorWidthB: [16]
+    - LocalReadVectorWidthA: [16]
+    - MIArchVgpr: [true]
+    - MXLoadInst: [TDM]
+    - MXScaleFormat: [InMemorySwizzle]
+    - MaxLDS: [327680]
+    - MbskPrefetchMethod: [1]
+    - MinGRIncPerMfma: [1]
+    - PrefetchGL2: [2]
+    - PrefetchGlobalRead: [2]
+    - ScheduleGROverBarrier: [0]
+    - ScheduleIterAlg: [4]
+    - SourceSwap: [true]
+    - StaggerU: [0]
+    - StaggerUStride: [0]
+    - StoreVectorWidth: [4]
+    - TDMInst: [3]
+    - TDMIterateMode: [2]
+    - ThreadTile:
+      - [1, 1]
+    - TransposeLDS: [1]
+    - UseCustomMainLoopSchedule: [0]
+    - UseSgprForGRO: [0]
+    - VectorWidthB: [4]
+    - VectorWidthA: [4]
+    - WavefrontSize: [32]
+    - WorkGroupMapping: [1]
+    - Groups:
+      - - MatrixInstruction: [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          MIArchVgpr: true
+    BenchmarkJoinParameters: null
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [8192, 512, 1, 1536, 8192, 8192, 1536, 1536]
+    - BiasTypeArgs: [0, 7]
+LibraryLogic:
+  ScheduleName: gfx1250
+  DeviceNames: [Device 73f0]
+  ArchitectureName: gfx1250
+LibraryClient: null
