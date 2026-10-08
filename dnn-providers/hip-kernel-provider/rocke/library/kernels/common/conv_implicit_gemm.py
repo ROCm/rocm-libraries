@@ -92,6 +92,7 @@ from kernels.common._conv_implicit_gemm_common import (  # noqa: F401 — re-exp
     _apply_accumulator_epilogue,
     _choose_load_vec_for,
     coalesced_load_reason,
+    vector_width_reason,
     _emit_frag_smem_load,
     _emit_mfma,
     _emit_smem_load,
@@ -492,6 +493,15 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         return False, (
             f"default epilogue is not supported with vector size c: {_eff_vec_c}"
         )
+    _why = vector_width_reason(
+        (
+            ("a", spec.vector_size_a, spec.data.dtype_a),
+            ("b", spec.vector_size_b, spec.data.dtype_b),
+            ("c", spec.vector_size_c, spec.data.dtype_d),
+        )
+    )
+    if _why is not None:
+        return False, _why
 
     # The MMA *family* is selected from the target's wave size: CDNA (wave64)
     # uses MFMA, the RDNA wave32 targets (gfx11xx) use WMMA. The same warp-tile

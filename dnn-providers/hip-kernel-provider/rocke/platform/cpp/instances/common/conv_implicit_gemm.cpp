@@ -16,6 +16,7 @@
 #include "rocke/helper_rocke.instances.common.conv_implicit_gemm.h"
 
 #include <stdio.h> /* snprintf */
+#include <string.h> /* strcmp */
 
 rocke_conv_problem_t rocke_conv_problem_make(int N,
                                              int Hi,
@@ -235,5 +236,29 @@ bool rocke_conv_coalesced_load_ok(const char* operand,
                  load_vec,
                  chunks,
                  block_size);
+    return false;
+}
+
+bool rocke_conv_vector_width_ok(
+    const char* operand, bool has_vec, int vec, const char* dtype, char* reason, size_t reason_cap)
+{
+    /* Python: nbytes = vec * (4 if dtype == "fp32" else 2)
+     *         if nbytes > MAX_VECTOR_BYTES: return f"vector_size_{operand}=..." */
+    const int max_vector_bytes = 16;
+    const char* dt = dtype ? dtype : "fp16";
+    if(!has_vec)
+        return true;
+    const int nbytes = vec * (strcmp(dt, "fp32") == 0 ? 4 : 2);
+    if(nbytes <= max_vector_bytes)
+        return true;
+    if(reason != NULL && reason_cap > 0)
+        snprintf(reason,
+                 reason_cap,
+                 "vector_size_%s=%d x %s is %d bytes > %d-byte max per-lane access",
+                 operand,
+                 vec,
+                 dt,
+                 nbytes,
+                 max_vector_bytes);
     return false;
 }
