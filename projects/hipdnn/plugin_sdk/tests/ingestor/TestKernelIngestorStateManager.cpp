@@ -18,6 +18,7 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
@@ -1300,6 +1301,26 @@ INSTANTIATE_TEST_SUITE_P(
                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
                     std::string{});
             }},
+        // The tuple is the completed one: a kernel leaving BLOCK_SIZE to its default of 64
+        // is kernel_64_half under another spelling.
+        StateManagerConstructionThrowCase{
+            "RejectsAKernelWhoseDefaultCompletesToAnotherKernelsTuple",
+            "duplicates the metadata tuple",
+            [] {
+                KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID});
+                KernelDescriptor defaulted;
+                defaulted.id = testId(0x75);
+                defaulted.name = "kernel_defaulted_half";
+                defaulted.metadata = {{DTYPE, MetadataValue{std::string{"HALF"}}}};
+                pack.kernels.push_back(defaulted);
+                return std::make_unique<StateManager>(
+                    makeSchema(),
+                    makeTestMatchers(),
+                    makeTestDispatches(),
+                    std::vector<KernelDescriptorPack>{pack},
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    std::string{});
+            }},
         // Overlapping lists need not be equal: a gfx942 device satisfies both, so the
         // tuple really is ambiguous. Plain string equality would let this construct.
         StateManagerConstructionThrowCase{
@@ -1365,6 +1386,41 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<StateManagerConstructionThrowCase>& info) {
         return info.param.name;
     });
+
+TEST(TestKernelIngestorStateManager, MakeEngineRejectsANullStateManager)
+{
+    const StubDeviceResolver resolver;
+    DescriptorSet set;
+    set.engine = makeEngineWithKnobs({});
+
+    EXPECT_THROW((makeEngine<StubHandle, StubSettings, StubContext>(
+                     set, std::unique_ptr<KernelIngestorStateManager<StubHandle>>{}, resolver)),
+                 std::invalid_argument);
+}
+
+/// An engine over a prebuilt state manager still carries the set's `predict_engine`
+/// bindings: a model the loader refused reports distrust, not a missing model.
+TEST(TestKernelIngestorStateManager, MakeEngineOverAPrebuiltStateManagerKeepsPredictionBindings)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    DescriptorSet set;
+    set.engine = makeEngineWithKnobs({BLOCK_SIZE});
+    set.unavailableEnginePredictionArches = {{"tflops", {"default"}}};
+
+    const auto engine
+        = makeEngine<StubHandle, StubSettings, StubContext>(set, makeStubStateManager(), resolver);
+
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x6D));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+    const auto prediction
+        = engine->getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(prediction.status, PredictionStatus::INVALID) << prediction.reason;
+    EXPECT_NE(prediction.reason.find("missing or incompatible"), std::string::npos)
+        << prediction.reason;
+}
 
 } // namespace
 

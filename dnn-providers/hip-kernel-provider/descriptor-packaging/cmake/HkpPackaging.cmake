@@ -612,6 +612,10 @@ function(hkp_verify_embedded_sources)
     # Resolved from the defining listfile: the callers are sibling directories that
     # never see this module's include-time variables.
     set(_tool "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/hkp_verify_embedded_sources.py")
+    # The sidecar reader the tool imports; an edit to it changes the verdict.
+    set(_tool_modules
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../python/hkp_pack/provenance_sidecar.py"
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../python/hkp_pack/errors.py")
     set(_stamp "${CMAKE_CURRENT_BINARY_DIR}/hkp-verify-${ARG_TARGET}.stamp")
 
     _hkp_key_manifest_args(_manifest_arg _manifest_dep "${ARG_TARGET}")
@@ -659,7 +663,7 @@ function(hkp_verify_embedded_sources)
                 ${_stamp_args}
                 ${_source_root_args}
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
-        DEPENDS "${_tool}" ${_manifest_dep} ${_pack_stamps}
+        DEPENDS "${_tool}" ${_tool_modules} ${_manifest_dep} ${_pack_stamps}
         COMMENT "hkp: verifying embedded kernel sources (${ARG_TARGET})"
         VERBATIM)
 
