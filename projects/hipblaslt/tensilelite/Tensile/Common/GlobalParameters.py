@@ -217,6 +217,11 @@ globalParameters["HybridAssignmentPolicy"] = ["Default"]
 # This is intentionally independent of ProblemType.StridedBatched so universal
 # strided kernels can exercise their ArgType==3 general-batched path.
 globalParameters["BatchMode"] = 0
+# Read the shared Synchronizer buffer back after each solution's first warmup
+# and fail the run if a kernel left it nonzero; residue is otherwise silent,
+# corrupting a later launch rather than the one that left it. Only StreamK,
+# GSU MultipleBufferSingleKernel, and output-amax solutions are scanned.
+globalParameters["CheckSynchronizer"] = True
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
@@ -402,6 +407,17 @@ globalParameters["StinkyTofuEnableRemarks"] = False
 # report self time, inclusive total, and run count for every pass that ran, so a
 # slow kernel generation can be attributed to individual passes.
 globalParameters["StinkyTofuTimePasses"] = False
+
+# StinkyTofu ds_load issue cap (gfx1250 DAG scheduler): at most DsReadPerCap ds_loads per
+# DsIssueCapSpanCycles. Mode 0 = sliding (each ds_load frees its slot that many cycles after
+# its own issue), 1 = periodic (a period opens at its first ds_load; all slots free together).
+# Span 0 = one WMMA window. See stinkytofu docs/user/scheduler-tuning-parameters.md.
+globalParameters["StinkyTofuDsIssueCapMode"] = 0
+globalParameters["StinkyTofuDsIssueCapSpanCycles"] = 0
+# Extra StinkyTofu module options, applied last so they override KernelWriter's own values,
+# e.g. {WmmaQueueDepth: 8, DsReadPerCap: 12}. Keys are StinkyAsmModule::ModuleOptions names;
+# see stinkytofu docs/user/scheduler-tuning-parameters.md.
+globalParameters["StinkyTofuModuleOptions"] = {}
 
 # Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
 # When set, each kernel's StinkyTofu module writes its cost file here via

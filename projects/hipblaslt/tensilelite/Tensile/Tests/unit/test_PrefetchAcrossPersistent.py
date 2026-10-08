@@ -1699,3 +1699,108 @@ def test_pap_never_names_an_unallocated_tdm_increment(
     referenced = set(re.findall(r"\bsgprtdm\w*Incs\b", asm))
     undefined = sorted(s for s in referenced if resolved.get(s) is None)
     assert not undefined, "referenced with no .set: %s" % undefined
+
+
+# Persistent vector epilogues coexist with prefetched compute data in LDS.
+_BF16_VECTOR_EPILOGUE = {
+    "DataType": "B", "MacDataTypeA": "B", "MacDataTypeB": "B",
+    "DestDataType": "B", "MXBlockA": 0, "MXBlockB": 0,
+}
+_BF16_VECTOR_MI = [16, 16, 32, 1, 1, 8, 8, 2, 2]
+
+
+@pytest.mark.parametrize("pap", [0, 1])
+@pytest.mark.parametrize("bias,sav", [(0, 0), (1, 0), (0, 1), (1, 1)])
+def test_persistent_vector_scratch_is_separate_only_with_pap(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pap, bias, sav):
+    common = dict(mi=_BF16_VECTOR_MI, DepthU=128,
+                  PrefetchAcrossPersistent=pap, SuppressNoLoadLoop=False)
+    baseline, reason = _derive(gfx1250_iim, assembler, capsys,
+                              ProblemType=_BF16_VECTOR_EPILOGUE, **common)
+    assert baseline.get("Valid"), reason
+    sol, reason = _derive(gfx1250_iim, assembler, capsys,
+                         ProblemType=dict(_BF16_VECTOR_EPILOGUE,
+                                          UseBias=bias, UseScaleAlphaVec=sav), **common)
+    assert sol.get("Valid"), reason
+    assert sol["_PersistentVectorEpilogueLds"] == bool(bias or sav)
+    if pap and (bias or sav):
+        assert sol["_SeparateEpilogueLds"]
+        # Start immediately after BOTH compute banks, rounded to 16 bytes.
+        assert sol["LdsOffsetBias"] == (baseline["LdsNumBytes"] + 15) // 16 * 16
+        assert sol["LdsOffsetBiasNonGSU"] == sol["LdsOffsetBias"]
+        assert sol["LdsOffsetBiasGSU"] == sol["LdsOffsetBias"]
+        assert sol["LdsNumBytes"] == sol["LdsOffsetBias"] + 256 * 4 * (bias + sav)
+    else:
+        assert not sol["_SeparateEpilogueLds"]
+        assert sol["LdsOffsetBias"] == 0
+        assert sol["LdsNumBytes"] == baseline["LdsNumBytes"]
+
+
+def _assert_lds_sync_at_barrier(asm, comment):
+    """Comments locate boundaries; the emitted instructions prove the handoff."""
+    instructions = []
+    boundaries = 0
+    for line in asm.splitlines():
+        code, _, annotation = line.partition("//")
+        if code.strip():
+            instructions.append(" ".join(code.split()))
+        if annotation.strip() == comment:
+            assert instructions[-3:] == [
+                "s_wait_dscnt 0", "s_barrier_signal -1", "s_barrier_wait -1",
+            ], "incomplete or out-of-order LDS synchronization at %s" % comment
+            boundaries += 1
+    assert boundaries, "missing LDS synchronization boundary: %s" % comment
+
+
+@pytest.mark.parametrize("pap,sia", [(0, 0), (0, 4), (1, 0), (1, 4)])
+def test_vector_lds_wait_is_late_and_does_not_drain_pap(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pap, sia):
+    sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2],
+                        DepthU=128, ScheduleIterAlg=sia,
+                        PrefetchAcrossPersistent=pap, SuppressNoLoadLoop=False,
+                        ProblemType=dict(_BF16_VECTOR_EPILOGUE,
+                                         UseBias=1, UseScaleAlphaVec=1))
+    assert sol.get("Valid"), capsys.readouterr().out
+    assert asm
+    start = asm.index("label_PersistentLoopStart:")
+    first_tdm = asm.index("tensor_load", start)
+    assert "reuse vector epilogue" not in asm[start:first_tdm]
+    # Examine the staging block, after all compute/tail code. A blanket
+    # tensor wait here would destroy the intended PAP overlap.
+    first_store = asm.index("store bias")
+    summation_ends = list(re.finditer(r"^label_Summation_End\w*:", asm[:first_store], re.M))
+    assert summation_ends, "missing summation/epilogue boundary"
+    start = summation_ends[-1].end()
+    end = asm.index("store bias", start)
+    staging = asm[start:end]
+    assert "LDS write barrier" in asm[start:]
+    assert "s_wait_tensorcnt" not in asm[start:]
+    handoff = "hand epilogue LDS back to persistent compute"
+    if pap:
+        # Separate storage lets PAP continue through both epilogue barriers.
+        assert handoff not in asm
+        assert staging.index("buffer_load") < staging.index("reuse vector epilogue LDS scratch")
+        _assert_lds_sync_at_barrier(asm[start:], "reuse vector epilogue LDS scratch")
+    else:
+        # Shared storage is handed back only after the whole epilogue, beyond
+        # the main-loop barrier pass. No wait is moved to the next tile's entry.
+        assert "reuse vector epilogue LDS scratch" not in asm
+        end_gw = re.search(r"^label_GW_End:", asm, re.M).start()
+        close = asm.index("label_PersistentLoopClose:", end_gw)
+        backedge = asm.index("label_PersistentLoopStart", close)
+        _assert_lds_sync_at_barrier(asm[close:backedge], handoff)
+
+
+def test_nonpersistent_vector_epilogue_keeps_its_existing_lds_layout(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys):
+    common = dict(mi=_BF16_VECTOR_MI, DepthU=128, StreamK=0, StreamKForceDPOnly=0)
+    baseline, reason = _derive(gfx1250_iim, assembler, capsys,
+                              ProblemType=_BF16_VECTOR_EPILOGUE, **common)
+    assert baseline.get("Valid"), reason
+    sol, reason = _derive(gfx1250_iim, assembler, capsys,
+                         ProblemType=dict(_BF16_VECTOR_EPILOGUE,
+                                          UseBias=1, UseScaleAlphaVec=1), **common)
+    assert sol.get("Valid"), reason
+    assert not sol["_SeparateEpilogueLds"]
+    assert sol["LdsOffsetBias"] == 0
+    assert sol["LdsNumBytes"] == baseline["LdsNumBytes"]
