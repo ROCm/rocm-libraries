@@ -4026,7 +4026,7 @@ def attention_3d_workspace_nbytes(
     )
 
 
-def _shape_key(cache_key: Tuple, problem: UnifiedAttentionProblem) -> Tuple:
+def _shape_key(cache_key: tuple, problem: UnifiedAttentionProblem) -> tuple:
     """Extend a binary cache key with the shape values the launch derives from.
 
     The tiled binaries are shared across batch counts and token counts, but the

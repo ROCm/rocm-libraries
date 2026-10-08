@@ -61,8 +61,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple
 
 ARCHES = ("gfx942", "gfx950", "gfx1250")
 
@@ -81,7 +81,7 @@ _IR_FEATURES = (
 )
 
 
-def _shape_grid(num_seqs, seqlens_q, seqlens_k) -> Iterator[Tuple[int, int, int]]:
+def _shape_grid(num_seqs, seqlens_q, seqlens_k) -> Iterator[tuple[int, int, int]]:
     """(num_seqs, max_seqlen_q, max_seqlen_k) with k >= q and no duplicates;
     "q" in ``seqlens_k`` means k == q."""
     for ns, q in itertools.product(num_seqs, seqlens_q):
@@ -95,8 +95,14 @@ def _shape_grid(num_seqs, seqlens_q, seqlens_k) -> Iterator[Tuple[int, int, int]
 # ---------------------------------------------------------------------------
 
 
-def _bootstrap(root: str, arch: Optional[str]):
-    """Import ``kernels`` from ``root`` and pin the attention arch."""
+def _bootstrap(root: str, arch: str | None):
+    """Import ``kernels`` from ``root`` and pin the attention arch.
+
+    Prepending the arm's tree to ``sys.path`` is the point of the harness: each
+    arm is its own process importing its own checkout, so the comparison never
+    mixes modules or caches. The root comes from ``--arm``, never a fixed path,
+    and the import is verified to resolve under it.
+    """
     root_path = Path(root).resolve()
     sys.path[:0] = [str(root_path / "library"), str(root_path / "platform" / "python")]
     from kernels.common import attention_unified as au
@@ -109,7 +115,7 @@ def _bootstrap(root: str, arch: Optional[str]):
     return au
 
 
-def _route(au, problem) -> Optional[str]:
+def _route(au, problem) -> str | None:
     """Path ``run_unified_attention_torch(backend="auto")`` takes, or None for
     the scalar fallback (out of scope here)."""
     if problem.select_path() != "2d":
@@ -239,7 +245,7 @@ def _worker_ir(args) -> None:
     au = _bootstrap(args.root, args.arch)
     P = au.UnifiedAttentionProblem
     paths, keys, builds = [], [], []
-    rep_of_build: Dict[str, Tuple] = {}
+    rep_of_build: dict[str, tuple] = {}
     for problem in _ir_sweep(P, args.arch, args.num_cus):
         try:
             path = _route(au, problem)
@@ -273,7 +279,7 @@ def _worker_ir(args) -> None:
     ir_of_build = dict(zip(order, hashes))
 
     own = [ir_of_build[b] if b is not None else None for b in builds]
-    first_of_key: Dict[str, str] = {}
+    first_of_key: dict[str, str] = {}
     served = []
     for k, h in zip(keys, own):
         served.append(None if k is None else first_of_key.setdefault(k, h))
@@ -295,7 +301,7 @@ def _worker_ir(args) -> None:
     )
 
 
-def _summarize_ir(arms: List[Tuple[str, str]], out: Path, arches, num_cus: int) -> int:
+def _summarize_ir(arms: list[tuple[str, str]], out: Path, arches, num_cus: int) -> int:
     base_name, cand_name = arms[0][0], arms[1][0]
     lines = [
         "# Tiled cache-key A/B: per-problem IR identity",
@@ -438,7 +444,7 @@ _AB_COHORTS = (
 )
 
 
-def _ab_sweep(problem_cls, arch: str, num_cus: int) -> Iterator[Tuple[str, object]]:
+def _ab_sweep(problem_cls, arch: str, num_cus: int) -> Iterator[tuple[str, object]]:
     for label, static, nss, qs, ks in _AB_COHORTS:
         static = {"dtype": "bf16", **static}
         if static.get("use_fp8"):
@@ -635,7 +641,7 @@ def _worker_ab(args) -> None:
     )
 
 
-def _summarize_ab(arms: List[Tuple[str, str]], out: Path, rounds: int) -> int:
+def _summarize_ab(arms: list[tuple[str, str]], out: Path, rounds: int) -> int:
     base_name, cand_name = arms[0][0], arms[1][0]
     runs = {
         name: [
@@ -763,7 +769,7 @@ def _git_head(root: str) -> str:
             return "unknown"
 
 
-def _spawn(worker: str, root: str, result: Path, extra: List[str]) -> None:
+def _spawn(worker: str, root: str, result: Path, extra: list[str]) -> None:
     cmd = [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -778,7 +784,7 @@ def _spawn(worker: str, root: str, result: Path, extra: List[str]) -> None:
     subprocess.run(cmd, check=True)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--mode", choices=("ir", "ab"))
     ap.add_argument(

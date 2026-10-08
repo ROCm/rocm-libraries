@@ -32,6 +32,22 @@ import itertools
 import pytest
 
 from kernels.common import attention_unified as au
+from kernels.gfx1250.attention_tiled_2d import (
+    UnifiedAttention2DTiledSpec as Gfx1250Spec2D,
+)
+from kernels.gfx942.attention_tiled_2d import (
+    UnifiedAttention2DTiledSpec as Gfx942Spec2D,
+)
+from kernels.gfx942.attention_tiled_3d import (
+    UnifiedAttention3DTiledSpec as Gfx942Spec3D,
+)
+from kernels.gfx950.attention_tiled_2d import (
+    UnifiedAttention2DTiledSpec as Gfx950Spec2D,
+)
+from kernels.gfx950.attention_tiled_3d import (
+    UnifiedAttention3DTiledSpec as Gfx950Spec3D,
+)
+from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 
 P = au.UnifiedAttentionProblem
 
@@ -307,8 +323,6 @@ def test_single_batch_interleave_splits_key(pin_arch):
 
 
 def _lower_2d(problem, arch, flavor):
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
     _, build, _ = au._tiled_2d_impl(arch)
     spec = au._tiled_spec_from_problem(problem)
     route = au._gfx942_4warp_route(problem)
@@ -317,8 +331,6 @@ def _lower_2d(problem, arch, flavor):
 
 
 def _lower_3d(problem, arch, flavor):
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
     _, reduce_spec_cls, build_seg, build_red, _ = au._tiled_3d_impl(arch)
     seg = build_seg(au._tiled_3d_spec_from_problem(problem), arch=arch)
     red = build_red(
@@ -408,7 +420,7 @@ _SHARED_PAIRS = [
 ]
 
 
-@pytest.mark.parametrize("flavor", ("llvm20", "llvm22"))
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 @pytest.mark.parametrize(
     "arch,path,a,b", [p[1:] for p in _SHARED_PAIRS], ids=[p[0] for p in _SHARED_PAIRS]
 )
@@ -459,28 +471,13 @@ def test_launch_meta_separates_num_seqs_under_one_key(pin_arch):
 # ---------------------------------------------------------------------------
 
 
-def _spec_classes():
-    from kernels.gfx942.attention_tiled_2d import (
-        UnifiedAttention2DTiledSpec as Gfx942Spec2D,
-    )
-    from kernels.gfx942.attention_tiled_3d import (
-        UnifiedAttention3DTiledSpec as Gfx942Spec3D,
-    )
-    from kernels.gfx950.attention_tiled_2d import (
-        UnifiedAttention2DTiledSpec as Gfx950Spec2D,
-    )
-    from kernels.gfx950.attention_tiled_3d import (
-        UnifiedAttention3DTiledSpec as Gfx950Spec3D,
-    )
-    from kernels.gfx1250.attention_tiled_2d import (
-        UnifiedAttention2DTiledSpec as Gfx1250Spec2D,
-    )
-
-    return (Gfx942Spec2D, Gfx942Spec3D, Gfx950Spec2D, Gfx950Spec3D, Gfx1250Spec2D)
+# gfx1250 3D floors the search at 32 iterations, so it is checked through the key
+# (test_same_outputs_share_key_and_ir) rather than mirrored here.
+_SPEC_CLASSES = (Gfx942Spec2D, Gfx942Spec3D, Gfx950Spec2D, Gfx950Spec3D, Gfx1250Spec2D)
 
 
 @pytest.mark.parametrize("num_seqs", (0, 1, 2, 3, 4, 7, 8, 15, 16, 450, 1 << 20))
-@pytest.mark.parametrize("spec_cls", _spec_classes(), ids=lambda c: c.__module__)
+@pytest.mark.parametrize("spec_cls", _SPEC_CLASSES, ids=lambda c: c.__module__)
 def test_binary_search_iters_mirrors_spec(spec_cls, num_seqs):
     # binary_search_iters is a pure function of num_seqs; bypass __init__
     # validation so the comparison needs no full geometry.
