@@ -64,7 +64,7 @@ def normalizeDictLibraryLayout(data: dict[str, Any]) -> bool:
     Raises:
         None.
     """
-    distanceModes = frozenset({"Equality", "GridBased", "Range"})
+    distanceModes = frozenset({"Equality", "GridBased", "MeshBased", "Range"})
     old_lt = data.get("LibraryType")
     hadLibrary = "Library" in data
     lib = data.get("Library")
