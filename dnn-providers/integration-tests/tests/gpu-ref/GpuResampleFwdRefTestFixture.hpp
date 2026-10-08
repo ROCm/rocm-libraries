@@ -5,6 +5,7 @@
 
 #include "ResampleShapeCatalog.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceResample.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceResampleFwd.hpp>
@@ -19,6 +20,7 @@ namespace gpu_resample_fwd_ref_test
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 using namespace gpu_resample_ref_test;
 
 template <class XDataType,
@@ -39,8 +41,9 @@ void runGpuVsCpuResampleFwd(const std::vector<int64_t>& xDims,
     const unsigned int seed = getGlobalTestSeed();
 
     auto xTensor = Tensor<XDataType>(xDims, layout);
-    xTensor.fillWithRandomValues(
-        static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed);
+    fillWithRandomValues(
+        xTensor, static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed);
+    xTensor.memory().hostData();
 
     auto yCpu = Tensor<YDataType>(yDims, layout);
     auto yGpu = Tensor<YDataType>(yDims, layout);

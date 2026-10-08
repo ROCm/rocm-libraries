@@ -71,7 +71,7 @@ public:
                         hipdnn_data_sdk::utilities::TensorBase<IndexDataType>* index = nullptr)
     {
         // Validate IO tensors, spatial parameters, and resample mode
-        validateInput(x, y, {prePadding, postPadding, stride, window}, resampleMode);
+        validateInput(x, y, {prePadding, postPadding, stride, window}, resampleMode, paddingMode);
 
         // Validate consistency of spatial parameters with IO tensor dimensions
         const auto& xDims = x.dims();
@@ -79,8 +79,22 @@ public:
         const auto spatialDims = xDims.size() - 2;
         for(size_t i = 0; i < spatialDims; ++i)
         {
-            const auto expectedYDim
-                = (xDims[i + 2] + prePadding[i] + postPadding[i] - window[i]) / stride[i] + 1;
+            if((prePadding[i] >= window[i]) || (postPadding[i] >= window[i]))
+            {
+                throw std::runtime_error("Resample forward requires padding size to be less than "
+                                         "the window size for each spatial dimension.");
+            }
+
+            const auto numerator = xDims[i + 2] + prePadding[i] + postPadding[i] - window[i];
+            if(numerator < 0)
+            {
+                throw std::runtime_error(
+                    "Window size: " + std::to_string(window[i]) + " exceeds padded input size: "
+                    + std::to_string(xDims[i + 2] + prePadding[i] + postPadding[i])
+                    + " at spatial dim: " + std::to_string(i));
+            }
+
+            const auto expectedYDim = numerator / stride[i] + 1;
             if(expectedYDim <= 0 || yDims[i + 2] != expectedYDim)
             {
                 throw std::runtime_error(
@@ -158,7 +172,8 @@ private:
     static void validateInput(const hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
                               const hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
                               const ResampleSpatialParams& spatialParams,
-                              hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode)
+                              hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode,
+                              hipdnn_flatbuffers_sdk::data_objects::PaddingMode paddingMode)
     {
         const auto& inputDims = input.dims();
         const auto& inputStrides = input.strides();
@@ -254,7 +269,13 @@ private:
            && resampleMode
                   != hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING)
         {
-            throw std::runtime_error("Resample received an unsupported resample mode.");
+            throw std::invalid_argument("Resample received an unsupported resample mode.");
+        }
+
+        if(paddingMode != hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD
+           && paddingMode != hipdnn_flatbuffers_sdk::data_objects::PaddingMode::NEG_INF_PAD)
+        {
+            throw std::invalid_argument("Resample received an unsupported padding mode.");
         }
     }
 

@@ -10,6 +10,9 @@ using namespace hipdnn_gpu_ref;
 using namespace gpu_resample_ref_test;
 using namespace gpu_resample_fwd_ref_test;
 
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
+
 // --- Valid configurations ---
 
 TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsTensorDims)
@@ -132,12 +135,12 @@ TEST(TestGpuResampleFwdRefValidation, AcceptsValidParamsAsymmetricPadding)
                                                            PaddingMode::ZERO_PAD));
 
     Tensor<float> x5D({2, 3, 6, 8, 10});
-    Tensor<float> y5D({2, 3, 7, 4, 3});
+    Tensor<float> y5D({2, 3, 6, 4, 3});
 
     EXPECT_NO_THROW(GpuFpReferenceResample::forward<float>(x5D,
                                                            y5D,
-                                                           {0, 1, 2},
-                                                           {2, 1, 0},
+                                                           {0, 1, 1},
+                                                           {1, 1, 0},
                                                            {1, 2, 3},
                                                            {2, 3, 4},
                                                            ResampleMode::AVGPOOL_EXCLUDE_PADDING,
@@ -474,7 +477,7 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnUnsupportedResampleMode)
                                                         {2, 2},
                                                         static_cast<ResampleMode>(100),
                                                         PaddingMode::ZERO_PAD),
-                 std::runtime_error);
+                 std::invalid_argument);
 }
 
 TEST(TestGpuResampleFwdRefValidation, ThrowsOnUnsupportedPaddingMode)
@@ -570,6 +573,53 @@ TEST(TestGpuResampleFwdRefValidation, ThrowsOnIndexTensorInputForAvgPool)
                  std::invalid_argument);
 }
 
+TEST(TestGpuResampleFwdRefValidation, ThrowsOnWindowSizeExceedsPaddedInput)
+{
+    SKIP_IF_NO_DEVICES();
+    Tensor<float> x({2, 4, 8, 8});
+    Tensor<float> y({2, 4, 1, 1});
+
+    EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
+                                                        y,
+                                                        {0, 0},
+                                                        {0, 0},
+                                                        {2, 2},
+                                                        {9, 9},
+                                                        ResampleMode::AVGPOOL_INCLUDE_PADDING,
+                                                        PaddingMode::ZERO_PAD),
+                 std::runtime_error);
+}
+
+TEST(TestGpuResampleFwdRefValidation, ThrowsOnPaddingSizeExceedsWindowSize)
+{
+    SKIP_IF_NO_DEVICES();
+    Tensor<float> x({2, 4, 8, 8});
+    Tensor<float> y({2, 4, 4, 4});
+    Tensor<int32_t> index({2, 4, 4, 4});
+
+    EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
+                                                        y,
+                                                        {3, 1},
+                                                        {0, 0},
+                                                        {2, 2},
+                                                        {2, 2},
+                                                        ResampleMode::MAXPOOL,
+                                                        PaddingMode::NEG_INF_PAD,
+                                                        &index),
+                 std::runtime_error);
+
+    EXPECT_THROW(GpuFpReferenceResample::forward<float>(x,
+                                                        y,
+                                                        {0, 0},
+                                                        {1, 3},
+                                                        {2, 2},
+                                                        {2, 2},
+                                                        ResampleMode::MAXPOOL,
+                                                        PaddingMode::NEG_INF_PAD,
+                                                        &index),
+                 std::runtime_error);
+}
+
 // --- Mixed type tests ---
 
 TEST(TestGpuResampleFwdRefMixedType, FloatInputHalfOutput)
@@ -577,13 +627,14 @@ TEST(TestGpuResampleFwdRefMixedType, FloatInputHalfOutput)
     SKIP_IF_NO_DEVICES();
 
     Tensor<float> xTensor({2, 3, 8, 8});
-    Tensor<half> yCpu({2, 3, 4, 4});
-    Tensor<half> yGpu({2, 3, 4, 4});
+    Tensor<HalfType> yCpu({2, 3, 4, 4});
+    Tensor<HalfType> yGpu({2, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    xTensor.memory().hostData();
 
-    CpuFpReferenceResampleFwd::forward<float, half, float, int32_t>(
+    CpuFpReferenceResampleFwd::forward<float, HalfType, float, int32_t>(
         xTensor,
         yCpu,
         {0, 0},
@@ -592,7 +643,7 @@ TEST(TestGpuResampleFwdRefMixedType, FloatInputHalfOutput)
         ResampleMode::AVGPOOL_EXCLUDE_PADDING,
         PaddingMode::ZERO_PAD);
 
-    GpuFpReferenceResample::forward<float, half, float, int32_t>(
+    GpuFpReferenceResample::forward<float, HalfType, float, int32_t>(
         xTensor,
         yGpu,
         {0, 0},
@@ -602,40 +653,41 @@ TEST(TestGpuResampleFwdRefMixedType, FloatInputHalfOutput)
         ResampleMode::AVGPOOL_EXCLUDE_PADDING,
         PaddingMode::ZERO_PAD);
 
-    assertAllClose(yCpu, yGpu, getTolerance<half>());
+    assertAllClose(yCpu, yGpu, getTolerance<HalfType>());
 }
 
 TEST(TestGpuResampleFwdRefMixedType, HalfInputFloatOutput)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> xTensor({2, 3, 8, 8});
+    Tensor<HalfType> xTensor({2, 3, 8, 8});
     Tensor<float> yCpu({2, 3, 4, 4});
     Tensor<float> yGpu({2, 3, 4, 4});
     Tensor<int32_t> indexCpu({2, 3, 4, 4});
     Tensor<int32_t> indexGpu({2, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed);
+    fillWithRandomValues(xTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
+    xTensor.memory().hostData();
 
-    CpuFpReferenceResampleFwd::forward<half, float, float, int32_t>(xTensor,
-                                                                    yCpu,
-                                                                    {0, 0},
-                                                                    {2, 2},
-                                                                    {2, 2},
-                                                                    ResampleMode::MAXPOOL,
-                                                                    PaddingMode::ZERO_PAD,
-                                                                    &indexCpu);
+    CpuFpReferenceResampleFwd::forward<HalfType, float, float, int32_t>(xTensor,
+                                                                        yCpu,
+                                                                        {0, 0},
+                                                                        {2, 2},
+                                                                        {2, 2},
+                                                                        ResampleMode::MAXPOOL,
+                                                                        PaddingMode::ZERO_PAD,
+                                                                        &indexCpu);
 
-    GpuFpReferenceResample::forward<half, float, float, int32_t>(xTensor,
-                                                                 yGpu,
-                                                                 {0, 0},
-                                                                 {0, 0},
-                                                                 {2, 2},
-                                                                 {2, 2},
-                                                                 ResampleMode::MAXPOOL,
-                                                                 PaddingMode::ZERO_PAD,
-                                                                 &indexGpu);
+    GpuFpReferenceResample::forward<HalfType, float, float, int32_t>(xTensor,
+                                                                     yGpu,
+                                                                     {0, 0},
+                                                                     {0, 0},
+                                                                     {2, 2},
+                                                                     {2, 2},
+                                                                     ResampleMode::MAXPOOL,
+                                                                     PaddingMode::ZERO_PAD,
+                                                                     &indexGpu);
 
     assertAllClose(yCpu, yGpu, getTolerance<float>());
     assertAllExact(indexCpu, indexGpu);
@@ -645,35 +697,36 @@ TEST(TestGpuResampleFwdRefMixedType, HalfInputHalfOutput)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> xTensor({2, 3, 8, 8});
-    Tensor<half> yCpu({2, 3, 4, 4});
-    Tensor<half> yGpu({2, 3, 4, 4});
+    Tensor<HalfType> xTensor({2, 3, 8, 8});
+    Tensor<HalfType> yCpu({2, 3, 4, 4});
+    Tensor<HalfType> yGpu({2, 3, 4, 4});
     Tensor<int32_t> indexCpu({2, 3, 4, 4});
     Tensor<int32_t> indexGpu({2, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(static_cast<half>(-1.0f), static_cast<half>(1.0f), seed);
+    fillWithRandomValues(xTensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(1.0f), seed);
+    xTensor.memory().hostData();
 
-    CpuFpReferenceResampleFwd::forward<half, half, float, int32_t>(xTensor,
-                                                                   yCpu,
-                                                                   {0, 0},
-                                                                   {2, 2},
-                                                                   {2, 2},
-                                                                   ResampleMode::MAXPOOL,
-                                                                   PaddingMode::NEG_INF_PAD,
-                                                                   &indexCpu);
+    CpuFpReferenceResampleFwd::forward<HalfType, HalfType, float, int32_t>(xTensor,
+                                                                           yCpu,
+                                                                           {0, 0},
+                                                                           {2, 2},
+                                                                           {2, 2},
+                                                                           ResampleMode::MAXPOOL,
+                                                                           PaddingMode::NEG_INF_PAD,
+                                                                           &indexCpu);
 
-    GpuFpReferenceResample::forward<half, half, float, int32_t>(xTensor,
-                                                                yGpu,
-                                                                {0, 0},
-                                                                {0, 0},
-                                                                {2, 2},
-                                                                {2, 2},
-                                                                ResampleMode::MAXPOOL,
-                                                                PaddingMode::NEG_INF_PAD,
-                                                                &indexGpu);
+    GpuFpReferenceResample::forward<HalfType, HalfType, float, int32_t>(xTensor,
+                                                                        yGpu,
+                                                                        {0, 0},
+                                                                        {0, 0},
+                                                                        {2, 2},
+                                                                        {2, 2},
+                                                                        ResampleMode::MAXPOOL,
+                                                                        PaddingMode::NEG_INF_PAD,
+                                                                        &indexGpu);
 
-    assertAllClose(yCpu, yGpu, getTolerance<half>());
+    assertAllClose(yCpu, yGpu, getTolerance<HalfType>());
     assertAllExact(indexCpu, indexGpu);
 }
 
@@ -681,14 +734,16 @@ TEST(TestGpuResampleFwdRefMixedType, BfloatInputFloatOutput)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<bfloat16> xTensor({2, 3, 8, 8});
+    Tensor<BFloat16Type> xTensor({2, 3, 8, 8});
     Tensor<float> yCpu({2, 3, 4, 4});
     Tensor<float> yGpu({2, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed);
+    fillWithRandomValues(
+        xTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed);
+    xTensor.memory().hostData();
 
-    CpuFpReferenceResampleFwd::forward<bfloat16, float, float, int32_t>(
+    CpuFpReferenceResampleFwd::forward<BFloat16Type, float, float, int32_t>(
         xTensor,
         yCpu,
         {0, 0},
@@ -697,7 +752,7 @@ TEST(TestGpuResampleFwdRefMixedType, BfloatInputFloatOutput)
         ResampleMode::AVGPOOL_INCLUDE_PADDING,
         PaddingMode::ZERO_PAD);
 
-    GpuFpReferenceResample::forward<bfloat16, float, float, int32_t>(
+    GpuFpReferenceResample::forward<BFloat16Type, float, float, int32_t>(
         xTensor,
         yGpu,
         {0, 0},
@@ -714,14 +769,16 @@ TEST(TestGpuResampleFwdRefMixedType, BfloatInputHalfOutput)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<bfloat16> xTensor({2, 3, 8, 8});
-    Tensor<half> yCpu({2, 3, 4, 4});
-    Tensor<half> yGpu({2, 3, 4, 4});
+    Tensor<BFloat16Type> xTensor({2, 3, 8, 8});
+    Tensor<HalfType> yCpu({2, 3, 4, 4});
+    Tensor<HalfType> yGpu({2, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(static_cast<bfloat16>(-1.0f), static_cast<bfloat16>(1.0f), seed);
+    fillWithRandomValues(
+        xTensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(1.0f), seed);
+    xTensor.memory().hostData();
 
-    CpuFpReferenceResampleFwd::forward<bfloat16, half, float, int32_t>(
+    CpuFpReferenceResampleFwd::forward<BFloat16Type, HalfType, float, int32_t>(
         xTensor,
         yCpu,
         {0, 0},
@@ -730,7 +787,7 @@ TEST(TestGpuResampleFwdRefMixedType, BfloatInputHalfOutput)
         ResampleMode::AVGPOOL_EXCLUDE_PADDING,
         PaddingMode::NEG_INF_PAD);
 
-    GpuFpReferenceResample::forward<bfloat16, half, float, int32_t>(
+    GpuFpReferenceResample::forward<BFloat16Type, HalfType, float, int32_t>(
         xTensor,
         yGpu,
         {0, 0},
@@ -740,7 +797,7 @@ TEST(TestGpuResampleFwdRefMixedType, BfloatInputHalfOutput)
         ResampleMode::AVGPOOL_EXCLUDE_PADDING,
         PaddingMode::NEG_INF_PAD);
 
-    assertAllClose(yCpu, yGpu, getTolerance<half>());
+    assertAllClose(yCpu, yGpu, getTolerance<HalfType>());
 }
 
 TEST(TestGpuResampleFwdRefMixedType, DoubleInputDoubleOutput)
@@ -754,7 +811,8 @@ TEST(TestGpuResampleFwdRefMixedType, DoubleInputDoubleOutput)
     Tensor<int32_t> indexGpu({2, 3, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(-1.0, 1.0, seed);
+    fillWithRandomValues(xTensor, -1.0, 1.0, seed);
+    xTensor.memory().hostData();
 
     CpuFpReferenceResampleFwd::forward<double, double, double, int32_t>(xTensor,
                                                                         yCpu,
@@ -792,7 +850,8 @@ TEST(TestGpuResampleFwdRefOptionalArgs, MaxPoolWithIndex)
     Tensor<int32_t> indexGpu({2, 3, 3, 3, 3});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    xTensor.memory().hostData();
 
     CpuFpReferenceResampleFwd::forward<float, float, float, int32_t>(xTensor,
                                                                      yCpu,
@@ -825,7 +884,8 @@ TEST(TestGpuResampleFwdRefOptionalArgs, AverageExcludePadding)
     Tensor<float> yGpu({2, 3, 3, 3});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    xTensor.memory().hostData();
 
     CpuFpReferenceResampleFwd::forward<float, float, float>(xTensor,
                                                             yCpu,
@@ -855,7 +915,8 @@ TEST(TestGpuResampleFwdRefOptionalArgs, AvgPoolIncludePadding)
     Tensor<float> yGpu({2, 3, 4, 3});
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    xTensor.memory().hostData();
 
     CpuFpReferenceResampleFwd::forward<float, float, float>(xTensor,
                                                             yCpu,
@@ -886,7 +947,8 @@ TEST(TestGpuResampleFwdRefChannelLast, AvgPoolMatchesCpuRef4D)
     Tensor<float> yGpu({2, 4, 5, 7}, TensorLayout::NHWC);
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    xTensor.memory().hostData();
 
     CpuFpReferenceResampleFwd::forward<float, float, float>(xTensor,
                                                             yCpu,
@@ -917,7 +979,8 @@ TEST(TestGpuResampleFwdRefChannelLast, MaxPoolMatchesCpuRefWithIndex4D)
     Tensor<int32_t> indexGpu({2, 4, 4, 4}, TensorLayout::NHWC);
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    xTensor.memory().hostData();
 
     CpuFpReferenceResampleFwd::forward<float, float, float>(xTensor,
                                                             yCpu,
@@ -949,7 +1012,8 @@ TEST(TestGpuResampleFwdRefChannelLast, AvgPoolMatchesCpuRef5D)
     Tensor<float> yGpu({2, 4, 4, 4, 4}, TensorLayout::NDHWC);
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    xTensor.memory().hostData();
 
     CpuFpReferenceResampleFwd::forward<float, float, float>(xTensor,
                                                             yCpu,
@@ -980,7 +1044,8 @@ TEST(TestGpuResampleFwdRefChannelLast, MaxPoolMatchesCpuRefWithIndex5D)
     Tensor<int32_t> indexGpu({2, 4, 4, 4, 4}, TensorLayout::NDHWC);
 
     const unsigned int seed = getGlobalTestSeed();
-    xTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, seed);
+    xTensor.memory().hostData();
 
     CpuFpReferenceResampleFwd::forward<float, float, float>(xTensor,
                                                             yCpu,
@@ -1007,11 +1072,11 @@ TEST(TestGpuResampleFwdRefChannelLast, MaxPoolMatchesCpuRefWithIndex5D)
 // --- Test suite instantiations ---
 
 using TestGpuResampleFwdRef4DFp32 = ResampleFwdTestSuite<float>;
-using TestGpuResampleFwdRef4DFp16 = ResampleFwdTestSuite<half>;
-using TestGpuResampleFwdRef4DBfp16 = ResampleFwdTestSuite<bfloat16>;
+using TestGpuResampleFwdRef4DFp16 = ResampleFwdTestSuite<HalfType>;
+using TestGpuResampleFwdRef4DBfp16 = ResampleFwdTestSuite<BFloat16Type>;
 using TestGpuResampleFwdRef5DFp32 = ResampleFwdTestSuite<float>;
-using TestGpuResampleFwdRef5DFp16 = ResampleFwdTestSuite<half>;
-using TestGpuResampleFwdRef5DBfp16 = ResampleFwdTestSuite<bfloat16>;
+using TestGpuResampleFwdRef5DFp16 = ResampleFwdTestSuite<HalfType>;
+using TestGpuResampleFwdRef5DBfp16 = ResampleFwdTestSuite<BFloat16Type>;
 
 TEST_P(TestGpuResampleFwdRef4DFp32, MatchesCpuRef)
 {
