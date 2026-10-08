@@ -43,6 +43,7 @@
 /* DirectToLdsA=True */
 /* DirectToLdsB=True */
 /* UseSgprForGRO=0 */
+/* Batched=False: infer StreamKNoBatch; sk.grid already includes batch */
 .amdgpu_metadata
 ---
 custom.config:
@@ -57,7 +58,7 @@ custom.config:
       TransposeA: False
       TransposeB: True
       UseBeta: True
-      Batched: True
+      Batched: False
       UseBias: 1
       BiasDataTypeList: [0]
       UseScaleAlphaVec: 1
