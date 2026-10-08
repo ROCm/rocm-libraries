@@ -935,6 +935,51 @@ class TestAPackEmptiedByDeduplicationIsRefused:
         assert inventory["total_descriptor_count"] == 2
 
 
+class TestShardedCatalog:
+    """Packs that declare no discriminator are one catalog split across KDP files:
+    the engine's graph_match admits every pack, so none carries an operation-scoped
+    matcher and the native stub registers none."""
+
+    @staticmethod
+    def _sharded():
+        return make_minimal_config(
+            packs=[
+                make_pack(name="alpha", kernels=[make_kernel(name="on_alpha")]),
+                make_pack(
+                    name="beta",
+                    kernels=[
+                        make_kernel(
+                            name="on_beta",
+                            metadata={"block_size": 128, "dtype": "FLOAT"},
+                        )
+                    ],
+                ),
+            ]
+        )
+
+    def test_every_shard_is_its_own_kdp_naming_only_the_kernel_matcher(self):
+        config = self._sharded()
+        ids = mint_ids(config)
+        documents = build_kdp_documents(config, ids)
+        assert [config.kdp_stem(pack) for pack, _ in documents] == [
+            "test_alpha",
+            "test_beta",
+        ]
+        for _, document in documents:
+            assert document["matchers"] == [ids["kernel_match"]]
+        assert not any(
+            key[0] == "operation_umd" for key in ids if isinstance(key, tuple)
+        )
+
+    def test_the_stubs_register_and_expect_no_operation_matcher(self, generator):
+        config = self._sharded()
+        native = generator._render_template("native.cpp.j2", config)
+        assert "OperationMatches" not in native
+        census = generator._render_template("test_packs.cpp.j2", config)
+        assert "CarriesNoGraphScopedMatcher" in census
+        assert "CarriesOneGraphScopedMatcherPerPack" not in census
+
+
 class TestEmittedInventory:
     """The context's view of what SHIPS, not what was authored: a census rendered from
     the authored count reports a shortfall whenever generation expressions overlap."""

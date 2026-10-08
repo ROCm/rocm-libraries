@@ -2255,19 +2255,21 @@ def _check_workspace_policy(config: IngestorConfig) -> None:
 
 
 def _check_pack_discriminators(config: IngestorConfig) -> None:
-    """A multi-pack engine needs a discriminator per pack to name its
-    operation-scoped matcher symbol; a single-pack engine must not declare
+    """A multi-pack engine either names an operation-scoped matcher symbol
+    per pack, each pack declaring its own discriminator, or declares none and
+    shards one catalog across its packs; a single-pack engine must not declare
     one (there is nothing to discriminate -- see the UMD policy)."""
     if config.is_multi_pack:
         missing = [p.name for p in config.packs if not p.discriminator]
-        if missing:
+        if missing and len(missing) != len(config.packs):
             raise ConfigError(
-                f"packs {missing} declare no 'discriminator', but this engine "
-                f"has {len(config.packs)} packs. Every pack needs a "
-                f"discriminator to name its own operation-scoped matcher "
-                f"symbol (e.g. 'add' -> '<engine>.add_match')."
+                f"packs {missing} declare no 'discriminator', but other packs "
+                f"of this engine do. Either every pack names its own "
+                f"operation-scoped matcher symbol (e.g. 'add' -> "
+                f"'<engine>.add_match'), or none does and the packs are shards "
+                f"of one catalog that the engine's graph_match admits alone."
             )
-        names = [p.discriminator for p in config.packs]
+        names = [p.discriminator for p in config.packs if p.discriminator]
         if len(names) != len(set(names)):
             raise ConfigError(f"packs declare duplicate discriminators: {names}.")
     else:

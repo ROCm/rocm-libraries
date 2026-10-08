@@ -26,7 +26,10 @@ keyed by kernel UUID, so this tool re-derives each kernel's UUID from its
         --instances instances.json --output configs/gfx950_conv_fwd_aot.yaml
     python generate.py --config configs/gfx950_conv_fwd_aot.yaml \\
         --output-dir "$GENERATED" --force
-    python tools/make_conv_aot_config.py --stabilize-ids "$GENERATED"/<...>/gfx950_conv_fwd_aot.kdp.json
+    python tools/make_conv_aot_config.py --stabilize-ids "$GENERATED"/<...>/*.kdp.json
+
+The config holds one pack, so one KDP, per dtype: a shard of the one catalog, which
+keeps every emitted file well below the size a source host accepts.
 """
 
 from __future__ import annotations
@@ -296,8 +299,12 @@ def _variant(name: str, order: tuple, specs: list) -> dict:
 def build_config(specs: list) -> dict:
     """The generator config for ``specs`` (already validated, de-duplicated).
 
-    Implicit-GEMM instances keep their own variant and leave the direct fields to
-    their builder_default; direct instances are a second variant stating them.
+    One pack per dtype, each its own KDP, so no file has to hold the whole catalog.
+    The packs declare no discriminator: they are shards of one catalog, and the
+    engine's graph_match and the shared kernel matcher admit every one of them.
+    Within a pack, implicit-GEMM instances keep their own variant and leave the
+    direct fields to their builder_default; direct instances are a second variant
+    stating them.
     """
     kmd = [
         {"name": name, "type": "int" if name in _INT_FIELDS else "string"}
@@ -312,14 +319,28 @@ def build_config(specs: list) -> dict:
         for name, default in DIRECT_FIELDS.items()
     ]
     metadata = list(DIRECT_SPEC_ORDER)
-    variants = []
-    for name, order, family in (
-        ("gfx950_conv_fwd_aot_{dtype}_{instance_id}", SPEC_ORDER, False),
-        ("gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}", DIRECT_SPEC_ORDER, True),
-    ):
-        members = [s for s in specs if s.is_direct == family]
-        if members:
-            variants.append(_variant(name, order, members))
+    packs = []
+    for dtype in sorted({s.dtype for s in specs}):
+        variants = []
+        for name, order, family in (
+            ("gfx950_conv_fwd_aot_{dtype}_{instance_id}", SPEC_ORDER, False),
+            ("gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}", DIRECT_SPEC_ORDER, True),
+        ):
+            members = [s for s in specs if s.dtype == dtype and s.is_direct == family]
+            if members:
+                variants.append(_variant(name, order, members))
+        packs.append(
+            {
+                "name": dtype,
+                "arch": ["gfx950"],
+                "kernel_defaults": {
+                    "kind": "rocke",
+                    "source": "builders/common/convolution_forward.py",
+                    "builder": "build_gfx950_conv_fwd_aot",
+                },
+                "variants": variants,
+            }
+        )
     return {
         "dialect": "packaged",
         "authored_subpath": "rocKE/gfx950_conv_fwd_aot",
@@ -338,18 +359,7 @@ def build_config(specs: list) -> dict:
             "matcher_only_fields": [],
             "bindings": {name: {"field": name} for name in metadata},
         },
-        "packs": [
-            {
-                "name": "gfx950_conv_fwd_aot",
-                "arch": ["gfx950"],
-                "kernel_defaults": {
-                    "kind": "rocke",
-                    "source": "builders/common/convolution_forward.py",
-                    "builder": "build_gfx950_conv_fwd_aot",
-                },
-                "variants": variants,
-            }
-        ],
+        "packs": packs,
     }
 
 
@@ -393,7 +403,7 @@ def dump_config(config: dict, dumper=None) -> str:
 
 
 def stabilize_ids(kdp_path: Path) -> int:
-    """Re-derive every kernel UUID from its instance_id; returns the count.
+    """Re-derive every kernel UUID of one KDP from its instance_id; returns the count.
 
     A kernel id found anywhere else in the file is referenced, and is refused.
     Every UUID in the text is counted in one pass and all kernel ids are then
@@ -412,12 +422,16 @@ def stabilize_ids(kdp_path: Path) -> int:
                 f"kernel id {old_id} appears {counts[old_id]} times in "
                 f"{kdp_path}; refusing to rewrite a referenced id"
             )
-        instance_id = kernel["metadata"]["instance_id"]
-        new_ids[old_id] = str(uuid.uuid5(INSTANCE_UUID_NAMESPACE, instance_id))
+        new_ids[old_id] = kernel_uuid(kernel["metadata"]["instance_id"])
     kdp_path.write_text(
         _UUID.sub(lambda match: new_ids.get(match.group(0), match.group(0)), text)
     )
     return len(kernels)
+
+
+def kernel_uuid(instance_id: str) -> str:
+    """The kernel UUID an instance is shipped under."""
+    return str(uuid.uuid5(INSTANCE_UUID_NAMESPACE, instance_id))
 
 
 def _kernels(node):
@@ -449,13 +463,15 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--stabilize-ids",
         type=Path,
+        nargs="+",
         metavar="KDP",
-        help="Rewrite a generated .kdp.json's kernel UUIDs from instance_id, then exit.",
+        help="Rewrite each generated .kdp.json's kernel UUIDs from instance_id, then exit.",
     )
     args = parser.parse_args(argv)
 
     if args.stabilize_ids:
-        print(f"stabilized {stabilize_ids(args.stabilize_ids)} kernel id(s)")
+        for kdp in args.stabilize_ids:
+            print(f"{kdp}: stabilized {stabilize_ids(kdp)} kernel id(s)")
         return 0
     if not (args.rocke_root and args.instances and args.output):
         parser.error("--rocke-root, --instances and --output are required")

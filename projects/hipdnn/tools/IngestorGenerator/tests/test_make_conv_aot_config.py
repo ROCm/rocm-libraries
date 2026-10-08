@@ -28,11 +28,19 @@ _ROCKE = _REPO / "dnn-providers" / "hip-kernel-provider" / "rocke"
 _CONFIGS = Path(__file__).resolve().parent.parent / "configs"
 _INSTANCES = _CONFIGS / "gfx950_conv_fwd_aot.instances.json"
 _CONFIG = _CONFIGS / "gfx950_conv_fwd_aot.yaml"
-_SHIPPED_KDP = (
+_SHIPPED_DIR = (
     _REPO
     / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors"
-    / "rocKE/gfx950_conv_fwd_aot/gfx950_conv_fwd_aot.kdp.json"
+    / "rocKE/gfx950_conv_fwd_aot"
 )
+#: One shipped shard, for the tests that rewrite a KDP.
+_SHIPPED_KDP = _SHIPPED_DIR / "gfx950_conv_fwd_aot_fp16.kdp.json"
+#: GitHub warns about any file above 50 MB; every emitted file stays below it.
+_FILE_SIZE_LIMIT = 50 * 1000 * 1000
+
+
+def _shipped_kdps():
+    return sorted(_SHIPPED_DIR.glob("*.kdp.json"))
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -65,8 +73,14 @@ def test_seed_config_is_what_the_tool_generates(seed_specs):
 
 
 def test_shipped_bundle_is_the_seed_catalog_with_instance_derived_ids(seed_specs):
-    kernels = json.loads(_SHIPPED_KDP.read_text())["kernelDescriptors"]
-    shipped = {k["metadata"]["instance_id"]: k for k in kernels}
+    shipped = {}
+    for kdp in _shipped_kdps():
+        document = json.loads(kdp.read_text())
+        dtype = kdp.name[: -len(".kdp.json")].rsplit("_", 1)[1]
+        assert document["name"] == f"hipkernel:gfx950_conv_fwd_aot_{dtype}"
+        for kernel in document["kernelDescriptors"]:
+            assert kernel["metadata"]["dtype"] == dtype
+            shipped[kernel["metadata"]["instance_id"]] = kernel
     assert sorted(shipped) == sorted(s.instance_id for s in seed_specs)
     for spec in seed_specs:
         kernel = shipped[spec.instance_id]
@@ -77,6 +91,48 @@ def test_shipped_bundle_is_the_seed_catalog_with_instance_derived_ids(seed_specs
         assert kernel["id"] == str(
             uuid.uuid5(tool.INSTANCE_UUID_NAMESPACE, spec.instance_id)
         )
+
+
+def test_config_shards_the_catalog_into_one_pack_per_dtype(tmp_path, seed_specs):
+    config = tool.build_config(seed_specs)
+    assert [pack["name"] for pack in config["packs"]] == ["bf16", "fp16"]
+    for pack in config["packs"]:
+        assert "discriminator" not in pack
+        dtypes = {
+            shape["dtype"]
+            for variant in pack["variants"]
+            for shape in variant["shapes"]
+        }
+        assert dtypes == {pack["name"]}
+    path = tmp_path / "aot.yaml"
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
+    loaded = load_config(path)
+    assert loaded.is_multi_pack and not loaded.has_operation_matchers
+    assert [loaded.kdp_stem(pack) for pack in loaded.packs] == [
+        "gfx950_conv_fwd_aot_bf16",
+        "gfx950_conv_fwd_aot_fp16",
+    ]
+
+
+def test_shipped_bundle_is_sharded_below_the_hosting_size_limit():
+    names = sorted(path.name for path in _SHIPPED_DIR.iterdir())
+    assert names == [
+        "gfx950_conv_fwd_aot.kmd.json",
+        "gfx950_conv_fwd_aot.udd.json",
+        "gfx950_conv_fwd_aot.ued.json",
+        "gfx950_conv_fwd_aot.uhd.json",
+        "gfx950_conv_fwd_aot_bf16.kdp.json",
+        "gfx950_conv_fwd_aot_fp16.kdp.json",
+        "kernel_dtype_matches_graph.umd.json",
+    ]
+    matcher = json.loads(
+        (_SHIPPED_DIR / "kernel_dtype_matches_graph.umd.json").read_text()
+    )
+    for path in _SHIPPED_DIR.iterdir():
+        assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
+    # No operation-scoped matcher: every shard names the shared kernel matcher only.
+    for kdp in _shipped_kdps():
+        assert json.loads(kdp.read_text())["matchers"] == [matcher["id"]]
 
 
 def test_instance_id_is_the_identity_stable_hash(seed_identities):
@@ -273,12 +329,12 @@ def test_unsupported_direct_identities_are_named_with_their_reason(
 
 def test_direct_instances_are_a_variant_stating_the_family_fields(seed_specs):
     config = tool.build_config(seed_specs)
-    variants = config["packs"][0]["variants"]
-    implicit, direct = variants
-    assert implicit["spec_order"] == list(tool.SPEC_ORDER)
-    assert direct["spec_order"] == list(tool.DIRECT_SPEC_ORDER)
-    assert all(shape["kernel_family"] == 1 for shape in direct["shapes"])
-    assert not any("kernel_family" in shape for shape in implicit["shapes"])
+    for pack in config["packs"]:
+        implicit, direct = pack["variants"]
+        assert implicit["spec_order"] == list(tool.SPEC_ORDER)
+        assert direct["spec_order"] == list(tool.DIRECT_SPEC_ORDER)
+        assert all(shape["kernel_family"] == 1 for shape in direct["shapes"])
+        assert not any("kernel_family" in shape for shape in implicit["shapes"])
     # Implicit-GEMM descriptors leave the direct fields to their builder default.
     defaults = {
         field["name"]: field["default_value"]
@@ -296,6 +352,8 @@ def test_direct_instances_are_a_variant_stating_the_family_fields(seed_specs):
     assert config["engine"]["knobs"] == ["tile_k", "kernel_family"]
     # Both families are in the shipped seed.
     assert {s.is_direct for s in seed_specs} == {False, True}
+
+
 def _stabilize_ids_one_kernel_at_a_time(kdp_path):
     """The original quadratic algorithm, kept as the reference for the linear one."""
     document = json.loads(kdp_path.read_text())

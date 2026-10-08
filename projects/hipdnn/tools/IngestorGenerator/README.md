@@ -161,9 +161,10 @@ verbatim. `direct_load` emits under `test_descriptors/<set>/<slug>/`, `<set>` be
     kernel_dtype_matches_graph.umd.json   # the one shared kernel-scoped matcher
     <slug>.kdp.json                 # single-pack engine: one KDP named after the slug
     <slug>_<pack>.kdp.json          # multi-pack engine: one KDP per pack
-    operation_is_<disc>.umd.json    # multi-pack engine ONLY -- one operation-scoped
-                                     # UMD per pack. A single-pack engine emits ZERO of
-                                     # these; see "UMD policy" below.
+    operation_is_<disc>.umd.json    # multi-pack engine with discriminators ONLY -- one
+                                     # operation-scoped UMD per pack. A single-pack or
+                                     # sharded engine emits ZERO of these; see "UMD
+                                     # policy" below.
   packs/<Name>Native.cpp            # native-symbol stub (graph_match/kernel_match/
                                     # score/dispatch bodies are all `// TODO`)
   tests/Test<Name>Packs.cpp         # COMPLETE pack-shape census -- not a stub
@@ -178,6 +179,12 @@ applicability belongs in the UED's `graph_match`. A **single-pack** engine gets 
 graph-scoped UMDs, its one pack's `matchers[]` naming only the shared kernel-scoped dtype
 matcher; a **multi-pack** engine gets **one** graph-scoped operation-matcher UMD per pack
 (each pack setting a unique `discriminator`), plus that same shared matcher.
+
+A multi-pack engine whose packs declare **no** `discriminator` is one catalog sharded
+across KDP files, for example one pack per dtype so that no file holds the whole catalog.
+It is treated like a single pack: zero graph-scoped UMDs, every shard naming only the
+shared kernel-scoped matcher, and the engine's `graph_match` admitting every shard. Either
+every pack of an engine declares a `discriminator` or none does.
 
 ### Native-symbol stub shape
 
@@ -644,7 +651,7 @@ workspace_policy: none | fixed | derived
 packs:
   - name: add
     arch: [gfx942]                # optional; empty means arch-independent
-    discriminator: add             # REQUIRED iff this engine has >1 pack; forbidden
+    discriminator: add             # on every pack or none of a >1-pack engine; forbidden
                                     # for a single-pack engine
     kernels:
       - name: my_engine.f32_block64
