@@ -8,56 +8,12 @@
 #include <string>
 #include <vector>
 
-// Writes TensileLite MessagePack libraries in the lazy-loading layout the stock
-// loader reads. Solutions are never built here: entries keep the generator's
-// bytes. Malformed input is Status::Code::Failed. A YAML-only build has no
-// MessagePack support and fails every call.
+// The JIT library's own MessagePack documents, which TensileLite does not
+// define. Library entries, masters and index mappings are TensileLite's and
+// are written with its writer. Malformed input is Status::Code::Failed. A
+// YAML-only build has no MessagePack support and fails every call.
 namespace hipblaslt_jit::msgpack_io
 {
-    // Copies the solution at local into entry bytes and renumbers its index.
-    // TensileLite's LoadLibraryData / MasterSolutionLibrary / ContractionSolution
-    // read and extend the library; they do not write these bytes.
-    Status rewriteEntryIndex(const std::vector<uint8_t>& entry,
-                             int64_t                     local,
-                             int32_t                     index,
-                             std::vector<uint8_t>&       rewritten);
-
-    // The entry's solution index and kernel name, and the predicate of its only
-    // library row, re-encoded as MessagePack.
-    struct EntryFields
-    {
-        int64_t              index = -1;
-        std::string          kernelName;
-        std::vector<uint8_t> predicate;
-    };
-    Status readEntry(const std::vector<uint8_t>& entry, EntryFields& fields);
-
-    // One master row: And(SizeEqual(i, sizes[i]) for every i, predicate)
-    // selecting Placeholder(prefix).
-    struct MasterRow
-    {
-        std::vector<size_t>  sizes;
-        std::vector<uint8_t> predicate;
-        std::string          prefix;
-    };
-
-    // Appends rows to a master whose library is a Problem node, keeping every
-    // other field. An empty master starts {"solutions": [], "library": Problem}.
-    Status appendMasterRows(const std::vector<uint8_t>&   master,
-                            const std::vector<MasterRow>& rows,
-                            std::vector<uint8_t>&         appended);
-
-    // The Placeholder prefix of every master row, in order.
-    Status readMasterPrefixes(const std::vector<uint8_t>& master, std::vector<std::string>& prefixes);
-
-    // The mapping file: solution index to library file prefix.
-    Status writeMapping(const std::map<int32_t, std::string>& mapping, std::vector<uint8_t>& bytes);
-    Status readMapping(const std::vector<uint8_t>& bytes, std::map<int32_t, std::string>& mapping);
-
-    // A MessagePack array of strings. A missing file means the default (none).
-    Status writeNames(const std::vector<std::string>& names, std::vector<uint8_t>& bytes);
-    Status readNames(const std::vector<uint8_t>& bytes, std::vector<std::string>& names);
-
     // {"next": <first unallocated index>}.
     Status writeAllocator(int64_t next, std::vector<uint8_t>& bytes);
     Status readAllocator(const std::vector<uint8_t>& bytes, int64_t& next);

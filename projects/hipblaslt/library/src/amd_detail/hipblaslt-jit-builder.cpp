@@ -3,10 +3,16 @@
 
 #include "hipblaslt-jit-code-object.hpp"
 #include "hipblaslt-jit-component.hpp"
+#include "hipblaslt-jit-source-bundle.hpp"
+#include <Tensile/ContractionSolution.hpp>
 #include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <system_error>
+
+#ifdef TENSILE_MSGPACK
+#include <Tensile/msgpack/SolutionState.hpp>
+#endif
 
 namespace hipblaslt_jit
 {
@@ -87,11 +93,17 @@ namespace hipblaslt_jit
                 options.linkerFlags       = {"-Xlinker", "--build-id=sha1"};
                 options.rocmPath          = co::rocmPath();
 
-                if(source.mainKernel.name.empty() || source.mainKernel.bytes.empty()
-                   || std::any_of(source.kernelNames.begin(),
-                                  source.kernelNames.end(),
-                                  [](const std::string& name) { return name.empty(); }))
+                if(source.mainKernel.name.empty() || source.mainKernel.bytes.empty())
                     return failure("A generated solution needs a main kernel", {});
+                std::vector<std::string> required;
+                for(const auto& solution : source.solutions)
+                    required.push_back(solution ? solution->kernelName : std::string());
+                required.insert(
+                    required.end(), source.kernelNames.begin(), source.kernelNames.end());
+                if(std::any_of(required.begin(), required.end(), [](const std::string& name) {
+                       return name.empty();
+                   }))
+                    return failure("A bundle has a null solution or an empty kernel name", {});
                 if(target.processor == Processor::gfx000)
                     return failure("A build needs the device's target processor", {});
                 if(kind == BuildKind::Relocatable && !source.helpers.empty())
@@ -125,7 +137,13 @@ namespace hipblaslt_jit
                 };
 
                 Artifact mainObject;
-                if(auto status = compile(source.mainKernel, mainObject); !status.ok())
+                if(source.mainKernel.kind == Artifact::Kind::Relocatable)
+                {
+                    if(kind == BuildKind::Relocatable)
+                        return failure("A relocatable build needs a source main kernel", {});
+                    mainObject = source.mainKernel;
+                }
+                else if(auto status = compile(source.mainKernel, mainObject); !status.ok())
                     return status;
                 if(kind == BuildKind::Relocatable)
                 {
@@ -170,14 +188,14 @@ namespace hipblaslt_jit
                                        + std::to_string(source.codeObjectVersion),
                                    linked.log);
                 const auto& names = metadata.kernelNames;
-                for(const auto& name : source.kernelNames)
+                for(const auto& name : required)
                     if(std::find(names.begin(), names.end(), name) == names.end())
                         return failure("The executable does not define kernel " + name,
                                        linked.log);
                 out      = std::move(linked.artifact);
-                out.name = names.empty()                 ? source.mainKernel.name
-                           : source.kernelNames.empty() ? names.front()
-                                                        : source.kernelNames.front();
+                out.name = names.empty()      ? source.mainKernel.name
+                           : required.empty() ? names.front()
+                                              : required.front();
                 return {};
             }
 
@@ -198,6 +216,102 @@ namespace hipblaslt_jit
     std::shared_ptr<const CodeObjectBuilder> makeComgrBuilder()
     {
         return std::make_shared<const ComgrBuilder>();
+    }
+
+    Status TensileliteAssembly::make(const CodeObjectBuilder& builder,
+                                     const SourceCodeBundle&  source,
+                                     TensileliteAssembly&     assembly,
+                                     Artifact&                relocatable)
+    {
+        assembly          = {};
+        relocatable       = {};
+        const auto failed = [](std::string message, std::string log = {}) {
+            Status status{Status::Code::Failed, Stage::Build, std::move(message)};
+            status.log = std::move(log);
+            return status;
+        };
+        if(source.mainKernel.kind != Artifact::Kind::Assembly)
+            return failed("A TensileLite kernel needs its assembly");
+#ifdef TENSILE_MSGPACK
+        const auto&      name  = source.mainKernel.name;
+        SourceCodeBundle alone = source;
+        alone.helpers.clear();
+        alone.solutions.clear();
+        alone.kernelNames.clear();
+        Artifact object;
+        if(auto status = builder.build(alone, BuildKind::Relocatable, object); !status.ok())
+            return status;
+        const auto note = co::metadataNote(object.bytes);
+        if(!note.ok())
+            return failed("Cannot read the metadata note of " + name, note.log);
+        const auto defined = co::inspect(object.bytes);
+        if(!defined.ok())
+            return failed("Cannot read the kernels of " + name, defined.log);
+        try
+        {
+            const auto handle = msgpack::unpack(reinterpret_cast<const char*>(note.bytes.data()),
+                                                note.bytes.size());
+            const auto&            metadata = handle.get();
+            const msgpack::object* state    = nullptr;
+            if(metadata.type == msgpack::type::MAP)
+                for(uint32_t i = 0; i < metadata.via.map.size && !state; ++i)
+                {
+                    const auto& entry = metadata.via.map.ptr[i];
+                    if(entry.key.type == msgpack::type::STR
+                       && entry.key.as<std::string>() == "custom.config")
+                        state = &entry.val;
+                }
+            if(!state)
+                return failed("Assembly " + name + " keeps no custom.config in its metadata");
+            auto        solution = TensileLite::solutionFromState(*state);
+            const auto& kernels  = defined.kernelNames;
+            if(std::find(kernels.begin(), kernels.end(), solution->kernelName) == kernels.end())
+                return failed("Assembly " + name + " does not define kernel "
+                              + solution->kernelName);
+            static_cast<Artifact&>(assembly) = source.mainKernel;
+            assembly.target                  = source.target;
+            assembly.solutions               = {std::move(solution)};
+            relocatable                      = std::move(object);
+            return {};
+        }
+        catch(const std::exception& error)
+        {
+            return failed("Cannot read the solution state of " + name + ": " + error.what());
+        }
+#else
+        return failed("A TensileLite assembly needs a MessagePack build of TensileLite");
+#endif
+    }
+
+    Status readTensileSourceBundle(const CodeObjectBuilder& builder,
+                                   const fs::path&          bundle,
+                                   const Target&            target,
+                                   int                      codeObjectVersion,
+                                   SourceCodeBundle&        source)
+    {
+        source = {};
+        SourceCodeBundle read;
+        try
+        {
+            read = source_bundle::readSourceBundle(bundle);
+        }
+        catch(const std::exception& error)
+        {
+            return {Status::Code::Failed,
+                    Stage::Generate,
+                    "Cannot read source bundle " + bundle.u8string() + ": " + error.what()};
+        }
+        read.target            = target;
+        read.codeObjectVersion = codeObjectVersion;
+        TensileliteAssembly assembly;
+        Artifact            relocatable;
+        if(auto status = TensileliteAssembly::make(builder, read, assembly, relocatable);
+           !status.ok())
+            return status;
+        read.mainKernel = std::move(relocatable);
+        read.solutions  = std::move(assembly.solutions);
+        source          = std::move(read);
+        return {};
     }
 
     void keepBuildLog(Status& status, const fs::path& scratch)

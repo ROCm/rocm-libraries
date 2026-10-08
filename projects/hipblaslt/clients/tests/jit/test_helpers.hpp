@@ -242,7 +242,8 @@ namespace hipblaslt_jit_test
         }
     };
 
-    // Handle, descriptor, stream, and the plain-pair replay backend for this device.
+    // Handle, descriptor, stream, and the replay backend, which replays this
+    // device's plain bundle under root as plain-pair.
     struct ReplayFixture
     {
         int                                            device = -1;
@@ -264,7 +265,7 @@ namespace hipblaslt_jit_test
             checkHip(hipStreamCreate(&stream), "hipStreamCreate");
             hipblaslt_ext::experimental::jit::Diagnostics diagnostics;
             const auto status = hipblaslt_ext::experimental::jit::replay::createBackend(
-                {{(bundles / "plain-pair").u8string()}}, backend, diagnostics);
+                {{(bundles / "plain").u8string()}}, backend, diagnostics);
             {
                 INFO((std::string("replay::createBackend: status ") + std::to_string(status)
                     + diagnostics.message));

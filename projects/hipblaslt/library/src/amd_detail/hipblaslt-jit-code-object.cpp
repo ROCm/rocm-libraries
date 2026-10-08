@@ -646,6 +646,18 @@ namespace hipblaslt_jit::code_object
             return static_cast<std::uint16_t>(p[0] | (p[1] << 8));
         }
 
+        // A little-endian field of the size of T at offset, which must lie in the object.
+        template <typename T>
+        T field(const std::vector<uint8_t>& elf, std::uint64_t offset)
+        {
+            if(offset > elf.size() || elf.size() - offset < sizeof(T))
+                fail(Status::MetadataError, "the code object is truncated");
+            T value = 0;
+            for(size_t i = 0; i < sizeof(T); ++i)
+                value |= static_cast<T>(static_cast<T>(elf[offset + i]) << (8 * i));
+            return value;
+        }
+
         int elfCodeObjectVersion(const unsigned char* elf, size_t size)
         {
             static const char bundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
@@ -708,6 +720,47 @@ namespace hipblaslt_jit::code_object
             });
             result.status = Status::Success;
             return result;
+        }
+
+        MetadataNote metadataNoteImpl(const std::vector<uint8_t>& elf, std::string&)
+        {
+            elfCodeObjectVersion(elf.data(), elf.size());
+            constexpr std::uint32_t noteSection = 7; // SHT_NOTE
+            constexpr std::uint32_t amdgpuNote  = 32; // NT_AMDGPU_METADATA
+            const auto              headers     = field<std::uint64_t>(elf, 0x28);
+            const auto              headerSize  = field<std::uint16_t>(elf, 0x3a);
+            const auto              count       = field<std::uint16_t>(elf, 0x3c);
+            const auto              padded = [](std::uint64_t size) { return (size + 3) & ~3ull; };
+            for(std::uint16_t i = 0; i < count; ++i)
+            {
+                const auto header = headers + std::uint64_t{i} * headerSize;
+                if(field<std::uint32_t>(elf, header + 4) != noteSection)
+                    continue;
+                auto       at  = field<std::uint64_t>(elf, header + 0x18);
+                const auto end = at + field<std::uint64_t>(elf, header + 0x20);
+                if(end < at || end > elf.size())
+                    fail(Status::MetadataError, "a note section lies outside the code object");
+                while(end - at >= 12)
+                {
+                    const auto nameSize = field<std::uint32_t>(elf, at);
+                    const auto descSize = field<std::uint32_t>(elf, at + 4);
+                    const auto type     = field<std::uint32_t>(elf, at + 8);
+                    const auto name     = at + 12;
+                    const auto desc     = name + padded(nameSize);
+                    if(desc > end || end - desc < descSize)
+                        fail(Status::MetadataError, "a note lies outside its section");
+                    if(type == amdgpuNote && nameSize == 7
+                       && std::memcmp(elf.data() + name, "AMDGPU", 7) == 0)
+                    {
+                        MetadataNote result;
+                        result.bytes.assign(elf.begin() + desc, elf.begin() + desc + descSize);
+                        result.status = Status::Success;
+                        return result;
+                    }
+                    at = desc + padded(descSize);
+                }
+            }
+            fail(Status::MetadataError, "the code object has no AMDGPU metadata note");
         }
 
 #ifndef _WIN32
@@ -840,6 +893,12 @@ namespace hipblaslt_jit::code_object
     ObjectCheck inspect(const std::vector<uint8_t>& elf) noexcept
     {
         return inspect(elf.data(), elf.size());
+    }
+
+    MetadataNote metadataNote(const std::vector<uint8_t>& elf) noexcept
+    {
+        return guarded<MetadataNote>(
+            [&](std::string& log) { return metadataNoteImpl(elf, log); });
     }
 
     std::string comgrVersion() noexcept

@@ -1,16 +1,16 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include "solution_entry.hpp"
+#include "test_helpers.hpp"
 #include <hip/hip_fp16.h>
 #include <catch2/catch_test_macros.hpp>
 
 #include <iostream>
 #include <string>
 
-// Stages the plain-pair sources of the current device's architecture and replays
-// them through Jit, which publishes each solution into the JIT solution library.
-// getJitAlgo returns its first solution for K=512 and its second for K=256 as
-// library indices from 2^30; each runs through hipblasLtMatmul and
+// Replays the committed plain bundle of the current device's architecture as
+// plain-pair through Jit, which publishes each solution into the JIT solution
+// library. getJitAlgo returns its first solution for K=512 and its second for
+// K=256 as library indices from 2^30; each runs through hipblasLtMatmul and
 // hipblaslt_ext::Gemm, and D is checked against the host. A second lookup
 // returns the same JIT solution library index.
 namespace jit = hipblaslt_ext::experimental::jit;
@@ -53,9 +53,8 @@ namespace
         Fp16Gemm         matrices(K);
 
         // Generate (replay), build with comgr, then publish a JIT library index.
-        std::shared_ptr<const jit::detail::GemmRequest>  request;
-        std::shared_ptr<const jit::detail::CompiledSolution> solution;
-        float         alpha = 1.25f, beta = 0.5f;
+        std::shared_ptr<const jit::detail::GemmRequest> request;
+        float                                           alpha = 1.25f, beta = 0.5f;
         BLAS(jit::makeGemmRequest(handle,
                                   desc,
                                   &alpha,
@@ -70,18 +69,15 @@ namespace
                                   matrices.layoutD,
                                   request,
                                   diagnostics));
-        BLAS(jit::getJitAlgo(device, request, backend, 64 << 20, solution, diagnostics));
         hipblasLtMatmulHeuristicResult_t result{};
-        BLAS(jit::getGemmAlgo(solution, result, diagnostics));
+        BLAS(jit::getJitAlgo(device, request, backend, 64 << 20, result, diagnostics));
         const int index = hipblaslt_ext::getIndexFromAlgo(result.algo);
         {
             INFO((label + " returned " + std::to_string(index) + ", not a JIT library index"));
-            REQUIRE((index >= (1 << 30)));
+            REQUIRE((index >= (1 << 30) && result.state == HIPBLAS_STATUS_SUCCESS));
         }
-        std::shared_ptr<const jit::detail::CompiledSolution> again;
-        BLAS(jit::getJitAlgo(device, request, backend, 64 << 20, again, diagnostics));
         hipblasLtMatmulHeuristicResult_t repeat{};
-        BLAS(jit::getGemmAlgo(again, repeat, diagnostics));
+        BLAS(jit::getJitAlgo(device, request, backend, 64 << 20, repeat, diagnostics));
         {
             INFO((label + " published a different index on the second lookup"));
             REQUIRE((hipblaslt_ext::getIndexFromAlgo(repeat.algo) == index));
@@ -172,14 +168,15 @@ namespace
         BLAS(hipblasLtMatrixLayoutCreate(&lt, HIP_R_16F, K, M, K));
         BLAS(hipblasLtMatrixLayoutCreate(&lb, HIP_R_16F, K, N, K));
         BLAS(hipblasLtMatrixLayoutCreate(&lc, HIP_R_16F, M, N, M));
-        std::shared_ptr<const jit::detail::GemmRequest>      transposed;
-        std::shared_ptr<const jit::detail::CompiledSolution> unsolved;
+        std::shared_ptr<const jit::detail::GemmRequest> transposed;
+        hipblasLtMatmulHeuristicResult_t                unsolved{};
         BLAS(jit::makeGemmRequest(handle, tn, &alpha, A.pointer, lt, B.pointer, lb, &beta,
                                   C.pointer, lc, D.pointer, lc, transposed, diagnostics));
         {
             INFO(("The replay backend accepted a problem its bundle does not solve"));
             REQUIRE((jit::getJitAlgo(device, transposed, fixture.backend, 64 << 20, unsolved, diagnostics)
-                == HIPBLAS_STATUS_NOT_SUPPORTED));
+                         == HIPBLAS_STATUS_NOT_SUPPORTED
+                     && unsolved.state == HIPBLAS_STATUS_NOT_SUPPORTED));
         }
         std::cout << "PASS a problem the bundle does not solve is not supported\n";
         hipblasLtMatrixLayoutDestroy(lt);
@@ -322,18 +319,12 @@ namespace
 TEST_CASE("replayed JIT GEMM solutions run end to end", "[jit-gpu]")
 {
     [[maybe_unused]] hipblaslt_jit_test::LibraryScratch root("end-to-end");
-    hipblaslt_jit_test::ScratchDir     stage("end-to-end-sources");
-    hipblaslt_jit_test::stageDescribedSources(std::filesystem::u8path(HIPBLASLT_JIT_DATA),
-                                              stage.path);
-    test(stage.path.u8string());
+    test(HIPBLASLT_JIT_DATA);
 }
 
 TEST_CASE("getLibraryAlgos publishes plain-pair solutions", "[jit-gpu]")
 {
     [[maybe_unused]] hipblaslt_jit_test::LibraryScratch root("end-to-end-library");
-    hipblaslt_jit_test::ScratchDir     stage("end-to-end-library-sources");
-    hipblaslt_jit_test::stageDescribedSources(std::filesystem::u8path(HIPBLASLT_JIT_DATA),
-                                              stage.path);
-    library(stage.path.u8string());
+    library(HIPBLASLT_JIT_DATA);
 }
 }

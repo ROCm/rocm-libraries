@@ -9,8 +9,8 @@ enable_testing()
 set(hipblaslt_jit_source "${PROJECT_SOURCE_DIR}/library/src/amd_detail")
 set(hipblaslt_jit_scratch "${CMAKE_CURRENT_BINARY_DIR}/scratch")
 set(hipblaslt_jit_data "${CMAKE_CURRENT_SOURCE_DIR}/data")
-# The publish test writes the JIT solution library here. Replay tests stage a
-# temporary source directory themselves, from the same descriptions.
+# The publish test writes the JIT solution library here. Replay tests read the
+# committed bundles in place.
 set(hipblaslt_jit_library "${hipblaslt_jit_scratch}/published")
 set(hipblaslt_jit_library_sources
     "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp"
@@ -96,7 +96,7 @@ add_executable(hipblaslt-jit-builder-test
 target_include_directories(hipblaslt-jit-builder-test PRIVATE
     "${hipblaslt_jit_source}/rocblaslt/src/include")
 target_link_libraries(hipblaslt-jit-builder-test PRIVATE
-    roc::hipblaslt roc::tensilelite-host amd_comgr hip::device)
+    roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} amd_comgr hip::device)
 target_compile_definitions(hipblaslt-jit-builder-test PRIVATE
     "HIPBLASLT_JIT_DATA=\"${hipblaslt_jit_data}\""
     "HIPBLASLT_JIT_KERNEL=\"${CMAKE_CURRENT_SOURCE_DIR}/builder_test_kernel.hip\""
@@ -136,7 +136,7 @@ set_tests_properties(jit-publish PROPERTIES FIXTURES_SETUP jit-publish)
 # Loads that library and resolves the pre-generated kernel.
 add_executable(hipblaslt-jit-loader-test
     loader_test.cpp
-    "${hipblaslt_jit_source}/hipblaslt-jit-loader.cpp"
+    "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
     ${hipblaslt_jit_library_sources})
 target_include_directories(hipblaslt-jit-loader-test PRIVATE
     "${hipblaslt_jit_source}/rocblaslt/src/include")
@@ -148,7 +148,8 @@ target_compile_definitions(hipblaslt-jit-loader-test PRIVATE
 hipblaslt_jit_catch_test(jit-loader jit-gpu hipblaslt-jit-loader-test)
 set_tests_properties(jit-loader PROPERTIES FIXTURES_REQUIRED jit-publish)
 
-# Compiles the committed assembly, publishes it, retrieves it and launches it.
+# Compiles the committed assembly, publishes it, retrieves it, launches it and
+# checks D. Also stores a helper relocatable and links it.
 add_executable(hipblaslt-jit-launch-test
     launch_test.cpp
     "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
@@ -159,21 +160,20 @@ target_link_libraries(hipblaslt-jit-launch-test PRIVATE
     roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} amd_comgr hip::device)
 target_compile_definitions(hipblaslt-jit-launch-test PRIVATE
     "HIPBLASLT_JIT_DATA=\"${hipblaslt_jit_data}\""
+    "HIPBLASLT_JIT_HELPER_LIBRARY=\"${hipblaslt_jit_scratch}/helper-library\""
+    "HIPBLASLT_JIT_KERNEL=\"${CMAKE_CURRENT_SOURCE_DIR}/builder_test_kernel.hip\""
     "HIPBLASLT_JIT_LAUNCH_LIBRARY=\"${hipblaslt_jit_scratch}/launch-library\""
     "HIPBLASLT_JIT_LAUNCH_SCRATCH=\"${hipblaslt_jit_scratch}/launch\"")
 hipblaslt_jit_catch_test(jit-launch jit-gpu hipblaslt-jit-launch-test)
 
-# Compiles the JIT solution library directly. It builds the plain entry of the
-# current device's architecture from the committed assembly and loads no code,
-# but TensileLite queries the current device when it reads an entry.
+# Compiles the JIT solution library directly. It builds the committed assembly
+# of the current device's architecture and publishes it, and loads no code,
+# but TensileLite queries the current device when it reads a solution.
 find_package(Threads REQUIRED)
 add_executable(hipblaslt-jit-library-test
     jit_library_test.cpp
-    "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp"
-    "${hipblaslt_jit_source}/hipblaslt-jit-fs.cpp"
-    "${hipblaslt_jit_source}/hipblaslt-jit-library.cpp"
-    "${hipblaslt_jit_source}/hipblaslt-jit-msgpack.cpp"
-    "${hipblaslt_jit_source}/hipblaslt-jit-problem-type.cpp")
+    "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
+    ${hipblaslt_jit_library_sources})
 target_include_directories(hipblaslt-jit-library-test PRIVATE
     "${hipblaslt_jit_source}/rocblaslt/src/include")
 target_compile_definitions(hipblaslt-jit-library-test PRIVATE
