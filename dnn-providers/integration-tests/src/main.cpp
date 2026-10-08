@@ -145,7 +145,7 @@ int main(int argc, char** argv) noexcept
         // parameterized tests (which ref executor is exercised as the SUT).
         parser.add_argument("--vm", "--verification-mode")
             .help("How bundle engine output is verified: 'auto' (default; golden -> "
-                  "GPU ref -> CPU ref -> skip), 'golden', 'gpu', or 'cpu'. Validating "
+                  "GPU ref -> CPU ref -> fail), 'golden', 'gpu', or 'cpu'. Validating "
                   "golden data against a reference (no engine involved) is not a mode "
                   "here; run the hipdnn_golden_data_tests binary instead. Can also be "
                   "set via HIPDNN_TEST_VERIFICATION_MODE env var.");
@@ -515,7 +515,8 @@ int main(int argc, char** argv) noexcept
         const int result = RUN_ALL_TESTS();
 
         // Print bundles that ended without a verdict (no oracle / reference bug).
-        // Informational only — these SKIP, so they do not affect `result`.
+        // Informational only — the tests themselves already carry the verdict, so
+        // this does not touch `result`.
         hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
         if(!hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
         {

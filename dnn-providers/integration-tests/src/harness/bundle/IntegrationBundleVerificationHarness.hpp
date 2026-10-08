@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -68,8 +70,16 @@ struct ClaimPhase
 
 /// Runs one bundle against the engine under test and decides what that says.
 ///
-/// Fallback chain: golden → GPU ref → CPU ref → SKIP (RFC 0010 §4.4). Inputs are
-/// read-only (shared); outputs are separate allocations per executor.
+/// Fallback chain: golden → GPU ref → CPU ref (RFC 0010 §4.4). In the reference modes
+/// (auto, gpu, cpu) the engine runs first, and a decline is a SKIP and a break a FAIL
+/// without consulting any oracle; the chain is only walked for an engine that ran.
+/// When nothing in it can verify the bundle, it is unverifiable, and that FAILs: an
+/// engine whose output nothing checks is untested. When the last reference tried
+/// errored rather than declined, the oracle itself is broken, and that FAILs too.
+/// --verification-mode=golden has no chain: it FAILs before running the engine if the
+/// bundle has no golden data.
+///
+/// Inputs are read-only (shared); outputs are separate allocations per executor.
 ///
 /// **This class has no virtual members.** Everything that needs a GPU, a handle, a
 /// loaded engine plugin, or process-wide state lives behind one of the four
@@ -310,8 +320,11 @@ private:
     // add a non-terminal failure before it, but it never decides what the test is.
     static void reportOutcome(const VerificationOutcome& outcome);
 
-    // Records the bundle as unverifiable and yields the skip outcome for TestBody()
-    // to issue.
+    // Records the bundle as unverifiable and returns the message the test reports,
+    // "Unverifiable: <reason> (<bundle>)".
+    std::string recordUnverifiable(const std::string& reason);
+    // recordUnverifiable(), as a SKIP. noOracle() is the one unverifiable outcome
+    // that FAILs instead.
     VerificationOutcome unverifiable(const std::string& reason,
                                      VerificationDepth reached = VerificationDepth::NOT_REACHED);
 
@@ -384,10 +397,76 @@ private:
     // APPLICABILITY and BUILDABLE come here; FULL takes the comparison path.
     VerificationOutcome enforceAtLevel(EnforcementLevel level, GraphSession& session);
 
+    /// A reference executor whose isApplicable() said it can take this graph.
+    struct ResolvedReference
+    {
+        ReferenceExecutorType type = ReferenceExecutorType::CPU;
+        IReferenceGraphExecutor* executor = nullptr;
+    };
+
+    /// An oracle the chain tried that could not verify the bundle.
+    struct TriedOracle
+    {
+        /// How the "tried: ..." list names it, e.g. "CPU reference (not applicable)".
+        std::string entry;
+        /// Set only if it errored rather than declined: its line in the
+        /// reference-error report.
+        std::optional<std::string> error;
+    };
+
+    /// The references a reference mode may use, in fallback order, and what became
+    /// of each one tried. Probed lazily: only as far as the first applicable one, so
+    /// a working GPU reference never instantiates the CPU one; the rest are probed
+    /// only if the ones before them fail at execute().
+    struct OracleChain
+    {
+        VerificationMode mode = VerificationMode::AUTO;
+        std::vector<ReferenceExecutorType> candidates;
+        std::vector<TriedOracle> tried;
+
+        void declined(std::string entry)
+        {
+            tried.push_back({std::move(entry), std::nullopt});
+        }
+        bool anyErrored() const
+        {
+            return std::any_of(tried.begin(), tried.end(), [](const TriedOracle& oracle) {
+                return oracle.error.has_value();
+            });
+        }
+        /// The verdict rests on the last oracle tried; this says it is broken.
+        bool lastErrored() const
+        {
+            return !tried.empty() && tried.back().error.has_value();
+        }
+    };
+
+    static OracleChain resolveOracles(VerificationMode mode);
+    // Creates `type`'s executor and asks isApplicable(). If it cannot be used, notes
+    // why in the chain and returns nothing.
+    std::optional<ResolvedReference> probeReference(OracleChain& chain, ReferenceExecutorType type);
+    // Notes a reference that errored rather than declined, and puts it in the
+    // reference-error report, worded `error`.
+    void referenceErrored(OracleChain& chain, std::string entry, std::string error);
+
     VerificationOutcome runComparison(GraphSession& session);
     VerificationOutcome runGoldenMode(GraphSession& session);
-    VerificationOutcome runExplicitRefMode(GraphSession& session, ReferenceExecutorType type);
-    VerificationOutcome runAutoMode(GraphSession& session);
+    VerificationOutcome runReferenceMode(GraphSession& session);
+    VerificationOutcome runOracleChain(OutputTensors& engineOutputs, OracleChain& chain);
+
+    // The two ways a spent chain ends, both after the engine ran (EXECUTED).
+    //
+    // The last reference tried errored: an explicit mode's only oracle, or auto
+    // mode's last resort, is broken. An ORACLE FAIL, worded as the reference error
+    // itself rather than as "Unverifiable" -- the bundle is not in the Unverifiable
+    // report.
+    VerificationOutcome lastOracleErrored(const OracleChain& chain) const;
+    // Every oracle declined, possibly after an earlier one errored. Recorded as
+    // unverifiable and a FAIL (ORACLE if one errored along the way, HARNESS if not),
+    // worded "Unverifiable: ..." like the other unverifiable outcomes, which SKIP.
+    VerificationOutcome noOracle(const OracleChain& chain);
+    // "tried: ..." for both messages above.
+    std::string describeTried(const OracleChain& chain) const;
 
     // nullopt when the inputs are ready; otherwise the outcome to return.
     std::optional<VerificationOutcome> prepareInputs();
@@ -398,7 +477,7 @@ private:
     EngineRunResult runEngine(GraphSession& session);
     VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 
-    RefRunResult runReferenceCapturingOutputs(ReferenceExecutorType type,
+    RefRunResult runReferenceCapturingOutputs(const ResolvedReference& ref,
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
 
