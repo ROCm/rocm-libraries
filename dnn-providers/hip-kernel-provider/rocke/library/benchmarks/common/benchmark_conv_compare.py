@@ -230,6 +230,14 @@ def _build_implicit_only_args(args) -> list[str]:
         a += ["--split-k", str(args.split_k)]
     if args.split_k_prune is not None:
         a += ["--split-k-prune", str(args.split_k_prune)]
+    if args.streamk == "off" and (
+        args.streamk_reductions is not None or args.streamk_ctas != -1
+    ):
+        print(
+            "warning: --streamk-reductions / --streamk-ctas are ignored "
+            "without --streamk",
+            file=sys.stderr,
+        )
     if args.streamk != "off":
         a += ["--streamk", args.streamk]
         if args.streamk_reductions is not None:
@@ -458,7 +466,7 @@ def main() -> int:
         dest="streamk_ctas",
         metavar="N",
         help=(
-            "stream-K CTA pool (-1 = arch default). Forwarded to implicit-GEMM " "only."
+            "stream-K CTA pool (-1 = arch default). Forwarded to implicit-GEMM only."
         ),
     )
 

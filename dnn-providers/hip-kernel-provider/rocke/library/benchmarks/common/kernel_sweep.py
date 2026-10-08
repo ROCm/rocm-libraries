@@ -758,10 +758,10 @@ def job_for_identity(identity: KernelIdentity) -> BuildJob:
     )
     want = identity.stable_hash()
     streamk = (
-        dict(
-            streamk_modes=(identity.streamk,),
-            streamk_reductions=(identity.streamk_reduction,),
-        )
+        {
+            "streamk_modes": (identity.streamk,),
+            "streamk_reductions": (identity.streamk_reduction,),
+        }
         if identity.direction == "wgrad" and identity.streamk != "off"
         else {}
     )
@@ -1755,11 +1755,6 @@ def _launch_values_for(direction, problem, identity, ptrs, sizes, extras):
             split_k=extras.get("split_k", 1),
             ws_ptr=extras.get("ws_ptr"),
             ws_bytes=extras.get("ws_bytes"),
-            # Stream-K: the StreamKLaunch (pool, mode, reduction) that fills
-            # the partition block, plus the linear/tree flag/partial buffers.
-            streamk=extras.get("streamk"),
-            sk_flags=extras.get("sk_flags"),
-            sk_partials=extras.get("sk_partials"),
         )
     return ConvArgs.from_problem(
         problem, direction="dgrad", tile_m=tm, tile_n=tn
