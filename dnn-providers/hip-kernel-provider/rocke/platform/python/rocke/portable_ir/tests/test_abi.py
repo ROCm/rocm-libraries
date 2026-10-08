@@ -201,6 +201,7 @@ class TestCEngineAgrees(unittest.TestCase):
         want = {
             "rocke_bundle_contains": ctypes.c_bool,
             "rocke_launch_plan_geometry": ctypes.c_bool,
+            "rocke_launch_plan_cluster": ctypes.c_bool,
             "rocke_launch_plan_kernel_name": ctypes.c_char_p,
             "rocke_launch_plan_kernarg_size": ctypes.c_uint,
             "rocke_engine_version": ctypes.c_char_p,

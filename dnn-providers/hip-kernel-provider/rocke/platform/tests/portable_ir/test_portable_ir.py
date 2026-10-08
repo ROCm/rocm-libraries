@@ -203,3 +203,80 @@ open(out + "/py.ll", "w").write(
         assert (
             got.stdout == expected
         ), f"{label}: standalone replay diverged from the Python lowerer"
+
+
+def _int_list(*items):
+    """A list-of-bare-ints attr as ir_export writes it."""
+    return {"t": "l", "v": [{"_": {"t": "i", "v": n}} for n in items]}
+
+
+_MALFORMED_LIST_ATTRS = [
+    ("non-array value", {"t": "l", "v": 3}, "must be an array"),
+    ("missing value", {"t": "l"}, "must be an array"),
+    (
+        "non-int item",
+        {"t": "l", "v": [{"_": {"t": "s", "v": "x"}}]},
+        "item 0 is not a bare int",
+    ),
+    ("item without a payload", {"t": "l", "v": [{}]}, "item 0 is not a bare int"),
+    ("non-integral item", _int_list(2, 1.5), "item 1 is not an integer"),
+    ("too many items", _int_list(*([1] * 17)), "at most 16"),
+]
+
+
+@pytest.mark.parametrize("key", ["cluster_dims", "agpr_alloc"])
+@pytest.mark.parametrize(
+    "attr,message",
+    [(a, m) for _, a, m in _MALFORMED_LIST_ATTRS],
+    ids=[w for w, _, _ in _MALFORMED_LIST_ATTRS],
+)
+def test_standalone_importer_rejects_malformed_list_attr(tmp_path, key, attr, message):
+    """A list kernel attr the importer cannot read is an error, never dropped.
+
+    Dropping ``cluster_dims`` would compile the kernel without
+    "amdgpu-cluster-dims" and launch it unclustered; Python's launch.eval_cluster
+    refuses the same input, so the C importer must as well."""
+    cli = _replay_cli()
+    if cli is None:
+        pytest.skip(
+            "replay CLI not built; "
+            "`cmake --build <build> --target rocke_portable_ir_replay_cli` "
+            "or point ROCKE_REPLAY_CLI at it"
+        )
+    author = """
+import sys
+from rocke.core import ir_export
+from rocke.instances.common.elementwise import ElementwiseSpec, build_elementwise
+
+open(sys.argv[1], "w").write(
+    ir_export.export_kernel_ir_json(build_elementwise(ElementwiseSpec(op="add")))
+)
+"""
+    r = _run([sys.executable, "-c", author, str(tmp_path / "k.ir.json")])
+    assert r.returncode == 0, r.stderr[-4000:]
+
+    import json
+
+    doc = json.loads((tmp_path / "k.ir.json").read_text())
+    doc["kernel"]["attrs"][key] = attr
+    bad = tmp_path / "bad.ir.json"
+    bad.write_text(json.dumps(doc))
+
+    got = subprocess.run(
+        [cli, "--ir", str(bad), "--arch", "gfx1250", "--flavor", "llvm23"],
+        capture_output=True,
+        text=True,
+    )
+    assert got.returncode != 0, f"malformed {key} was accepted"
+    assert message in got.stderr and key in got.stderr, got.stderr[-2000:]
+
+    # The well-formed shape must not trip the same check.
+    doc["kernel"]["attrs"][key] = _int_list(2, 1, 1)
+    ok = tmp_path / "ok.ir.json"
+    ok.write_text(json.dumps(doc))
+    got = subprocess.run(
+        [cli, "--ir", str(ok), "--arch", "gfx1250", "--flavor", "llvm23"],
+        capture_output=True,
+        text=True,
+    )
+    assert f"kernel attr '{key}'" not in got.stderr, got.stderr[-2000:]

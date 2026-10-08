@@ -30,6 +30,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
@@ -146,11 +147,108 @@ int count(const std::string& hay, const char* needle)
     return n;
 }
 
+// A recipe with no program but `ret`, carrying one kernel attr. Just enough to
+// reach the recipe VM's kernel-attr loop.
+std::string attr_recipe(const std::string& key, const std::string& attr_json)
+{
+    return std::string(R"json({"schema": "rocke.recipe/v1", "kernel_name_fmt": "attr_probe",
+  "spec": [], "attrs": {")json")
+           + key + "\": " + attr_json + R"json(}, "program": [{"op": "ret"}]})json";
+}
+
+// A bare-int list as ir_export writes it: {"t": "l", "v": [{"_": {"t": "i", "v": N}}, ...]}.
+std::string int_list(const std::vector<std::string>& items)
+{
+    std::string out = R"json({"t": "l", "v": [)json";
+    for(size_t i = 0; i < items.size(); ++i)
+    {
+        out += std::string(i ? ", " : "") + R"json({"_": {"t": "i", "v": )json" + items[i] + "}}";
+    }
+    return out + "]}";
+}
+
+// Replay `recipe`; on success lower it for gfx1250 into *out_ll. Returns the
+// status, and the VM's message in *out_err.
+rocke_status_t run_attr_recipe(const std::string& recipe, std::string* out_ll, std::string* out_err)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_recipe_run_from_json(
+        recipe.c_str(), nullptr, 0, nullptr, 0, &b, &kernel, err, sizeof(err));
+    out_err->assign(err);
+    if(st != ROCKE_OK || !kernel)
+    {
+        return st != ROCKE_OK ? st : ROCKE_ERR_VALUE;
+    }
+    char* ll = nullptr;
+    char lerr[ROCKE_ERR_MSG_CAP];
+    lerr[0] = '\0';
+    st = rocke_lower_kernel_to_llvm_ex(
+        kernel, ROCKE_LLVM_FLAVOR_LLVM23, "gfx1250", &ll, lerr, sizeof(lerr));
+    if(st == ROCKE_OK && ll)
+    {
+        out_ll->assign(ll);
+    }
+    std::free(ll);
+    rocke_ir_builder_free(&b);
+    return st;
+}
+
+// A list kernel attr is either carried exactly or the replay fails -- never
+// dropped, because a kernel compiled without its cluster_dims is a wrong launch.
+void check_kernel_list_attrs()
+{
+    std::string ll, err;
+
+    check(run_attr_recipe(attr_recipe("cluster_dims", int_list({"2", "2", "1"})), &ll, &err)
+              == ROCKE_OK,
+          "well-formed cluster_dims replays");
+    check(ll.find("\"amdgpu-cluster-dims\"=\"2,2,1\"") != std::string::npos,
+          "cluster_dims reaches the lowered kernel");
+
+    struct bad_t
+    {
+        const char* what;
+        std::string attr;
+        const char* message;
+    };
+    std::vector<std::string> sixteen_plus_one(17, "1");
+    const bad_t bad[] = {
+        {"non-array value", R"json({"t": "l", "v": 3})json", "must be an array"},
+        {"missing value", R"json({"t": "l"})json", "must be an array"},
+        {"non-int item",
+         R"json({"t": "l", "v": [{"_": {"t": "s", "v": "x"}}]})json",
+         "item 0 is not a bare int"},
+        {"item without a payload", R"json({"t": "l", "v": [{}]})json", "item 0 is not a bare int"},
+        {"non-integral item", int_list({"2", "1.5"}), "item 1 is not an integer"},
+        {"too many items", int_list(sixteen_plus_one), "at most 16"},
+    };
+    for(const bad_t& c : bad)
+    {
+        // Same shape under both keys that take a list, so no key is exempt.
+        for(const char* key : {"cluster_dims", "agpr_alloc"})
+        {
+            ll.clear();
+            err.clear();
+            const std::string what = std::string(c.what) + " under " + key;
+            check(run_attr_recipe(attr_recipe(key, c.attr), &ll, &err) != ROCKE_OK,
+                  (what + " is rejected").c_str());
+            check(err.find(c.message) != std::string::npos,
+                  (what + " names the defect (got: " + err + ")").c_str());
+            check(err.find(key) != std::string::npos, (what + " names the attr").c_str());
+        }
+    }
+}
+
 } // namespace
 
 int main()
 {
     std::printf("portable_ir recipe_vm_replay:\n");
+
+    check_kernel_list_attrs();
 
     std::string ll4, name4, ll8, name8;
     if(!replay(4, "f32", &ll4, &name4) || !replay(8, "f32", &ll8, &name8))
