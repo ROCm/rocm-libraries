@@ -3777,9 +3777,11 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     }
     catch(const std::exception& e)
     {
+        log_error(__func__, e.what());
     }
     catch(...)
     {
+        log_error(__func__, "unknown exception");
     }
 
     return status;
@@ -4014,6 +4016,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             // set workspace size from argument
             data->inputs.workspaceSize = workspaceSizeInBytes;
             data->problem.setWorkspaceSize(workspaceSizeInBytes);
+            if(workspaceSizeInBytes < solution->requiredWorkspaceSize(data->problem, *hardware))
+            {
+                log_error(__func__, "workspace size is less than the solution requires");
+                return rocblaslt_status_invalid_value;
+            }
 
             // The object API learns its stream here, not at create time, and the
             // flag pointer is baked into the kernel arguments by solve() just
@@ -4112,6 +4119,23 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 data->problem.gemms[i].setWorkspaceSizeGroupedGemm(workspaceSizeInBytes);
                 data->problem.gemms[i].setWorkspaceSize(workspaceSizeInBytes);
             }
+            // User-args workspace holds no host args, only per-problem workspaces.
+            size_t requiredWorkspace = 0;
+            if(useUserArgs)
+            {
+                for(const auto& gemm : data->problem.gemms)
+                    requiredWorkspace += solution->requiredWorkspaceSize(gemm, *hardware);
+            }
+            else
+            {
+                requiredWorkspace
+                    = solution->requiredWorkspaceSizeGroupedGemm(data->problem.gemms, *hardware);
+            }
+            if(workspaceSizeInBytes < requiredWorkspace)
+            {
+                log_error(__func__, "workspace size is less than the solution requires");
+                return rocblaslt_status_invalid_value;
+            }
 
             // Grouped GEMM does select Stream-K solutions, so isolation has to
             // cover the stream as well as the problem index: offsetting by index
@@ -4169,9 +4193,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
     }
     catch(const std::exception& e)
     {
+        log_error(__func__, e.what());
     }
     catch(...)
     {
+        log_error(__func__, "unknown exception");
     }
 
     return status;
@@ -4545,9 +4571,11 @@ rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             h
     }
     catch(const std::exception& e)
     {
+        log_error(__func__, e.what());
     }
     catch(...)
     {
+        log_error(__func__, "unknown exception");
     }
 
     return status;
@@ -4877,12 +4905,9 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
             }
         }
 
-        //workaround: findAllSolutions should get all solutions without duplications
-        bool duplicated_sol = false;
-        for(int j = 0; j < i; j++)
-            if(*(int*)(heuristicResults[j].algo.data) == solution->index)
-                duplicated_sol = true;
-        if(duplicated_sol)
+        //workaround: findAllSolutions should get all solutions without duplications.
+        //Sorting by index makes duplicates adjacent, so only the last kept entry can match.
+        if(i > 0 && *(int*)(heuristicResults[i - 1].algo.data) == solution->index)
         {
             ++duplicated_counts;
             continue;
@@ -5403,7 +5428,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
                                   std::shared_ptr<void>  gemmData,
-                                  const int              workspaceBytes,
+                                  const size_t           workspaceBytes,
                                   const int              requestedAlgoCount,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults)
 {
