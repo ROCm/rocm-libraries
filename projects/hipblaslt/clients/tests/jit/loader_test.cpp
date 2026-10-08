@@ -97,7 +97,7 @@ TEST_CASE("the loader reads the JIT solution library", "[jit-gpu]")
                     INFO(("resolve: " + why.message));
                     REQUIRE((view.master && view.adapter));
                 }
-                const auto object = library.directory(key)
+                const auto object = library.directory(key) / "slices" / hj::sliceKey(problem)
                                     / fs::u8path(std::string(solution->codeObjectFilename.load()));
                 {
                     INFO(("Cannot load " + object.u8string()));

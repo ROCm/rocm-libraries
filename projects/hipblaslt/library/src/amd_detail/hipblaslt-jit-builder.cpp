@@ -113,7 +113,11 @@ namespace hipblaslt_jit
                     wavefrontSize = wave != 0 ? wave : wavefrontSize;
                 }
                 const auto& names = solution.kernelNames;
-                if(solution.units.empty() || names.empty()
+                std::vector<BuildUnit> mainUnits;
+                std::vector<BuildUnit> helpers;
+                for(const auto& unit : solution.units)
+                    (unit.role == BuildUnit::Role::Helper ? helpers : mainUnits).push_back(unit);
+                if(mainUnits.empty() || names.empty()
                    || std::any_of(names.begin(), names.end(), [](const std::string& name) {
                           return name.empty();
                       }))
@@ -124,7 +128,7 @@ namespace hipblaslt_jit
 
                 auto assemblyTarget          = target;
                 assemblyTarget.wavefrontSize = wavefrontSize;
-                auto linked = co::build(solution.units, assemblyTarget, options);
+                auto linked = co::build(mainUnits, assemblyTarget, options);
                 if(!linked.ok())
                     return failure(request, solution, "comgr could not build the code object", linked.log);
 
@@ -156,6 +160,29 @@ namespace hipblaslt_jit
                                        linked.log);
                 built.generated = solution;
                 built.object.bytes.assign(linked.bytes.begin(), linked.bytes.end());
+                for(const auto& helper : helpers)
+                {
+                    if(helper.name.empty())
+                        return failure(request, solution, "A helper unit has no name", {});
+                    auto helperObject = co::build({helper}, assemblyTarget, options);
+                    if(!helperObject.ok())
+                        return failure(request,
+                                       solution,
+                                       "comgr could not build helper " + helper.name,
+                                       helperObject.log);
+                    const auto helperMeta = co::inspect(helperObject.bytes);
+                    if(!helperMeta.ok() || helperMeta.isaName != target.isaName()
+                       || helperMeta.codeObjectVersion != request.codeObjectVersion)
+                        return failure(request,
+                                       solution,
+                                       "Helper " + helper.name + " is not a code object for "
+                                           + target.isaName(),
+                                       helperObject.log + helperMeta.log);
+                    built.helpers.push_back(
+                        {helper.name,
+                         CodeObject{std::vector<uint8_t>(helperObject.bytes.begin(),
+                                                         helperObject.bytes.end())}});
+                }
                 return {};
             }
 

@@ -67,9 +67,15 @@ namespace hipblaslt_jit
             Assembly,
             Hip,
         };
+        enum class Role
+        {
+            Main, // compiled into the solution's code object
+            Helper, // compiled once per backend id and name, then reused
+        };
         std::string            name;
         std::vector<uint8_t>   bytes;
         Kind                   kind = Kind::Assembly;
+        Role                   role = Role::Main;
         std::vector<BuildUnit> includes; // Hip only; name and bytes
     };
 
@@ -101,6 +107,9 @@ namespace hipblaslt_jit
     {
         GeneratedSolution generated;
         CodeObject        object;
+        // Helper name and its code object. The library stores one copy per
+        // backend id and name; entries record the name only.
+        std::vector<std::pair<std::string, CodeObject>> helpers;
     };
 
     class CodeObjectBuilder
