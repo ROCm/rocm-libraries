@@ -20,17 +20,8 @@
 #include <vector>
 
 /// @file TestUhdAdapters.cpp
-/// @brief makeUhdAdapter's dispatch -- RFC 0019 §7's kind names, resolved to an adapter.
-///
-/// Scoped to the factory. The adapters themselves are covered by TestNativeAdapter,
-/// TestCustomLibraryAdapter, TestTableAdapter and TestTreeDataAdapter in this suite, which drive
-/// each one directly, including a real dlopen'd scorer built from test_scorer_lib.cpp. Each case
-/// here asserts the built adapter scores the way the named kind does, which is what proves the
-/// dispatch reached that kind and not some other one.
-///
-/// That matters because the alternative to declining is not an error. A factory falling through
-/// to a default kind would score against a model the descriptor never named, and §5 step 7's
-/// degradation to `static_order` -- which is what nullptr triggers -- would never happen.
+/// @brief makeUhdAdapter's dispatch from RFC 0019 §7 kind names to adapters. Each case checks
+/// the built adapter scores like the named kind, proving dispatch reached that kind.
 namespace hipdnn_plugin_sdk::uhd
 {
 namespace
@@ -83,9 +74,7 @@ TEST(TestIngestorUhdAdapters, TheFactoryBuildsANativeAdapterFromItsConfig)
 
 TEST(TestIngestorUhdAdapters, TheFactoryDeclinesAKindItCannotBuild)
 {
-    // An unknown adapter type is a UHD written against a newer schema than this runtime. It has
-    // to read as "I cannot rank with this" and not as "rank with the default kind", which would
-    // score against a model the descriptor never named.
+    // An unknown kind (a newer schema) must not fall through to a default kind.
     UhdConfig config;
     config.adapterType = "onnx";
     config.featuresHash = FEATURES_HASH;
@@ -111,9 +100,8 @@ std::string testScorerLibrary()
         .string();
 }
 
-/// The SHA-256 of @p path's bytes -- what a conformant UHD would declare as the artifact's
-/// `hash`. Computed rather than pinned: the library is rebuilt from source on every
-/// configuration, so a literal digest would pin this suite to one toolchain.
+/// The SHA-256 of @p path's bytes. Computed rather than pinned because the library's bytes
+/// differ per toolchain.
 std::string bytesHashOf(const std::string& path)
 {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -125,15 +113,8 @@ std::string bytesHashOf(const std::string& path)
     return sha256(bytes.data(), bytes.size());
 }
 
-/// RFC 0019 §7.2: a body naming an artifact may carry the digest of its bytes, "which the
-/// adapter recomputes before parsing and refuses on mismatch".
-///
-/// The factory dropped `modelHash` on the floor for this arm, so a declared digest bound
-/// nothing: the provider dlopen'ed -- and ran the initialisers of -- whatever sat at the
-/// declared path. It was invisible because the L1 predictor hashed the same file itself
-/// before calling the factory, so only `sort_kernel_catalog`, which has no such pre-check,
-/// loaded an unverified library. Both roles construct through here, so verifying in the
-/// adapter is what makes the guarantee role-independent.
+/// RFC 0019 §7.2: the adapter verifies a declared artifact digest before loading, so the check
+/// holds for every role that constructs through the factory.
 TEST(TestIngestorUhdAdapters, TheFactoryRefusesACustomLibraryWhoseDeclaredHashIsNotItsBytes)
 {
     UhdConfig config;
@@ -143,19 +124,17 @@ TEST(TestIngestorUhdAdapters, TheFactoryRefusesACustomLibraryWhoseDeclaredHashIs
     config.featuresSignature = {"$kernel.tile_m", "$kernel.split_k", "$q.seqlen"};
     config.featuresHash = FEATURES_HASH;
 
-    // A digest of the right shape over the wrong bytes: the tamper this check exists for is
-    // a substituted library, not a malformed field, so the value has to be a real hash.
+    // A well-formed digest of other bytes: a substituted library, not a malformed field.
     config.modelHash = sha256(std::string("a different library"));
     EXPECT_EQ(makeUhdAdapter(config), nullptr);
 
-    // The control: the same config with the digest the file really has. Without it the case
-    // above would also pass against a factory that refused every custom_library outright.
+    // Control: the correct digest loads, so the refusal above is not unconditional.
     config.modelHash = bytesHashOf(config.modelArtifactPath);
     const auto loaded = makeUhdAdapter(config);
     ASSERT_NE(loaded, nullptr);
     EXPECT_DOUBLE_EQ(loaded->score({1.0, 2.0, 3.0}), 6.0) << "not testLinearScorer";
 
-    // And a UHD declaring no digest still loads: §4.1 makes the artifact hash optional.
+    // §4.1 makes the artifact hash optional.
     config.modelHash.clear();
     EXPECT_NE(makeUhdAdapter(config), nullptr);
 }
@@ -183,9 +162,6 @@ std::string writeTableModel(const std::filesystem::path& path)
     return sha256(builder.GetBufferPointer(), builder.GetSize());
 }
 
-/// R8: the table arm dropped `modelHash` exactly as the custom_library arm once did, so a
-/// table artifact was scored whatever its bytes -- under an identity (the declared digest)
-/// those bytes do not have. It now verifies the digest the way tree_data does.
 TEST(TestIngestorUhdAdapters, TheFactoryRefusesATableWhoseDeclaredHashIsNotItsBytes)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(

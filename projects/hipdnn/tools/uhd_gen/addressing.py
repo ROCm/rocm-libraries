@@ -1,29 +1,9 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""What a knob ordinal means, learned from the engine rather than re-derived.
+"""Knob ordinal -> value tables, observed from enumeration rather than re-derived.
 
-RFC 0019 §13.2: "The generation UED therefore exposes every addressable KMD field, making
-the knob tuple equal to the metadata tuple and every catalog entry individually reachable."
-
-A knob value is an integer end to end -- the bench CLI parses `--knob name=value` as a
-number, the backend carries an int64, and the ingestor matches it against the kernel's
-metadata. So `int` fields address themselves and the other four KMD types (`bool`, `float`,
-`string`, `int_list`) are addressed by an INDEX into the engine's value set for that field.
-
-**The engine owns that numbering, and this module does not reproduce it.** Enumeration
-already returns, for every candidate, both halves of the mapping:
-
-    knob_settings   {"dtype": 0, "block_m": 256, ...}   <- what addresses this kernel
-    kernel_features {"kernel.dtype": "BF16", ...}       <- what the kernel actually is
-
-so `0 -> "BF16"` is an observation, not a derivation. An earlier version of this module
-computed the table a second time from the descriptor tree and held the two in agreement by
-contract: sort the same way, apply KMD defaults the same way, span the same packs. Each of
-those is a way to disagree silently -- a mismatch produces a valid integer that addresses
-the wrong kernel -- and the defaults rule had already been got wrong once.
-
-What is observed is exactly what is addressable: a value no candidate carried cannot be
-pinned, so its absence from the table costs nothing.
+Non-int KMD fields are pinned by an index into the engine's value set (RFC 0019 §13.2).
+The engine owns that numbering, so this module only records what candidates show.
 """
 from __future__ import annotations
 
@@ -44,15 +24,7 @@ def _hashable(value):
 def observe(candidates, table: dict | None = None) -> dict:
     """Extend `table` with the (knob, ordinal) -> value pairs these candidates show.
 
-    `candidates` are enumerated catalog entries as the bench emits them: each carries a
-    complete `knob_settings` tuple and the `kernel_features` of the kernel that tuple
-    addresses. A knob whose pinned integer equals the kernel's own value is a native `int`
-    field and is recorded as such, so a reader can tell "the value is 256" from "the value
-    is the one at index 0".
-
-    Raises on a contradiction rather than overwriting. Two candidates disagreeing about
-    what ordinal 1 means is the engine's numbering shifting mid-corpus, which would make
-    every recorded row before the shift address a different kernel on replay.
+    Raises on a contradiction: it means the engine's numbering shifted mid-corpus.
     """
     table = {} if table is None else table
     for candidate in candidates:
@@ -61,7 +33,6 @@ def observe(candidates, table: dict | None = None) -> dict:
         for name, pinned in knobs.items():
             actual = features.get(KERNEL_PREFIX + name)
             if actual is None:
-                # The knob names no kernel field this candidate published; nothing to learn.
                 continue
             entry = table.setdefault(name, {})
             known = entry.get(pinned)
@@ -77,21 +48,12 @@ def observe(candidates, table: dict | None = None) -> dict:
 
 
 def is_ordinal(table: dict, name: str) -> bool:
-    """Does this knob address by index rather than by its own value?
-
-    True when any observed pin differs from the value it addressed -- which is what an
-    ordinal IS. An `int` field pins its own value, so every pair agrees.
-    """
+    """True when the knob addresses by index rather than by its own value."""
     return any(pinned != value for pinned, value in table.get(name, {}).items())
 
 
 def decode(table: dict, name: str, pinned: int):
-    """The value an ordinal addressed, for reading a recorded row back.
-
-    Refuses an unobserved ordinal rather than guessing: an index the corpus never saw
-    names no kernel here, and returning the neighbour that happens to sit at it is how a
-    replay silently measures something else.
-    """
+    """The value an ordinal addressed; refuses an ordinal the corpus never observed."""
     entry = table.get(name)
     if entry is None or pinned not in entry:
         raise ValueError(f"knob {name!r} has no observed value for ordinal {pinned}")
@@ -99,12 +61,7 @@ def decode(table: dict, name: str, pinned: int):
 
 
 def as_manifest(table: dict) -> dict:
-    """The table in a form that survives JSON and stays readable.
-
-    Ordinals are dict keys, which JSON stringifies, so each knob becomes a list ordered by
-    ordinal with explicit indices. Recorded for reading, not for use: the runtime derives
-    its own numbering and the corpus is unreadable without knowing what the integers meant.
-    """
+    """The table as JSON: per knob, a list of {pin, value} ordered by ordinal."""
     manifest = {}
     for name, entry in sorted(table.items()):
         manifest[name] = {
@@ -123,11 +80,7 @@ def as_manifest(table: dict) -> dict:
 def merge_manifests(manifests) -> dict:
     """One addressing table from several collections' `as_manifest` records.
 
-    Each collection observes only the candidates its own graphs enumerated, so collections
-    of one corpus measured in shards record different SUBSETS of the engine's numbering --
-    not different numberings. They are merged under `observe`'s rule: a pin two collections
-    both saw must address the same value, and a contradiction is refused, because it means
-    the engine numbered differently between them and one side's rows address other kernels.
+    Shards record subsets of one numbering; a pin that maps to different values is refused.
     """
     table: dict = {}
     for index, manifest in enumerate(manifests):
@@ -147,9 +100,5 @@ def merge_manifests(manifests) -> dict:
 
 
 def unaddressable(exposed_knobs, table: dict) -> list[str]:
-    """Exposed knobs no candidate ever pinned.
-
-    Reported rather than ignored: a knob the engine advertises and never uses addresses
-    nothing, and the tuple collision it eventually causes surfaces far from this cause.
-    """
+    """Exposed knobs no candidate ever pinned."""
     return sorted(name for name in exposed_knobs if not table.get(name))

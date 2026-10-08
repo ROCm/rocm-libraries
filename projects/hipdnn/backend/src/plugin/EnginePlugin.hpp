@@ -69,10 +69,9 @@ public:
                                      uint64_t offset,
                                      uint64_t limit,
                                      hipdnnPluginConstData_t* engineDetails) const;
-    /// Returns false when the optional prediction capability is unavailable.
-    /// Successful output follows the engine-details allocation/lifetime protocol.
-    /// The requested metric travels in engineConfig's ranking_metric; the response is
-    /// returned unvalidated, and EnginePluginResourceManager checks its metric and value.
+    /// Returns false when the optional prediction capability is unavailable. Output follows
+    /// the engine-details allocation protocol. The requested metric is engineConfig's
+    /// ranking_metric; EnginePluginResourceManager validates the response.
     virtual bool getPrediction(hipdnnEnginePluginHandle_t handle,
                                const hipdnnPluginConstData_t* engineConfig,
                                const hipdnnPluginConstData_t* opGraph,

@@ -4,13 +4,6 @@
 /**
  * @file TestCustomLibraryAdapter.cpp
  * @brief Tests for CustomLibraryAdapter (compiled scorer .so) per RFC 0019 §7.2.
- *
- * Tests cover:
- * - Loading .so and resolving symbols
- * - Calling scorer function with feature vectors
- * - Error paths (missing library, missing symbol)
- * - Features hash validation
- * - Lifecycle (dlopen/dlclose)
  */
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/CustomLibraryAdapter.hpp>
@@ -29,8 +22,7 @@ namespace
 {
 constexpr const char* TEST_HASH = "sha256:test_hash_12345678";
 
-// Helper to get the path to the test scorer library.
-// The library is built as hipdnn_test_scorer_lib.so/.dll and placed in the test plugin dir.
+// The scorer library built from test_scorer_lib.cpp into the test plugin dir.
 std::string getTestScorerLibPath()
 {
 #ifdef _WIN32
@@ -116,10 +108,7 @@ TEST_F(TestCustomLibraryAdapter, ScoreThrowsOnFeatureCountMismatch)
     auto adapter = CustomLibraryAdapter::load(libPath, "testLinearScorer", 3, TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    // Adapter expects 3 features, provide 2 -> should throw
     EXPECT_THROW(adapter->score({1.0, 2.0}), std::invalid_argument);
-
-    // Adapter expects 3 features, provide 4 -> should throw
     EXPECT_THROW(adapter->score({1.0, 2.0, 3.0, 4.0}), std::invalid_argument);
 }
 
@@ -141,18 +130,16 @@ TEST_F(TestCustomLibraryAdapter, MultipleAdaptersFromSameLibrary)
 {
     const auto libPath = getTestScorerLibPath();
 
-    // Load two different symbols from the same library
     auto adapter1 = CustomLibraryAdapter::load(libPath, "testLinearScorer", 2, TEST_HASH);
     auto adapter2 = CustomLibraryAdapter::load(libPath, "testConstantScorer", 2, TEST_HASH);
 
     ASSERT_NE(adapter1, nullptr);
     ASSERT_NE(adapter2, nullptr);
 
-    // Both should work independently
     EXPECT_DOUBLE_EQ(adapter1->score({1.0, 2.0}), 3.0);
     EXPECT_DOUBLE_EQ(adapter2->score({1.0, 2.0}), 42.0);
 
-    // Destroying one shouldn't affect the other (dlclose is independent per load)
+    // Each load holds its own dlopen reference.
     adapter1.reset();
     EXPECT_DOUBLE_EQ(adapter2->score({999.0, -100.0}), 42.0);
 }

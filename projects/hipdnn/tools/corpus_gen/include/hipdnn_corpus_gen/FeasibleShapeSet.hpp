@@ -16,48 +16,19 @@
 /// @file FeasibleShapeSet.hpp
 /// @brief Builds a spread set of shapes an engine accepts (RFC 0019.13 §5.3).
 ///
-/// The problem in one line: draw a well-spread sample from a set that nobody has described.
-/// An operation parameter carries no declared range, the engine advertises none, and the only
-/// thing that knows is `is_applicable` answering one whole shape at a time.
-///
-/// Three properties of that set defeat the obvious approaches:
-///
-///  - **It is high-dimensional.** Convolution has a dozen parameters. Rejection sampling from
-///    a box fails here for the usual reason: the feasible fraction of a box falls off roughly
-///    geometrically in the number of dimensions, so nearly every draw is wasted.
-///  - **The parameters are coupled.** Padding, stride, dilation and groups do not have bounds
-///    of their own; together they decide whether a shape is degenerate. A bound found for one
-///    dimension with the others pinned describes a slice, not the space, so probing each
-///    dimension separately and taking the product overstates the region.
-///  - **It has holes, and may be disconnected.** Alignment and divisibility rules exclude
-///    interior values; an engine with two kernel families can accept two separated islands.
-///
-/// The approach that survives all three is to stop describing the region and move around
-/// inside it. Find a feasible point, then take steps, keeping the ones the oracle accepts.
-/// Coupling is handled because every step is tested as a whole shape. Dimensionality is
-/// handled because the walk does not have to find the region by luck more than once. What a
-/// walk cannot do is cross a gap, so it is restarted from independent draws, and what it
-/// reaches is reported rather than assumed to be everything.
-///
-/// Everything is done on a logarithmic scale. These dimensions span orders of magnitude, and
-/// a step of +1 means something entirely different at 8 than at 8192.
+/// The region is known only through a whole-shape oracle, so the search walks inside it,
+/// in log space, from restarted footholds.
 namespace hipdnn_corpus_gen
 {
 
-/// One value per declared parameter, in the order the caller declared them.
+/// One value per declared parameter, in declaration order.
 using Shape = std::vector<int64_t>;
 
-/// Whether the engine accepts this shape. In production: build the graph and call
-/// `is_applicable`. Injected so the search can be tested against regions already known, and
-/// because building a graph is the caller's business, not this file's.
+/// Whether the engine accepts this shape (in production: build the graph, call `is_applicable`).
 using ShapeOracle = std::function<bool(const Shape&)>;
 
-/// A parameter and the range worth asking about.
-///
-/// The bounds are a search window, not a claim about the engine. `high` is what the memory
-/// ceiling permits -- nothing above it can be benchmarked, so nothing above it is worth
-/// proposing. `low` is 1 by default because degenerate shapes are real workloads: `M = 1` is
-/// single-token decode, a regime in its own right.
+/// A parameter's search window, not a claim about the engine. `high` is the memory ceiling;
+/// `low` defaults to 1 because degenerate shapes (e.g. `M = 1` decode) are real workloads.
 struct ShapeDimension
 {
     std::string name;
@@ -68,37 +39,27 @@ struct ShapeDimension
 /// What the search reached, and what it did not.
 struct FeasibleSetStats
 {
-    /// Oracle calls. The cost that matters: each is a graph build and a predicate call.
+    /// Oracle calls; each is a graph build plus a predicate call.
     int64_t oracleCalls = 0;
 
-    /// Draws made while looking for a foothold, and how many landed. Their ratio is the
-    /// feasible fraction of the search box, and the reason the walk exists -- a low number
-    /// here is exactly the cost that rejection sampling alone would pay for every shape.
+    /// Draws made seeking a foothold, and how many were accepted.
     int64_t seedAttempts = 0;
     int64_t seedsFound = 0;
 
-    /// Independent footholds whose walks never met. A lower bound on the number of
-    /// disconnected components, not a count: two walks that stayed apart may still have been
-    /// in one region and simply not have crossed.
+    /// Footholds whose walk never moved. Evidence of isolated components, not a count.
     int64_t isolatedStarts = 0;
 
-    /// Distinct shapes accepted before thinning. The gap between this and the returned set is
-    /// how much spread cost.
+    /// Walk steps accepted, before selection.
     int64_t accepted = 0;
 
-    /// Cells the corpus is partitioned into, and how many hold a problem. Coverage is
-    /// occupied over total -- a measurement rather than a claim, which post-hoc thinning
-    /// could not provide.
+    /// Cells the corpus is partitioned into, and how many hold a shape (coverage = ratio).
     int64_t cells = 0;
     int64_t cellsOccupied = 0;
 
-    /// Distinct feasible points the search reached, before selection. The corpus is chosen
-    /// from these, so it can never exceed them -- and when it falls short, this says whether
-    /// the search or the selection was the limit.
+    /// Distinct feasible points reached; the corpus is selected from these.
     int64_t distinct = 0;
 
-    /// True when the target count was not reached. The caller MUST NOT read a short set as a
-    /// small region: it may equally be a budget that ran out.
+    /// Target count not reached. MUST NOT be read as a small region: the budget may have run out.
     bool budgetExhausted = false;
 };
 
@@ -108,39 +69,29 @@ struct FeasibleShapeSet
     FeasibleSetStats stats;
 };
 
-/// How hard to look, and for how much.
+/// Search inputs and limits.
 struct FeasibleSetRequest
 {
     std::vector<ShapeDimension> dimensions;
 
-    /// Shapes wanted. The search stops early when it has them.
+    /// Shapes wanted; also the number of cells.
     int64_t targetCount = 100;
 
-    /// Ceiling on oracle calls. Present because the feasible fraction of the box is unknown
-    /// before the search starts, so "how long will this take" cannot be answered in advance --
-    /// only bounded.
+    /// Ceiling on oracle calls; the feasible fraction is unknown up front, so cost is bounded.
     int64_t oracleBudget = 100000;
 
-    /// Independent footholds to look for. More restarts find more components and cost more
-    /// rejection draws; one restart on a disconnected region silently samples one island.
+    /// Independent footholds. Too few on a disconnected region silently samples one island.
     int64_t restarts = 8;
 
     /// Steps attempted per foothold before giving up on it.
     int64_t stepsPerStart = 400;
 
-    /// Reproducibility, per §5.8. Randomised against the region's structure, not across runs.
+    /// RNG seed, for reproducibility (§5.8).
     uint64_t seed = 0;
 
-    /// Shapes to try before drawing any, and to walk from when accepted.
-    ///
-    /// Rejection sampling finds a region in proportion to its measure, and for an operation
-    /// whose parameters constrain each other that measure is nearly zero: independent draws
-    /// over a convolution's thirteen parameters produce a filter larger than its input almost
-    /// every time, and the search maps the frontend's validator instead of the engine.
-    ///
-    /// A caller that knows the structure -- declared regime buckets, recorded workload shapes
-    /// -- supplies it here. This is not a shortcut around the search: seeds are put to the
-    /// oracle like anything else, and the walk still discovers what no list contains.
+    /// Shapes tried first, and walked from when accepted (e.g. regime buckets, recorded
+    /// workloads). Coupled parameters make random draws almost never feasible. Seeds still go
+    /// through the oracle.
     std::vector<Shape> seeds;
 };
 
@@ -154,9 +105,7 @@ inline double toLog(int64_t value)
 
 inline int64_t fromLog(double value, int64_t low, int64_t high)
 {
-    // Clamped in log space before exponentiating. A walk that steps upward repeatedly can
-    // push the exponent past what a double can represent, and llround of an infinity is
-    // undefined -- clamping after the fact would be too late.
+    // Clamp in log space: exp of a large exponent overflows, and llround(inf) is undefined.
     const double ceiling = toLog(high);
     if(value >= ceiling)
     {
@@ -166,13 +115,8 @@ inline int64_t fromLog(double value, int64_t low, int64_t high)
     return std::clamp(rounded, low, high);
 }
 
-/// Log space cannot represent zero, and some parameters legitimately start there. A
-/// convolution's padding is the common case: an engine that requires unpadded input --
-/// hip-kernel-provider's conv pack does -- accepts nothing a search floored at 1 can propose,
-/// and reports as serving no convolutions at all.
-///
-/// So the search runs over `value - low + 1`, which is at least 1 for any floor, and
-/// translates at the boundary. A dimension with `low = 1` is unchanged, which is most of them.
+/// Log space cannot represent zero, yet some parameters (e.g. padding) start there, so the
+/// search runs over `value - low + 1`.
 inline double toLogFrom(int64_t value, int64_t low)
 {
     return toLog(value - low + 1);
@@ -184,9 +128,7 @@ inline int64_t fromLogFrom(double value, int64_t low, int64_t high)
     return std::clamp(offset + low - 1, low, high);
 }
 
-/// Log-uniform draw across the box. Log-uniform rather than uniform because performance
-/// regimes scale multiplicatively: a uniform draw over [1, 2^20] puts almost every sample in
-/// the top octave and never visits the small shapes that are their own regime.
+/// Log-uniform draw across the box; a uniform draw would almost never visit small shapes.
 inline Shape drawLogUniform(const std::vector<ShapeDimension>& dimensions, std::mt19937_64& rng)
 {
     Shape shape;
@@ -200,8 +142,7 @@ inline Shape drawLogUniform(const std::vector<ShapeDimension>& dimensions, std::
     return shape;
 }
 
-/// Squared distance in log space, which is the space spread is judged in for the same reason
-/// sampling happens there: 64 and 128 are as far apart as 4096 and 8192.
+/// Squared distance in log space, where spread is judged.
 inline double logDistanceSquared(const Shape& a, const Shape& b)
 {
     double total = 0.0;
@@ -213,8 +154,8 @@ inline double logDistanceSquared(const Shape& a, const Shape& b)
     return total;
 }
 
-/// Log-space distance from @p shape to the nearest member of @p known. Infinite for an empty
-/// set, so the first foothold is always novel.
+/// Squared log-space distance from @p shape to the nearest member of @p known; max double if
+/// @p known is empty.
 inline double distanceToSet(const Shape& shape, const std::vector<Shape>& known)
 {
     double nearest = std::numeric_limits<double>::max();
@@ -225,12 +166,7 @@ inline double distanceToSet(const Shape& shape, const std::vector<Shape>& known)
     return nearest;
 }
 
-/// How far a draw must be from everything already found to count as unexplored territory
-/// rather than more of what is known.
-///
-/// A quarter of the box's diagonal in log space. Scale-free by construction, so it means the
-/// same thing for a two-parameter box as for a twelve-parameter one, and expressed as a
-/// squared distance to match logDistanceSquared.
+/// Squared novelty threshold: a quarter of the box's log-space diagonal, so it is scale-free.
 inline double noveltyRadiusSquared(const std::vector<ShapeDimension>& dimensions)
 {
     double diagonal = 0.0;
@@ -242,21 +178,8 @@ inline double noveltyRadiusSquared(const std::vector<ShapeDimension>& dimensions
     return diagonal * 0.25 * 0.25;
 }
 
-/// Well-spread cell centres over the points the search actually reached.
-///
-/// Not over the declared box, which was the first attempt and is wrong for the same reason a
-/// uniform prior is wrong here: the feasible set is usually a thin slice of the box. An engine
-/// requiring unit stride, unit dilation and no padding pins six of a convolution's thirteen
-/// parameters, so the region is seven-dimensional and every cell placed off that slice is
-/// unreachable by construction. Measured: 184 occupied of 10000 box cells, with the search
-/// having found more than a million feasible points to put in them.
-///
-/// Tessellating the observed set instead means every cell can be filled and the corpus spreads
-/// over the region that exists. How much of the *declared* space turned out to be reachable is
-/// a separate question, and is reported separately rather than folded into coverage.
-///
-/// k-centre over the observations, which is the practical stand-in for the centroidal Voronoi
-/// tessellation CVT-MAP-Elites uses to avoid a grid exponential in the parameter count.
+/// Up to @p count well-spread cell centres (greedy k-centre) over the reached points, not the
+/// declared box: the feasible set is usually a thin slice of it, and off-slice cells never fill.
 inline std::vector<std::vector<double>>
     buildCentroids(const std::vector<std::vector<double>>& observed, size_t count)
 {
@@ -297,13 +220,8 @@ inline std::vector<std::vector<double>>
     return centroids;
 }
 
-/// One problem per cell, kept by proximity to the cell's centre.
-///
-/// This replaces selecting a spread subset after the fact. Post-hoc selection can only choose
-/// among what the search produced, so when a declared skeleton dominates the accepted set it
-/// faithfully returns skeleton points and the corpus contains nothing the declaration did not
-/// already name. An archive cannot collapse that way: a seed occupies its own cell and no
-/// more, and coverage becomes a number -- occupied cells over total -- rather than a claim.
+/// One shape per cell, kept by proximity to the cell's centre. Unlike post-hoc thinning, a
+/// dominant seed cluster fills only its own cells, and coverage is measurable.
 class CellArchive
 {
 public:
@@ -316,8 +234,7 @@ public:
     {
     }
 
-    /// Places @p shape in its cell. Returns true when it took an empty cell, which is the
-    /// signal that the search reached somewhere new.
+    /// Places @p shape in its nearest cell; returns true if that cell was empty.
     bool insert(const Shape& shape)
     {
         std::vector<double> position;
@@ -385,14 +302,7 @@ private:
 };
 
 /// One discrete hit-and-run step from @p current (Baumert et al., *Operations Research* 57(3)).
-///
-/// A uniform random direction, then a uniform draw along the chord that direction cuts through
-/// the box -- shrinking the interval toward the current point on each refusal, which is what
-/// makes the step legal for a region that is neither convex nor connected.
-///
-/// This replaces a coordinate-direction walk with an adaptive step size. That walk is the one
-/// the literature singles out as failing to converge because it becomes trapped in isolated
-/// regions, and its step size was a hand-rolled substitute for the chord this samples directly.
+/// The chord interval shrinks toward @p current on each refusal, so non-convex regions work.
 inline std::optional<Shape> hitAndRunStep(const ShapeOracle& oracle,
                                           const Shape& current,
                                           const std::vector<ShapeDimension>& dimensions,
@@ -401,14 +311,8 @@ inline std::optional<Shape> hitAndRunStep(const ShapeOracle& oracle,
                                           int64_t& calls,
                                           int64_t budget)
 {
-    // Half the steps move along one axis, half in a random direction.
-    //
-    // Neither alone is enough. A full-dimensional direction changes every coordinate at once,
-    // which is fatal for a region defined per coordinate -- a set admitting only multiples of
-    // eight in each of three dimensions is left by almost every diagonal step, and the walk
-    // stalls. A coordinate direction preserves the other coordinates and moves happily inside
-    // such a region, but cannot cross a diagonal ridge. Coordinate Hit-and-Run exists as a
-    // named variant for the first reason; keeping both is what covers the second.
+    // Half axis-aligned, half random: random directions rarely stay inside per-coordinate
+    // constraints (e.g. multiples of 8); axis steps cannot cross a diagonal ridge.
     std::vector<double> direction(dimensions.size(), 0.0);
     std::bernoulli_distribution axisAligned(0.5);
     if(axisAligned(rng))
@@ -473,8 +377,7 @@ inline std::optional<Shape> hitAndRunStep(const ShapeOracle& oracle,
 
         if(candidate == current)
         {
-            // The draw landed back on the lattice point it started from; shrinking here would
-            // narrow the interval without having learned anything.
+            // Rounded back to the start point: shrink without spending an oracle call.
             (t < 0.0 ? low : high) = t;
             continue;
         }
@@ -484,8 +387,7 @@ inline std::optional<Shape> hitAndRunStep(const ShapeOracle& oracle,
         {
             return candidate;
         }
-        // Refused: pull that side of the interval in to the refused point, which is the
-        // accept/reject a disconnected region makes unavoidable.
+        // Refused: pull that side of the interval in to the refused point.
         (t < 0.0 ? low : high) = t;
     }
     return std::nullopt;
@@ -495,24 +397,9 @@ inline std::optional<Shape> hitAndRunStep(const ShapeOracle& oracle,
 
 /// @brief Builds a spread set of shapes @p oracle accepts.
 ///
-/// Three phases, each answering a failure of the one before:
-///
-///  1. **Seed.** Log-uniform draws across the box until one is accepted. This is rejection
-///     sampling, and it is used only to find footholds -- a handful of them -- rather than to
-///     produce the corpus, because its cost per shape is what makes it unusable in many
-///     dimensions.
-///  2. **Walk.** From each foothold, multiply one randomly chosen dimension by a random
-///     factor and keep the result if the oracle accepts it. The step size adapts: it shrinks
-///     on rejection, so a walk against a boundary works its way along rather than hammering
-///     it, and grows on acceptance, so an open region is crossed rather than crept through.
-///     Every step is a whole shape put to the oracle, which is what makes coupled parameters
-///     no harder than independent ones.
-///  3. **Thin.** Farthest-point selection over everything accepted, because a walk's trace is
-///     clustered and a corpus wants coverage.
-///
-/// What this does not do: guarantee uniformity over the feasible set, or find every component
-/// of a disconnected one. Restarts are the mitigation and @ref FeasibleSetStats::isolatedStarts
-/// is the evidence; neither is a proof.
+/// Finds footholds (caller seeds, then log-uniform draws), walks from each by hit-and-run, then
+/// keeps one shape per cell over the points reached. Neither uniformity nor discovery of every
+/// disconnected component is guaranteed; see @ref FeasibleSetStats.
 inline FeasibleShapeSet buildFeasibleShapeSet(const ShapeOracle& oracle,
                                               const FeasibleSetRequest& request)
 {
@@ -529,9 +416,7 @@ inline FeasibleShapeSet buildFeasibleShapeSet(const ShapeOracle& oracle,
         return oracle(shape);
     };
 
-    // Every feasible point the search reaches. Held because the cells are placed over these
-    // rather than over the declared box -- the region is typically a thin slice of the box,
-    // and cells placed off it can never be filled.
+    // Every feasible point reached (capped); cells are placed over these.
     std::vector<Shape> observed;
     const size_t observationCap = static_cast<size_t>(request.targetCount) * 200;
 
@@ -633,8 +518,7 @@ inline FeasibleShapeSet buildFeasibleShapeSet(const ShapeOracle& oracle,
         }
     }
 
-    // Deduplicate before tessellating: a walk revisits points, and duplicates would pull
-    // centres toward wherever it lingered rather than toward where it reached.
+    // Deduplicate so revisits don't pull centres toward where the walk lingered.
     std::sort(observed.begin(), observed.end());
     observed.erase(std::unique(observed.begin(), observed.end()), observed.end());
     result.stats.distinct = static_cast<int64_t>(observed.size());

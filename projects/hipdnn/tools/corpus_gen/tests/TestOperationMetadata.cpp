@@ -5,13 +5,8 @@
  * @file TestOperationMetadata.cpp
  * @brief Covers the declared problem space and the argument mapping (RFC 0019.13 §4).
  *
- * The failures here are quiet ones. A builder mapping written against a different
- * parameterization than the operation declares still builds a graph — from stale defaults —
- * and that graph benchmarks, produces a time, and gets labelled with parameters that never
- * reached it. §4.4 exists for that case, and so does most of this file.
- *
- * The metadata under test is the LayerNorm example from §4.2, used verbatim so a change to
- * the RFC's own example shows up as a failure here rather than as drift.
+ * A mapping written against a different parameterization still builds a graph from stale
+ * defaults, mislabelled; §4.4 guards that. Uses §4.2's LayerNorm example verbatim.
  */
 
 #include <gtest/gtest.h>
@@ -80,9 +75,7 @@ TEST(TestOperationMetadata, LoadsTheWorkedExampleFromTheSpecification)
 
 TEST(TestOperationMetadata, EnumeratesTheCategoricalParametersAndNotTheNumericOnes)
 {
-    // dtype is part of the problem space, not a kernel property. Hardcoding it -- as an earlier
-    // version of this generator did -- makes every problem fp32 and leaves the engine's
-    // half-precision kernels unreachable, with nothing in the corpus saying so.
+    // dtype is part of the problem space, not a kernel property.
     const auto load = parseOperationMetadata(layernormMetadata());
     ASSERT_TRUE(load.ok());
 
@@ -99,9 +92,7 @@ TEST(TestOperationMetadata, EnumeratesTheCategoricalParametersAndNotTheNumericOn
 
 TEST(TestOperationMetadata, RejectsABuilderWrittenAgainstADifferentParameterization)
 {
-    // §4.4 check 2, and the reason it is worth having: this metadata is otherwise well formed,
-    // so without the check it loads, builds graphs from a default the mapping never overrides,
-    // and yields a corpus whose rows describe problems that were never run.
+    // §4.4 check 2: otherwise this loads and builds from a default the mapping never overrides.
     auto broken = layernormMetadata();
     broken["graph_builder"]["arguments"][0]["value"] = {"$q.batch", "$q.sequence_length"};
 
@@ -114,9 +105,7 @@ TEST(TestOperationMetadata, RejectsABuilderWrittenAgainstADifferentParameterizat
 
 TEST(TestOperationMetadata, RejectsAForwardStridesReference)
 {
-    // Arguments resolve in declaration order, so strides_of naming a later argument cannot be
-    // satisfied. Caught at load rather than at resolve, where it would read as an empty dims
-    // list and produce a rank-zero tensor that fails somewhere unrelated.
+    // Arguments resolve in declaration order; caught at load, not as a rank-zero tensor later.
     auto broken = layernormMetadata();
     broken["graph_builder"]["arguments"][1]["of"] = "not_yet_declared";
 
@@ -128,9 +117,7 @@ TEST(TestOperationMetadata, RejectsAForwardStridesReference)
 
 TEST(TestOperationMetadata, RejectsAnUnpermittedStratificationAxis)
 {
-    // §4.3.4 permits three. Arithmetic intensity is shape-invariant for a bandwidth-bound op,
-    // so the axis is declared rather than assumed, and an unrecognised one would silently
-    // stratify nothing.
+    // §4.3.4 permits three axes; an unknown one would stratify nothing.
     auto broken = layernormMetadata();
     broken["stratification_axis"] = "flops";
 
@@ -176,9 +163,7 @@ TEST(TestOperationMetadata, ResolvesTheWorkedExamplesArguments)
 
 TEST(TestOperationMetadata, RefusesToResolveAPointMissingAParameter)
 {
-    // Not a default. A missing parameter silently substituted would produce a graph whose
-    // shape disagrees with the row that labels it, which is the one failure this whole layer
-    // is arranged to prevent.
+    // Never defaulted: the graph would disagree with the row that labels it.
     const auto load = parseOperationMetadata(layernormMetadata());
     ASSERT_TRUE(load.ok());
 
@@ -198,8 +183,7 @@ TEST(TestOperationMetadata, ComputesRowMajorStridesForAnyRank)
 
 TEST(TestOperationMetadata, DefaultsToZerosWhenNoContentsAreDeclared)
 {
-    // Correct for every operation whose work is fixed by shape, which is most of them. The
-    // declaration exists for the ones where it is not.
+    // Correct whenever the work is fixed by shape.
     const auto load = parseOperationMetadata(layernormMetadata());
     ASSERT_TRUE(load.ok());
     EXPECT_TRUE(load.metadata->variantPack.empty());
@@ -207,9 +191,7 @@ TEST(TestOperationMetadata, DefaultsToZerosWhenNoContentsAreDeclared)
 
 TEST(TestOperationMetadata, ReadsDeclaredTensorContents)
 {
-    // An MoE grouped matmul's routing lives in the contents of first_token_offset, not in any
-    // dimension. Two problems with identical graphs and different routing do different work,
-    // so the contents are part of the problem specification.
+    // MoE routing lives in first_token_offset's contents, not in any dimension.
     auto metadata = layernormMetadata();
     metadata["parameters"]["num_experts"] = {{"type", "int64"}};
     metadata["parameters"]["skew"] = {{"type", "enum"}, {"values", {"uniform", "imbalanced"}}};
@@ -232,9 +214,7 @@ TEST(TestOperationMetadata, ReadsDeclaredTensorContents)
 
 TEST(TestOperationMetadata, RefusesAnUnknownFillRatherThanDefaultingToZeros)
 {
-    // Substituting zeros for a fill nobody can produce is precisely the failure the
-    // declaration exists to prevent: the benchmark still runs, still produces a time, and the
-    // time describes a routing the corpus never asked for.
+    // Zeros would benchmark a routing the corpus never asked for.
     auto metadata = layernormMetadata();
     metadata["variant_pack"]
         = nlohmann::json::array({{{"tensor", "x"}, {"fill", "gaussian_with_outliers"}}});
@@ -256,13 +236,7 @@ TEST(TestOperationMetadata, RefusesAFillOverAnUndeclaredParameter)
 
 TEST(TestOperationMetadata, ExpressesAConvolutionsOutputExtent)
 {
-    // The case that forced expression evaluation to be real. A convolution's y extent is
-    // (H + 2*pad - dilation*(R-1) - 1)/stride + 1, so a resolver that understood only variable
-    // references and literals could not describe conv at all -- which is how a hand-written
-    // C++ builder ends up existing for it.
-    //
-    // Evaluated by the shared §6.2 interpreter, the same one UMD criteria and UDD dispatch
-    // formulas use, rather than by arithmetic local to the corpus generator.
+    // Conv's output extent needs real arithmetic, evaluated by the shared §6.2 interpreter.
     const auto metadata = parseOperationMetadata(nlohmann::json::parse(R"({
       "schema_version": "1.0",
       "operation": "conv_fwd",
@@ -296,7 +270,7 @@ TEST(TestOperationMetadata, ExpressesAConvolutionsOutputExtent)
 
     ASSERT_TRUE(metadata.ok()) << (metadata.errors.empty() ? "" : metadata.errors.front());
 
-    // 224 + 2*3 - 1*(7-1) - 1 = 223; 223/2 = 111; + 1 = 112. ResNet50 conv1.
+    // (224 + 2*3 - 1*(7-1) - 1)/2 + 1 = 112. ResNet50 conv1.
     const ProblemPoint resnetConv1{{"N", int64_t{64}},
                                    {"C", int64_t{3}},
                                    {"K", int64_t{64}},
@@ -317,9 +291,7 @@ TEST(TestOperationMetadata, ExpressesAConvolutionsOutputExtent)
 
 TEST(TestOperationMetadata, ANestedExpressionsVariablesAreStillChecked)
 {
-    // §4.4 check 2 has to see inside an expression, not just scan its text. The variables come
-    // from the evaluator, so a typo buried three levels deep is caught at load rather than
-    // producing a graph built from whatever the interpreter did with an unbound symbol.
+    // §4.4 check 2 must see variables nested inside an expression.
     auto broken = nlohmann::json::parse(R"({
       "schema_version": "1.0",
       "operation": "conv_fwd",
@@ -339,9 +311,7 @@ TEST(TestOperationMetadata, ANestedExpressionsVariablesAreStillChecked)
 namespace
 {
 
-/// An operation with a kernel pool, whose `kernel_catalog` block is the thing under test.
-/// `catalog` is spliced in as written so each case below reads as the declaration an author
-/// would have typed.
+/// An operation with a kernel pool; `catalog` is spliced in as its `kernel_catalog` block.
 nlohmann::json catalogMetadata(const nlohmann::json& catalog)
 {
     auto declaration = nlohmann::json::parse(R"({
@@ -366,18 +336,13 @@ nlohmann::json catalogMetadata(const nlohmann::json& catalog)
 
 TEST(TestOperationMetadata, AConstantAnswersForAParameterThePackVocabularyHasNoFieldFor)
 {
-    // The case this exists for: rocKE's dense packs record `causal` without recording which
-    // corner the diagonal is anchored at, because every kernel in them anchors it top-left.
-    // Without a way to say so, a declared argument reading `$q.alignment` would fail to resolve
-    // for every geometry in the pack and the kernel pool would silently be empty.
+    // rocKE's dense packs omit the causal anchor (always top-left); a constant supplies it.
     const auto load = parseOperationMetadata(catalogMetadata(nlohmann::json::parse(R"({
       "metadata": { "batch": "batch", "is_causal": "causal" },
       "constants": { "alignment": "top_left", "batch_size_hint": 0 }
     })")));
 
-    // `batch_size_hint` is undeclared, so the load fails -- and that is the first assertion,
-    // because a constant for a parameter nobody declared is a typo that would otherwise ride
-    // into every point the pack produces.
+    // `batch_size_hint` is undeclared: a constant for an undeclared parameter is a typo.
     EXPECT_FALSE(load.ok());
     EXPECT_NE(load.errors.front().find("batch_size_hint"), std::string::npos)
         << load.errors.front();
@@ -385,8 +350,7 @@ TEST(TestOperationMetadata, AConstantAnswersForAParameterThePackVocabularyHasNoF
 
 TEST(TestOperationMetadata, AConstantIsTypedAgainstItsParameterAtLoad)
 {
-    // Typed here, not at use: point construction has no error channel, so a mistyped constant
-    // there is a pack that mysteriously contributes nothing.
+    // Typed at load: point construction has no error channel.
     const auto wrongType = [](const char* json) {
         const auto load = parseOperationMetadata(catalogMetadata(nlohmann::json::parse(json)));
         EXPECT_FALSE(load.ok()) << json;
@@ -403,7 +367,6 @@ TEST(TestOperationMetadata, AConstantIsTypedAgainstItsParameterAtLoad)
                   .find("not one of its declared values"),
               std::string::npos);
 
-    // And the well-typed ones survive with their declared types intact.
     const auto load = parseOperationMetadata(catalogMetadata(nlohmann::json::parse(R"({
       "metadata": { "batch": "batch" },
       "constants": { "is_causal": true, "scale": 0.125, "alignment": "bottom_right" }
@@ -418,9 +381,7 @@ TEST(TestOperationMetadata, AConstantIsTypedAgainstItsParameterAtLoad)
 
 TEST(TestOperationMetadata, AConstantMayNotOverrideWhatAPackActuallySaid)
 {
-    // A parameter the pack answers for is not eligible. Allowing both would let a declaration
-    // quietly replace a descriptor's own geometry with a fixed value, which is the one thing a
-    // pool harvested from packs must never do.
+    // A constant must not replace a geometry field the pack actually supplies.
     const auto load = parseOperationMetadata(catalogMetadata(nlohmann::json::parse(R"({
       "metadata": { "batch": "batch", "is_causal": "causal" },
       "constants": { "is_causal": true }

@@ -16,14 +16,10 @@
 #include <vector>
 
 /// @file TestGraphIdentity.cpp
-/// @brief The identity a written graph carries, and the two ways it can be wrong.
+/// @brief The identity a written graph carries.
 ///
-/// A graph written without an id is not rejected -- `GraphDescriptor::finalize` mints a fresh
-/// v4 for it at load -- so the whole corpus is measured under different identities on every run
-/// and nothing reports an error. And an id that is not the one the bench reports back joins to
-/// nothing, because `uhd_gen/corpus_io.py:31-34` treats `benchmark` and `graph_id` as one
-/// identity under two spellings. Both failures are silent, which is why they are asserted here
-/// rather than left to an end-to-end run to notice.
+/// An id-less graph gets a random id from `GraphDescriptor::finalize` at load, and
+/// `uhd_gen/corpus_io.py` treats `benchmark` and `graph_id` as one identity; both fail silently.
 
 using namespace hipdnn_corpus_gen;
 
@@ -32,9 +28,7 @@ namespace
 
 namespace sdk = hipdnn_flatbuffers_sdk::utilities;
 
-/// One real graph, built through the shipped declaration the way the tool builds them, so the
-/// stamping tests operate on a document the backend would accept rather than on bytes
-/// assembled here.
+/// One real graph built through the shipped declaration, as the tool builds them.
 std::vector<uint8_t> someGraph()
 {
     const std::string path
@@ -81,9 +75,8 @@ TEST(TestGraphIdentity, AGraphIdentityIsAFunctionOfTheBytesAndNothingElse)
 
 TEST(TestGraphIdentity, AGraphIdentityIsShapedLikeAUuidSoItRoundTripsThroughTheGraphDocument)
 {
-    // It is written into `Graph.id` and read back by the bench, so it has to parse as one.
-    // Version 8 rather than 4 or 5: it is content-derived, and calling it v4 would describe it
-    // as random while calling it v5 would claim a rule nothing else here follows.
+    // Stored in `Graph.id`, so it must parse as a UUID. Version 8: content-derived, neither
+    // random (v4) nor name-based (v5).
     const std::string bytes = "some graph bytes";
     const auto identity
         = graphIdentity(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
@@ -107,9 +100,8 @@ TEST(TestGraphIdentity, AGraphIdentityIsShapedLikeAUuidSoItRoundTripsThroughTheG
 
 TEST(TestGraphIdentity, TheStampedGraphCarriesTheNameAndTheIdItReports)
 {
-    // The returned id is what the manifest's `benchmark` column records, and the id inside the
-    // document is what the bench reports as `graph_id`. If those two ever disagree the manifest
-    // is a record of graphs nobody measured, so the document is read back rather than trusted.
+    // The returned id (manifest `benchmark`) must equal the id in the document (bench
+    // `graph_id`), so the document is read back.
     const auto stamped = stampGraphIdentity(someGraph(), "sdpa_fwd_prefill_short_batch1");
 
     const auto* graph = fb::GetGraph(stamped.bytes.data());
@@ -124,9 +116,7 @@ TEST(TestGraphIdentity, TheStampedGraphCarriesTheNameAndTheIdItReports)
 
 TEST(TestGraphIdentity, StampingAnAlreadyStampedGraphReproducesTheSameId)
 {
-    // The digest is taken with the id cleared, so restamping does not digest the previous id.
-    // Without that, a corpus regenerated from stamped inputs would drift exactly as an id-less
-    // one does, and the idempotence is what makes the id safe to recompute anywhere.
+    // The digest is taken with the id cleared, so the id is safe to recompute.
     const auto once = stampGraphIdentity(someGraph(), "a_graph");
     const auto twice = stampGraphIdentity(once.bytes, "a_graph");
 
@@ -136,9 +126,7 @@ TEST(TestGraphIdentity, StampingAnAlreadyStampedGraphReproducesTheSameId)
 
 TEST(TestGraphIdentity, TwoGraphsDifferingOnlyInTheirNameGetDifferentIds)
 {
-    // The name is set before the digest for this reason: two problems that differ only in a
-    // parameter the builder ignores would otherwise collide, and the name is where that
-    // parameter still shows.
+    // The name is digested so problems differing only in a builder-ignored parameter differ.
     const auto left = stampGraphIdentity(someGraph(), "a_graph");
     const auto right = stampGraphIdentity(someGraph(), "another_graph");
 

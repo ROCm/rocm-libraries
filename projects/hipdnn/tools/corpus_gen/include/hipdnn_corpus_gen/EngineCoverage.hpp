@@ -9,14 +9,9 @@
 #include <string>
 
 /// @file EngineCoverage.hpp
-/// @brief What shape generation knows about an engine's coverage that the engine does not say.
+/// @brief Per-engine coverage overrides from operations/engines.json.
 ///
-/// An engine answers "do you serve this graph" and nothing wider: no query returns the set of
-/// graphs it serves, and a natively-coded matcher does not declare which fields it compares.
-/// For an engine whose kernels bake every shape field in, and whose matcher demands equality on
-/// all of them, that set is exactly its pack, and searching for more can only rediscover pack
-/// shapes. Until an engine can state that itself, it is recorded in operations/engines.json,
-/// with the reason, and generation skips the search for it.
+/// A `pack` engine serves exactly its pack's shapes, so shape search is skipped for it.
 namespace hipdnn_corpus_gen
 {
 
@@ -36,9 +31,7 @@ using EngineCoverageTable = std::map<std::string, EngineCoverageEntry>;
 
 /// @brief Parses `{"engines": {"<name>": {"coverage": "pack"|"search", "reason": "..."}}}`.
 ///
-/// An unknown coverage value, or a `pack` entry with no reason, is refused: an entry is a
-/// claim that stops a search, and a claim nobody can check is exactly what this file exists
-/// to avoid.
+/// Rejects an unknown coverage value and a `pack` entry with no reason.
 inline bool parseEngineCoverage(const nlohmann::json& document,
                                 EngineCoverageTable& table,
                                 std::string& error)

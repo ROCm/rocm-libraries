@@ -21,49 +21,20 @@
 namespace hipdnn_plugin_sdk::uhd
 {
 
-/// @brief Native adapter for scorers compiled into the engine (RFC 0019 §7.1).
+/// @brief Adapter for a scorer compiled into the engine and resolved by symbol (RFC 0019 §7.1).
 ///
-/// The NATIVE adapter names a scorer by symbol; the engine registers the
-/// implementation with NativeScorerRegistry at init and this adapter resolves
-/// it. Nothing is loaded from disk and there is no model artifact — the UHD
-/// carries a symbol name, and the behaviour is ordinary C++ compiled into the
-/// engine.
-///
-/// Two roles, per RFC 0019 §7.1:
-///
-/// - **Escape hatch** for heuristics no model expresses.
-/// - **Performance baseline.** RFC 0019 §9 defines the `tree_data` overhead
-///   target as within 2× of this adapter, so `native` is what that ratio is
-///   measured against.
-///
-/// It is deliberately *not* a drop-in: changing the heuristic means recompiling
-/// the engine, so it does not serve the data-driven, independently-shippable
-/// goal that `tree_data` exists for.
-///
-/// `features_signature` is optional here (RFC 0019 §7.1). A scorer may consume
-/// the standard feature row, holding it to the same contract as a model, or
-/// featurize from the bindings directly. Construct with @p numFeatures of 0 to
-/// select the second mode; the feature-count check is then skipped.
-///
-/// For the baseline role specifically, prefer the feature-row mode: if `native`
-/// featurizes from bindings while `tree_data` goes through the generic
-/// extractor, a comparison between them conflates extraction cost with scoring
-/// cost, which RFC 0019 §9.4 requires be wall-clocked separately.
+/// The engine registers the scorer with NativeScorerRegistry at init; no artifact is loaded.
+/// Construct with numFeatures 0 when the scorer featurizes from bindings; the feature-count
+/// check is then skipped. As the RFC 0019 §9 baseline, use the feature-row mode so extraction
+/// cost is not mixed into scoring cost.
 class NativeAdapter : public IUhdAdapter
 {
 public:
     /// @brief Resolve a registered scorer by symbol.
-    ///
-    /// @param symbolName Symbol the engine registered with NativeScorerRegistry.
-    /// @param numFeatures Expected feature count, or 0 when the scorer
-    ///        featurizes from bindings itself.
-    /// @param expectedFeaturesHash SHA-256 of the feature signature; empty when
-    ///        the UHD carries no `features_signature`.
-    /// @return Adapter on success, nullptr when the symbol is not registered.
-    ///
-    /// Returning nullptr rather than throwing matches the other adapters and
-    /// lets selection degrade to `static_order` (RFC 0019 §5), which is the
-    /// required behaviour for any UHD that cannot be brought up.
+    /// @param numFeatures Expected feature count, or 0 when the scorer featurizes itself.
+    /// @param expectedFeaturesHash Empty when the UHD carries no `features_signature`.
+    /// @return nullptr when the symbol is not registered, so selection degrades to
+    ///         `static_order` (RFC 0019 §5).
     static std::unique_ptr<NativeAdapter> resolve(const std::string& symbolName,
                                                   size_t numFeatures,
                                                   const std::string& expectedFeaturesHash);
@@ -101,9 +72,7 @@ inline std::unique_ptr<NativeAdapter> NativeAdapter::resolve(
         return nullptr;
     }
 
-    // tryResolve rather than resolve: an unregistered symbol degrades this UHD
-    // to static_order (RFC 0019 §5) instead of propagating an exception through
-    // plan build.
+    // tryResolve: an unregistered symbol must degrade to static_order, not throw.
     UhdScoreFn scorer = NativeScorerRegistry::tryResolve(symbolName);
     if(scorer == nullptr)
     {
@@ -114,7 +83,7 @@ inline std::unique_ptr<NativeAdapter> NativeAdapter::resolve(
         return nullptr;
     }
 
-    // Private constructor, so make_unique is unavailable.
+    // Private constructor; make_unique cannot be used.
     return std::unique_ptr<NativeAdapter>(
         new NativeAdapter(scorer, numFeatures, expectedFeaturesHash, symbolName));
 }
@@ -132,8 +101,7 @@ inline NativeAdapter::NativeAdapter(UhdScoreFn scorer,
 
 inline double NativeAdapter::score(const std::vector<double>& features) const
 {
-    // numFeatures == 0 means the scorer featurizes from bindings itself, so
-    // there is no row to validate (RFC 0019 §7.1).
+    // numFeatures == 0: the scorer featurizes from bindings; no row to validate.
     if(_numFeatures != 0 && features.size() != _numFeatures)
     {
         std::ostringstream oss;

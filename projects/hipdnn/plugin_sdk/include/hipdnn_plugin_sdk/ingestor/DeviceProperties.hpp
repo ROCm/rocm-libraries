@@ -31,11 +31,8 @@ struct DeviceProperties
     int warpSize = 0; ///< Threads per wavefront; 0 if unresolved.
     int multiProcessorCount = 0; ///< Compute units; 0 if unresolved.
 
-    // One arch spans several boards, and a UHD is arch-keyed: a gfx942 model trained on
-    // a corpus merged from MI300X, MI325X and MI308X has to be able to tell them apart,
-    // or it averages over their differences. Compute units alone does not: boards exist
-    // that share a CU count and differ in memory, where the faster memory changes which
-    // kernel wins on a bandwidth-bound shape. These are the fields that separate them.
+    // One arch spans several boards (gfx942: MI300X, MI325X, MI308X), and boards with equal
+    // CU counts can differ in memory, which changes the winner on bandwidth-bound shapes.
     /// HBM capacity in bytes; 0 if unresolved.
     std::size_t totalGlobalMem = 0;
     /// Memory bus width in bits; 0 if unresolved.
@@ -47,10 +44,7 @@ struct DeviceProperties
 };
 
 /// Theoretical peak HBM bandwidth in bytes/second, or 0 when either input is
-/// unresolved. Double-data-rate, hence the factor of 2; kHz and bits convert to Hz and
-/// bytes. Derived rather than stored so it cannot disagree with the two fields it comes
-/// from, and offered because it is the number a bandwidth-bound kernel actually cares
-/// about -- neither clock nor bus width means much alone.
+/// unresolved. The factor of 2 is double data rate; kHz and bits convert to Hz and bytes.
 inline double peakMemoryBandwidth(const DeviceProperties& properties) noexcept
 {
     if(properties.memoryClockRate <= 0 || properties.memoryBusWidth <= 0)
@@ -61,18 +55,9 @@ inline double peakMemoryBandwidth(const DeviceProperties& properties) noexcept
            * (static_cast<double>(properties.memoryBusWidth) / 8.0);
 }
 
-/// The `$device.*` vocabulary: every device fact a feature signature may name, paired
-/// with its value, in one place.
-///
-/// Two consumers read this and they MUST agree. The feature extractor binds it at
-/// scoring time, and the benchmark recorder writes it as `device.*` columns into the
-/// corpus a model is trained from. A name present in one and missing from the other is
-/// a feature that trains on a column the runtime cannot produce, or a runtime binding
-/// no corpus ever held -- neither fails loudly, both produce a model that is quietly
-/// wrong. Defining the list once is what stops that.
-///
-/// `arch` is deliberately absent: it selects which UHD runs (RFC 0019 §3.1), so a model
-/// splitting on it would be splitting on the thing that chose it.
+/// The `$device.*` feature vocabulary as (name, value) pairs. The feature extractor and
+/// the benchmark recorder must both use this list, or a model trains on columns the
+/// runtime cannot produce. `arch` is absent: it selects which UHD runs (RFC 0019 §3.1).
 inline std::vector<std::pair<std::string, std::variant<std::int64_t, double>>>
     deviceFeatureValues(const DeviceProperties& properties)
 {

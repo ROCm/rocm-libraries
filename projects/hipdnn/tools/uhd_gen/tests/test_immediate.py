@@ -38,8 +38,7 @@ PROVENANCE = {
 def measurement(*, engine=7, graph="graph", elapsed=2.0, robust=2.5, metric="tflops"):
     name = f"provider:engine{engine}"
     selector = "provider-1/immediate-2/library-3"
-    # trained_against as GenericEngine emits it: the selector revision beside the descriptor
-    # set the engine loaded from.
+    # As GenericEngine emits it: the selector revision beside the descriptor provenance.
     return {
         "engine_id": engine,
         "engine_name": name,
@@ -58,10 +57,8 @@ def measurement(*, engine=7, graph="graph", elapsed=2.0, robust=2.5, metric="tfl
             },
         },
         "features": {"graph.flops": 2e12, "graph.nodes": 1, "device.cu_count": 120},
-        # RFC 0019.13 §11.2 (:2003) pins a calibrated score to `avgTimeMs`, so that
-        # is the label. `robustMeanMs` rides along as §8.5's informational statistic
-        # and is deliberately a DIFFERENT number here: a label read from the wrong
-        # column produces a wrong TFLOPS rather than the same one.
+        # The label is `avgTimeMs` (RFC 0019.13 §11.2). `robustMeanMs` differs on
+        # purpose, so reading the wrong column yields a wrong TFLOPS.
         "avgTimeMs": elapsed,
         "robustMeanMs": robust,
         "stddevMs": 0.05,
@@ -72,8 +69,8 @@ def measurement(*, engine=7, graph="graph", elapsed=2.0, robust=2.5, metric="tfl
     }
 
 
-# Callers take the `evaluator` fixture: the digest below is the runtime's, computed by the
-# shared binary, because RFC 0019 §6.3 leaves features_hash with exactly one definition.
+# Callers need the `evaluator` fixture: features_hash comes from the shared runtime
+# binary (RFC 0019 §6.3).
 def descriptor(row, metric="tflops", signature=("$graph.flops",)):
     return {
         "version": "1.0",
@@ -92,8 +89,7 @@ def descriptor(row, metric="tflops", signature=("$graph.flops",)):
 def bundle(
     row, prediction, training_keys=(), metric="tflops", signature=("$graph.flops",)
 ):
-    # The owning engine is recorded by the training manifest's binding, never by the
-    # descriptor: RFC 0019 Section 3.1 leaves that binding to the UED role map.
+    # The owning engine is in the manifest binding, not the descriptor (RFC 0019 §3.1).
     scorer = (
         prediction
         if callable(prediction)
@@ -111,7 +107,7 @@ def bundle(
 
 
 def test_import_derives_physical_throughput_from_full_graph_and_mean_timing():
-    """§11.2 (:2003)/§10.6.2 (:1914-1916): a calibrated score trains on `avgTimeMs`."""
+    """A calibrated score trains on `avgTimeMs` (RFC 0019.13 §11.2, §10.6.2)."""
     row = normalize_row(measurement())
     # 2e12 flops / (2.0 ms * 1e9). Off robustMeanMs=2.5 this would read 800.
     assert row["tflops"] == 1000.0
@@ -147,8 +143,7 @@ def test_candidate_information_cannot_enter_an_l1_corpus_or_recipe(where):
         with pytest.raises(ValueError):
             validate_signature([{"/": ["$graph.flops", "$kernel.tile_m"]}])
     elif where == "label":
-        # The label is envelope, never input: a feature that reads it would be fitting
-        # the answer. `_LEAKED_FIELDS` is exempted for the row, never for the recipe.
+        # The label is envelope, never a feature input: reading it would fit the answer.
         with pytest.raises(ValueError):
             validate_signature(["$graph.avgTimeMs"])
     elif where == "sweep":
@@ -190,11 +185,7 @@ def test_cross_engine_labels_require_the_same_full_graph_work_count():
 
 
 def test_a_failed_correctness_verdict_survives_import_without_its_label():
-    """RFC 0019 §13.2: the row is kept with its verdict and reason, its timing is not.
-
-    Import used to return a row with neither field and the wrong pick's `avgTimeMs` as an
-    ordinary label, so nothing after it -- training, evaluation, promotion -- could tell.
-    """
+    """RFC 0019 §13.2: the row keeps its verdict and reason but not its timing."""
     wrong = measurement()
     wrong.update(numerically_valid=False, validation="output_mismatch: wrong output")
     row = normalize_row(wrong)
@@ -202,7 +193,7 @@ def test_a_failed_correctness_verdict_survives_import_without_its_label():
     assert row["validation"] == "output_mismatch: wrong output"
     for label in ("avgTimeMs", "robustMeanMs", "stddevMs", "tflops"):
         assert row[label] is None, label
-    # Read back as `corpus.json` is, the verdict and the absence both hold.
+    # The verdict and the missing label survive a corpus round trip.
     [again] = normalize_corpus(pd.DataFrame([row])).to_dict(orient="records")
     assert (again["numerically_valid"], again["validation"]) == (
         False,
@@ -210,7 +201,7 @@ def test_a_failed_correctness_verdict_survives_import_without_its_label():
     )
     assert pd.isna(again["avgTimeMs"])
 
-    # Undecided is carried as undecided, measurement intact -- never promoted to True.
+    # An undecided verdict stays None and keeps its measurement.
     unknown = measurement(graph="other")
     unknown.update(numerically_valid=None, validation="no_reference: one engine ran")
     row = normalize_row(unknown)
@@ -219,9 +210,7 @@ def test_a_failed_correctness_verdict_survives_import_without_its_label():
 
 
 def test_a_pick_checked_wrong_is_not_the_oracle_of_selection_regret(evaluator):
-    """The wrong engine ran fastest; it is out of the held-out rows and the oracle, so the
-    valid engine is compared against nothing rather than charged regret against a wrong
-    answer."""
+    """The fastest engine was wrong, so it is dropped from the rows and the oracle."""
     wrong, valid = measurement(elapsed=1), measurement(engine=8, elapsed=4)
     wrong.update(numerically_valid=False, validation="output_mismatch: wrong output")
     report = evaluate_immediate(
@@ -239,8 +228,7 @@ def test_a_pick_checked_wrong_is_not_the_oracle_of_selection_regret(evaluator):
 
 @pytest.mark.parametrize("transform", [None, ""])
 def test_an_omitted_transform_is_the_runtimes_identity(evaluator, transform):
-    """`score_transform::SUPPORTED_TRANSFORMS` lists "" and `applyInverse` returns the raw
-    score for it, so the engine admits an L1 model that declares no transform."""
+    """The runtime treats an empty or omitted transform as identity."""
     model = descriptor(measurement())
     if transform is None:
         del model["score"]["transform"]
@@ -313,7 +301,7 @@ def test_runtime_prediction_must_match_measured_request_but_can_use_new_l1_model
     changed["features"]["constraint.workspace_limit"] = 0
     with pytest.raises(ValueError):
         scorer(normalize_corpus(pd.DataFrame([changed])))
-    # The answer names its metric, and one in another metric is refused, never converted.
+    # An answer in another metric is refused, never converted.
     wrong_metric = copy.deepcopy(response)
     wrong_metric["metric"] = "time"
     with pytest.raises(ValueError, match="metric"):
@@ -321,8 +309,7 @@ def test_runtime_prediction_must_match_measured_request_but_can_use_new_l1_model
 
 
 def test_time_predictions_rank_lower_first_and_report_in_milliseconds(evaluator):
-    """RFC 0019 §4.4: `time` is avgTimeMs directly and lower wins, so the engine with the
-    lower predicted time is picked and the report is keyed by `time`, not throughput."""
+    """RFC 0019 §4.4: `time` is avgTimeMs directly and lower wins."""
     fast, slow = measurement(metric="time"), measurement(
         engine=8, elapsed=4, metric="time"
     )
@@ -429,9 +416,7 @@ def test_real_immediate_training_and_promotion_loads_standard_calibrated_artifac
 def test_time_l1_training_declares_the_metric_its_label_and_direction(
     tmp_path, evaluator
 ):
-    """`--metric time` trains on avgTimeMs directly and declares the direction the metric
-    fixes; a label or objective that contradicts the metric is refused before any output.
-    """
+    """A label or objective contradicting the metric is refused before any output."""
     pytest.importorskip("lightgbm")
     pytest.importorskip("flatbuffers")
     from uhd_gen.__main__ import main
@@ -504,11 +489,7 @@ def test_time_l1_training_declares_the_metric_its_label_and_direction(
 def test_a_prediction_the_runtime_would_refuse_is_a_decline_not_a_broken_artifact(
     evaluator,
 ):
-    """A prediction its metric cannot take is one the engine reports as INVALID, leaving
-    the engine unscored for that graph. The model is fitted on log1p
-    and inverted with expm1, so a log-space prediction below zero lands in (-1, 0) -- a few
-    rows at the bottom of the range. Failing the artifact discarded a trained AITER model
-    over 4 rows in 495 (run 67929709); the rows are now reported and skipped."""
+    """log1p-space predictions below zero invert into (-1, 0): a per-row decline."""
     good, bad = measurement(), measurement(engine=8, graph="other")
     report = evaluate_immediate(
         pd.DataFrame([good, bad]),
@@ -523,8 +504,7 @@ def test_a_prediction_the_runtime_would_refuse_is_a_decline_not_a_broken_artifac
 
 
 def test_a_model_that_can_score_nothing_is_still_a_failure(evaluator):
-    """Reporting every row as a decline is not a model; it is an artifact that would leave
-    the engine on static ordering everywhere, which the generator must not publish."""
+    """A model declining every row would leave the engine on static ordering."""
     row = measurement()
     with pytest.raises(ValueError, match="scored no evaluation row"):
         evaluate_immediate(
@@ -533,8 +513,7 @@ def test_a_model_that_can_score_nothing_is_still_a_failure(evaluator):
 
 
 def test_rows_collected_for_one_metric_cannot_score_a_model_of_another(evaluator):
-    """T2: the engine's selector answers in the requested metric, so rows described under
-    the tflops selector are not what a `time` model is about. Refused, naming both."""
+    """Rows described under one metric's selector cannot evaluate another's model."""
     row = measurement()
     with pytest.raises(
         ValueError, match="collected for metric 'tflops'.*predicts 'time'"
@@ -545,7 +524,7 @@ def test_rows_collected_for_one_metric_cannot_score_a_model_of_another(evaluator
             eval_fraction=1,
             seed=0,
         )
-    # The selector revision the model was trained against is held to the rows' too.
+    # The model's selector revision must match the rows' too.
     model = bundle(row, 1000)
     model.descriptor["trained_against"] = {
         **PROVENANCE,
@@ -560,7 +539,7 @@ def test_a_measurement_must_name_the_metric_it_was_described_under():
     row["binding"].pop("metric")
     with pytest.raises(ValueError, match="binding.metric"):
         normalize_row(row)
-    # The bench's own record of what it asked for must agree with the description.
+    # The bench's requested metric must agree with the binding.
     row = measurement()
     row["metric"] = "time"
     with pytest.raises(ValueError, match="collected for metric 'tflops'"):
@@ -568,8 +547,7 @@ def test_a_measurement_must_name_the_metric_it_was_described_under():
 
 
 def test_a_time_label_needs_no_flop_count_but_a_throughput_label_does():
-    """0.9: a provider that publishes no FLOP count (conv backward) still yields `time`
-    labels; a corpus mixing graphs with and without a count is not inconsistent."""
+    """A provider with no FLOP count (conv backward) still yields `time` labels."""
     counted, uncounted = measurement(metric="time"), measurement(
         graph="bwd", metric="time"
     )
@@ -589,9 +567,7 @@ DY = "graph.nodes[0].dy.dims[0]"
 def test_a_mixed_operation_corpus_scores_with_a_signature_that_defaults_absent_inputs(
     evaluator,
 ):
-    """T1: a conv-fwd row publishes no `dy`. The runtime evaluates `value_or_default` over
-    it, so requiring every referenced name to be published rejected a model the engine
-    loads and scores. A bare reference to the same name is what the runtime refuses."""
+    """`value_or_default` covers a `dy` a row lacks; a bare reference is refused."""
     forward, backward = measurement(), measurement(graph="bwd")
     backward["features"][DY] = 4
     frame = pd.DataFrame([forward, backward])
@@ -612,9 +588,7 @@ def test_a_mixed_operation_corpus_scores_with_a_signature_that_defaults_absent_i
 def test_a_declined_fastest_engine_is_still_the_oracle_and_its_loss_is_reported(
     evaluator,
 ):
-    """T3: A runs at 1000 TFLOPS but its model declines; B runs at 500 and is scored. The
-    runtime picks B, so the problem loses half its throughput. Dropping A before building
-    the oracle left B alone and reported nothing to compare."""
+    """A declined engine still sets the oracle, so the pick's loss shows as regret."""
     fast, slow = measurement(elapsed=2.0), measurement(engine=8, elapsed=4.0)
     report = evaluate_immediate(
         pd.DataFrame([fast, slow]),
@@ -642,9 +616,7 @@ def test_a_declined_fastest_engine_is_still_the_oracle_and_its_loss_is_reported(
 
 
 def test_a_problem_no_engine_scores_is_picked_by_the_static_rules(evaluator):
-    """With nothing scored the runtime falls to `sortEngineIds`, which puts the
-    deterministic MIOpen engine last whatever its ID. Its FNV-1a ID is negative, so an
-    ID-ordered fallback would pick it first."""
+    """`sortEngineIds` puts deterministic MIOpen last despite its negative ID."""
     deterministic = (
         -6748551569128940061
     )  # engineNameToId("MIOPEN_ENGINE_DETERMINISTIC")
@@ -679,9 +651,7 @@ def test_a_problem_no_engine_scores_is_picked_by_the_static_rules(evaluator):
 
 
 def test_a_declined_runtime_prediction_is_unscored_not_an_error(evaluator):
-    """An INVALID or UNAVAILABLE answer is the engine declining that graph; the runtime then
-    orders it statically, so the evaluator does too instead of refusing the whole run.
-    """
+    """An INVALID or UNAVAILABLE answer is a decline, ordered statically."""
     row = measurement()
     response = copy.deepcopy(row)
     response.update(model=UHD, status="INVALID", metric="tflops", value=0)
@@ -695,10 +665,7 @@ def test_a_declined_runtime_prediction_is_unscored_not_an_error(evaluator):
 def test_a_mixed_forward_backward_corpus_trains_and_evaluates_end_to_end(
     tmp_path, evaluator
 ):
-    """0.4 acceptance: forward rows publish `x` and a FLOP count, backward rows publish
-    `dy` and no count. A `time` model over `value_or_default` of both trains, and the
-    evaluator scores it, without NaN reaching the feature pipe or a name-membership check
-    refusing what the runtime evaluates."""
+    """Forward rows publish `x` and a FLOP count; backward rows only `dy`."""
     pytest.importorskip("lightgbm")
     pytest.importorskip("flatbuffers")
     from uhd_gen.__main__ import main

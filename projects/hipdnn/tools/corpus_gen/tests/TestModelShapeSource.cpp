@@ -15,20 +15,15 @@
 /// @file TestModelShapeSource.cpp
 /// @brief The model pool: the shapes somebody recorded a real workload running.
 ///
-/// The value of this pool is not that it adds points -- the sweep has more than anyone can
-/// measure -- it is that it adds the *named* ones, and that a miner emitting a column spelling
-/// the declaration does not know loses every row. So what is pinned here is the accounting: a
-/// row for another operation and a row the declaration cannot express are different findings,
-/// counted apart, and the first unusable row says why in words.
+/// Rows for another operation and rows the declaration cannot express are counted apart, and
+/// the first unusable row is explained.
 
 using namespace hipdnn_corpus_gen;
 
 namespace
 {
 
-/// A scratch tree under the test's own working directory rather than under TMPDIR, for the same
-/// reason `TestKernelCatalogSource` does: these runs happen inside containers where /tmp is not
-/// always writable, and a test that cannot write is indistinguishable from one that failed.
+/// A scratch tree under the working directory: /tmp is not always writable in containers.
 class TempTree
 {
 public:
@@ -91,8 +86,7 @@ TEST(TestModelShapeSource, ARecordedShapeBecomesAPointCarryingItsNameAndRegime)
     EXPECT_EQ(entries.front().point.at("heads_kv"), ParameterValue{int64_t{8}});
     EXPECT_EQ(entries.front().point.at("is_causal"), ParameterValue{true});
     EXPECT_EQ(entries.front().point.at("dtype"), ParameterValue{std::string("bf16")});
-    // The whole point of this pool to a later audit: "llama3-70b prefill" explains a regime
-    // that a row of numbers does not.
+    // The workload name is what explains the row in a later audit.
     EXPECT_NE(entries.front().origin.find("llama3-70b prefill"), std::string::npos)
         << entries.front().origin;
     EXPECT_FALSE(entries.front().regime.empty());
@@ -112,8 +106,6 @@ TEST(TestModelShapeSource, AColumnWithoutTheQueryPrefixStillReads)
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", bare), report);
     ASSERT_EQ(entries.size(), 1u);
-    // No name column, so the row identifies itself by position -- still an origin, and still
-    // enough to find the line that produced a surprising graph.
     EXPECT_NE(entries.front().origin.find("row 1"), std::string::npos) << entries.front().origin;
 }
 
@@ -131,8 +123,7 @@ TEST(TestModelShapeSource, ARowNamingAnotherOperationIsSkippedRatherThanCountedU
 
     ASSERT_EQ(entries.size(), 1u);
     EXPECT_EQ(report.rows, 2);
-    // One mined file may cover several operations; that is not a defect, and folding it into
-    // `unusable` would report a working miner as a broken one.
+    // Several operations per mined file is normal, not `unusable`.
     EXPECT_EQ(report.otherOperation, 1);
     EXPECT_EQ(report.unusable, 0);
 }
@@ -143,7 +134,7 @@ TEST(TestModelShapeSource, AMisspelledColumnLosesEveryRowAndSaysWhichName)
     const auto metadata = shippedSdpa();
     ModelShapeReport report;
 
-    // `causal` for `is_causal`. Every row goes; a count alone would not say why.
+    // `causal` for `is_causal`.
     const std::string wrong = "q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,"
                               "q.causal,q.alignment,q.generate_stats,q.dtype\n"
                               "1,64,8,4096,4096,128,true,top_left,false,bf16\n"
@@ -210,8 +201,7 @@ TEST(TestModelShapeSource, NoOracleIsAppliedSoAShapeNobodyServesStillArrives)
     const auto metadata = shippedSdpa();
     ModelShapeReport report;
 
-    // Far past any benchmarking byte budget. Whether an engine serves a shape somebody runs is
-    // a finding for the caller's admission to make, not a reason to drop the row here.
+    // Far past any byte budget; admission is the caller's job.
     const std::string huge
         = kHeader
           + std::string("enormous,64,128,128,131072,131072,256,false,top_left,false,bf16\n");

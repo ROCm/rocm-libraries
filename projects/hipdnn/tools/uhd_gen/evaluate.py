@@ -1,29 +1,13 @@
 #!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Score a trained UHD against the best kernel that was actually measured.
+"""Score a trained UHD against the best measured kernel (RFC 0019.13 §11.2).
 
-RFC 0019.13 §11.2. Training reports RMSE on `log(target)`; the runtime decision is
-*pick the best kernel for this problem*, and RMSE can improve while that decision gets
-worse. This module computes the metrics that answer the decision question directly:
-
-    top-1 regret     how much slower the model's pick is than the oracle's
-    regret tail      the fraction of problems where that shortfall exceeds 5%
-    top-k recall     how often the oracle is in the model's top k
-    per-regime       the same regret, broken out, because an aggregate hides a model
-                     that is excellent on the dense middle and useless on the edges
-
-The oracle `v*(p)` is the best *measured* candidate for a problem -- argmin of the
-target under `objective: min`, argmax under `max`. Regret is measured in the target
-metric, never in rank position (§11.2): ranks are meaningless between variants whose
-timings overlap within noise, and choosing the second of two indistinguishable kernels
-costs nothing and MUST NOT be scored as an error.
-
-Everything here is computed on a held-out slice split BY PROBLEM (§5.6.4 "folds are by
-problem"). A row-wise split would put some of a problem's candidates in training and
-the rest in evaluation; the evaluation-side oracle would then be the best of a subset,
-the model's pick would frequently be that same row, and the reported regret would be a
-number far better than the truth. The split therefore moves whole problems.
+RMSE on `log(target)` can improve while the pick-the-best-kernel decision gets worse, so
+this reports top-1 regret, the regret tail, top-k recall, and per-regime regret.
+The oracle is the best *measured* candidate; regret is in the target metric, not rank,
+so picking one of two indistinguishable kernels costs nothing. The held-out slice is
+split by problem (§5.6.4): a row-wise split would make the oracle the best of a subset.
 """
 from __future__ import annotations
 
@@ -49,8 +33,7 @@ from .score_transform import inverse as invert_score
 
 logger = logging.getLogger(__name__)
 
-#: Report format identity. Written into every report so a consumer can tell one
-#: vintage from another rather than guessing from which keys happen to be present.
+#: Report format identity, written into every report.
 REPORT_SCHEMA = "uhd_gen.eval_report/1"
 
 #: §11.2: "fraction of problems with regret > 5%".
@@ -59,38 +42,26 @@ DEFAULT_REGRET_TAIL_THRESHOLD = 0.05
 #: §11.2: "k = 1, 3, 5".
 TOP_K_VALUES = (1, 3, 5)
 
-#: Advisory only. §11.2 fixes no threshold for calibration error -- it requires the
-#: figures, not a verdict -- so this is the point at which a bias is worth interrupting a
-#: reader for, not a pass/fail line. Chosen to sit well above benchmark noise and well
-#: below a difference that would reorder engines of genuinely different speed.
+#: Advisory only: §11.2 fixes no calibration threshold. Above benchmark noise, below a
+#: difference that would reorder engines of genuinely different speed.
 CALIBRATION_BIAS_WARN = 0.10
 
 DEFAULT_EVAL_FRACTION = 0.2
 DEFAULT_SEED = 0
 
-#: The device identity column of the §8.3 envelope: lowercase hex of `DeviceKey::hash()`,
-#: the device half of the winner key, exactly as `benchmark` is the graph half. Dotless,
-#: so it is an envelope column and not a feature; the `device.*` feature columns (device
-#: properties) are a different thing and are NOT part of problem identity.
+#: Device identity column of the §8.3 envelope: hex of `DeviceKey::hash()`. Not the
+#: `device.*` feature columns, which are not part of problem identity.
 DEVICE_COLUMN = "device"
 
-#: The graph-content hash. Half of a problem's identity on its own, all of it on a
-#: corpus collected before the `device` column existed.
+#: The graph-content hash; the whole problem identity on corpora without `device`.
 BENCHMARK_COLUMN = "benchmark"
 
-#: Where a corpus might carry §5.2's regime label. Discovered rather than required: a
-#: sweep exported by `export-benchmarks` carries no regime at all today, and demanding
-#: one would make `evaluate` unusable on every corpus that exists.
+#: Where a corpus might carry §5.2's regime label. Optional: exported sweeps carry none.
 REGIME_COLUMN_CANDIDATES = ("regime", "corpus_regime", "q.regime", "problem.regime")
 
 
 def _regime_column(columns: Iterable[str]) -> str | None:
-    """The corpus's regime label, by name and then by suffix.
-
-    The named candidates first, then any namespaced `*.regime`: a corpus publishing the
-    label beside its other problem values carries it under the token that bound them, which
-    is the operation's name (`attention_dense.regime`) and so cannot be listed ahead of time.
-    """
+    """The corpus's regime label: a named candidate, else any namespaced `*.regime`."""
     columns = list(columns)
     named = next((name for name in REGIME_COLUMN_CANDIDATES if name in columns), None)
     if named is not None:
@@ -98,39 +69,27 @@ def _regime_column(columns: Iterable[str]) -> str | None:
     return next((c for c in columns if c.endswith(".regime")), None)
 
 
-#: Two candidates whose measured times differ by less than this are treated as the same
-#: choice for top-k recall. See `_tie_mask` for why recall needs it and regret does not.
+#: Relative regret below which two candidates tie for top-k recall (see `_tie_mask`).
 DEFAULT_TIE_REL_TOLERANCE = 0.01
 
-#: Half-width, in standard errors, of the noise band used for the same purpose when the
-#: target is a millisecond timing column and `stddevMs`/`iters` are present.
+#: Tie noise band half-width in standard errors, for millisecond targets with `stddevMs`.
 DEFAULT_TIE_SIGMA = 2.0
 
-#: Targets whose units are milliseconds, and so are comparable with `stddevMs`. Applying
-#: a millisecond spread to a TFLOPS target would be a units error that silently widens
-#: or narrows the tie band, so the noise rule is restricted to these by name.
+#: Millisecond targets, comparable with `stddevMs`; the noise band applies only to these.
 MILLISECOND_TARGETS = frozenset({"minTimeMs", "avgTimeMs", "robustMeanMs"})
 
-#: Float slack for the non-negativity assertion. Regret is a ratio of two measured
-#: values; when the pick IS the oracle the ratio is exactly 1.0 in binary, but a
-#: tolerance costs nothing and a spurious failure would cost a run.
+#: Float slack for the regret non-negativity check.
 _REGRET_EPSILON = 1e-9
 
-#: A scorer maps candidate rows to a predicted score in the target's direction: higher
-#: is better under `objective: max`, lower under `min`. Only the ORDER it induces is
-#: used -- regret is computed from measured values, never predicted ones -- so a
-#: monotone reparameterisation of the score cannot change any number in the report.
+#: Maps candidate rows to a score in the target's direction. Only the induced order is
+#: used; regret comes from measured values.
 Scorer = Callable[[pd.DataFrame], np.ndarray]
 
 
 class ObjectiveDirectionError(RuntimeError):
-    """A regret came out negative, which is arithmetically impossible under §11.2.
+    """A regret came out negative: `objective` is backwards, so every figure is inverted.
 
-    Both directions are defined so that regret is non-negative. A negative one means
-    the oracle was chosen under the opposite direction to the one the metric applied,
-    i.e. `objective` is backwards -- and every number in the report is then inverted.
-    Raised rather than clamped: a report that prints wrong-way-round regret as a
-    plausible small positive number is worse than no report.
+    Raised rather than clamped so an inverted report is never printed.
     """
 
 
@@ -169,26 +128,20 @@ class ProblemResult:
     regret: float
     #: 0-based position of the oracle in the model's ranking.
     oracle_rank: int
-    #: Best position, in the same ranking, of any candidate indistinguishable from the
-    #: oracle. Equals `oracle_rank` when nothing ties with it.
+    #: Best rank of any candidate tied with the oracle; `oracle_rank` if none.
     tied_rank: int
     tied_candidates: int
-    #: §11.4's static-order reference: the pick Stage 1's shipped `priority`/`id`
-    #: ordering (§2.1) makes, and where the oracle sits in that ordering. The corpus
-    #: preserves engine enumeration order, so the static pick is this problem's first
-    #: usable candidate row and the static ranking is the row order itself.
+    #: §11.4 static-order reference: corpus rows are in engine enumeration order, so the
+    #: static pick is the first usable row and the static ranking is the row order.
     static_order_value: float
     static_order_regret: float
     static_order_oracle_rank: int
     static_order_tied_rank: int
-    #: §11.4's random reference: uniform choice from `V(p)`. Both figures are exact
-    #: expectations over the candidate set, never sampled, so neither moves run to run.
+    #: §11.4 random reference: exact expectations over the candidate set, not sampled.
     random_regret: float
     random_tail_fraction: float
-    #: For a two-layer model, `regret` split by which decision lost it. Both are expressed
-    #: against the same oracle so they sum to `regret`: the shortfall of the best member of
-    #: the chosen group, plus the shortfall of the chosen member within that group. None when
-    #: the model is single-layer or the corpus does not carry the grouping column.
+    #: Two-layer models: `regret` split into wrong-group and wrong-member parts, which
+    #: sum to `regret`. None for single-layer models or without the group column.
     group_regret: float | None = None
     in_group_regret: float | None = None
 
@@ -197,10 +150,8 @@ class ProblemResult:
 class Exclusions:
     """Rows and problems that could not contribute, counted by reason.
 
-    §5.6.3 warns that dropping a configuration from the evaluation slice removes it
-    from the oracle -- the corruption the prune of §5.5 is otherwise warned about. So
-    nothing is dropped silently here, and what IS dropped is only ever a row that
-    carries no measurement to be best with.
+    Only rows with no usable measurement are dropped; anything else would corrupt the
+    oracle (§5.6.3).
     """
 
     invalid_rows: int = 0
@@ -211,14 +162,10 @@ class Exclusions:
     problems_non_positive_oracle: int = 0
 
     def deterministic_catalog(self, scored: int) -> bool:
-        """Nothing was scored, and single-candidate problems are the whole reason.
+        """Nothing was scored, solely because every problem had one candidate.
 
-        The distinction this draws is the one an operator cannot draw from an empty
-        report: a corpus where every problem offered one candidate is an engine whose
-        kernel choice is a total function of the problem, and there was never a ranking
-        to learn. A corpus emptied by unmeasured or degenerate problems is a collection
-        failure. Both print "problems scored: 0", and they want opposite responses --
-        train L1, versus go and fix the sweep.
+        That means kernel choice is a function of the problem (train L1), unlike an empty
+        report caused by unmeasured problems (fix the sweep).
         """
         return (
             scored == 0
@@ -270,18 +217,10 @@ def _blank(series: pd.Series) -> pd.Series:
 
 
 def resolve_grouping(df: pd.DataFrame, device_column: str | None = None) -> Grouping:
-    """Decide what identifies a problem in this corpus.
+    """Decide what identifies a problem: `(benchmark, device)`.
 
-    A problem is `(benchmark, device)`. The same graph on two GPUs is two problems with
-    two different best kernels, and grouping on `benchmark` alone would put both GPUs'
-    candidates in one pool: the oracle becomes "fastest kernel on the faster card", and
-    every problem from the slower card is charged a regret it never had any way to
-    avoid. The resulting number is not a smaller version of the truth, it is a
-    different quantity.
-
-    Corpora collected before the `device` column existed cannot be grouped that way, so
-    this degrades to `benchmark` alone -- and says so loudly everywhere the number is
-    shown, because the degraded figure is the conflated one described above.
+    Each GPU has its own best kernel; pooling them charges the slower card regret it
+    could not avoid. Corpora without `device` degrade to `benchmark` and are flagged.
     """
     if BENCHMARK_COLUMN not in df.columns:
         raise ValueError(
@@ -345,16 +284,10 @@ def _problem_digest(key: Sequence[str], seed: int) -> str:
 def split_problems(
     keys: Iterable[tuple[str, ...]], fraction: float, seed: int
 ) -> Split:
-    """Hold out `fraction` of the PROBLEMS, reproducibly.
+    """Hold out `fraction` of the problems, reproducibly.
 
-    Assignment is by a seeded hash of the problem key, not by shuffling row order, so
-    the same corpus and seed give the same slice no matter what order the rows arrived
-    in or which rows were appended since -- a regret figure that moves because the log
-    was concatenated differently is not comparable round over round (§5.6.3).
-
-    The unit is the problem. Splitting rows would scatter one problem's candidates
-    across both sides; see this module's docstring for why the number that comes out of
-    that is not the one anyone wants.
+    Assigned by a seeded hash of the problem key, so row order or appended rows do not
+    move the split (§5.6.3).
     """
     if not 0.0 < fraction <= 1.0:
         raise ValueError(f"--eval-fraction must be in (0, 1]; got {fraction}")
@@ -367,11 +300,7 @@ def split_problems(
     if fraction >= 1.0:
         count = len(ranked)
     else:
-        # At least one problem, always: a fraction that rounds to zero on a small
-        # corpus would produce an empty slice and a report full of nulls, which reads
-        # like a broken tool rather than like "your corpus is too small to hold out
-        # from". A one-problem slice is visibly imprecise instead, and the problem
-        # count is in the report so the imprecision is legible (§5.6.3).
+        # At least one problem, so a small corpus gets an imprecise slice, not an empty one.
         count = max(1, round(fraction * len(ranked)))
     held_out = set(ranked[:count])
     return Split(
@@ -394,9 +323,8 @@ _PHYSICAL_TRANSFORMS = frozenset({"log", "log1p", "sqrt"})
 def score_is_physical(score_declaration: dict | None) -> bool:
     """Whether the runtime holds this score to `> 0` (`scoreFromRaw`, UhdKernelHeuristic.hpp).
 
-    A declared metric is a physical quantity (a time, a throughput) that cannot be zero or
-    negative, and so is the inverse of a log/log1p/sqrt transform. A metric-less ranker with
-    an identity or exp transform is an ordering key, which may legitimately be signed.
+    True for a declared metric or a log/log1p/sqrt transform; a metric-less identity or
+    exp score is an ordering key and may be signed.
     """
     declaration = score_declaration or {}
     return (
@@ -408,8 +336,7 @@ def score_is_physical(score_declaration: dict | None) -> bool:
 def rankable_scores(recovered: np.ndarray, physical: bool) -> np.ndarray:
     """The runtime's score admission: finite, and positive when the score is physical.
 
-    Anything else the engine discards and ranks last, in declared order, so an offline
-    evaluator that ranked it would report a pick the engine never makes.
+    Anything else the engine ranks last in declared order.
     """
     finite = np.isfinite(recovered)
     return finite & (recovered > 0) if physical else finite
@@ -438,12 +365,7 @@ def regret_of(picked: float, oracle: float, objective: str) -> float:
 def _regret_vector(
     values: np.ndarray, oracle_value: float, objective: str
 ) -> np.ndarray:
-    """`regret_of`, vectorised over one problem's whole candidate set.
-
-    Used wherever a metric needs every candidate's shortfall rather than one pick's:
-    the tie mask, and §11.4's random reference, whose expected regret is the mean of
-    exactly these numbers.
-    """
+    """`regret_of`, vectorised over one problem's whole candidate set."""
     cost = (
         values / oracle_value - 1.0
         if objective == "min"
@@ -461,33 +383,12 @@ def _tie_mask(
     stddev: np.ndarray | None,
     iters: np.ndarray | None,
 ) -> np.ndarray:
-    """Which candidates are indistinguishable from the oracle.
+    """Which candidates are indistinguishable from the oracle, for top-k recall.
 
-    §11.2 measures regret in the target metric precisely so that picking one of two
-    statistically indistinguishable kernels costs nothing. Regret gets that for free:
-    two candidates a fraction of a percent apart produce a regret a fraction of a
-    percent from zero. Top-k recall does NOT -- it is a rank test, and it scores the
-    second of two coin-flip-equivalent kernels as an outright miss, so a model that is
-    behaving perfectly can post a recall@1 of 0.5 on a corpus of near-ties.
-
-    Two candidates count as tied here when EITHER holds:
-
-    - the regret of choosing one over the other is within `rel_tolerance`. Unit-free,
-      works for any target and either direction, and it is the same quantity the regret
-      metric already reports -- so "tied" means exactly "costs less than 1%", which is
-      a claim a reader can check against the regret column;
-    - their measurement intervals overlap within `sigma` standard errors. Only applied
-      when the target is a millisecond timing column, because `stddevMs` is in
-      milliseconds and comparing it against a TFLOPS target would be a units error.
-      For `avgTimeMs` the standard error is exactly `stddevMs/sqrt(iters)`; for
-      `minTimeMs` -- §8.5's default target -- and for `robustMeanMs`, the statistic
-      `hipdnn_bench` reports beside it, the sample spread is only a scale for the
-      noise rather than that estimator's own error, so this band is approximate --
-      and deliberately so, since the alternative is to have no noise notion at all
-      for either.
-
-    The report carries strict recall alongside the tie-aware one, so nothing is hidden
-    by this choice: a reader who distrusts the tolerance can read the strict column.
+    Regret already scores near-ties near zero; rank-based recall does not. Tied means
+    regret within `rel_tolerance`, or, for millisecond targets, values within `sigma`
+    standard errors (`stddevMs/sqrt(iters)`; approximate for min/robust-mean targets).
+    The report also carries strict recall.
     """
     oracle_value = float(values[oracle_position])
     tied = _regret_vector(values, oracle_value, objective) <= rel_tolerance
@@ -602,8 +503,7 @@ def evaluate_corpus(
 
     exclusions = Exclusions()
     exclusions.invalid_rows = int((~valid).sum())
-    # A known-wrong row may still carry the timing of its wrong answer; the fastest wrong
-    # kernel would otherwise be the oracle every correct pick is charged against.
+    # A known-wrong row may still carry a timing; it must never become the oracle.
     wrong = known_wrong(eval_df)
     exclusions.numerically_invalid_rows = int((valid & wrong).sum())
     valid = valid & ~wrong
@@ -618,10 +518,7 @@ def evaluate_corpus(
             "spread is not in comparable units"
         )
     elif "stddevMs" not in eval_df.columns:
-        # §8.3 makes `stddevMs` and `iters` required columns of the result envelope.
-        # A producer that drops them turns the band off without changing any number in
-        # the report, so the absence is stated here rather than silently folded into
-        # "the units do not match".
+        # §8.3 requires `stddevMs`/`iters`; say so rather than reporting a units mismatch.
         stddev_all = iters_all = None
         noise_available = False
         noise_absent_reason = (
@@ -654,9 +551,7 @@ def evaluate_corpus(
     # Finite scores the runtime discards as non-positive; reported beside calibration.
     discarded_predictions = 0
     physical = score_is_physical(score_declaration)
-    # Grouped by hand rather than through `Series.groupby`: the keys here are tuples,
-    # and pandas treats a tuple key as a multi-column selector in several places. This
-    # keeps the key exactly as it was built and the row index exactly as it was read.
+    # Grouped by hand: pandas treats tuple keys as multi-column selectors in places.
     groups: dict[tuple[str, ...], list] = {}
     for index, key in eval_keys.items():
         groups.setdefault(key, []).append(index)
@@ -675,10 +570,7 @@ def evaluate_corpus(
         )
         oracle_value = float(measured[oracle_position])
         if not oracle_value > 0.0:
-            # Both regret formulas divide by the oracle value, and under `max` a
-            # non-positive oracle also flips the ratio's sense, so the metric would
-            # come out negative for a correct pick. Excluded and counted rather than
-            # producing a number whose sign no longer means what the report says.
+            # Regret divides by the oracle, and a non-positive one flips its sign.
             exclusions.problems_non_positive_oracle += 1
             continue
         if len(measured) < 2:
@@ -697,15 +589,10 @@ def evaluate_corpus(
                 "would sort arbitrarily and silently randomise the model's pick"
             )
 
-        # Rank in the objective's direction. `argsort` is stable, so predicted ties
-        # keep corpus order rather than depending on the sort implementation.
-        #
-        # Admission is the runtime's (`rankable_scores`): an unrankable candidate ranks last.
-        # Forced last explicitly rather than by its sign: under `min` a negative time (or a
-        # grouped model's -inf for a candidate outside the group layer 1 chose) is the
-        # smallest value and would otherwise be *picked*. Unrankable candidates keep corpus
-        # order among themselves, so if nothing is rankable the pick is §5 step 7's declared
-        # order -- what the engine runs.
+        # Rank in the objective's direction; stable sort keeps corpus order on ties.
+        # Unrankable candidates (`rankable_scores`) are forced last explicitly: under
+        # `min` a negative or -inf score would otherwise be picked. With nothing
+        # rankable, the pick is §5 step 7's declared order, as in the engine.
         rankable = rankable_scores(predictions, physical)
         discarded_predictions += int(
             np.count_nonzero(np.isfinite(predictions) & ~rankable)
@@ -717,20 +604,9 @@ def evaluate_corpus(
         picked_value = float(measured[picked_position])
         regret = regret_of(picked_value, oracle_value, objective)
 
-        # §11.2's calibration inputs. Ranking only needs the ORDER of `predictions`, so
-        # nothing above would notice a score that ranks perfectly and is wrong by a
-        # constant factor -- which is exactly the failure §11.2 exists to catch, because
-        # cross-engine arbitration (RFC 0019 §11.3) compares absolute values across
-        # models that never saw each other's candidates. Kept per row, and separately for
-        # the row the model actually picked: that is the one that runs, so its error is
-        # the one an engine comparison is decided on.
-        #
-        # A declined candidate is a decision, not a prediction: a grouped model returns -inf
-        # for everything outside the group it chose, and counting those as predicted values
-        # would report an arbitrarily large calibration error for the design working as
-        # intended. A non-positive score is discarded by the runtime before any consumer sees
-        # it, so it is not a value anything is arbitrated on either; it is counted instead.
-        # Only what the runtime actually uses is calibrated.
+        # §11.2 calibration inputs: ranking ignores a constant-factor score error, but
+        # cross-engine arbitration (RFC 0019 §11.3) compares absolute values. Only
+        # rankable scores count: -inf declines and non-positive scores are never used.
         calibration_predicted.extend(predictions[rankable].tolist())
         calibration_measured.extend(measured[rankable].tolist())
         if rankable[picked_position]:
@@ -757,16 +633,10 @@ def evaluate_corpus(
             ),
         )
 
-        # §11.4's two non-oracle references, read off the same measured values.
-        #
-        # Static order is the `priority`/`id` ordering the engine ships in Stage 1
-        # (§2.1) -- what the model has to beat to justify existing. The corpus rows of
-        # a problem are in the order the engine enumerated its candidates, so the
-        # static pick is the FIRST usable row and the static ranking is the row order.
+        # §11.4 references. Static order: rows follow engine enumeration (§2.1), so
+        # the static pick is the first usable row.
         static_order_value = float(measured[0])
-        # Random is uniform choice from V(p), §11.4's sanity floor. Both figures are
-        # exact expectations over the candidate set -- the mean candidate regret, and
-        # the share of candidates in the tail -- so neither moves between runs.
+        # Random: exact expectations over V(p), so they do not move between runs.
         candidate_regrets = _regret_vector(measured, oracle_value, objective)
 
         regime = None
@@ -774,10 +644,7 @@ def evaluate_corpus(
             labels = rows[regime_column].astype(str).str.strip()
             regime = labels.iloc[0] if labels.nunique() == 1 else "<mixed>"
 
-        # Split the shortfall by which of a two-layer model's decisions lost it. Both parts are
-        # measured against the same oracle, so they sum to `regret` and a bad total is
-        # attributable: choosing the wrong group is a different failure from choosing the wrong
-        # member of the right one, and they are fixed in different places.
+        # Split regret into wrong-group and wrong-member parts; they sum to `regret`.
         group_regret = in_group_regret = None
         if group_column is not None and group_column in candidates.columns:
             same_group = (
@@ -824,12 +691,8 @@ def evaluate_corpus(
         calibration_picked_measured,
         discarded_predictions,
     )
-    # The report is not a gate (§11.4: "These metrics do not gate emission"), but a
-    # systematic bias is the one failure a ranking report cannot show, so it is said out
-    # loud rather than left for a reader to find in the JSON. Direction matters as much
-    # as size, and it is the metric's: a throughput that reads high, or a time that reads
-    # low, wins arbitrations it should lose; the opposite error is passed over for work
-    # it would have done best.
+    # Not a gate (§11.4), but a systematic bias is invisible in ranking figures, so warn.
+    # Over-reading a throughput or under-reading a time wins arbitrations it should lose.
     selected = calibration.get("selected_candidate")
     if selected is not None:
         bias = selected["signed_relative_bias"]
@@ -893,17 +756,9 @@ def _calibration_block(
 ) -> dict[str, Any]:
     """RFC 0019.13 §11.2's calibration metrics, or why they were not computed.
 
-    §11.2 makes these "**required when `score.calibrated` is true**", and says why a
-    ranking report is not enough on its own: "A model with flawless ranking and a
-    systematic absolute bias passes every metric above and then loses every cross-engine
-    arbitration." Nothing else in the pipeline checks the absolute scale -- `train
-    --calibrated` stamps the flag the author asked for and says outright that it does not
-    verify the claim -- so this is where a biased scale is caught.
-
-    Reported in two forms. Over every scored candidate, which is the model's calibration
-    as a regressor; and over the candidate the model PICKED, which is the number
-    cross-engine selection actually consumes, and can be much better or much worse than
-    the population figure when the error correlates with the score.
+    Nothing else checks the absolute scale (`train --calibrated` only stamps the flag).
+    Reported over all scored candidates and over the picked one, which is what
+    cross-engine selection consumes.
     """
     declaration = score_declaration or {}
     if declaration.get("calibrated") is not True:
@@ -927,9 +782,7 @@ def _calibration_block(
     measured_array = np.asarray(measured, dtype=float)
     picked_predicted_array = np.asarray(picked_predicted, dtype=float)
     picked_measured_array = np.asarray(picked_measured, dtype=float)
-    # Every relative figure divides by the measurement. `evaluate_corpus` already drops a
-    # problem whose oracle is not positive, but an individual candidate can still be zero
-    # under a `max` target, so guard here rather than emitting an infinity.
+    # A `max` target can still have a zero candidate (only zero oracles are dropped).
     usable = measured_array > 0.0
     picked_usable = picked_measured_array > 0.0
     if not usable.any():
@@ -955,16 +808,13 @@ def _calibration_block(
             else None
         ),
         "excluded_non_positive_rows": int((~usable).sum()),
-        # Scores the runtime discards (non-positive for a physical score): never consumed,
-        # so not calibrated, but counted -- many of them is a model extrapolating badly.
+        # Runtime-discarded scores are never consumed, so not calibrated, but counted.
         "excluded_runtime_discarded_predictions": discarded_predictions,
     }
     label = RANKING_METRICS[metric].label if metric in RANKING_METRICS else None
     if label != target:
-        # Not fatal, and not silently fudged either: the two numbers are subtracted, so a
-        # reader has to be able to see whether they were on the same scale. A registered
-        # metric fixes its label column (RFC 0019 §13.4), so any other target is a
-        # different quantity from the one the score claims to estimate.
+        # The figures subtract prediction from measurement; a registered metric fixes its
+        # label column (RFC 0019 §13.4), so any other target is a different quantity.
         block["warning"] = (
             f"score.metric {metric!r} is measured by the {label!r} column but the target "
             f"column is {target!r}. These figures subtract the prediction from the "
@@ -1003,22 +853,10 @@ def _references(
     regime_column: str | None,
     regret_tail_threshold: float,
 ) -> dict[str, Any]:
-    """§11.4's three reference points, over exactly the problems the model was scored on.
+    """§11.4's oracle, static-order and random references, over the scored problems.
 
-    | Reference    | Definition (§11.4)                                          |
-    |--------------|-------------------------------------------------------------|
-    | Oracle       | `v*(p)`; regret 0 by construction. Upper bound.             |
-    | Static order | The `priority`/`id` ordering the engine ships in Stage 1.   |
-    | Random       | Uniform choice from `V(p)`. Sanity floor.                   |
-
-    §11.4 MUST 1 wants every §11.2 metric against all three. Static order induces a
-    full ranking -- the corpus row order, which is the order the engine enumerated its
-    catalog in -- so regret, tail and top-k recall are the ordinary computations
-    applied to that ranking. Random induces no ranking, so its figures are exact
-    expectations over `V(p)` rather than one draw: expected regret is the mean
-    candidate regret, expected strict recall@k is `min(k, n)/n`, and expected
-    tie-aware recall@k is `1 - C(n-t, k)/C(n, k)` for the `t` candidates tied with the
-    oracle. Sampling would have made the sanity floor move between runs for no gain.
+    Static order is the corpus row order (engine enumeration order). Random has no
+    ranking, so its figures are exact expectations over `V(p)`, not sampled draws.
     """
     count = len(results)
 
@@ -1154,9 +992,7 @@ def _build_report(
             recall["tie_aware"][str(k)] = sum(
                 item.tied_rank < k for item in results
             ) / len(results)
-            # A problem with no more than k measured candidates scores a hit whatever
-            # the model does. Counted so a recall@5 of 1.0 on a corpus of 4-candidate
-            # problems is legible as the tautology it is.
+            # Problems with at most k candidates hit regardless of the model.
             recall["trivial"][str(k)] = sum(
                 item.candidates <= k for item in results
             ) / len(results)
@@ -1165,8 +1001,7 @@ def _build_report(
                 str(k)
             ] = None
 
-    # Present only when the model groups and the corpus carries the column, so an absent
-    # section means "not a two-layer model", not "the split came out zero".
+    # Absent section means "not a two-layer model", not "the split came out zero".
     split_results = [item for item in results if item.group_regret is not None]
     two_stage = None
     if split_results:
@@ -1207,9 +1042,8 @@ def _build_report(
     )
     static_regret = references["static_order"]["top1_regret"]["mean"]
     model_regret = _summarise(regrets)["mean"]
-    # §11.4 MUST 2. "Not better", not "worse": a model that merely matches the ordering
-    # it replaces has not earned the artifact, and the epsilon keeps an exact tie from
-    # turning on float wobble.
+    # §11.4 MUST 2: merely matching static order is not beating it; epsilon absorbs
+    # float wobble on an exact tie.
     if model_regret is not None and model_regret >= static_regret - _REGRET_EPSILON:
         warnings.append(
             "MODEL DOES NOT BEAT STATIC ORDER: mean top-1 regret "
@@ -1219,8 +1053,7 @@ def _build_report(
             "where shipping is almost certainly wrong. This does not gate emission -- "
             "§11.4 leaves that judgement to the author."
         )
-    # §11.4 MUST 3: an aggregate improvement can hide a regression confined to the
-    # regime the heuristic was built for, so each regime is checked on its own.
+    # §11.4 MUST 3: an aggregate gain can hide a regression in one regime.
     static_per_regime = references["static_order"]["per_regime"]
     if per_regime is not None and static_per_regime is not None:
         losing = [
@@ -1246,8 +1079,8 @@ def _build_report(
         "rfc": "0019.13 §11.2, §11.4",
         "generated": datetime.now(timezone.utc).isoformat(),
         "corpus": {"rows": corpus_rows, "problems": corpus_problems},
-        # The ranking metric the score estimates (RFC 0019 §4.4), or null for a
-        # metric-less ranker; regret is in `target`, in `objective`'s direction.
+        # The ranking metric the score estimates (RFC 0019 §4.4); null for a metric-less
+        # ranker. Regret is in `target`.
         "metric": metric,
         "target": target,
         "objective": objective,
@@ -1284,8 +1117,7 @@ def _build_report(
         "exclusions": exclusions.as_dict(),
         "metrics": {
             "problems_scored": len(results),
-            # Recorded even when false, so a reader of two reports can tell "this engine
-            # ranks nothing" from "this report predates the check".
+            # Recorded even when false, to distinguish from reports predating the check.
             "deterministic_catalog": exclusions.deterministic_catalog(len(results)),
             "top1_regret": _summarise(regrets),
             "regret_tail": {
@@ -1367,8 +1199,7 @@ class ModelBundle:
     descriptor: dict = field(default_factory=dict)
     manifest: dict = field(default_factory=dict)
     role: str | None = None
-    #: The feature layer 1 grouped on, from the manifest. The artifact carries only a slot
-    #: index, which cannot name the corpus column the report needs to decompose regret.
+    #: The feature layer 1 grouped on; the artifact only has a slot index, not a column.
     group_feature: str | None = None
 
 
@@ -1385,21 +1216,11 @@ def _flatbuffer_scorer(
     score_transform: str = TRAINED_TRANSFORM,
     physical: bool,
 ) -> Scorer:
-    """Score with the artifact that actually ships.
+    """Score with the shipped `model.bin`, summed as `TreeDataAdapter::score()` does.
 
-    `train` deletes `model.lgbm` unless `--keep-lgbm`, so on an ordinary model
-    directory `model.bin` is the only thing left to rank with -- and it is also the
-    file the engine loads, which makes it the right thing to measure anyway.
-
-    Only the induced ORDER matters (see `Scorer`), so the ensemble is summed exactly as
-    `TreeDataAdapter::score()` does -- unit learning rate, LightGBM having folded the
-    shrinkage into the dumped leaf values -- and the transform's inverse is applied for
-    callers who want the value, not because ranking needs it.
-
-    The bytes pass the loader's own checks first (`verify_tree_artifact`: declared digest,
-    `HGBM` identifier, structure) and then its features-hash comparison, so a file the
-    engine refuses -- and silently replaces with static order -- is never reported here as
-    a model with a regret.
+    `train` deletes `model.lgbm` by default. The bytes pass the loader's own checks
+    (`verify_tree_artifact`, features hash) first, so a file the engine would refuse is
+    never reported with a regret.
     """
     import uhd_gen  # noqa: F401  puts _generated/ on sys.path
 
@@ -1438,10 +1259,9 @@ def _flatbuffer_scorer(
         return flags
 
     def arrays_of(trees) -> list[tuple[np.ndarray, ...]]:
-        # `default_left` and `decision_lte` are optional and may be shorter than the tree.
-        # TreeDataAdapter reads a missing or short `default_left` as false (go right); an
-        # absent or empty `decision_lte` as `<=` everywhere, but a nonempty short one as
-        # `<` past its end.
+        # `default_left`/`decision_lte` may be short, read as TreeDataAdapter does: missing
+        # `default_left` is false; absent or empty `decision_lte` is `<=` everywhere, but a
+        # nonempty short one is `<` past its end.
         arrays = []
         for tree in trees or []:
             count = len(tree.leftChildren)
@@ -1462,10 +1282,7 @@ def _flatbuffer_scorer(
     trees = arrays_of(model.trees)
     base = float(model.baseScore)
 
-    # A grouped artifact (RFC 0019 two-layer) decides twice: layer 1 picks the group, layer 2
-    # orders within it. Reading only `trees` would score layer 1 alone and silently report a
-    # single-layer model's behaviour for a two-layer one -- the same number a correct
-    # single-layer model produces, so nothing about the output would look wrong.
+    # Two-layer artifact: reading only `trees` would silently score layer 1 alone.
     group_slot = int(
         model.groupByFeatureIndex if model.groupByFeatureIndex is not None else -1
     )
@@ -1484,8 +1301,7 @@ def _flatbuffer_scorer(
         total = np.full(len(rows), base, dtype=np.float64)
         for feature_index, threshold, left, right, leaf, default_left, lte in arrays:
             node = np.zeros(len(rows), dtype=np.int64)
-            # Descend every row one level per iteration rather than one row at a time:
-            # a 500-tree model over a corpus is otherwise minutes of Python.
+            # Vectorised: descend every row one level per iteration.
             while True:
                 internal = left[node] >= 0
                 if not internal.any():
@@ -1493,10 +1309,7 @@ def _flatbuffer_scorer(
                 at = np.flatnonzero(internal)
                 here = node[at]
                 x = matrix[rows[at], feature_index[here]]
-                # `decision_lte` false is `<`, not `>`: the schema, TreeDataAdapter and
-                # test_converter.py all read it that way, and the complement would send every
-                # row down the opposite subtree -- ranking such a model backwards while the
-                # runtime scored it correctly.
+                # `decision_lte` false means `<` (schema, TreeDataAdapter), not `>`.
                 go_left = np.where(lte[here], x <= threshold[here], x < threshold[here])
                 go_left = np.where(np.isnan(x), default_left[here], go_left)
                 node[at] = np.where(go_left, left[here], right[here])
@@ -1519,17 +1332,10 @@ def _flatbuffer_scorer(
         if group_slot < 0 or not groups:
             return recover(layer_one)
 
-        # `evaluate_corpus` calls a scorer with one problem's candidates, which is the batch
-        # TreeDataAdapter::scoreBatch is handed, so the group decision is made over exactly
-        # this frame. Choosing one group across several problems would let one problem's
-        # winner blank out another's candidates.
-        #
-        # The decision is the adapter's: only a row that names a group and whose layer-1
-        # score the runtime would admit (`rankable_scores`) may choose; the best raw score in
-        # the objective's direction wins -- the smallest under `min`, since taking the largest
-        # picked the slowest group of a time model -- and an exact tie goes to the smaller
-        # group value, so the choice does not depend on row order. With no such row nothing
-        # is chosen and every candidate is unusable: declared order.
+        # The group is chosen per problem (this frame), as TreeDataAdapter::scoreBatch
+        # does. Only rows naming a group with a rankable layer-1 score may choose; best raw
+        # score in the objective's direction wins, exact ties go to the smaller group value.
+        # No eligible row: every candidate is unusable, i.e. declared order.
         group_values = matrix[:, group_slot]
         eligible = ~np.isnan(group_values) & rankable_scores(
             recover(layer_one), physical
@@ -1544,13 +1350,11 @@ def _flatbuffer_scorer(
         )
         chosen = group_values[eligible & (layer_one == best)].min()
         inside = np.flatnonzero(group_values == chosen)
-        # A group layer 1 picked but layer 2 does not describe is ranked by layer 1, matching
-        # the adapter: a partially trained artifact degrades rather than refusing its own pick.
+        # A group layer 2 does not describe is ranked by layer 1, matching the adapter.
         within = groups.get(float(chosen))
         raw[inside] = ensemble(within, matrix, inside) if within else layer_one[inside]
 
-        # A rejected group's -inf survives the inverse (score_transform.inverse), so it stays
-        # unusable, which is what `rankScored` expects.
+        # Rejected groups' -inf survives the inverse, so they stay unusable (`rankScored`).
         return recover(raw)
 
     return score
@@ -1604,10 +1408,8 @@ def load_model(
     manifest = _load_json(manifest_path) if manifest_path.exists() else {}
     role = manifest.get("role")
     if role is None:
-        # A promoted model ships without its training manifest, and RFC 0019 Section 3.1
-        # leaves the role to the owning UED rather than the UHD. `promote` encodes that
-        # role map in the install layout, `<ued-id>/<role>/<arch>/[<metric>/]`, so read it
-        # back.
+        # Promoted models ship without a manifest; recover the role from the install
+        # layout `<ued-id>/<role>/<arch>/[<metric>/]` (RFC 0019 §3.1).
         from .provenance import ROLES
 
         for ancestor in model_dir.resolve().parents[:2]:
@@ -1639,8 +1441,7 @@ def load_model(
     signature = signature or []
     features = [reference[1:] for reference in signature_references(signature)]
 
-    # The objective is READ, never assumed: it decides which end of the measured range
-    # is the oracle, and getting it backwards inverts every number in the report.
+    # Read, never assumed: a backwards objective inverts every number in the report.
     objective = descriptor.get("objective") or manifest.get("objective")
 
     group_feature = manifest.get("group_by_feature")
@@ -1650,10 +1451,7 @@ def load_model(
     )
     expected_hash = descriptor.get("features_hash", manifest.get("features_hash"))
     if expected_hash is not None:
-        # RFC 0019 §6.3: verification runs the routine generation stamped with, so the
-        # digest is recomputed by the shared evaluator whatever the signature contains.
-        # Checking a C++-stamped hash against a Python-recomputed one only ever proved
-        # that the two implementations had not drifted yet.
+        # RFC 0019 §6.3: recompute the digest with the shared evaluator generation used.
         if (
             compute_features_hash(signature, categorical_encoding, feature_evaluator)
             != expected_hash
@@ -1661,9 +1459,8 @@ def load_model(
             raise ValueError(
                 "features_signature/categorical_encoding does not match features_hash"
             )
-        # The loader refuses a feature-reading model trained under other feature semantics
-        # (FeatureSemantics.hpp), so numbers reported for one describe a model no engine
-        # would ever score. Same rule, same evaluator the digest above came from.
+        # The loader refuses models trained under other feature semantics
+        # (FeatureSemantics.hpp), so report nothing for one.
         if signature:
             require_feature_semantics(
                 descriptor.get("trained_against", manifest.get("trained_against")),
@@ -1671,16 +1468,14 @@ def load_model(
             )
 
     if descriptor:
-        # The UHD is what the engine loads, and the engine reads an absent or empty
-        # `score.transform` as identity (ScoreTransform.hpp); a training manifest must not
-        # reinterpret the descriptor it was shipped with.
+        # The engine reads an absent or empty `score.transform` as identity
+        # (ScoreTransform.hpp); the descriptor wins over the manifest.
         transform = (descriptor.get("score") or {}).get("transform") or "identity"
     else:
-        # A manifest without the key predates `log`: every model trained then was log1p.
+        # A manifest without the key predates `log`; those models were all log1p.
         transform = manifest.get("score_transform", "log1p")
     if transform not in INVERTIBLE_TRANSFORMS:
-        # The engine's transform vocabulary is wider (score_transform::isSupported);
-        # what is missing here is this module's inverse, not the descriptor's validity.
+        # The engine supports more transforms; this module just lacks their inverse.
         raise ValueError(
             f"uhd_gen can only score {', '.join(INVERTIBLE_TRANSFORMS)} transforms; this "
             f"descriptor declares {transform!r}, which the runtime loads but `evaluate` cannot invert"
@@ -1704,9 +1499,7 @@ def load_model(
         elif descriptor.get("tree_data", {}).get("artifact"):
             candidate = model_dir / descriptor["tree_data"]["artifact"]
         elif (model_dir / "model.lgbm").exists() and not group_feature:
-            # A grouped model's `model.lgbm` holds layer 1 alone -- LightGBM has no way to
-            # carry the per-group ensembles -- so ranking with it would silently measure half
-            # the model and report a single-layer figure that looks entirely plausible.
+            # A grouped model's `model.lgbm` holds layer 1 only; use `model.bin` instead.
             candidate = model_dir / "model.lgbm"
         else:
             candidate = model_dir / "model.bin"
@@ -1722,8 +1515,7 @@ def load_model(
                 score_transform=transform,
             )
         else:
-            # The declared digest guards the artifact the descriptor names; an explicitly
-            # supplied other file (--model) has no declaration to hold it to.
+            # The declared digest covers only the artifact the descriptor names.
             declared = descriptor.get("tree_data", {})
             named = (
                 model_dir / declared["artifact"] if declared.get("artifact") else None
@@ -1764,13 +1556,9 @@ def load_model(
 def _holdout_integrity(
     bundle: ModelBundle, evaluated: Iterable[Sequence[str]]
 ) -> dict[str, str]:
-    """Was the model kept away from the problems it is about to be scored on?
+    """Whether the model's recorded training problem keys overlap the evaluated ones.
 
-    Only problem identity can answer that. The training manifest records the keys the model
-    was fitted on (`training_problem_keys`, the same `problem_keys` identity the split
-    uses): disjoint from every evaluated key is `held_out`, any shared key is `COMPROMISED`.
-    A file name proves nothing either way -- a renamed copy of the training corpus is the
-    same problems -- so without recorded keys the answer is `unknown`.
+    Without recorded keys the answer is `unknown`: a file name proves nothing.
     """
     evaluated = {tuple(str(part) for part in key) for key in evaluated}
     recorded = bundle.manifest.get("training_problem_keys")
@@ -1784,9 +1572,8 @@ def _holdout_integrity(
             "below is optimistic (RFC 0019.13 §5.6.4).",
         }
     trained = {tuple(str(part) for part in key) for key in recorded}
-    # A corpus without device identity groups by graph alone. Keys of different widths are
-    # compared on the graph both still carry: no shared graph is disjoint, but a shared
-    # graph may have been measured on another device, which neither side can tell.
+    # Keys of different widths (one corpus lacks device identity) are compared on the
+    # graph alone; a shared graph may then be from another device, so that is unknown.
     narrowed = len({len(key) for key in trained | evaluated}) > 1
     if narrowed:
         trained = {key[:1] for key in trained}
@@ -1970,8 +1757,7 @@ def run_evaluate(args: argparse.Namespace) -> int:
         return 1
     from .immediate import ROLE
 
-    # A registered metric fixes the direction (RFC 0019 §4.4); an override that
-    # contradicts it would invert every regret, so it is refused rather than applied.
+    # A registered metric fixes the direction (RFC 0019 §4.4); refuse a contradiction.
     declared = bundle.descriptor.get("score", {}).get("metric")
     if declared in RANKING_METRICS and args.objective not in (
         None,
@@ -2049,9 +1835,8 @@ def run_evaluate(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # The same suffix rule and the same identity pinning the trainer applies, so a model
-    # trained from the published .parquet dataset is scored against that dataset rather
-    # than against a re-exported CSV whose column types were decided by concatenation.
+    # Same reader as the trainer, so a .parquet-trained model is scored against the
+    # same typed dataset.
     df = read_corpus_frame(corpus_path)
     logger.info("Loaded %d row(s) from %s", len(df), corpus_path)
 
@@ -2154,9 +1939,7 @@ def _print_summary(report: dict[str, Any], output_path: Path) -> None:
     metrics = report["metrics"]
     regret = metrics["top1_regret"]
 
-    # Warnings first and unmissable. A degraded grouping or a compromised holdout makes
-    # every figure below mean something other than what it is labelled, so it cannot be
-    # a footnote under the numbers it invalidates.
+    # Warnings first: a degraded grouping or compromised holdout invalidates the figures.
     for warning in report["warnings"]:
         print(f"\n!! {warning}")
 
@@ -2174,10 +1957,7 @@ def _print_summary(report: dict[str, Any], output_path: Path) -> None:
     if regret["mean"] is None:
         print("  top-1 regret:       n/a (no problem had two measured candidates)")
         if metrics.get("deterministic_catalog"):
-            # The arithmetic above was already right; what was missing was the reason. An
-            # empty report reads as a broken corpus, and the operator goes to debug a
-            # sweep that worked -- when the engine simply has one kernel per problem and
-            # wanted the other role all along.
+            # Explain why it is empty, so a working sweep is not debugged needlessly.
             print(
                 "                      all "
                 f"{report['exclusions']['problems_single_candidate']} problem(s) had a "
@@ -2205,8 +1985,7 @@ def _print_summary(report: dict[str, Any], output_path: Path) -> None:
             )
     references = metrics["references"]
     if regret["mean"] is not None:
-        # §11.4: the model's regret means nothing on its own. The ordering it replaces
-        # and the uniform-choice floor bracket it, so they are printed beside it.
+        # §11.4: the model's regret is only meaningful beside the references.
         print(
             "  vs §11.4 references: static order "
             f"{references['static_order']['top1_regret']['mean']:.4f}   "

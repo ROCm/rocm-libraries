@@ -92,8 +92,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-#: Substrings that mark a target as something you want less of. Used only to warn
-#: about an objective/target mismatch, never to override the caller's choice.
+#: Substrings that mark a target as a cost; used only to warn on an objective mismatch.
 _COST_METRIC_MARKERS = (
     "latency",
     "time",
@@ -108,18 +107,8 @@ _COST_METRIC_MARKERS = (
     "loss",
 )
 
-#: Fraction of the requested feature set that, being constant, stops looking like
-#: pinned knobs and starts looking like a thin corpus.
-#:
-#: 2/3 is picked against the case this tool exists for: a rocKE attention corpus has 8
-#: of 14 kernel fields pinned by the kernel matcher before ranking begins -- 57%, the
-#: ORDINARY reading -- so a threshold at or below that would fire on every normal run
-#: and be learned as noise, which is worse than not warning at all. 2/3 clears it with
-#: margin and still catches the shapes that really are suspicious (2 of 3, 3 of 4).
-#:
-#: The proportion is a smell, not a diagnosis: nothing in a CSV distinguishes
-#: pinned-by-construction from under-sampled, so the message says which two readings
-#: are possible and points at the corpus rather than asserting one.
+#: Constant fraction of the requested features that suggests a thin corpus, not pinned
+#: knobs. Above rocKE attention's normal 8/14 (57%) so ordinary runs stay quiet.
 CONSTANT_FEATURE_WARN_FRACTION = 2 / 3
 
 
@@ -130,7 +119,6 @@ def _looks_like_cost_metric(target: str) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Dispatch to a subcommand."""
     parser = argparse.ArgumentParser(
         prog="uhd_gen",
         description="Generate a UHD heuristic from benchmark data",
@@ -139,8 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Thin delegation: the exporter owns its own arguments, and duplicating them
-    # here would be a second place for them to drift.
+    # The exporter owns its arguments; it parses its own argv below.
     subparsers.add_parser(
         "export-benchmarks",
         add_help=False,
@@ -212,8 +199,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_size_arguments(size)
 
-    # export-benchmarks parses its own argv tail, so it is split off before the
-    # main parser sees flags it does not declare.
+    # Split off before the main parser sees flags it does not declare.
     if argv is None:
         argv = sys.argv[1:]
     if argv and argv[0] == "export-benchmarks":
@@ -430,10 +416,7 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
 def _resolve_uhd_id(requested: str | None) -> str:
     """The descriptor's identity: the caller's id, or a fresh one.
 
-    A typo'd id is not caught anywhere downstream -- it becomes the descriptor's
-    identity, the UED points at the id the author meant, nothing resolves, and the
-    engine loads with no heuristic. That is precisely the silence --uhd-id exists to
-    end, so it is rejected here instead.
+    A malformed id is rejected here; downstream it would silently resolve to nothing.
     """
     if requested is None:
         return str(uuid.uuid4())
@@ -444,7 +427,6 @@ def _resolve_uhd_id(requested: str | None) -> str:
     canonical = str(parsed)
     if canonical != requested:
         # Braced/urn/undashed spellings parse, but the descriptor is written canonical.
-        # Say so, or the id in the file quietly differs from the one that was typed.
         logger.warning(
             "--uhd-id %r normalized to canonical form %s", requested, canonical
         )
@@ -454,10 +436,8 @@ def _resolve_uhd_id(requested: str | None) -> str:
 def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
     """Settle the metric, label column and objective before any data is read.
 
-    RFC 0019 §4.4: the metric fixes the units and the winning direction, and §13.4 fixes
-    its label, so with a metric named there is nothing left for --target or --objective
-    to choose -- only something for them to contradict. A model with no metric is a
-    within-engine ranker over whatever column it was given, and says nothing comparable.
+    RFC 0019 §4.4/§13.4: a metric fixes label and direction, so --target and --objective
+    can only contradict it. A metric-less model is a within-engine ranker.
     """
     from .immediate import LABEL_STATISTIC
 
@@ -489,8 +469,7 @@ def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
         )
     args.target, args.objective = metric.label, metric.objective
     if metric.label == LABEL_STATISTIC:
-        # This metric's label IS a timing statistic, so it cannot have been derived from
-        # another one.
+        # This metric's label is itself a timing statistic.
         if args.timing_statistic not in (None, LABEL_STATISTIC):
             raise ValueError(
                 f"--metric {metric.name} is labelled by {LABEL_STATISTIC}; "
@@ -526,22 +505,18 @@ def _run_train(args: argparse.Namespace) -> int:
             args.descriptor_name
         ).name != args.descriptor_name or args.descriptor_name in ("", ".", ".."):
             raise ValueError("--descriptor-name must be a file stem, not a path")
-        # Settled, and captured below, before data preparation or fitting, never stamped later.
+        # Settled before data preparation or fitting, never stamped later.
         _resolve_score(args, immediate)
         if immediate:
             if args.group_by_feature:
-                # The runtime scores an engine-level model's root ensemble only, and one group
-                # chosen across unrelated graphs has no per-row meaning: until an L1 contract
-                # for grouped artifacts exists, training one would ship a model nobody scores
-                # the way it was fitted.
+                # The runtime scores only an engine-level model's root ensemble, so a
+                # grouped L1 artifact would not be scored the way it was fitted.
                 raise ValueError(
                     f"--group-by-feature is not supported for {ROLE}: a grouped "
                     "artifact has no engine-level (per-row) scoring contract"
                 )
             df, binding = training_binding(read_corpus(input_path), args.engine)
-            # RFC 0019 §13.2, exactly as `generate` gates its L1 labels: an immediate pick
-            # a correctness check showed wrong keeps its row in the corpus (normalize_row
-            # suppressed its timing) and is never a label. Null is unknown, not wrong.
+            # RFC 0019 §13.2: a pick checked wrong is never a label; null is unknown.
             wrong = known_wrong(df)
             if wrong.any():
                 logger.info(
@@ -549,8 +524,7 @@ def _run_train(args: argparse.Namespace) -> int:
                     int(wrong.sum()),
                 )
                 df = df[~wrong]
-            # Every row, not the first: the selector that picked each measured kernel answered
-            # in the binding's metric, so rows of another metric describe another selector.
+            # Check every row: rows of another metric describe another selector.
             for index, row_binding in enumerate(df["binding"]):
                 require_binding_metric(
                     json.loads(row_binding), args.metric, f"{input_path} row {index}"
@@ -578,9 +552,8 @@ def _run_train(args: argparse.Namespace) -> int:
                 )
             args.group_by = ["benchmark", "device"]
             args.calibrated = True
-            # RFC 0019.13 §11.2 (:2003) and §10.6.2 (:1914-1916): L1 always declares a
-            # calibrated score, so every label -- the time itself, or the throughput
-            # derived from it -- comes from `avgTimeMs`, and the manifest says so.
+            # RFC 0019.13 §11.2: L1 is always calibrated, so its label comes from
+            # `avgTimeMs`.
             if args.timing_statistic not in (None, LABEL_STATISTIC):
                 raise ValueError(
                     f"{ROLE} labels are derived from {LABEL_STATISTIC}; "
@@ -624,37 +597,15 @@ def _run_train(args: argparse.Namespace) -> int:
                 )
             else:
                 raise ValueError("training requires --descriptor-tree or --provenance")
-            # The suffix decides, in `corpus_io.read_corpus_frame` for every command
-            # alike. `.parquet` is what uhd_gen/dataset publishes (RFC 0019.13
-            # §8.3) and is the route a model anyone ships should come by: the dataset
-            # carries its own types, so a column empty in one shard and populated in
-            # another cannot concatenate to `object` and quietly change what the
-            # trainer sees. A collected CSV is read directly, and nothing §8.3
-            # specifies is checked on it -- that is what the importer exists for -- so
-            # it is the escape hatch for a quick local run. The §11.2 label rule below
-            # is applied to all three alike: the published dataset earns no exemption
-            # from it.
+            # The suffix picks the reader. Only the `.parquet` dataset is §8.3-checked; a
+            # collected CSV is a local escape hatch. The §11.2 rule below applies to both.
             df = read_corpus_frame(input_path)
-            # What "this row has no measurement" looks like, in both spellings, because
-            # a corpus arrives in both. A collected CSV says `is_valid=False`, which is
-            # what the runtime record carries at the moment of failure. §8.3's published
-            # dataset has no validity flag at all: the measurement is null and `error`
-            # carries the reason, so that no two columns can disagree about one row.
-            # Both mean the candidate never ran, and a candidate that never ran cannot
-            # be fitted -- its target is NaN, and without this the NaN reaches
-            # `train_uhd.train_model`, whose "target must contain finite nonnegative
-            # values" then reports a missing filter as a corrupt corpus. `evaluate`
-            # excludes exactly these rows, by both spellings, for the same reason
-            # (§5.6.3 and `Exclusions`), and training and evaluation must not disagree
-            # about which rows exist.
+            # A row with no measurement is `is_valid=False` (collected CSV) or carries an
+            # `error` (published dataset). Drop both, as `evaluate` does, so training and
+            # evaluation agree on which rows exist.
             invalid = errored = unmeasured = 0
-            # RFC 0019 §13.2: a candidate shown to compute the wrong answer is never a
-            # label, whatever its timing says -- a wrong-but-fast kernel holds the best time
-            # in its group, so fitting it teaches the ranker to prefer it. The same gate
-            # `generate` applies (`correctness.known_wrong`): False is excluded, null
-            # (undecided) is kept, because null is every corpus collected without a
-            # reference. A published dataset also carries the failure as `error`; a
-            # collected CSV or a corpus JSON may still carry the timing.
+            # RFC 0019 §13.2: a candidate shown wrong is never a label (a wrong-but-fast
+            # kernel would teach the ranker to prefer it). False is dropped; null is kept.
             wrong = known_wrong(df)
             numerically_wrong = int(wrong.sum())
             df = df[~wrong]
@@ -667,17 +618,12 @@ def _run_train(args: argparse.Namespace) -> int:
                 errored = int(failed.sum())
                 df = df[~failed]
             if args.target in df.columns:
-                # Coerced rather than trusted: a CSV column holding one empty cell reads
-                # back as `object`, so the target can be a string here even when every
-                # populated row is a number.
+                # Coerced: one empty CSV cell reads the column back as `object`.
                 finite = np.isfinite(pd.to_numeric(df[args.target], errors="coerce"))
                 unmeasured = int((~finite).sum())
                 df = df[finite]
             if numerically_wrong or invalid or errored or unmeasured:
-                # Counted apart because they are four different producer facts, and the
-                # one that fires says which end to look at: the correctness check, the
-                # collector's flag, the published dataset's error, or a target column
-                # that is neither.
+                # Counted apart: each points at a different producer.
                 logger.info(
                     "Dropped %d row(s) checked numerically wrong, %d row(s) with "
                     "is_valid=False, %d row(s) carrying a collection error, and %d "
@@ -688,12 +634,8 @@ def _run_train(args: argparse.Namespace) -> int:
                     unmeasured,
                     args.target,
                 )
-            # RFC 0019.13 §11.2 (:2003): "A UHD declaring `calibrated: true` MUST train
-            # its score on `avgTimeMs`". A calibrated model is the one whose absolute
-            # value gets compared across engines, and minimum- or robust-mean-derived
-            # throughput is optimistically biased, so the claim is checked rather than
-            # trusted. Uncalibrated ranking may use any statistic; it just has to say
-            # which, because §11.2 refuses to compare models trained on different ones.
+            # RFC 0019.13 §11.2: a calibrated score MUST train on `avgTimeMs`. Uncalibrated
+            # models may use any statistic but must record which.
             if args.calibrated and args.timing_statistic != LABEL_STATISTIC:
                 raise ValueError(
                     "--calibrated requires --timing-statistic avgTimeMs (RFC 0019.13 "
@@ -702,17 +644,9 @@ def _run_train(args: argparse.Namespace) -> int:
         if df.empty:
             raise ValueError("No valid rows to train on")
         if not immediate:
-            # After the row filtering above, so the census sees exactly the rows that would
-            # train -- a candidate that failed to run is not a candidate the ranker gets to
-            # choose between, and counting it would report ranking density that measurement
-            # already destroyed. `generate` checks the same thing earlier and at greater
-            # value, before a GPU sweep rather than after; this catches the corpus handed
-            # to `train` directly, which is the route a re-train off collected data takes.
-            #
-            # Problems are identified exactly as training groups them below: `--group-by`
-            # when given, else `benchmark` (plus `device`). A corpus with neither has no
-            # problem identity, so there is nothing to census -- training has always
-            # accepted such a corpus, ungrouped, and the census must not refuse it.
+            # Census after row filtering, so it sees exactly the rows that train. Problems
+            # are grouped as training groups them; a corpus with no problem identity is
+            # trained ungrouped and the census is skipped.
             census_grouping = None
             if args.group_by is not None:
                 census_grouping = Grouping(
@@ -744,7 +678,7 @@ def _run_train(args: argparse.Namespace) -> int:
         if immediate:
             validate_signature(signature)
         if not any(isinstance(entry, dict) for entry in signature):
-            # A raw reference is a column gather; an expression's inputs may be legally absent
+            # A raw reference is a column gather; expression inputs may be legally absent
             # (value_or_default/present), so the shared evaluator decides for those.
             missing = {reference[1:] for reference in references} - set(df.columns)
             if missing:
@@ -757,15 +691,12 @@ def _run_train(args: argparse.Namespace) -> int:
             df, [ref[1:] for ref in references]
         )
         if immediate:
-            # After the encoding, because a published string is only evaluable through it.
+            # After the encoding: a published string is only evaluable through it.
             check_signature_evaluates(
                 signature, df["features"], categorical_encoding, args.feature_evaluator
             )
-        # The branch decides where the VALUES come from, never where the digest comes from:
-        # RFC 0019 §6.3 gives features_hash one definition and both kinds of signature take
-        # it from the shared evaluator. Values still split, because a raw reference is a
-        # column gather that pandas does in-process, and pushing a whole training corpus
-        # through the evaluator's JSON pipe to re-derive it would buy nothing.
+        # The digest always comes from the shared evaluator (RFC 0019 §6.3); raw references
+        # are gathered in-process rather than piped through it.
         if any(isinstance(entry, dict) for entry in signature):
             features_hash, values = evaluate_feature_rows(
                 df, signature, categorical_encoding, args.feature_evaluator
@@ -778,9 +709,8 @@ def _run_train(args: argparse.Namespace) -> int:
             matrix = build_feature_matrix(
                 df, [entry[1:] for entry in signature], categorical_encoding
             )
-        # From the evaluator that just digested this signature: what the published values
-        # mean is that build's, and the loader refuses a model recording any other revision
-        # (FeatureSemantics.hpp). Recorded before fitting, like the rest of the provenance.
+        # The loader refuses a model recording another feature-semantics revision
+        # (FeatureSemantics.hpp), so record this evaluator's before fitting.
         trained_against = record_feature_semantics(
             trained_against,
             evaluator_feature_semantics_revision(args.feature_evaluator),
@@ -811,19 +741,10 @@ def _run_train(args: argparse.Namespace) -> int:
             )
         dropped = [{"column": name, "value": value} for name, value in constants]
         if constants:
-            # A column with one value is a column no tree can split on, so it buys the
-            # model nothing -- and it is not free. RFC 0019 §6.3 hashes the whole
-            # signature into features_hash, so the dead column enlarges the contract the
-            # runtime must reproduce and bakes itself into the descriptor's identity: a
-            # later, more correct retrain that omits it reads as a contract break rather
-            # than as a better model. The test is variance in THIS corpus, never the
-            # column's name -- GenericPlanBuilder::candidateFeatures merges a sweep
-            # across several boards of one arch, and gfx942 spans MI300X and MI325X,
-            # whose total_global_mem, memory_clock_rate and peak_memory_bandwidth
-            # genuinely differ. Every drop is named with its value, because constancy is
-            # measured against the corpus that was collected: a field the sweep failed to
-            # cover is indistinguishable here from one the kernels pin, and only the
-            # author can tell those apart.
+            # A constant column cannot be split on, yet RFC 0019 §6.3 hashes it into the
+            # descriptor's identity. Constancy is measured in THIS corpus, not by name
+            # (one arch spans boards with differing memory fields), and each drop is
+            # logged because only the author can tell under-sampled from pinned.
             logger.warning(
                 "Dropping %d feature column(s) that never vary in this corpus: %s. "
                 "RFC 0019.13 §10.4: this prunes model inputs only, and leaves the "
@@ -849,9 +770,7 @@ def _run_train(args: argparse.Namespace) -> int:
                 for key, value in categorical_encoding.items()
                 if key in remaining_refs
             }
-            # Pruning changed the signature, so the descriptor's identity changed with
-            # it (§6.3). Only the digest is restated -- the kept columns of `matrix`
-            # are already the values for the surviving entries.
+            # Pruning changed the signature, so restate its digest (§6.3).
             features_hash = compute_features_hash(
                 signature, categorical_encoding, args.feature_evaluator
             )
@@ -867,11 +786,8 @@ def _run_train(args: argparse.Namespace) -> int:
         groups = args.group_by
         if groups is None and "benchmark" in df.columns:
             groups = ["benchmark"] + (["device"] if "device" in df.columns else [])
-        # Layer 1 ranks groups, so it is fitted on one row per (problem, group) carrying
-        # that group's best achievable target -- not on every candidate. Fitted on the raw
-        # rows it would instead rank individual candidates, and taking the group of the best
-        # one answers a different question: the error over a group's whole candidate set
-        # propagates into what should be a choice among a handful of groups.
+        # Layer 1 ranks groups, so fit it on one row per (problem, group) with that
+        # group's best target, not on every candidate.
         layer_one_df, layer_one_matrix = df, matrix
         if args.group_by_feature:
             if not groups:
@@ -907,9 +823,8 @@ def _run_train(args: argparse.Namespace) -> int:
             feature_matrix=layer_one_matrix,
         )
 
-        # Layer 2: one ensemble per group, fitted on that group's rows alone. Trained on the
-        # same feature columns, so one signature describes both layers; the slots a layer
-        # does not read are simply unused by its trees.
+        # Layer 2: one ensemble per group on that group's rows, over the same feature
+        # columns so one signature describes both layers.
         group_models: list[tuple[float, object]] = []
         group_index = -1
         if args.group_by_feature:
@@ -920,18 +835,14 @@ def _run_train(args: argparse.Namespace) -> int:
                     "to be one of them"
                 )
             group_index = names.index(args.group_by_feature)
-            # The runtime compares a row's group SLOT -- the value the feature row carries,
-            # which for a string column is its categorical code -- against each group's
-            # value. Exported as the raw value, "1"/"2" became 1.0/2.0 against codes 0/1 and
-            # "A"/"B" could not be exported at all.
+            # The runtime compares the group's feature SLOT value, which for a string
+            # column is its categorical code, so export codes rather than raw values.
             codes = categorical_encoding.get(feature_reference(args.group_by_feature))
             tagged = df.assign(_uhd_row=np.arange(len(df)))
             for value, rows in tagged.groupby(args.group_by_feature, sort=True):
                 at = rows["_uhd_row"].to_numpy()
-                # train_model cross-validates over problems, not rows, so a group with more
-                # rows than problems can still be unfittable. Skipping leaves the group to
-                # layer 1, which the adapter already handles -- a group it chose but layer 2
-                # does not describe ranks by layer 1 rather than being discarded.
+                # Cross-validation is over problems, so a group may be unfittable; it then
+                # ranks by layer 1, which the adapter handles.
                 try:
                     group_models.append(
                         (
@@ -949,8 +860,7 @@ def _run_train(args: argparse.Namespace) -> int:
                         )
                     )
                 except (ValueError, RuntimeError) as error:
-                    # Warn rather than fail: one unfittable group must not cost the artifact
-                    # every other group's layer 2, and the degradation is visible here.
+                    # One unfittable group must not cost every other group's layer 2.
                     logger.warning(
                         "group %s not fitted (%s); it will rank by layer 1",
                         value,
@@ -999,12 +909,8 @@ def _run_train(args: argparse.Namespace) -> int:
             "calibrated": args.calibrated,
             "transform": score_transform.TRAINED,
         },
-        # RFC 0019 §7.2: the body naming the artifact carries the digest of its bytes,
-        # which TreeDataAdapter recomputes before parsing and refuses on mismatch. It
-        # answers the question features_hash does not -- that one fingerprints the input
-        # contract, so two models with identical signatures and different training hash
-        # identically. Emitted bare-hex because that is what `sha256(buffer, size)`
-        # returns on the other side of the comparison.
+        # RFC 0019 §7.2: TreeDataAdapter verifies this artifact digest before parsing.
+        # Bare hex, matching `sha256(buffer, size)` on the runtime side.
         "tree_data": {"artifact": fb_path.name, "hash": model_sha256},
     }
     if categorical_encoding:
@@ -1021,9 +927,8 @@ def _run_train(args: argparse.Namespace) -> int:
         "trained_against": trained_against,
         "device_coverage": coverage,
         "dropped_constant_features": dropped,
-        # RFC 0019.13 §10.5: a content hash over the UHD document AND the model artifact.
-        # Conversion is deterministic (`lgbm_to_flatbuffer.resolve_training_date`), so
-        # these are checkable against the sources rather than merely recorded.
+        # RFC 0019.13 §10.5: content hashes of the UHD document and model artifact;
+        # conversion is deterministic, so both are reproducible from sources.
         "uhd_sha256": hashlib.sha256(descriptor_document.encode("utf-8")).hexdigest(),
         "model_sha256": model_sha256,
         "categorical_encoding": categorical_encoding,
@@ -1031,16 +936,13 @@ def _run_train(args: argparse.Namespace) -> int:
         "objective": args.objective,
         "score_metric": args.metric,
         "score_calibrated": args.calibrated,
-        # RFC 0019.13 §10.5/§11.2: which measured timing the target came from. §11.2
-        # refuses cross-engine comparison between models trained on different ones, so
-        # a consumer has to be able to read it off the artifact rather than infer it.
+        # RFC 0019.13 §10.5/§11.2: models trained on different statistics are not
+        # comparable, so the artifact records which one it used.
         "timing_statistic": args.timing_statistic,
         "score_transform": score_transform.TRAINED,
         "group_by": groups or [],
-        # The feature layer 1 groups on, and the count it produced. Recorded because the
-        # artifact alone gives an evaluator only a slot index, and a slot index cannot say
-        # which column it came from -- without the name, a report cannot attribute a regret
-        # to choosing the wrong group rather than the wrong member of the right one.
+        # The artifact holds only a slot index; the name lets a report attribute regret
+        # to the group choice versus the member choice.
         "group_by_feature": args.group_by_feature,
         "group_models": len(group_models or []),
         "num_trees": model.num_trees(),
@@ -1070,8 +972,7 @@ def _run_train(args: argparse.Namespace) -> int:
             training_problem_keys=sorted(set(zip(df["benchmark"], df["device"]))),
         )
     elif BENCHMARK_COLUMN in df.columns:
-        # The problems this model saw, in `evaluate`'s own identity, so a later standalone
-        # evaluation can prove its slice held out from content rather than from a path.
+        # In `evaluate`'s identity, so a later evaluation can prove its slice held out.
         manifest["training_problem_keys"] = sorted(
             set(problem_keys(df, resolve_grouping(df)))
         )

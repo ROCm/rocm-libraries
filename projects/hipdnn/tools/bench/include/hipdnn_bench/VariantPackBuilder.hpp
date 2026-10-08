@@ -17,26 +17,13 @@
 /// @file VariantPackBuilder.hpp
 /// @brief Sizing the buffers a deserialized graph needs (RFC 0019.13 §5.3).
 ///
-/// A problem arrives as a serialized graph, so the benchmark knows nothing about the
-/// operation it is about to run. It has tensors, and it must allocate for them. That is the
-/// whole job, and the two ways to get it wrong both produce a number rather than a crash:
-///
-///  - **Sizing by element count.** `count * sizeof(element)` is the footprint of a *packed*
-///    tensor. A tensor with padded or aligned leading dimensions occupies more, and the
-///    kernel will write past the end of a buffer sized this way.
-///  - **Sizing sub-byte types by a byte-valued element size.** FP4 and INT4 are half a byte,
-///    so any per-element size rounded to 1 over-allocates harmlessly, but rounded to 0
-///    allocates nothing. The arithmetic here is in bits for that reason.
-///
-/// Neither shows up as a failure in a corpus run. They show up as a time.
+/// Sizes come from strides, not element counts (padded tensors are larger than packed), and
+/// are computed in bits so sub-byte types (FP4, INT4) are not rounded to zero.
 namespace hipdnn_bench
 {
 
-/// Bits one element of @p dataType occupies, or 0 for a type this tool cannot size.
-///
-/// Bits rather than bytes because FP4_E2M1 and INT4 are four. Returning 0 rather than
-/// guessing is deliberate: a problem naming a type not listed here is refused with its name,
-/// which is a fixable message, where a guessed width is a buffer overrun.
+/// Bits one element of @p dataType occupies, or 0 for a type this tool cannot size (refused
+/// by name rather than guessed).
 inline int64_t elementBits(hipdnn_frontend::DataType dataType)
 {
     using hipdnn_frontend::DataType;
@@ -88,18 +75,11 @@ inline int64_t elementBits(hipdnn_frontend::DataType dataType)
     }
 }
 
-/// @brief Elements spanned by @p dims with @p strides -- the extent that must be addressable,
-///        which is not the element count unless the tensor is packed.
+/// @brief Elements spanned by @p dims with @p strides: `sum_i((dim_i - 1) * stride_i) + 1`,
+///        which equals the element count only for packed tensors.
 ///
-/// `sum_i((dim_i - 1) * stride_i) + 1`. A sum rather than a maximum over dimensions: the
-/// furthest addressable element is the one at the last index of *every* dimension at once, so
-/// taking the largest single term would under-count and size the buffer short.
-///
-/// Returns 0 for a malformed tensor (rank mismatch, non-positive extent, negative stride) and
-/// for one whose span int64_t cannot represent, so a caller refuses rather than allocating
-/// something arbitrary. Every product and sum is checked *before* it is formed: a wrapped
-/// span is signed-overflow UB, and in practice a small positive number -- a plausible
-/// allocation the kernel then writes far past.
+/// Returns 0 for a malformed tensor (rank mismatch, non-positive extent, negative stride) or
+/// one whose span overflows int64_t; overflow is checked before each product is formed.
 inline int64_t elementSpan(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
 {
     if(dims.empty() || dims.size() != strides.size())
@@ -128,9 +108,8 @@ inline int64_t elementSpan(const std::vector<int64_t>& dims, const std::vector<i
 
 /// @brief Bytes to allocate for a tensor of @p dims / @p strides / @p dataType.
 ///
-/// Rounds up, so a sub-byte tensor with an odd span still gets a whole byte. Returns nullopt
-/// for an unsizeable tensor, including one whose byte count int64_t cannot represent, rather
-/// than a zero or a wrapped size a caller might allocate.
+/// Rounds up to whole bytes. Returns nullopt for an unsizeable tensor or one whose byte count
+/// overflows int64_t.
 inline std::optional<int64_t> tensorBytes(const std::vector<int64_t>& dims,
                                           const std::vector<int64_t>& strides,
                                           hipdnn_frontend::DataType dataType)
@@ -142,9 +121,8 @@ inline std::optional<int64_t> tensorBytes(const std::vector<int64_t>& dims,
         return std::nullopt;
     }
 
-    // ceil(span * bits / 8), split as (span / 8) * bits + ceil((span % 8) * bits / 8) so no
-    // intermediate exceeds the result. `span * bits + 7` does: a 4- or 6-bit span near
-    // int64_t's range passes a `span * bits` bound and then overflows on the rounding.
+    // ceil(span * bits / 8), split so no intermediate exceeds the result; `span * bits + 7`
+    // can overflow for 4/6-bit spans near int64_t's range.
     const int64_t whole = span / 8;
     const int64_t tail = (((span % 8) * bits) + 7) / 8; // at most 256 bits: never overflows
     if(whole > (std::numeric_limits<int64_t>::max() - tail) / bits)
@@ -169,10 +147,8 @@ struct TensorRequirement
     int64_t bytes = 0;
     hipdnn_frontend::DataType dataType = hipdnn_frontend::DataType::NOT_SET;
 
-    /// Some node of the graph writes it. The flat plan carries no direction otherwise, and
-    /// both the input fill and the correctness gate depend on it: filling a result would hide
-    /// a kernel that writes nothing, and comparing an input would count bytes every
-    /// candidate was handed as agreement about what it computed.
+    /// Some node of the graph writes it. Produced tensors are cross-checked; the rest get the
+    /// input fill.
     bool produced = false;
 
     TensorStorage storage = TensorStorage::DEVICE;
@@ -183,9 +159,8 @@ struct VariantPackPlan
 {
     std::vector<TensorRequirement> tensors;
 
-    /// Non-empty when some tensor could not be sized; the plan is then unusable. Named
-    /// rather than counted, because "one tensor could not be sized" is not actionable and
-    /// "tensor W is FP6_E2M3, which this tool cannot size" is.
+    /// Non-empty, naming the offending tensor, when some tensor could not be sized; the plan
+    /// is then unusable.
     std::string error;
 };
 
@@ -210,16 +185,8 @@ inline std::unordered_set<int64_t> producedUids(const hipdnn_frontend::graph::Gr
 /// @brief Every tensor of @p graph the variant pack must carry, with the bytes each needs,
 ///        whether the graph writes it, and where its memory lives.
 ///
-/// Virtual tensors are skipped: they are intermediates the engine materialises itself, and
-/// allocating for them would both waste memory and hand the plan a pointer for something the
-/// variant pack must not contain.
-///
-/// Pass-by-value scalars follow RFC 0016 and the frontend's own variant-pack rule
-/// (Graph::execute): a scalar with a baked value -- compile-time constant or
-/// runtime-with-default -- reaches the provider through the op graph and has no slot, so it
-/// is not planned at all. A runtime user-supplied scalar is resolved at execute by a CPU read
-/// of its slot (hipdnn_plugin_sdk::resolveScalarOperand), so its slot is host memory: a
-/// device allocation there is a pointer the provider cannot portably dereference.
+/// Skips virtual tensors and scalars with a baked value (RFC 0016; they have no slot).
+/// Runtime user-supplied scalars get host memory because the provider reads them on the CPU.
 inline VariantPackPlan planVariantPack(const hipdnn_frontend::graph::Graph& graph)
 {
     VariantPackPlan plan;
@@ -263,8 +230,7 @@ inline VariantPackPlan planVariantPack(const hipdnn_frontend::graph::Graph& grap
         plan.error = "the graph declares no non-virtual tensors";
     }
 
-    // Sorted by uid so a plan is reproducible: getTensorsByUid returns an unordered_map, and
-    // allocation order would otherwise vary between runs of the same problem.
+    // Sorted by uid so allocation order is reproducible across runs.
     std::sort(plan.tensors.begin(),
               plan.tensors.end(),
               [](const TensorRequirement& a, const TensorRequirement& b) { return a.uid < b.uid; });

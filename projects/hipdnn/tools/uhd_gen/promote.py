@@ -43,8 +43,6 @@ UHD_SUFFIX = ".uhd.json"
 _ARCH = re.compile(r"^gfx[a-z0-9_-]+$")
 _ADAPTERS = ("static_order", "native", "tree_data", "table", "onnx", "custom_library")
 #: Roles whose arch key binds a list of UHDs, one per ranking metric (RFC 0019 §3.1).
-#: `predict_applicable_kernels` generates the candidate set rather than scoring it, so it
-#: has no metric to key on and stays single-valued.
 _METRIC_ROLES = ("sort_kernel_catalog", ROLE)
 
 
@@ -57,11 +55,8 @@ class PromotePlan:
     descriptor_path: Path
     descriptor_id: str
     artifact_path: Path | None
-    #: The UED whose role map binds this model, and the document to rewrite. Both are None
-    #: for an engine that owns no descriptor set: it binds its model by a UUID declared in
-    #: provider code (RFC 0019 §4.1, Open Question 7), so there is no role map to edit and
-    #: nothing to rewrite -- the model is installed where the loader scans, under the
-    #: identity the provider already asks for.
+    #: The UED that binds this model and its rewritten document; both None for an engine
+    #: with no UED, which binds by a UUID declared in provider code (RFC 0019 §4.1).
     ued_path: Path | None
     ued_document: dict | None
     engine_name: str
@@ -130,10 +125,7 @@ def add_promote_arguments(parser: argparse.ArgumentParser) -> None:
 def parse_uhd_ids(values: list[str] | None) -> dict[str | None, str]:
     """`--uhd-id` values as metric -> canonical UUID; a bare UUID is keyed by None.
 
-    UUIDs are declared per engine per METRIC (not per arch): one engine's `time` and
-    `tflops` estimates are two models, each under its own id, and one id may be bound
-    under every arch key it covers. A bare UUID names exactly one model, so it cannot be
-    mixed with metric-keyed ones.
+    A bare UUID names exactly one model, so it cannot be mixed with metric-keyed ones.
     """
     ids: dict[str | None, str] = {}
     for value in values or []:
@@ -210,12 +202,7 @@ def build_plan(
 
 
 def _corpus_path(model_dir: Path, corpus: Path | None) -> Path | None:
-    """The corpus that produced this model, when this run can see it.
-
-    `generate` stages `corpus.json` beside the `model/` directory it trains into and
-    promotes from exactly that layout, so the sibling is the ordinary case and needs no
-    flag; `--corpus` is for promoting a model whose corpus was archived elsewhere.
-    """
+    """`--corpus`, else the `corpus.json` that `generate` stages beside the model, else None."""
     if corpus is not None:
         if not corpus.is_file():
             raise PromoteError(f"--corpus is not a readable file: {corpus}")
@@ -227,23 +214,10 @@ def _corpus_path(model_dir: Path, corpus: Path | None) -> Path | None:
 
 
 def _correctness_gate(model_dir: Path, corpus: Path | None) -> list[str]:
-    """RFC 0019 §13.4: refuse emission while any candidate carries an invalid marker.
+    """Refuse emission while any candidate carries an invalid marker (RFC 0019 §13.4).
 
-    §13.2 is explicit that this is diagnosis, not remedy: suppressing the timing protects
-    the training labels, but the scorer cannot exclude a candidate (§5), so a kernel that
-    is applicable and incorrect stays selectable through every path that does not consult
-    the model -- a knob pin, a winning candidate that fails to build, any `static_order`
-    fallback. A learned demotion is a preference, and preference is not a correctness gate.
-
-    So the refusal lives here, at the stage §13.4 calls "the only stage positioned to
-    refuse to ship it". Clearing the marker is a matcher or kernel change, deliberately
-    reaching back into the pack: this is the one documented exception to the two-stage
-    layering, not a hole in it.
-
-    Returns the warnings a caller should surface. An undecidable verdict is not a refusal
-    -- Open Question 19(a) has not settled what reference each op validates against, so a
-    corpus of nulls is the expected state today -- but it is reported, because a check that
-    decided nothing must never be mistaken for a check that passed.
+    The model can only demote a kernel, not exclude it, so this is the gate. Undecided
+    verdicts are not refused but come back as warnings.
     """
     path = _corpus_path(model_dir, corpus)
     if path is None:
@@ -302,19 +276,9 @@ def _opaque_plan(
 ):
     """Install a model for an engine that owns no descriptor set.
 
-    Nothing is bound here and nothing is rewritten: the provider names the UUID it will
-    look for, and this writes the document carrying that UUID where the loader already
-    scans. The identity is therefore load-bearing in a way it is not for a UED-owned role
-    -- promote the wrong UUID and the engine reports no model rather than the wrong one,
-    which is why the id must be the one the provider declares for the model's metric.
-
-    The loader keys on the UUID, not on where the document lies, so an installed model
-    under that UUID is owned by what it is -- its metric and the architectures it was
-    trained for -- not by its path. One serving exactly this metric and only the
-    architectures this promotion targets is this slot's model wherever it was installed
-    (the shipped ASM models predate promote's layout), and is replaced in place. Any other
-    different model under the UUID is refused rather than overwritten: it serves a slot
-    this promotion does not own.
+    The model's id must be the UUID the provider declares for its metric. An incumbent
+    under that UUID serving the same metric and arches is replaced where it lies; any
+    other incumbent is refused.
     """
     if remove_knobs:
         raise PromoteError(
@@ -335,8 +299,7 @@ def _opaque_plan(
     binding = manifest.get("binding")
     recorded = binding.get("uhd_id") if isinstance(binding, dict) else None
     if recorded is not None:
-        # The id the engine described for this metric while the corpus was collected: the
-        # provider's own declaration, read back rather than retyped.
+        # The id the provider declared for this metric at collection time.
         recorded = descriptor_id(recorded, "train_manifest.json binding.uhd_id")
         if declared is not None and declared != recorded:
             raise PromoteError(
@@ -357,8 +320,7 @@ def _opaque_plan(
             f"({declared}); retrain with --uhd-id {metric}={declared} -- promote never "
             "renames a model"
         )
-    # One directory per metric, so the engine's `time` and `tflops` estimates for one arch
-    # never share a file name (RFC 0019 §3.1: one UHD per role, arch and metric).
+    # One directory per metric: one UHD per role, arch and metric (RFC 0019 §3.1).
     destination_dir = (
         Path(descriptor_tree) / "heuristics" / _slug(engine_name) / role / arch / metric
     )
@@ -399,7 +361,7 @@ def _opaque_plan(
         )
     for path, installed in incumbents:
         if _same_file(path, destination_descriptor):
-            # Promote's own layout for this role, arch and metric: replaced as written.
+            # Promote's own layout for this slot: overwritten as planned.
             continue
         if _same_model(
             path, installed, installed_descriptor, artifact_path, artifact_key
@@ -414,8 +376,7 @@ def _opaque_plan(
             {arch} if arch != "default" else set(manifest.get("training_arches", [])),
             descriptor_tree,
         )
-        # The incumbent's document and artifact are overwritten where they lie, so the
-        # incoming document names the artifact by the incumbent's file name.
+        # Overwrite the incumbent in place, keeping its artifact file name.
         plan.destination_descriptor = path
         installed_descriptor["tree_data"][artifact_key] = payload
         plan.copies[:] = (
@@ -438,13 +399,10 @@ def _same_slot_artifact(
     served: set,
     descriptor_tree,
 ) -> tuple[Path, str]:
-    """The incumbent's artifact and its name, once it is proven to be this slot's model.
+    """The incumbent's artifact and its name, once proven to be this slot's model.
 
-    An opaque engine's UUID is declared per architecture and metric, so the incumbent is
-    this slot's model when it estimates the same metric and its artifact records training
-    architectures that are all among the ones this promotion serves. Anything else -- a
-    model another architecture still scores with, a different metric, or a model whose
-    coverage cannot be read -- is a different binding of the id, and is refused.
+    It must estimate `metric` and its recorded training arches must all be in `served`;
+    anything else, including unreadable coverage, is refused.
     """
 
     def refuse(reason: str):
@@ -552,13 +510,7 @@ def _require_same_model(
     artifact_path: Path | None,
     artifact_key: str | None,
 ) -> None:
-    """Refuse unless the UHD at `path` is the incoming model (`_same_model`).
-
-    D2: one UUID is one model, however many arch keys bind it. Re-promoting that model for
-    another arch binds the installed copy (idempotently); a DIFFERENT model under an id
-    that is already installed elsewhere would silently change what every other binding of
-    it scores with, so it is refused.
-    """
+    """Refuse unless the UHD at `path` is the incoming model (D2: one UUID, one model)."""
     if not _same_model(path, installed, incoming, artifact_path, artifact_key):
         raise PromoteError(
             f"UHD id {installed.get('id')} is already installed at {path} with different "
@@ -578,13 +530,7 @@ def _reuse(plan: PromotePlan, installed: Path) -> None:
 def _verify_artifact(
     descriptor: dict, artifact_path: Path | None, role: str
 ) -> str | None:
-    """The artifact's digest, once the checks the runtime applies to it at load have passed.
-
-    `tree_data` gets `TreeDataAdapter`'s full load check -- declared digest, `HGBM`
-    identifier, structural decode -- plus the features-hash match it performs against the
-    descriptor, so promote never installs bytes the engine would refuse. Every other
-    artifact-bearing adapter gets the declared-digest check its loader applies.
-    """
+    """The artifact's digest, after the checks the runtime's loader applies to it."""
     if artifact_path is None:
         return None
     adapter = descriptor["adapter"]
@@ -598,8 +544,8 @@ def _verify_artifact(
                     f"actual {digest!r}"
                 )
             return digest
-        # The signature's slot count is what EnginePredictor and UhdKernelHeuristic hold
-        # the artifact's `num_features` to; a matching features_hash does not imply it.
+        # The runtime checks num_features against the signature length; a matching
+        # features_hash does not imply it.
         data = verify_tree_artifact(
             artifact_path,
             declared,
@@ -619,9 +565,7 @@ def _verify_artifact(
             f"UHD's {descriptor.get('features_hash')!r}; the engine would refuse it"
         )
     if role == ROLE and is_grouped_tree(data):
-        # The runtime scores only the root ensemble of an engine-level model, and offline
-        # evaluation would pick one group across unrelated graphs: a grouped artifact has
-        # no per-row L1 contract yet, so it is refused rather than mis-scored.
+        # Grouped artifacts have no engine-level scoring contract yet; refuse, don't mis-score.
         raise PromoteError(
             f"{artifact_path} is a grouped (two-layer) tree_data artifact, which "
             f"{ROLE} cannot bind; retrain without --group-by-feature"
@@ -630,7 +574,7 @@ def _verify_artifact(
 
 
 def _slug(name: str) -> str:
-    """A directory name from an engine name: the loader keys on content, not on layout."""
+    """A directory name from an engine name; the loader keys on content, not layout."""
     return "".join(
         character if character.isalnum() else "_" for character in name
     ).strip("_")
@@ -650,9 +594,7 @@ def _build_plan(
     uhd_ids = uhd_ids or {}
     if role not in ROLES:
         raise PromoteError(f"unknown heuristic role {role!r}")
-    # First, because it is the one refusal that is not about this installation at all: a
-    # correctness defect the timing run found is a fact about the pack, and it holds whether
-    # or not the descriptors line up.
+    # First: a correctness defect refuses regardless of the descriptors.
     gate_warnings = _correctness_gate(model_dir, corpus)
     descriptor_path = _find_descriptor(model_dir)
     _contained(descriptor_path, model_dir, "source descriptor")
@@ -691,16 +633,12 @@ def _build_plan(
         raise PromoteError("incoming model was trained for another role")
     provenance = descriptor.get("trained_against", {})
     if descriptor.get("features_signature"):
-        # The loader refuses a model whose recorded feature semantics are not the build's
-        # (FeatureSemantics.hpp), silently leaving the engine on its fallback; installing
-        # one would ship a model nobody scores. Only a feature-reading model, as there.
+        # The loader silently drops a model whose feature semantics differ from the build's.
         require_feature_semantics(
             provenance, evaluator_feature_semantics_revision(feature_evaluator)
         )
-        # The loader recomputes the digest from the signature and the categorical codes and
-        # drops the model on a mismatch (UhdKernelHeuristic.hpp, EnginePredictor.hpp). The
-        # artifact's own copy agreeing with the descriptor's proves only that both were
-        # stamped by one run -- not that the signature beside them is the one they describe.
+        # The loader recomputes this digest and drops the model on a mismatch; the
+        # artifact agreeing with the descriptor does not prove the signature matches.
         computed = compute_features_hash(
             descriptor["features_signature"],
             descriptor.get("categorical_encoding"),
@@ -715,11 +653,8 @@ def _build_plan(
     if role == ROLE:
         validate_model(descriptor)
         if "ued" in provenance and "selector_revision" not in provenance:
-            # An engine-level estimate is compared ACROSS engines, so the runtime holds a
-            # descriptor-backed engine's model to the selector revision it was measured under,
-            # exactly as it holds an opaque engine's: absent, the engine reports UNAVAILABLE.
-            # Every binding the bench records carries the revision, so absence means the
-            # model did not come from a collection by this pipeline.
+            # The runtime requires a selector revision for engine-level models and reports
+            # UNAVAILABLE without one.
             raise PromoteError(
                 f"{descriptor_path}: an engine-level model for a descriptor-backed engine must "
                 "record trained_against.selector_revision, which the runtime compares with the "
@@ -730,9 +665,7 @@ def _build_plan(
     digest = _verify_artifact(descriptor, artifact_path, role)
     installed_descriptor = copy.deepcopy(descriptor)
     if digest is not None:
-        # RFC 0019 §7.2: the body carries the digest of the bytes it names. Written when the
-        # trainer did not, so the runtime's model identity is the content actually installed
-        # rather than a UUID that outlives a weight change.
+        # RFC 0019 §7.2: the body carries the digest of the bytes it names.
         installed_descriptor[descriptor["adapter"]].setdefault("hash", digest)
 
     index = load_descriptor_tree(descriptor_tree)
@@ -741,13 +674,8 @@ def _build_plan(
             f"incoming UHD identity {identity} conflicts with a dependency descriptor"
         )
     if "ued" not in provenance:
-        # An engine that owns no descriptor set: AITER, MIOpen. RFC 0019 §4.1 / Open
-        # Question 7 binds its model by a UUID declared in provider code, so there is no
-        # role map to edit and no UED to select -- promotion is installing the document
-        # where the loader scans, under the identity the provider already asks for. The
-        # model says so itself: its trained_against names a selector revision and nothing
-        # else, which is exactly the case `select_engine` cannot serve ("expected one UED
-        # for --engine 'ASM_SDPA_ENGINE', found 0", run 67929588, after the model trained).
+        # No descriptor set (e.g. AITER, MIOpen): bound by a UUID declared in provider
+        # code, so there is no UED to select or role map to edit (RFC 0019 §4.1).
         opaque = _opaque_plan(
             descriptor_path,
             descriptor,
@@ -774,9 +702,7 @@ def _build_plan(
             f"model {identity} is not the id --uhd-id names for metric {metric} "
             f"({requested}); promote never renames a model"
         )
-    # One directory per metric, so an engine's rankers for one arch never share a file name
-    # (RFC 0019 §3.1: one UHD per role, arch and metric). A metric-less ranker has the arch
-    # directory to itself.
+    # One directory per metric (RFC 0019 §3.1); a metric-less ranker uses the arch directory.
     destination_dir = ued_path.parent / "heuristics" / original_ued["id"] / role / arch
     if metric is not None:
         destination_dir /= metric
@@ -829,8 +755,7 @@ def _build_plan(
         ued["revision"] = f"{major + 1}.0"
         ued["knobs"] = [knob for knob in exposed if knob not in plan.dropped_knobs]
     if descriptor.get("features_signature"):
-        # RFC 0019 §6.3 check 2 against the UED as it will be installed, i.e. after any
-        # --remove-knob: a model the runtime would refuse to rank with is not installed.
+        # RFC 0019 §6.3 check 2, against the UED after any --remove-knob.
         knobs = ued.get("knobs", [])
         if not isinstance(knobs, list) or any(
             not isinstance(item, str) for item in knobs
@@ -877,15 +802,13 @@ def _build_plan(
         )
 
     target = (ued_path.resolve(), role, arch)
-    # Only the entry this promotion replaces leaves the role map. Every other binding --
-    # including the other metrics' UHDs under this same arch key -- is held fixed.
+    # Every binding except the ones this promotion replaces, including other metrics here.
     others = [
         (path, slot, target_arch, ref)
         for path, slot, target_arch, ref in references
         if (path.resolve(), slot, target_arch) != target or ref not in replaced
     ]
-    # A UUID shared by another role or architecture is immutable for this promotion,
-    # even if the destination filename happens to be the model it already references.
+    # A UUID shared by another role or arch is immutable here, even at the same filename.
     descriptor_changes = not _same_file(descriptor_path, destination_descriptor)
     destination_artifact = None
     if artifact_path is not None:
@@ -1017,11 +940,8 @@ def _rebind(
 ) -> tuple:
     """The arch key's value once `identity` is bound, and the ids it displaces.
 
-    RFC 0019 §3.1 and §13.4: a metric-keyed role holds one UHD per metric under each arch
-    key, so the incoming UHD replaces only the entry of its own metric and otherwise joins
-    the others. The metric lives in each UHD, never in the UED, so the bound UHDs are read
-    to learn theirs -- a bound UHD this tree does not contain cannot be classified, and
-    guessing would either drop a live model or bind two of one metric.
+    A metric-keyed role holds one UHD per metric, and the metric lives only in each UHD, so
+    every bound UHD must be installed in this tree to be classified.
     """
     where = f"{role}.{arch}"
     value = ued.get(role, {}).get(arch)
@@ -1159,8 +1079,7 @@ def _validate_descriptor(document: dict, path: Path) -> None:
             raise PromoteError(f"{path}: score.transform must be a nonempty string")
         if "calibrated" in score and not isinstance(score["calibrated"], bool):
             raise PromoteError(f"{path}: score.calibrated must be a boolean")
-        # RFC 0019 §4.1: the metric is registered, fixes the direction, and is what a
-        # calibrated score is calibrated in.
+        # RFC 0019 §4.1: a registered metric fixes the objective direction.
         if "metric" in score:
             if score["metric"] not in RANKING_METRICS:
                 raise PromoteError(
@@ -1176,8 +1095,7 @@ def _validate_descriptor(document: dict, path: Path) -> None:
         elif score.get("calibrated") is True:
             raise PromoteError(f"{path}: a calibrated score must name its metric")
     body = document[adapter]
-    # static_order has no parameters: it ranks by UKD priority, then descriptor id. Declared
-    # criteria are refused, as UhdParser refuses them, rather than installed and ignored.
+    # static_order takes no criteria; refused here as UhdParser refuses them.
     if adapter == "static_order" and "order" in body:
         raise PromoteError(
             f"{path}: static_order.order is not supported: declared ordering criteria are "
@@ -1200,8 +1118,7 @@ def _validate_descriptor(document: dict, path: Path) -> None:
         raise PromoteError(f"{path}: unknown {adapter} body fields")
     if "hash" in body and (not isinstance(body["hash"], str) or not body["hash"]):
         raise PromoteError(f"{path}: model hash must be a nonempty string")
-    # UhdParser admits an omitted or empty configuration only: nothing consumes one yet,
-    # so a populated object is refused at load rather than silently ignored.
+    # UhdParser admits only an omitted or empty config.
     if adapter == "custom_library" and "config" in body and body["config"] != {}:
         raise PromoteError(
             f"{path}: custom_library configuration is not supported; omit config or "

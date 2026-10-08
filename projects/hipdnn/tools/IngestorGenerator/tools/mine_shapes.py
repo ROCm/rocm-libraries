@@ -16,13 +16,11 @@ warning.
     mine_shapes.py --catalog ../hipdnn_torch/MODEL_CATALOG.md \
         --shape-dir ~/model-shapes --out-query-csv model-shapes.csv
 
-Emits the request-field mappings `dispatch_parity.py --shapes` consumes, and -- with
-`--out-query-csv` -- the `q.<parameter>` columns `hipdnn_corpus_gen --model-shapes`
-reads as its model pool. Neither output filters by what a kernel can serve: that is
-the dispatcher's job at stage 4a and the corpus tool's oracle at admission, both of
-which report declines with reasons. Filtering here would hide the gap this corpus
-exists to measure. The CSV does narrow, but only to what one operation declaration can
-EXPRESS, and it reports every row it lost.
+Emits the request-field mappings `dispatch_parity.py --shapes` consumes and, with
+`--out-query-csv`, the `q.<parameter>` columns `hipdnn_corpus_gen --model-shapes`
+reads. Neither output filters by kernel support -- that would hide the gap this
+corpus measures. The CSV narrows only to what one operation declaration can express,
+and reports every row it drops.
 """
 
 from __future__ import annotations
@@ -35,20 +33,9 @@ import re
 import sys
 from pathlib import Path
 
-#: CSV mask spellings -> the request's mask_type. `swin` is a sliding window, which
-#: is a different mask kind rather than a causal variant; folding it onto causal
-#: collapsed seven distinct shape keys in an earlier join. It is carried through with
-#: its own value so the dispatcher declines it explicitly instead of it silently
-#: becoming a causal duplicate.
-#: Public for the same reason BACKWARD_GRADIENT_TENSOR_NAMES is: `write_query_csv`
-#: below, and any consumer reading shape files through this module, has to agree with
-#: it about what a mask value means, and a second literal is one that can silently
-#: drift from this one.
-#: `no_mask` and `top_left` are aiter/CK's spellings of the two it already had (see
-#: `composablekernel/tile_engine/ops/fmha`, whose published model shapes use them).
-#: `bottom_right` is deliberately ABSENT: causal aligned to the bottom right is a
-#: different mask from causal aligned to the top left whenever seqlen_q != seqlen_k,
-#: so it is refused by name rather than mapped onto `causal`.
+#: CSV mask spellings -> the request's mask_type. `swin` (sliding window) keeps its own
+#: value so the dispatcher declines it instead of serving it as causal. `bottom_right`
+#: is deliberately absent: it differs from top-left causal when seqlen_q != seqlen_k.
 MASK_TYPE = {"full": 0, "none": 0, "no_mask": 0, "causal": 1, "top_left": 1, "swin": 2}
 
 #: Tensor names marking a graph as backward, in both gradient spellings a
@@ -128,16 +115,8 @@ def _mask_from_attributes(
 ) -> dict:
     """Normalize the graph dialect to a mask kind, a window, and an anchor.
 
-    The anchor is REPORTED rather than normalized away. Folding bottom-right onto
-    top-left is safe only where Sq == Sk, and a UHD corpus deliberately contains the
-    case where it is not: `sdpa_fwd.opmeta.json` declares `alignment` as an axis so an
-    engine whose table is bottom-right-only is exercised (AITER's gfx942 forward table
-    has no top-left causal kernel, and a single-anchor corpus had it serving none of
-    its 15 causal graphs). Refusing those made this reader unable to read the corpus
-    the UHD trains on.
-
-    Consumers that only ever see Sq == Sk keep reading `mask_type` and `sliding_window`
-    and are unaffected; `alignment` is additive.
+    The anchor is reported, not folded onto top-left: the two differ when Sq != Sk,
+    and the UHD corpus deliberately includes that case. `alignment` is additive.
     """
     alignment = attrs.get("diagonal_alignment", "TOP_LEFT")
     if alignment not in ("TOP_LEFT", "BOTTOM_RIGHT"):
@@ -160,8 +139,7 @@ def _mask_from_attributes(
     if left == -1 and right == -1:
         return {"mask_type": 0, "sliding_window": 0, "alignment": "top_left"}
     if right != 0:
-        # A right bound other than 0 is not a causal mask at all, and there is no
-        # anchor that makes it one. Still refused.
+        # A right bound other than 0 is not causal under any anchor.
         raise SystemExit(
             f"FAIL: {path}: unsupported translation of bounds ({left}, {right}), "
             f"alignment {alignment}, Sq={seqlen_q}, Sk={seqlen_k} to AttentionRequest"
@@ -173,16 +151,8 @@ def _mask_from_attributes(
     }
 
 
-#: Every spelling a source uses for a dtype -> the spelling the rocKE spec takes.
-#: Three vocabularies meet here and none of them agree: hipDNN graphs say
-#: `bfloat16`, torch traces say `torch.bfloat16`, the spec says `bf16`. A source
-#: dtype that reaches the dispatcher unmapped is REJECTED at spec construction
-#: ("dtype must be one of ['bf16', 'fp16']"), which reads like the kernel declining
-#: a shape when it is really the miner mis-spelling one -- and the whole graph
-#: corpus disappears from the servable count that way.
-#: Public, with `normalise_dtype`, because every source read here normalises the same
-#: three vocabularies; a second table elsewhere would be a second opinion about what
-#: `half` means.
+#: Every source spelling of a dtype -> the rocKE spec's spelling. An unmapped dtype
+#: is rejected at spec construction, which looks like a kernel declining the shape.
 DTYPE_SPELLINGS = {
     "bf16": "bf16",
     "bfloat16": "bf16",
@@ -224,11 +194,7 @@ def from_graph_corpus(root: Path) -> list[dict]:
             graph = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
             continue
-        # A document that is not a graph object is skipped exactly like an unparseable
-        # one: this reader mines graphs and says nothing about anything else. Load-bearing
-        # for `from_shape_dir`, which points it at a published shape directory holding CSV,
-        # record-style JSON arrays and key=value files beside the graphs -- all of which
-        # parse as JSON and none of which carry tensors.
+        # Non-graph JSON (e.g. records beside graphs in a shape dir) is skipped.
         if not isinstance(graph, dict):
             continue
         tensors = {
@@ -460,11 +426,8 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
     return shapes
 
 
-#: Column spellings a published shape file uses -> this tool's field. Three publishers
-#: disagree (the kernel team's results CSV says `heads_q`/`seq_q`, aiter's model_shapes
-#: say `nhead_q`/`seqlen_q`, a hand-written file says `h`/`hq`), and a shape file that
-#: silently mines as zero rows is indistinguishable from one nobody pointed at. Adding a
-#: spelling here is the whole maintenance cost of accepting a new publisher.
+#: Column spellings a published shape file uses -> this tool's field. Publishers
+#: disagree (`heads_q`, `nhead_q`, `h`, ...); a new one costs one entry here.
 SHAPE_COLUMNS = {
     "batch": "batch",
     "batch_size": "batch",
@@ -537,11 +500,7 @@ def _shape_rows_from_csv(path: Path) -> list[dict]:
 def _shape_rows_from_text(path: Path) -> list[dict]:
     """`key=value key=value` per line, one shape per line.
 
-    The file convention is `dnn-convert-shapes`': one invocation per line, blank lines
-    and `#` comments skipped, so a hand-maintained shape list reads the same whichever
-    converter is pointed at it. None of that tool's code is reused -- it converts MIOpen
-    driver lines for convolution and batchnorm, and MIOpenDriver has no attention
-    operation to spell a line for.
+    Follows `dnn-convert-shapes`' convention: blank lines and `#` comments skipped.
     """
     rows = []
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -557,10 +516,7 @@ def _shape_rows_from_text(path: Path) -> list[dict]:
 def _shape_row(row: dict, path: Path) -> dict | None:
     """A published row as a record, or None if it is not a shape row at all.
 
-    Every value that decides a kernel goes through this module's own vocabulary rather
-    than through a guess: an unrecognised dtype or mask spelling is refused loudly,
-    because a guessed one mines a corpus entry that measures a different problem than
-    the one the row named.
+    An unrecognised dtype or mask spelling is refused, never guessed.
     """
     fields: dict = {}
     for key, value in row.items():
@@ -573,10 +529,8 @@ def _shape_row(row: dict, path: Path) -> dict | None:
     if any(field not in fields for field in required):
         return None
 
-    # A boolean `is_causal` column, or a named mask `MASK_TYPE` already knows. Every
-    # other spelling is refused rather than mapped here: `bottom_right`, for one, is a
-    # genuinely different mask from top-left causal, and accepting it would put a shape
-    # in the corpus that is not the one the row named.
+    # A boolean `is_causal` column or a `MASK_TYPE` name; anything else (e.g.
+    # `bottom_right`, a different mask) is refused.
     raw_mask = str(fields.get("mask", "")).strip().lower()
     if raw_mask in ("true", "1", "yes"):
         mask_type = MASK_TYPE["causal"]
@@ -614,15 +568,10 @@ def _shape_row(row: dict, path: Path) -> dict | None:
 def from_shape_dir(root: Path, arch: str | None = None) -> list[dict]:
     """Shapes from a published directory -- the cluster's `~/model-shapes`.
 
-    Both forms are read: hipDNN graph JSON (through `from_graph_corpus`, the same reader
-    a `dnn-benchmarking` tree gets) and tabular files -- `.json` records, `.csv`, and
-    `key=value` lines. Whichever form the kernel team publishes, the directory is the
-    pointer and nothing here has to be told which; a tree that mixes both is the
-    ordinary case, which is why the graph reader already skips non-graph documents.
+    Reads hipDNN graph JSON (via `from_graph_corpus`) and tabular files (`.json`
+    records, `.csv`, `key=value` lines); a directory may mix both.
 
-    `arch`, when given, drops rows that name a DIFFERENT arch. A row that names none is
-    kept: most publishers record a shape, not a target, and refusing those would mine
-    nothing from the common case.
+    `arch`, when given, drops rows naming a different arch; rows naming none are kept.
     """
     shapes = list(from_graph_corpus(root))
     wrong_arch = 0
@@ -649,11 +598,8 @@ def from_shape_dir(root: Path, arch: str | None = None) -> list[dict]:
     return shapes
 
 
-#: Batches to expand each catalog geometry over. The catalog's A/B runs are all
-#: single-batch (`output (1,256,1536)`), which is a measurement convention rather than
-#: a serving one: `corpus_gen/operations/sdpa_fwd.opmeta.json`'s own archetypes put the
-#: same models at batch 1..256. Emitting only batch 1 would mine a corpus that has never
-#: seen a served batch of the shapes it exists to get right.
+#: Batches to expand each catalog geometry over. The catalog's runs are all batch 1,
+#: a measurement convention; served batches (see `sdpa_fwd.opmeta.json`) are larger.
 CATALOG_BATCHES = (1, 8, 32)
 
 
@@ -677,9 +623,7 @@ def _catalog_sections(text: str) -> dict:
 def _catalog_table(text: str) -> list[dict]:
     """The `model | D | q/kv heads | causal` drill-down rows.
 
-    The catalog says the same things in prose several times over; this table is the
-    one place it says them as columns, so it is the row source and the prose is only
-    consulted for the sequence length it does not carry.
+    The table is the row source; prose is consulted only for sequence length.
     """
     rows, header_seen = [], False
     for line in text.splitlines():
@@ -711,12 +655,9 @@ def _catalog_numbers(field: str) -> list[int]:
 
 
 def _catalog_lengths(body: str) -> list[int]:
-    """Sequence lengths the entry records, from the two spellings it uses.
+    """Sequence lengths the entry records (`Sq=Skv=512` or `seq512`).
 
-    `Sq=Skv=512` in the validated SDPA report and `seq512` in the run's geometry
-    line. Nothing is inferred from a model's name: an entry that records no sequence
-    length yields no shape and is reported as skipped, because a guessed prompt
-    length is a shape no one measured.
+    Nothing is inferred from a model's name; an entry with no length yields no shape.
     """
     found = set(int(value) for value in re.findall(r"Sq=Skv=(\d+)", body))
     found |= set(int(value) for value in re.findall(r"\bseq(\d+)\b", body))
@@ -726,17 +667,8 @@ def _catalog_lengths(body: str) -> list[int]:
 def from_model_catalog(path: Path, batches=CATALOG_BATCHES) -> list[dict]:
     """Every attention geometry `MODEL_CATALOG.md` records, expanded over batch.
 
-    The fourth source, and the only in-tree one: this is the single place in the
-    repository where `bert = 12 heads, D=64, non-causal, Sq=Skv=512` is written down as
-    an OBSERVATION rather than as a plausible number. The other three sources all come
-    from outside the tree and are absent on a machine nobody staged them to.
-
-    A causal entry additionally yields its decode shape -- one query token against the
-    context it just filled. Decode is not an extra flavour of the prefill row: a
-    `seqlen_q` of 1 against a long cache is memory bound where the square prefill is
-    compute bound, and a corpus that omits it says nothing about the half of serving
-    that is decode. Encoder entries (bert, whisper, flux) get no decode shape: they
-    have no autoregressive phase to decode in.
+    A causal entry also yields its decode shape (one query token against the full
+    context), which is memory bound where prefill is compute bound.
     """
     text = path.read_text(encoding="utf-8")
     sections = _catalog_sections(text)
@@ -756,11 +688,8 @@ def from_model_catalog(path: Path, batches=CATALOG_BATCHES) -> list[dict]:
             "",
         )
         lengths = _catalog_lengths(body)
-        # The dtypes the entry was actually validated in, not every dtype the model
-        # could run in: an entry validated only in bf16 says nothing about fp16, and a
-        # declaration sweep is where unrecorded combinations belong. `\bf16\b` cannot
-        # match inside `bf16` -- `b` and `f` are both word characters -- so the two
-        # spellings do not collide.
+        # Only the dtypes the entry was validated in. `\bf16\b` cannot match inside
+        # `bf16` (`b` and `f` are both word characters).
         dtypes = set()
         if re.search(r"\bbf16\b", body):
             dtypes.add("bf16")
@@ -843,12 +772,7 @@ def from_model_catalog(path: Path, batches=CATALOG_BATCHES) -> list[dict]:
 
 
 def _shape_name(shape: dict, index: int) -> str:
-    """A human-readable name for one shape, or a positional one if it has no name.
-
-    The model pool's whole value over a sweep is that its points are NAMED: a regime a
-    later audit can argue about is `llama3-70b decode`, never a row of numbers. The
-    positional fallback exists so a nameless source still joins, not so it is the norm.
-    """
+    """A human-readable name for one shape, or a positional one if it has no name."""
     origin = shape.get("_provenance") or {}
     model = str(origin.get("model") or "")
     phase = str(origin.get("phase") or "")
@@ -864,21 +788,11 @@ def _shape_name(shape: dict, index: int) -> str:
 def write_query_csv(shapes: list[dict], path: Path) -> dict:
     """The mined corpus as the `q.<parameter>` columns `corpus_gen --model-shapes` reads.
 
-    This is a NARROWING, and it reports what it narrowed. The mined record is the union
-    of what four sources record; the CSV is what one operation declaration can express,
-    and the difference is not empty -- a sliding window, an asymmetric head dim and a
-    sink trace are all real recorded shapes that `sdpa_fwd` has no parameter for. Each
-    is dropped by name and counted, because a model pool that silently shrinks is
-    indistinguishable from a miner nobody pointed at anything.
-
-    `q.alignment` is the causal anchor the source recorded. A graph reports its own
-    (`_mask_from_attributes` keeps bottom-right rather than folding it onto top-left,
-    which is only equivalent where Sq == Sk); a tabular source cannot say bottom-right
-    -- `MASK_TYPE` deliberately has no spelling for it -- so it defaults to `top_left`.
-    The column is always written because the declaration's argument resolution is
-    strict about a parameter it reads being present. `q.generate_stats` is always
-    `false` for the same reason: every source here records inference forwards, and
-    none says whether a shape also ran as a training forward.
+    Narrows to what `sdpa_fwd` can express (no sliding window, asymmetric head dim,
+    or sinks) and counts each drop by reason. `q.alignment` defaults to `top_left`
+    for sources that cannot record an anchor; it and `q.generate_stats` (always
+    `false`: sources record inference forwards) are always written because argument
+    resolution requires every parameter it reads.
     """
     columns = [
         "name",

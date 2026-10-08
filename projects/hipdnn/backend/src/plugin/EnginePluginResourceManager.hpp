@@ -189,11 +189,9 @@ public:
                                                      uint64_t offset,
                                                      uint64_t limit) const;
 
-    /// Queries one engine without changing applicability, in the ranking metric the
-    /// config names (empty = default; unregistered throws BAD_PARAM). Returned data is owned
-    /// by the host and always carries that metric; invalid model/plugin predictions,
-    /// including an answer in another metric or an AVAILABLE value the metric rejects, are
-    /// explicit INVALID results. A selected configuration carries the metric it was chosen by.
+    /// Queries one engine without changing applicability, in the config's ranking metric
+    /// (empty = default; unregistered throws BAD_PARAM). The host-owned result always carries
+    /// that metric; malformed or other-metric answers are returned as INVALID.
     virtual hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         getEnginePrediction(const hipdnnPluginConstData_t& engineConfig,
                             const hipdnnPluginConstData_t& opGraph,

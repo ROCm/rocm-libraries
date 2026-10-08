@@ -43,33 +43,24 @@
 #include <vector>
 
 /// @file CustomLibraryAdapter.hpp
-/// @brief RFC 0019 §7.2's escape hatch: a scorer the in-tree walker cannot express.
-///
-/// Moved here from the backend. It was implemented beside a kernel-ranking path that RFC 0019
-/// §5 assigns to the engine ("the engine owns the UHD that ranks it"), and the adapter factory
-/// on the live path knew only tree_data, table and native -- so this adapter existed and was
-/// unreachable. Header-only to match its three siblings, which is what lets the same factory
-/// construct it.
+/// @brief RFC 0019 §7.2 escape hatch: a scorer the in-tree walker cannot express.
+/// Header-only so the shared adapter factory can construct it.
 namespace hipdnn_plugin_sdk::uhd
 {
 
 namespace detail
 {
 
-/// The three dynamic-loading calls this adapter needs, on both platforms it builds for.
-///
-/// A shim rather than `#ifdef`s at the call sites: the POSIX error protocol (clear
-/// `dlerror()`, call, read it back) and the Windows one (`GetLastError()`) do not
-/// interleave, so spelling them inline three times invites getting one of them subtly
-/// wrong. The handle stays `void*` in the member, which both platforms can carry.
+/// Dynamic-loading shim for POSIX and Windows; keeps each platform's error protocol
+/// (dlerror vs GetLastError) in one place.
 
 inline void* sharedLibraryOpen(const char* path)
 {
 #ifdef _WIN32
     return static_cast<void*>(::LoadLibraryA(path));
 #else
-    // RTLD_NOW so a missing symbol surfaces at load rather than at the first score() call,
-    // and RTLD_LOCAL so a third-party scorer cannot export names into the global scope.
+    // RTLD_NOW: missing symbols fail at load, not first score(). RTLD_LOCAL: a third-party
+    // scorer cannot export names into the global scope.
     return ::dlopen(path, RTLD_NOW | RTLD_LOCAL);
 #endif
 }
@@ -96,8 +87,8 @@ inline bool sharedLibraryClose(void* handle)
 #endif
 }
 
-/// The last failure, or empty when the platform reports none. Empty is not "succeeded":
-/// POSIX only guarantees a message after a call that failed.
+/// The last failure, or empty when the platform reports none. Empty does not mean success:
+/// POSIX only guarantees a message after a failed call.
 inline std::string sharedLibraryError()
 {
 #ifdef _WIN32
@@ -115,12 +106,8 @@ inline std::string sharedLibraryError()
 #endif
 }
 
-/// Whether @p path's bytes hash to @p expectedHash, naming what disagreed when they do not.
-///
-/// Reads the whole artifact: the digest is over the library as shipped, so accepting a
-/// prefix would accept a library with anything appended to it. The size is bounded before
-/// the buffer is sized -- the same bound TreeDataAdapter applies -- so a hostile length
-/// cannot be turned into an allocation by a file nothing has verified yet.
+/// Whether @p path's bytes hash to @p expectedHash. Hashes the whole file so appended bytes
+/// are caught, and bounds the size before allocating for an unverified file.
 inline bool artifactHashMatches(const std::string& path, const std::string& expectedHash)
 {
     constexpr std::streamoff MAX_ARTIFACT_BYTES = std::streamoff{256} * 1024 * 1024;
@@ -165,30 +152,17 @@ inline bool artifactHashMatches(const std::string& path, const std::string& expe
 
 /// @brief Custom library adapter for compiled scorers (RFC 0019 §7.2).
 ///
-/// dlopen's a `.so` shipped with the engine and calls a C ABI score function:
+/// dlopens a shipped `.so` (e.g. Treelite output) and calls a C ABI scorer:
 ///
 ///     extern "C" double <symbol>(const double* features, size_t num_features);
-///
-/// This mirrors RFC 0017's native-predicate pattern: the engine ships a `.so` alongside its
-/// descriptor set and the provider dlopen's it rather than linking it statically. The
-/// motivating case is a Treelite-generated `.so` from a GBDT the in-tree walker cannot read.
 class CustomLibraryAdapter : public IUhdAdapter
 {
 public:
     /// @brief Loads a custom library scorer.
-    ///
-    /// @param libraryPath          Absolute path to the shared object.
-    /// @param symbolName           C ABI scorer function name.
-    /// @param numFeatures          Expected feature-row length.
-    /// @param expectedFeaturesHash SHA-256 of the feature signature.
-    /// @param expectedModelHash    SHA-256 of the library's own bytes, from the UHD's
-    ///        `custom_library.hash`. Empty when the descriptor declares none, which RFC 0019
-    ///        §4.1 allows -- the digest is optional, but a declared one is binding.
-    /// @return Adapter on success, nullptr on any load failure.
-    ///
-    /// Returns nullptr rather than throwing: a descriptor set is drop-in data from a
-    /// potentially third-party author, and RFC 0019 §5 step 7 requires a malformed one to
-    /// degrade to static_order rather than fail the request.
+    /// @param expectedModelHash SHA-256 of the library bytes (`custom_library.hash`); empty
+    ///        when undeclared (RFC 0019 §4.1). A declared hash must match.
+    /// @return nullptr on any load failure, so a malformed descriptor degrades to
+    ///         static_order (RFC 0019 §5) instead of failing the request.
     static std::unique_ptr<CustomLibraryAdapter> load(const std::string& libraryPath,
                                                       const std::string& symbolName,
                                                       size_t numFeatures,
@@ -208,7 +182,7 @@ public:
         }
     }
 
-    /// Non-copyable and non-movable: the handle is owned and unloaded exactly once.
+    /// Non-copyable and non-movable: the handle is unloaded exactly once.
     CustomLibraryAdapter(const CustomLibraryAdapter&) = delete;
     CustomLibraryAdapter& operator=(const CustomLibraryAdapter&) = delete;
     CustomLibraryAdapter(CustomLibraryAdapter&&) = delete;
@@ -218,9 +192,8 @@ public:
     {
         if(features.size() != _numFeatures)
         {
-            // Throws rather than scoring a short row: the callee reads num_features entries
-            // through a raw pointer, so a mismatch is an out-of-bounds read inside code this
-            // process does not own.
+            // The callee reads num_features entries through a raw pointer, so a short row
+            // would be an out-of-bounds read.
             std::ostringstream message;
             message << "CustomLibraryAdapter: feature count mismatch. Expected " << _numFeatures
                     << ", got " << features.size();
@@ -243,8 +216,7 @@ public:
     }
 
 private:
-    /// C ABI scorer signature, identical to UhdScoreFn so one implementation can be reached
-    /// either way -- registered in-process for `native`, or exported from a `.so` for this.
+    /// Same signature as UhdScoreFn, so one scorer can serve `native` or this adapter.
     using ScorerFunc = double (*)(const double*, size_t);
 
     CustomLibraryAdapter(void* libHandle,
@@ -286,13 +258,7 @@ inline std::unique_ptr<CustomLibraryAdapter>
         return nullptr;
     }
 
-    // RFC 0019 §7.2: a body naming a model artifact may carry the digest of its bytes, and
-    // the adapter recomputes it before parsing and refuses on mismatch. Before the open,
-    // never after: dlopen/LoadLibrary maps the image and runs its initialisers, so a
-    // library verified afterwards has already executed whatever it wanted to. That
-    // ordering is why this cannot be hoisted to the caller the way EnginePredictor used to
-    // do it -- and why the same .so bound as `sort_kernel_catalog` went unverified while
-    // the `predict_engine` binding of it was checked.
+    // Verify before opening: dlopen/LoadLibrary run the library's initialisers.
     if(!expectedModelHash.empty() && !detail::artifactHashMatches(libraryPath, expectedModelHash))
     {
         return nullptr;
@@ -310,8 +276,7 @@ inline std::unique_ptr<CustomLibraryAdapter>
     void* symbol = detail::sharedLibrarySymbol(libHandle, symbolName.c_str());
     if(symbol == nullptr)
     {
-        // Only consulted once the symbol is known missing: a null result is the failure,
-        // and on POSIX a non-null symbol may legitimately leave a stale message behind.
+        // Read the error only on failure; POSIX may leave a stale message after success.
         const auto err = detail::sharedLibraryError();
         HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: symbol lookup failed for '"
                              << symbolName << "' in " << libraryPath << ": "

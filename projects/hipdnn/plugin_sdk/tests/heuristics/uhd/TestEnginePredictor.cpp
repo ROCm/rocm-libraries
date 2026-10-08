@@ -40,8 +40,7 @@ std::filesystem::path uniqueDirectory()
            / ("engine_prediction_" + std::to_string(s_session) + "_" + std::to_string(s_counter++));
 }
 
-/// A UHD reaches an engine only through the UED role map the descriptor loader resolves
-/// (RFC 0019 §3.1), so every case here hands predictEngine an already-resolved config.
+/// Every case hands predictEngine an already-resolved config, as the loader would (§3.1).
 class TestEnginePredictor : public ::testing::Test
 {
 protected:
@@ -110,7 +109,7 @@ protected:
             17, "test:opaque", "selector-1", metric, arch, _features, evaluate, cfg, compiled);
     }
 
-    /// A calibrated time model on the same scorer: objective `min` is what the metric fixes.
+    /// A calibrated time model (objective `min`) on the same scorer.
     UhdConfig timeConfig() const
     {
         auto doc = document();
@@ -130,8 +129,7 @@ protected:
         return doc;
     }
 
-    /// A flat one-feature ensemble matching document()'s signature that predicts
-    /// @p throughput everywhere, trained on @p trainingArches.
+    /// A flat ensemble matching document()'s signature predicting @p throughput everywhere.
     GbdtModelTestBuilder treeModel(double throughput,
                                    const std::vector<std::string>& trainingArches
                                    = {"gfx942"}) const
@@ -183,14 +181,7 @@ TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
     EXPECT_NEAR(treeResult.value, nativeResult.value, 1e-12);
 }
 
-/// RFC 0019 §7.2's digest is the adapter's to verify, and this is the L1 half of that.
-///
-/// The check used to live here, in the predictor, ahead of the factory call -- which is
-/// precisely why the kernel-ranking role, which has no such preamble, dlopen'ed the same
-/// library unverified. Moving it into CustomLibraryAdapter::load makes one implementation
-/// serve both roles, and this pins the L1 side of that move: a mismatched digest must still
-/// leave the engine without an estimate rather than quietly scoring through a substituted
-/// library.
+/// RFC 0019 §7.2: the adapter verifies the digest; the engine role must still see the refusal.
 TEST_F(TestEnginePredictor, ACustomLibraryWhoseDeclaredHashIsNotItsBytesYieldsNoEstimate)
 {
     auto custom = config(document());
@@ -204,13 +195,10 @@ TEST_F(TestEnginePredictor, ACustomLibraryWhoseDeclaredHashIsNotItsBytesYieldsNo
     custom.modelHash = sha256(std::string("not this library"));
 
     const auto result = predict(custom);
-    // INVALID, not UNAVAILABLE: §11.2 separates "I do not answer this question" from "I
-    // answer, and the answer is bad". A library present under a digest it does not match is
-    // the second, and reporting it as merely absent would hide a substituted artifact.
+    // INVALID, not UNAVAILABLE (§11.2): reporting it as absent would hide a substituted library.
     EXPECT_EQ(result.status, PredictionStatus::INVALID);
     EXPECT_DOUBLE_EQ(result.value, 0.0);
-    // Every answer names the metric it was asked in, a refusal included, so the host can
-    // tell a wrong-metric answer from a right-metric refusal.
+    // A refusal still names the metric it was asked in.
     EXPECT_EQ(result.metric, "tflops");
 }
 
@@ -228,21 +216,16 @@ TEST_F(TestEnginePredictor, DescriptionPublishesBindingWithoutLoadingOrScoring)
     EXPECT_EQ(binding.at("metric"), "tflops");
     EXPECT_EQ(binding.at("selector_revision"), "selector-1");
     EXPECT_EQ(binding.at("uhd_id"), cfg.uhdId);
-    // A description says what a model collected from it would be trained against. For an
-    // engine with no descriptors that is the selector revision and nothing else (§4.1,
-    // Open Question 7); a descriptor-backed engine adds its set on top in GenericEngine.
-    // A description carrying none at all cannot be turned into a UHD, which is where every
-    // opaque L1 collection stopped before this (run 67929509).
+    // An engine with no descriptors trains against its selector revision alone (§4.1);
+    // descriptor-backed engines add their set in GenericEngine.
     EXPECT_EQ(binding.at("trained_against").at("selector_revision"), "selector-1");
     EXPECT_FALSE(binding.at("trained_against").contains("ued"));
     EXPECT_EQ(nlohmann::json::parse(description.features_json).at("graph.work"), std::log1p(42.0));
     EXPECT_EQ(predict(cfg).status, PredictionStatus::UNAVAILABLE);
 }
 
-/// RFC 0019 §11.2: an engine nothing binds a prediction model to -- no UED role map and
-/// no UUID declared in provider code (Open Question 7) -- contributes no score, yet must
-/// still describe the binding an author would train against: that description is how the
-/// very first model gets collected.
+/// RFC 0019 §11.2: an unbound engine still describes its binding, which is how the first model
+/// gets collected.
 TEST_F(TestEnginePredictor, EngineWithNoResolvedRoleDescribesItsBindingAndDeclinesToScore)
 {
     const UhdConfig unbound;
@@ -262,8 +245,6 @@ TEST_F(TestEnginePredictor, EngineWithNoResolvedRoleDescribesItsBindingAndDeclin
     EXPECT_EQ(nlohmann::json::parse(description.features_json).at("graph.work"), std::log1p(42.0));
 }
 
-/// The loader backfills engine/role/arch onto the config it resolved, so a model that
-/// somehow names another engine or role must not be scored for this one.
 TEST_F(TestEnginePredictor, LoaderBackfilledAttachmentMustAgreeWithTheAskingEngine)
 {
     auto cfg = config(document());
@@ -282,10 +263,7 @@ TEST_F(TestEnginePredictor, LoaderBackfilledAttachmentMustAgreeWithTheAskingEngi
     EXPECT_EQ(predict(cfg).status, PredictionStatus::INVALID);
 }
 
-/// RFC 0019 §4.4: metrics never substitute for one another. A model of one metric asked a
-/// question in another is a binding that does not match -- the number would be in the wrong
-/// units -- so it is refused rather than reported, and the refusal still names the metric
-/// that was asked.
+/// RFC 0019 §4.4: the answer would be in the wrong units.
 TEST_F(TestEnginePredictor, AModelIsNeverAnsweredInAnotherMetric)
 {
     const auto tflops = config(document());
@@ -297,11 +275,8 @@ TEST_F(TestEnginePredictor, AModelIsNeverAnsweredInAnotherMetric)
     EXPECT_DOUBLE_EQ(asTime.value, 0.0);
 }
 
-/// FeatureSemantics.hpp: the revision says what published feature values MEAN, so a model
-/// trained under another one reads the same names and passes the same features_hash while
-/// scoring numbers it was never fitted on. It is refused as UNAVAILABLE -- not a bad model,
-/// just not this build's -- naming both revisions. A document recording none is revision 1:
-/// the shape of every model shipped before the revision existed.
+/// Same names and features_hash, different meaning, so UNAVAILABLE naming both revisions.
+/// A document recording no revision is revision 1.
 TEST_F(TestEnginePredictor, AModelTrainedOnOtherFeatureSemanticsIsUnavailable)
 {
     using hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION;
@@ -331,8 +306,7 @@ TEST_F(TestEnginePredictor, AModelTrainedOnOtherFeatureSemanticsIsUnavailable)
     EXPECT_EQ(scorerCalls, 0U);
 }
 
-/// Revisions are compared for equality, so one value must have one spelling: 1.0, "1" or
-/// true reaching the comparison as 1 would let a malformed document through as current.
+/// Revisions compare for equality, so 1.0, "1" or true must not be read as 1.
 TEST_F(TestEnginePredictor, AFeatureSemanticsRevisionMustBeAPositiveInteger)
 {
     for(const auto& value : {nlohmann::json(0),
@@ -348,9 +322,8 @@ TEST_F(TestEnginePredictor, AFeatureSemanticsRevisionMustBeAPositiveInteger)
     }
 }
 
-/// One engine may bind one model per metric (RFC 0019 §3.1), and the arch fallback stays
-/// inside the requested metric: (gfx950, time) falls back to (default, time) and never to
-/// (gfx950, tflops), because that would report a throughput as a time.
+/// RFC 0019 §3.1: the arch fallback never crosses metrics, which would report a throughput as
+/// a time.
 TEST_F(TestEnginePredictor, BindingSelectsByMetricAndFallsBackWithinIt)
 {
     EngineModelBinding binding;
@@ -365,8 +338,7 @@ TEST_F(TestEnginePredictor, BindingSelectsByMetricAndFallsBackWithinIt)
     EXPECT_EQ(tflops.metric, "tflops");
     EXPECT_NEAR(tflops.value, 42.0, 1e-12);
 
-    // The time model scores the same feature through an identity transform, so its value is
-    // distinguishable from the throughput model's.
+    // The identity transform makes this distinguishable from the tflops model's value.
     const auto time = ask("time", "gfx942");
     ASSERT_EQ(time.status, PredictionStatus::AVAILABLE);
     EXPECT_EQ(time.metric, "time");
@@ -378,14 +350,13 @@ TEST_F(TestEnginePredictor, BindingSelectsByMetricAndFallsBackWithinIt)
     EXPECT_EQ(otherArch.metric, "time");
     EXPECT_EQ(otherArch.reason, "no predict_engine UHD for metric 'time' on arch 'gfx950'");
 
-    // A refusal is per metric too: refusing time on gfx942 leaves the tflops model answering.
+    // A refusal is per metric too.
     binding.markUnusable("time", "gfx942", PredictionStatus::INVALID, "refused");
     EXPECT_EQ(ask("time", "gfx942").status, PredictionStatus::INVALID);
     EXPECT_EQ(ask("tflops", "gfx942").status, PredictionStatus::AVAILABLE);
 }
 
-/// A time is valid only when strictly positive (RFC 0019 §11.4), where a throughput of 0 is
-/// merely the worst one: validity is the metric's, not a single rule for every number.
+/// RFC 0019 §11.4: a time must be strictly positive, while a throughput of 0 is merely worst.
 TEST_F(TestEnginePredictor, ValidityIsTheRequestedMetrics)
 {
     const auto cfg = timeConfig();
@@ -400,8 +371,7 @@ TEST_F(TestEnginePredictor, ValidityIsTheRequestedMetrics)
     EXPECT_DOUBLE_EQ(positive.value, 0.5);
 }
 
-/// RFC 0019 §4.1: `trained_against` names the descriptor set and only that. The engine
-/// selector variant is gone, and the ued/kmd/umd triple is all-or-nothing.
+/// RFC 0019 §4.1: the ued/kmd/umd triple is all-or-nothing.
 TEST_F(TestEnginePredictor, DescriptorProvenanceIsRequiredWholeAndAdmitsNoEngineVariant)
 {
     auto doc = document();
@@ -448,11 +418,7 @@ TEST_F(TestEnginePredictor, InvalidScoreAndTransformNeverBecomeAvailable)
     EXPECT_EQ(predict(cfg).status, PredictionStatus::INVALID);
     _features.bind("graph.work", 1000.0);
     EXPECT_EQ(predict(cfg).status, PredictionStatus::INVALID);
-    // An uninvertible transform, not merely an unusual one. `sqrt` stood here while
-    // validateBinding kept its own {identity, log1p} list; it now asks
-    // score_transform::isSupported, which accepts every transform this runtime can invert --
-    // so pinning the gate needs a name no inverse exists for. Recovering the metric from a
-    // z-score needs the training distribution's mean and variance, which no UHD carries.
+    // Uninvertible: a z-score needs the training mean and variance, which no UHD carries.
     cfg.scoreTransform = "zscore";
     _features.bind("graph.work", 2.0);
     EXPECT_EQ(predict(cfg).status, PredictionStatus::INVALID);
@@ -461,8 +427,7 @@ TEST_F(TestEnginePredictor, InvalidScoreAndTransformNeverBecomeAvailable)
     EXPECT_EQ(predict(cfg).status, PredictionStatus::INVALID);
 }
 
-/// The owning engine compiles a model once and reuses it, so a compiled model must not
-/// reach back to its artifact -- and its trained-arch set still bounds coverage.
+/// A compiled model is reused, so it must not reach back to its artifact.
 TEST_F(TestEnginePredictor, LoadedModelIsImmutableAndTrainingArchitectureLimitsCoverage)
 {
     auto cfg = config(document());
@@ -484,14 +449,8 @@ TEST_F(TestEnginePredictor, LoadedModelIsImmutableAndTrainingArchitectureLimitsC
     EXPECT_EQ(predictWith(cfg, compiled, true, "gfx950").status, PredictionStatus::UNAVAILABLE);
 }
 
-/// D2: one UUID bound under several architecture keys is one model. It is compiled once and
-/// shared, and where it answers is decided by the artifact's `training_arches`, never by the
-/// binding: bound for gfx942 and gfx950 but trained on gfx942 only, it answers on gfx942 and
-/// reports "no coverage" on gfx950.
-///
-/// The artifact is removed between the two queries. Compiled per arch key, the gfx950 query
-/// recompiles and reports the artifact "not deployed"; compiled per UUID, it reaches the
-/// model gfx942 already compiled, and that model's coverage is what answers.
+/// Coverage comes from the artifact's `training_arches`, not the binding. The artifact is
+/// removed between queries: a per-arch recompile would report "not deployed" instead.
 TEST_F(TestEnginePredictor, OneUuidBoundUnderTwoArchesIsOneModelAnsweringOnlyWhereTrained)
 {
     ASSERT_TRUE(treeModel(42.0, {"gfx942"}).buildToFile(artifactPath("shared.fb")));
@@ -514,10 +473,7 @@ TEST_F(TestEnginePredictor, OneUuidBoundUnderTwoArchesIsOneModelAnsweringOnlyWhe
     EXPECT_EQ(untrained.uhd_id, shared.uhdId);
 }
 
-/// R6: a UHD declaring no artifact hash is identified by the bytes present when it was
-/// parsed, in the same format a declared hash takes, so replacing the weights changes the
-/// identity every cache keys on. The adapter verifies against it like a declared digest:
-/// weights replaced after parse are refused, never scored under the old identity.
+/// Weights replaced after parse are refused, never scored under the old identity.
 TEST_F(TestEnginePredictor, AModelDeclaringNoHashIsIdentifiedByTheBytesItWasParsedWith)
 {
     const auto path = artifactPath("weights.fb");
@@ -547,10 +503,8 @@ TEST_F(TestEnginePredictor, AModelDeclaringNoHashIsIdentifiedByTheBytesItWasPars
     EXPECT_TRUE(config(treeDocument("weights.fb")).modelHash.empty());
 }
 
-/// R9: a grouped tree_data model decides per group, and an L1 estimate is one row per graph
-/// with no contract naming its group, so the runtime would answer from the root ensemble
-/// alone -- a number nothing trained or evaluated. Refused as INVALID, naming why; the same
-/// ensemble without groups is the control.
+/// An engine estimate is one row with no group, so only the untrained root ensemble could
+/// answer. The ungrouped ensemble is the control.
 TEST_F(TestEnginePredictor, AGroupedTreeArtifactIsRefusedForTheEngineRole)
 {
     GbdtModelTestBuilder::TreeSpec zero;

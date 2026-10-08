@@ -77,9 +77,7 @@ def _l1_train(corpus, output, *extra):
 def test_rows_collected_under_another_metric_cannot_train_a_model(
     tmp_path, evaluator, caplog
 ):
-    """T2: rows measured under the tflops selector describe what THAT selector picked, so a
-    `time` model fitted on them models the wrong engine behaviour without any number
-    looking wrong. The refusal names both metrics."""
+    """Rows describe what their own metric's selector picked; the refusal names both."""
     corpus = _l1_corpus(tmp_path / "corpus.json", metric="tflops")
     assert (
         _l1_train(
@@ -108,8 +106,7 @@ def test_rows_collected_under_another_metric_cannot_train_a_model(
 
 
 def test_a_grouped_engine_prediction_model_is_refused_before_fitting(tmp_path, caplog):
-    """R9: the runtime scores an L1 model's root ensemble only, so a grouped L1 artifact
-    would be scored differently from how it was fitted."""
+    """The runtime scores only the root ensemble of an L1 model."""
     corpus = _l1_corpus(tmp_path / "corpus.json")
     assert (
         _l1_train(
@@ -130,10 +127,7 @@ def test_a_grouped_engine_prediction_model_is_refused_before_fitting(tmp_path, c
 def test_grouped_export_keys_each_group_by_the_code_the_feature_row_carries(
     tmp_path, evaluator, categories
 ):
-    """T4: the runtime routes a row by comparing its group slot -- the categorical code of a
-    string feature -- with each group's value. Keyed by float(raw), "1"/"2" exported as
-    1.0/2.0 against codes 0/1 (the second group's model unreachable), and "A"/"B" could not
-    be exported at all, leaving both groups to layer 1."""
+    """The runtime routes by the string feature's categorical code, not float(raw)."""
     from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
 
     provenance = tmp_path / "provenance.json"
@@ -218,11 +212,7 @@ def _manifest(output):
 def test_a_catalog_row_checked_numerically_wrong_never_trains(
     tmp_path, evaluator, suffix
 ):
-    """RFC 0019 §13.2, at the `train` entrance `generate` does not guard: a candidate
-    shown wrong is not a label whatever its timing says. The bench's timing flag is
-    independent of the verdict, so the wrong row arrives `is_valid` with the fastest time
-    in its problem -- exactly the row a ranker would learn to prefer. Null (undecided)
-    still trains: it is every corpus collected without a reference."""
+    """RFC 0019 §13.2: a wrong candidate is never a label; null (unchecked) trains."""
     pd = pytest.importorskip("pandas")
     if suffix == ".parquet":
         pytest.importorskip("pyarrow")
@@ -292,8 +282,7 @@ def test_a_catalog_row_checked_numerically_wrong_never_trains(
 
 
 def test_an_immediate_pick_checked_numerically_wrong_never_trains(tmp_path, evaluator):
-    """The L1 half of the same gate: the verdict survives import and the row is excluded
-    from the labels, rather than import erasing the verdict and training on its time."""
+    """The L1 verdict survives import and the row is excluded from the labels."""
     corpus = _l1_corpus(tmp_path / "corpus.json")
     rows = json.loads(corpus.read_text(encoding="utf-8"))
     rows[0].update(numerically_valid=False, validation="output_mismatch: wrong output")

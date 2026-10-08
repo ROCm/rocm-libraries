@@ -23,47 +23,24 @@
 
 /**
  * @file TestUhdGeneratedModel.cpp
- * @brief The seam between the training tool and the runtime.
- *
- * Everything else in the UHD suites builds its model in-process with the
- * generated C++ builder, which is why a Python writer whose vtable was two slots
- * short shipped green for as long as it did: the two sides never exchanged a
- * file. These load committed `uhd_gen` output instead.
- *
- * Three contracts hold this together, and each of them has already been broken:
- *
- *  - the descriptor JSON, parsed by `DescriptorLoader` before a field is read
- *  - `features_hash`, computed by Python and recomputed by C++ from the
- *    signature in the same file; a mismatch refuses the load
- *  - the artifact path in `tree_data`, relative to the `.uhd.json` that
- *    declares it
- *
- * What is deliberately NOT here: executing the chosen kernel. That needs a
- * packaged descriptor tree and a device, and lives with the provider's
- * integration suite. These prove the artifact loads and reorders a catalog,
- * which is the part no test covered.
+ * @brief Loads committed `uhd_gen` output, rather than an in-process model, so the tool's
+ * writer and the runtime's reader exchange a real file. Executing the chosen kernel needs a
+ * device and lives in the provider's integration suite.
  */
 namespace hipdnn_plugin_sdk::ingestor
 {
 namespace
 {
 
-/// Where the committed `uhd_gen` output lives, relative to this source file.
-///
-/// The path is a compile definition rather than a runtime search: the fixture is
-/// source, not a build output, and probing for it would turn a missing file into
-/// a skip when it should be a failure.
+/// Where the committed `uhd_gen` output lives. A compile definition rather than a runtime
+/// search, so a missing fixture fails instead of skipping.
 std::filesystem::path fixtureDir()
 {
     return {HIPDNN_UHD_GENERATED_FIXTURE_DIR};
 }
 
-/// The committed `tile_selector.uhd.json`, through the loader's own parser.
-///
-/// Parsed rather than retyped: a descriptor built here would pass whatever the
-/// tool emitted through a second, hand-maintained spelling of the schema, and
-/// the seam this suite exists to hold is exactly that the tool writes what the
-/// parser reads.
+/// The committed `tile_selector.uhd.json`, parsed by the loader rather than retyped, so the
+/// test checks that the parser reads what the tool writes.
 HeuristicDescriptor generatedDescriptor()
 {
     const auto path = fixtureDir() / "tile_selector.uhd.json";
@@ -81,10 +58,8 @@ DescriptorId testId(uint8_t tag)
     return id;
 }
 
-/// Two kernels differing only in tile, with `priority` set AGAINST the model.
-///
-/// The small tile is declared first and ranks first without a heuristic, so any
-/// ordering the model does not produce is the fallback's, not a coincidence.
+/// Two kernels differing only in tile, with `priority` set against the model: without a
+/// heuristic the small tile ranks first.
 Catalog catalogAgainstPriority(int64_t seqlen)
 {
     Catalog catalog;
@@ -104,11 +79,8 @@ Catalog catalogAgainstPriority(int64_t seqlen)
     return catalog;
 }
 
-/// The committed `dtype_selector` pair, whose signature reads a STRING field.
-///
-/// A second fixture rather than a richer first one: `tile_selector` is numeric
-/// throughout, and it has to stay that way to keep proving that a signature with
-/// no categorical field hashes exactly as it did before the field existed.
+/// The committed `dtype_selector` pair, whose signature reads a string field. Kept separate
+/// so `tile_selector` stays all-numeric and keeps its pre-categorical hash.
 HeuristicDescriptor dtypeDescriptor()
 {
     const auto dir = fixtureDir() / "dtype_selector";
@@ -119,7 +91,6 @@ HeuristicDescriptor dtypeDescriptor()
     return descriptor;
 }
 
-/// The same two tiles, with the dtype the model actually splits on bound.
 Catalog catalogForDtype(const std::string& dtype)
 {
     Catalog catalog = catalogAgainstPriority(1024);
@@ -132,18 +103,11 @@ Catalog catalogForDtype(const std::string& dtype)
 
 const std::vector<std::string> DTYPE_KNOBS = {"dtype", "tile_m"};
 
-/// The knobs an engine shipping this model would declare.
-///
-/// RFC 0019 §6.3 check 2 requires the engine's exposed knobs to be exactly the model's
-/// `$kernel.*` axes, and the fixture's signature is `["$kernel.tile_m", "$q.seqlen"]`, so
-/// `tile_m` is the whole set. Passing it is not test scaffolding: a caller that omits it
-/// is describing an engine that varies nothing, and a model ranking on `tile_m` there is
-/// the broken contract the check exists to refuse.
+/// RFC 0019 §6.3 check 2: exposed knobs must equal the model's `$kernel.*` axes, which for
+/// this fixture is `tile_m` alone.
 const std::vector<std::string> KNOBS = {"tile_m"};
 
-/// The fields the KMD behind these fixtures declares. §6.3 check 2's other assertion --
-/// `F ⊆ KMD.fields` -- is re-checked at load, and a knob is a KMD field the engine chose
-/// to expose (§3.2), so the field set is the knob set plus whatever stays dispatch-only.
+/// KMD fields: the knobs plus any dispatch-only fields (§3.2, §6.3 check 2).
 const std::unordered_set<std::string> FIELDS = {"tile_m"};
 const std::unordered_set<std::string> DTYPE_FIELDS = {"dtype", "tile_m"};
 
@@ -159,7 +123,7 @@ TEST(TestIngestorUhdGeneratedModel, TheModelDecidesTheOrderRatherThanPriority)
     properties.gcnArchName = "gfx942";
     const MatchContext context{graph, 0, properties};
 
-    // 4096 is in the region the training data says the large tile wins.
+    // The training data has the large tile winning at seqlen 4096.
     const auto ranked = heuristic->rank(catalogAgainstPriority(4096), context);
 
     ASSERT_EQ(ranked.size(), 2U);
@@ -169,9 +133,7 @@ TEST(TestIngestorUhdGeneratedModel, TheModelDecidesTheOrderRatherThanPriority)
 
 TEST(TestIngestorUhdGeneratedModel, TheSameCatalogRanksDifferentlyForADifferentProblem)
 {
-    // The case that separates a model from a static order. Both rankings above
-    // could be produced by a constant; only a model that reads $q.seqlen flips
-    // when the problem does, and that flip is the reason a UHD exists at all.
+    // A constant order cannot produce this flip; only a model reading $q.seqlen can.
     const auto heuristic = makeKernelHeuristic(generatedDescriptor(), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
@@ -193,10 +155,8 @@ TEST(TestIngestorUhdGeneratedModel, TheSameCatalogRanksDifferentlyForADifferentP
 
 TEST(TestIngestorUhdGeneratedModel, TheModelRanksOnTheStringItWasTrainedOn)
 {
-    // End to end: a category reaches the model as a number and changes the answer.
-    // The two catalogs differ ONLY in dtype -- same tiles, same priorities, same
-    // seqlen -- so a model that never saw the string cannot produce this flip, and a
-    // model reading it through the wrong codes produces the flip backwards.
+    // The catalogs differ only in dtype, so the flip comes from the categorical encoding;
+    // wrong codes would flip it backwards.
     const auto heuristic = makeKernelHeuristic(dtypeDescriptor(), {}, DTYPE_KNOBS, DTYPE_FIELDS);
     ASSERT_NE(heuristic, nullptr);
 

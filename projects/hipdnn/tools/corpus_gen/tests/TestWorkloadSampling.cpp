@@ -5,10 +5,8 @@
  * @file TestWorkloadSampling.cpp
  * @brief Covers drawing from archetypes and moving within neighbourhoods.
  *
- * The property under test throughout is that a draw stays a *plausible problem*: the joint
- * facts an archetype records survive the draw, and a perturbation moves a parameter the way
- * that parameter actually moves in real networks. A sampler that produced valid-but-arbitrary
- * numbers would pass a shape-validity check and still rebuild the distribution this replaces.
+ * Draws must stay plausible: an archetype's joint values survive, and perturbation moves each
+ * parameter the way it moves in real networks.
  */
 
 #include <gtest/gtest.h>
@@ -33,8 +31,8 @@ OperationMetadata metadataFor(const std::string& json)
     return load.metadata.value_or(OperationMetadata{});
 }
 
-/// A convolution cut down to what these tests need: two correlated extents, a mirror, and a
-/// categorical the archetypes disagree about.
+/// A cut-down convolution: two correlated extents, a mirror, and a categorical the archetypes
+/// disagree about.
 OperationMetadata tinyConv()
 {
     return metadataFor(R"({
@@ -90,9 +88,7 @@ OperationMetadata shipped(const std::string& operation)
 
 TEST(TestWorkloadSampling, ADrawKeepsAnArchetypesValuesTogether)
 {
-    // The whole reason archetypes exist: C=3 is realistic beside H=224 and R=7, and meaningless
-    // beside C=64's shape. Drawing each parameter from its own marginal loses exactly that, and
-    // is what a uniform search over the region already does.
+    // C=3 belongs with H=224 and R=7; per-parameter marginals would lose that.
     const auto metadata = tinyConv();
     std::mt19937_64 rng(1);
 
@@ -110,8 +106,7 @@ TEST(TestWorkloadSampling, ADrawKeepsAnArchetypesValuesTogether)
 
 TEST(TestWorkloadSampling, AReferencedValueFollowsWhatWasActuallyDrawn)
 {
-    // `W: ["$q.H"]` is how a declaration says "square". Re-drawing W independently would make
-    // 224x224 into 224x112 and the archetype would no longer describe the layer it names.
+    // `W: ["$q.H"]` means square: W must follow the drawn H.
     const auto metadata = tinyConv();
     std::mt19937_64 rng(2);
 
@@ -123,10 +118,8 @@ TEST(TestWorkloadSampling, AReferencedValueFollowsWhatWasActuallyDrawn)
 
 TEST(TestWorkloadSampling, EveryShippedSdpaArchetypeDrawsWhateverOrderItsKeysParseIn)
 {
-    // The parser keeps a JSON object's keys sorted, so `seqlen_k` comes before the `seqlen_q`
-    // it copies. Drawing in that order left every `seqlen_k: ["$q.seqlen_q"]` archetype with
-    // nothing to copy: six of seven SDPA anchors drew nothing, and only decode -- the one with
-    // literal lengths -- reached the corpus.
+    // JSON keys parse sorted, so `seqlen_k` precedes the `seqlen_q` it copies; draw order must
+    // follow references, not key order.
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
         const auto metadata = shipped(operation);
@@ -157,9 +150,7 @@ TEST(TestWorkloadSampling, EveryShippedSdpaArchetypeDrawsWhateverOrderItsKeysPar
 
 TEST(TestWorkloadSampling, AShippedMirrorFollowsThePerturbedValueWhateverOrderItsKeysParseIn)
 {
-    // The same sorted order moved `seqlen_k` before the `seqlen_q` it mirrors, so it kept the
-    // anchor's length while `seqlen_q` scaled away from it -- 1024 against 2048 is a ratio the
-    // declaration never offered.
+    // Same key-order hazard for neighbourhood mirrors.
     const auto metadata = shipped("sdpa_fwd");
     std::mt19937_64 rng(5);
     const ProblemPoint anchor{{"batch", int64_t{4}},
@@ -186,8 +177,7 @@ TEST(TestWorkloadSampling, AShippedMirrorFollowsThePerturbedValueWhateverOrderIt
 
 TEST(TestWorkloadSampling, AReferenceCycleIsRefusedAtLoad)
 {
-    // No order draws either side of a cycle first. Accepted, the archetype would draw nothing
-    // and its combinations would fall back to exploration without a word.
+    // A cycle cannot be drawn in any order.
     const auto refusesCycle = [](const std::string& json) {
         const auto load = parseOperationMetadata(nlohmann::json::parse(json));
         EXPECT_FALSE(load.ok());
@@ -215,9 +205,7 @@ TEST(TestWorkloadSampling, AReferenceCycleIsRefusedAtLoad)
 
 TEST(TestWorkloadSampling, AnArchetypeThatContradictsTheCombinationDeclinesRatherThanOverrides)
 {
-    // Combinations own the categorical axes, and each gets its own budget. An archetype that
-    // quietly overrode dtype would file fp32 problems under fp16 -- every row mislabeled
-    // in the one column a model cannot recover from the shape.
+    // Combinations own the categorical axes; overriding dtype would mislabel rows.
     const auto metadata = tinyConv();
     std::mt19937_64 rng(3);
 
@@ -234,9 +222,7 @@ TEST(TestWorkloadSampling, AnArchetypeThatContradictsTheCombinationDeclinesRathe
 
 TEST(TestWorkloadSampling, PerturbationKeepsChannelsAligned)
 {
-    // The measured failure: 1.3% of a uniform corpus had C and K both aligned to eight, while
-    // essentially every convolution in a real network does. Alignment decides which kernels are
-    // even applicable, so a corpus that loses it is asking the model the wrong question.
+    // Alignment decides which kernels apply; real networks keep C and K aligned to eight.
     const auto metadata = tinyConv();
     std::mt19937_64 rng(4);
 
@@ -257,9 +243,7 @@ TEST(TestWorkloadSampling, PerturbationKeepsChannelsAligned)
 
 TEST(TestWorkloadSampling, ADistinguishedSmallValueSurvivesAnAlignmentNeighbourhood)
 {
-    // C=3 is the three-channel image every vision network starts from. It is not a misaligned
-    // 8, and rounding it up to one deletes the stem layer from the 60% of the corpus that comes
-    // from perturbation -- quietly, because C=8 is a perfectly ordinary channel count.
+    // C=3 is the image stem, not a misaligned 8.
     const auto metadata = tinyConv();
     std::mt19937_64 rng(41);
 
@@ -276,7 +260,6 @@ TEST(TestWorkloadSampling, ADistinguishedSmallValueSurvivesAnAlignmentNeighbourh
         EXPECT_EQ(at(moved, "C"), 3) << "the three-channel input did not survive perturbation";
     }
 
-    // A value at or above the alignment still moves, and still lands on a multiple.
     const ProblemPoint body{{"C", int64_t{64}},
                             {"H", int64_t{56}},
                             {"W", int64_t{56}},
@@ -295,8 +278,7 @@ TEST(TestWorkloadSampling, ADistinguishedSmallValueSurvivesAnAlignmentNeighbourh
 
 TEST(TestWorkloadSampling, PerturbationActuallyMoves)
 {
-    // A neighbourhood that returned the anchor every time would look like it was working and
-    // reduce the corpus to its handful of archetypes, which memorises rather than generalises.
+    // A neighbourhood that never moves would reduce the corpus to its archetypes.
     const auto metadata = tinyConv();
     std::mt19937_64 rng(5);
 
@@ -324,8 +306,7 @@ TEST(TestWorkloadSampling, PerturbationActuallyMoves)
 
 TEST(TestWorkloadSampling, AMirrorFollowsThePerturbedValueNotTheOriginal)
 {
-    // If W mirrored the anchor's H rather than the drawn one, halving H would silently produce
-    // a 28x56 image -- a shape that is valid, unremarkable in a CSV, and in no real network.
+    // W must mirror the perturbed H, not the anchor's.
     const auto metadata = tinyConv();
     std::mt19937_64 rng(6);
 
@@ -348,9 +329,7 @@ TEST(TestWorkloadSampling, AMirrorFollowsThePerturbedValueNotTheOriginal)
 
 TEST(TestWorkloadSampling, AParameterWithNoNeighbourhoodDoesNotDrift)
 {
-    // Padding is chosen with the filter, not independently: a 7x7 filter comes with pad 3
-    // because that is what preserves the spatial extent. Moving it because it happens to be an
-    // integer would turn a recorded layer into a geometry nobody selected.
+    // Padding is chosen with the filter; moving it independently invents unseen geometries.
     const auto metadata = tinyConv();
     std::mt19937_64 rng(7);
 
@@ -395,8 +374,7 @@ TEST(TestWorkloadSampling, PerturbationRespectsADeclaredRange)
 
 TEST(TestWorkloadSampling, DeclaringAnchorsWithoutAMixtureStillUsesThem)
 {
-    // Silence here used to mean the archetypes were parsed and then ignored, which reads in
-    // every report as a corpus that had anchors.
+    // Declared archetypes must not be parsed and then ignored.
     const auto metadata = metadataFor(R"({
       "schema_version": "1.1",
       "operation": "defaulted",
@@ -431,8 +409,7 @@ TEST(TestWorkloadSampling, AnOperationWithNoAnchorsIsExplorationOnly)
 
 TEST(TestWorkloadSampling, AMalformedDeclarationIsRefusedRatherThanQuietlyWeakened)
 {
-    // Each of these would otherwise degrade to "no perturbation" or "unanchored", which is
-    // indistinguishable in the output from a corpus that was anchored and simply looks odd.
+    // Each would otherwise silently degrade to "no perturbation" or "unanchored".
     const auto expectError = [](const std::string& json, const std::string& fragment) {
         const auto load = parseOperationMetadata(nlohmann::json::parse(json));
         EXPECT_FALSE(load.ok());

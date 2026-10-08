@@ -1,7 +1,6 @@
 find_package(Threads REQUIRED)
 
-# Tensor sizing, initialization and the §13.2 correctness gate: all decisions over host
-# buffers, so none of them requires a device or a plugin.
+# Host-only tests: no device or plugin required.
 add_executable(hipdnn_bench_tests
     TestVariantPackBuilder.cpp
     TestCsvOutput.cpp TestNumericalValidation.cpp)

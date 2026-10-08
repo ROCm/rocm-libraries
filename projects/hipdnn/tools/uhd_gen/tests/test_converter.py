@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Tests for LightGBM to FlatBuffer converter.
-
-These tests verify that:
-1. The FlatBuffer output has correct structure
-2. Tree traversal produces same results as LightGBM predict()
-3. Features hash is correctly embedded
-"""
+"""Tests for the LightGBM to FlatBuffer converter."""
 from __future__ import annotations
 
 import hashlib
@@ -18,9 +12,8 @@ from pathlib import Path
 
 import pytest
 
-# Must precede the imports below: these are optional, heavyweight training
-# dependencies, and importing them directly would turn a missing dep into a
-# collection error instead of a skip.
+# Before the imports below, so a missing optional dependency skips instead of
+# failing collection.
 flatbuffers = pytest.importorskip("flatbuffers")
 lgb = pytest.importorskip("lightgbm")
 np = pytest.importorskip("numpy")
@@ -66,19 +59,10 @@ def _train_simple_model(
 
 
 def _score_flatbuffer_model(buffer: bytes, features) -> float:
-    """Mirror of `TreeDataAdapter::score()` over a GbdtModel FlatBuffer.
+    """Independent mirror of C++ `TreeDataAdapter::score()` over a GbdtModel buffer.
 
-    Deliberately a re-implementation rather than a call into the tool: the point is
-    to walk the emitted bytes exactly the way the C++ runtime walks them, so a
-    writer that produces a buffer the runtime misreads fails here.
-
-    Semantics copied from
-    plugin_sdk/include/hipdnn_plugin_sdk/heuristics/uhd/adapters/TreeDataAdapter.hpp:
-      - score() is `base_score + sum(tree)`; `learning_rate` is metadata and is NOT
-        applied, because LightGBM folds shrinkage into the dumped leaf values
-      - a node is a leaf when `left_children[node] < 0`
-      - `decision_lte` absent or true means `<=`, false means `<`
-      - a NaN feature, or a feature index outside the row, takes `default_left`
+    `learning_rate` is not applied (LightGBM folds it into leaf values); absent
+    `decision_lte` means `<=`; a NaN or out-of-range feature takes `default_left`.
     """
     model = GbdtModel.GetRootAs(buffer, 0)
     total = model.BaseScore()
@@ -126,12 +110,7 @@ def _score_flatbuffer_tree(tree, features) -> float:
 
 
 class TestCostMetricDetection:
-    """Guard on the objective/target mismatch.
-
-    `--target` is free-form while `objective` used to be hardcoded to "max", so
-    training on a latency column emitted a descriptor telling the runtime to
-    maximize latency. This heuristic only warns; it never overrides the caller.
-    """
+    """Flags cost-like `--target` names; it only warns, never overrides."""
 
     @pytest.mark.parametrize(
         "target",
@@ -163,8 +142,7 @@ class TestObjectiveName:
     @pytest.mark.parametrize(
         ("dump", "expected"),
         [
-            # LightGBM 4.x: a bare string. Reading this as a mapping raised
-            # AttributeError and broke every conversion.
+            # LightGBM 4.x: a bare string.
             ({"objective": "regression"}, "regression"),
             # 4.x with trailing objective parameters; only the leading token names it.
             ({"objective": "binary sigmoid:1"}, "binary"),
@@ -182,17 +160,14 @@ class TestObjectiveName:
         assert _objective_name(dump) == expected
 
     def test_real_lightgbm_dump_is_supported(self):
-        """The installed LightGBM's actual dump shape must convert, not just fixtures."""
+        """The installed LightGBM's real dump shape, not just fixtures."""
         X, y = _create_synthetic_data(n_samples=100, n_features=3)
         model = _train_simple_model(X, y, num_trees=2)
         assert _objective_name(model.dump_model()) == "regression"
 
 
 class TestConverter:
-    """Test FlatBuffer conversion."""
-
     def test_convert_simple_model(self, tmp_path: Path):
-        """Test converting a simple 2-tree model."""
         X, y = _create_synthetic_data(n_samples=100, n_features=3)
         model = _train_simple_model(X, y, num_trees=2)
 
@@ -206,12 +181,10 @@ class TestConverter:
         with open(fb_path, "rb") as f:
             buffer = f.read()
 
-        # Verify file identifier
         assert buffer[4:8] == GBDT_MODEL_FILE_IDENTIFIER
-        assert len(buffer) > 100  # Should have some content
+        assert len(buffer) > 100
 
     def test_features_hash_embedded(self, tmp_path: Path):
-        """Test that features hash is embedded in output."""
         X, y = _create_synthetic_data(n_samples=50, n_features=2)
         model = _train_simple_model(X, y, num_trees=1)
 
@@ -225,27 +198,23 @@ class TestConverter:
         with open(fb_path, "rb") as f:
             buffer = f.read()
 
-        # The hash should appear somewhere in the buffer
         assert test_hash.encode() in buffer
 
     def test_build_gbdt_model_structure(self):
-        """Test that build_gbdt_model produces valid FlatBuffer."""
         X, y = _create_synthetic_data(n_samples=100, n_features=4)
         model = _train_simple_model(X, y, num_trees=3)
         model_json = model.dump_model()
 
         buffer = build_gbdt_model(model_json, "sha256:test", num_training_samples=100)
 
-        # Should have file identifier
         assert buffer[4:8] == GBDT_MODEL_FILE_IDENTIFIER
 
-        # Should be valid FlatBuffer (root offset in first 4 bytes)
+        # The root offset (first 4 bytes) must point inside the buffer.
         root_offset = struct.unpack_from("<I", buffer, 0)[0]
         assert root_offset > 0
         assert root_offset < len(buffer)
 
     def test_num_features_correct(self, tmp_path: Path):
-        """Test that num_features matches training data."""
         n_features = 7
         X, y = _create_synthetic_data(n_samples=50, n_features=n_features)
         model = _train_simple_model(X, y, num_trees=2)
@@ -258,16 +227,9 @@ class TestConverter:
 
 
 class TestRoundTrip:
-    """The converted model must predict what LightGBM predicts.
-
-    This is the training<->runtime parity check RFC 0019 §15 Phase 4 asks for, and
-    the only test in either language that would catch a converter emitting bytes the
-    runtime walks differently. Structural assertions cannot: a buffer with the right
-    tree count and the wrong split semantics passes every one of them.
-    """
+    """Converted models must predict what LightGBM predicts (RFC 0019 §15 Phase 4)."""
 
     def test_predictions_match_lightgbm(self):
-        """Every row must score the same through both evaluators."""
         X, y = _create_synthetic_data(n_samples=800, n_features=6)
         model = _train_simple_model(X, y, num_trees=12)
         buffer = build_gbdt_model(model.dump_model(), "sha256:test")
@@ -280,13 +242,7 @@ class TestRoundTrip:
             ), f"row {row}: flatbuffer {actual} != lightgbm {expected[row]}"
 
     def test_exact_threshold_values_match(self):
-        """Feature values sitting exactly on a split threshold.
-
-        This is where `decision_lte` is observable: `<=` sends the row left, `<`
-        sends it right, and every other input in the corpus agrees either way. A
-        converter that dropped the field, or inverted it, passes
-        test_predictions_match_lightgbm on random data and fails here.
-        """
+        """Only values exactly on a threshold observe `decision_lte` (`<=` vs `<`)."""
         X, y = _create_synthetic_data(n_samples=400, n_features=4)
         model = _train_simple_model(X, y, num_trees=6)
         model_json = model.dump_model()
@@ -310,12 +266,7 @@ class TestRoundTrip:
             ), f"probe {i} on threshold: flatbuffer {actual} != lightgbm {expected[i]}"
 
     def test_missing_values_match(self):
-        """NaN features must take the direction `default_left` records.
-
-        LightGBM decides missing-value routing per node at training time. If the
-        converter drops `default_left`, the mirror falls back to `False` (go right)
-        and diverges on exactly the rows that carry a NaN.
-        """
+        """NaN features must take the direction `default_left` records."""
         X, y = _create_synthetic_data(n_samples=600, n_features=5)
         model = _train_simple_model(X, y, num_trees=8)
         buffer = build_gbdt_model(model.dump_model(), "sha256:test")
@@ -333,12 +284,9 @@ class TestRoundTrip:
             ), f"NaN probe {i}: flatbuffer {actual} != lightgbm {expected[i]}"
 
     def test_learning_rate_is_not_applied_twice(self):
-        """A non-default shrinkage must not scale the ensemble a second time.
+        """Leaf values already include `learning_rate`; it must not be applied again.
 
-        LightGBM folds `learning_rate` into the dumped leaf values, so the emitted
-        model carries 1.0 as provenance and `TreeDataAdapter::score()` deliberately
-        ignores it. Training at 0.3 rather than the 0.1 the other cases use makes a
-        double application a 3x error rather than a rounding difference.
+        0.3 (not the usual 0.1) makes a double application a 3x error, not rounding.
         """
         X, y = _create_synthetic_data(n_samples=400, n_features=4)
         train_data = lgb.Dataset(X, label=y)
@@ -381,10 +329,7 @@ def _collect_thresholds(model_json) -> list[tuple[int, float]]:
 
 
 class TestEdgeCases:
-    """Test edge cases and error handling."""
-
     def test_single_tree_model(self, tmp_path: Path):
-        """Test conversion with single tree."""
         X, y = _create_synthetic_data(n_samples=50, n_features=2)
         model = _train_simple_model(X, y, num_trees=1)
 
@@ -400,7 +345,6 @@ class TestEdgeCases:
         assert len(buffer) > 0
 
     def test_many_trees_model(self, tmp_path: Path):
-        """Test conversion with many trees."""
         X, y = _create_synthetic_data(n_samples=200, n_features=3)
         model = _train_simple_model(X, y, num_trees=50)
 
@@ -414,17 +358,15 @@ class TestEdgeCases:
         with open(fb_path, "rb") as f:
             buffer = f.read()
 
-        # 50 trees should produce substantial output
         assert len(buffer) > 5000
 
     def test_deep_tree(self, tmp_path: Path):
-        """Test conversion with deeper trees (more leaves)."""
         X, y = _create_synthetic_data(n_samples=500, n_features=5)
 
         train_data = lgb.Dataset(X, label=y)
         params = {
             "objective": "regression",
-            "num_leaves": 63,  # Deeper tree
+            "num_leaves": 63,
             "verbose": -1,
         }
         model = lgb.train(params, train_data, num_boost_round=5)
@@ -439,12 +381,7 @@ class TestEdgeCases:
 
 
 class TestReproducibility:
-    """A shipped artifact that cannot be rebuilt byte for byte cannot be checked.
-
-    The committed `.bin` files are 4.8 MB of the product; RFC 0019 §10.5 records a content
-    hash over them, and a wall-clock stamp inside the buffer makes that hash a function of
-    when someone ran the converter rather than of what they converted.
-    """
+    """Artifacts must rebuild byte for byte: RFC 0019 §10.5 records a hash over them."""
 
     @staticmethod
     def _saved(tmp_path: Path) -> Path:
@@ -473,8 +410,8 @@ class TestReproducibility:
             model_version="1.0.0",
         )
         assert first.read_bytes() == second.read_bytes()
-        # The returned digest is what the descriptor body records and TreeDataAdapter
-        # recomputes, so it has to be over the bytes that reached the file.
+        # The descriptor records this digest and TreeDataAdapter rechecks it, so it
+        # must cover the bytes written.
         assert (
             first_digest
             == second_digest
@@ -490,7 +427,7 @@ class TestReproducibility:
         )
         model = _read_model(tmp_path / "model.bin")
         assert model.TrainingDate() is None
-        # Everything else that is provenance rather than a clock still lands.
+        # Non-clock provenance is still written.
         assert model.Framework() == b"lightgbm"
 
     def test_source_date_epoch_supplies_the_stamp_a_reproducible_build_can_reproduce(
@@ -523,8 +460,7 @@ class TestReproducibility:
     def test_an_unparseable_source_date_epoch_is_refused_not_ignored(
         self, tmp_path: Path, monkeypatch
     ):
-        # Ignoring it would drop a stamp the build asked for without saying so, and the
-        # reproducible-builds specification requires the error.
+        # The reproducible-builds specification requires the error.
         monkeypatch.setenv("SOURCE_DATE_EPOCH", "yesterday")
         with pytest.raises(ValueError, match="SOURCE_DATE_EPOCH"):
             convert(
@@ -588,8 +524,8 @@ class TestReproducibility:
             (output / "train_manifest.json").read_text(encoding="utf-8")
         )
         artifact = (output / descriptor["tree_data"]["artifact"]).read_bytes()
-        # Bare hex: TreeDataAdapter compares this against `sha256(buffer, size)`, which
-        # carries no `sha256:` prefix. A prefixed value would refuse every model it guards.
+        # Bare hex: TreeDataAdapter compares against `sha256(buffer, size)`, which has
+        # no `sha256:` prefix.
         assert descriptor["tree_data"]["hash"] == hashlib.sha256(artifact).hexdigest()
         # RFC 0019.13 §10.5 wants the pair: the document and the artifact it names.
         assert manifest["model_sha256"] == descriptor["tree_data"]["hash"]

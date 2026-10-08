@@ -85,10 +85,8 @@ private:
         stream.insert(stream.end(), properties.gcnArchName.begin(), properties.gcnArchName.end());
         appendTrivial(stream, properties.warpSize);
         appendTrivial(stream, properties.multiProcessorCount);
-        // The memory fields separate boards of one arch that compute units does not --
-        // two cards can carry the same CU count and different HBM. Unhashed, they would
-        // share a winner-cache entry, and a ranking measured on one would be served to
-        // the other as if it had been measured there.
+        // Memory fields separate same-arch boards with equal CU counts but different HBM,
+        // which must not share a winner-cache entry.
         appendTrivial(stream, properties.totalGlobalMem);
         appendTrivial(stream, properties.memoryBusWidth);
         appendTrivial(stream, properties.memoryClockRate);

@@ -36,33 +36,15 @@ using GraphId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;
 
 /// The catalog cache key. Excludes the handle: unrelated to a plan's validity.
 ///
-/// RFC 0019 §9.2 keys a cached ranking on `(engine id, graph id, device id)` plus the
-/// inventory generation counter. Two of those four are already here by construction: the
-/// engine id is implicit in the cache's location -- §9.2, "where the cache already lives on
-/// the engine ... the engine id is *implicit* in the cache's location rather than absent
-/// from the key" -- and there is no mid-process generation counter to carry, because engines
-/// are loaded once at hipDNN startup and nothing re-scans the inventory while a cache is
-/// live.
-///
-/// What the counter exists to catch is still real, though: a ranking outliving the
-/// descriptor set that produced it. @ref engineVersion stands in for it, so the question a
-/// counter would have answered ("is this entry from the inventory I am running?") is
-/// answered by the descriptor set's own authored revision instead of by a number that only
-/// ever changes in a re-scan this build does not perform.
+/// RFC 0019 §9.2's engine id is implicit in the cache's location, and @ref engineVersion
+/// replaces its inventory generation counter, since nothing re-scans the inventory.
 struct CatalogKey
 {
     GraphId graphId;
     DeviceId deviceId;
-    /// `EngineDescriptor::revision` of the descriptor set that ranked this catalog.
-    ///
-    /// In-process this is constant per engine, so it never separates two live entries; it is
-    /// in the key for the case that has no other guard -- an entry reaching a newer engine
-    /// version, whether through a future shared cache or through the persisted winner records
-    /// that outlive the process (see `EngineIdentity` in WinnerCacheFile.hpp). A stale
-    /// ranking is not a wrong answer today only because nothing hands entries across that
-    /// boundary; keying it makes that a property of the key rather than of the call graph.
-    // Not redundant: partial aggregate inits such as CatalogKey{graph, device} would
-    // otherwise trip -Wmissing-field-initializers.
+    /// `EngineDescriptor::revision` of the descriptor set that ranked this catalog. Constant
+    /// in-process; keyed so an entry can never be served to a newer engine version.
+    // Explicit init avoids -Wmissing-field-initializers on partial CatalogKey{graph, device}.
     // NOLINTNEXTLINE(readability-redundant-member-init) - see above
     hipdnn_data_sdk::utilities::Version engineVersion{};
     /// The ranking metric the order was computed for (RFC 0019 §11.4): every cache of a
@@ -91,9 +73,7 @@ struct CatalogKeyHash
             hash ^= value + 0x9e3779b9ULL + (hash << 6U) + (hash >> 2U);
         };
         mix(static_cast<size_t>(key.deviceId));
-        // Each component separately: a packed "major*1000 + minor" style fold makes 1.10.0
-        // and 2.0.0 collide, and a revision bump is exactly the event this field exists to
-        // separate.
+        // Mixed per component: a packed major*1000+minor fold would collide 1.10.0 and 2.0.0.
         mix(static_cast<size_t>(key.engineVersion.major));
         mix(static_cast<size_t>(key.engineVersion.minor));
         mix(static_cast<size_t>(key.engineVersion.patch));
@@ -127,10 +107,9 @@ struct MatchContext
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph;
     DeviceId deviceId;
     const DeviceProperties& deviceProperties;
-    /// The registered ranking metric the request ranks by (RFC 0019 §11.4), which selects
-    /// the `sort_kernel_catalog` UHD and keys every ranked-order cache. Matching and
-    /// dispatch never read it. A view like the references above, so it must outlive the
-    /// context; a cache keys on the registry's own copy of the name, never on this view.
+    /// Registered ranking metric for the request (RFC 0019 §11.4); selects the
+    /// `sort_kernel_catalog` UHD and keys ranked-order caches. A view: must outlive the
+    /// context, and caches key on the registry's copy of the name, never on this view.
     std::string_view rankingMetric = hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC;
 };
 

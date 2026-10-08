@@ -235,10 +235,7 @@ endfunction() # _create_check_targets_internal
 
 
 
-# Registers the schema generators' own unit tests (cache key, node operands) as a ctest
-# test. The generated headers' runtime behaviour is covered by the C++ suites; this covers
-# the generators' field policy, so a change to it fails here rather than silently
-# reshaping the key or the published operands.
+# Registers the schema generators' own unit tests (cache key, node operands) as a ctest test.
 #
 # The policy under test belongs to the schemas, so this runs regardless of
 # HIPDNN_ENABLE_KERNEL_INGESTOR.
@@ -309,15 +306,9 @@ endfunction() # finalize_test_targets
 #   WORKING_DIR - Working directory for test execution
 # ~~~
 function(add_hipdnn_test TARGET WORKING_DIR)
-    # ROCm ships its own googletest at /opt/rocm/include/gtest, and hip::host puts that
-    # directory on the include path. A target receiving it *before* the fetched googletest
-    # compiles against ROCm's headers while linking the fetched archive, whose
-    # MakeAndRegisterTestInfo has a different signature -- an undefined symbol at link time,
-    # in some test targets and not others depending on dependency ordering.
-    #
-    # Per target rather than per directory: a library translation unit has no business seeing
-    # googletest's headers. Both gtest and gmock, since pinning one leaves the other coming
-    # from /opt/rocm, and that mismatched pair does not compile.
+    # ROCm ships its own googletest, which hip::host puts on the include path. Ahead of the
+    # fetched googletest it compiles against ROCm's headers but links the fetched archive.
+    # Pinned per target, for both gtest and gmock, so library sources never see googletest.
     foreach(_hipdnn_gtest_target GTest::gtest GTest::gmock)
         if(TARGET ${_hipdnn_gtest_target})
             get_target_property(_hipdnn_gtest_includes ${_hipdnn_gtest_target}

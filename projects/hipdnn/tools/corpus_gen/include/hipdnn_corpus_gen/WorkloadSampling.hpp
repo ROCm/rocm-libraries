@@ -16,37 +16,15 @@
 /// @file WorkloadSampling.hpp
 /// @brief Drawing problems that look like workloads, from declared anchors (§5.2, §12.2).
 ///
-/// The exploration in ProblemSpace.hpp answers "what does this engine serve?", and answers it
-/// well: it finds the feasible region and spreads over it. That is the wrong distribution for
-/// training, and measurably so -- a uniform spread over conv_fwd's feasible region put 1.0% of
-/// its draws on a square image and 1.3% on channel counts aligned to eight, so 0.04% of ten
-/// thousand shapes resembled a layer anyone runs. A model trained on that learns the region's
-/// interior, which is not where the questions come from.
-///
-/// The fix is not to narrow the region -- an engine still has to answer for problems nobody
-/// listed, and §5.4 keeps an exploration floor for exactly that reason. It is to draw *most*
-/// of the corpus near recorded workloads, and to make "near" mean something structural:
-///
-///  - **Archetypes** are correlated tuples from real networks. A draw takes one value per
-///    parameter from one archetype, so the joint fact survives; sampling each parameter from
-///    its own marginal is what loses it.
-///  - **Neighbourhoods** say how each parameter may move away from an anchor and remain
-///    plausible: channels between aligned multiples, spatial extents by halving and doubling,
-///    filters among the small odd sizes, widths following heights.
-///
-/// Nothing here is operation-specific. The declaration carries the workload knowledge; this is
-/// one sampler for every operation, the same way there is one exploration.
+/// Archetypes are correlated tuples from real networks; a draw takes one whole archetype so
+/// joint facts survive. Neighbourhoods say how each parameter may move away from an anchor.
 namespace hipdnn_corpus_gen
 {
 namespace detail
 {
 
-/// A parameter's floor: its declared range's lower bound, or 1.
-///
-/// One rather than zero for an undeclared floor, because a zero extent is not a problem for any
-/// operation declared so far and a zero reaching a graph builder makes a tensor with no
-/// elements. A *declared* zero floor is honoured -- that is padding, where zero is the ordinary
-/// case rather than a degenerate one.
+/// A parameter's floor: its declared range's lower bound, or 1 when undeclared (a zero extent
+/// makes an empty tensor). A declared zero floor, e.g. padding, is honoured.
 inline int64_t parameterFloor(const Parameter& parameter)
 {
     if(parameter.range.has_value())
@@ -62,8 +40,7 @@ inline int64_t clampToRange(const Parameter& parameter, int64_t value)
     int64_t clamped = std::max(value, parameterFloor(parameter));
     if(parameter.range.has_value())
     {
-        // An undeclared ceiling is stored as int64 max, so this is a no-op there rather than a
-        // special case -- see the range parsing in OperationMetadata.hpp.
+        // An undeclared ceiling is stored as int64 max, so this is a no-op there.
         clamped = std::min(clamped, parameter.range->second);
     }
     return clamped;
@@ -91,10 +68,8 @@ inline std::optional<int64_t> integerAt(const ProblemPoint& point, const std::st
 /// Converts one declared archetype value to a parameter value, following `$q.<other>` against
 /// what has already been drawn.
 ///
-/// Returns nullopt when a reference names something not yet drawn. The archetype's draw order
-/// puts every referent first and loading refuses a reference it cannot order, so reaching it
-/// means that order was bypassed -- worth failing the draw rather than substituting a floor and
-/// calling the result an anchored shape.
+/// Returns nullopt when a reference names something not yet drawn; draw order should prevent
+/// that, so fail the draw rather than substitute a floor.
 inline std::optional<ParameterValue> archetypeValue(const nlohmann::json& declared,
                                                     const ProblemPoint& drawnSoFar)
 {
@@ -129,15 +104,9 @@ inline std::optional<ParameterValue> archetypeValue(const nlohmann::json& declar
 
 /// @brief Draws one problem point from @p archetype, honouring an already-fixed @p categorical.
 ///
-/// Returns nullopt when the archetype contradicts the categorical assignment -- a causal-only
-/// attention archetype under `is_causal = false`, say. That is not an error: it says this
-/// combination has no recorded workload, and the caller should fall back to exploration rather
-/// than manufacture an anchor nobody claimed. Silently overriding the categorical instead would
-/// give one combination another's problems and label them with the wrong dtype or mode.
-///
-/// A numeric parameter the archetype does not set takes its floor. Deliberately unambitious:
-/// the archetype is the claim about realism, and inventing a value for something it left out
-/// would be this code making that claim instead.
+/// Returns nullopt when the archetype contradicts @p categorical (no recorded workload for that
+/// combination); the caller should fall back to exploration. A numeric parameter the archetype
+/// does not set takes its floor rather than an invented value.
 inline std::optional<ProblemPoint> drawFromArchetype(const OperationMetadata& metadata,
                                                      const Archetype& archetype,
                                                      const ProblemPoint& categorical,
@@ -214,21 +183,15 @@ inline int64_t perturbOne(const Parameter& parameter,
     }
     case Neighbourhood::Kind::MULTIPLE:
     {
-        // A value below the alignment is left alone. It is not a misaligned version of
-        // something -- it is a distinguished small value the alignment cannot express, and the
-        // motivating case is C=3. Rounding 3 up to 8 loses the three-channel input of every
-        // vision network's first layer, and it does so in the 60% of the corpus that comes
-        // from perturbation, so a ResNet stem survives only in the pure-archetype share.
-        // Measured before this: C=3 was 4.3% of a MIOpen conv corpus and 1.9% of a hipkernel
-        // one, against roughly a fifth of the archetypes declaring it.
+        // A value below the alignment is left alone: it is a distinguished small value (e.g.
+        // C=3 for an image input), not a misaligned one, and rounding it up would lose it.
         if(base < hood.of)
         {
             return clampToRange(parameter, base);
         }
 
-        // At or above the alignment, align first: an anchor is usually already a multiple, but
-        // one that is not would otherwise carry its misalignment through every perturbation,
-        // and alignment is the property this kind exists to preserve.
+        // At or above the alignment, align first so a misaligned anchor does not carry its
+        // misalignment through every perturbation.
         const auto aligned = std::max(hood.of,
                                       static_cast<int64_t>(std::llround(
                                           static_cast<double>(base) / static_cast<double>(hood.of)))
@@ -256,9 +219,8 @@ inline int64_t perturbOne(const Parameter& parameter,
 
 /// @brief Moves @p anchor within the declared neighbourhood, leaving categoricals alone.
 ///
-/// Parameters with no neighbourhood keep the anchor's value. That is the point: a declaration
-/// says which parameters may drift, and padding or dilation that moved because it was numeric
-/// would turn a recorded layer into a shape whose geometry nobody chose.
+/// Parameters with no declared neighbourhood keep the anchor's value, so e.g. padding does not
+/// drift just because it is numeric.
 inline ProblemPoint perturbWithinNeighbourhood(const OperationMetadata& metadata,
                                                const ProblemPoint& anchor,
                                                std::mt19937_64& rng)

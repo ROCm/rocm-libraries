@@ -6,10 +6,6 @@
 /**
  * @file GbdtModelTestBuilder.hpp
  * @brief In-memory GBDT FlatBuffer builder shared by the UHD tests.
- *
- * Lets a test construct a tree_data model artifact without a training run, so both
- * the adapter tests and the end-to-end selection-flow tests can exercise real models
- * (including training-arch metadata) from the same builder.
  */
 
 #include <hipdnn_flatbuffers_sdk/data_objects/gbdt_model_generated.h>
@@ -74,10 +70,8 @@ public:
         return *this;
     }
 
-    /// Add layer 2 for one group value (RFC 0019 grouped tree_data).
-    ///
-    /// Without a grouping index the model stays single-layer, so a fixture opts in by
-    /// naming both: which feature slot carries the group, and the trees for each value.
+    /// Feature slot carrying the group for layer 2 (RFC 0019 grouped tree_data). Without it the
+    /// model stays single-layer.
     GbdtModelTestBuilder& setGroupByFeatureIndex(int32_t index)
     {
         _groupByFeatureIndex = index;
@@ -101,7 +95,6 @@ public:
     {
         flatbuffers::FlatBufferBuilder fbb;
 
-        // Build trees
         std::vector<flatbuffers::Offset<fb::GbdtTree>> treeOffsets;
         for(const auto& tree : _trees)
         {
@@ -118,7 +111,6 @@ public:
         auto treesVector = fbb.CreateVector(treeOffsets);
         auto hashOffset = fbb.CreateString(_featuresHash);
 
-        // Build training_arches vector if provided
         flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>>
             archesVectorOffset = 0;
         if(!_trainingArches.empty())
@@ -132,7 +124,6 @@ public:
             archesVectorOffset = fbb.CreateVector(archOffsets);
         }
 
-        // Build model_version if provided
         flatbuffers::Offset<flatbuffers::String> versionOffset = 0;
         if(!_modelVersion.empty())
         {

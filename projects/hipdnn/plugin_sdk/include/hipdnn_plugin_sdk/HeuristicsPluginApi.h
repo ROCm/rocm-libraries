@@ -86,22 +86,12 @@ typedef struct hipdnnHeuristicPolicyDescriptor_opaque* hipdnnHeuristicPolicyDesc
 /**
  * @brief Scoped host services for prediction-aware policies (ABI version 2).
  *
- * The table, context, callback, ranking_metric string, and returned EnginePrediction
- * FlatBuffers are borrowed and valid only during hipdnnHeuristicPolicyFinalizeWithHost.
- * A plugin MUST NOT retain them, invoke callbacks asynchronously, or free host
- * buffers. Copy any configuration needed after finalize before returning.
- * Calls are synchronous on the finalize thread. Only input candidate engine IDs
- * may be queried.
- *
- * Every prediction get_prediction returns is in the metric ranking_metric names
- * (RFC 0019 §4.4, §11.2): its `value` is a calibrated physical quantity in that
- * metric's registered units, not an ordering key, and better is higher or lower as
- * the registered metric says. The host has already refused an answer in any other
- * metric (status INVALID), so a policy compares values only in this one metric.
- *
- * Check version and struct_size before accessing callback fields. Future versions
- * may append fields; a larger struct_size remains compatible. A version 1 table has
- * no ranking_metric field and means "tflops".
+ * The table, its strings, and returned EnginePrediction buffers are borrowed only for
+ * the duration of hipdnnHeuristicPolicyFinalizeWithHost: do not retain them, call back
+ * asynchronously, or free them. Only input candidate engine IDs may be queried. Every
+ * returned prediction is in ranking_metric's registered units (RFC 0019 §11.2).
+ * Check version and struct_size before reading fields; version 1 has no ranking_metric
+ * and means "tflops".
  */
 typedef struct
 {
@@ -113,8 +103,7 @@ typedef struct
         int64_t engine_id,
         hipdnnEnginePredictionKind_t kind,
         hipdnnPluginConstData_t* prediction); ///< Borrow a verified EnginePrediction.
-    /// Version 2: the registered ranking metric ("tflops", "time", ...) this finalize
-    /// ranks by. NUL-terminated, never NULL, borrowed for the duration of finalize.
+    /// Version 2: registered metric ("tflops", "time", ...) to rank by. Never NULL.
     const char* ranking_metric;
 } hipdnnHeuristicHostCallbacks_t;
 
@@ -362,15 +351,11 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnHeuristicPolicyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int32_t* out_applied);
 
 /**
- * @brief Optional synchronous finalize with scoped host prediction services.
+ * @brief Optional synchronous finalize with scoped host prediction services (ABI 0.1.0).
  *
- * Introduced in heuristic ABI 0.1.0. A host uses this instead of Finalize when
- * exported. Legacy plugins need not implement it. A null host means predictions
- * are unavailable; prediction-only policies decline with out_applied=0.
- * Neither host services nor prediction buffers may escape this call.
- * A policy that ranks on predictions orders engines by host->ranking_metric, in that
- * metric's direction, and declines when no candidate has a usable prediction in it
- * rather than returning a static order dressed as a ranking (RFC 0019 §11.2).
+ * Used instead of Finalize when exported. A null host means predictions are unavailable.
+ * A prediction-ranking policy orders by host->ranking_metric in that metric's direction,
+ * and declines (out_applied=0) when no candidate has a usable prediction.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnHeuristicPolicyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t desc,
@@ -378,17 +363,11 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
                                           int32_t* out_applied);
 
 /**
- * @brief Optional exact EngineConfig retrieval for a returned engine ID.
+ * @brief Optional exact EngineConfig retrieval for a returned engine ID (ABI 0.1.0).
  *
- * Introduced in heuristic ABI 0.1.0. Valid after successful finalize. The buffer
- * is owned by the policy descriptor until its next mutation or destruction;
- * the host verifies and copies it before another plugin call. NOT_APPLICABLE
- * means this policy has no config for the engine (legacy ID-only behavior).
- * Config engine_id MUST match a returned input engine. A configuration-level
- * prediction must preserve every scored knob setting, not rerank later.
- * The host stamps the finalize's ranking metric into every result configuration's
- * ranking_metric, so the chosen engine ranks its own catalog by the same metric at
- * plan build; a configuration naming an unregistered metric is rejected.
+ * Valid after successful finalize. The buffer is owned by the descriptor until its next
+ * mutation or destruction. NOT_APPLICABLE means no config for this engine. Config
+ * engine_id MUST match a returned engine, and every scored knob setting must be kept.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnHeuristicPolicyGetEngineConfig(hipdnnHeuristicPolicyDescriptor_t desc,

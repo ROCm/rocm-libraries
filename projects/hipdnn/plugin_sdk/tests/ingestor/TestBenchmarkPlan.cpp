@@ -153,8 +153,7 @@ using OraclePlanBuilder = GenericPlanBuilder<StubHandle, StubSettings, OracleCon
 
 /// Three kernels with no matchers, so every kernel survives catalog construction and
 /// only the heuristic decides rank. @p graphMatchSymbol selects what graph matching
-/// binds: the fixture default binds nothing, and a test wanting problem tokens in the
-/// log registers its own.
+/// binds; the default binds nothing.
 std::unique_ptr<KernelIngestorStateManager<StubHandle>>
     makeThreeKernelStubStateManager(const char* graphMatchSymbol = GRAPH_MATCH_SYMBOL)
 {
@@ -617,10 +616,8 @@ TEST(TestIngestorBenchmarkPlan, TheDefaultTimerTimesEverySampleAgainstRealHipEve
 namespace
 {
 
-/// Every log line that parses as one of our candidate records.
-///
-/// Filtered by parsing rather than by substring: a record that stopped being valid JSON
-/// would otherwise still match an `"event":` grep and pass every assertion below.
+/// Every log line that parses as a candidate record. Parsed rather than substring-matched,
+/// so a record that stopped being valid JSON fails the assertions.
 template <typename TRecorder>
 std::vector<nlohmann::json> candidateRecords(const TRecorder& recorder)
 {
@@ -750,9 +747,8 @@ TEST(TestIngestorBenchmarkPlan, AWatchdogTimeoutAbortsThePassImmediatelyAndRerun
         << "the candidate after the timeout must not be sampled during the aborted stalled "
            "pass, only during the unstalled rerun";
 
-    // The discarded stalled pass leaves no trace in the per-kernel log: a candidate
-    // sampled in both passes is still one (benchmark, kernel) row, describing the pass
-    // that ranked it, never two rows an exporter would count as two measurements.
+    // The discarded stalled pass logs nothing: each kernel is one row, from the pass that
+    // ranked it.
     std::vector<std::string> loggedKernels;
     loggedKernels.reserve(firstRecords.size());
     for(const auto& record : firstRecords)
@@ -1282,12 +1278,8 @@ TEST(TestIngestorBenchmarkPlan, EqualTimesKeepCandidateOrderPastTheInsertionSort
     }
 }
 
-/// The per-candidate JSON records (RFC 0019.13 §8.3).
-///
-/// The winner cache keeps one row -- the winner -- because it is also read at runtime to
-/// replay a decision. Training needs the losers too, and needs the pairs that failed to
-/// run at all, neither of which the cache may carry. The log is the only channel that has
-/// both, so its shape is a contract and not decoration.
+/// RFC 0019.13 §8.3: the log is the only record of losing and failed candidates; the
+/// winner cache keeps only the winner.
 TEST(TestIngestorBenchmarkPlan, EveryTimedCandidateIsLoggedAsAParsableRecord)
 {
     auto recorder
@@ -1333,9 +1325,8 @@ TEST(TestIngestorBenchmarkPlan, EveryTimedCandidateIsLoggedAsAParsableRecord)
 
 TEST(TestIngestorBenchmarkPlan, ARecordCarriesTheTimesItsSamplesProduced)
 {
-    // One candidate, every sample identical, so the reduction cannot disguise a field
-    // that was populated from the wrong statistic: min, mean and the ranking value all
-    // equal the sample, and the spread is exactly zero.
+    // Identical samples make every statistic equal the sample, so no field can come from
+    // the wrong one unnoticed.
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
@@ -1356,10 +1347,8 @@ TEST(TestIngestorBenchmarkPlan, ARecordCarriesTheTimesItsSamplesProduced)
 
 TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedToTimeIsStillLogged)
 {
-    // The case the winner cache structurally cannot cover. It omits failed candidates on
-    // purpose -- a kernel that could not be timed must never be served from a cached
-    // ranking -- so without this record the pair looks like one that was never tried,
-    // which is a different thing and trains a different model.
+    // The winner cache omits failed candidates, so this record is the only evidence the
+    // pair was tried.
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
@@ -1388,8 +1377,7 @@ TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedToTimeIsStillLogged)
 
 TEST(TestIngestorBenchmarkPlan, NothingIsLoggedWhenLoggingIsOff)
 {
-    // The records are per-candidate per-sweep, so they must cost nothing on the default
-    // path. The guard runs before the JSON object is built, not after.
+    // Records are per candidate per sweep, so the default path must not build them.
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
     const BenchmarkTestHandle handle;
@@ -1400,15 +1388,8 @@ TEST(TestIngestorBenchmarkPlan, NothingIsLoggedWhenLoggingIsOff)
     EXPECT_TRUE(candidateRecords(recorder).empty());
 }
 
-/// The feature values a row is trained on (RFC 0019.13 §8.3).
-///
-/// Without them the exported CSV is timings with nothing to fit against, and a human has
-/// to join every row back to the problem and kernel it measured by hand. The keys are the
-/// UHD namespaces minus the `$`, so a `features_signature` entry `"$q.seqlen"` names the
-/// column `q.seqlen` directly.
-
-/// One candidate carrying an explicit payload, so the record's shape is proved without
-/// the builder in the picture.
+/// One candidate carrying explicit feature values, keyed as UHD namespaces minus the `$`
+/// (`$q.seqlen` -> `q.seqlen`).
 std::vector<TestBenchmarkPlan::Candidate> oneCandidateWithFeatures(nlohmann::json features)
 {
     std::vector<TestBenchmarkPlan::Candidate> candidates;
@@ -1454,12 +1435,8 @@ TEST(TestIngestorBenchmarkPlan, ACandidatesFeatureValuesAppearInItsRecordVerbati
 
 TEST(TestIngestorBenchmarkPlan, ACandidateWithNoFeaturesLogsExactlyTheRecordItAlwaysDid)
 {
-    // A test double and a direct construction hand over no payload and no device
-    // identity, and neither may see the record grow a key. Asserted as the whole key set,
-    // not as an absence of the two keys the test above used: a stray "features": {}
-    // wrapper, or a `device` emitted as "" when unidentified, would pass that weaker
-    // check and still break every consumer reading columns by name -- an empty device is
-    // a device, and grouping on it would merge every unidentified sweep into one problem.
+    // Asserted as the whole key set: a stray `"features": {}` or an empty `device` would
+    // break consumers reading columns by name.
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
@@ -1494,10 +1471,8 @@ TEST(TestIngestorBenchmarkPlan, ACandidateWithNoFeaturesLogsExactlyTheRecordItAl
 
 TEST(TestIngestorBenchmarkPlan, AFailedCandidateStillCarriesItsFeatures)
 {
-    // A kernel that could not run is a row the corpus needs -- it is the only evidence
-    // that the pair was tried at all, and the winner cache structurally drops it. Without
-    // its features the row cannot be placed in feature space, so it can only be thrown
-    // away, which silently biases the corpus towards kernels that happened to work.
+    // Without features a failed row cannot be placed in feature space and gets dropped,
+    // biasing the corpus toward kernels that ran.
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
@@ -1515,17 +1490,15 @@ TEST(TestIngestorBenchmarkPlan, AFailedCandidateStillCarriesItsFeatures)
     EXPECT_EQ(records[0]["kernel.dtype"].get<std::string>(), "fp16");
 }
 
-/// Binds two problem tokens of different types, so a record proves both that graph
-/// matching's bindings reach the log and that neither was coerced on the way.
+/// Binds tokens of two types, so a record proves bindings reach the log uncoerced.
 std::optional<BoundTokens> bindTestProblemTokens(const MatchContext& /*context*/)
 {
     return BoundTokens{{"seqlen", MetadataValue{int64_t{512}}},
                        {"layout", MetadataValue{std::string{"nhwc"}}}};
 }
 
-/// Registers @p implementation under @p symbol for the object's lifetime. The shared
-/// fixture's graph matcher binds nothing, and it is used by every other test in the
-/// suite, so this installs a second symbol beside it rather than replacing it.
+/// Registers @p implementation under @p symbol for the object's lifetime, beside the shared
+/// fixture's graph matcher rather than replacing it.
 class ScopedGraphMatchRegistration
 {
 public:
@@ -1549,10 +1522,8 @@ private:
 
 TEST(TestIngestorBenchmarkPlan, BuildPlanGivesEachCandidateItsFeaturesAndTheDeviceItRanOn)
 {
-    // The bootstrap case, and the only one that matters: this engine ships no UHD, no
-    // features_signature and no model -- a NativeKernelHeuristic orders the catalog. A
-    // corpus collectable only by a build that already had the model would never produce
-    // the first model.
+    // The bootstrap case: no UHD, signature or model; a NativeKernelHeuristic orders the
+    // catalog. The first corpus must come from such a build.
     constexpr const char* BOUND_GRAPH_MATCH_SYMBOL
         = "hipdnn.kernel_ingestor.test.bound_graph_match";
 
@@ -1572,8 +1543,7 @@ TEST(TestIngestorBenchmarkPlan, BuildPlanGivesEachCandidateItsFeaturesAndTheDevi
     const auto manager = makeThreeKernelStubStateManager(BOUND_GRAPH_MATCH_SYMBOL);
     const auto engine = makeEngineWithKnobs({});
     const StubDeviceResolver resolver;
-    // Every candidate reports the same time: this asserts what was logged, not who won,
-    // and a constant keeps the sweep off a device.
+    // Constant time: this asserts what was logged, not who won.
     const OraclePlanBuilder builder(engine,
                                     *manager,
                                     resolver,
@@ -1616,13 +1586,8 @@ TEST(TestIngestorBenchmarkPlan, BuildPlanGivesEachCandidateItsFeaturesAndTheDevi
         blockSizes.push_back(record["kernel.block_size"].get<int64_t>());
         EXPECT_TRUE(record["kernel.dtype"].is_string());
 
-        // The device half of the winner key, spelled the same way -- not a second
-        // notion of "which GPU" derived independently here. Recomputing the fold from
-        // the resolver's own properties is the point of the assertion: if the builder
-        // ever composed the identity from, say, the arch string alone, this would still
-        // read as "a device" while two parts differing only in compute units collapsed
-        // to one problem, which is precisely the conflation RFC 0019.13 §11.2's oracle
-        // must not suffer.
+        // Recomputed from the resolver's properties: the logged device must be the full
+        // DeviceKey fold, not something coarser such as the arch alone.
         EXPECT_EQ(record["device"].get<std::string>(), expectedDeviceIdentity)
             << "the logged device identity must agree with the winner cache's DeviceKey";
     }

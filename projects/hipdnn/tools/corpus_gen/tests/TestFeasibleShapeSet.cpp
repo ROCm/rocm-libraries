@@ -5,10 +5,8 @@
  * @file TestFeasibleShapeSet.cpp
  * @brief Covers shape-set generation against regions whose shape is known in advance.
  *
- * Each case defines a region, so what the search should find is arithmetic rather than
- * whatever it happened to produce. The cases are chosen to be the ones that defeat the
- * approaches this algorithm exists to replace: a region too sparse for rejection sampling, a
- * region whose parameters constrain each other, and a region in two pieces.
+ * Each case defines its region, so the expected result is arithmetic: sparse, coupled, and
+ * disconnected regions.
  */
 
 #include <gtest/gtest.h>
@@ -40,8 +38,7 @@ FeasibleSetRequest requestFor(std::vector<ShapeDimension> dimensions, int64_t ta
     return request;
 }
 
-/// Distinct values seen in one dimension, as a crude read on whether a set spans its range
-/// rather than huddling around wherever the walk started.
+/// Distinct values seen in one dimension, as a crude check of spread.
 size_t distinctValues(const std::vector<Shape>& shapes, size_t dimension)
 {
     std::set<int64_t> values;
@@ -56,8 +53,7 @@ size_t distinctValues(const std::vector<Shape>& shapes, size_t dimension)
 
 TEST(TestFeasibleShapeSet, EveryShapeReturnedIsAccepted)
 {
-    // The floor. A set containing one shape the engine would refuse is worse than an empty
-    // one: it is benchmarked, fails, and the failure is attributed to the kernel.
+    // A refused shape in the set would be benchmarked and blamed on the kernel.
     const auto region
         = [](const Shape& shape) { return shape[0] * shape[1] <= 1000000 && shape[2] % 8 == 0; };
 
@@ -72,8 +68,7 @@ TEST(TestFeasibleShapeSet, EveryShapeReturnedIsAccepted)
 
 TEST(TestFeasibleShapeSet, FindsARegionTooSparseForRejectionSampling)
 {
-    // Roughly one box point in 500 qualifies. Rejection sampling would need ~30000 draws for
-    // 60 shapes; the walk pays that rate only until it has a foothold.
+    // About one box point in 512 qualifies.
     const auto region = [](const Shape& shape) {
         return shape[0] % 8 == 0 && shape[1] % 8 == 0 && shape[2] % 8 == 0;
     };
@@ -81,16 +76,13 @@ TEST(TestFeasibleShapeSet, FindsARegionTooSparseForRejectionSampling)
     auto request = requestFor(matmulLikeDimensions());
     const auto result = buildFeasibleShapeSet(region, request);
 
-    // The corpus is the occupied cells, so it is not required to reach the requested count:
-    // this region covers about one box point in 512, and many cells contain no feasible point
-    // at all. A cell that cannot be filled is a fact about the region, and reporting coverage
-    // is more useful than topping the corpus up with duplicates of what was reachable.
+    // The corpus is the occupied cells; many cells hold no feasible point, so the target count
+    // need not be reached and is not padded with duplicates.
     EXPECT_GT(result.stats.cellsOccupied, request.targetCount / 2)
         << "occupied " << result.stats.cellsOccupied << " of " << result.stats.cells;
     EXPECT_EQ(static_cast<int64_t>(result.shapes.size()), result.stats.cellsOccupied);
 
-    // What the walk is for, stated as the cost it beats: rejection sampling pays about 512
-    // oracle calls per shape in this region however many it wants.
+    // Rejection sampling would pay about 512 calls per shape here.
     const double callsPerShape = static_cast<double>(result.stats.oracleCalls)
                                  / static_cast<double>(result.stats.accepted);
     EXPECT_LT(callsPerShape, 150.0) << "oracle calls " << result.stats.oracleCalls << " for "
@@ -99,9 +91,7 @@ TEST(TestFeasibleShapeSet, FindsARegionTooSparseForRejectionSampling)
 
 TEST(TestFeasibleShapeSet, HandlesParametersThatConstrainEachOther)
 {
-    // The convolution-shaped difficulty in miniature: no dimension has a bound of its own,
-    // and validity is a relation between them. Probing each dimension with the others pinned
-    // would describe a slice; the walk tests whole shapes, so coupling costs it nothing.
+    // No dimension has its own bound; validity is a relation between them.
     const auto region = [](const Shape& shape) {
         const int64_t input = shape[0];
         const int64_t filter = shape[1];
@@ -123,8 +113,7 @@ TEST(TestFeasibleShapeSet, HandlesParametersThatConstrainEachOther)
 
 TEST(TestFeasibleShapeSet, ReachesBothHalvesOfADisconnectedRegion)
 {
-    // Two islands with a gap no single step crosses. One walk samples one island and reports
-    // a region half the size it is; restarts from independent draws are what reach the other.
+    // No single step crosses the gap; restarts must reach the other island.
     const auto region = [](const Shape& shape) {
         return (shape[0] <= 100 && shape[1] <= 100) || (shape[0] >= 4000 && shape[1] >= 4000);
     };
@@ -144,9 +133,7 @@ TEST(TestFeasibleShapeSet, ReachesBothHalvesOfADisconnectedRegion)
 
 TEST(TestFeasibleShapeSet, SpreadsAcrossTheRangeRatherThanClustering)
 {
-    // A walk's trace is a path: consecutive shapes are neighbours. Without thinning the set
-    // would be a huddle around wherever it started, which is a corpus that covers one corner
-    // and reports as though it covered the space.
+    // Without thinning, a walk's consecutive shapes would cluster near its start.
     const auto region = [](const Shape&) { return true; };
 
     const auto result = buildFeasibleShapeSet(region, requestFor(matmulLikeDimensions(), 40));
@@ -154,7 +141,6 @@ TEST(TestFeasibleShapeSet, SpreadsAcrossTheRangeRatherThanClustering)
     ASSERT_EQ(result.shapes.size(), 40U);
     EXPECT_GT(distinctValues(result.shapes, 0), 20U);
 
-    // Spanning the range, not just varied: something small and something large in each.
     const auto minMax
         = std::minmax_element(result.shapes.begin(),
                               result.shapes.end(),
@@ -165,8 +151,7 @@ TEST(TestFeasibleShapeSet, SpreadsAcrossTheRangeRatherThanClustering)
 
 TEST(TestFeasibleShapeSet, ReportsAnEmptyRegionRatherThanInventingOne)
 {
-    // Nothing is acceptable. The honest answer is nothing, with budgetExhausted set so the
-    // caller can tell "no region" from "not enough budget" -- which it cannot from the count.
+    // budgetExhausted distinguishes "no region" from "not enough budget".
     const auto region = [](const Shape&) { return false; };
 
     const auto result = buildFeasibleShapeSet(region, requestFor(matmulLikeDimensions()));
@@ -179,8 +164,6 @@ TEST(TestFeasibleShapeSet, ReportsAnEmptyRegionRatherThanInventingOne)
 
 TEST(TestFeasibleShapeSet, RespectsTheOracleBudget)
 {
-    // The budget is what makes an unknown feasible fraction survivable: a region this sparse
-    // cannot be characterised in advance, so the search is bounded rather than estimated.
     const auto region = [](const Shape& shape) { return shape[0] == 4096 && shape[1] == 4096; };
 
     auto request = requestFor(matmulLikeDimensions());
@@ -193,8 +176,7 @@ TEST(TestFeasibleShapeSet, RespectsTheOracleBudget)
 
 TEST(TestFeasibleShapeSet, IsReproducibleFromItsSeed)
 {
-    // §5.8: a corpus must be reproducible from its seed, and this is the step that decides
-    // which shapes are in it.
+    // §5.8: a corpus must be reproducible from its seed.
     const auto region = [](const Shape& shape) { return shape[0] * shape[1] <= 100000; };
 
     const auto first = buildFeasibleShapeSet(region, requestFor(matmulLikeDimensions()));
@@ -210,8 +192,7 @@ TEST(TestFeasibleShapeSet, IsReproducibleFromItsSeed)
 
 TEST(TestFeasibleShapeSet, StaysInsideTheDeclaredSearchWindow)
 {
-    // The window is the memory ceiling: nothing above it can be benchmarked, so proposing
-    // there wastes oracle calls on shapes that could never enter a corpus.
+    // The window is the memory ceiling; nothing above it can be benchmarked.
     const auto region = [](const Shape&) { return true; };
 
     const auto result = buildFeasibleShapeSet(region, requestFor({{"M", 16, 512}, {"N", 16, 512}}));

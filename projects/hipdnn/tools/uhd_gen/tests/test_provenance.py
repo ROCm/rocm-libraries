@@ -152,11 +152,7 @@ def test_snapshot_rejects_legacy_version_only_provenance():
 
 
 def test_an_engine_with_no_descriptors_is_trained_against_its_selector_revision():
-    """RFC 0019 §4.1, Open Question 7: an engine with no UED binds its model by declared
-    UUID, so there is no ued/kmd/umd to name -- only the provider build whose behaviour was
-    measured. The loader has accepted this since opaque engines gained L1 (`UhdParser.hpp`
-    :146-161); this validator rejecting it stopped every AITER and MIOpen L1 collection
-    after the whole corpus had been measured (runs 67929293, 67929294)."""
+    """RFC 0019 §4.1: an engine with no UED has only a provider build to name."""
     recorded = validate_provenance(
         {"selector_revision": "miopen-provider/0.2.0/aiter-fwd-1"}
     )
@@ -174,16 +170,13 @@ def test_an_engine_with_no_descriptors_is_trained_against_its_selector_revision(
     ],
 )
 def test_provenance_that_names_neither_form_completely_is_refused(snapshot):
-    """Two thirds of a descriptor set is not a weaker claim, it is an unverifiable one --
-    and an empty or absent revision names nothing at all."""
+    """A partial descriptor set or empty revision is unverifiable, not weaker."""
     with pytest.raises(ProvenanceError):
         validate_provenance(snapshot)
 
 
 def test_a_stale_selector_revision_is_refused_rather_than_scored():
-    """L1 is the one score compared ACROSS engines, so a model measured against another
-    provider build does not merely misreport a number -- it changes which engine wins.
-    """
+    """L1 is compared across engines, so a stale build changes which one wins."""
     trained = {"selector_revision": "aiter-fwd-1"}
     compare_provenance(trained, {"selector_revision": "aiter-fwd-1"})
     with pytest.raises(ProvenanceError, match="selector_revision"):
@@ -191,8 +184,6 @@ def test_a_stale_selector_revision_is_refused_rather_than_scored():
 
 
 def test_feature_semantics_absent_means_revision_1_and_a_mismatch_names_both():
-    """FeatureSemantics.hpp, as the loader reads it: every model trained before the revision
-    existed records none and is revision 1; either direction of mismatch refuses."""
     shipped = {"selector_revision": "hip-kernel-provider/asm-sdpa-fwd/b162a5ffd743c21d"}
     require_feature_semantics(shipped, 1)
     require_feature_semantics(None, 1)
@@ -205,9 +196,6 @@ def test_feature_semantics_absent_means_revision_1_and_a_mismatch_names_both():
 
 
 def test_training_records_the_evaluators_revision_but_never_overwrites_another():
-    """A descriptor or binding snapshot says nothing about feature meaning, so training adds
-    the evaluator's revision; a hand-written snapshot claiming a different one is refused
-    rather than restamped into a model its author said was trained on something else."""
     snapshot = {"selector_revision": "provider-1"}
     assert record_feature_semantics(snapshot, 2) == {
         **snapshot,
@@ -225,8 +213,7 @@ def test_training_records_the_evaluators_revision_but_never_overwrites_another()
 
 @pytest.mark.parametrize("recorded", [0, -1, True, 1.0, "1", 2**63])
 def test_a_feature_semantics_revision_is_a_positive_int64(recorded):
-    """The loader parses exactly this (UhdParser.hpp); anything it refuses must not be
-    written, or a model trains, promotes, and then never loads."""
+    """Matches UhdParser.hpp: anything it refuses would train but never load."""
     with pytest.raises(ProvenanceError, match="feature_semantics_revision"):
         validate_provenance(
             {"selector_revision": "provider-1", "feature_semantics_revision": recorded}

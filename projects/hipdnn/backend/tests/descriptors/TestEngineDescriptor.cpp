@@ -71,8 +71,7 @@ public:
             HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &engineId));
     }
 
-    /// Sets every mock expectation finalize() consumes: the applicability check, and nothing
-    /// else -- engine details load on the first details-derived read (expectDetailsLoad).
+    /// Sets the mock expectations finalize() consumes: only the applicability check.
     void expectFinalizeCalls(int64_t engineId) const
     {
         setGraph();
@@ -84,11 +83,10 @@ public:
             .WillOnce(Return(std::vector<int64_t>{engineId}));
     }
 
-    /// Sets every mock expectation the first details-derived read consumes except the engine
-    /// name resolution, which the caller pins separately. @p details (default: the fixture's
-    /// serialized details) is read when the provider is asked, not when this is called.
-    /// Call it after finalize(): gmock matches the newest expectation even once saturated, so
-    /// set earlier, its getHandle() would also absorb finalize()'s call.
+    /// Expects the first details-derived read, except engine name resolution. @p details
+    /// (default: the fixture's) is read when the provider is asked. Call after finalize():
+    /// gmock prefers the newest expectation, so set earlier it would absorb finalize()'s
+    /// getHandle() call.
     void expectDetailsLoad(const hipdnnPluginConstData_t* details = nullptr) const
     {
         const auto* source = details != nullptr ? details : &_serializedEngineDetails;
@@ -494,10 +492,8 @@ TEST_F(TestEngineDescriptor, PreservesUnknownBehaviorNote)
     EXPECT_EQ(note, UNKNOWN_NOTE);
 }
 
-/// Regression. finalize() used to load engine details, and a provider builds its knob list --
-/// defaults included -- by ranking the engine's catalog. Every prediction description and
-/// candidate page starts with a finalized engine descriptor and reads no knob, so each one paid
-/// a cold catalog ranking it never used. Details now wait for a details-derived read.
+/// Providers build the knob list by ranking the catalog, so finalize() must not load
+/// engine details; prediction and candidate reads never use them.
 TEST_F(TestEngineDescriptor, FinalizeDoesNotQueryEngineDetails)
 {
     expectFinalizeCalls(ENGINE_ID);
@@ -1066,8 +1062,7 @@ TEST_F(TestEngineDescriptor, CandidatePageForwardsPagingAndScopeAndIsEnumeratedO
     ASSERT_EQ(data.size, page.size());
     EXPECT_EQ(std::memcmp(data.ptr, page.data(), page.size()), 0);
 
-    // The page is owned by the descriptor: reading it again reuses the same bytes
-    // instead of enumerating the catalog a second time.
+    // The page is cached: a second read reuses the same bytes.
     hipdnnBackendFlatbufferData_t again{};
     ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_ENGINE_CANDIDATES_EXT,
                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
@@ -1147,8 +1142,7 @@ TEST_F(TestEngineDescriptor, EnginePredictionCarriesTheEngineKindEvaluateFlagAnd
     const int64_t evaluate = 0;
 
     expectFinalizeCalls(ENGINE_ID);
-    // Describing a prediction reads no knob, so it must not load engine details: a provider
-    // ranks its catalog to build them.
+    // Describing a prediction reads no knob, so it must not load engine details.
     EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _)).Times(0);
     ASSERT_NO_THROW(engine->setAttribute(
         HIPDNN_ATTR_ENGINE_PREDICTION_EVALUATE_EXT, HIPDNN_TYPE_INT64, 1, &evaluate));

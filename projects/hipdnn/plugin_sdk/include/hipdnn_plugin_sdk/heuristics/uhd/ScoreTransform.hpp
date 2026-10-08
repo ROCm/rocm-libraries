@@ -15,24 +15,13 @@ namespace hipdnn_plugin_sdk::uhd
 
 /// @brief Score transform utilities (RFC 0019 §5, §12.3).
 ///
-/// Models may be trained on a transformed target (e.g. log1p(tflops)). The declared
-/// `score.transform` names that transform so a consumer can invert it and recover the value
-/// in `score.metric`'s registered units — which is what makes cross-engine comparison meaningful.
-///
-/// The set of transforms is closed: a descriptor naming one we cannot invert is rejected
-/// when it is parsed (`parseUhdConfig`'s `score` block) and again where an engine binds an
-/// L1 model (`prediction_detail::validateBinding`), rather than silently reporting a
-/// transformed number as if it were in the declared units. `isSupported` below is that gate;
-/// both call it, so there is one vocabulary and not a copy per call site.
+/// The set is closed: `isSupported` rejects any other name at parse and at L1 binding, so a
+/// transformed number is never reported as if it were in `score.metric`'s units.
 namespace score_transform
 {
 
-/// Transform names this runtime can invert. An empty name and "identity" both mean
-/// the model was trained on the raw target.
-///
-/// Kept in sync with the `score.transform` vocabulary a UHD descriptor may declare
-/// (RFC 0019 §4) — a name the format advertises but this list omits is a descriptor
-/// that passes review and then fails to load.
+/// Transform names this runtime can invert; empty and "identity" mean the raw target. Must
+/// cover every `score.transform` the UHD format allows (RFC 0019 §4).
 inline constexpr std::array<const char*, 6> SUPPORTED_TRANSFORMS
     = {"", "identity", "log1p", "log", "exp", "sqrt"};
 
@@ -64,19 +53,12 @@ inline std::string supportedTransformList()
     return out;
 }
 
-/// Apply inverse transform to recover original scale.
-///
-/// @param rawScore Score from the model.
-/// @param transform Transform name from UhdConfig::scoreTransform. Must be one of
-///        SUPPORTED_TRANSFORMS; unknown names fall through unchanged, which is only
-///        safe because `isSupported` rejects them at parse (and again at L1 binding),
-///        so no path reaches here with a name this function cannot invert.
-/// @returns Score in the units of the UHD's `score.metric`.
+/// Inverts @p transform to recover the score in `score.metric`'s units. Unknown names pass
+/// through unchanged; `isSupported` keeps them from reaching here.
 inline double applyInverse(double rawScore, const std::string& transform)
 {
     if(transform == "log1p")
     {
-        // Inverse of log1p is expm1
         return std::expm1(rawScore);
     }
     if(transform == "log")
@@ -89,13 +71,9 @@ inline double applyInverse(double rawScore, const std::string& transform)
     }
     if(transform == "sqrt")
     {
-        // Squaring is the inverse only on the domain sqrt actually produces. A negative
-        // prediction is out of that domain, and squaring it silently maps it to a *positive*
-        // score -- so a model predicting -0.5 outranks one predicting +0.25. NaN says
-        // out-of-domain, which is what the log branches above already say for the same reason.
+        // A negative prediction is outside sqrt's range; squaring would rank it as positive.
         return rawScore < 0.0 ? std::numeric_limits<double>::quiet_NaN() : rawScore * rawScore;
     }
-    // "" or "identity": the model was trained on the raw target.
     return rawScore;
 }
 
@@ -121,25 +99,15 @@ inline double applyForward(double value, const std::string& transform)
     return value;
 }
 
-/// Whether a recovered score -- the raw score with `score.transform` inverted -- is a physical
-/// quantity, which RFC 0019 §8.3 accepts as a prediction only when it is strictly positive.
-///
-/// It is physical when the model declares a metric (a throughput or a time, §4.4), or when it
-/// was trained under a transform only a positive target admits (`log`, `log1p`, `sqrt`), so a
-/// non-positive value lies outside anything it was fitted to. A metric-less ranker under
-/// `identity` or `exp` scores on an ordering scale of its own, where zero and negatives are
-/// opinions like any other: refusing them flattened distinct predictions into declared order.
-///
-/// The one definition of the rule. uhd_gen's offline evaluators apply exactly this predicate,
-/// so a model is measured offline the way it ranks here.
+/// Whether the recovered score is a physical quantity, which RFC 0019 §8.3 accepts only when
+/// strictly positive: true when a metric is declared or the transform admits only positive
+/// targets. uhd_gen's offline evaluators apply the same predicate.
 inline bool isPhysicalScore(const std::string& metric, const std::string& transform)
 {
     return !metric.empty() || transform == "log" || transform == "log1p" || transform == "sqrt";
 }
 
-/// RFC 0019 §8.3's score-range rule: a candidate is rankable only when its recovered score is
-/// finite, and also strictly positive when @p positiveRequired (isPhysicalScore). Anything
-/// else ranks last and reports the 0 that §5 step 7 gives "no measurement".
+/// RFC 0019 §8.3: rankable only when finite, and strictly positive when @p positiveRequired.
 inline bool isRankableScore(double recovered, bool positiveRequired)
 {
     return std::isfinite(recovered) && (!positiveRequired || recovered > 0.0);

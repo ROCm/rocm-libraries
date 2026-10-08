@@ -4,14 +4,6 @@
 /**
  * @file TestTreeDataAdapter.cpp
  * @brief Tests for TreeDataAdapter (GBDT tree walker) per RFC 0019 §8.1.
- *
- * Tests cover:
- * - Model loading from buffer
- * - Features hash validation (contract enforcement per RFC §7.3)
- * - Single tree evaluation
- * - Multi-tree ensemble scoring
- * - Missing value handling (NaN with default_left)
- * - Edge cases (empty model, invalid buffer)
  */
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
@@ -39,7 +31,6 @@ namespace
 /// Shared with TestUhdSelectionFlow so both suites build model artifacts the same way.
 using GbdtModelBuilder = hipdnn_test_sdk::utilities::GbdtModelTestBuilder;
 
-/// Create a simple single-node tree (just a leaf).
 GbdtModelBuilder::TreeSpec makeLeafTree(double leafValue)
 {
     GbdtModelBuilder::TreeSpec spec;
@@ -52,31 +43,21 @@ GbdtModelBuilder::TreeSpec makeLeafTree(double leafValue)
     return spec;
 }
 
-/// Create a simple binary split tree:
-///       [0]  (feature 0 < threshold)
-///      /   \
-///   [1]     [2]
-///  leaf    leaf
+/// Node 0 splits @p featureIdx at @p threshold (<=) into leaves @p leftLeaf and @p rightLeaf.
 GbdtModelBuilder::TreeSpec
     makeBinarySplitTree(int32_t featureIdx, double threshold, double leftLeaf, double rightLeaf)
 {
     GbdtModelBuilder::TreeSpec spec;
     spec.featureIndices = {featureIdx, 0, 0};
     spec.thresholds = {threshold, 0.0, 0.0};
-    spec.leftChildren = {1, -1, -1}; // node 0 -> left=1, nodes 1,2 are leaves
-    spec.rightChildren = {2, -1, -1}; // node 0 -> right=2
+    spec.leftChildren = {1, -1, -1};
+    spec.rightChildren = {2, -1, -1};
     spec.leafValues = {0.0, leftLeaf, rightLeaf};
-    spec.defaultLeft = {1, 1, 1}; // default left on missing
+    spec.defaultLeft = {1, 1, 1};
     return spec;
 }
 
-/// Create a deeper tree with multiple splits:
-///           [0]  (feature 0 < 5.0)
-///          /   \
-///       [1]     [2]  (feature 1 < 10.0)
-///      leaf    /   \
-///           [3]     [4]
-///          leaf    leaf
+/// feature[0] <= 5.0 ? 1.0 : (feature[1] <= 10.0 ? 2.0 : 3.0)
 GbdtModelBuilder::TreeSpec makeDeepTree()
 {
     GbdtModelBuilder::TreeSpec spec;
@@ -88,8 +69,6 @@ GbdtModelBuilder::TreeSpec makeDeepTree()
     spec.defaultLeft = {1, 1, 1, 1, 1};
     return spec;
 }
-
-// ========== Test Fixture ==========
 
 class TestTreeDataAdapter : public ::testing::Test
 {
@@ -159,13 +138,8 @@ TEST_F(TestTreeDataAdapter, LoadFailsOnHashMismatch)
     EXPECT_EQ(adapter, nullptr);
 }
 
-/// RFC 0019 §12: a contract diagnostic is "a clear error (not a warning) naming which of the
-/// three checks failed". Both of this adapter's checks reported at WARN, which is the level
-/// an operator filters out -- and the consequence here is silent, since the engine goes on
-/// answering and ranks by declared order, so this line is the only trace that its model was
-/// disabled. The level is asserted rather than the wording: the message is free to change,
-/// the severity is the contract. The WARN count is asserted too, because raising one check
-/// and leaving its sibling behind is what made the two spellings of one condition diverge.
+/// RFC 0019 §12: a failed contract check is an error, not a warning. The level is the
+/// contract, not the wording.
 TEST_F(TestTreeDataAdapter, AContractCheckThatDisablesTheModelReportsAnError)
 {
     auto recorder
@@ -238,7 +212,6 @@ TEST_F(TestTreeDataAdapter, LoadFailsOnNullBuffer)
 
 TEST_F(TestTreeDataAdapter, LoadFailsOnTooSmallBuffer)
 {
-    // Buffer must be at least large enough to have a file identifier
     std::vector<uint8_t> tooSmall = {0x00, 0x00, 0x00, 0x04}; // Just a size prefix
 
     auto adapter = TreeDataAdapter::loadFromBuffer(tooSmall.data(), tooSmall.size(), TEST_HASH);
@@ -248,14 +221,13 @@ TEST_F(TestTreeDataAdapter, LoadFailsOnTooSmallBuffer)
 
 TEST_F(TestTreeDataAdapter, LoadFailsOnWrongFileIdentifier)
 {
-    // Build a valid buffer but corrupt the file identifier
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(2)
                       .setFeaturesHash(TEST_HASH)
                       .addTree(makeLeafTree(1.0))
                       .build();
 
-    // Corrupt the file identifier (last 4 bytes before root table offset)
+    // Bytes 4-7 hold the file identifier.
     if(buffer.size() >= 8)
     {
         buffer[4] = 'X';
@@ -293,7 +265,7 @@ TEST_F(TestTreeDataAdapter, ScoreLeafOnlyTree)
 
 TEST_F(TestTreeDataAdapter, ScoreBinarySplitGoesLeft)
 {
-    // Tree: if feature[0] < 5.0 then 10.0 else 20.0
+    // Tree: if feature[0] <= 5.0 then 10.0 else 20.0
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(1)
                       .setFeaturesHash(TEST_HASH)
@@ -303,7 +275,7 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitGoesLeft)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    const std::vector<double> features = {3.0}; // < 5.0, should go left
+    const std::vector<double> features = {3.0};
     const double score = adapter->score(features);
 
     EXPECT_DOUBLE_EQ(score, 10.0);
@@ -311,7 +283,7 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitGoesLeft)
 
 TEST_F(TestTreeDataAdapter, ScoreBinarySplitGoesRight)
 {
-    // Tree: if feature[0] < 5.0 then 10.0 else 20.0
+    // Tree: if feature[0] <= 5.0 then 10.0 else 20.0
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(1)
                       .setFeaturesHash(TEST_HASH)
@@ -321,7 +293,7 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitGoesRight)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    const std::vector<double> features = {7.0}; // >= 5.0, should go right
+    const std::vector<double> features = {7.0};
     const double score = adapter->score(features);
 
     EXPECT_DOUBLE_EQ(score, 20.0);
@@ -329,8 +301,7 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitGoesRight)
 
 TEST_F(TestTreeDataAdapter, ScoreBinarySplitAtThreshold)
 {
-    // Tree: if feature[0] <= 5.0 then 10.0 else 20.0
-    // At exactly threshold, should go LEFT (LightGBM uses <= by default)
+    // LightGBM's default comparison is <=, so the threshold itself goes left.
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(1)
                       .setFeaturesHash(TEST_HASH)
@@ -340,7 +311,7 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitAtThreshold)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    const std::vector<double> features = {5.0}; // == 5.0, should go left with <= comparison
+    const std::vector<double> features = {5.0};
     const double score = adapter->score(features);
 
     EXPECT_DOUBLE_EQ(score, 10.0);
@@ -348,7 +319,7 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitAtThreshold)
 
 TEST_F(TestTreeDataAdapter, ScoreDeepTreePath1)
 {
-    // Deep tree: feature[0] < 5.0 -> leaf(1.0)
+    // Deep tree: feature[0] <= 5.0 -> leaf(1.0)
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(2)
                       .setFeaturesHash(TEST_HASH)
@@ -358,7 +329,7 @@ TEST_F(TestTreeDataAdapter, ScoreDeepTreePath1)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    const std::vector<double> features = {3.0, 15.0}; // feature[0] < 5.0
+    const std::vector<double> features = {3.0, 15.0};
     const double score = adapter->score(features);
 
     EXPECT_DOUBLE_EQ(score, 1.0);
@@ -366,7 +337,7 @@ TEST_F(TestTreeDataAdapter, ScoreDeepTreePath1)
 
 TEST_F(TestTreeDataAdapter, ScoreDeepTreePath2)
 {
-    // Deep tree: feature[0] >= 5.0 && feature[1] < 10.0 -> leaf(2.0)
+    // Deep tree: feature[0] > 5.0 && feature[1] <= 10.0 -> leaf(2.0)
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(2)
                       .setFeaturesHash(TEST_HASH)
@@ -376,7 +347,7 @@ TEST_F(TestTreeDataAdapter, ScoreDeepTreePath2)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    const std::vector<double> features = {7.0, 5.0}; // feature[0] >= 5.0, feature[1] < 10.0
+    const std::vector<double> features = {7.0, 5.0};
     const double score = adapter->score(features);
 
     EXPECT_DOUBLE_EQ(score, 2.0);
@@ -384,7 +355,7 @@ TEST_F(TestTreeDataAdapter, ScoreDeepTreePath2)
 
 TEST_F(TestTreeDataAdapter, ScoreDeepTreePath3)
 {
-    // Deep tree: feature[0] >= 5.0 && feature[1] >= 10.0 -> leaf(3.0)
+    // Deep tree: feature[0] > 5.0 && feature[1] > 10.0 -> leaf(3.0)
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(2)
                       .setFeaturesHash(TEST_HASH)
@@ -394,7 +365,7 @@ TEST_F(TestTreeDataAdapter, ScoreDeepTreePath3)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    const std::vector<double> features = {7.0, 15.0}; // feature[0] >= 5.0, feature[1] >= 10.0
+    const std::vector<double> features = {7.0, 15.0};
     const double score = adapter->score(features);
 
     EXPECT_DOUBLE_EQ(score, 3.0);
@@ -420,8 +391,6 @@ TEST_F(TestTreeDataAdapter, ScoreMultipleTreesSumsLeaves)
     const std::vector<double> features = {0.0};
     const double score = adapter->score(features);
 
-    // score = base_score + learning_rate * sum(leaf_values)
-    // score = 0.0 + 1.0 * (1.0 + 2.0 + 3.0) = 6.0
     EXPECT_DOUBLE_EQ(score, 6.0);
 }
 
@@ -441,24 +410,20 @@ TEST_F(TestTreeDataAdapter, ScoreAppliesBaseScore)
     const std::vector<double> features = {0.0};
     const double score = adapter->score(features);
 
-    // score = base_score + learning_rate * sum(leaf_values)
-    // score = 100.0 + 1.0 * 5.0 = 105.0
     EXPECT_DOUBLE_EQ(score, 105.0);
 }
 
 TEST_F(TestTreeDataAdapter, ScoreAppliesLearningRate)
 {
-    // NOTE: LightGBM's dump_model() returns leaf_values that ALREADY include
-    // learning_rate multiplication. We test with pre-scaled values here.
-    // If learning_rate=0.1 and "raw" leaves were 100.0 and 200.0,
-    // then exported leaf_values would be 10.0 and 20.0.
+    // LightGBM's dump_model() exports leaf values already scaled by learning_rate, so
+    // score() must not apply it again.
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(1)
                       .setFeaturesHash(TEST_HASH)
                       .setBaseScore(0.0)
-                      .setLearningRate(0.1) // Stored for metadata, not used in score()
-                      .addTree(makeLeafTree(10.0)) // Pre-scaled: 0.1 * 100.0
-                      .addTree(makeLeafTree(20.0)) // Pre-scaled: 0.1 * 200.0
+                      .setLearningRate(0.1) // Metadata only
+                      .addTree(makeLeafTree(10.0))
+                      .addTree(makeLeafTree(20.0))
                       .build();
 
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
@@ -467,22 +432,18 @@ TEST_F(TestTreeDataAdapter, ScoreAppliesLearningRate)
     const std::vector<double> features = {0.0};
     const double score = adapter->score(features);
 
-    // score = base_score + sum(leaf_values)
-    // score = 0.0 + (10.0 + 20.0) = 30.0
-    // (learning_rate is NOT applied again since leaf_values are pre-scaled)
     EXPECT_DOUBLE_EQ(score, 30.0);
 }
 
 TEST_F(TestTreeDataAdapter, ScoreWithBaseScoreAndLearningRate)
 {
-    // Same principle: leaf_values from LightGBM are pre-scaled by learning_rate.
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(1)
                       .setFeaturesHash(TEST_HASH)
                       .setBaseScore(50.0)
                       .setLearningRate(0.5) // Metadata only
-                      .addTree(makeLeafTree(10.0)) // Pre-scaled
-                      .addTree(makeLeafTree(20.0)) // Pre-scaled
+                      .addTree(makeLeafTree(10.0))
+                      .addTree(makeLeafTree(20.0))
                       .build();
 
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
@@ -491,8 +452,6 @@ TEST_F(TestTreeDataAdapter, ScoreWithBaseScoreAndLearningRate)
     const std::vector<double> features = {0.0};
     const double score = adapter->score(features);
 
-    // score = base_score + sum(leaf_values)
-    // score = 50.0 + (10.0 + 20.0) = 80.0
     EXPECT_DOUBLE_EQ(score, 80.0);
 }
 
@@ -500,7 +459,7 @@ TEST_F(TestTreeDataAdapter, ScoreWithBaseScoreAndLearningRate)
 
 TEST_F(TestTreeDataAdapter, ScoreWithNaNUsesDefaultLeft)
 {
-    // Tree with default_left = true: NaN should go left
+    // makeBinarySplitTree sets default_left on every node.
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(1)
                       .setFeaturesHash(TEST_HASH)
@@ -513,7 +472,6 @@ TEST_F(TestTreeDataAdapter, ScoreWithNaNUsesDefaultLeft)
     const std::vector<double> features = {std::numeric_limits<double>::quiet_NaN()};
     const double score = adapter->score(features);
 
-    // NaN with default_left=true should go left -> 10.0
     EXPECT_DOUBLE_EQ(score, 10.0);
 }
 
@@ -528,11 +486,9 @@ TEST_F(TestTreeDataAdapter, ScoreWithInfinity)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    // Positive infinity should go right (>= threshold)
     const std::vector<double> featuresPos = {std::numeric_limits<double>::infinity()};
     EXPECT_DOUBLE_EQ(adapter->score(featuresPos), 20.0);
 
-    // Negative infinity should go left (< threshold)
     const std::vector<double> featuresNeg = {-std::numeric_limits<double>::infinity()};
     EXPECT_DOUBLE_EQ(adapter->score(featuresNeg), 10.0);
 }
@@ -553,7 +509,6 @@ TEST_F(TestTreeDataAdapter, ScoreWithNoTrees)
     const std::vector<double> features = {1.0, 2.0};
     const double score = adapter->score(features);
 
-    // With no trees, should return base_score
     EXPECT_DOUBLE_EQ(score, 42.0);
 }
 
@@ -571,7 +526,6 @@ TEST_F(TestTreeDataAdapter, ScoreWithEmptyFeatureVector)
     const std::vector<double> features;
     const double score = adapter->score(features);
 
-    // Leaf-only tree should still return leaf value
     EXPECT_DOUBLE_EQ(score, 5.0);
 }
 
@@ -586,12 +540,11 @@ TEST_F(TestTreeDataAdapter, BatchScoring)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    // With <= comparison (LightGBM default), values <= 5.0 go left (10.0)
     const std::vector<std::vector<double>> batch = {
-        {3.0}, // <= 5.0 -> 10.0
-        {7.0}, // > 5.0 -> 20.0
-        {5.0}, // <= 5.0 -> 10.0 (at threshold, goes left with <=)
-        {-1.0}, // <= 5.0 -> 10.0
+        {3.0},
+        {7.0},
+        {5.0}, // At the threshold: <= goes left.
+        {-1.0},
     };
 
     const auto scores = adapter->scoreBatch(batch);
@@ -599,7 +552,7 @@ TEST_F(TestTreeDataAdapter, BatchScoring)
     ASSERT_EQ(scores.size(), 4u);
     EXPECT_DOUBLE_EQ(scores[0], 10.0);
     EXPECT_DOUBLE_EQ(scores[1], 20.0);
-    EXPECT_DOUBLE_EQ(scores[2], 10.0); // Now goes left with <= comparison
+    EXPECT_DOUBLE_EQ(scores[2], 10.0);
     EXPECT_DOUBLE_EQ(scores[3], 10.0);
 }
 
@@ -607,19 +560,12 @@ TEST_F(TestTreeDataAdapter, BatchScoring)
 
 TEST_F(TestTreeDataAdapter, WorksWithFeatureExtractor)
 {
-    // This tests that TreeDataAdapter integrates properly with the UHD flow
-    // by building a model that uses multiple features in realistic ways
-
-    // Tree that prefers higher tile sizes and lower priority:
-    // if tile_m (feature 0) >= 128:
-    //   if priority (feature 1) < 5: score = 3.0
-    //   else: score = 2.0
-    // else: score = 1.0
+    // tile_m (feature 0) > 128 ? (priority (feature 1) <= 5 ? 3.0 : 2.0) : 1.0
     GbdtModelBuilder::TreeSpec realisticTree;
     realisticTree.featureIndices = {0, 1, 0, 0, 0};
     realisticTree.thresholds = {128.0, 5.0, 0.0, 0.0, 0.0};
-    realisticTree.leftChildren = {2, 3, -1, -1, -1}; // node 0: left=2, node 1: left=3
-    realisticTree.rightChildren = {1, 4, -1, -1, -1}; // node 0: right=1, node 1: right=4
+    realisticTree.leftChildren = {2, 3, -1, -1, -1};
+    realisticTree.rightChildren = {1, 4, -1, -1, -1};
     realisticTree.leafValues = {0.0, 0.0, 1.0, 3.0, 2.0};
     realisticTree.defaultLeft = {0, 1, 1, 1, 1};
 
@@ -632,14 +578,8 @@ TEST_F(TestTreeDataAdapter, WorksWithFeatureExtractor)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    // Test different kernel configurations
-    // High tile, low priority -> best score (3.0)
     EXPECT_DOUBLE_EQ(adapter->score({256.0, 1.0}), 3.0);
-
-    // High tile, high priority -> medium score (2.0)
     EXPECT_DOUBLE_EQ(adapter->score({256.0, 10.0}), 2.0);
-
-    // Low tile -> low score (1.0)
     EXPECT_DOUBLE_EQ(adapter->score({64.0, 1.0}), 1.0);
 }
 
@@ -655,7 +595,6 @@ TEST_F(TestTreeDataAdapter, IsTrainedForArchReturnsTrueWhenNoArches)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    // Should return true for any arch when no restriction
     EXPECT_TRUE(adapter->isTrainedForArch("gfx942"));
     EXPECT_TRUE(adapter->isTrainedForArch("gfx950"));
     EXPECT_TRUE(adapter->isTrainedForArch("anything"));
@@ -694,52 +633,26 @@ TEST_F(TestTreeDataAdapter, IsTrainedForArchReturnsFalseWhenArchNotInList)
 }
 
 // ========== Realistic Multi-Tree Ensemble Test ==========
-// This test simulates the structure lgbm_to_flatbuffer.py would produce:
-// - Multiple trees (typical LightGBM has 100-500)
-// - Each tree uses different feature indices
-// - Leaf values represent log1p(TFLOPS) predictions
-// - Base score starts at mean of training target
+// Features: 0=M, 1=N, 2=K, 3=tile_m, 4=cu_count; leaves are log1p(TFLOPS).
 
-/// Create a tree that splits on multiple features at different depths.
-/// This mimics LightGBM's tree structure for kernel selection:
-/// Features: 0=M, 1=N, 2=K, 3=tile_m, 4=cu_count
-///
-/// Tree structure:
-///           [0] M < 512
-///          /         \
-///       [1]           [2] tile_m < 128
-///      leaf=0.3      /         \
-///                  [3]           [4] cu_count < 60
-///                 leaf=0.5      /         \
-///                            [5]          [6]
-///                          leaf=0.7     leaf=0.9
+/// M <= 512 ? 0.3 : (tile_m <= 128 ? 0.5 : (cu_count <= 60 ? 0.7 : 0.9))
 GbdtModelBuilder::TreeSpec makeRealisticTree1()
 {
     GbdtModelBuilder::TreeSpec spec;
-    // Node indices: 0=root, 1=left-leaf, 2=right-internal, 3=left-leaf, 4=right-internal, 5=leaf, 6=leaf
-    spec.featureIndices = {0, 0, 3, 0, 4, 0, 0}; // M(0), _, tile_m(3), _, cu_count(4)
+    spec.featureIndices = {0, 0, 3, 0, 4, 0, 0};
     spec.thresholds = {512.0, 0.0, 128.0, 0.0, 60.0, 0.0, 0.0};
     spec.leftChildren = {1, -1, 3, -1, 5, -1, -1};
     spec.rightChildren = {2, -1, 4, -1, 6, -1, -1};
-    spec.leafValues = {0.0, 0.3, 0.0, 0.5, 0.0, 0.7, 0.9}; // Internal nodes have 0.0
+    spec.leafValues = {0.0, 0.3, 0.0, 0.5, 0.0, 0.7, 0.9};
     spec.defaultLeft = {1, 1, 1, 1, 1, 1, 1};
     return spec;
 }
 
-/// Second tree focuses on different feature combinations:
-/// Features: 0=M, 1=N, 2=K
-///
-/// Tree structure:
-///           [0] N < 1024
-///          /         \
-///       [1] K < 256    [2]
-///      /      \       leaf=0.2
-///    [3]       [4]
-///  leaf=0.1  leaf=0.15
+/// N <= 1024 ? (K <= 256 ? 0.1 : 0.15) : 0.2
 GbdtModelBuilder::TreeSpec makeRealisticTree2()
 {
     GbdtModelBuilder::TreeSpec spec;
-    spec.featureIndices = {1, 2, 0, 0, 0}; // N(1), K(2)
+    spec.featureIndices = {1, 2, 0, 0, 0};
     spec.thresholds = {1024.0, 256.0, 0.0, 0.0, 0.0};
     spec.leftChildren = {1, 3, -1, -1, -1};
     spec.rightChildren = {2, 4, -1, -1, -1};
@@ -748,10 +661,7 @@ GbdtModelBuilder::TreeSpec makeRealisticTree2()
     return spec;
 }
 
-/// Third tree: simple split on a single feature (tile efficiency):
-/// Features: 3=tile_m
-///
-/// Tree: if tile_m < 64 then -0.05 else 0.05
+/// tile_m <= 64 ? -0.05 : 0.05
 GbdtModelBuilder::TreeSpec makeRealisticTree3()
 {
     GbdtModelBuilder::TreeSpec spec;
@@ -766,8 +676,6 @@ GbdtModelBuilder::TreeSpec makeRealisticTree3()
 
 TEST_F(TestTreeDataAdapter, RealisticGbdtEnsembleScoring)
 {
-    // Build a model with 3 trees, like lgbm_to_flatbuffer.py would produce
-    // Features: M(0), N(1), K(2), tile_m(3), cu_count(4)
     const std::string realisticHash = "sha256:realistic_gemm";
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(5)
@@ -787,34 +695,21 @@ TEST_F(TestTreeDataAdapter, RealisticGbdtEnsembleScoring)
     EXPECT_EQ(adapter->treeCount(), 3u);
     EXPECT_TRUE(adapter->isTrainedForArch("gfx942"));
 
-    // Test case 1: Small problem (M=256), small tile (tile_m=32), low CU count (cu_count=40)
-    // Tree1: M<512 -> leaf=0.3
-    // Tree2: N<1024 (assume N=512) -> K<256 (assume K=128) -> leaf=0.1
-    // Tree3: tile_m<64 -> leaf=-0.05
-    // Total: base_score + (0.3 + 0.1 + (-0.05)) = 3.5 + 0.35 = 3.85
+    // Small problem: leftmost leaf of every tree.
     {
         const std::vector<double> features = {256.0, 512.0, 128.0, 32.0, 40.0};
         const double score = adapter->score(features);
         EXPECT_DOUBLE_EQ(score, 3.5 + 0.3 + 0.1 + (-0.05));
     }
 
-    // Test case 2: Large problem (M=1024), large tile (tile_m=256), high CU count (cu_count=120)
-    // Tree1: M>=512 -> tile_m>=128 -> cu_count>=60 -> leaf=0.9
-    // Tree2: N>=1024 (assume N=2048) -> leaf=0.2
-    // Tree3: tile_m>=64 -> leaf=0.05
-    // Total: base_score + (0.9 + 0.2 + 0.05) = 3.5 + 1.15 = 4.65
+    // Large problem: rightmost leaf of every tree.
     {
         const std::vector<double> features = {1024.0, 2048.0, 512.0, 256.0, 120.0};
         const double score = adapter->score(features);
         EXPECT_DOUBLE_EQ(score, 3.5 + 0.9 + 0.2 + 0.05);
     }
 
-    // Test case 3: Medium problem exploring different tree paths
-    // M=800 (>512, not <=), tile_m=64 (<=128), N=512 (<=1024), K=512 (>256, not <=)
-    // Tree1: M>512 -> tile_m<=128 -> leaf=0.5
-    // Tree2: N<=1024 -> K>256 -> leaf=0.15
-    // Tree3: tile_m<=64 -> leaf=-0.05 (at threshold, goes left with <=)
-    // Total: 3.5 + 0.5 + 0.15 + (-0.05) = 4.1
+    // Mixed paths; tile_m == 64 sits on tree 3's threshold and goes left.
     {
         const std::vector<double> features = {800.0, 512.0, 512.0, 64.0, 80.0};
         const double score = adapter->score(features);
@@ -837,7 +732,6 @@ TEST_F(TestTreeDataAdapter, RealisticBatchScoringMatchesSingle)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), realisticHash);
     ASSERT_NE(adapter, nullptr);
 
-    // Multiple kernel configurations to compare
     const std::vector<std::vector<double>> batch = {
         {256.0, 512.0, 128.0, 32.0, 40.0}, // Small
         {1024.0, 2048.0, 512.0, 256.0, 120.0}, // Large
@@ -848,7 +742,6 @@ TEST_F(TestTreeDataAdapter, RealisticBatchScoringMatchesSingle)
     const auto batchScores = adapter->scoreBatch(batch);
     ASSERT_EQ(batchScores.size(), batch.size());
 
-    // Verify batch scores match individual scores
     for(size_t i = 0; i < batch.size(); ++i)
     {
         const double singleScore = adapter->score(batch[i]);
@@ -858,8 +751,6 @@ TEST_F(TestTreeDataAdapter, RealisticBatchScoringMatchesSingle)
 
 TEST_F(TestTreeDataAdapter, RealisticRankingOrdersCorrectly)
 {
-    // This test verifies that the model correctly ranks kernels
-    // by predicted performance (higher score = better)
     const std::string realisticHash = "sha256:ranking_test";
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(5)
@@ -873,7 +764,6 @@ TEST_F(TestTreeDataAdapter, RealisticRankingOrdersCorrectly)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), realisticHash);
     ASSERT_NE(adapter, nullptr);
 
-    // Score different kernel configurations and verify ordering
     struct KernelConfig
     {
         std::vector<double> features;
@@ -893,26 +783,19 @@ TEST_F(TestTreeDataAdapter, RealisticRankingOrdersCorrectly)
         scored.emplace_back(adapter->score(cfg.features), cfg.name);
     }
 
-    // Sort by score descending (higher = better)
     std::sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) {
         return a.first > b.first;
     });
 
-    // Verify: large_tile_high_cu should rank highest (uses all "good" paths)
     EXPECT_EQ(scored[0].second, "large_tile_high_cu");
-
-    // medium should rank second
     EXPECT_EQ(scored[1].second, "medium");
-
-    // small_tile_low_cu should rank last
     EXPECT_EQ(scored[2].second, "small_tile_low_cu");
 }
 
-// ========== Ownership Transfer Safety Tests (Dangling Pointer Fix) ==========
+// ========== Ownership Transfer Safety Tests ==========
 
 TEST_F(TestTreeDataAdapter, OwnershipTransferPreservesModel)
 {
-    // Build a model and load it
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(2)
                       .setFeaturesHash(TEST_HASH)
@@ -923,11 +806,10 @@ TEST_F(TestTreeDataAdapter, OwnershipTransferPreservesModel)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    // Clear the original buffer to ensure adapter owns its data
+    // The adapter must own a copy of the buffer.
     std::fill(buffer.begin(), buffer.end(), static_cast<uint8_t>(0));
 
-    // Adapter should still work correctly after original buffer is cleared
-    const std::vector<double> features = {3.0}; // < 5.0 -> left -> 1.0
+    const std::vector<double> features = {3.0};
     const double score = adapter->score(features);
     EXPECT_DOUBLE_EQ(score, 11.0); // base_score(10.0) + leaf(1.0)
 }
@@ -943,7 +825,7 @@ TEST_F(TestTreeDataAdapter, SelfLoopingTreeIsRejectedAtLoad)
     GbdtModelBuilder::TreeSpec cyclic;
     cyclic.featureIndices = {0, 0};
     cyclic.thresholds = {0.5, 0.5};
-    cyclic.leftChildren = {0, -1}; // <-- node 0 points at node 0
+    cyclic.leftChildren = {0, -1};
     cyclic.rightChildren = {1, -1};
     cyclic.leafValues = {0.0, 1.0};
     cyclic.defaultLeft = {1, 1};
@@ -978,7 +860,7 @@ TEST_F(TestTreeDataAdapter, DeepButAcyclicTreeStillEvaluates)
     {
         chain.featureIndices.push_back(0);
         chain.thresholds.push_back(0.5);
-        chain.leftChildren.push_back(i + 1); // descend
+        chain.leftChildren.push_back(i + 1);
         chain.rightChildren.push_back(i + 1);
         chain.leafValues.push_back(0.0);
         chain.defaultLeft.push_back(1);
@@ -1008,10 +890,8 @@ TEST_F(TestTreeDataAdapter, ModelHashFieldAccepted)
                       .addTree(makeLeafTree(5.0))
                       .build();
 
-    // Compute actual model hash for validation (RFC 0019 §9.2)
     const std::string modelHash = hipdnn_plugin_sdk::uhd::sha256(buffer.data(), buffer.size());
 
-    // Load with model hash validation enabled
     auto adapter
         = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH, modelHash);
     ASSERT_NE(adapter, nullptr);
@@ -1140,17 +1020,8 @@ TEST_F(TestTreeDataAdapter, AddsBaseScoreAfterSummingTreesInModelOrder)
 
 TEST_F(TestTreeDataAdapter, ATreeWhoseParallelArraysDisagreeIsRejected)
 {
-    // gbdt_model.fbs documents node i as indexing every array -- feature_indices[i],
-    // thresholds[i], left_children[i], right_children[i]. Nothing enforced it. The
-    // descent is bounded by left_children.size() and then subscripts the other three
-    // with the same index, so a model whose right_children is shorter reads past the
-    // end of the buffer's vector. FlatBuffers' Verifier does not catch this: each
-    // vector is individually well-formed and inside the buffer, and the verifier has
-    // no notion that these four are meant to be the same length.
-    //
-    // The model artifact is author-controlled input loaded from disk (RFC 0019 §16,
-    // "malformed drop-in pack"), so this is reachable by shipping a crafted or
-    // truncated model artifact.
+    // FlatBuffers' Verifier checks each vector alone, not that the node-parallel arrays share
+    // a length, so the adapter must (RFC 0019 §16).
     GbdtModelBuilder::TreeSpec ragged;
     ragged.featureIndices = {0, 0, 0};
     ragged.thresholds = {1.0, 2.0, 3.0};
@@ -1210,9 +1081,7 @@ TEST(TestTreeDataAdapterGrouped, RowsOutsideTheChosenGroupAreUnusable)
 
 TEST(TestTreeDataAdapterGrouped, AMinObjectiveChoosesTheGroupWithTheLowestLayerOneScore)
 {
-    // Regression. Layer 1 of a `min` model predicts a cost, and the group was chosen by the
-    // largest layer-1 score regardless -- the slowest group. The same artifact, loaded as a
-    // `min` model, has to flip the choice to group 0.0 (leaf 1.0 against 9.0).
+    // Layer 1 of a `min` model predicts a cost, so group 0.0 (leaf 1.0 against 9.0) wins.
     const auto buffer = groupedBuilder().build();
     const auto adapter = TreeDataAdapter::loadFromBuffer(
         buffer.data(), buffer.size(), "sha256:grouped", /*expectedModelHash=*/"", "min");
@@ -1243,9 +1112,7 @@ TEST(TestTreeDataAdapterGrouped, TheSurvivingRowsAreScoredByTheirOwnGroupsTrees)
 
 TEST(TestTreeDataAdapterGrouped, EqualGroupStandingsResolveIndependentlyOfRowOrder)
 {
-    // Regression (S4a). Layer 1 kept the first row reaching the best score, so two groups
-    // scoring alike were decided by the order the catalog's rows arrived in -- and rank()'s
-    // priority/id tie-break could not repair it, since the other group was already discarded.
+    // rank()'s tie-break cannot repair this later: the losing group is already discarded.
     GbdtModelBuilder builder;
     builder.setNumFeatures(2)
         .setFeaturesHash("sha256:grouped")
@@ -1271,10 +1138,7 @@ TEST(TestTreeDataAdapterGrouped, EqualGroupStandingsResolveIndependentlyOfRowOrd
 
 TEST(TestTreeDataAdapterGrouped, ALayerOneScoreOutsideItsTargetCannotChooseTheGroup)
 {
-    // Regression (S4b). A `time` model's layer 1 predicting a negative time for group 0.0 won
-    // the `min` comparison outright, and the group's valid layer-2 score then hid that the
-    // decision rested on a value no time can take. RFC 0019 §8.3 refuses that score for a
-    // candidate; it must not decide a group either.
+    // RFC 0019 §8.3 refuses a negative time for a candidate; it must not decide a group either.
     GbdtModelBuilder builder;
     builder.setNumFeatures(2).setFeaturesHash("sha256:grouped").setGroupByFeatureIndex(0);
     GbdtModelBuilder::TreeSpec layerOne;
@@ -1306,8 +1170,7 @@ TEST(TestTreeDataAdapterGrouped, ALayerOneScoreOutsideItsTargetCannotChooseTheGr
 
 TEST(TestTreeDataAdapterGrouped, ScoreStillAnswersWithLayerOne)
 {
-    // A single row cannot express a group decision, so score() gives the coarse answer
-    // rather than a wrong one -- and callers that only rank engines still get a number.
+    // One row cannot express a group decision, so score() answers with layer 1.
     const auto buffer = groupedBuilder().build();
     const auto adapter
         = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:grouped");
@@ -1319,8 +1182,6 @@ TEST(TestTreeDataAdapterGrouped, ScoreStillAnswersWithLayerOne)
 
 TEST(TestTreeDataAdapterGrouped, AnUngroupedModelBatchesExactlyAsItScores)
 {
-    // The compatibility claim: every artifact written before grouping existed carries no
-    // grouping index, so scoreBatch must reduce to the per-row loop.
     GbdtModelBuilder builder;
     builder.setNumFeatures(2).setFeaturesHash("sha256:plain").addTree(makeLeafTree(3.5));
     const auto buffer = builder.build();
@@ -1339,10 +1200,7 @@ TEST(TestTreeDataAdapterGrouped, AnUngroupedModelBatchesExactlyAsItScores)
 
 TEST(TestTreeDataAdapterGrouped, TheGroupingSlotIsReadable)
 {
-    // A ranker has to report which group each candidate was in, and it must be the slot the
-    // model actually grouped on. Deriving it anywhere else -- from the descriptor's text, or
-    // from the candidate's metadata -- could disagree with what decided, and the disagreement
-    // would surface as a correct-looking answer naming the wrong solver.
+    // Rankers report the slot that actually decided, not one derived from descriptor text.
     const auto buffer = groupedBuilder().build();
     const auto adapter
         = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:grouped");

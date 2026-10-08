@@ -40,20 +40,10 @@ def type_from_filename(path):
 
 @dataclass(frozen=True)
 class Sidecar:
-    """A non-descriptor file a descriptor names by relative path.
+    """A non-descriptor file (e.g. a model) a descriptor names by relative path.
 
-    The packer is otherwise JSON-only: discovery globs `*.json`, so a file that
-    is not a descriptor is invisible to validation, staging and install alike.
-    A trained UHD needs one anyway -- `adapter: "tree_data"` names a model
-    artifact -- so those files are resolved at discovery and carried alongside
-    the descriptor that named them.
-
-    Fields are a resolved absolute source and the destination it keeps in an arch
-    tree. The destination preserves the authored layout rather than flattening to
-    the descriptor's own folder, so the authored path stays valid verbatim in the
-    packed tree and the runtime's `baseDir / artifact` join resolves the same way
-    it did in the source. This mirrors `kernel_source.library`, the only other
-    descriptor field naming a file the packer must carry.
+    `rel_dir` preserves the authored layout under the source root, so the authored
+    relative path still resolves in the packed tree.
     """
 
     source: Path
@@ -418,8 +408,8 @@ def _validate_ued(desc):
         raise HkpPackError(
             f"{where}: legacy heuristic is not supported; use role/arch maps"
         )
-    # Mirrors the loader's requireKnownKeys: a misspelled role is absent rather than
-    # wrong, and an absent role is legal, so the engine would silently lose its model.
+    # Mirrors the loader's requireKnownKeys: a misspelled role would otherwise be
+    # silently absent.
     unknown = sorted(
         key
         for key in desc.doc
@@ -445,8 +435,7 @@ def _validate_ued(desc):
             if isinstance(value, str) or role not in _METRIC_ROLES:
                 _validate_uuid(value, entry_where)
                 continue
-            # RFC 0019 §3.1: a scoring role names one UHD per metric, so its value may
-            # be a list. The list names models, not metrics -- each UHD declares its own.
+            # RFC 0019 §3.1: a scoring role may list one UHD per metric.
             if not isinstance(value, list) or not value:
                 raise HkpPackError(
                     f"{entry_where} must be a UUID or a nonempty list of UUIDs"
@@ -482,8 +471,8 @@ _UHD_ADAPTERS = (
     "custom_library",
 )
 _UHD_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
-# The roles that map an architecture to one UHD per ranking metric. A candidate
-# generator produces the set a ranker scores, so it has no metric and stays single.
+# Roles mapping an arch to one UHD per ranking metric. A candidate generator has no
+# metric, so predict_applicable_kernels stays single.
 _METRIC_ROLES = ("sort_kernel_catalog", "predict_engine")
 _UED_KEYS = (
     "version",
@@ -498,15 +487,12 @@ _UED_KEYS = (
     "numerical_notes",
     "graph_match",
 )
-# RFC 0019 §4.4's closed ranking-metric registry, mirrored from
-# hipdnn_data_sdk/utilities/RankingMetrics.hpp: each metric fixes the UHD
-# `objective` a model of it must declare.
+# RFC 0019 §4.4 ranking-metric registry (RankingMetrics.hpp): metric -> required
+# UHD `objective`.
 _RANKING_METRIC_OBJECTIVES = {"tflops": "max", "time": "min"}
 _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
 
-# The adapters whose body names a file the packed tree has to carry. `static_order`
-# scores from the descriptor's own fields and `native` names a symbol the provider
-# registered in-process; neither has anything on disk.
+# Adapters whose body names a file the packed tree must carry.
 _ARTIFACT_ADAPTERS = ("tree_data", "table", "onnx", "custom_library")
 _METADATA_TYPES = ("bool", "int", "float", "string", "int_list")
 
@@ -556,14 +542,9 @@ def _string(value, where):
 
 
 def _validate_trained_against(value, where):
-    # RFC 0019 4.1: trained_against names ONE of two things. A model a UED role map binds
-    # names the descriptor set (ued/kmd/umd, all three or none); a model an engine with no
-    # UED binds by provider-declared UUID names selector_revision, the provider build that
-    # was measured, because it has no descriptor set to be trained against. Loader is
-    # authoritative: UhdParser.hpp parser_detail::provenance. Either form may also record
-    # feature_semantics_revision (FeatureSemantics.hpp), which uhd_gen stamps on every
-    # model it trains: an integer >= 1 the loader compares for equality, never a form on
-    # its own.
+    # RFC 0019 §4.1: names either the descriptor set (ued/kmd/umd, all or none) or,
+    # for a model bound by provider-declared UUID, a selector_revision. Either may add
+    # feature_semantics_revision (integer >= 1). Loader is authoritative: UhdParser.hpp.
     _known_keys(
         value,
         ("ued", "kmd", "umd", "selector_revision", "feature_semantics_revision"),
@@ -611,10 +592,7 @@ def _validate_trained_against(value, where):
 def _validate_uhd(desc, source_root):
     """Mirror the canonical Draft7 header, then resolve artifact sidecars safely.
 
-    A missing model artifact is a hard error. The runtime drops an engine whose
-    artifact is absent rather than shipping one that silently stops using its
-    model, so a UHD packed without its artifact costs the whole engine. Catching
-    it here reports it against the source tree, where the fix is.
+    A missing model artifact is a hard error: the runtime drops the whole engine.
     """
     doc = desc.doc
     where = f"UHD {desc.path.name}"
@@ -703,12 +681,11 @@ def _validate_uhd(desc, source_root):
             )
         if "calibrated" in score and not isinstance(score["calibrated"], bool):
             raise HkpPackError(f"{where}.score.calibrated must be a boolean")
-        # A calibrated score claims to be comparable across engines, which a number is
-        # only in a named quantity (RFC 0019 §4.4).
+        # A calibrated score is comparable across engines only in a named quantity
+        # (RFC 0019 §4.4).
         if score.get("calibrated") and "metric" not in score:
             raise HkpPackError(f"{where}: a calibrated score requires score.metric")
-        # The metric fixes the direction and `objective` only restates it; disagreeing,
-        # the model ranks one way while engine selection compares the other.
+        # The metric fixes the ranking direction; `objective` must agree with it.
         if "metric" in score:
             expected = _RANKING_METRIC_OBJECTIVES[score["metric"]]
             if doc.get("objective") != expected:
@@ -718,8 +695,8 @@ def _validate_uhd(desc, source_root):
                 )
     body = doc[adapter]
     if adapter == "static_order":
-        # No parameters: static_order ranks by UKD priority, then descriptor id. Declared
-        # criteria are refused, as UhdParser refuses them, rather than packed and ignored.
+        # static_order ranks by UKD priority, then descriptor id. Declared criteria are
+        # refused, as UhdParser refuses them, rather than packed and ignored.
         if isinstance(body, dict) and "order" in body:
             raise HkpPackError(
                 f"{where}.static_order.order is not supported: declared ordering criteria are "
@@ -751,15 +728,8 @@ def _validate_uhd(desc, source_root):
 def _resolve_sidecar(desc, source_root, payload):
     """Resolve a descriptor-relative payload path to a carriable Sidecar.
 
-    Descriptor-relative with no root-relative fallback, matching
-    compile_hip_variant: a fallback fires exactly when the local file is missing,
-    so a typo would stop being an error and bind silently to a same-named file
-    elsewhere in the tree. Sharing one artifact between sibling folders stays
-    expressible by saying so -- `"../shared/model.bin"`.
-
-    The destination keeps the resolved path's position under the root, so an
-    authored `../shared/...` lands in the packed tree where the same relative
-    path still reaches it.
+    No root-relative fallback (matching compile_hip_variant): a typo must not bind
+    to a same-named file elsewhere. Use `../shared/model.bin` to share an artifact.
     """
     root = Path(source_root).resolve()
     resolved = (root / desc.rel_dir / payload).resolve()
@@ -1024,12 +994,8 @@ def _validate_references(flat):
 def _validate_role_metrics(ued, uhd_by_id):
     """At most one model per metric for each architecture a scoring role names.
 
-    RFC 0019 §3.1: a scoring role's list is keyed by the metric each UHD declares, so two
-    models in one metric leave the loader no way to choose and it disables that metric for
-    that architecture -- the engine keeps working and silently stops using both models.
-    The same holds for two metric-less rankers. A `predict_engine` model with no metric
-    answers in no registered units, so nothing could consume it. All three are authoring
-    errors the pack reports against the source tree.
+    RFC 0019 §3.1: the loader disables a metric with two models. A `predict_engine`
+    model must declare a metric.
     """
     for role in _METRIC_ROLES:
         for arch, value in ued.doc.get(role, {}).items():

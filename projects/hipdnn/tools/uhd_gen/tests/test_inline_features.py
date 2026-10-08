@@ -51,9 +51,7 @@ DY = "graph.nodes[0].dy.dims[0]"
 def test_an_unpublished_binding_is_null_for_the_evaluator_not_nan_or_an_error(
     evaluator,
 ):
-    """A conv-fwd row publishes no `dy`; pandas fills the hole with NaN, which is not JSON,
-    and a column no row publishes is not in the frame at all. Both reach the evaluator as
-    absent, where `value_or_default` answers exactly as it does at runtime."""
+    """NaN holes and missing columns both reach the evaluator as absent bindings."""
     signature = [{"value_or_default": [f"${DY}", 0]}]
     mixed = pd.DataFrame([{"graph.flops": 1e12}, {"graph.flops": 1e12, DY: 4}])
     assert evaluate_feature_rows(mixed, signature, executable=evaluator)[1] == [
@@ -64,10 +62,10 @@ def test_an_unpublished_binding_is_null_for_the_evaluator_not_nan_or_an_error(
     assert evaluate_feature_rows(unpublished, signature, executable=evaluator)[1] == [
         [0]
     ]
-    # A bare reference has no default: the runtime refuses the row, and so does this.
+    # A bare reference has no default, so the row is refused, as at runtime.
     with pytest.raises(ValueError, match="Undefined variable"):
         evaluate_feature_rows(mixed, [f"${DY}"], executable=evaluator)
-    # An absent string binding is not a second type in the column, and has no code.
+    # An absent string binding gets no category code.
     layouts = pd.DataFrame([{"x.layout": "NHWC"}, {}])
     assert derive_categorical_encoding(layouts, ["x.layout", "dy.layout"]) == {
         "$x.layout": {"NHWC": 0}
@@ -134,9 +132,7 @@ def test_computed_training_ships_provenance_and_scores_real_artifact(
 def test_evaluation_refuses_a_model_trained_on_other_feature_semantics(
     tmp_path, evaluator, evaluator_reporting
 ):
-    """FeatureSemantics.hpp: the loader refuses a model whose recorded revision is not the
-    build's, so offline numbers for it would describe a model no engine scores. Evaluation
-    applies the same rule through the same evaluator, naming both revisions."""
+    """As the runtime loader does, evaluation refuses another semantics revision."""
     frame = pd.DataFrame(
         {
             "kernel.tile_m": [32 if row % 2 else 64 for row in range(80)],

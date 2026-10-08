@@ -6,20 +6,12 @@
 #include <string>
 
 /// @file CsvOutput.hpp
-/// @brief Writing benchmark rows that survive being read back.
-///
-/// In a header rather than the tool's main file so it can be tested. The failure it guards is
-/// not a crash: a harvest CSV that mis-quotes one field still parses, and the damage shows up
-/// as a model trained on columns that are one place to the left.
+/// @brief CSV field quoting for benchmark rows.
 namespace hipdnn_bench
 {
 
-/// A CSV field, quoted only when it has to be (RFC 4180).
-///
-/// `skip_reason` (RFC 0019.13 §7.4) is the one free-text column a harvest emits, and the only
-/// one that can carry a comma or a quote. An unquoted comma does not fail to parse -- it shifts
-/// every column to its right, so the timings land under the wrong headers and the trainer reads
-/// transposed features without noticing.
+/// A CSV field, quoted only when it has to be (RFC 4180). An unquoted comma would silently
+/// shift every later column rather than fail to parse.
 inline std::string csvField(const std::string& text)
 {
     if(text.find_first_of(",\"\n") == std::string::npos)

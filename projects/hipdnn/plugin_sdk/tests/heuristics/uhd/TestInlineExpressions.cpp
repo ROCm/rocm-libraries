@@ -50,8 +50,7 @@ TEST(TestInlineExpressions, NestedQuantizationRecomputesOnlyItsCandidateTail)
 
 TEST(TestInlineExpressions, InvalidRealDomainsFailClosed)
 {
-    // The language declines these rather than producing NaN or infinity; a feature row
-    // must refuse the decline rather than substitute a number for it.
+    // The language declines these instead of yielding NaN or infinity; extraction must throw.
     FeatureExtractionContext ctx;
     ctx.bind("input.n", int64_t{0});
     for(const auto* expression : {R"({"pow":[-1,0.5]})",

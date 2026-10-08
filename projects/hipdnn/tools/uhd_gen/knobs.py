@@ -2,29 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Which knobs earn the kernels they cost.
 
-An AOT pack builds one kernel per knob combination per geometry, so every knob
-multiplies the build. A knob earns that only if varying it changes which kernel is
-fastest. This measures that directly, against the same oracle the regret report uses
-(RFC 0019.13 §11.2): the best *measured* candidate for a problem.
-
-Three questions, in the order they are worth asking:
-
-  1. **Does the knob vary at all?** A field the pack declares but builds one value of
-     costs nothing and teaches nothing. It is still worth naming, because it sits in
-     the KMD claiming to be a variant axis and a model may be ranking on it.
-
-  2. **If it were pinned to one value, what would that cost?** For each value, restrict
-     the catalog to candidates carrying it and re-ask the oracle question. Two distinct
-     failures come out and must not be averaged together: a problem the value still
-     serves but more slowly (regret), and a problem it cannot serve at all (coverage
-     loss). The second is not a slower kernel; it is no kernel.
-
-  3. **How few kernels per geometry actually suffice?** Greedy over knob combinations,
-     reporting the regret curve as variants are added. This is the number the AOT budget
-     is spent on, and the one worth arguing about.
-
-Deliberately not a model: it reads measurements and reports what they say. Nothing here
-trains, ranks, or predicts.
+Every knob multiplies an AOT build, so each is measured against the best-measured
+oracle (RFC 0019.13 §11.2): does it vary, what would pinning it cost (regret and lost
+coverage, kept separate), and how few combinations per geometry suffice.
 """
 from __future__ import annotations
 
@@ -52,14 +32,11 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-#: Knob columns live under this prefix. `$kernel.*` is the KMD's variant space, which is
-#: exactly what an AOT build enumerates; the problem columns describe the problem and cannot
-#: be chosen away.
+#: Prefix of the KMD's variant space, i.e. what an AOT build enumerates.
 _KERNEL_PREFIX = "kernel."
 
-#: Roots that are not the problem. The problem's own root is the operation's name
-#: (`attention_dense.*`), so it can only be identified by what it is not -- see
-#: `uhd_gen.dataset.publish._query_columns`, which draws the same line.
+#: Roots that are not the problem; the problem root is the op name, so it is found by
+#: exclusion (same line as `uhd_gen.dataset.publish._query_columns`).
 _RESERVED_PREFIXES = (_KERNEL_PREFIX, "device.")
 
 #: Identity columns that share the prefix without being knobs.
@@ -80,9 +57,7 @@ def knob_columns(df: pd.DataFrame) -> list[str]:
 def graph_bound_twins(columns) -> dict[str, str]:
     """Short name -> the problem column carrying it, for a field the matcher binds.
 
-    A problem column named `seqlen_q` beside `kernel.seqlen_q` means the matcher bound the
-    kernel's value to the graph's. Matched on the short name, since the two sides do not
-    share a root: a knob is `kernel.seqlen_q` while its twin is `attention_dense.seqlen_q`.
+    Matched on the short name: `kernel.seqlen_q` twins `attention_dense.seqlen_q`.
     """
     return {
         column.split(".", 1)[1]: column
@@ -124,17 +99,11 @@ class KnobAblation:
     name: str
     values: list = field(default_factory=list)
     per_value: list[ValueAblation] = field(default_factory=list)
-    #: Whether the column varies among the candidates of a single problem. False means
-    #: no AOT choice exists for it, and its pin cost is meaningless.
+    #: Varies among one problem's candidates; if False its pin cost is meaningless.
     tunable: bool = True
-    #: Whether a problem column carries the same short name. Separates a field the
-    #: matcher bound to the graph from one the pack's generator pinned per geometry --
-    #: identical in the data, different in what the author can do about it.
+    #: A problem column shares the short name (matcher-bound, not generator-pinned).
     graph_bound: bool = False
-    #: That column, in full. The advice for a matched knob tells the author to read the
-    #: problem side instead, and a signature naming an unbound variable is a hard error at
-    #: score time -- so the name has to be the one the engine actually publishes rather
-    #: than a namespace assumed here.
+    #: That column's full published name, as the advice must name a real binding.
     bound_as: str | None = None
 
     @property
@@ -145,9 +114,7 @@ class KnobAblation:
     def best(self) -> ValueAblation | None:
         """The value that would hurt least if the knob were pinned to it.
 
-        Ordered on coverage first: a value that cannot serve a problem is not
-        comparable to one that serves it slowly, and no amount of low regret on the
-        problems it does cover makes up for the ones it drops.
+        Coverage first: no regret saving makes up for a dropped problem.
         """
         if not self.per_value:
             return None
@@ -194,30 +161,9 @@ def analyse_knobs(
     oracle = _oracle_by_problem(usable, group, target, objective)
     total_problems = len(oracle)
 
-    # A `kernel.*` column is not automatically something a caller tunes. The KMD
-    # declares one variant space, and it holds both: fields the matcher binds to the
-    # problem (head_size, seqlen_q, dtype -- the kernel was built for that shape) and
-    # fields a caller genuinely chooses among the candidates that survive matching
-    # (block_m, use_exp2_fast).
-    #
-    # They are told apart by whether the column varies *within* a problem. A field that
-    # cannot offer a choice there is not something an AOT build decides: pinning it has
-    # no measurable cost, because the problems it would orphan simply leave the
-    # comparison rather than scoring badly in it. A report ranking on cost alone
-    # therefore recommends dropping seqlen_q, which means shipping kernels for one
-    # sequence length.
-    #
-    # Two different causes produce that, and they need different answers, so they are
-    # distinguished by whether the problem namespace carries the same name:
-    #
-    #   * a problem column named `seqlen_q` exists beside `kernel.seqlen_q` -> the matcher
-    #     binds it to the graph. Nothing to do; the kernel was built for that shape.
-    #   * nothing names `waves_per_eu` on the problem side -> nothing bound it. The pack's
-    #     generator simply chose one value per geometry, so the model was never offered
-    #     the choice. That is a decision the author can revisit: build both and re-sweep
-    #     to find out whether it matters, or drop it from the KMD as unearned.
-    #
-    # Matched on the short name (`graph_bound_twins`), since the two sides do not share a root.
+    # Only a column that varies within a problem is a real choice; otherwise its pin cost
+    # is meaningless (orphaned problems just leave the comparison). Non-varying ones are
+    # graph-bound if a problem column twins them, else pinned by the pack's generator.
     graph_bound = graph_bound_twins(usable.columns)
     within = usable.groupby(group, dropna=False)
     knobs = []
@@ -276,15 +222,7 @@ def analyse_knobs(
 
 
 def _variant_curve(df, group, target, objective, oracle) -> list[dict]:
-    """How regret falls as knob combinations are added, best-first.
-
-    Greedy, not exhaustive: the exhaustive answer is a set-cover over 2^combinations and
-    the greedy one is what a build budget is actually spent -- "if I can afford N
-    variants, which N, and what do they cost me".
-
-    Reported as a curve rather than a single number because the interesting quantity is
-    where it flattens: the first N after which another kernel per geometry buys nothing.
-    """
+    """How regret falls as knob combinations are added greedily, best-first."""
     knobs = knob_columns(df)
     varying = [k for k in knobs if df[k].nunique(dropna=False) > 1]
     if not varying:
@@ -334,29 +272,20 @@ def _variant_curve(df, group, target, objective, oracle) -> list[dict]:
                 "p95_regret": p95,
             }
         )
-        # The curve is only interesting until it is flat and complete.
         if uncovered == 0 and mean_regret <= 1e-12:
             break
     return curve
 
 
-#: Pinning costs below this read as measurement noise, not a real loss. A knob this
-#: cheap buys nothing that survives a re-run, so its kernels are not earning their
-#: build.
+#: Pinning costs below this are measurement noise.
 FREE_THRESHOLD = 0.005
 
-#: Above noise but small. Whether it is worth kernels is the author's call, not the
-#: tool's: it depends on how much build budget the engine has, which this tool cannot
-#: see.
+#: Above noise but small; worth kernels only if the author's build budget allows.
 CHEAP_THRESHOLD = 0.02
 
 
 def load_importance(manifest_path: str | Path) -> dict[str, dict]:
-    """Read `feature_importance` from a training manifest, if it carries one.
-
-    Absent is normal -- a manifest written before the field existed, or a report run
-    without a model. The ranking never depends on it; it is a second opinion.
-    """
+    """Optional `feature_importance` from a training manifest; ranking never needs it."""
     try:
         with open(manifest_path, encoding="utf-8") as handle:
             manifest = json.load(handle)
@@ -367,25 +296,10 @@ def load_importance(manifest_path: str | Path) -> dict[str, dict]:
 
 
 def rank_knobs(report: dict, importance: dict[str, dict] | None = None) -> list[dict]:
-    """Every declared field, most consequential first, with the decision it implies.
+    """Every declared field by descending pin cost, with the decision it implies.
 
-    Ordering is by what pinning the field would cost, descending, because that is the
-    question an AOT build asks: the row at the top is the one whose kernels are buying
-    the most, and the row at the bottom is the one to delete first.
-
-    Three things are deliberately never ranked on cost:
-
-    * A **matched** field -- one the matcher binds to the problem's shape, so it does
-      not vary among the candidates of any single problem. Its pin cost measures
-      nothing, because the problems it would orphan leave the comparison rather than
-      scoring badly in it. Ranked on cost, `seqlen_q` reads 0.00% and the report
-      recommends shipping kernels for one sequence length.
-    * A field whose best value still **orphans problems**. Zero regret over the
-      problems it can serve says nothing about the ones it cannot.
-    * A **constant**, which costs no kernels at all -- there is only one value to
-      build -- but is not harmless: training drops a column that cannot separate
-      candidates, and §6.3 then refuses a model whose axes no longer match the
-      engine's knobs.
+    Matched/pinned fields, fields whose best value orphans problems, and constants are
+    never judged on cost: there it does not measure what it seems to.
     """
     importance = importance or {}
     ranked = []
@@ -460,9 +374,7 @@ def rank_knobs(report: dict, importance: dict[str, dict] | None = None) -> list[
             )
         ranked.append(row)
 
-    # Matched fields and constants sort below the real choices: neither is something an
-    # AOT build decides, and either one reported above the knob that actually decides
-    # the winner would bury the ranking this exists to give.
+    # Non-choices sort below the real choices so they do not bury the ranking.
     def _order(row: dict) -> tuple:
         rank = {"PINNED": 1, "MATCHED": 2, "CONSTANT": 3}.get(row["verdict"], 0)
         return (rank, -(row["cost"] or 0.0), row["name"])
@@ -570,19 +482,14 @@ def add_knob_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run_knobs(args: argparse.Namespace) -> int:
-    # The reader train and evaluate use, not a bare read_csv: a corpus is analysed here
-    # and fitted there, and the two must not disagree about what `--input` means or
-    # about the type of a numeric-looking device id they both group by.
+    # Same reader as train/evaluate, so `--input` and device-id typing agree.
     try:
         df = read_corpus_frame(Path(args.input))
     except (OSError, ValueError, ImportError) as error:
         logger.error("cannot read corpus %s: %s", args.input, error)
         return 1
-    # Answered before the per-field tables rather than through them. On a deterministic
-    # catalog every field comes back MATCHED or PINNED -- true, and a page of it reads as
-    # a list of knobs to go and pin, when the finding is that the engine offers no choice
-    # to pin anything about. Exit 0: the question "which knobs are worth keeping" was
-    # answered, and the answer is none.
+    # A deterministic catalog offers no choice at all: say so instead of a table of
+    # MATCHED/PINNED rows. Exit 0: "no knob is worth keeping" is a valid answer.
     density = candidate_density(df, device_column=args.device_column)
     if density.deterministic:
         print(f"\nKnob value over {density.problems} problem(s)")
@@ -605,12 +512,8 @@ def run_knobs(args: argparse.Namespace) -> int:
     print(f"  grouped by: {', '.join(report['grouped_by'])}")
     print(f"  target:     {report['target']} ({report['objective']})\n")
 
-    # The ranking first and unconditionally: it is the answer, and everything below is
-    # its supporting detail.
     print("  Fields, most consequential first:")
-    # `orphans` is not decoration: a zero cost beside a non-zero orphan count is the
-    # difference between "free to pin" and "pinning it ships no kernel for those
-    # problems at all", and a table without it cannot be checked by its reader.
+    # Zero cost with non-zero orphans is not free to pin; this column shows which.
     header = (
         f"    {'field':22} {'values':>6} {'verdict':>9} {'cost':>8} "
         f"{'orphans':>8} {'best':>8}"

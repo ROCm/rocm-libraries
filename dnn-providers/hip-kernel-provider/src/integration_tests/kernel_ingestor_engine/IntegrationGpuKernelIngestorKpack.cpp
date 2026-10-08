@@ -657,40 +657,23 @@ TEST_F(IntegrationGpuKernelIngestorKpack, ExecutesAPackagedKernelOnPerThreadStre
 // ---------------------------------------------------------------------------
 // The reset sweep reaches the attention pack too
 //
-// resetIngestorModuleCachesForTesting() is driven off the SAME ingestorPacks() table
-// TestIngestorPacksModuleCacheOwnership (host-side, tests/engines/kernel_ingestor_engine/
-// TestIngestorPacks.cpp) checks for internal consistency. That host-side test proves the
-// table's two fields agree; it cannot prove the reset actually clears a LIVE module,
-// because it links no device and calls no pointer. This tier closes that gap for the
-// attention pack specifically: PACKED_ENGINE_NAME above only ever exercised
-// hipkernel:pointwise_packed, so a broken reset wire on the attention pack's entry
-// would pass every existing suite, GPU and host alike.
+// Device-side complement to TestIngestorPacksModuleCacheOwnership, which cannot exercise a
+// live module.
 // ---------------------------------------------------------------------------
 
-// SDPA-GATED, and the gate is this file's own. Graph::sdpa and SdpaAttributes live
-// behind HIPDNN_ENABLE_SDPA (hipdnn_frontend/Graph.hpp), but integration_tests/
-// CMakeLists.txt compiles this translation unit on HIPDNN_ENABLE_KERNEL_INGESTOR
-// alone -- the two options are independent and an ingestor-on/SDPA-off build is a
-// configuration this branch ships. Unguarded, that build fails to COMPILE rather
-// than merely omitting a suite it could never have run: with SDPA off there is no
-// sdpa node for any of these graphs to carry.
+// Graph::sdpa needs HIPDNN_ENABLE_SDPA, which is independent of
+// HIPDNN_ENABLE_KERNEL_INGESTOR; without this guard an SDPA-off build fails to compile.
 #ifdef HIPDNN_ENABLE_SDPA
 
 namespace
 {
 
-/// One shipped, aligned (non-ragged), causal BF16 variant of the pack -- small enough to
-/// build quickly, and its `causal_mask`/BSHD shape is exactly what the matcher's
-/// graph_match derives TOP_LEFT_CAUSAL from. Picked from the descriptors the pack
-/// actually ships (Gfx950AttentionDenseNative.cpp's kernelMatches requires an EXACT
-/// shape match against baked metadata), not invented: a shape the pack never shipped
-/// would report "no engine offered this graph" here, which is a different failure
-/// than the one this tier exists to catch.
+/// One shipped, aligned, causal BF16 variant of the pack. kernelMatches requires an exact
+/// shape match against the shipped descriptors, so the shape must be one the pack ships.
 struct AttentionDenseFixture
 {
     std::string engineName;
-    /// The one architecture the pack ships for; on any other device the engine cannot
-    /// appear, so the case skips rather than failing for an environmental reason.
+    /// The only arch the pack ships for; other devices skip.
     std::string servedArch;
     int64_t batch;
     int64_t numQueryHeads;
@@ -699,11 +682,8 @@ struct AttentionDenseFixture
     int64_t headSize;
 };
 
-/// Builds a single-node SDPA graph in the BSHD layout the attention pack requires
-/// (Gfx950AttentionDenseNative.cpp's hasBshdStrides) and pins it to `fixture.engineName`
-/// so the graph is served by that pack specifically rather than whichever engine wins
-/// the ranking -- the same pinning discipline ExecutesAPackagedKernelOnDevice above
-/// uses for the pointwise pack.
+/// Builds a single-node BSHD SDPA graph (the layout the pack requires) pinned to
+/// `fixture.engineName`.
 std::shared_ptr<Graph> buildAttentionDenseGraph(const AttentionDenseFixture& fixture)
 {
     auto graph = std::make_shared<Graph>();
@@ -750,10 +730,7 @@ class IntegrationGpuKernelIngestorAttentionDenseResetP
           IntegrationGraphVerificationHarness<float, AttentionDenseFixture>
 {
 protected:
-    /// Runs the pinned graph to completion, asserting the named engine actually served
-    /// it -- the same attributability discipline buildAndCompilePacked() uses for the
-    /// pointwise pack above, so a silently-wrong pin cannot be mistaken for a passing
-    /// reset case.
+    /// Runs the pinned graph to completion, asserting the named engine actually served it.
     void executeOnPinnedAttentionEngine(Graph& graph, const std::string& engineName)
     {
         auto result = graph.build_operation_graph(_handle);
@@ -779,9 +756,8 @@ protected:
         ASSERT_EQ(servingEngineId, engineId)
             << "engine id " << servingEngineId << " served the pinned graph, not " << engineName;
 
-        // BF16 attention against the CPU reference: the tolerance the ASM SDPA forward
-        // suites use for the same dtype. What this fixture proves is the reset, so the
-        // bound only has to rule out garbage from a dropped or corrupted module.
+        // ASM SDPA forward suites' BF16 tolerance; only needs to rule out garbage from a
+        // dropped or corrupted module.
         constexpr float BF16_ATTENTION_TOLERANCE = 1e-2f;
         GraphVerificationContext context(graph);
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
@@ -797,15 +773,8 @@ protected:
     }
 };
 
-/// Proves resetIngestorModuleCachesForTesting() reaches the attention pack, not just
-/// hipkernel:pointwise_packed -- the coverage gap FINDING B1 named. Runs the graph
-/// once to populate the pack's module cache, resets every pack's cache (the same call
-/// ...SurvivesABrokenArchive makes), then runs it again: a reset that silently missed
-/// this pack's entry would be unobservable here (the resident module would just keep
-/// serving), but a reset that crashed, corrupted the cache, or dropped a module a live
-/// plan still needed would fail the second run. Combined with the host-side
-/// TestIngestorPacksModuleCacheOwnership test, which proves the table entry for the
-/// pack is wired at all, this is the device-side half: proof the wire actually works.
+/// Runs, resets every pack's module cache, then runs again: a reset that crashed,
+/// corrupted the cache, or dropped a module a live plan still needs fails the second run.
 TEST_P(IntegrationGpuKernelIngestorAttentionDenseResetP, SurvivesAResetAfterFirstDispatch)
 {
     const auto& fixture = GetParam();

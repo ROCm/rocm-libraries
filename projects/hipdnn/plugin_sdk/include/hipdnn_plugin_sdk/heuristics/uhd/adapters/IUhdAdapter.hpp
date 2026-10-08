@@ -15,22 +15,18 @@
 namespace hipdnn_plugin_sdk::uhd
 {
 
-/// @brief Abstract interface for UHD model adapters.
-///
-/// An adapter scores kernel candidates based on their feature vectors.
-/// Different adapters support different model formats (GBDT trees, lookup tables, native scorers).
+/// @brief Abstract interface for UHD model adapters: scores candidates from feature vectors.
 class IUhdAdapter
 {
 public:
     virtual ~IUhdAdapter() = default;
 
     /// Score a single candidate.
-    /// @param features Feature vector (must match expected count).
-    /// @returns Predicted score (interpretation depends on UHD objective).
+    /// @param features Feature vector; size must equal expectedFeatureCount().
+    /// @returns Predicted score; meaning depends on the UHD objective.
     virtual double score(const std::vector<double>& features) const = 0;
 
-    /// Score multiple candidates in batch.
-    /// Default implementation calls score() for each row.
+    /// Score multiple candidates; the default calls score() per row.
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     virtual std::vector<double> scoreBatch(const std::vector<std::vector<double>>& batch) const
     {
@@ -43,27 +39,22 @@ public:
         return results;
     }
 
-    /// Which slot of the feature row identifies a candidate's group, or -1 when this adapter
-    /// does not decide in two layers.
-    ///
-    /// `scoreBatch` already makes the group decision internally; this exposes only *where* the
-    /// group is read from, so a ranker can report which group each candidate belonged to without
-    /// re-deriving it from anywhere else and risking a different answer.
+    /// Feature-row slot holding a candidate's group, or -1 if this adapter is not two-layer.
+    /// Lets a ranker report each candidate's group exactly as scoreBatch decided it.
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     virtual int groupFeatureIndex() const
     {
         return -1;
     }
 
-    /// Get the expected number of features.
+    /// Expected number of features.
     virtual size_t expectedFeatureCount() const = 0;
 
-    /// Get the features hash this adapter was trained on (for contract validation).
+    /// Features hash this adapter was trained on (for contract validation).
     virtual const std::string& getFeaturesHash() const = 0;
 
-    /// Check if the given architecture was seen during training.
-    /// Returns true if training_arches is empty (no restriction) or if arch is in the list.
-    /// Default implementation always returns true (no restriction).
+    /// True if @p arch was seen in training or training_arches is empty.
+    /// The default imposes no restriction.
     virtual bool isTrainedForArch(const std::string& /*arch*/) const
     {
         return true;

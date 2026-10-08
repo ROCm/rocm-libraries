@@ -778,12 +778,8 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderWhenNotSet)
     ASSERT_NO_THROW(heur->finalize());
 
     // With no descriptor-level override and no env var, resolveHeuristicPolicyOrder
-    // returns the built-in default: Config first so HIPDNN_HEUR_CONFIG_PATH rules win,
-    // then StaticOrdering as the last-resort fallback that always succeeds. The backend
-    // injects nothing of its own here — RFC 0007 §5.3.2/§5.3.3 make the ordered policy
-    // list the only channel for policy selection, so a heuristic mode never adds an
-    // entry. Keep in step with the default list in
-    // EngineHeuristicDescriptor::resolveHeuristicPolicyOrder.
+    // returns the built-in default, Config then StaticOrdering; a heuristic mode adds
+    // nothing. Keep in step with EngineHeuristicDescriptor::resolveHeuristicPolicyOrder.
     int64_t count = 999;
     ASSERT_NO_THROW(heur->getAttribute(
         HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 0, &count, nullptr));
@@ -798,8 +794,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderWhenNotSet)
               hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"));
 }
 
-// The prediction policies reach the descriptor as ordinary policy-order entries, in the
-// caller's order, and are never synthesized by the backend from a heuristic mode.
+// The backend never synthesizes prediction policies from a heuristic mode.
 TEST_F(TestGpuEngineHeuristicDescriptor, PredictionPoliciesTravelThroughPolicyOrderAttribute)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envGuard(
@@ -1358,8 +1353,7 @@ std::string readRankingMetric(const EngineHeuristicDescriptor& heur)
 }
 } // namespace
 
-// Same precedence as the policy order: environment, then attribute, then "tflops". The
-// metric resolves before candidates are gathered, so finalizing with no applicable
+// The metric resolves before candidates are gathered, so finalizing with no applicable
 // engine is enough to observe it.
 TEST_F(TestEngineHeuristicDescriptor, RankingMetricResolvesEnvThenAttributeThenDefault)
 {
@@ -1385,8 +1379,7 @@ TEST_F(TestEngineHeuristicDescriptor, RankingMetricResolvesEnvThenAttributeThenD
     EXPECT_EQ(finalizeWith("tflops", "time"), "tflops");
 }
 
-// RFC 0019 §4.4: an unregistered metric is refused where the request is made — at set for
-// the attribute, at finalize for the environment, which has no set.
+// Refused at set for the attribute, at finalize for the environment (RFC 0019 §4.4).
 TEST_F(TestEngineHeuristicDescriptor, UnregisteredRankingMetricIsRejected)
 {
     auto heur = getEngineHeuristicDescriptor();
@@ -1401,8 +1394,7 @@ TEST_F(TestEngineHeuristicDescriptor, UnregisteredRankingMetricIsRejected)
     ASSERT_THROW_HIPDNN_STATUS(heur->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
-// RFC 0019 §11.4: the metric travels with every chosen configuration to plan build, whether
-// or not the winning policy supplied a configuration of its own.
+// With or without a policy-supplied configuration (RFC 0019 §11.4).
 TEST_F(TestGpuEngineHeuristicDescriptor, EveryResultConfigCarriesTheRankingMetric)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(

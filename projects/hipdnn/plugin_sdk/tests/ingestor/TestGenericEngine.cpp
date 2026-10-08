@@ -272,7 +272,7 @@ TEST(TestIngestorGenericEngine, BrokenEngineModelDoesNotRemoveGraphApplicability
     model.engineName = descriptor.name;
     model.role = "predict_engine";
     model.arch = "default";
-    // Recorded and matching, so what refuses this model is its kernel feature, not provenance.
+    // Provenance matches, so only the kernel feature refuses this model.
     model.trainedAgainstSelectorRevision = "selector-test";
     model.trainedAgainstJson
         = {{"ued", {{"id", "20112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
@@ -304,10 +304,8 @@ double firstL1Feature(const double* values, size_t count)
     return count == 0 ? 0.0 : values[0];
 }
 
-/// Regression (#4, C3). A descriptor-backed engine bound its `predict_engine` model with no
-/// selector check, so an estimate trained against another build of the engine -- other
-/// rankers, packs, kernels -- was answered as this one's and competed across engines. The
-/// opaque-engine path always refused it; this pins the descriptor path to the same rule.
+/// A descriptor-backed engine's `predict_engine` model answers only for the selector revision
+/// it was trained against, as on the opaque-engine path.
 TEST(TestIngestorGenericEngine, AnEngineModelAnswersOnlyForTheSelectorItWasTrainedAgainst)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -376,9 +374,8 @@ flatbuffers::FlatBufferBuilder configWithMetric(const std::string& metric)
     return builder;
 }
 
-/// RFC 0019 §4.4: a metric the registry does not know has no direction to rank by, so it is
-/// the caller's error -- refused where the request is made -- rather than an engine with no
-/// estimate. Answering UNAVAILABLE would let a typo read as "no engine serves this".
+/// RFC 0019 §4.4: an unregistered metric has no direction to rank by. BAD_PARAM rather than
+/// UNAVAILABLE, so a typo does not read as "no engine serves this".
 TEST(TestIngestorGenericEngine, AnUnregisteredRankingMetricIsABadParameter)
 {
     const ScopedTestSymbols symbols;
@@ -408,7 +405,7 @@ TEST(TestIngestorGenericEngine, AnUnregisteredRankingMetricIsABadParameter)
     {
         expectBadParam([&] { engine.getPrediction(handle, graph, config, kind, true); });
     }
-    // Plan build ranks the catalog by the same field, so it refuses the same way.
+    // Plan build ranks by the same field, so it refuses the same way.
     StubContext context;
     expectBadParam([&] { engine.initializeExecutionContext(handle, graph, config, context); });
 }
@@ -495,9 +492,8 @@ TEST_P(TestIngestorConfigurationPrediction, ReturnsOnlyUniquelyAddressableConfig
     EXPECT_EQ(candidates->candidates()->Get(0)->id()->str(),
               toString(testId(GetParam() == ConfigurationCatalog::SINGLETON ? 0x64 : 0x65)));
 
-    // The only calibrated ranker estimates tflops. Asked in `time`, L2 has no ranker of that
-    // metric and says so in that metric -- it never reports the tflops number as a time, even
-    // though the tflops ranker would still pick the kernel at plan build (RFC 0019 §11.4).
+    // Asked in `time`, L2 has no ranker of that metric and must not report the tflops value as
+    // a time (RFC 0019 §11.4).
     const auto timeBuffer = configWithMetric("time");
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper timeConfig(
         timeBuffer.GetBufferPointer(), timeBuffer.GetSize());
@@ -514,11 +510,8 @@ INSTANTIATE_TEST_SUITE_P(KnobTuples,
                                            ConfigurationCatalog::DISTINCT_KNOBS,
                                            ConfigurationCatalog::AMBIGUOUS_KNOBS));
 
-/// Regression (#5, RFC 0019 §5 step 9). Plan build orders the catalog from a benchmark
-/// record covering it, but configuration prediction always asked the calibrated model -- so
-/// it pinned the model's favourite, a kernel plan build would not serve, and reported an
-/// estimate where a measurement existed. Here the model prefers K128 and the record measured
-/// K64 at 1 ms against K128's 2 ms: the prediction must pin K64 and report the measurement.
+/// RFC 0019 §5 step 9: a benchmark record covering the catalog decides the predicted
+/// configuration and its value. The model prefers K128; the record measured K64 faster.
 TEST(TestIngestorGenericEngine, ACoveringRecordDecidesTheConfigurationPredictionAndItsValue)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -597,7 +590,7 @@ TEST(TestIngestorGenericEngine, ACoveringRecordDecidesTheConfigurationPrediction
         return candidates->size() == 1 ? candidates->Get(0)->id()->str() : std::string();
     };
 
-    // Time is what the record measures, so it answers -- and no model produced the number.
+    // The record measures time, so it answers without a model.
     const TestGraph timed(makeGraphId(0x6D));
     measure(timed);
     const auto inTime = predict(timed, "time");
@@ -607,8 +600,7 @@ TEST(TestIngestorGenericEngine, ACoveringRecordDecidesTheConfigurationPrediction
     EXPECT_DOUBLE_EQ(inTime.value, 1.0);
     EXPECT_TRUE(inTime.uhd_id.empty()) << "a measured value was attributed to a model";
 
-    // Throughput is derived from the measured time and the graph's work: 2*1024^3 flops in
-    // 1 ms. The model's 128 for K128 is never consulted.
+    // Throughput derives from the measured time and the graph's work: 2*1024^3 flops in 1 ms.
     const MatmulTestGraph matmul(1024, 1024, 1024);
     measure(matmul.graph());
     const auto inTflops = predict(matmul.graph(), "tflops");
@@ -618,8 +610,8 @@ TEST(TestIngestorGenericEngine, ACoveringRecordDecidesTheConfigurationPrediction
     EXPECT_DOUBLE_EQ(inTflops.value, 2.0 * 1024 * 1024 * 1024 / 1e9);
     EXPECT_TRUE(inTflops.uhd_id.empty());
 
-    // A graph with no published work cannot turn a time into a throughput: the record still
-    // decides the configuration, and the model answers what that configuration is worth.
+    // With no published work a time cannot become a throughput: the record still picks the
+    // configuration and the model estimates its value.
     const TestGraph unknownWork(makeGraphId(0x6E));
     measure(unknownWork);
     const auto estimated = predict(unknownWork, "tflops");
@@ -630,11 +622,8 @@ TEST(TestIngestorGenericEngine, ACoveringRecordDecidesTheConfigurationPrediction
     EXPECT_EQ(estimated.uhd_id, toString(HEURISTIC_ID));
 }
 
-/// Plan build and configuration prediction read ONE measured snapshot. The catalog cache keeps
-/// a measured order after the bounded winner cache has evicted the record that produced it, so
-/// plan build kept serving the measured K64 while the prediction looked the record up again,
-/// missed, and pinned the model's K128 with the model's number. Here the winner cache holds one
-/// record, so recording another evicts the first while the catalog it ordered stays cached.
+/// Plan build and configuration prediction must read one measured snapshot: the catalog cache
+/// keeps a measured order after the winner cache (capacity 1 here) evicts its record.
 TEST(TestIngestorGenericEngine, AnEvictedRecordStillDecidesBothPlanAndPrediction)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -679,7 +668,7 @@ TEST(TestIngestorGenericEngine, AnEvictedRecordStillDecidesBothPlanAndPrediction
         return WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{graph},
                          DeviceKey{properties}};
     };
-    // Identified, so its catalog is cached; real work, so a time becomes a throughput.
+    // Identified, so its catalog is cached; real work, so a time converts to a throughput.
     const MatmulTestGraph matmul(1024, 1024, 1024, makeGraphId(0x6F));
     const auto& graph = matmul.graph();
 
@@ -723,7 +712,7 @@ TEST(TestIngestorGenericEngine, AnEvictedRecordStillDecidesBothPlanAndPrediction
         << "the measured K64 throughput, not the model's estimate";
     EXPECT_TRUE(prediction.uhd_id.empty()) << "a measured value was attributed to a model";
 
-    // The configuration the prediction names builds the kernel plan build serves unpinned.
+    // The predicted configuration builds the same kernel as the unpinned plan.
     flatbuffers::FlatBufferBuilder serialized;
     serialized.Finish(EngineConfig::Pack(serialized, prediction.engine_config.get()));
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper predicted(
@@ -732,10 +721,8 @@ TEST(TestIngestorGenericEngine, AnEvictedRecordStillDecidesBothPlanAndPrediction
     EXPECT_EQ(builtBlockSize(predicted), 64U);
 }
 
-/// Regression (R3). A candidate's knob tuple carries ordinals for non-integer knobs, but the
-/// uniqueness check compared each kernel's metadata as a raw int64_t -- so a string knob matched
-/// nothing, the count came out 0, and every candidate was refused as unidentifiable even when
-/// the string was exactly what told the two kernels apart.
+/// The uniqueness check must compare non-integer knobs by ordinal, so a string knob can be the
+/// only thing that distinguishes two kernels.
 TEST(TestIngestorGenericEngine, AConfigurationDistinguishedByAStringKnobIsPredictable)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -780,8 +767,7 @@ TEST(TestIngestorGenericEngine, AConfigurationDistinguishedByAStringKnobIsPredic
 
     ASSERT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
     ASSERT_NE(prediction.engine_config, nullptr);
-    // The predicted configuration addresses exactly the kernel that was scored: replaying its
-    // knobs -- the string one as its ordinal -- enumerates that one candidate and no other.
+    // Replaying the predicted knobs (the string as its ordinal) enumerates exactly one kernel.
     flatbuffers::FlatBufferBuilder serialized;
     serialized.Finish(EngineConfig::Pack(serialized, prediction.engine_config.get()));
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper selected(
@@ -819,10 +805,8 @@ public:
     ScopedCountingScorer& operator=(const ScopedCountingScorer&) = delete;
 };
 
-/// Regression (R7b). A CONFIGURATION description cleared `uhd_id`, and a capability is a
-/// description naming a model, so getPredictionCapabilities could never list an L2 model. The
-/// description must name the calibrated ranker an evaluation would use -- and, being how a
-/// caller discovers capabilities one (kind, metric) at a time, must rank nothing to do it.
+/// A CONFIGURATION description names the calibrated ranker an evaluation would use, so
+/// getPredictionCapabilities can list L2 models, and ranks nothing to do it.
 TEST(TestIngestorGenericEngine, AConfigurationDescriptionNamesTheL2ModelWithoutRanking)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -883,8 +867,7 @@ TEST(TestIngestorGenericEngine, AConfigurationDescriptionNamesTheL2ModelWithoutR
         handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, /*evaluate=*/false);
     EXPECT_EQ(scoredKernels.load(), 0) << "describing a prediction ranked the catalog";
 
-    // The counter is live: evaluating the same configuration does rank, and names the same
-    // model the description did.
+    // The counter is live: evaluating does rank, and names the same model.
     const auto evaluated = engine.getPrediction(
         handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, /*evaluate=*/true);
     ASSERT_EQ(evaluated.status, PredictionStatus::AVAILABLE) << evaluated.reason;

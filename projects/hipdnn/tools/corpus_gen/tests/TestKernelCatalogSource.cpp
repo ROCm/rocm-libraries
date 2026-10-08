@@ -19,12 +19,8 @@
 /// @file TestKernelCatalogSource.cpp
 /// @brief What a descriptor pack contributes to a corpus, and what it is allowed to lose.
 ///
-/// The behaviour under test is the one the retired Python kernel pool got wrong:
-/// a pack whose every geometry is claimed by exactly one kernel used to contribute nothing, so
-/// the engine that most needs measuring -- a deterministic one, whose matcher pins every field
-/// -- got a corpus with none of its own shapes in it. The first test here is that regression,
-/// and the rest are the losses that ARE real: a shape this tool cannot name, one it cannot
-/// build, one too large to time.
+/// A deterministic pack (one kernel per geometry) must contribute all its geometries; the
+/// legitimate losses are shapes this tool cannot name, cannot build, or cannot time.
 
 using namespace hipdnn_corpus_gen;
 
@@ -42,9 +38,8 @@ OperationMetadata shippedSdpa()
     return parsed.ok() ? *parsed.metadata : OperationMetadata{};
 }
 
-/// One descriptor, spelled the way a real pack spells it -- `num_query_heads`, `seqlen_kv`,
-/// `head_size` -- so the declaration's `kernel_catalog` block is what makes this readable and a
-/// change to those names is a test failure rather than a silent empty pool.
+/// One descriptor, spelled as a real pack spells it (`num_query_heads`, `seqlen_kv`,
+/// `head_size`), so the declaration's `kernel_catalog` block must map these names.
 nlohmann::json descriptor(int64_t batch,
                           int64_t heads,
                           int64_t headsKv,
@@ -67,9 +62,7 @@ nlohmann::json descriptor(int64_t batch,
                             {"block_m", blockM}}}};
 }
 
-/// A scratch tree under the test's own working directory rather than under TMPDIR: these runs
-/// happen inside containers where /tmp is not always writable, and a test that cannot write is
-/// indistinguishable from one that failed.
+/// A scratch tree under the working directory: /tmp is not always writable in containers.
 class TempTree
 {
 public:
@@ -112,9 +105,7 @@ private:
 
 TEST(TestKernelCatalogSource, ADeterministicPackContributesEveryGeometryItCarries)
 {
-    // The regression. Four geometries, one kernel each: the matcher pins every distinguishing
-    // field, so kernel identity is a total function of the problem. That is precisely the engine
-    // `predict_engine` exists for, and it cannot be measured on a corpus that excludes it.
+    // One kernel per geometry: exactly the engine `predict_engine` exists for.
     TempTree tree("deterministic");
     const auto path = tree.pack("dense.kdp.json",
                                 nlohmann::json::array({
@@ -132,17 +123,14 @@ TEST(TestKernelCatalogSource, ADeterministicPackContributesEveryGeometryItCarrie
     EXPECT_EQ(harvest.entries.size(), 4u);
     EXPECT_TRUE(harvest.report.shutOut.empty()) << harvest.report.shutOut;
 
-    // Reported so an operator learns here rather than eight hours into a sweep, and acted on
-    // nowhere: not one geometry was dropped for it.
+    // Reported only; no geometry is dropped for it.
     EXPECT_TRUE(harvest.report.deterministic);
     EXPECT_EQ(harvest.report.maxCandidates, 1);
 }
 
 TEST(TestKernelCatalogSource, TheDeclarationSuppliesTheFieldNamesAndTheEnumSpellings)
 {
-    // The point read back is the pack's geometry in the declaration's vocabulary: `BF16` became
-    // `bf16` through the `enums` table, and `causal: 1` became a bool. Without that the graph
-    // would be built for a shape nobody asked for.
+    // `BF16` maps through the `enums` table and `causal: 1` becomes a bool.
     TempTree tree("vocabulary");
     const auto path = tree.pack(
         "dense.kdp.json", nlohmann::json::array({descriptor(2, 16, 4, 128, 4096, 64, 1, "BF16")}));
@@ -160,8 +148,7 @@ TEST(TestKernelCatalogSource, TheDeclarationSuppliesTheFieldNamesAndTheEnumSpell
     EXPECT_TRUE(std::get<bool>(point.at("is_causal")));
     EXPECT_EQ(std::get<std::string>(point.at("dtype")), "bf16");
 
-    // The pool entry says where it came from and which population it joins, because both are
-    // manifest columns and a `kernel` row with neither cannot be reconciled against the pack.
+    // Both are manifest columns.
     EXPECT_EQ(harvest.entries.front().source, "kernel");
     EXPECT_NE(harvest.entries.front().origin.find("dense.kdp.json"), std::string::npos);
     EXPECT_EQ(harvest.entries.front().regime, "append_long_gqa");
@@ -169,13 +156,8 @@ TEST(TestKernelCatalogSource, TheDeclarationSuppliesTheFieldNamesAndTheEnumSpell
 
 TEST(TestKernelCatalogSource, AParameterThePackNeverMentionsComesFromTheDeclaredConstant)
 {
-    // A pack records what its kernels were compiled for, and `alignment` is not in that
-    // vocabulary -- these kernels all anchor the causal diagonal top-left, so the pack simply
-    // says `causal: 1`. The shipped declaration says so under `kernel_catalog.constants`, and
-    // that is what lets the builder resolve an argument no descriptor supplies.
-    //
-    // Without it the failure is not an error but an absence: `$q.alignment` resolves for no
-    // geometry, so every one of them is unbuildable and the kernel pool is empty.
+    // Packs never mention `alignment`; it comes from `kernel_catalog.constants`, without which
+    // every geometry would be unbuildable.
     TempTree tree("constants");
     const auto path = tree.pack(
         "dense.kdp.json", nlohmann::json::array({descriptor(1, 32, 8, 128, 4096, 128, 1, "BF16")}));
@@ -189,9 +171,7 @@ TEST(TestKernelCatalogSource, AParameterThePackNeverMentionsComesFromTheDeclared
 
 TEST(TestKernelCatalogSource, TwoSpellingsOfOneShapeAreOneProblemToMeasure)
 {
-    // `causal: 1` and `causal: true` are the same graph. Keying geometries on the raw metadata
-    // would make them two corpus entries with identical bytes -- a duplicated measurement that
-    // reads as two independent samples in the training set.
+    // `causal: 1` and `causal: true` are the same graph and must not be measured twice.
     TempTree tree("spellings");
     const auto path = tree.pack("dense.kdp.json",
                                 nlohmann::json::array({
@@ -205,16 +185,14 @@ TEST(TestKernelCatalogSource, TwoSpellingsOfOneShapeAreOneProblemToMeasure)
     EXPECT_EQ(harvest.report.geometries, 1);
     EXPECT_EQ(harvest.entries.size(), 1u);
 
-    // Two kernels on one geometry: a choice exists, so the pack is not deterministic.
     EXPECT_EQ(harvest.report.maxCandidates, 2);
     EXPECT_FALSE(harvest.report.deterministic);
 }
 
 TEST(TestKernelCatalogSource, APackDescribingNoShapesIsReadAndStaysSilent)
 {
-    // `pointwise_add` and the shipped `tiled_attention` carry `block_size`, `dtype`, `operation`
-    // and nothing else. There is no flag that admits them, so naming one would be advice that
-    // does not work -- and the descriptors are one population, not one geometry each.
+    // `pointwise_add` and `tiled_attention` carry no shape fields; no flag would help, so
+    // nothing is reported.
     TempTree tree("shapeless");
     const auto path = tree.pack("pointwise_add.kdp.json",
                                 nlohmann::json::array({
@@ -235,8 +213,7 @@ TEST(TestKernelCatalogSource, APackDescribingNoShapesIsReadAndStaysSilent)
 
 TEST(TestKernelCatalogSource, AValueTheDeclarationDoesNotMapIsCountedAndNamedRatherThanGuessed)
 {
-    // A pack in fp8 read as bf16 would produce a corpus of graphs the engine does not serve,
-    // labelled as ones it does -- every row of it wrong, and nothing downstream able to tell.
+    // Guessing a mapping would mislabel every row.
     TempTree tree("unmapped");
     const auto path = tree.pack(
         "fp8.kdp.json", nlohmann::json::array({descriptor(1, 8, 8, 512, 512, 64, 1, "FP8")}));
@@ -252,10 +229,8 @@ TEST(TestKernelCatalogSource, AValueTheDeclarationDoesNotMapIsCountedAndNamedRat
 
 TEST(TestKernelCatalogSource, AGeometryTooLargeToBenchmarkIsCountedApartFromOneThatCannotBuild)
 {
-    // Two refusals that read identically in a corpus -- the graph is absent either way -- and
-    // mean opposite things: one is a ceiling the operator can raise, the other is a declaration
-    // that cannot express the shape. Reporting them together advises raising a flag that will
-    // not help.
+    // Both drop the graph, but only the ceiling is fixable by a flag, so they are reported
+    // separately.
     const auto metadata = shippedSdpa();
 
     const ProblemPoint point{{"batch", int64_t{1}},
@@ -265,8 +240,7 @@ TEST(TestKernelCatalogSource, AGeometryTooLargeToBenchmarkIsCountedApartFromOneT
                              {"seqlen_k", int64_t{512}},
                              {"head_dim", int64_t{64}},
                              {"is_causal", true},
-                             // Supplied here because this point is built directly rather than
-                             // harvested; a pack gets it from `kernel_catalog.constants`.
+                             // Built directly; a pack gets this from `kernel_catalog.constants`.
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
                              {"dtype", std::string("bf16")}};
@@ -285,7 +259,7 @@ TEST(TestKernelCatalogSource, AGeometryTooLargeToBenchmarkIsCountedApartFromOneT
     EXPECT_EQ(tight.report.eligible, 0);
     EXPECT_NE(tight.report.shutOut.find("--max-bytes"), std::string::npos) << tight.report.shutOut;
 
-    // The same geometry at a ceiling it fits, so the refusal was the ceiling and nothing else.
+    // Proves the refusal was the ceiling.
     const auto roomy = fromPack(metadata, path, footprint);
     EXPECT_EQ(roomy.report.eligible, 1);
     EXPECT_EQ(roomy.report.overByteBudget, 0);
@@ -294,11 +268,8 @@ TEST(TestKernelCatalogSource, AGeometryTooLargeToBenchmarkIsCountedApartFromOneT
 
 TEST(TestKernelCatalogSource, AGeometryTheDeclarationCannotBuildIsCountedAndTheFirstErrorKept)
 {
-    // A catalog mapping fewer fields than the builder needs: the geometry is read, and the graph
-    // it should become references a parameter no descriptor supplied. That is an authoring
-    // defect in the declaration rather than anything about the pack, and it is worth a message
-    // because it costs the pack every geometry it has -- which is what distinguishes it from the
-    // one-off refusals above.
+    // A catalog missing a field the builder needs is a declaration defect that costs every
+    // geometry, so it gets a message.
     auto metadata = shippedSdpa();
     ASSERT_EQ(metadata.kernelCatalog.fields.erase("head_dim"), 1u);
 
@@ -318,9 +289,7 @@ TEST(TestKernelCatalogSource, AGeometryTheDeclarationCannotBuildIsCountedAndTheF
 
 TEST(TestKernelCatalogSource, AnOperationDeclaringNoKernelCatalogHasNoKernelPool)
 {
-    // How coverage stays "whatever has a declaration": an operation that has not been taught a
-    // pack vocabulary reads no pack at all, rather than there being an operation list somewhere
-    // that has to be kept in step with the declarations.
+    // Reading packs is opt-in per declaration; there is no operation list to maintain.
     const auto load = parseOperationMetadata(nlohmann::json::parse(R"({
       "schema_version": "0.1",
       "operation": "toy",
@@ -347,9 +316,7 @@ TEST(TestKernelCatalogSource, AnOperationDeclaringNoKernelCatalogHasNoKernelPool
 
 TEST(TestKernelCatalogSource, PacksAreFoundByStructureAndInAStableOrder)
 {
-    // Packs are laid out one arch per directory and are named by whoever wrote them, so the
-    // discovery is over the extension rather than over a list of expected names. Order is fixed
-    // because a corpus has to reproduce across machines.
+    // Discovered by extension, not name; order is fixed so corpora reproduce across machines.
     TempTree tree("discovery");
     const auto gfx942 = tree.pack("gfx942/attention.kdp.json", nlohmann::json::array());
     const auto gfx950 = tree.pack("gfx950/attention.kdp.json", nlohmann::json::array());
@@ -362,17 +329,15 @@ TEST(TestKernelCatalogSource, PacksAreFoundByStructureAndInAStableOrder)
     EXPECT_NE(found[1].string().find("gfx950"), std::string::npos);
     EXPECT_EQ(found, discoverPacks({tree.root()}));
 
-    // A path naming a file is that file, and naming it twice -- directly and through its root --
-    // contributes it once.
+    // Naming a file twice (directly and via its root) contributes it once.
     EXPECT_EQ(discoverPacks({gfx950}).size(), 1u);
     EXPECT_EQ(discoverPacks({tree.root(), gfx942}).size(), 2u);
 }
 
 TEST(TestKernelCatalogSource, ACollectedPoolIsSpreadAcrossRegimesRatherThanLeftInPackOrder)
 {
-    // Packs are written one arch, one dtype, one head size at a time, so a pool left in pack
-    // order and cut to a budget is a corpus of whatever the first pack listed. The first few
-    // entries have to be a sample of the whole.
+    // Packs are written one arch/dtype/head size at a time, so pack order would bias any
+    // prefix cut.
     TempTree tree("spread");
     tree.pack("a/decode.kdp.json",
               nlohmann::json::array({

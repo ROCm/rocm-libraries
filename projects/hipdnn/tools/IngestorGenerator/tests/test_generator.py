@@ -389,8 +389,6 @@ class TestAllowListedKeys:
     }
     _UMD_KEYS = {"version", "id", "name", "scope", "match_symbol"}
     _UDD_KEYS = {"version", "id", "name", "dispatch_symbol"}
-    # `kind`/`payload` was the shape before the UHD became a whole descriptor; a
-    # generator still emitting it produces a heuristic the loader drops.
     _UHD_KEYS = {"version", "id", "name", "adapter", "objective", "native"}
     _KDP_KEYS = {
         "version",

@@ -14,9 +14,6 @@
 
 /// @file UhdConfig.hpp
 /// @brief The resolved contents of one UHD, as the loader produces it.
-///
-/// Kept apart from any registry so both the policy path and the ingestor's
-/// plan-build path can name it without depending on how the other finds engines.
 namespace hipdnn_plugin_sdk::uhd
 {
 
@@ -26,9 +23,8 @@ struct UhdConfig
     std::string uhdId;
     std::string name;
 
-    /// Backfilled by the descriptor loader from the UED role map that resolved this
-    /// UHD (RFC 0019 §3.1); never authored in the document itself. Empty for a config
-    /// parsed outside a descriptor set.
+    /// Backfilled by the descriptor loader from the UED role map (RFC 0019 §3.1); empty
+    /// outside a descriptor set.
     std::string engineName;
     std::string role;
     std::string arch;
@@ -39,9 +35,8 @@ struct UhdConfig
     std::string featuresHash;
     std::string objective = "max"; // "max" or "min"
 
-    // Score metadata for cross-engine comparison (RFC 0019 §4.4, §11.3). The metric names
-    // a registered ranking metric (RankingMetrics.hpp), which fixes units and direction;
-    // empty for a ranker that orders its catalog without predicting a comparable number.
+    // Registered ranking metric (RankingMetrics.hpp; RFC 0019 §4.4); empty for a ranker
+    // whose scores are not comparable predictions.
     std::string scoreMetric; // e.g., "tflops", "time"
     bool scoreCalibrated = false; // cross-engine comparable?
     std::string scoreTransform; // e.g., "log1p", "identity"
@@ -53,9 +48,8 @@ struct UhdConfig
     std::string customLibrarySymbol; // for custom_library: symbol name in .so
     std::string nativeSymbol; // for native: symbol registered with NativeScorerRegistry
 
-    /// RFC 0019 §6.5: field -> (string value -> code), for features that read a string field.
-    /// Empty when none does, which is the common case and must hash identically to a UHD
-    /// that predates the field.
+    /// RFC 0019 §6.5: field -> (string value -> code). Empty must hash identically to a UHD
+    /// without the field.
     std::map<std::string, std::map<std::string, int32_t>> categoricalEncoding;
 };
 

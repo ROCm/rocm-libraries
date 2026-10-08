@@ -4,13 +4,6 @@
 /**
  * @file TestTableAdapter.cpp
  * @brief Tests for TableAdapter (coarse bucket lookup) per RFC 0019 §7 "table".
- *
- * Tests cover:
- * - Model loading from buffer
- * - Features hash validation
- * - Bucket quantization and lookup
- * - Training arch detection
- * - Edge cases (no match, invalid buffer)
  */
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/TableAdapter.hpp>
@@ -73,7 +66,6 @@ public:
     {
         flatbuffers::FlatBufferBuilder builder;
 
-        // Build buckets
         std::vector<flatbuffers::Offset<fb::FeatureBucket>> bucketOffsets;
         for(const auto& bucket : _buckets)
         {
@@ -82,7 +74,6 @@ public:
                 fb::CreateFeatureBucket(builder, bucket.featureIdx, boundaries));
         }
 
-        // Build entries
         std::vector<flatbuffers::Offset<fb::TableEntry>> entryOffsets;
         for(const auto& entry : _entries)
         {
@@ -91,7 +82,6 @@ public:
                 fb::CreateTableEntry(builder, bucketKey, entry.kernelId, entry.score));
         }
 
-        // Build training arches
         std::vector<flatbuffers::Offset<flatbuffers::String>> archOffsets;
         archOffsets.reserve(_trainingArches.size());
         for(const auto& arch : _trainingArches)
@@ -140,7 +130,6 @@ class TestTableAdapter : public ::testing::Test
 
 TEST_F(TestTableAdapter, LoadFromBufferBasic)
 {
-    // Build a simple table: 2 features, 1 bucket each, 2 entries
     auto buffer = TableModelBuilder()
                       .setNumFeatures(2)
                       .setFeaturesHash(TEST_HASH)
@@ -203,16 +192,11 @@ TEST_F(TestTableAdapter, FeaturesHashMismatch)
                       .addEntry({0}, 100, 1.0)
                       .build();
 
-    // Load should fail due to hash mismatch
     auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     EXPECT_EQ(adapter, nullptr);
 }
 
-/// RFC 0019 §12: a contract diagnostic is "a clear error (not a warning) naming which of the
-/// three checks failed". This is the same event TreeDataAdapter reports for its own artifact,
-/// so it is reported at the same level -- one condition logged at two levels is how an
-/// operator greps for the errors and never learns this model was disabled. The level is
-/// asserted, not the wording.
+/// RFC 0019 §12: a features_hash mismatch is an error, not a warning, as in TreeDataAdapter.
 TEST_F(TestTableAdapter, TheFeaturesHashCheckReportsAnError)
 {
     auto recorder
@@ -295,11 +279,10 @@ TEST_F(TestTableAdapter, LoadFromBufferTooSmall)
 
 TEST_F(TestTableAdapter, LoadFromBufferWrongIdentifier)
 {
-    // Build a buffer with wrong file identifier
     flatbuffers::FlatBufferBuilder builder;
     auto hashOffset = builder.CreateString(TEST_HASH);
     auto model = fb::CreateTableModel(builder, 1, hashOffset);
-    builder.FinishSizePrefixed(model, "BAAD"); // Wrong identifier
+    builder.FinishSizePrefixed(model, "BAAD");
 
     std::vector<uint8_t> buffer(builder.GetBufferPointer(),
                                 builder.GetBufferPointer() + builder.GetSize());

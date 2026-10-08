@@ -12,15 +12,8 @@ add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
-# TestUhdGenArtifact runs tools/uhd_gen and loads what it writes, which is the only check
-# that a real artifact from the trainer is loadable by the runtime -- the features_hash
-# contract is pinned on both sides, but pinning a hash is not loading a file.
-#
-# It needs the trainer's own dependencies, so probe for them by importing exactly what the
-# tool imports. Gating compilation rather than skipping at run time keeps a developer
-# without lightgbm from seeing a failure they cannot act on; the warning is there so the
-# absence is visible, because uhd_gen's own suite spent its life unregistered by a probe
-# that failed quietly.
+# TestUhdGenArtifact runs tools/uhd_gen and loads its output, so it needs the trainer's Python
+# dependencies. Build it only when they import, and warn otherwise so the gap stays visible.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
@@ -98,17 +91,13 @@ add_executable(hipdnn_plugin_sdk_tests
 
 target_compile_options(hipdnn_plugin_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 
-# TestUhdGeneratedModel loads committed `uhd_gen` output from the source tree.
-# Passed as a definition rather than copied into the build dir: the fixture is
-# source, and a runtime search for it would turn a missing file into a skip when
-# it should be a failure.
+# Passed as a definition, not searched for at run time, so a missing fixture fails
+# instead of skipping.
 target_compile_definitions(
     hipdnn_plugin_sdk_tests
     PRIVATE HIPDNN_UHD_GENERATED_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ingestor/uhd/fixtures"
 )
-# TestCustomLibraryAdapter dlopen's this at runtime; it is the only consumer, and it moved here
-# with the adapter it covers. HIPDNN_TEST_PLUGIN_DIR is set by the top-level CMakeLists, so both
-# suites can name the same output directory.
+# Loaded by TestCustomLibraryAdapter via dlopen from HIPDNN_TEST_PLUGIN_DIR.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     add_library(hipdnn_test_scorer_lib SHARED heuristics/uhd/test_scorer_lib.cpp)
     set_target_properties(hipdnn_test_scorer_lib PROPERTIES CXX_VISIBILITY_PRESET hidden)
@@ -148,26 +137,18 @@ target_link_libraries(
 target_include_directories(hipdnn_plugin_sdk_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../flatbuffers_sdk/tests)
 if(HIPDNN_UHD_GEN_RUNNABLE)
-    # The interpreter that satisfied the probe above, not whatever `python3` resolves to in
-    # the test's environment; and the directory `python -m uhd_gen` has to run from, since
-    # the tool is a source tree rather than an installed package.
+    # The interpreter that passed the probe above, and the directory `python -m uhd_gen` must
+    # run from (the tool is a source tree, not an installed package).
     target_compile_definitions(hipdnn_plugin_sdk_tests
         PRIVATE HIPDNN_UHD_GEN_PYTHON="${Python3_EXECUTABLE}"
                 HIPDNN_UHD_GEN_TOOLS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tools")
 
-    # uhd_gen resolves the evaluator from this variable on its own, so naming it here covers
-    # every invocation rather than the ones that remembered to pass --feature-evaluator. It
-    # names a target `tools` declares, which is configured after this directory; the
-    # generator expression is resolved at generate time, and the guard above already implies
-    # HIPDNN_ENABLE_KERNEL_INGESTOR, which is what decides that target exists.
-    #
-    # Appended, not set: Sanitizers.cmake puts the ASAN symbolizer and the MIOpen cache
-    # directory in this same variable, and add_hipdnn_test() applies it through
-    # set_tests_properties, which replaces the property rather than adding to it.
+    # uhd_gen reads the evaluator path from this variable, so every invocation gets it.
+    # Appended, not set: Sanitizers.cmake also populates TEST_ENVIRONMENT, and
+    # add_hipdnn_test() replaces the test property rather than adding to it.
     list(APPEND TEST_ENVIRONMENT
          "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
 
-    # The variable only names the binary; this is what makes it exist first.
     add_dependencies(hipdnn_plugin_sdk_tests hipdnn_uhd_features)
 endif()
 

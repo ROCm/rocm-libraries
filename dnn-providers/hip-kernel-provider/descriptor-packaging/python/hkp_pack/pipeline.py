@@ -991,10 +991,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
             generic.path.read_bytes(),
         )
 
-    # Sidecars ride with the generics they belong to, and like them are copied
-    # unpruned here: the intermediate tree is a pre-prune mirror of the authored
-    # input, which test_int3_pre_prune_completeness asserts. Pruning happens once,
-    # in pack_arch.
+    # Sidecars are copied unpruned like their generics; pruning happens in pack_arch.
     for sidecar in flat.sidecars_for(flat.generics()):
         _write_bytes_at(
             inter_arch_dir,
@@ -1367,11 +1364,8 @@ def pack_arch(
             generic.path.read_bytes(),
         )
 
-    # Gated on the same reachability set, deliberately derived from the surviving
-    # descriptors rather than added to it. reachable_generic_ids is a walk over
-    # descriptor *ids* that drops anything not in generic_by_id(), so a sidecar --
-    # which has a filename and no id -- could never enter it. Deriving keeps that
-    # walk untouched and makes a sidecar's fate exactly its descriptor's.
+    # Derived from the surviving descriptors: reachable_generic_ids holds ids only, so a
+    # sidecar's fate is exactly its descriptor's.
     for sidecar in flat.sidecars_for(surviving_generics):
         _write_bytes_at(
             out_arch_dir,

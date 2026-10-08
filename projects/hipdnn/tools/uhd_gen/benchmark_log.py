@@ -3,19 +3,9 @@
 # SPDX-License-Identifier: MIT
 """Turn an ingestor benchmark log into the RFC 0019.13 §8.3 training CSV.
 
-The ingestor emits one JSON object per benchmarked kernel (see
-`BenchmarkPlan::logCandidateTiming`). This reads those out of a log file and
-writes the dataset envelope a UHD is trained on.
-
-Why the log and not the winner cache: the cache keeps the winner alone, because
-it is also read back at runtime to replay a decision, and it drops candidates
-that failed to run so a broken kernel can never be served from it. Training needs
-the losers and the failures. Only the log has both.
-
-Five §8.3 columns describe the *sweep* rather than any single dispatch --
-`collection_mode`, `problem_complete`, `shard_id`, `config_set_hash`,
-`applicability_id`. The runtime has no notion of them, so they are supplied by
-whoever drove the corpus and stamped onto every row here.
+Reads the log, not the winner cache, because only the log keeps losers and failures.
+The five sweep-level columns (collection_mode .. applicability_id) are unknown to the
+runtime and are supplied by whoever drove the corpus.
 """
 from __future__ import annotations
 
@@ -32,22 +22,11 @@ logger = logging.getLogger(__name__)
 
 CANDIDATE_EVENT = "ingestor.benchmark.candidate"
 
-# Envelope columns, in the order they are written. Feature columns (the problem's own
-# namespace, `kernel.*`, `device.*`) are appended after these; RFC 0019.13 §8.3 reads columns
-# by name and leaves order arbitrary, so this is only for readability.
+# Envelope columns, in write order; feature columns follow. §8.3 reads by name.
 ENVELOPE_COLUMNS = (
     "benchmark",
-    # The device half of the problem identity, beside the graph half it is only half of.
-    # The runtime keys its winner cache on (graph, device) because the same graph on two
-    # GPUs is two problems with two different best kernels; a corpus merged from several
-    # machines, or one sweep spanning two devices, therefore has to be grouped on both.
-    # Grouping on `benchmark` alone would take RFC 0019.13 §11.2's per-problem oracle
-    # `v*(p)` across devices, making every regret figure derived from it too small --
-    # silently, and in the flattering direction.
-    #
-    # Dotless like every other envelope column, so FEATURE_KEY_MARKER below still sorts
-    # it as envelope rather than discovering it as a feature. It sits beside the `device.*`
-    # feature columns exactly as `kernel` sits beside `kernel.*`: identity, then properties.
+    # A problem is (graph, device): grouping on `benchmark` alone would take the §11.2
+    # oracle across devices and understate regret. Dotless, so it stays envelope.
     "device",
     "kernel",
     "pack",
@@ -66,12 +45,8 @@ ENVELOPE_COLUMNS = (
     "applicability_id",
 )
 
-# What tells a feature key apart from an envelope key in a record. The runtime
-# namespaces every feature it logs (`attention_dense.seqlen_kv`, `kernel.tile_m`) and every envelope
-# key is a bare word, so the dot is the whole test. Discovered rather than listed:
-# a sweep over a different operation binds different problem tokens and different KMD
-# fields, and a hardcoded set would silently drop the columns of any op but the one
-# it was written for.
+# Feature keys are namespaced (`kernel.tile_m`); envelope keys are bare words. Discovered,
+# not listed, so sweeps of other operations keep their columns.
 FEATURE_KEY_MARKER = "."
 
 
@@ -84,12 +59,7 @@ def feature_items(record: dict) -> Iterator[tuple[str, Any]]:
 
 @dataclass
 class SweepProvenance:
-    """The §8.7/§8.8 fields the runtime cannot know.
-
-    Defaults describe the simplest honest case: one unsharded process that
-    measured whatever the engine offered, making no claim to have covered a
-    configuration set it never enumerated.
-    """
+    """The §8.7/§8.8 fields the runtime cannot know; defaults claim no completeness."""
 
     collection_mode: str = "exhaustive"
     problem_complete: bool = False
@@ -106,20 +76,14 @@ class ParseStats:
     failed: int = 0
     malformed: int = 0
     problems: set = field(default_factory=set)
-    #: Every feature column the sweep produced. Reported so an operator sees at a
-    #: glance that a log carried nothing to train on, rather than discovering it when
-    #: `train --features` cannot find a column.
+    #: Every feature column the sweep produced, so an empty log is reported up front.
     feature_keys: set = field(default_factory=set)
 
 
 def iter_candidate_records(lines: Iterable[str], stats: ParseStats) -> Iterator[dict]:
     """Yield the candidate records in a log stream, skipping everything else.
 
-    A log file interleaves these with ordinary prose from every other component,
-    and a line may carry a timestamp or severity prefix, so each is located by its
-    first `{` and parsed. A line that looks like JSON but is not is counted rather
-    than raised on: truncation at the tail of a killed run is normal, and losing a
-    whole corpus to it would not be.
+    Malformed JSON is counted, not raised: a killed run normally truncates its tail.
     """
     for line in lines:
         stats.lines += 1
@@ -140,24 +104,9 @@ def iter_candidate_records(lines: Iterable[str], stats: ParseStats) -> Iterator[
 def row_from_record(record: dict, provenance: SweepProvenance) -> dict[str, Any]:
     """One CSV row from one candidate record.
 
-    A failed candidate keeps its identity and its reason and carries no timings:
-    §8.3 rule 6 wants the timing columns empty when `is_valid` is False, so a
-    zero can never be read as a measurement of zero. It keeps its features, though:
-    a pair that could not run is a row the corpus needs placed in feature space.
-
-    Identity includes the device: a failed candidate still belongs to a specific
-    problem on a specific device, so `device` is written on every row exactly like
-    `benchmark`. Empty when the record carries none, which is what a log collected
-    before the runtime emitted the field looks like -- distinguishable from a real
-    identity, so a consumer can degrade deliberately rather than silently grouping
-    every machine's rows together (RFC 0019.13 §11.2).
-
-    `is_valid`/`skip_reason` are the COLLECTION spelling of a failure and go no further
-    than this file. §8.3's published dataset records a failure once, as a null
-    measurement plus a non-empty `error`, and `uhd_gen.dataset` performs that translation
-    on the way in. The boolean stays here because it is what the runtime record carries
-    at the moment of failure, and because this CSV has to remain an appendable, resumable
-    log (§8.8) rather than the place where the published encoding is decided.
+    A failed candidate keeps identity, reason and features but empty timings (§8.3 rule
+    6). `device` is empty when the record has none. `is_valid`/`skip_reason` are the
+    collection spelling; `uhd_gen.dataset` translates them to the published encoding.
     """
     succeeded = record.get("status") == "ok"
     row: dict[str, Any] = {
@@ -188,9 +137,7 @@ def row_from_record(record: dict, provenance: SweepProvenance) -> dict[str, Any]
         row["robustMeanMs"] = ""
         row["iters"] = ""
 
-    # Copied through untouched. The runtime logs raw values -- a string feature stays
-    # a string -- and encoding one here would put a second, invisible encoding between
-    # the sweep and the feature extractor that owns the real one (RFC 0019 §7).
+    # Raw values: the feature extractor owns encoding (RFC 0019 §7).
     row.update(feature_items(record))
 
     return row
@@ -201,11 +148,7 @@ def convert(
     output_path: Path,
     provenance: SweepProvenance | None = None,
 ) -> ParseStats:
-    """Write the §8.3 CSV for every candidate record across @p log_paths.
-
-    Several logs because a sharded campaign produces one per worker and they
-    concatenate: rows are independent, and `shard_id` distinguishes them.
-    """
+    """Write the §8.3 CSV for every candidate record across @p log_paths (e.g. shards)."""
     provenance = provenance or SweepProvenance()
     stats = ParseStats()
     rows: list[dict[str, Any]] = []
@@ -214,10 +157,7 @@ def convert(
         with open(log_path, encoding="utf-8", errors="replace") as handle:
             for record in iter_candidate_records(handle, stats):
                 row = row_from_record(record, provenance)
-                # The pair, not the graph alone: a problem is (graph, device), so a
-                # corpus merged from two machines has twice the problems, not the same
-                # ones twice. Counting on `benchmark` alone would under-report exactly
-                # where the RFC 0019.13 §11.2 oracle would be conflated.
+                # A problem is (graph, device).
                 stats.problems.add((row["benchmark"], row["device"]))
                 stats.feature_keys.update(key for key, _ in feature_items(record))
                 if row["is_valid"] == "True":
@@ -226,10 +166,8 @@ def convert(
                     stats.failed += 1
                 rows.append(row)
 
-    # The header is the union across every row, sorted: two kernels of one sweep can
-    # carry different KMD fields, and a row that lacks a key another row has must still
-    # line up under the columns it does have rather than shifting every cell after it.
-    # DictWriter fills the gap with its empty restval.
+    # Header is the union across rows: kernels can carry different KMD fields, and
+    # DictWriter leaves a missing key empty.
     fieldnames = list(ENVELOPE_COLUMNS) + sorted(stats.feature_keys)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

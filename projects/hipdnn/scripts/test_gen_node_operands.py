@@ -2,13 +2,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for gen_node_operands.py's operand policy and emitter.
-
-Drives the OperandsEmitter with hand-built reflection schemas, so no flatc invocation
-and no compilation is needed. The generated header's runtime behaviour, over every
-real node type, is covered by TestEngineFeatures.cpp; what is pinned here is which
-fields become tensors, scalars and elements, and that every union member is visited.
-"""
+"""Unit tests for gen_node_operands.py's operand policy, on hand-built schemas."""
 
 import re
 import unittest
@@ -250,8 +244,6 @@ class TestAttributeOperands(unittest.TestCase):
 
 class TestRejectedSchemas(unittest.TestCase):
     def test_work_data_dependent_requires_a_tensor_reference(self):
-        # Only contents make work data-dependent; on a plain attribute it would
-        # silently mark nothing.
         with self.assertRaises(SystemExit):
             emit([("Op", [work(field("size", "Long", 0))])])
 

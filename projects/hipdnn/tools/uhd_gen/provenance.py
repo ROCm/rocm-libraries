@@ -11,7 +11,7 @@ from pathlib import Path
 ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
 _REVISION = re.compile(r"^[0-9]+\.[0-9]+$")
 _UUID = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
-#: `trained_against` member recording what published feature values mean (`FeatureSemantics.hpp`).
+#: `trained_against` member: what published feature values mean (`FeatureSemantics.hpp`).
 FEATURE_SEMANTICS_REVISION = "feature_semantics_revision"
 #: The loader reads the revision as int64_t.
 _MAX_INT64 = 2**63 - 1
@@ -46,24 +46,9 @@ def _dependency(value: object, where: str) -> dict:
 def validate_provenance(snapshot: object) -> dict:
     """Validate a recorded snapshot without consulting or inventing dependencies.
 
-    RFC 0019 §4.1: a UHD names what it was generated against, and only that. Two things
-    can be named, and a model names whichever applies to the engine that will bind it --
-    the same two the loader accepts (`UhdParser.hpp:146-188`):
-
-      - the descriptor set (`ued`/`kmd`/`umd`, all three or none) for a model a UED role
-        map binds;
-      - `selector_revision`, the provider build whose behaviour was measured, for a model
-        an engine with NO UED binds by declared UUID (Open Question 7, RESOLVED). AITER
-        and MIOpen have no UED, KMD or UMD to name; their behaviour is decided by the
-        library they wrap, so the revision string is the only thing to be trained against.
-
-    Either form may also record `feature_semantics_revision`, what the feature values the
-    model was trained on MEAN (`FeatureSemantics.hpp`); absent means 1, and
-    `require_feature_semantics` is what compares it.
-
-    The loader learned the second form when opaque engines gained L1; this validator did
-    not, so every opaque L1 collection died here with "requires exactly ued, kmd and umd"
-    after measuring its whole corpus (runs 67929293, 67929294).
+    Accepts what the loader accepts (RFC 0019 §4.1): a descriptor set (`ued`/`kmd`/`umd`,
+    all or none) and/or a `selector_revision` for engines with no UED, plus an optional
+    `feature_semantics_revision` (absent means 1).
     """
     if not isinstance(snapshot, dict):
         raise ProvenanceError("trained_against must be an object")
@@ -79,8 +64,7 @@ def validate_provenance(snapshot: object) -> dict:
     semantics = {}
     if FEATURE_SEMANTICS_REVISION in snapshot:
         recorded_semantics = snapshot[FEATURE_SEMANTICS_REVISION]
-        # An integer, as the loader requires: a bool or 1.0 spelling revision 1 would pass
-        # an equality check here that the runtime then refuses.
+        # Strict int: True or 1.0 would compare equal to 1 here but the loader refuses them.
         if (
             isinstance(recorded_semantics, bool)
             or not isinstance(recorded_semantics, int)
@@ -102,8 +86,7 @@ def validate_provenance(snapshot: object) -> dict:
                 "trained_against.selector_revision must be a non-empty string"
             )
         return {"selector_revision": revision_text, **semantics}
-    # All three or none: two thirds of a descriptor set is not a weaker claim, it is an
-    # unverifiable one.
+    # All three or none: a partial descriptor set is unverifiable.
     if not {"ued", "kmd", "umd"} <= set(snapshot):
         raise ProvenanceError("trained_against requires exactly ued, kmd and umd")
     if not isinstance(snapshot["umd"], list):
@@ -118,8 +101,8 @@ def validate_provenance(snapshot: object) -> dict:
         "umd": sorted(matchers, key=lambda item: item["id"]),
     }
     if "selector_revision" in snapshot:
-        # A descriptor-backed engine MAY also record the provider build it was measured
-        # on; the loader accepts both together and checks each on its own terms.
+        # A descriptor-backed engine may also record its provider build; the loader
+        # checks each independently.
         if (
             not isinstance(snapshot["selector_revision"], str)
             or not snapshot["selector_revision"]
@@ -132,15 +115,10 @@ def validate_provenance(snapshot: object) -> dict:
 
 
 def require_feature_semantics(trained: object, current: int) -> None:
-    """Refuse a model whose features meant something else when it was trained.
+    """Refuse a model whose recorded feature-semantics revision is not `current`.
 
-    `current` is what `features.evaluator_feature_semantics_revision` reports -- the
-    revision of the build that would score the model -- and a model recording none was
-    trained at revision 1 -- as is one recording no `trained_against` at all (`None`). The
-    loader applies the same rule to the same field (`UhdParser.hpp`'s
-    `featureSemanticsMismatch`), and only to a model with a `features_signature`: one
-    reading no published feature cannot be misled by one changing. A mismatch in either
-    direction refuses, naming both.
+    No record (or `trained` is None) means revision 1, as in the loader's
+    `featureSemanticsMismatch`.
     """
     recorded = (
         1
@@ -155,12 +133,9 @@ def require_feature_semantics(trained: object, current: int) -> None:
 
 
 def record_feature_semantics(snapshot: object, current: int) -> dict:
-    """`snapshot` with the evaluator's feature-semantics revision recorded, at train time.
+    """`snapshot` with the evaluator's feature-semantics revision recorded.
 
-    A descriptor or binding snapshot says nothing about feature meaning, so absence there
-    is no claim and `current` is simply added. One that does record a revision -- a
-    hand-written `--provenance` -- must record this one: stamping over it would publish a
-    model claiming semantics its author said it was not trained on.
+    An existing record must already equal `current`; it is never overwritten.
     """
     recorded = validate_provenance(snapshot)
     if FEATURE_SEMANTICS_REVISION in recorded:
@@ -173,27 +148,15 @@ def compare_provenance(
 ) -> None:
     """Existing dependencies must retain identity/major and not regress minor.
 
-    Additional pack matchers are coverage changes, not contract breakages.
-
-    `foreign_matchers` are matchers the engine's packs for OTHER architectures own and none
-    of `actual`'s architecture's packs do (`foreign_matcher_ids`). A model collected over
-    several arches' packs records their union, and one UUID bound under each of those arch
-    keys is one model (D2), so on any one arch the matchers of the others are ignored
-    rather than refused -- the rule `DescriptorLoader.hpp`'s `provenanceError` applies. A
-    recorded matcher no pack of the engine owns at all is still a removed dependency.
-
-    A selector revision is compared for equality, not compatibility: it is an opaque
-    provider build string that only the provider can interpret, and the loader refuses a
-    model whose recorded revision is not the one the provider reports (`UhdParser.hpp:140`).
+    Extra pack matchers are fine. Recorded matchers in `foreign_matchers` (owned only by
+    other arches' packs) are ignored, as in `DescriptorLoader.hpp`. Selector revisions are
+    opaque and must match exactly.
     """
     trained = validate_provenance(trained)
     actual = validate_provenance(actual)
     recorded_revision = trained.get("selector_revision")
-    # Only when the other side carries one too. The loader has both -- the model's record
-    # and the provider's live report -- and refuses a mismatch. A descriptor tree does not:
-    # `provenance_for_engine` reads descriptors, which say nothing about the provider build,
-    # so comparing there would reject every descriptor-backed model that also records the
-    # revision it was measured on (run 67929708, promote of the gfx950 dense L1).
+    # Only when `actual` has one: snapshots built from descriptors never carry the
+    # provider build.
     if (
         recorded_revision is not None
         and "selector_revision" in actual
@@ -309,11 +272,7 @@ def _pack_matchers(index: dict, ued_id: str, arch: str | None) -> set[str]:
 
 
 def foreign_matcher_ids(index: dict, ued: dict, arch: str | None) -> frozenset[str]:
-    """Matchers only the engine's packs for other architectures own, as seen from `arch`.
-
-    `compare_provenance` ignores these when a model recorded them: they are the other
-    arches' share of a multi-arch collection, not a dependency this arch lost.
-    """
+    """Matchers owned only by the engine's packs for architectures other than `arch`."""
     ued_id = descriptor_id(ued.get("id"), "UED")
     return frozenset(
         _pack_matchers(index, ued_id, None) - _pack_matchers(index, ued_id, arch)
@@ -329,8 +288,8 @@ def provenance_for_engine(index: dict, ued: dict, arch: str | None = None) -> di
         return {"id": identity, "revision": entry[1].get("revision", "1.0")}
 
     ued_id = descriptor_id(ued.get("id"), "UED")
-    # Use the supplied UED revision so promotion can evaluate an explicitly planned
-    # knob-removal revision, without modifying the training snapshot.
+    # Take the revision from the supplied UED so promote can check a planned
+    # knob-removal revision.
     ued_dependency = resolve("ued", ued_id)
     ued_dependency["revision"] = ued.get("revision", "1.0")
     matchers = _pack_matchers(index, ued_id, arch)

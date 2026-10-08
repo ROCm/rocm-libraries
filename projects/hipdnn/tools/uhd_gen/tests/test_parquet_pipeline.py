@@ -1,20 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The documented chain, end to end: sweep CSV -> uhd_gen.dataset -> train.
-
-RFC 0019.13 §8.3 collects as CSV and publishes as Parquet, and the README tells a reader
-to run one into the other. The two ends spell "this candidate never ran" differently --
-the collector writes `is_valid=False` and a `skip_reason`, the published dataset writes a
-null measurement and an `error`, because a dataset that records the fact twice can
-contradict itself -- and nothing else in the suite reads a corpus in both formats. So
-these train the same corpus by both routes and require the same answer: the same rows
-reach the fit, and an identity is the same name in both.
-
-What breaks without them is quiet. A failed candidate that survives into the fit arrives
-as a NaN target, and the error the trainer then raises names the corpus rather than the
-missing filter; an identity inferred as an integer from one format and a string from the
-other splits a problem that should be one.
-"""
+"""The documented chain, end to end: sweep CSV -> uhd_gen.dataset -> train."""
 from __future__ import annotations
 
 import json
@@ -38,20 +24,18 @@ from uhd_gen.corpus_io import read_corpus_frame  # noqa: E402
 from uhd_gen.merge import merge_corpora  # noqa: E402
 
 
-#: Identities that look like numbers. `0123` read as an integer is 123, which is a
-#: different name, and the round trip through two formats is where the two spellings meet.
+#: A numeric-looking identity: read as an integer it would become a different name.
 DEVICE = "0007"
 
 PROBLEMS = 8
 TILES = (64, 128, 256)
 
-#: Candidates that failed. A distinct tile, because a failed candidate is a candidate:
-#: repeating a measured one would be a second collection of the same candidate set.
+#: Tile of the failed candidates; distinct so they do not repeat a measured candidate.
 FAILED_TILE = 512
 
 
 def _collected(path: Path, *, device: str = DEVICE, failures: int = 2) -> Path:
-    """What `uhd_gen export-benchmarks` writes: the §8.3 envelope with a validity flag."""
+    """What `uhd_gen export-benchmarks` writes: the §8.3 envelope with `is_valid`."""
     rows = []
     for index in range(PROBLEMS):
         for tile in TILES:
@@ -126,7 +110,7 @@ def _provenance(tmp_path: Path) -> Path:
 
 
 def _train(corpus: Path, output_dir: Path, provenance: Path) -> dict:
-    """Train on `corpus` and return the manifest, whose `num_samples` is what was fitted."""
+    """Train on `corpus`; the manifest's `num_samples` is what was fitted."""
     from uhd_gen.__main__ import main
 
     assert (
@@ -163,15 +147,7 @@ def _train(corpus: Path, output_dir: Path, provenance: Path) -> dict:
 def test_the_collected_csv_and_the_dataset_published_from_it_train_the_same_rows(
     tmp_path, evaluator
 ):
-    """The chain the README documents, run end to end.
-
-    Both routes must drop the two candidates that never ran and fit the rest. The collector
-    spells that `is_valid=False`; the published dataset spells it as a null `avgTimeMs` and a
-    non-empty `error`, and has no validity flag at all (§8.3). Reading only the flag, the
-    dataset's failed rows reach the fit as NaN targets and `train_uhd` refuses the corpus with
-    "target 'avgTimeMs' must contain finite nonnegative values" -- an error about the data that
-    is really about the reader.
-    """
+    """Failure is `is_valid=False` in CSV but a null `avgTimeMs` in the dataset."""
     pytest.importorskip("lightgbm")
     pytest.importorskip("flatbuffers")
 
@@ -188,20 +164,13 @@ def test_the_collected_csv_and_the_dataset_published_from_it_train_the_same_rows
     assert from_csv["num_samples"] == measured
     assert from_parquet["num_samples"] == measured
 
-    # The failed rows are still in the dataset -- a candidate that could not run is information
-    # about feature space, and §8.3 keeps it. They are dropped at the fit, not at the import.
+    # Failed rows stay in the dataset (§8.3); they are dropped at the fit.
     assert len(dataset) == measured + 2
     assert "is_valid" not in dataset.columns
 
 
 def test_an_identity_is_the_same_name_whichever_format_it_arrives_in(tmp_path):
-    """`0007` is a device's name, not the number seven.
-
-    The CSV reader infers unless told, and Parquet returns whatever type the writer froze, so
-    without pinning at both reads the same board is `"0007"` on one route and `7` on the other.
-    Every consumer of identity compares it -- problem grouping, the immediate corpus's
-    canonical-string check -- and two spellings are two problems.
-    """
+    """`0007` is a device's name, not the number seven."""
     collected = _collected(tmp_path / "bench.csv")
     _publish(collected, tmp_path / "dataset.parquet")
 
@@ -218,10 +187,7 @@ def test_an_identity_is_the_same_name_whichever_format_it_arrives_in(tmp_path):
 
 
 def test_an_identity_frozen_as_an_integer_by_a_producer_still_reads_as_a_name(tmp_path):
-    """The dataset need not come from our importer. A foreign publisher that wrote the column as
-    int64 is read the same way here, because the pinning happens at the read rather than
-    depending on what the writer chose.
-    """
+    """Identities are pinned to strings at the read, whatever type the writer chose."""
     path = tmp_path / "foreign.parquet"
     pd.DataFrame(
         {"benchmark": [7, 8], "device": [7, 7], "avgTimeMs": [1.0, 2.0]}
@@ -234,9 +200,7 @@ def test_an_identity_frozen_as_an_integer_by_a_producer_still_reads_as_a_name(tm
 
 
 def test_knobs_reads_the_published_dataset(tmp_path, capsys):
-    """`knobs` analyses the corpus `train` fits, so `--input dataset.parquet` has to mean the
-    same file in both. Read with `pd.read_csv` it died inside pandas on the Parquet magic bytes.
-    """
+    """`knobs` reads `--input dataset.parquet` the same way `train` does."""
     # The CLI imports the trainer and the FlatBuffer converter.
     pytest.importorskip("lightgbm")
     pytest.importorskip("flatbuffers")
@@ -259,16 +223,12 @@ def test_knobs_reads_the_published_dataset(tmp_path, capsys):
         )
         == 0
     )
-    # The dataset was read, grouped by (benchmark, device) and stripped of the two candidates
-    # that never ran -- which is the corpus `train` fits, arrived at through a different reader.
+    # Grouped by (benchmark, device), with the two failed candidates dropped.
     assert "8 problem(s), 24 measurement(s)" in capsys.readouterr().out
 
 
 def test_merge_joins_published_datasets_and_publishes_one(tmp_path):
-    """Two boards' datasets merge into the corpus a single arch-keyed model is fitted on, and the
-    merged file keeps the format its name claims -- a `.parquet` written as CSV is a file `train`
-    hands straight to `read_parquet`.
-    """
+    """A merged `.parquet` output is written as Parquet, not CSV."""
     # The CLI imports the trainer and the FlatBuffer converter.
     pytest.importorskip("lightgbm")
     pytest.importorskip("flatbuffers")
@@ -283,7 +243,7 @@ def test_merge_joins_published_datasets_and_publishes_one(tmp_path):
 
     merged, report = merge_corpora(paths)
     assert report["devices"] == ["0007", "0008"]
-    # A problem is (benchmark, device), so two boards over one graph set is twice the problems.
+    # A problem is (benchmark, device), so two boards double the problem count.
     assert report["problems"] == 2 * PROBLEMS
 
     output = tmp_path / "merged.parquet"

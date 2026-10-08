@@ -5,31 +5,21 @@
 #SBATCH --time=04:00:00
 #SBATCH --output=%x-%j.log
 #
-# The bake-off: install every engine's trained L1 model into ONE runtime and ask each of
-# them, for every graph in the corpus, what it predicts.
+# The bake-off: install every engine's trained L1 model into ONE runtime and ask each for
+# its prediction on every corpus graph, checking that L1 is comparable across engines
+# (RFC 0019 §11.3).
 #
-# The generation jobs each measured their own engine in isolation, which answers "how fast
-# is this engine here". Cross-engine selection needs the other half: what each engine's
-# model SAYS before anything runs, on a graph every engine can see. A model is only useful
-# if the number it reports can be compared with another engine's number -- RFC 0019 §11.3's
-# calibrated L1 -- and the only way to check that claim is to install both and ask.
-#
-# Asked once per ranking metric (UHD_METRICS, `+`-separated; default tflops): an engine
-# answers each metric with that metric's own model, and the winner of `time` is the lowest
-# prediction, not the highest. A MIOpen convolution bake-off:
+# Asked once per metric in UHD_METRICS (`+`-separated; default tflops). Example:
 #   UHD_PROVIDERS=miopen-provider+hip-kernel-provider UHD_METRICS=tflops+time
 #   UHD_MODELS="miopen-tflops=<l1>/model_tflops:MIOPEN_ENGINE;miopen-time=<l1>/model_time:MIOPEN_ENGINE;..."
 #
-# The #SBATCH lines are defaults; the site's partition, account and GPU constraint are
-# passed at submission (reproduce/README.md, "What every job needs").
+# #SBATCH lines are defaults; pass site settings at submission (reproduce/README.md).
 set -uo pipefail
 
 BRANCH=${UHD_BRANCH:?set UHD_BRANCH to the rocm-libraries branch to build}
 SRC=/tmp/uhd/src
-# The descriptor root the provider packs as `product`. Unset keeps the provider's own
-# default, the shipped root (src/engines/kernel_ingestor_engine/descriptors) that carries
-# hipkernel:Gfx950AttentionDense; UHD_PRODUCTION_ROOT=<path relative to the checkout>
-# packs another tree instead, e.g. the descriptor-packaging examples fixture tree.
+# Descriptor root packed as `product`, relative to the checkout; unset keeps the provider's
+# shipped root.
 PRODUCTION_ROOT_ARGS=()
 [ -n "${UHD_PRODUCTION_ROOT:-}" ] && \
     PRODUCTION_ROOT_ARGS=(-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/$UHD_PRODUCTION_ROOT")
@@ -59,33 +49,19 @@ python3 -m pip install --quiet --break-system-packages "zstandard>=0.20.0" msgpa
 
 step "source: $BRANCH${UHD_COMMIT:+ @ $UHD_COMMIT}"
 rm -rf /tmp/uhd; mkdir -p /tmp/uhd "$OUT"
-# --depth 200, not 1: a bundle carries commits relative to a base, and a one-commit
-# clone has no ancestor for it to apply against ("Repository lacks these prerequisite
-# commits"), even on a node whose mirror is current rather than stale.
+# --depth 200, not 1: a bundle needs ancestor commits to apply against.
 GIT_LFS_SKIP_SMUDGE=1 git clone --depth 200 --single-branch --branch "$BRANCH" \
     https://github.com/ROCm/rocm-libraries.git "$SRC" > /tmp/uhd/clone.log 2>&1 || exit 1
 if [ -n "${UHD_COMMIT:-}" ]; then
-    # An opaque engine's model records the provider build it was measured on, and the
-    # loader REFUSES a model whose recorded selector_revision is not the one the provider
-    # reports -- by design, because L1 is the score compared across engines. A bake-off
-    # built from a commit whose provider reports another revision refuses every model
-    # collected before it: the engine answers and none of its answers score.
-    # Pinning the collection's commit makes the runtime the build the model describes.
-    #
-    # Deepened rather than fetched by SHA: GitHub refuses `fetch <sha>` unless the server
-    # opts in ("couldn't find remote ref"), and the commit is an ancestor of this branch,
-    # so history is the reliable way to reach it.
+    # The loader refuses a model whose selector_revision differs from the provider's, so
+    # build the commit the models were collected on. Deepened, since GitHub refuses
+    # `fetch <sha>`.
     git -C "$SRC" fetch --depth 200 origin "$BRANCH" >> /tmp/uhd/clone.log 2>&1
     git -C "$SRC" checkout --detach "$UHD_COMMIT" >> /tmp/uhd/clone.log 2>&1 \
         || { echo "FATAL: cannot check out $UHD_COMMIT"; tail -5 /tmp/uhd/clone.log; exit 1; }
 fi
 if [ -n "${UHD_BUNDLE:-}" ]; then
-    # The compute sites do not all resolve github.com to the same mirror: a node can clone a
-    # branch tip hours behind the one `git ls-remote` reports from the login node. A bundle
-    # carries the exact commits from the machine that pushed them, so verification cannot
-    # silently test a different tree than the one under review.
-    # `git bundle create <file> <base>..HEAD` names its tip HEAD, not a branch ref, so the
-    # fetch asks for exactly that and checks out FETCH_HEAD.
+    # Mirrors can lag; a bundle pins the exact commits. Its tip is HEAD, not a branch ref.
     git -C "$SRC" fetch "$UHD_BUNDLE" "${UHD_COMMIT:-HEAD}" >> /tmp/uhd/clone.log 2>&1 \
         && git -C "$SRC" checkout --detach FETCH_HEAD >> /tmp/uhd/clone.log 2>&1 \
         || { echo "FATAL: bundle $UHD_BUNDLE did not apply"; tail -8 /tmp/uhd/clone.log; exit 1; }
@@ -118,9 +94,7 @@ LIST_ENGINES=$(find "$BUILD" -name hipdnn_list_engines -type f -perm -u+x | head
 # Every provider built installs its plugin into the one engine-plugin directory.
 PLUGIN_DIR=$(dirname "$(find "$BUILD" \( -name "libhip_kernel_provider*.so" -o -name "libmiopen_plugin*.so" \) \
     -path "*plugins*" | head -1)")
-# The shipped (product) tree for this arch, never test_arch_content: that tree also holds
-# kpack archives, sorts first, and carries none of the provider's engines, so taking it
-# finds no UED for the engine.
+# The shipped tree for this arch, never test_arch_content, which carries no provider engines.
 TREE_ROOT=$(find "$BUILD" -type d -name kpack -path "*/arch_content/*/$ARCH/kpack" \
     -not -path "*/test_arch_content/*" | head -1); TREE_ROOT=${TREE_ROOT%/kpack}
 # MIOpen alone ships no descriptors: its models are installed into a root of their own.
@@ -135,8 +109,7 @@ echo "tree root: $TREE_ROOT"; echo "aiter asm: ${AITER_ASM:-NONE}"
 
 step "install every trained model into the one tree"
 cd "$SRC/projects/hipdnn/tools" || exit 1
-# An engine with no UED reads only the ids its provider declares; promote installs a model
-# only under the one declared for its metric (declared_ids.sh), so name them all.
+# A UED-less engine reads only its declared ids (declared_ids.sh), so pass them all.
 source uhd_gen/reproduce/declared_ids.sh
 IFS=';' read -ra ENTRIES <<< "$MODELS"
 for entry in "${ENTRIES[@]}"; do
@@ -166,8 +139,7 @@ for line in (out / "engines.log").read_text(errors="replace").splitlines():
     if match:
         value = int(match.group(2), 16)
         engines.append((match.group(1), value - (1 << 64) if value >= (1 << 63) else value))
-# The corpus's own graph list when it has one (hipdnn_corpus_gen's manifest.json), so a
-# stray file under graphs/ is never asked about and the stem is the manifest row's `name`.
+# Prefer the corpus manifest.json, so stray files under graphs/ are never asked about.
 manifest = corpus / "manifest.json"
 if manifest.is_file():
     document = json.loads(manifest.read_text())

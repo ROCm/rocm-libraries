@@ -297,11 +297,8 @@ typedef MoeGroupedMatmulMode MoeGroupedMatmulMode_t; ///< @brief MoE routing mod
  *
  * Controls how the hipDNN backend selects execution plans and engines.
  *
- * A and B are not backend modes. They name prediction POLICIES
- * (SelectionHeuristic::ModeA / SelectionHeuristic::ModeB) that the frontend
- * places in the heuristic descriptor's ordered policy list
- * (HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT); the backend mode itself stays
- * HIPDNN_HEUR_MODE_FALLBACK for every value here.
+ * A and B request the SelectionHeuristic::ModeA / ModeB prediction policies through the
+ * heuristic descriptor's policy order; the backend mode stays HIPDNN_HEUR_MODE_FALLBACK.
  */
 enum class HeuristicMode
 {
@@ -1047,9 +1044,8 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 {
     switch(type)
     {
-    // Every frontend heuristic mode folds to the single hipDNN backend mode.
-    // A and B select prediction policies through the policy order instead
-    // (see createEngineHeuristicDescriptorForGraph).
+    // Every frontend mode maps to the one backend mode; A and B select prediction policies
+    // through the policy order instead (see createEngineHeuristicDescriptorForGraph).
     case HeuristicMode::FALLBACK:
     case HeuristicMode::A:
     case HeuristicMode::B:

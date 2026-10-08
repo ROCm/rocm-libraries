@@ -65,13 +65,8 @@ def _nest(root, sub, fixture):
 def _restem_uuid_ids(folder, token):
     """Give every UUID id under `folder` a distinct, deterministic value.
 
-    A descriptor whose id is a UUID carries no stem, so the `-solo` -> `-solob`
-    substitution below cannot reach it: two copies of one fixture would define
-    that id twice and whole-set validation refuses the tree. Derived with uuid5
-    rather than uuid4 because a pack is compared byte for byte against a second
-    run of itself. Applied to the folder's JSON text, so a definition and the
-    references naming it move together -- the same way the token substitution
-    works.
+    Stem substitution cannot reach UUID ids, so copied fixtures would collide.
+    uuid5 keeps repeat packs byte-identical.
     """
     ids = set()
     for path in sorted(folder.rglob("*.json")):
@@ -1275,21 +1270,12 @@ def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
 def test_a_model_uhds_artifact_reaches_the_shipped_tree(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    """A trained UHD must be shipped with the model it names.
-
-    test_hkp_pack_sidecars.py covers resolution and the intermediate mirror, and
-    stops there. Carriage happens twice -- once into the pre-prune intermediate and
-    once into the arch output -- and only the second is what the runtime reads. With
-    the second missing, every sidecar case still passed while the shipped tree held a
-    descriptor naming a model that was never packed; the runtime then finds the
-    artifact missing and drops the whole engine.
-    """
+    """The model a UHD names ships in the arch output, not only the intermediate."""
     root = tmp_path / "root"
     dest = _nest(root, "hip/pointwise", main_fixture)
 
-    # The fixture's UHD is native, so it names no file. Make it the trained kind. Both
-    # UEDs already reference the shared UHD, so it survives the reachability walk and its
-    # sidecar has to survive with it.
+    # Make the shared UHD a trained one; both UEDs reference it, so it and its
+    # sidecar survive pruning.
     (dest / "shared.uhd.json").write_text(
         json.dumps(
             {

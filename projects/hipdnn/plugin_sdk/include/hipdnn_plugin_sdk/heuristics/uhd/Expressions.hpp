@@ -24,17 +24,8 @@
 /// @file Expressions.hpp
 /// @brief UHD's binding to the descriptor expression language (RFC 0019 §6.2).
 ///
-/// Feature entries, like UMD criteria and UDD dispatch formulas, are written in the one
-/// language `ingestor/JsonExpression.hpp` compiles and evaluates. This header adds only what a
-/// UHD consumer needs around it: a variable table to evaluate against, the bounds a descriptor
-/// read from disk must respect, the `shape`/`rank` short-hands §6.2 lowers at compile time, and
-/// the strict numeric reading a feature row requires.
-///
-/// The language's own semantics apply unchanged. In particular an operator that cannot answer --
-/// an unbound variable, a zero divisor, a non-finite result -- yields null ("unresolved") rather
-/// than throwing, `value_or_default` falls back on any unresolved value, and `and`/`or` return
-/// the operand that decided them. A consumer that needs a number reads the result through
-/// number(), which refuses null, strings and arrays.
+/// Operators that cannot answer (unbound variable, zero divisor, non-finite result) yield
+/// null rather than throwing; use number() when a feature row needs a strict number.
 namespace hipdnn_plugin_sdk::uhd
 {
 
@@ -50,10 +41,8 @@ public:
 /// Per-reference vocabularies of a categorical feature, keyed by the full `$` reference.
 using CategoricalEncoding = std::map<std::string, std::map<std::string, int32_t>>;
 
-/// The published symbols an expression reads, keyed by name without the `$` sigil.
-///
-/// Names may be given with or without the sigil; both spell the same symbol. This is the data
-/// source compiled expressions evaluate against, so an unbound name reads as null.
+/// The symbols an expression reads, keyed without the `$` sigil (accepted either way).
+/// An unbound name reads as null.
 class VariableContext
 {
 public:
@@ -133,15 +122,12 @@ private:
     std::unordered_map<std::string, ValueType> _bindings;
 };
 
-/// An ordered list of descriptor expressions, compiled once and evaluated many times.
-///
-/// Immutable after construction, so one instance serves concurrent evaluations, and copies
-/// share the compiled trees.
+/// Descriptor expressions compiled once and evaluated many times.
+/// Immutable after construction: safe for concurrent evaluation; copies share the trees.
 class ExpressionSet
 {
 public:
-    /// Nesting bound on one expression, one level per operator. Tighter than the language's
-    /// own limit: a feature entry or a corpus relation is a handful of operators deep.
+    /// Operator nesting bound per expression; tighter than the language's own limit.
     static constexpr size_t MAX_EXPRESSION_DEPTH = 64;
     /// JSON nodes read across the whole set, before anything is compiled.
     static constexpr size_t MAX_INPUT_NODES = 65536;
@@ -150,8 +136,7 @@ public:
 
     ExpressionSet() = default;
 
-    /// @throws JsonLogicError when an expression exceeds a bound, uses a short-hand
-    ///         incorrectly, or does not compile.
+    /// @throws JsonLogicError when an expression exceeds a bound or does not compile.
     explicit ExpressionSet(const std::vector<nlohmann::json>& expressions)
     {
         if(expressions.size() > MAX_EXPRESSIONS)
@@ -165,8 +150,7 @@ public:
         {
             if(expression.is_null())
             {
-                // The language reads a null literal as "unresolved", so an absent expression
-                // would compile to one that never answers rather than being reported.
+                // A null literal would compile to an expression that never resolves.
                 throw JsonLogicError("Unsupported descriptor expression type");
             }
             checkBounds(expression, 0, visited);
@@ -207,9 +191,8 @@ public:
     }
 
     /// @brief Expression @p index's answer, which must resolve.
-    /// @throws JsonLogicError naming the first unbound symbol it reads, or stating that it
-    ///         did not resolve when every symbol was bound (a zero divisor, a non-finite
-    ///         result, an operand of the wrong kind).
+    /// @throws JsonLogicError naming the first unbound symbol, or a generic error when all
+    ///         symbols were bound but the expression still did not resolve.
     jsonexpr::Value resolve(size_t index, const VariableContext& context) const
     {
         auto value = evaluate(index, context);
@@ -304,8 +287,7 @@ private:
 
     static void checkBounds(const nlohmann::json& node, size_t depth, size_t& visited)
     {
-        // An operator's argument array is a JSON level of its own, so twice the operator
-        // bound, plus the entry itself.
+        // Each operator adds two JSON levels (object + argument array).
         if(depth > 2 * MAX_EXPRESSION_DEPTH + 2 || ++visited > MAX_INPUT_NODES)
         {
             throw JsonLogicError("Descriptor expression exceeds the depth or input-size bound");
@@ -333,8 +315,8 @@ private:
         return text.size() > 1 && text[0] == '$' && text[1] != '$';
     }
 
-    /// Lowers the §6.2 compile-time short-hands to the published names they abbreviate:
-    /// `{"shape": ["$t", k]}` is `"$t.dims[k]"` and `{"rank": "$t"}` is `"$t.rank"`.
+    /// Lowers §6.2 short-hands: `{"shape": ["$t", k]}` -> `"$t.dims[k]"`,
+    /// `{"rank": "$t"}` -> `"$t.rank"`.
     static nlohmann::json lower(const nlohmann::json& node)
     {
         if(node.is_array())

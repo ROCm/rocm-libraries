@@ -100,11 +100,8 @@ TEST_F(TestGpuDeviceQuery, ConcreteStreamKeepsOwningDevice)
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-/// The L1 prediction path resolves its device through the same default-token rule as
-/// getDeviceArch(): every default token follows the live current device. Falsifying
-/// mutation: route hipStreamLegacy/hipStreamPerThread to hipStreamGetDevice() again (as
-/// predictionDevice() did), and HIP treats the token as a stream object -- the call fails
-/// or reports the wrong device.
+/// Every default stream token resolves to the current device, as in getDeviceArch(); passing
+/// a token to hipStreamGetDevice() would fail or report the wrong device.
 TEST_F(TestGpuDeviceQuery, PredictionDeviceResolvesEveryDefaultTokenToTheLiveDevice)
 {
     const std::array<hipStream_t, 3> streams{nullptr, hipStreamLegacy, hipStreamPerThread};
@@ -121,8 +118,7 @@ TEST_F(TestGpuDeviceQuery, PredictionDeviceResolvesEveryDefaultTokenToTheLiveDev
             SCOPED_TRACE(::testing::Message()
                          << "device " << currentDevice << ", stream " << stream);
             const auto& resolved = hipdnn_plugin_sdk::heuristics::predictionDevice(stream);
-            // PCI location identifies the physical device; two boards of one arch share a
-            // gcnArchName, so the name alone could not tell a wrong ordinal apart.
+            // Compare PCI location: boards of one arch share a gcnArchName.
             EXPECT_EQ(resolved.pciDomainID, expected.pciDomainID);
             EXPECT_EQ(resolved.pciBusID, expected.pciBusID);
             EXPECT_EQ(resolved.pciDeviceID, expected.pciDeviceID);

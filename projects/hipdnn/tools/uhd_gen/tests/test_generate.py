@@ -1,6 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Collection must never associate a timing with an unaddressed candidate."""
+"""Tests for uhd_gen generate: corpus collection, labels and model emission."""
 import copy
 import json
 from pathlib import Path
@@ -18,9 +18,7 @@ from uhd_gen.provenance import snapshot_provenance
 
 
 def _cli():
-    """uhd_gen's CLI entry point. It imports the trainer and the FlatBuffer converter, so
-    a run through it needs lightgbm and flatbuffers; without them the test is skipped,
-    as every other converter-backed suite is."""
+    """uhd_gen's CLI entry point; skips if lightgbm or flatbuffers is missing."""
     pytest.importorskip("lightgbm")
     pytest.importorskip("flatbuffers")
     from uhd_gen.__main__ import main
@@ -85,11 +83,7 @@ def _timing(page):
 
 
 def _sweep(page, *results):
-    """The single `--sweep --json` response: the catalog it enumerated AND what it timed.
-
-    One process per graph enumerates and times, so both halves arrive together; the old
-    protocol paid a second bench startup per graph to get the first half.
-    """
+    """A `--sweep --json` response: the enumerated catalog plus its timings."""
     response = copy.deepcopy(page)
     response["results"] = list(results) if results else [_timing(page)["results"][0]]
     return response
@@ -158,13 +152,11 @@ def test_feature_suffixed_device_uses_bare_training_architecture(monkeypatch, tm
 def test_collected_rows_carry_the_noise_columns_and_the_calibrated_rate(
     monkeypatch, tmp_path
 ):
-    """§8.3's envelope, and §11.1's cross-engine score off §11.2's statistic."""
+    """RFC 0019 §8.3 noise columns and the §11.1 calibrated score."""
     page = _page()
     row = _collect(monkeypatch, tmp_path, [_sweep(page)])[0][0]
     assert (row["stddevMs"], row["iters"]) == (0.01, 40)
-    # graph.flops / (avgTimeMs * 1e9): the mean, not the robust mean, because §11.2
-    # (:2003) pins a calibrated score to `avgTimeMs`. Off robust_time_ms=2.5 this
-    # would read 1600.0 instead.
+    # graph.flops / (avgTimeMs * 1e9): §11.2 calibrates on the mean, not robust mean.
     assert row["tflops"] == pytest.approx(4e12 / (2.6 * 1e9))
 
 
@@ -179,12 +171,7 @@ def test_an_engine_that_publishes_no_work_count_gets_no_fabricated_throughput(
 
 
 def test_a_collected_corpus_activates_the_evaluate_noise_band(monkeypatch, tmp_path):
-    """§8.5 records the spread "so it can be used": the band keys on these exact names.
-
-    `evaluate` looks for `stddevMs`/`iters`. Collection wrote neither, so the band was
-    unreachable from a generated corpus however the run was configured -- and the report
-    blamed the target's units for it.
-    """
+    """§8.5: `evaluate` keys the noise band on the `stddevMs`/`iters` columns."""
     import pandas as pd
     from uhd_gen.evaluate import evaluate_corpus
 
@@ -224,12 +211,7 @@ def test_a_collected_corpus_activates_the_evaluate_noise_band(monkeypatch, tmp_p
 def test_a_numerically_invalid_candidate_keeps_its_row_but_loses_its_timing(
     monkeypatch, tmp_path
 ):
-    """RFC 0019 §13.2: recorded with its measurement suppressed and an invalid marker.
-
-    The two halves are one rule. Dropping the row loses the failure surface the section
-    wants the model to learn; keeping the timing hands the ranker the group's best time,
-    because a kernel that does not compute the answer is the fastest one in it.
-    """
+    """RFC 0019 §13.2: keep the failure for learning, but never its (fast) timing."""
     page = _page()
     timed = _timing(page)
     timed["results"][0].update(
@@ -240,15 +222,11 @@ def test_a_numerically_invalid_candidate_keeps_its_row_but_loses_its_timing(
 
     assert row["numerically_valid"] is False
     assert row["validation"].startswith("output_mismatch")
-    # Suppressed where the row is built, so `corpus.json`, `corpus.csv` and the `evaluate`
-    # regret pass that reads the corpus back all see the same absence.
     assert [
         row[column] for column in ("robustMeanMs", "minTimeMs", "avgTimeMs", "stddevMs")
     ] == [None] * 4
-    # No derived rate either: a throughput computed from a suppressed time would put the
-    # measurement back under a different column name.
+    # A throughput would leak the suppressed time under another column.
     assert "tflops" not in row
-    # The candidate stays visible: which kernel was wrong, on which problem, and why.
     assert (row["kernel"], row["benchmark"], row["succeeded"], row["is_valid"]) == (
         "kernel-a",
         "graph",
@@ -260,12 +238,7 @@ def test_a_numerically_invalid_candidate_keeps_its_row_but_loses_its_timing(
 def test_an_undecided_verdict_is_carried_rather_than_treated_as_correct(
     monkeypatch, tmp_path
 ):
-    """A null verdict keeps its measurement but never claims the candidate was checked.
-
-    Open Question 19(a) has not settled what reference each op validates against, so a
-    single-candidate problem is genuinely undecidable. Suppressing those timings would
-    train on nothing; recording them as `True` would be the silent pass §13.2 forbids.
-    """
+    """A null verdict (e.g. no reference to compare) keeps its timing and stays null."""
     page = _page()
     timed = _timing(page)
     timed["results"][0].update(
@@ -279,12 +252,7 @@ def test_an_undecided_verdict_is_carried_rather_than_treated_as_correct(
 
 @pytest.mark.parametrize("missing", ["numerically_valid", "validation"])
 def test_a_benchmark_that_records_no_verdict_is_refused(monkeypatch, tmp_path, missing):
-    """§13.2 records the verdict on the row, so an absent one is a tool that did not check.
-
-    Refused rather than defaulted. Any default is wrong: `True` inverts the oracle, and
-    `None` would let a benchmark silently regress out of validating while the corpus still
-    looks well-formed.
-    """
+    """§13.2: a missing verdict is refused, not defaulted to True or None."""
     page = _page()
     timed = _timing(page)
     timed["results"][0].pop(missing)
@@ -293,12 +261,7 @@ def test_a_benchmark_that_records_no_verdict_is_refused(monkeypatch, tmp_path, m
 
 
 def test_every_candidate_is_timed_by_one_invocation_per_graph(monkeypatch, tmp_path):
-    """RFC 0019 §13.2: sweeping inside one process amortises load, build and compilation.
-
-    A process per candidate paid all three once per row. The row content is unchanged --
-    this pins the cost, which is the whole reason the sweep exists: two candidates, two
-    invocations (enumerate, then sweep), not three.
-    """
+    """RFC 0019 §13.2: one sweep process amortises load, build and compilation."""
     page = _page()
     second = {
         "id": "kernel-b",
@@ -320,25 +283,17 @@ def test_every_candidate_is_timed_by_one_invocation_per_graph(monkeypatch, tmp_p
         monkeypatch, tmp_path, [_sweep(page, first_result, second_result)], calls
     )
 
-    # ONE process for a two-candidate graph: the sweep enumerates and times together.
-    # It was two -- an `enumerate` run that built the catalog and discarded its timings,
-    # then the sweep that rebuilt the same catalog to time it.
     assert len(calls) == 1
     assert [row["kernel"] for row in rows] == ["kernel-a", "kernel-b"]
     assert "--sweep" in calls[0] and "--json" in calls[0]
-    # The collection pins restrict the sweep; they are not replaced by one candidate's tuple,
-    # which is what made the old protocol need one process per row.
+    # The sweep is not pinned to a single candidate's knobs.
     assert "--knob" not in calls[0]
 
 
 def test_a_sweep_that_times_fewer_candidates_than_it_enumerated_is_not_a_corpus(
     monkeypatch, tmp_path
 ):
-    """A subset is silent data loss: the rows are simply absent from the corpus.
-
-    Reachable now in a way it was not before -- one process holds every candidate, so a
-    crash or an early return takes the rest of the graph with it.
-    """
+    """A partial sweep would silently drop rows, so it is refused."""
     page = _page()
     page["candidates"].append(
         {
@@ -363,7 +318,7 @@ def _catalog(**columns):
 
 
 def test_each_catalog_metric_takes_its_own_label_and_is_calibrated_on_the_mean():
-    """RFC 0019 §13.4: `tflops` from FLOPs over avgTimeMs, `time` from avgTimeMs itself."""
+    """RFC 0019 §13.4: `tflops` is FLOPs over avgTimeMs; `time` is avgTimeMs."""
     usable = _catalog(tflops=[1.5, 1.3])
     assert _catalog_label("tflops", usable, False, "sort_kernel_catalog") == (
         "tflops",
@@ -380,8 +335,8 @@ def test_each_catalog_metric_takes_its_own_label_and_is_calibrated_on_the_mean()
 
 
 def test_an_unpublished_work_count_falls_back_only_when_no_metric_was_asked_for():
-    """The default run keeps today's metric-less robustMeanMs ranker; a run that NAMED
-    tflops gets an error rather than a model that estimates something else."""
+    """Without graph.flops, only a run with no explicit metric falls back to
+    robustMeanMs; an explicit `tflops` is an error."""
     usable = _catalog()
     assert _catalog_label("tflops", usable, True, "sort_kernel_catalog") == (
         None,
@@ -407,11 +362,10 @@ def _immediate_bench(
     wrong=(),
     engine="provider:engine7",
 ):
-    """A `--collect-immediate` stand-in; returns the metrics it was asked in, in order.
+    """A `--collect-immediate` stand-in; returns the metrics it was asked for, in order.
 
-    `declared` maps metric -> the id the engine's description reports (binding.uhd_id);
-    graphs whose id is in `broken` make the bench fail the way a crashing one does, and
-    those in `wrong` come back with a failed correctness verdict.
+    `declared` maps metric -> binding.uhd_id; graph ids in `broken` crash the bench and
+    those in `wrong` fail validation.
     """
     requested = []
 
@@ -426,8 +380,7 @@ def _immediate_bench(
             raise ValueError("hipdnn_bench failed (-11): segmentation fault")
         # A `time` request lets the engine's time ranker pick a faster kernel.
         average = (1.0 + graph["size"] / 10) * (0.8 if metric == "time" else 1.0)
-        # As EnginePredictor/GenericEngine emit it: the selector revision, plus the descriptor
-        # set a descriptor-backed engine loaded from.
+        # Shaped like EnginePredictor/GenericEngine's binding output.
         binding = {
             "engine": engine,
             "role": "predict_engine",
@@ -527,9 +480,7 @@ def _l1_args(graphs, tree, output, evaluator, *extra, features="graph.flops"):
 def test_one_generate_run_emits_and_installs_one_l1_model_per_metric(
     monkeypatch, tmp_path, evaluator
 ):
-    """`--metric tflops time`: each metric's labels are measured under that metric (the
-    engine's kernel choice follows it), each trains and evaluates its own UHD, and both
-    land in the arch's role list rather than the second replacing the first."""
+    """Each metric is measured, trained and installed separately; both are kept."""
     main = _cli()
 
     tree = _ued_tree(tmp_path / "descriptors")
@@ -583,9 +534,8 @@ TIME_ID = "30284ebe-6e15-4f8e-968d-09f92d8a9480"
 def test_an_opaque_time_model_over_a_corpus_without_flops_skips_one_bad_graph(
     monkeypatch, tmp_path, evaluator
 ):
-    """T6 + 0.2: L1 `time` needs no work count (a conv-bwd corpus publishes none), one
-    crashing graph is recorded and skipped rather than ending the run, and an engine with
-    no UED trains and installs under the id its provider declares for the metric."""
+    """L1 `time` needs no FLOP count, a crashing graph within budget is skipped, and an
+    engine with no UED uses the provider-declared id."""
     main = _cli()
 
     tree = tmp_path / "descriptors"
@@ -712,9 +662,7 @@ def test_an_opaque_engine_is_never_trained_under_an_undeclared_id(
 def test_l1_generation_never_trains_on_picks_checked_wrong(
     monkeypatch, tmp_path, evaluator, caplog
 ):
-    """§13.2 at the L1 entrance: every immediate pick came back wrong, so there is no label
-    at all -- refused, with each row's verdict and reason kept in the preserved corpus.
-    Import used to erase the verdict and this run trained and evaluated on 13 rows."""
+    """§13.2: all picks invalid means no labels; the staged corpus keeps verdicts."""
     main = _cli()
 
     tree = _ued_tree(tmp_path / "descriptors")
@@ -749,10 +697,8 @@ def test_l1_generation_never_trains_on_picks_checked_wrong(
 def test_the_measured_tree_is_the_only_descriptor_root_the_bench_sees(
     monkeypatch, tmp_path, role
 ):
-    """The loader keeps the FIRST definition of an id across roots, so an inherited
-    replacement or additive root ahead of the tree being generated against supplies its
-    own selector, and the labels describe a tree this run never installs into. Both roles
-    run with exactly one root: the given tree (L1) or its collection copy (L2)."""
+    """The loader keeps the first definition of an id across roots, so inherited roots
+    must not shadow the tree (L1) or its collection copy (L2)."""
     main = _cli()
 
     tree = _ued_tree(tmp_path / "descriptors")
@@ -804,7 +750,7 @@ def test_the_measured_tree_is_the_only_descriptor_root_the_bench_sees(
 
 
 def _corpus_root(root):
-    """What `hipdnn_corpus_gen --output` writes: graphs/ beside manifest.json and .csv."""
+    """Mimics `hipdnn_corpus_gen --output`: graphs/ beside manifest.json."""
     (root / "graphs").mkdir(parents=True)
     rows = []
     for index in range(3):
@@ -826,8 +772,7 @@ def _corpus_root(root):
 
 
 def test_a_corpus_root_is_read_through_its_manifest_graph_list(tmp_path):
-    """T6: the manifest is never collected as a graph, and it -- not a directory walk --
-    decides which graphs the corpus holds."""
+    """The manifest, not a directory walk, lists the graphs; it is never one itself."""
     from uhd_gen.generate import discover_graphs
 
     root = _corpus_root(tmp_path / "corpus")
@@ -836,7 +781,6 @@ def test_a_corpus_root_is_read_through_its_manifest_graph_list(tmp_path):
     ]
     assert discover_graphs([str(root)]) == expected
     assert discover_graphs([str(root / "manifest.json")]) == expected
-    # A directory above corpus roots is walked, and their manifests are skipped.
     assert all(
         path.name != "manifest.json" for path in discover_graphs([str(tmp_path)])
     )
@@ -851,8 +795,8 @@ def test_a_manifest_listing_a_missing_graph_is_refused(tmp_path):
         discover_graphs([str(root)])
 
 
-#: The gfx950 attention shape: the collection UED exposed every KMD field, the shipping UED
-#: one knob, and the matcher binds `causal` from the graph.
+#: gfx950 attention: the collection UED exposes every KMD field, the shipping UED one
+#: knob, and the matcher binds `causal` from the graph.
 _KMD_FIELDS = ["block_m", "causal", "ragged"]
 _SHIPPING_KNOBS = ["block_m"]
 
@@ -871,10 +815,8 @@ def _attention_frame():
 
 
 def test_generation_offers_kernel_features_only_for_the_shipping_knobs():
-    """The runtime admits a ranker only if each `$kernel.*` axis is a knob of the UED that
-    ships it; the collection UED exposes every KMD field, and proposing from it is how the
-    gfx950 rankers came to read `$kernel.causal` and were never used. A graph-bound field is
-    still learned from -- through its problem-side twin."""
+    """The runtime only admits `$kernel.*` features that are shipping-UED knobs; a
+    graph-bound field is read through its problem-side twin instead."""
     frame = _attention_frame()
     signature, _ = feature_recipe(
         frame, set(frame.columns), None, _KMD_FIELDS, _SHIPPING_KNOBS, []

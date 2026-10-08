@@ -57,20 +57,12 @@ _LEAKED_FIELDS = frozenset(
     }
 )
 
-#: RFC 0019.13 §11.2 (:2003): "A UHD declaring `calibrated: true` MUST train its score
-#: on `avgTimeMs`", and §10.6.2 (:1914-1916) repeats it for the engine-level estimate --
-#: minimum- and robust-mean-over-iterations are optimistically biased, and two engines
-#: trained on different statistics are not comparable at all. L1 declares
-#: `score.calibrated: true` unconditionally (`validate_model`), so its label is the
-#: arithmetic mean and nothing else.
+#: RFC 0019.13 §11.2: a `calibrated: true` score MUST train on `avgTimeMs`, and L1 always
+#: declares calibrated (`validate_model`), so the label is the arithmetic mean.
 LABEL_STATISTIC = "avgTimeMs"
 
-#: What a normalized L1 row is allowed to carry back in: the label, the §8.5 statistic
-#: kept beside it for information, the derived rate, the validity flag and the §13.2
-#: correctness verdict with its reason. Every other name in `_LEAKED_FIELDS` is
-#: candidate/search data an immediate measurement must not have. This exemption is for
-#: the ENVELOPE only -- `validate_signature` still rejects every `_LEAKED_FIELDS` name in
-#: a feature, so no L1 feature can read its own label.
+#: Envelope-only exemption from `_LEAKED_FIELDS`; `validate_signature` still rejects these
+#: names in features, so no L1 feature can read its own label.
 _LABEL_FIELDS = frozenset({"tflops", "is_valid", "robustMeanMs", LABEL_STATISTIC})
 
 
@@ -100,7 +92,7 @@ def _positive(value, where: str) -> float:
 
 
 def _missing(value) -> bool:
-    """Absent from the row: never written, JSON null, or the NaN pandas fills in for either."""
+    """Never written, JSON null, or the NaN pandas fills in for either."""
     return value is None or (isinstance(value, float) and math.isnan(value))
 
 
@@ -141,9 +133,8 @@ def validate_binding(value) -> dict:
         raise ValueError(f"binding.role must be {ROLE}")
     if binding["arch"] != "default" and not _ARCH.fullmatch(binding["arch"]):
         raise ValueError("binding.arch must be a bare gfx architecture or default")
-    # The runtime's description names the metric it was asked in (EnginePredictor), and
-    # which label a row may train or be scored against depends on it: a row collected
-    # under the tflops selector is not a `time` measurement, whatever columns it carries.
+    # Which label a row may train or be scored against depends on the metric it was
+    # collected under, whatever columns it carries.
     if binding.get("metric") not in RANKING_METRICS:
         raise ValueError(
             f"binding.metric must name a registered ranking metric "
@@ -156,12 +147,9 @@ def validate_binding(value) -> dict:
 def require_binding_metric(
     binding: dict, metric: str, where: str, selector_revision: str | None = None
 ) -> None:
-    """A collection binding feeds only a model of the metric (and selector) it was taken under.
+    """Refuse a binding whose metric (or selector revision) differs from the model's.
 
-    The engine's own selector answers in the requested metric, so rows described under
-    one metric are measurements of what that selector picked -- training or scoring a
-    model of another metric on them fits the wrong engine behaviour without any number
-    looking wrong. A binding that names no metric cannot be checked and is refused.
+    A binding that names no metric cannot be checked and is refused.
     """
     recorded = binding.get("metric")
     if recorded is None:
@@ -185,11 +173,9 @@ def require_binding_metric(
 
 
 def validate_signature(signature: list) -> None:
-    """Only graph/device/constraint inputs, never measured outputs.
+    """Reject references to measured outputs; only graph/device/constraint inputs.
 
-    Whether each entry evaluates on the engine's published features is a separate
-    question the shared evaluator answers (`check_signature_evaluates`): a reference inside
-    `value_or_default` or `present` is legal on a graph that does not publish it.
+    Whether entries evaluate on published features is `check_signature_evaluates`'s job.
     """
     for reference in signature_references(signature):
         name = reference.removeprefix("$")
@@ -208,10 +194,8 @@ def check_signature_evaluates(
 ) -> None:
     """Every published feature map yields a full row through the runtime's FeatureExtractor.
 
-    `published` holds the rows' `features` objects (or their JSON). The engine refuses a row
-    its signature cannot evaluate -- an unbound bare reference, a string with no code --
-    and scores one where `value_or_default`/`present` supplies the answer, so the evaluator
-    decides, not a name-by-name membership test that rejects mixed-operation corpora.
+    The evaluator decides, not a name-membership test: `value_or_default`/`present` may
+    reference names a graph does not publish.
     """
     distinct = {
         json.dumps(_object(value, "features"), sort_keys=True) for value in published
@@ -245,10 +229,8 @@ def normalize_row(value: dict) -> dict:
         )
     if value.get("selection_mode") != "immediate":
         raise ValueError("L1 labels require selection_mode=immediate")
-    # `hipdnn_bench --collect-immediate` declares `robustMeanMs` -- the statistic it
-    # ranks and reports on. A row this function has already produced declares the
-    # LABEL statistic instead, so both spellings read back and the label below is
-    # `avgTimeMs` either way.
+    # `hipdnn_bench` declares `robustMeanMs`; an already-normalized row declares the label
+    # statistic. Both read back, and the label is `avgTimeMs` either way.
     if value.get("timing_statistic") not in ("robustMeanMs", LABEL_STATISTIC):
         raise ValueError(
             f"L1 labels require timing_statistic robustMeanMs or {LABEL_STATISTIC}"
@@ -256,8 +238,7 @@ def normalize_row(value: dict) -> dict:
     if value.get("is_valid") is not True:
         raise ValueError("L1 labels require is_valid=true")
     binding = validate_binding(value.get("binding"))
-    # `hipdnn_bench` states the metric it asked in beside the description it got back; the
-    # two disagreeing means the row is not what its binding says it is.
+    # A row metric that disagrees with its binding means the row is not what it claims.
     if not _missing(value.get("metric")):
         require_binding_metric(binding, value["metric"], "immediate measurement")
     engine = value.get("engine_id", value.get("engine"))
@@ -300,20 +281,14 @@ def normalize_row(value: dict) -> dict:
             raise ValueError(
                 f"flattened feature {key} differs from the published feature map"
             )
-    # RFC 0019 §13.2: the correctness verdict and its reason ride on the row, tri-state,
-    # so evaluation and promotion see exactly what collection decided. A row checked wrong
-    # keeps its place -- the failure is a fact about this engine on this graph -- but loses
-    # every timing and derived label, the way `collect_graph` builds a failed candidate's
-    # row; training and evaluation then exclude it (`correctness.known_wrong`). Null stays
-    # null: the current collector cannot cross-check one engine's single pick, and that is
+    # RFC 0019 §13.2: the tri-state verdict rides on the row. A row checked wrong keeps its
+    # place but loses every timing label (excluded later via `known_wrong`); null means
     # unknown, not correct.
     verdict = numerical_verdict(value.get(VERDICT))
     reason = numerical_reason(value.get(REASON))
     average = elapsed = spread = iterations = tflops = None
     if verdict is not False:
-        # RFC 0019.13 §11.2 (:2003) and §10.6.2 (:1914-1916): the score this model
-        # declares `calibrated: true` MUST be trained on `avgTimeMs`. `robustMeanMs`
-        # stays on the row as the informational §8.5 statistic, never as the label.
+        # §11.2: the calibrated score trains on `avgTimeMs`; `robustMeanMs` is informational.
         average = _positive(
             value.get(LABEL_STATISTIC, value.get("avg_time_ms")), LABEL_STATISTIC
         )
@@ -324,9 +299,8 @@ def normalize_row(value: dict) -> dict:
         iterations = _optional_count(
             value.get("iters", value.get("iterations")), "iters"
         )
-        # Only a throughput label needs the logical work count. A `time` collection over
-        # graphs whose provider publishes no FLOP count (conv backward, today) is a
-        # complete label; a count that IS published must still be a real one.
+        # Only a throughput label needs graph.flops (conv backward publishes none); a
+        # published count must still be valid.
         if binding["metric"] == "tflops" or "graph.flops" in features:
             flops = _positive(features.get("graph.flops"), "full-graph graph.flops")
             tflops = flops / average / 1e9
@@ -410,12 +384,8 @@ def normalize_corpus(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def read_corpus(path: Path) -> pd.DataFrame:
-    # The trainer's suffix rule, applied here too because it is the same reader: --input
-    # decides by suffix whichever role is being trained, so a published .parquet dataset
-    # is never handed to the CSV reader. `read_corpus_frame` also pins `graph_id` and
-    # `device_id` to text on every branch, which this normalization depends on --
-    # `_text` below rejects a non-string, so a graph named `0123` frozen as an int64 in
-    # the dataset would fail here and nowhere else.
+    # `read_corpus_frame` picks the reader by suffix and pins `graph_id`/`device_id` to
+    # text, which `_text` requires (a graph named `0123` must not become an int).
     return normalize_corpus(read_corpus_frame(path))
 
 
@@ -446,13 +416,8 @@ def validate_model(descriptor: dict) -> RankingMetric:
         raise ValueError(
             f"L1 prediction of {metric.name!r} requires objective={metric.objective}"
         )
-    # The transform vocabulary belongs to `score_transform::isSupported` on the runtime
-    # side; this narrower set is not a second opinion about it. `evaluate`'s scorers
-    # implement only the inverses in score_transform.INVERTIBLE, so a descriptor declaring
-    # any other supported transform is loadable by the engine and not scoreable here --
-    # a capability limit of this tool, reported where the scoring happens. An omitted or
-    # empty transform is the runtime's identity (`SUPPORTED_TRANSFORMS` lists "", and
-    # `applyInverse` returns the raw score for it), so it is admitted as exactly that.
+    # The runtime owns the transform vocabulary (`score_transform::isSupported`); this tool
+    # can only score the INVERTIBLE inverses plus the omitted/empty identity transform.
     if score.get("calibrated") is not True or score.get("transform", "") not in (
         "",
         *INVERTIBLE_TRANSFORMS,
@@ -535,9 +500,8 @@ def prediction_scorer(descriptor: dict, responses: list[dict]):
                 f"runtime prediction answers metric {response.get('metric')!r}, "
                 f"not the model's {metric!r}"
             )
-        # A declined answer -- UNAVAILABLE, INVALID, or a value the metric cannot take,
-        # which the backend demotes to INVALID -- leaves the engine unscored for that
-        # graph. It is what the runtime would do, so it is scored as such, not refused.
+        # A declined answer (UNAVAILABLE, INVALID, or a value the metric cannot take) leaves
+        # the engine unscored for that graph, as the runtime would.
         value = response.get("value")
         available = status in ("AVAILABLE", "available", 1) and is_valid_metric_value(
             metric, value
@@ -594,12 +558,10 @@ _STATIC_PRECEDENCE = {
 
 
 def _static_engine_rank(engine_id: int) -> tuple[int, int]:
-    """Where the runtime's static rules put an engine it could not score.
+    """Where the runtime's static rules (`sortEngineIds`) put an engine it could not score.
 
-    `sortEngineIds` (EngineOrdering.hpp): MIOPEN_ENGINE, ASM_SDPA_ENGINE, ROCKE_ENGINE,
-    every other engine, MIOPEN_ENGINE_DETERMINISTIC. "Every other engine" keeps the order
-    the providers enumerated it in, which a corpus does not record, so the public ID stands
-    in for it; HIPDNN_HEUR_FALLBACK_ENGINE_ORDER is an operator override and is not applied.
+    Unlisted engines keep provider enumeration order, which a corpus does not record, so
+    the public ID stands in; HIPDNN_HEUR_FALLBACK_ENGINE_ORDER is not applied.
     """
     return _STATIC_PRECEDENCE.get(engine_id, 3), engine_id
 
@@ -629,10 +591,8 @@ def evaluate_immediate(
     grouping = resolve_grouping(frame)
     keys = problem_keys(frame, grouping)
     split = split_problems(keys, eval_fraction, seed)
-    # Split over every row, as training's split is, so the two agree on which problems are
-    # held out; then a row checked numerically wrong leaves both the scored rows and the
-    # oracle -- its measurement was suppressed at import, and a wrong answer is not a
-    # selection anyone should be measured against (RFC 0019 §13.2).
+    # Split over every row, like training, so both agree on held-out problems; then drop
+    # rows checked wrong from scoring and the oracle (RFC 0019 §13.2).
     held_out = frame[keys.isin(split.eval_problems) & ~known_wrong(frame)].copy()
     by_engine = {}
     integrity = []
@@ -677,14 +637,8 @@ def evaluate_immediate(
         values = np.asarray(bundle.scorer(selected), dtype=float)
         if values.shape != (len(selected),):
             raise ValueError("L1 model returned the wrong number of predictions")
-        # A prediction the metric cannot take is one the RUNTIME refuses: the engine reports
-        # INVALID rather than a score (isValidMetricValue), and selection orders it by the
-        # static rules for that graph. A model uhd_gen trains now cannot do this -- it is
-        # fitted on log and inverted with exp (score_transform.py) -- but one trained on
-        # log1p is inverted with expm1, and a log-space prediction below zero lands in
-        # (-1, 0): a handful of rows near the bottom of the range (4 in 495, run 67929709).
-        # Those models still ship, so the rows are scored as the declines the runtime makes
-        # of them rather than failing the artifact.
+        # The runtime refuses a value the metric cannot take as INVALID and orders the
+        # engine statically, so score it as a decline (log1p models can predict in (-1, 0)).
         impossible = np.array(
             [not is_valid_metric_value(name, float(value)) for value in values],
             dtype=bool,
@@ -697,8 +651,7 @@ def evaluate_immediate(
     if scored.empty:
         raise ValueError(f"L1 model scored no evaluation row with a valid {name} value")
 
-    # Keyed by the metric so a `time` report never carries a field named for throughput;
-    # a `tflops` report keeps the keys it has always had.
+    # Keys are named by metric so a `time` report has no throughput-named fields.
     def calibration(group):
         measured = group[label].to_numpy(dtype=float)
         error = group[predicted_column].to_numpy(dtype=float) - measured
@@ -712,12 +665,8 @@ def evaluate_immediate(
             "mean_absolute_relative_error": float(np.mean(np.abs(relative))),
         }
 
-    # The oracle is every valid measurement, scored or not: an engine whose model declined
-    # is still on the device, and dropping it hid exactly the loss a decline causes -- the
-    # fastest engine unscored, a slower scored one picked, and the problem reported as
-    # having nothing to compare. The pick is the runtime's (PredictionPolicy): scored
-    # engines best-first in the metric's direction, then the unscored tail, both tied by
-    # the static rules; with nothing scored the static order alone decides.
+    # The oracle is every valid measurement, scored or not, so a decline's loss shows. The
+    # pick mirrors PredictionPolicy: scored engines best-first, then unscored, ties static.
     per_problem, regrets = [], []
     better = -1.0 if metric.objective == "max" else 1.0
 

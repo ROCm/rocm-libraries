@@ -1,20 +1,9 @@
 """Does the engine whose model predicts the better value actually run better?
 
-L1 is the one score compared ACROSS engines, so the question it must answer is not "how
-close is the number" but "does it pick the winner". This joins a bake-off's predictions with
-the per-engine measured L1 corpora on the graph and reports, per ranking metric, over the
-graphs where two or more engines both predicted and measured:
-
-  * agreement -- predicted winner == measured winner
-  * the cost of disagreeing, as the regret of the predicted pick relative to the measured
-    best in that metric's own direction (throughput given up for tflops, time added for time)
-  * both, per regime, because an aggregate hides a selector that is right on prefill and
-    wrong on every decode-shaped problem
-
-Engines are named as the runtime names them, so any engine's model scores -- there is no
-allowlist. A measured row counts toward the metric its collection binding was taken under:
-an engine's own selector picks its kernel in the requested metric, so a `time` model is
-scored against `time`-selector measurements only.
+Joins a bake-off's predictions with per-engine measured L1 corpora and reports, per ranking
+metric and per regime, over graphs two or more engines predicted and measured: agreement of
+predicted and measured winners, and the regret of the predicted pick. A measured row counts
+only toward the metric its collection was selected under.
 
 Usage:
     python score_predictions.py --manifest corpus/manifest.json --predictions predictions.json \
@@ -32,8 +21,7 @@ import sys
 
 import pandas as pd
 
-# The registry the runtime enforces (label column and direction per metric), from the
-# checkout this script ships in rather than a second copy of it.
+# The runtime's metric registry, from this checkout rather than a second copy.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from uhd_gen.ranking_metrics import RANKING_METRICS  # noqa: E402
 
@@ -88,8 +76,7 @@ def _report(metric, rows) -> None:
             f", p95 {100 * wrong['regret'].quantile(0.95):.1f}%"
             f", max {100 * wrong['regret'].max():.1f}%"
         )
-    # The whole-corpus figure a selector delivers: zero where it picks right, the shortfall
-    # where it does not. This is what a user feels, unlike the agreement rate.
+    # What a user feels: zero where the pick is right, the shortfall where it is not.
     print(f"  mean regret over ALL scored        : {100 * frame['regret'].mean():.2f}%")
 
     print(f"\n{'regime':<26} {'graphs':>7} {'agree':>7}   measured winners")

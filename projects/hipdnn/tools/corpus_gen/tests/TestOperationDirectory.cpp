@@ -5,9 +5,7 @@
  * @file TestOperationDirectory.cpp
  * @brief Covers loading a directory of declarations.
  *
- * The property under test is that nothing is dropped quietly. An operation whose declaration
- * fails to parse and is silently skipped leaves a hole in the corpus indistinguishable from an
- * operation nobody declared -- and the run still reports a total that looks whole.
+ * A declaration that fails to load must be reported, never skipped silently.
  */
 
 #include <gtest/gtest.h>
@@ -84,9 +82,7 @@ TEST(TestOperationDirectory, LoadsEveryDeclarationInTheDirectory)
 
 TEST(TestOperationDirectory, VisitsFilesInAStableOrder)
 {
-    // Directory iteration order is unspecified. An unordered visit reshuffles which operations
-    // a maxCombinations bound reaches, so two runs of the same command cover different ground
-    // while both report success.
+    // Iteration order is unspecified, and a maxCombinations bound depends on visit order.
     const Scratch scratch("stable_order");
     scratch.write("zulu.opmeta.json", declaration("zulu"));
     scratch.write("alpha.opmeta.json", declaration("alpha"));
@@ -102,8 +98,6 @@ TEST(TestOperationDirectory, VisitsFilesInAStableOrder)
 
 TEST(TestOperationDirectory, AMalformedDeclarationIsReportedAndNamed)
 {
-    // Not skipped: a declaration that does not load is a hole in the corpus, and one malformed
-    // file among twenty must say which one it was.
     const Scratch scratch("malformed");
     scratch.write("good.opmeta.json", declaration("good"));
     scratch.write("broken.opmeta.json", "{ this is not json");
@@ -118,8 +112,7 @@ TEST(TestOperationDirectory, AMalformedDeclarationIsReportedAndNamed)
 
 TEST(TestOperationDirectory, AnInvalidDeclarationIsReportedRatherThanLoaded)
 {
-    // Parses as JSON, fails §4.4 validation. The distinction matters: this is the case where a
-    // file looks fine and means nothing.
+    // Parses as JSON but fails §4.4 validation.
     const Scratch scratch("invalid");
     scratch.write("bad.opmeta.json", R"({
       "schema_version": "1.0",
@@ -139,8 +132,7 @@ TEST(TestOperationDirectory, AnInvalidDeclarationIsReportedRatherThanLoaded)
 
 TEST(TestOperationDirectory, IgnoresFilesThatAreNotDeclarations)
 {
-    // A corpus directory accumulates notes, generated CSVs and editor droppings. Reading them
-    // as declarations would turn housekeeping into errors and hide the real ones.
+    // Notes, CSVs and editor files are not declarations.
     const Scratch scratch("ignores");
     scratch.write("real.opmeta.json", declaration("real"));
     scratch.write("notes.md", "not a declaration");
@@ -156,8 +148,7 @@ TEST(TestOperationDirectory, IgnoresFilesThatAreNotDeclarations)
 
 TEST(TestOperationDirectory, AMissingDirectoryIsAnErrorRatherThanAnEmptyCorpus)
 {
-    // Silently returning nothing would read as "this engine serves no declared operation",
-    // which is a statement about the engine rather than about a mistyped path.
+    // An empty result would read as an engine serving nothing.
     const auto set = loadOperationDirectory("/no/such/corpus/directory");
 
     EXPECT_TRUE(set.operations.empty());

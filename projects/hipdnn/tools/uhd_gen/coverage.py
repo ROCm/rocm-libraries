@@ -9,7 +9,7 @@ from .features import signature_references
 
 
 def device_field_coverage(df) -> dict:
-    """Board identity is not variation: record the actual values of every field."""
+    """Observed values of each `device.*` field; one board's fields never count as variation."""
     fields = {}
     for column in sorted(name for name in df.columns if name.startswith("device.")):
         series = df[column]
@@ -64,10 +64,9 @@ def enforce_device_coverage(signature: list, coverage: dict) -> None:
 def propose_features(
     df, kernel_fields: set[str], dim_tile_pairs: list[tuple[str, str]]
 ) -> tuple[list, list]:
-    """Published problem/device values and the offered kernel fields, plus author-declared geometry.
+    """Problem/device values, offered kernel fields, and author-declared dim-to-tile geometry.
 
-    `kernel_fields` is what the caller may read through `$kernel.*` -- for generation, the
-    shipping UED's knobs -- so a dim-to-tile pair must name one of them too.
+    `kernel_fields` is what `$kernel.*` may read (the shipping UED's knobs).
     """
     coverage = device_field_coverage(df)
     signature = [
@@ -101,7 +100,7 @@ def propose_features(
                 )
             else:
                 signature.append(normalized)
-    # The same pair may be supplied twice; preserve authored feature order, not duplicates.
+    # Drop duplicates, keeping authored feature order.
     unique = {}
     for entry in signature:
         unique.setdefault(json.dumps(entry, sort_keys=True), entry)

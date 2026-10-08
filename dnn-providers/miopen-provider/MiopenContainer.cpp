@@ -37,28 +37,10 @@ namespace miopen_plugin
 // the MIOPEN_ENGINE_NAME and MIOPEN_ENGINE_ID constants directly from there.
 // ============================================================================
 
-// ============================================================================
-// L1 engine models (RFC 0019 Open Question 7, RESOLVED)
-// ============================================================================
-// MIOpen ships no UED, so it cannot bind a `predict_engine` UHD through a role map (RFC
-// 0019 §3.1). It binds them the other sanctioned way instead: by naming those UHDs'
-// UUIDs here, in the provider's own engine definition. The loader resolves each id out
-// of the descriptor catalog it already parses and validates provenance exactly as it
-// does for a UED role reference; the UHD keeps §4.1's shape and carries no `engine`,
-// `role` or `arch` member, so no document can attach itself to an engine by claiming one.
-//
-// Ids per engine, not per provider: MIOPEN_ENGINE and MIOPEN_ENGINE_DETERMINISTIC run
-// different solvers over different operations and perform differently, so a single
-// model cannot answer for both. Per ranking metric, because a `tflops` and a `time`
-// model are different models (§4.4) and collection promotes each under its own id. Not
-// per architecture: every id binds under `default`, one model may be trained across
-// several architectures, and the artifact's `training_arches` decides per query where
-// it answers -- an architecture it was not trained on gets no estimate.
-//
-// Nothing is deployed for these ids yet, so they could still change freely; once a
-// model ships under one, changing it orphans that model. An unresolved id is
-// UNAVAILABLE -- no estimate, engine unaffected, static ordering as before (§11.2's "no
-// declared model" row) -- so the ids can ship ahead of the models they name.
+// L1 engine models (RFC 0019 Open Question 7): MIOpen ships no UED, so each engine names
+// its `predict_engine` UHDs by UUID here, per ranking metric, bound under `default`.
+// Once a model ships under an id, changing that id orphans the model. An unresolved id
+// just means no estimate, so ids can ship ahead of their models.
 const std::map<std::string, std::string> MIOPEN_ENGINE_L1_MODELS{
     {"tflops", "c47e1b3a-8f60-4a92-b5d4-1e08c9a27f63"},
     {"time", "30284ebe-6e15-4f8e-968d-09f92d8a9480"}};

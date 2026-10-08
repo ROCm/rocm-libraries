@@ -158,10 +158,7 @@ int main(int argc, char** /*argv*/)
             bindRow(context, row);
             values.push_back(extractor.extract(context));
         }
-        // The revision rides on every response rather than behind a flag: whoever asked
-        // for a digest or values is about to stamp or check a model with them, and the
-        // meaning of those values is this build's, so the two cannot be asked of
-        // different binaries.
+        // Always report the revision: the hash and values are only meaningful for this build.
         std::cout << nlohmann::json{{"features_hash", extractor.getSignatureHash()},
                                     {"feature_semantics_revision",
                                      hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION},

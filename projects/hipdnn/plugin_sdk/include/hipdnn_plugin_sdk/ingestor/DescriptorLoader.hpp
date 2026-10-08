@@ -76,49 +76,27 @@
  * engines; two packs of one engine sharing a kernel is not legal, since the duplicate
  * completed metadata tuples collide on the catalog key.
  *
- * The UED follows RFC 0020 and the UMD RFC 0018 (sources of truth); the other five follow
- * RFC 0017 §4 until their own follow-ups land. Six deliberate divergences: four ask for an
- * RFC amendment, and two -- the declarative `graph_match` arm and `kernel_fields` -- are
- * conforming features this loader does not implement and rejects rather than ignores:
+ * The UED follows RFC 0020 and the UMD RFC 0018; the other five follow RFC 0017 §4.
+ * Deliberate divergences:
  *
- *  - RFC 0018 A.1 makes a UMD's `version` optional, defaulting to `1.0`; here every
- *    file-backed descriptor must carry one, because a type with no version cannot be
- *    gated by RFC 0017 §4's accept rule at all. Only an inline kernel is exempt: it
+ *  - Every file-backed descriptor must carry `version`, the UMD included (RFC 0018 A.1
+ *    makes it optional), since an unversioned type cannot be gated. An inline kernel
  *    gates against its pack's UKD row.
- *  - RFC 0020 §4.2 gives `graph_match` two mutually exclusive arms, the declarative
- *    `nodes` of §4.3 and the `native` symbol of §4.5; only `native` is accepted here
- *    (parseEngineDescriptor), resolved through GraphMatchRegistry. A conforming UED
- *    written against the declarative arm is not partially read: `nodes` is an unknown
- *    key, so the file fails, the engine never registers, and every pack naming it is
- *    dropped for an engine no descriptor defines. What the author sees is an unknown-key
- *    error, not "not implemented yet". The escape hatch is the only arm today.
- *  - RFC 0018 A.1 permits `kernel_fields` beside `match_symbol`, the hand-declared
- *    `$kernel.*` read set a native criterion trades for memoization and the KMD
- *    cross-check; the UMD key set here does not list it (parseMatchDescriptor). A UMD
- *    carrying it fails as an unknown key, so the matcher is skipped and every pack
- *    listing it is dropped naming a matcher "which no descriptor defines" -- the author
- *    sees a missing matcher rather than a rejected field. Omitting the key gives RFC
- *    0018's own unmemoized fallback, which is what every matcher here gets.
- *  - RFC 0020 §13.2.1 makes the id alone the unit of collision; packs and standalone
- *    kernels are keyed by (id, arch), because a per-arch shard ships one id per arch with
- *    content built against that arch. The other five types stay keyed by id alone.
- *  - RFC 0017 §4 calls arch a pack property (§8.1 applies the gate when packs resolve);
- *    a standalone UKD carries `arch` too, and an inline kernel may narrow within its
- *    pack's list, for the same reason -- a shard ships one kernel id many times and the
- *    id alone cannot distinguish them. Every entry is a bare base id: a device reports
- *    feature suffixes and matching stops at ':', so a partial target id
- *    (`gfx942:xnack-`) would match nothing while reading as deliberate.
+ *  - `graph_match` accepts only the `native` arm (RFC 0020 §4.5); the declarative `nodes`
+ *    arm (§4.3) fails as an unknown key, dropping the engine and its packs.
+ *  - A UMD's `kernel_fields` (RFC 0018 A.1) fails as an unknown key, dropping its packs.
+ *  - Packs and standalone kernels are keyed by (id, arch), not id alone (RFC 0020
+ *    §13.2.1): a per-arch shard ships one id per arch.
+ *  - A standalone UKD may carry `arch`, and an inline kernel may narrow its pack's list.
+ *    Entries are bare base ids: a partial target id (`gfx942:xnack-`) matches nothing.
  *  - RFC 0020 §4.2 and §13.1 make any unknown field a hard rejection
  *    (`additionalProperties: false`); a key prefixed `x-` or `_`, plus the packager's
  *    `provenance` block, is warned about and ignored instead, so a descriptor may carry
  *    tracking data. Every other unknown key is still the hard rejection the RFC asks
  *    for, including a leftover `schema`.
  *
- * Two things that look like divergences are not. No descriptor carries a `schema` member:
- * the filename states the type, which is what RFC 0018 §10 and A.1 and RFC 0019 §4.1 ask
- * for (RFC 0019's illustrative JSON shows one, and it is rejected here as an unknown key).
- * And `sdk_version` belongs on the UED: RFC 0020 §4.2 carries both the field-table row and
- * the schema property, and RFC 0017 §4 declares the graph-schema floor once, on the engine.
+ * Not divergences: no descriptor carries a `schema` member (the filename states the
+ * type, RFC 0018 §10), and `sdk_version` belongs on the UED (RFC 0020 §4.2).
  *
  * Apart from the UED, UMD and KDP, whose keys the RFCs fix, every JSON key is the snake_case
  * spelling of its C++ field, and an unrecognized key fails the file naming the path unless
@@ -501,10 +479,8 @@ inline UhdAdapter uhdAdapterFromString(const std::string& text, const std::strin
     {
         return UhdAdapter::CUSTOM_LIBRARY;
     }
-    // `onnx` is the one RFC 0019 §7 adapter this path deliberately cannot build: its runtime
-    // does not reach every provider's include path, so makeUhdAdapter answers nullptr for it.
-    // Rejecting it by name beats accepting a descriptor that would then silently rank by
-    // declared order.
+    // `onnx` (RFC 0019 §7) is rejected by name: makeUhdAdapter cannot build it, so a
+    // descriptor naming it would silently rank by declared order.
     fail("unknown or unsupported UHD adapter '" + text + "' in " + where
          + " (expected static_order, native, tree_data, table or custom_library)");
 }
@@ -697,9 +673,7 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
     heuristic.trainedAgainstJson = config.trainedAgainst;
     if(config.trainedAgainst.is_object())
     {
-        // Validated by the common UHD parser (parser_detail::provenance): present means a
-        // nonempty string. Opaque here -- only the provider that produced it can say what
-        // it means, and the loader only ever compares it for equality.
+        // Validated by the common UHD parser; opaque here and only compared for equality.
         heuristic.trainedAgainstSelectorRevision
             = config.trainedAgainst.value("selector_revision", std::string{});
     }
@@ -814,10 +788,6 @@ inline std::vector<std::string> requireArchList(const nlohmann::json& object,
 
 inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const std::string& where)
 {
-    // `sdk_version` conforms: RFC 0020 §4.2 lists it in the field table and in the schema,
-    // and RFC 0017 §4 declares the graph-schema floor once, on the engine, with no other
-    // descriptor carrying one -- a UMD included (RFC 0018 A.1 restates that). It sits here
-    // because every descriptor under an engine reads tokens that engine's binding produced.
     requireKnownKeys(root,
                      {"version",
                       "revision",
@@ -860,9 +830,8 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
             readValue(*found, entry.key());
         }
     };
-    // RFC 0019 §3.1: the two scoring roles map an architecture to one UHD per metric, so the
-    // value is a list; a single id is a one-element list, so an existing role map needs no
-    // rewrite. The list names models, never metrics -- each UHD declares its own.
+    // RFC 0019 §3.1: a scoring role maps an arch to one UHD per metric, so the value is
+    // a list; a single id reads as a one-element list.
     const auto readList = [&where](const char* key,
                                    std::map<std::string, std::vector<DescriptorId>>& into) {
         return [key, &into, &where](const nlohmann::json& role, const std::string& arch) {
@@ -894,8 +863,7 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
                 {
                     fail(entryWhere + " holds a value that is not a UUID: " + error.what());
                 }
-                // Repeating an id says nothing a single mention does not, and reads as a
-                // second model where there is one (RFC 0020 §4.6, `uniqueItems`).
+                // A repeated id would read as a second model (RFC 0020 §4.6, `uniqueItems`).
                 if(std::find(ids.begin(), ids.end(), id) != ids.end())
                 {
                     fail(entryWhere + " lists " + element.get<std::string>() + " twice");
@@ -951,9 +919,8 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
 
     // The graph-topology match this engine declares. Absent leaves the symbol empty,
     // meaning this engine binds no tokens and is admitted or declined by its UMDs
-    // alone. The only inner key today is the native escape hatch of RFC 0020 §4.5;
-    // §4.3's declarative `nodes` arm is a conforming sibling this loader rejects as an
-    // unknown key, taking the engine and its packs with it (see the ledger above).
+    // alone. Only the native arm (RFC 0020 §4.5) is read; the declarative `nodes` arm
+    // fails as an unknown key.
     if(const auto it = root.find("graph_match"); it != root.end())
     {
         const std::string graphMatchWhere = where + " graph_match";
@@ -966,9 +933,8 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
 
 inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root, const std::string& where)
 {
-    // RFC 0018 A.1's `kernel_fields`, legal beside `match_symbol`, is absent from this key
-    // set on purpose: a UMD declaring it fails, and its packs then name a matcher nothing
-    // defines (see the ledger above). `criteria`, the declarative arm, is likewise unread.
+    // `kernel_fields` (RFC 0018 A.1) and the declarative `criteria` arm are deliberately
+    // unsupported and fail as unknown keys; see the file header.
     requireKnownKeys(root, {"version", "revision", "id", "name", "scope", "match_symbol"}, where);
 
     MatchDescriptor matcher;
@@ -1875,12 +1841,9 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
 /**
  * @brief The descriptor roots the environment names, for a provider assembling its own.
  *
- * One spelling of the three variables, shared because two providers reading the same
- * variables with two parsers is two contracts. A value that is not a directory is dropped
- * with a warning rather than passed through: a stale value is common -- an install-tree
- * CTestTestfile.cmake bakes in the build's staging path, which will not exist on a test
- * machine -- and to loadDescriptorCatalog a nonexistent root is indistinguishable from an
- * empty one, so a typo would otherwise load nothing and say nothing.
+ * A value that is not a directory is dropped with a warning: loadDescriptorCatalog treats
+ * a missing root as empty, so a stale or mistyped path would otherwise load nothing
+ * silently.
  */
 struct EnvironmentDescriptorRoots
 {
@@ -1946,17 +1909,10 @@ namespace detail
 /**
  * @brief Why @p model's recorded training provenance does not match what binds it, or "".
  *
- * RFC 0019 §8.1: a UHD names the descriptor set it was generated against, and the loader
- * checks that set by UUID and major/minor semantic revision. Model validity is
- * independent of engine/pack validity, so this runs for every role and architecture at
- * load and leaves artifact loading to the selected model at rank time.
+ * RFC 0019 §8.1: checks the UHD's `trained_against` set by UUID and major/minor revision.
  *
- * @param engine  The UED the model is being bound to, or nullptr when the binding engine
- *                ships no descriptor set at all (RFC 0019 Open Question 7, RESOLVED: an
- *                opaque engine binds its L1 model by naming the UUID in provider code).
- *                Such an engine has no UED, KMD or UMD to be trained against, so a
- *                `trained_against` is incompatible by construction -- the same rule, not
- *                an exemption from it.
+ * @param engine  The UED the model is bound to, or nullptr for an engine that ships no
+ *                descriptor set; any `trained_against` is then incompatible.
  * @param schema  The KMD @p engine names; nullptr exactly when @p engine is.
  */
 inline std::string provenanceError(const HeuristicDescriptor& model,
@@ -1990,14 +1946,9 @@ inline std::string provenanceError(const HeuristicDescriptor& model,
     {
         return "incompatible KMD identity or semantic revision";
     }
-    // Checked per bound architecture (D2): one model may be bound under several arch keys,
-    // and an L1 model records the matchers of every pack the engine has
-    // (enginePredictionProvenance), not just the ones this key's packs use. So a recorded
-    // matcher is judged by which packs own it:
-    //   - owned by a pack serving @p arch: must be loaded at a compatible revision;
-    //   - owned only by the engine's other-arch packs: says nothing about this arch, ignored;
-    //   - owned by no pack at all: the model was trained against a matcher this engine no
-    //     longer has, which is a contract break on every arch.
+    // Per bound arch: a recorded matcher owned by a pack serving @p arch must be loaded at
+    // a compatible revision; one owned only by other-arch packs is ignored; one no pack
+    // owns is a contract break on every arch.
     std::set<DescriptorId> relevant;
     std::set<DescriptorId> owned;
     for(const auto& pack : packs)
@@ -2028,8 +1979,8 @@ inline std::string provenanceError(const HeuristicDescriptor& model,
     }
     if(!relevant.empty())
     {
-        // A newly added pack does not change any recorded dependency. Its inputs
-        // still pass the normal feature/coverage guards before model evaluation.
+        // Extra matchers are not a provenance break; their inputs still pass the normal
+        // feature/coverage guards.
         HIPDNN_PLUGIN_LOG_WARN("descriptor loader: engine '"
                                << engine->name << "' heuristic '" << model.name << "' arch='"
                                << arch << "' has additional matchers outside training provenance");
@@ -2040,18 +1991,13 @@ inline std::string provenanceError(const HeuristicDescriptor& model,
 /**
  * @brief Whether @p model can be used at all, after the symbol and artifact pre-flight.
  *
- * An unregistered native symbol or an artifact reached from outside the descriptor tree
- * disables that model and preserves the engine (RFC 0019 §11.2). An absent artifact is
- * only a warning: deployment is separate from load (§5), and @p absent says what the
- * engine does meanwhile.
+ * An unregistered native symbol or an artifact outside the descriptor tree disables the
+ * model but keeps the engine (RFC 0019 §11.2). An absent artifact only warns; @p absent
+ * says what the engine does meanwhile.
  *
- * @param uhdScorer Selects the registry by ROLE, not by the model's shape: a
- *                  `predict_engine` model always resolves through
- *                  uhd::NativeScorerRegistry (the registry makeUhdAdapter consults),
- *                  while a ranking model without a feature signature is a ScoreRegistry
- *                  comparator. Inferring that from featuresSignature would disable a
- *                  legal signature-less native L1 model that featurizes from its own
- *                  bindings.
+ * @param uhdScorer Selects the registry by role: a `predict_engine` model always
+ *                  resolves through uhd::NativeScorerRegistry, even without a feature
+ *                  signature.
  */
 inline bool usableModel(const std::string& engineName,
                         const std::string& arch,
@@ -2396,11 +2342,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             set.dispatches.push_back(std::move(dispatch));
         }
 
-        // Model validity is independent of engine/pack validity. Check every role and
-        // architecture now, but leave artifact loading to the selected model at rank time.
-        // A model trained on features this build computes differently (FeatureSemantics.hpp)
-        // is refused here too, for every role alike: an L2 ranker reads the same published
-        // graph features an L1 estimate does, so neither may score through a changed meaning.
+        // Every role and arch is checked now; artifacts load lazily at rank time. A model
+        // whose features this build computes differently (FeatureSemantics.hpp) is refused.
         const auto provenanceError = [&](const HeuristicDescriptor& model,
                                          const std::string& arch) {
             auto reason
@@ -2418,12 +2361,9 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                                     << "' model=" << toString(id) << " disabled: " << reason
                                     << "; engine remains available with declared-order fallback");
         };
-        // RFC 0019 §3.1: a scoring role maps an arch key to a list, indexed by the metric each
-        // UHD declares. One UHD per (role, arch key, metric): two claiming one metric is a load
-        // error for that metric on that key, since no rule could choose between them and
-        // picking either would make the ranking depend on list order. Every refusal records
-        // (metric, arch) as unavailable, so a failed exact entry never falls back to the
-        // `default` key's model for the same metric.
+        // RFC 0019 §3.1: one UHD per (role, arch key, metric). Two claiming one metric disable
+        // that metric on that key, and every refusal marks (metric, arch) unavailable so it
+        // never falls back to the `default` key's model.
         const auto resolveScoringRole
             = [&](const char* roleName,
                   const std::map<std::string, std::vector<DescriptorId>>& references,
@@ -2445,9 +2385,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                               unidentified = true;
                               continue;
                           }
-                          // An estimate is compared across engines, which is meaningful only
-                          // in a named quantity (RFC 0019 §11.1); a ranker may order its own
-                          // catalog without one.
+                          // An estimate is compared across engines, so it needs a named metric
+                          // (RFC 0019 §11.1); a ranker may order its own catalog without one.
                           if(!ranking && model->score.metric.empty())
                           {
                               disabled(roleName,
@@ -2489,16 +2428,14 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                           resolved.treeRoot = catalog.heuristics.at(id).treeRoot;
                           if(!ranking)
                           {
-                              // engineName/role/arch are the loader's own backfill, so a
-                              // resolved model always agrees with the role map that named it.
+                              // Backfilled by the loader, so the model agrees with its role map.
                               resolved.engineName = engine.name;
                               resolved.role = roleName;
                               resolved.arch = arch;
                           }
                       }
-                      // A missing entry declared a metric nobody can read. It could have been any
-                      // metric this list does not otherwise serve, so each of those is withheld on
-                      // this key rather than left free to fall back across architectures.
+                      // A missing entry may have declared any metric not otherwise served here,
+                      // so each is withheld on this key rather than falling back across arches.
                       if(unidentified)
                       {
                           std::vector<std::string> candidates;
@@ -2613,12 +2550,9 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
 /// Why a declared L1 model was refused, and what that refusal means downstream.
 struct DeclaredModelRefusal
 {
-    /// RFC 0019 §11.2's two refusals. UNAVAILABLE is silence -- the model is not this
-    /// build's, so this build has no answer; INVALID is a claim -- a model is present and
-    /// failed its contract, so do not pick this engine. Decided here rather than by each
-    /// provider, because the loader is what knows which of the two happened.
+    /// RFC 0019 §11.2: UNAVAILABLE means this build has no answer; INVALID means a model
+    /// is present and failed its contract.
     hipdnn_flatbuffers_sdk::data_objects::PredictionStatus status;
-    /// Surfaced verbatim as the prediction's reason, so it names what was compared.
     std::string reason;
 };
 
@@ -2628,54 +2562,27 @@ struct DeclaredModelRefusal
 struct DeclaredEnginePredictions
 {
     std::map<std::string, std::map<std::string, HeuristicDescriptor>> byMetric;
-    /// Kept apart from a pair that is simply absent from both maps: nothing declared or
-    /// nothing deployed is silence with no diagnosis to report.
+    /// Separate from absent pairs, which mean nothing was declared or deployed.
     std::map<std::string, std::map<std::string, DeclaredModelRefusal>> refused;
 };
 
 /**
  * @brief The `predict_engine` models an engine with no UED declared by UUID.
  *
- * RFC 0019 Open Question 7 (RESOLVED): an engine that ships no UED binds its L1 model by
- * naming that UHD's UUID in its provider's own engine definition. The declaration is
- * compiled-in provider code and @p declared is that declaration; nothing here scans for a
- * model, and no document may claim an engine (§4.1 keeps a UHD free of `engine`, `role`
- * and `arch` members, and the parser rejects them as unknown keys). The identity comes
- * from the caller, exactly as a UED role reference supplies it for a descriptor-backed
- * engine (§3.1).
+ * RFC 0019 Open Question 7: an engine with no UED binds its L1 model by naming the UHD's
+ * UUID in provider code; @p declared is that declaration. Each declared id gets the same
+ * pre-flight, provenance and feature-semantics checks as a UED role reference, and the
+ * model must record @p selectorRevision: a stale L1 estimate would change which engine
+ * is selected, so it is refused rather than warned about.
  *
- * A declared id gets the pre-flight a role reference gets -- the same symbol and artifact
- * check (detail::usableModel), the same provenance rule (detail::provenanceError), which
- * refuses a model claiming a descriptor set this engine does not have, and the same
- * feature-semantics rule (uhd::featureSemanticsMismatch) -- plus the one check that only
- * applies here: @p selectorRevision.
+ * Never throws, and no refusal costs the engine. A declared id no descriptor defines
+ * leaves the arch unbound, since a declaration may ship ahead of its model (§5).
  *
- * **Staleness is refused, not warned about.** An opaque engine's behaviour is the vendor
- * library's, so what its model was measured against is a provider build, recorded as
- * §4.1's `trained_against.selector_revision`. A model that does not record one, or
- * records a different one, is not used. L1 is the one score compared ACROSS engines, so a
- * stale estimate does not merely misreport a number -- it changes which engine is
- * selected. Refusing is also the reversible direction: relaxing to warn-and-use later is
- * a one-line change here, while tightening later would break deployments that had come to
- * rely on the looser rule.
- *
- * Never throws, and no refusal ever costs the engine: it stays fully applicable and falls
- * back to the ordering it had before it declared anything. A declared id no descriptor
- * defines is silence rather than a refusal: unlike a UED role reference -- a document
- * naming an id its own tree fails to define, which is a broken descriptor set -- a
- * compiled-in declaration legitimately ships ahead of the model it names, and deployment
- * is separate from load (§5). So an id nothing deploys, and a machine with no descriptor
- * tree at all, both leave the architecture simply unbound.
- *
- * @param engineName       The declaring engine's hipDNN name, for diagnostics and for the
- *                         binding check the predictor runs.
- * @param selectorRevision What this build of the engine reports as its selector identity;
- *                         the same string the engine passes to uhd::predictEngine.
- * @param declared         Architecture (`default`, or a `gcnArchName` prefix) to UHD ids,
- *                         one per metric (RFC 0019 §11.4). The metric of each comes from
- *                         the UHD it names, never from the declaration: a declared UHD that
- *                         names no registered metric is logged and dropped, and two naming
- *                         one metric for one architecture refuse that metric there.
+ * @param engineName       The declaring engine's hipDNN name.
+ * @param selectorRevision The selector identity this engine build reports, as passed
+ *                         to uhd::predictEngine.
+ * @param declared         Arch (`default` or a `gcnArchName` prefix) to UHD ids, one
+ *                         per metric; each metric comes from the UHD it names.
  */
 inline DeclaredEnginePredictions resolveDeclaredEnginePredictions(
     const DescriptorCatalog& catalog,
@@ -2745,8 +2652,7 @@ inline DeclaredEnginePredictions resolveDeclaredEnginePredictions(
             if(reason.empty())
             {
                 bound = *model;
-                // Backfilled by the loader from the declaration, never authored (§3.1's rule,
-                // applied to a declaration that lives in code rather than in a UED).
+                // Backfilled from the declaration, never authored (§3.1).
                 bound.treeRoot = catalog.heuristics.at(id).treeRoot;
                 bound.engineName = engineName;
                 bound.role = ROLE;
@@ -2761,8 +2667,7 @@ inline DeclaredEnginePredictions resolveDeclaredEnginePredictions(
                 }
                 else if(bound.trainedAgainstSelectorRevision.empty())
                 {
-                    // An unqualified L1 model cannot be checked against anything, which is a
-                    // contract failure rather than a wrong-build one -- hence INVALID.
+                    // Unverifiable, so a contract failure (INVALID) rather than a wrong build.
                     reason = "model records no trained_against.selector_revision, so it cannot "
                              "be matched to a provider build";
                 }
@@ -2776,7 +2681,7 @@ inline DeclaredEnginePredictions resolveDeclaredEnginePredictions(
                                                                       bound.trainedAgainstJson);
                         !mismatch.empty())
                 {
-                    // Wrong build, not a broken model: the same refusal as a stale selector.
+                    // Wrong build, not a broken model: refused like a stale selector.
                     status = PredictionStatus::UNAVAILABLE;
                     reason = std::move(mismatch);
                 }
@@ -2827,9 +2732,8 @@ inline std::deque<std::string>& registeredEngineNames()
  * already-registered engine holds, and a state manager built from it constructs without
  * throwing, so an engine this returns is one the provider can advertise and then serve.
  *
- * Takes a parsed catalog rather than roots so a provider that also resolves declared L1
- * models out of the same trees (resolveDeclaredEnginePredictions) walks them once.
- * @p source names where the catalog was read from, for the summary line.
+ * Takes a parsed catalog so a provider that also calls resolveDeclaredEnginePredictions
+ * walks the trees once. @p source names the catalog's origin in the summary line.
  *
  * A summary line reports how many sets survived and how many validation dropped. The line
  * is an error if validation drops a set.
@@ -2885,8 +2789,7 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const DescriptorCa
                 resolvable = false;
             }
         }
-        // A UED-named prediction model is loaded exactly like a ranking model, so it
-        // gets exactly the same pre-flight (detail::usableModel), per metric: a failed
+        // Prediction models get the same pre-flight as ranking models, per metric: a failed
         // (metric, arch) entry is withheld without touching that arch's other metrics.
         const auto prune =
             [&set](auto& byMetric, auto& unavailable, const char* absent, bool uhdScorer) {

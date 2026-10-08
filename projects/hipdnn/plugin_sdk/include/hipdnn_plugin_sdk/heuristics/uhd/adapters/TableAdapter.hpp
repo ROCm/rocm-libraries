@@ -41,28 +41,21 @@ struct VectorHash
 
 /// @brief Table-based lookup adapter for coarse problem buckets (RFC 0019 §7 "table").
 ///
-/// Maps feature vectors to kernel IDs via bucketing and table lookup. Features are
-/// quantized into discrete buckets, then the bucket combination is looked up in a
-/// precomputed table. A feature vector no bucket covers is declined (-infinity), which
-/// the consumer orders last under either objective, behind every candidate the table scores.
+/// Quantizes features into buckets and looks the bucket combination up in a precomputed
+/// table. Uncovered rows score -infinity (declined), so they rank last under either objective.
 class TableAdapter : public IUhdAdapter
 {
 public:
     /// Load a table model from a FlatBuffer file.
-    /// @param modelPath Path to the .fb model file.
-    /// @param expectedFeaturesHash Hash from UHD features_signature.
-    /// @param expectedModelHash The UHD's artifact digest (SHA-256 hex); empty skips it.
-    /// @returns Adapter or nullptr if loading/validation fails.
+    /// @param expectedModelHash Artifact SHA-256 hex; empty skips the check.
+    /// @returns nullptr if loading or validation fails.
     static std::unique_ptr<TableAdapter> load(const std::string& modelPath,
                                               const std::string& expectedFeaturesHash,
                                               const std::string& expectedModelHash = "");
 
-    /// Load from an in-memory buffer.
-    /// @param buffer FlatBuffer data. Copied into the adapter.
-    /// @param size Size of buffer in bytes.
-    /// @param expectedFeaturesHash Hash from UHD features_signature.
-    /// @param expectedModelHash The UHD's artifact digest (SHA-256 hex); empty skips it.
-    /// @returns Adapter or nullptr if validation fails.
+    /// Load from an in-memory buffer, which is copied into the adapter.
+    /// @param expectedModelHash Artifact SHA-256 hex; empty skips the check.
+    /// @returns nullptr if validation fails.
     static std::unique_ptr<TableAdapter> loadFromBuffer(const uint8_t* buffer,
                                                         size_t size,
                                                         const std::string& expectedFeaturesHash,
@@ -74,9 +67,7 @@ public:
     TableAdapter(const TableAdapter&) = delete;
     TableAdapter& operator=(const TableAdapter&) = delete;
 
-    /// Score a candidate by bucketing features and looking up in the table.
-    /// @param features Feature vector (must match expected count).
-    /// @returns Score from table if bucket match found, -infinity (declined) otherwise.
+    /// @returns The table score for the features' bucket, or -infinity (declined) if absent.
     double score(const std::vector<double>& features) const override;
 
     size_t expectedFeatureCount() const override
@@ -98,15 +89,10 @@ private:
                  size_t numFeatures,
                  std::vector<std::string> trainingArches);
 
-    /// Quantize a feature value into a bucket index using the feature's boundaries.
-    /// @param value Feature value to bucket.
-    /// @param boundaries Sorted bucket boundaries.
-    /// @returns Bucket index (0 to boundaries.size()).
+    /// @returns Bucket index in [0, boundaries.size()]; @p boundaries must be sorted.
     static uint32_t quantize(double value, const std::vector<double>& boundaries);
 
-    /// Build bucket key from feature vector.
-    /// @param features Input feature vector.
-    /// @returns Bucket indices for each bucketed feature, or empty vector if bucketing fails.
+    /// @returns One bucket index per bucketed feature, or empty if bucketing fails.
     std::vector<uint32_t> buildBucketKey(const std::vector<double>& features) const;
 
     std::vector<uint8_t> _ownedBuffer;
@@ -115,9 +101,7 @@ private:
     size_t _numFeatures;
     std::vector<std::string> _trainingArches;
 
-    /// Precomputed lookup table: bucket_key -> score.
-    /// Built during construction from the model's entries.
-    /// Uses custom hash function for vector<uint32_t> keys.
+    /// bucket_key -> score, built from the model's entries at construction.
     std::unordered_map<std::vector<uint32_t>, double, VectorHash> _lookupTable;
 };
 
@@ -166,18 +150,14 @@ inline std::unique_ptr<TableAdapter>
                                  const std::string& expectedFeaturesHash,
                                  const std::string& expectedModelHash)
 {
-    // Guard against null/empty buffer
     if(buffer == nullptr || size < sizeof(flatbuffers::uoffset_t) + 4
        || size > size_t{256} * 1024 * 1024)
     {
         return nullptr;
     }
 
-    // RFC 0019 §9.2 integrity validation, exactly as TreeDataAdapter runs it: the digest is
-    // what identifies this model's content to every cache that outlives the process, so a
-    // table artifact whose bytes differ from it must not be scored under that identity. The
-    // check ran for tree_data and custom_library but not here, so a substituted table was
-    // used silently. ERROR for the reason TreeDataAdapter gives.
+    // RFC 0019 §9.2: the digest identifies the model to persistent caches, so mismatched
+    // bytes must not be scored under it.
     if(!expectedModelHash.empty())
     {
         const std::string actualHash = sha256(buffer, size);
@@ -192,13 +172,11 @@ inline std::unique_ptr<TableAdapter>
         }
     }
 
-    // Verify file identifier
     if(!flatbuffers::BufferHasIdentifier(buffer, fb::TableModelIdentifier()))
     {
         return nullptr;
     }
 
-    // Verify buffer
     flatbuffers::Verifier verifier(buffer, size);
     if(!fb::VerifyTableModelBuffer(verifier))
     {
@@ -211,14 +189,8 @@ inline std::unique_ptr<TableAdapter>
         return nullptr;
     }
 
-    // Validate features hash (RFC 0019 §6.3 check 3).
-    //
-    // ERROR, not WARN: §12 requires "a clear error (not a warning) naming which of the three
-    // checks failed and why, plus the fact that ranking degraded to static_order and the
-    // estimate was reported as 0". A features-hash mismatch here is the same event
-    // TreeDataAdapter and CustomLibraryAdapter report, so it is named the same way and at the
-    // same level -- three spellings of one condition is how a log grep finds two of them and
-    // concludes the third never fires.
+    // RFC 0019 §6.3 check 3. ERROR, not WARN (§12), worded like the other adapters so one
+    // log search finds all of them.
     const std::string modelHash
         = model->features_hash() != nullptr ? model->features_hash()->str() : "";
     if(!expectedFeaturesHash.empty() && modelHash != expectedFeaturesHash)
@@ -232,7 +204,6 @@ inline std::unique_ptr<TableAdapter>
 
     const auto numFeatures = static_cast<size_t>(model->num_features());
 
-    // Extract training arches
     std::vector<std::string> trainingArches;
     if(model->training_arches() != nullptr)
     {
@@ -245,7 +216,6 @@ inline std::unique_ptr<TableAdapter>
         }
     }
 
-    // Copy buffer to owned storage
     std::vector<uint8_t> ownedBuffer(buffer, buffer + size);
 
     // Evaluate GetTableModel BEFORE moving ownedBuffer
@@ -265,7 +235,6 @@ inline TableAdapter::TableAdapter(std::vector<uint8_t> ownedBuffer,
     , _numFeatures(numFeatures)
     , _trainingArches(std::move(trainingArches))
 {
-    // Build the lookup table from the model's entries
     if(_model->entries() != nullptr)
     {
         for(const auto* entry : *_model->entries())
@@ -275,7 +244,6 @@ inline TableAdapter::TableAdapter(std::vector<uint8_t> ownedBuffer,
                 continue;
             }
 
-            // Convert FlatBuffers vector to std::vector
             std::vector<uint32_t> key;
             key.reserve(entry->bucket_key()->size());
             for(auto val : *entry->bucket_key())
@@ -283,7 +251,6 @@ inline TableAdapter::TableAdapter(std::vector<uint8_t> ownedBuffer,
                 key.push_back(val);
             }
 
-            // Store in lookup table (use custom hash function)
             _lookupTable.emplace(std::move(key), entry->score());
         }
     }
@@ -296,10 +263,8 @@ inline uint32_t TableAdapter::quantize(double value, const std::vector<double>& 
         return 0;
     }
 
-    // Find the first boundary > value
     auto it = std::upper_bound(boundaries.begin(), boundaries.end(), value);
 
-    // Return the bucket index (distance from begin)
     return static_cast<uint32_t>(std::distance(boundaries.begin(), it));
 }
 
@@ -326,7 +291,6 @@ inline std::vector<uint32_t> TableAdapter::buildBucketKey(const std::vector<doub
             return {}; // Feature index out of range
         }
 
-        // Extract boundaries
         std::vector<double> boundaries;
         if(bucket->boundaries() != nullptr)
         {
@@ -337,7 +301,6 @@ inline std::vector<uint32_t> TableAdapter::buildBucketKey(const std::vector<doub
             }
         }
 
-        // Quantize the feature value
         const uint32_t bucketIdx = quantize(features[featureIdx], boundaries);
         key.push_back(bucketIdx);
     }
@@ -347,7 +310,6 @@ inline std::vector<uint32_t> TableAdapter::buildBucketKey(const std::vector<doub
 
 inline double TableAdapter::score(const std::vector<double>& features) const
 {
-    // Build the bucket key from features
     const auto key = buildBucketKey(features);
     if(key.empty())
     {
@@ -355,21 +317,19 @@ inline double TableAdapter::score(const std::vector<double>& features) const
         return -std::numeric_limits<double>::infinity();
     }
 
-    // Lookup in the prebuilt table
     const auto it = _lookupTable.find(key);
     if(it != _lookupTable.end())
     {
         return it->second;
     }
 
-    // No exact match: the table has nothing to say about this candidate. 0.0 would read as
-    // a real prediction, and under `objective: min` a zero cost outranks every covered one.
+    // No match: decline. 0.0 would look like a real prediction and, under `objective: min`,
+    // outrank every covered candidate.
     return -std::numeric_limits<double>::infinity();
 }
 
 inline bool TableAdapter::isTrainedForArch(const std::string& arch) const
 {
-    // If no training arches specified, assume works for all
     if(_trainingArches.empty())
     {
         return true;

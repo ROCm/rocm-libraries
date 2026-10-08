@@ -13,34 +13,16 @@
 #include <vector>
 
 /// @file GraphIdentity.hpp
-/// @brief The name and the id a written graph carries, and why they are not incidental.
+/// @brief Content-derived names and ids for written graphs.
 ///
-/// Both are how a measurement finds its way back to the problem that produced it.
-/// `hipdnn_bench` reports `graph_id` from the document's own `id` field, and
-/// `uhd_gen/corpus_io.py:31-34` treats `graph_id` and `benchmark` as one identity under two
-/// spellings -- so the manifest's `benchmark` column and this id must be the same string or
-/// the two files do not join and RFC 0019.13 §11.2's per-regime table reports UNAVAILABLE.
-///
-/// A graph written without an id is not rejected: `GraphDescriptor::finalize` mints a UUID v4
-/// for it at load. That is the failure worth naming, because it is silent -- every run and
-/// every machine measures the same corpus under different identities, and nothing reports an
-/// error. Deriving the id from the graph's own bytes makes `benchmark` ids content-derived, so
-/// rows join across runs and machines for the graphs this tool writes, as they already do for
-/// the ones `uhd_gen` mints ids for.
+/// The id must equal the manifest's `benchmark` column so bench results join to the corpus.
 namespace hipdnn_corpus_gen
 {
 
 namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 
-/// @brief A content-derived identity for a graph, as raw UUID bytes.
-///
-/// Version 8 (RFC 9562, custom) with the RFC 4122 variant. It is neither v4 random nor the v5
-/// SHA-1 name hash `uhd_gen generate` mints for id-less JSON graphs, and labelling it as
-/// either would misdescribe it. `graph.fbs:121` permits it outright -- "readers preserve any
-/// 128-bit value without enforcing a UUID version or variant" -- and the schema's one
-/// substantive requirement, that one id never name two different graph contents, is what a
-/// digest gives by construction. Nothing cross-checks these against `generate.py`'s; that path
-/// declines to mint for binary graphs (`generate.py:385-390`).
+/// @brief A content-derived graph id as raw UUID bytes: SHA-256 of the graph, stamped as a
+/// version 8 (custom) UUID with the RFC 4122 variant. `graph.fbs` permits any 128-bit id.
 inline hipdnn_flatbuffers_sdk::utilities::UuidBytes graphIdentityBytes(const uint8_t* data,
                                                                        size_t size)
 {
@@ -62,11 +44,9 @@ inline hipdnn_flatbuffers_sdk::utilities::UuidBytes graphIdentityBytes(const uin
     return bytes;
 }
 
-/// @brief @ref graphIdentityBytes in the spelling the graph document's JSON carries.
+/// @brief @ref graphIdentityBytes formatted as the graph JSON carries it.
 ///
-/// Formatted through the SDK's own `formatUuid` rather than by assembling the hex here,
-/// because this string has to be character for character what `to_json` renders from the same
-/// bytes (`utilities/json/Graph.hpp:173`). That equality is the entire join.
+/// Uses the SDK's `formatUuid` so the string matches what `to_json` renders exactly.
 inline std::string graphIdentity(const uint8_t* data, size_t size)
 {
     return hipdnn_flatbuffers_sdk::utilities::formatUuid(graphIdentityBytes(data, size));
@@ -77,26 +57,17 @@ struct IdentifiedGraph
 {
     std::vector<uint8_t> bytes;
 
-    /// The formatted id, as the graph document now carries it and as the bench will report it.
+    /// The formatted id, as the bench will report it.
     std::string id;
 
-    /// The name it was given, returned so a caller recording both does not have to keep its
-    /// own copy in step with this one.
+    /// The name it was given.
     std::string name;
 };
 
 /// @brief Names @p bytes and gives it an id derived from its own content.
 ///
-/// Done by unpacking and repacking rather than by threading a name and an id through every
-/// builder, because the identity has to be a function of the finished graph: a builder cannot
-/// digest bytes it has not produced yet. The round trip is the same `UnPack`/`CreateGraph`
-/// pair the backend performs on every graph it loads, so it is faithful by the same argument.
-///
-/// The digest is taken over the graph *after* renaming and with the id cleared, which makes
-/// the operation idempotent -- restamping an already-stamped graph reproduces the same id
-/// rather than digesting the previous one. It also makes the id sensitive to the name, which
-/// is wanted: two problems that differ only in a parameter the builder ignores would otherwise
-/// collide, and the name is where that parameter still shows.
+/// The digest is taken after renaming and with the id cleared, so restamping is idempotent
+/// and the id depends on the name.
 inline IdentifiedGraph stampGraphIdentity(const std::vector<uint8_t>& bytes,
                                           const std::string& name)
 {

@@ -10,18 +10,8 @@
 #include <vector>
 
 /// @file TestSha256.cpp
-/// @brief The in-tree SHA-256, which carries RFC 0019 §6.5's features_hash.
-///
-/// This is an own implementation, not a library call, and it has one job: agree with Python's
-/// `hashlib.sha256` in tools/uhd_gen. The hash is how the runtime decides a model was trained on
-/// the feature signature it is about to be handed (§6.3 check 1). An implementation that is
-/// self-consistent but wrong fails *every* comparison, so every UHD is rejected and every engine
-/// falls back to declared order -- which is a legal ranking, logged as a warning, and otherwise
-/// indistinguishable from working.
-///
-/// The vectors below are the published FIPS 180-4 ones. Checking against a constant rather than
-/// against ourselves is the point: only an external reference can catch an implementation that
-/// is consistently wrong.
+/// @brief The in-tree SHA-256 behind RFC 0019 §6.5's features_hash. It must agree with Python's
+/// `hashlib.sha256`, so it is checked against published FIPS 180-4 vectors, not against itself.
 namespace hipdnn_plugin_sdk::uhd
 {
 namespace
@@ -37,10 +27,7 @@ TEST(TestIngestorSha256, MatchesThePublishedVectors)
 
 TEST(TestIngestorSha256, HandlesTheLengthsWherePaddingChangesBlockCount)
 {
-    // The classic implementation bug. A message of 55 bytes leaves exactly enough room for the
-    // 0x80 marker and the 8-byte length; 56 does not, and needs a second block. An
-    // off-by-one here is correct for almost every input and wrong for a narrow band of
-    // lengths -- which a feature signature can land in without anyone choosing it.
+    // 55 bytes fit the 0x80 marker and 8-byte length in one block; 56 need a second.
     EXPECT_EQ(sha256(std::string(55, 'a')),
               "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318");
     EXPECT_EQ(sha256(std::string(56, 'a')),
@@ -55,8 +42,7 @@ TEST(TestIngestorSha256, HandlesTheLengthsWherePaddingChangesBlockCount)
 
 TEST(TestIngestorSha256, TheByteAndStringOverloadsAgree)
 {
-    // Both are on the live path: the string form hashes a feature signature, the byte form
-    // hashes a model artifact. They must not be able to disagree.
+    // The string form hashes a feature signature, the byte form a model artifact.
     const std::string text = "q.N,q.C,kernel.tile_m";
     const std::vector<uint8_t> bytes(text.begin(), text.end());
 
@@ -65,9 +51,7 @@ TEST(TestIngestorSha256, TheByteAndStringOverloadsAgree)
 
 TEST(TestIngestorSha256, EmbeddedNulsAreHashedRatherThanTerminating)
 {
-    // A model artifact is arbitrary bytes. Treating a NUL as the end truncates the input, so
-    // two different artifacts sharing a prefix would hash identically -- and the check that
-    // exists to notice a swapped model would pass.
+    // Truncating at a NUL would let two artifacts sharing a prefix hash identically.
     const std::vector<uint8_t> first{'a', 0, 'b'};
     const std::vector<uint8_t> second{'a', 0, 'c'};
 
@@ -77,8 +61,7 @@ TEST(TestIngestorSha256, EmbeddedNulsAreHashedRatherThanTerminating)
 
 TEST(TestIngestorSha256, EveryDigestIsSixtyFourLowercaseHexDigits)
 {
-    // The format is half the contract: the value is compared as text against a string Python
-    // wrote, so an uppercase or unpadded digest never matches even when the bytes are right.
+    // Compared as text against the digest Python wrote.
     for(const auto& input : {std::string(), std::string("abc"), std::string(200, 'z')})
     {
         const auto digest = sha256(input);

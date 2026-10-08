@@ -1,13 +1,9 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Sourced by generate.sbatch and bakeoff.sbatch: the UHD ids an engine with no UED declares
-# in provider code, one per ranking metric. Such an engine reads only these ids, so a model
-# trained or installed under any other one is never read. Mirrors MiopenContainer.cpp
-# (MIOPEN_ENGINE_L1_MODELS, per metric under `default`) and AsmSdpaEngine.hpp
-# (L1_MODEL_IDS, per arch); `uhd_gen generate` cross-checks the id against the one the
-# engine's own description reports, so a drifted row fails the run instead of training
-# under a stale id.
+# Sourced by generate.sbatch and bakeoff.sbatch: the UHD ids a UED-less engine declares in
+# provider code, per metric. Mirrors MiopenContainer.cpp (MIOPEN_ENGINE_L1_MODELS) and
+# AsmSdpaEngine.hpp (L1_MODEL_IDS); `uhd_gen generate` fails on a drifted row.
 
 # declared_uhd_ids ENGINE ARCH -> `+`-separated METRIC=UUID pairs (empty for a UED engine).
 declared_uhd_ids() {
@@ -22,9 +18,8 @@ declared_uhd_ids() {
     esac
 }
 
-# uhd_id_args PAIRS METRICS -> one `--uhd-id METRIC=UUID` argument pair per line, for the
-# pairs whose metric is in the `+`-separated METRICS (generate refuses an id for a metric it
-# was not asked to train).
+# uhd_id_args PAIRS METRICS -> one `--uhd-id METRIC=UUID` pair per line, only for metrics in
+# METRICS (generate refuses an id for a metric it was not asked to train).
 uhd_id_args() {
     local pair
     local -a pairs

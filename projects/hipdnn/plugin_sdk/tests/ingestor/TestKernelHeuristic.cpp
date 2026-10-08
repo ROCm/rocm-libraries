@@ -326,8 +326,8 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
     EXPECT_EQ(heuristic->score(context, BoundTokens{}, makeDefinition(testId(0x01), 128)), 128.0);
 }
 
-/// A native cost scorer: milliseconds by block size, 256 the fast kernel. Registered for one
-/// test's duration, because the registry is process-wide.
+/// A native cost scorer in milliseconds; 256 is the fast kernel. Registered per test because
+/// the registry is process-wide.
 constexpr const char* MILLISECONDS_SYMBOL = "hipdnn.kernel_ingestor.test.milliseconds";
 
 class ScopedMillisecondsScorer
@@ -369,10 +369,8 @@ HeuristicDescriptor millisecondsDescriptor(const std::string& metric)
     return descriptor;
 }
 
-/// Regression (R4). A signature-less native scorer never saw the UHD's objective, and
-/// rankScored orders higher-first, so a `min` scorer returning milliseconds ranked the 10 ms
-/// kernel first. Both routes to a direct scorer are covered: the metric-less ranker the
-/// factory builds itself, and a metric's ranker, which UhdKernelHeuristic wraps.
+/// Covers both direct-scorer routes: the metric-less ranker the factory builds, and a metric's
+/// ranker wrapped by UhdKernelHeuristic.
 TEST(TestIngestorKernelHeuristic, ANativeMinScorerRanksTheCheapestKernelFirst)
 {
     const ScopedMillisecondsScorer scorer;
@@ -397,9 +395,8 @@ TEST(TestIngestorKernelHeuristic, ANativeMinScorerRanksTheCheapestKernelFirst)
     }
 }
 
-/// Once a direct scorer is ordered in its objective's direction, a calibrated `time` native
-/// ranker's figure of merit is usable: ascending milliseconds, the physical values -- not the
-/// negated ordering key, which a caller comparing engines would read as negative time.
+/// Reports physical milliseconds, not the negated ordering key, which would read as negative
+/// time.
 TEST(TestIngestorKernelHeuristic, ACalibratedNativeTimeScorerReportsAscendingMilliseconds)
 {
     const ScopedMillisecondsScorer scorer;
@@ -421,10 +418,8 @@ TEST(TestIngestorKernelHeuristic, ACalibratedNativeTimeScorerReportsAscendingMil
     EXPECT_EQ(modelId, toString(HEURISTIC_ID));
 }
 
-/// Regression (S2). A direct scorer's value was reported in its transform's space and the
-/// inverse applied afterwards, past a zero test meant for "no measurement" -- so a `log` time
-/// scorer pricing a kernel at exactly 1 ms (log 1 = 0) read as unmeasured, and the whole
-/// calibrated ranking was withheld because its winner looked unpriced.
+/// The inverse transform must precede the "no measurement" zero test: log(1 ms) = 0 is a
+/// measurement.
 TEST(TestIngestorKernelHeuristic, ATransformedZeroIsAMeasurementNotItsAbsence)
 {
     constexpr const char* LOG_MILLISECONDS_SYMBOL = "hipdnn.kernel_ingestor.test.log_milliseconds";
@@ -454,8 +449,8 @@ TEST(TestIngestorKernelHeuristic, ATransformedZeroIsAMeasurementNotItsAbsence)
     ScoreRegistry::unregisterSymbol(LOG_MILLISECONDS_SYMBOL);
 }
 
-/// Under `min` a zero cost is no measurement. Negated it would be -0, above every real
-/// candidate's negated cost, so the one kernel the scorer could not price would win.
+/// Under `min` a zero cost means no measurement; negated it would be -0 and outrank every
+/// priced kernel.
 TEST(TestIngestorKernelHeuristic, AZeroCostDoesNotWinUnderANativeMinScorer)
 {
     const ScopedMillisecondsScorer scorer;
@@ -478,10 +473,8 @@ TEST(TestIngestorKernelHeuristic, AZeroCostDoesNotWinUnderANativeMinScorer)
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicDegradesWhenAModelCannotBeBroughtUp)
 {
-    // A MODEL naming an artifact that is not there degrades rather than throwing, which is
-    // the difference between it and NATIVE: an unregistered symbol is a build fact and the
-    // engine could never score, while a missing artifact is a deployment fact and the
-    // engine still selects, by declared order (RFC 0019 §5).
+    // An unregistered NATIVE symbol is a build error, but a missing MODEL artifact is a
+    // deployment fact: degrade to declared order (RFC 0019 §5).
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "model heuristic";
@@ -585,9 +578,8 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
 {
     // The fallback must contribute no ordering of its own: any score spread would
     // outrank priority, which is the one signal an engine without a model still has.
-    // It reports 0 -- RFC 0019 §5 step 7's value for "no measurement" -- so a fallback and a
-    // model that scored zero describe themselves the same way. traceDecidedBy() is what tells
-    // them apart, and calibratedRanking needs one rule rather than two sentinels.
+    // 0 is RFC 0019 §5 step 7's "no measurement"; traceDecidedBy() tells a fallback apart from
+    // a model that scored zero.
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
@@ -599,9 +591,7 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
     EXPECT_DOUBLE_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x02), 4096)),
                      0.0);
 
-    // Equal-in-ordering is what the fallback owes. These two definitions carry the same
-    // priority, so the documented tiebreak -- ascending descriptor id -- has to decide, and
-    // a NaN score must not have leaked into the comparator to decide it instead.
+    // Equal priority, so the ascending-id tiebreak must decide, not a leaked NaN.
     Catalog catalog;
     catalog.entries.push_back(makeDefinition(testId(0x02), 4096));
     catalog.entries.push_back(makeDefinition(testId(0x01), 64));
@@ -610,15 +600,9 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
     EXPECT_EQ(ranked.front().kernelId, testId(0x01)) << "the id tiebreak did not decide";
     EXPECT_DOUBLE_EQ(ranked.front().score, 0.0) << "the fallback invented a figure of merit";
 }
-/// RFC 0019 §5 step 7: "No model, or the scorer errors -> rank by static_order (priority + id)",
-/// under the heading "A failure degrades the result; it never fails the request" -- which spells
-/// out that a malformed descriptor set "must not fail after the engine has already claimed
-/// applicability."
-///
-/// The model path honoured this from the start; the native path did not, and every UHD shipped
-/// today is native. It is reachable from descriptor data alone: the shipped scorer reads
-/// kernel.getIntMetadata("block_size"), which throws std::out_of_range when a KDP joins the
-/// engine with a kernel that omits the knob.
+
+/// RFC 0019 §5 step 7: a throwing scorer degrades to static order and never fails the
+/// request. Mimics the native scorer reading a `block_size` the kernel does not declare.
 class ThrowingHeuristic : public IKernelHeuristic
 {
 public:
@@ -642,25 +626,22 @@ TEST(TestIngestorKernelHeuristic, AThrowingScorerDegradesInsteadOfFailingTheRequ
 
     const ThrowingHeuristic heuristic;
 
-    // The request survives at all -- this is the whole of step 7's guarantee.
+    // Step 7's guarantee: the request survives.
     std::vector<ScoredKernel> ranked;
     ASSERT_NO_THROW(ranked = heuristic.rankScored(catalog, context));
 
-    // And it is a usable answer: static_order, which step 5 defines as priority then id. These
-    // two carry equal priority, so ascending id decides.
+    // Static order is priority then id; priorities are equal, so ascending id decides.
     ASSERT_EQ(ranked.size(), 2U);
     EXPECT_EQ(ranked.front().kernelId, testId(0x01));
     EXPECT_DOUBLE_EQ(ranked.front().score, 0.0) << "a failed ranking reported a figure of merit";
 
-    // The whole ranking degrades, not the candidates that happened to throw: a mix of real
-    // scores and sentinels is neither order.
+    // The whole ranking degrades, not just the candidates that threw.
     EXPECT_DOUBLE_EQ(ranked.back().score, 0.0);
 }
 
 TEST(TestIngestorKernelHeuristic, AThrowingScorerIsReportedRatherThanSwallowed)
 {
-    // Degrading silently would leave an engine that looks like it ranks on a model while
-    // ranking on declared order -- the failure RFC 0019 §12 exists to make visible.
+    // Silent degradation would hide that the engine ranks on declared order (RFC 0019 §12).
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
@@ -677,7 +658,7 @@ TEST(TestIngestorKernelHeuristic, AThrowingScorerIsReportedRatherThanSwallowed)
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "scorer threw while ranking"));
     EXPECT_TRUE(recorder.hasLogContaining("block_size")) << "the cause was not carried through";
 
-    // Once: the cause is a property of the descriptor set, so it recurs for every graph.
+    // Once: the cause is a property of the descriptor set and recurs for every graph.
     const auto after = recorder.countLogsAtLevel(HIPDNN_SEV_ERROR);
     (void)heuristic.rankScored(catalog, context);
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), after) << "the report repeated";
@@ -685,8 +666,7 @@ TEST(TestIngestorKernelHeuristic, AThrowingScorerIsReportedRatherThanSwallowed)
 
 TEST(TestIngestorKernelHeuristic, RankAlsoSurvivesAThrowingScorer)
 {
-    // rank() is what production calls (KernelIngestorStateManager), and it is derived from
-    // rankScored -- so the guard has to reach it without a second implementation.
+    // Production calls rank(), which derives from rankScored and must share its guard.
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};

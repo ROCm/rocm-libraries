@@ -67,27 +67,15 @@ constexpr std::string_view X_TOKEN = "conv_fwd.x.uid";
 constexpr std::string_view W_TOKEN = "conv_fwd.w.uid";
 constexpr std::string_view Y_TOKEN = "conv_fwd.y.uid";
 
-// The problem itself, which a UHD actually ranks on: the fields are RFC 0020 §6.1's
-// (`dims[i]` positionally, the derived `dtype`), and without them the only bindable
-// feature is a tensor uid -- a high-cardinality handle actively harmful as a model input.
-//
-// The ROOT spelling deliberately diverges from that grammar and must be reconciled when
-// the pattern-driven path lands. §6.1 has `tensor-ref = tvar "." tensor-field`: two
-// levels, where `tvar` is an operand name a UED `nodes` pattern binds (`$q.dims[2]`).
-// These roots are three levels, op-qualified. A native matcher has no UED pattern to name
-// its operands, so the matcher author picks the names, and op-qualifying them is what
-// keeps two ops binding in one graph unambiguous; it also extends the `conv_fwd.x.uid`
-// spelling already shipped above rather than standing a second convention beside it.
-// Resolution is a flat lookup into BoundTokens, so depth costs nothing -- the divergence
-// is a naming question for RFC 0020's owner, not a structural one.
+// RFC 0020 §6.1 shape fields (`dims[i]`, `dtype`); a tensor uid alone is a poor model input.
+// Roots are op-qualified (three levels, not §6.1's `tvar.field`) because a native matcher
+// has no UED pattern naming its operands; reconcile with RFC 0020 when that path lands.
 constexpr std::string_view X_ROOT = "conv_fwd.x";
 constexpr std::string_view W_ROOT = "conv_fwd.w";
 constexpr std::string_view Y_ROOT = "conv_fwd.y";
 
-// RFC 0019 §13.6's precomputed op-intrinsic cost fields, `$<op>.flops` and `$<op>.bytes`,
-// which a features_signature divides into arithmetic intensity. They are facts about the
-// op, identical for every engine implementing it, so they belong to the binding layer
-// rather than to any one UHD.
+// RFC 0019 §13.6 op-intrinsic cost fields. They are the same for every engine of this op,
+// so the binding publishes them rather than any one UHD.
 constexpr std::string_view FLOPS_TOKEN = "conv_fwd.flops";
 constexpr std::string_view BYTES_TOKEN = "conv_fwd.bytes";
 
@@ -182,19 +170,12 @@ std::string dataTypeName(data_objects::DataType dataType)
     return data_objects::EnumNameDataType(dataType);
 }
 
-/// The two runtime facts about a dtype the binding publishes.
+/// The dtype facts the binding publishes.
 ///
-/// `spelling` is what `to_string(DataType)` in hipdnn_frontend/Types.hpp answers -- the
-/// only vocabulary a `$q.dtype` binding may hold, and the one a UHD's own
-/// `categorical_encoding` (RFC 0019 §6.5) is generated from. It is restated here rather
-/// than called because this provider does not link the frontend, and `EnumNameDataType`
-/// answers a different vocabulary ("FLOAT", "HALF") that no model-side encoding knows.
-///
-/// An empty `spelling` is `to_string`'s "unknown" fallthrough, and `bytes == 0` is a
-/// width this pack will not state: both make the dependent token absent instead of
-/// silently wrong, which is what RFC 0019 §13.6 requires of a cost field with no exact
-/// form. The sub-byte types are the second kind -- their footprint is a property of the
-/// packing, not of the element, so no per-element byte count exists to publish.
+/// `spelling` mirrors frontend `to_string(DataType)`, the vocabulary UHD
+/// `categorical_encoding` uses (not `EnumNameDataType`'s "FLOAT"); restated because this
+/// provider does not link the frontend. Empty spelling or `bytes == 0` (e.g. sub-byte
+/// types) leaves the dependent token absent rather than wrong (RFC 0019 §13.6).
 struct DataTypeFacts
 {
     std::string_view spelling;
@@ -247,10 +228,8 @@ DataTypeFacts dataTypeFacts(data_objects::DataType dataType)
     }
 }
 
-/// @p left * @p right, or nullopt if the product would overflow or either factor is not
-/// positive. Dims arrive from the caller and nothing upstream bounds their product, so an
-/// unchecked multiply would publish a wrapped, negative "cost" as a model feature -- the
-/// silently-wrong value RFC 0019 §13.6 rules out.
+/// @p left * @p right, or nullopt on overflow or a non-positive factor, so a wrapped value
+/// is never published as a cost feature.
 std::optional<int64_t> checkedMultiply(int64_t left, int64_t right)
 {
     if(left <= 0 || right <= 0 || left > std::numeric_limits<int64_t>::max() / right)
@@ -291,14 +270,8 @@ std::optional<int64_t> elementCount(const data_objects::TensorAttributes& tensor
     return count;
 }
 
-/// Bytes moved by the op: the sum over its operands of element_count x **that tensor's
-/// own** dtype size. Reading one operand's dtype and applying it to all of them is the
-/// bug RFC 0019 §13.6's caveat names -- it is wrong the moment a graph is mixed-precision
-/// (fp8 in, fp16 out). This pack refuses mixed dtypes today, so the per-tensor sum is the
-/// form rather than yet a difference; a pack that admits them inherits the right answer.
-///
-/// nullopt when any operand has no statable element width, so the token is absent rather
-/// than short by one tensor.
+/// Sum over operands of element count x that operand's own dtype size (correct for mixed
+/// precision). nullopt when any operand has no statable width, so the token is absent.
 std::optional<int64_t>
     movedBytes(std::initializer_list<const data_objects::TensorAttributes*> operands)
 {
@@ -321,14 +294,8 @@ std::optional<int64_t>
     return total;
 }
 
-/// Publishes @p tensor's RFC 0020 §6.1 shape fields under @p root: every dim positionally
-/// as `dims[i]`, and the derived `dtype`.
-///
-/// dtype binds as the runtime spelling **string**, never a pre-encoded number: the
-/// integer code space belongs to the descriptor that ships the model -- its own
-/// `categorical_encoding` (RFC 0019 §6.5) -- and is applied downstream by the feature
-/// extractor, so a number here would freeze one model's code space inside the matcher
-/// and drift from it silently.
+/// Publishes @p tensor's RFC 0020 §6.1 `dims[i]` and `dtype` under @p root. dtype is the
+/// spelling string, never a code: the model's `categorical_encoding` encodes it downstream.
 void bindTensorFields(BoundTokens& bound,
                       std::string_view root,
                       const data_objects::TensorAttributes& tensor)
@@ -470,20 +437,13 @@ std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
     bound[std::string(W_TOKEN)] = attributes.w_tensor_uid();
     bound[std::string(Y_TOKEN)] = attributes.y_tensor_uid();
 
-    // The dims and dtypes validated just above, published instead of discarded: they are
-    // the only features a UHD can rank a conv on (RFC 0020 §6.1).
+    // The validated dims and dtypes are the features a UHD ranks a conv on.
     bindTensorFields(bound, X_ROOT, *x);
     bindTensorFields(bound, W_ROOT, *w);
     bindTensorFields(bound, Y_ROOT, *y);
 
-    // 2 x N x K x P x Q x C x R x S: two flops per multiply-accumulate, over every output
-    // element and every filter tap.
-    //
-    // Convention: the settled project convention is rocKE's causal-EFFECTIVE count
-    // (`attention_flops` in rocke/.../stage1_benchmark/_ua_shape_utils.py), not the dense
-    // one RFC 0019 §887 and RFC 0019.13 §4.3.3 state -- those differ by ~2x for square
-    // causal attention. Conv forward has no masking, so both conventions give this same
-    // number; the choice is recorded because the next op bound here will not be so lucky.
+    // 2 x N x K x P x Q x C x R x S: two flops per MAC over every output element and filter
+    // tap. No masking, so the effective and dense flop conventions agree.
     const auto flops
         = checkedProduct({2, xDims->Get(0), wK, yDims->Get(2), yDims->Get(3), xC, wR, wS});
     if(flops.has_value())

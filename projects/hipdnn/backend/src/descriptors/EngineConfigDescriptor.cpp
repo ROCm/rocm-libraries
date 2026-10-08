@@ -68,9 +68,8 @@ void EngineConfigDescriptor::getAttribute(hipdnnBackendAttributeName_t attribute
                                           int64_t* elementCount,
                                           void* arrayOfElements) const
 {
-    // A prediction configuration carries constraints only: it is deliberately never
-    // finalized, so no engine metadata, catalog, or workspace query is performed. Its
-    // ranking metric is plain stored input and is readable on the same terms.
+    // A prediction configuration is never finalized, so its prediction and ranking metric
+    // are readable without finalize.
     THROW_IF_TRUE(!isFinalized() && attributeName != HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT
                       && attributeName != HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT,
                   HIPDNN_STATUS_NOT_INITIALIZED,
@@ -88,7 +87,7 @@ void EngineConfigDescriptor::getAttribute(hipdnnBackendAttributeName_t attribute
         getPrediction(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT:
-        // The effective metric: an unset one reads back as the default it means.
+        // Unset reads back as the default.
         getString(
             std::string(heuristics::resolveRankingMetric(_engineConfigData->ranking_metric).name),
             attributeType,
@@ -109,9 +108,8 @@ void EngineConfigDescriptor::getAttribute(hipdnnBackendAttributeName_t attribute
 
 const flatbuffers::DetachedBuffer& EngineConfigDescriptor::ensurePrediction() const
 {
-    // A lock rather than call_once: this descriptor stays mutable while the prediction is
-    // readable, so the cache has to be rebuildable. Two concurrent readers must not both
-    // pack and replace it, which would free bytes the other just returned.
+    // A lock, not call_once: setAttribute can invalidate the cache, and two readers must not
+    // both rebuild it and free bytes the other just returned.
     const std::lock_guard<std::mutex> guard(_predictionMutex);
     if(_predictionBuffer.size() == 0)
     {
@@ -142,8 +140,7 @@ void EngineConfigDescriptor::invalidatePrediction()
     const std::lock_guard<std::mutex> guard(_predictionMutex);
     if(_predictionBuffer.size() != 0)
     {
-        // Retired, not freed: a caller may still hold these bytes, which the attribute
-        // documents as valid for the descriptor's lifetime.
+        // Retired, not freed: returned bytes must stay valid for the descriptor's lifetime.
         _retiredPredictions.push_back(std::move(_predictionBuffer));
     }
     _predictionBuffer = flatbuffers::DetachedBuffer();
@@ -280,8 +277,7 @@ void EngineConfigDescriptor::setAttribute(hipdnnBackendAttributeName_t attribute
                   elementCount,
                   arrayOfElements,
                   "EngineConfigDescriptor failed to set ranking metric");
-        // Refused where the request is made (RFC 0019 §4.4), not when a plugin later
-        // finds it cannot rank by it.
+        // Refuse an unregistered metric where the request is made (RFC 0019 §4.4).
         std::ignore = heuristics::resolveRankingMetric(metric);
         _engineConfigData->ranking_metric = std::move(metric);
         break;
@@ -409,8 +405,7 @@ void EngineConfigDescriptor::validateEngineConfig(
                            "Engine config has a non-finite knob value");
         }
     }
-    // An unregistered metric would reach the plugin as a plan-build or prediction request
-    // it can only refuse; a heuristic plugin's config is untrusted and gets the same check.
+    // A heuristic plugin's config is untrusted; refuse an unregistered metric here too.
     std::ignore = heuristics::resolveRankingMetric(config.ranking_metric);
 }
 

@@ -13,17 +13,14 @@
 /// @file TestPoolAssembly.cpp
 /// @brief What a corpus is made of, and in what proportion.
 ///
-/// These are the cases the retired Python assembler's own suite pinned, carried over so the
-/// behaviour survives the port rather than being re-derived with it deleted. Each
-/// one names a corpus that was actually built wrong.
+/// Cases carried over from the retired Python assembler's suite.
 
 using namespace hipdnn_corpus_gen;
 
 namespace
 {
 
-/// A pool entry distinguished only by the fields under test. The point is what deduplication
-/// and spreading see, so it is what varies.
+/// A pool entry distinguished only by the fields deduplication and spreading see.
 PoolEntry entryAt(const std::string& source, int64_t index, const std::string& regime)
 {
     PoolEntry entry;
@@ -49,8 +46,7 @@ std::map<std::string, int64_t> regimeCounts(const std::vector<PoolEntry>& entrie
 
 TEST(TestPoolAssembly, ASourceThatCannotFillItsShareHandsTheRestBack)
 {
-    // Otherwise a corpus asked for 100 problems returns however many the smallest source had,
-    // and the shortfall is invisible.
+    // Otherwise the shortfall is invisible.
     const auto allocation
         = allocate(100, {{"model", 5}, {"kernel", 400}, {"sweep", 400}}, defaultShares());
 
@@ -65,8 +61,7 @@ TEST(TestPoolAssembly, ASourceThatCannotFillItsShareHandsTheRestBack)
 
 TEST(TestPoolAssembly, EverySourceIsRepresentedEvenInASmallCorpus)
 {
-    // A corpus of 30 that is 30 packed geometries has none of the problems the heuristic exists
-    // to get right in it.
+    // Not just packed geometries in a small corpus.
     const auto allocation
         = allocate(30, {{"model", 50}, {"kernel", 500}, {"sweep", 500}}, defaultShares());
     for(const auto& entry : allocation)
@@ -77,11 +72,8 @@ TEST(TestPoolAssembly, EverySourceIsRepresentedEvenInASmallCorpus)
 
 TEST(TestPoolAssembly, AZeroShareExcludesItsSourceRatherThanDeferringIt)
 {
-    // An engine whose kernels are compiled per exact shape wants ONLY its pack's geometries;
-    // every other problem is a decline it pays a measurement for. Redistribution used to refill
-    // the sources the caller had just switched off: asking for kernel-only against a
-    // 974-geometry pack returned 974 kernel problems and 4026 from `model` and `sweep`. The
-    // corpus is capped by the pack, and that is the honest answer.
+    // Kernel-only means only the pack's geometries; the corpus is capped by the pack rather
+    // than refilled from disabled sources.
     const auto allocation = allocate(5000,
                                      {{"model", 500}, {"kernel", 974}, {"sweep", 9000}},
                                      {{"model", 0.0}, {"kernel", 1.0}, {"sweep", 0.0}});
@@ -93,13 +85,8 @@ TEST(TestPoolAssembly, AZeroShareExcludesItsSourceRatherThanDeferringIt)
 
 TEST(TestPoolAssembly, ATruncatedPoolKeepsItsRegimeMixRatherThanAnAlphabeticalPrefix)
 {
-    // The model pool arrives grouped: shape files are read in name order, so each file's rows
-    // are contiguous. Taking the front of that is taking the alphabet -- against a published
-    // shape directory it dropped 95 of 200 shapes, and any regime written down in a late-named
-    // file left the corpus entirely.
-    //
-    // Proportional, not one row of each: the pool's own mix is what real models run, so a fifth
-    // of the pool should look like the pool.
+    // Model shapes arrive grouped by file, so a prefix would be alphabetical. The cut keeps the
+    // pool's proportions rather than one row per regime.
     std::vector<PoolEntry> pool;
     pool.reserve(100);
     for(int64_t index = 0; index < 80; ++index)
@@ -132,9 +119,7 @@ TEST(TestPoolAssembly, ATruncatedPoolKeepsItsRegimeMixRatherThanAnAlphabeticalPr
 
 TEST(TestPoolAssembly, ASpreadPoolKeepsEachRegimesInternalOrder)
 {
-    // The spread reorders across regimes and must not reorder within one: a pool's own order
-    // inside a regime is the only ranking it carries, and shuffling it would silently pick
-    // different members whenever the allocation changed.
+    // Order within a regime is its only ranking, so it must survive the spread.
     std::vector<PoolEntry> pool;
     pool.reserve(6);
     for(int64_t index = 0; index < 6; ++index)
@@ -157,9 +142,7 @@ TEST(TestPoolAssembly, ASpreadPoolKeepsEachRegimesInternalOrder)
 
 TEST(TestPoolAssembly, TheSameProblemFromTwoSourcesIsMeasuredOnce)
 {
-    // Two entries differing only in provenance are one problem measured twice: the same graph
-    // benchmarked under two names, which inflates a corpus and biases whichever regime it lands
-    // in. The earlier source wins, so the manifest records the provenance worth auditing.
+    // Otherwise one graph is benchmarked under two names. The earlier source wins.
     SourcePools pools;
     pools["model"] = {entryAt("model", 1, "r"), entryAt("model", 2, "r")};
     pools["kernel"] = {entryAt("kernel", 2, "r"), entryAt("kernel", 3, "r")};
@@ -179,9 +162,7 @@ TEST(TestPoolAssembly, TheSameProblemFromTwoSourcesIsMeasuredOnce)
 
 TEST(TestPoolAssembly, ADisabledSourceCannotTakeAPointFromAnEnabledOne)
 {
-    // Kernel-only, against a pack of two geometries, with a model pool that happens to name
-    // one of them. The model pool won that geometry in deduplication and was then given no
-    // share, so the corpus came back with one problem of the two the pack holds.
+    // The model pool names one of the pack's two geometries; with share 0 it must not keep it.
     const std::map<std::string, double> kernelOnly{{"model", 0.0}, {"kernel", 1.0}, {"sweep", 0.0}};
     SourcePools pools;
     pools["model"] = {entryAt("model", 2, "r")};
@@ -206,9 +187,7 @@ TEST(TestPoolAssembly, ADisabledSourceCannotTakeAPointFromAnEnabledOne)
 
 TEST(TestPoolAssembly, ASourceWithNoPoolIsNotAnError)
 {
-    // An operation whose declaration carries no kernel catalog simply has no kernel pool. That
-    // is the whole mechanism by which coverage is "whatever has a declaration", so it must be a
-    // quiet zero rather than a missing key that throws.
+    // An operation with no kernel catalog simply has no kernel pool.
     std::map<std::string, int64_t> allocation;
     const auto selected = select({{"sweep", {entryAt("sweep", 1, "r"), entryAt("sweep", 2, "r")}}},
                                  2,
@@ -222,9 +201,7 @@ TEST(TestPoolAssembly, ASourceWithNoPoolIsNotAnError)
 
 TEST(TestPoolAssembly, ACutSweepPoolKeepsEveryCategoricalCombination)
 {
-    // A search arrives combination by combination -- every fp32 problem, then every bf16 one.
-    // Taking a prefix of that dropped bf16 from a pooling corpus entirely, though the engine
-    // served it. Spread over the stratum, a cut keeps each combination's share.
+    // A search arrives one combination at a time, so a prefix would drop whole dtypes.
     std::vector<PoolEntry> pool;
     for(int64_t index = 0; index < 60; ++index)
     {
@@ -247,9 +224,7 @@ TEST(TestPoolAssembly, ACutSweepPoolKeepsEveryCategoricalCombination)
 
 TEST(TestPoolAssembly, ARegimeQuotaIsFilledBeforeTheProportionalCut)
 {
-    // Ninety of one population and ten of another: a proportional cut of twenty takes two of
-    // the rare one, which is the lopsided corpus a quota exists to correct. Owed six, it gets
-    // six, and the rest of the count is cut from what is left, as before.
+    // A proportional cut of 20 would take 2 of the rare regime; the quota of 6 is honoured first.
     std::vector<PoolEntry> pool;
     pool.reserve(100);
     for(int64_t index = 0; index < 100; ++index)
@@ -271,8 +246,6 @@ TEST(TestPoolAssembly, ARegimeQuotaIsFilledBeforeTheProportionalCut)
 
 TEST(TestPoolAssembly, ACountBelowTheQuotasDoesNotTrimThem)
 {
-    // The quotas are what the caller measured it needs; a count set with them in mind must not
-    // quietly undo them.
     std::vector<PoolEntry> pool;
     pool.reserve(40);
     for(int64_t index = 0; index < 40; ++index)
@@ -291,8 +264,7 @@ TEST(TestPoolAssembly, ACountBelowTheQuotasDoesNotTrimThem)
 
 TEST(TestPoolAssembly, AQuotaThePoolsCannotFillSaysHowShortItIs)
 {
-    // Reported, never padded from another regime: a short quota is a finding about what the
-    // engine serves, and filling it with something else would hide it.
+    // Reported, never padded from another regime.
     std::map<std::string, int64_t> allocation;
     std::map<std::string, RegimeQuotaOutcome> outcome;
     const auto selected
@@ -310,8 +282,7 @@ TEST(TestPoolAssembly, AQuotaThePoolsCannotFillSaysHowShortItIs)
 
 TEST(TestPoolAssembly, AQuotaTakesARecordedShapeBeforeASample)
 {
-    // Same precedence as everything else: of two problems in the owed regime, the recorded
-    // model shape is the one worth measuring.
+    // A recorded model shape takes precedence, as elsewhere.
     SourcePools pools;
     pools["model"] = {entryAt("model", 1, "rare")};
     pools["sweep"] = {entryAt("sweep", 2, "rare"), entryAt("sweep", 3, "rare")};

@@ -103,16 +103,14 @@ def test_malformed_fixture_is_rejected(validator, name, marker):
     )
 
 
-# Each binds one model the way the runtime role admits or refuses it. The engine always
-# loads -- a refused model degrades its role, not the engine -- so the verdict lives in
-# the run's exit status and the bound model's own check.
+# The engine always loads; a refused model fails only its role, so the verdict is the
+# exit status plus the bound model's own check.
 ROLE_FIXTURES = [
     # A kernel ranker may keep declared order.
     ("l2_static_order", "sort_kernel_catalog", True),
     # An L1 estimate is a calibrated value; static_order has none to give.
     ("l1_static_order", "predict_engine", False),
-    # A signature-less native L1 scorer resolves through the UHD scorer registry, not
-    # the kernel comparator registry a signature-less ranker uses.
+    # A signature-less native L1 scorer resolves via the UHD scorer registry.
     ("l1_native", "predict_engine", True),
 ]
 

@@ -48,16 +48,10 @@ SDKS = {
     "flatbuffers_sdk": "hipdnn_flatbuffers_sdk",
 }
 
-# Schemas that additionally need Python bindings, mapped to the directory the
-# generated package tree is written into (relative to the hipdnn root).
-#
-# Only this one: uhd_gen writes a GbdtModel, and nothing else in the tree builds a
-# FlatBuffer from Python. The UHD itself is JSON (RFC 0019 §4). Kept here rather than
-# inferred so adding a schema to the list is a deliberate act.
-#
-# The C++ flag set is not reused. --gen-compare and --scoped-enums are C++-only and
-# flatc rejects them for --python; --gen-object-api is required because the writers
-# are built on the object API.
+# Schemas that also need Python bindings -> output directory relative to the hipdnn root.
+# Only uhd_gen builds a FlatBuffer (GbdtModel) from Python. The C++ flags are not reused:
+# flatc rejects --gen-compare/--scoped-enums for --python, and the writers need the
+# object API.
 PYTHON_BINDING_SCHEMAS = {
     "gbdt_model.fbs": os.path.join("tools", "uhd_gen", "_generated"),
 }
@@ -144,11 +138,7 @@ def main():
 
 
 def _run_flatc(flatc_path, schemas_dir, flags, output_dir, schema):
-    """Invoke flatc once, surfacing its output on failure.
-
-    flatc reports schema errors on stderr and exits non-zero; capturing and
-    re-printing is what turns a bare CalledProcessError into a diagnosable message.
-    """
+    """Invoke flatc once, printing its stdout/stderr and exiting on failure."""
     os.makedirs(output_dir, exist_ok=True)
     try:
         subprocess.run(

@@ -5,10 +5,7 @@
  * @file TestCorpusOutput.cpp
  * @brief Covers the two forms a problem is written in, and that they agree.
  *
- * A corpus is only useful if the `q.*` columns of a CSV row and the `--query` argument of the
- * command that produced it describe the same problem. They are rendered by separate code paths
- * that must agree forever, and nothing checked it -- the generator's output was validated only
- * by being looked at.
+ * The CSV `q.*` columns and the `--query` argument are rendered by separate code paths.
  */
 
 #include <gtest/gtest.h>
@@ -36,8 +33,7 @@ ProblemPoint conv()
 
 TEST(TestCorpusOutput, TheHeaderAndTheRowLineUp)
 {
-    // A header and row that disagree about column order transpose two features silently, and
-    // the model trains on the wrong ones -- there is nothing in the file to notice it.
+    // A column-order mismatch would silently transpose features.
     const auto header = asQueryColumns(conv(), true);
     const auto row = asQueryColumns(conv(), false);
 
@@ -50,9 +46,7 @@ TEST(TestCorpusOutput, TheHeaderAndTheRowLineUp)
 
 TEST(TestCorpusOutput, ColumnsCarryTheQualifierTheTrainerHashes)
 {
-    // tools/uhd_gen/features.py requires every feature to be q./kernel./device. qualified and
-    // hashes that signature. Emitting bare names would need a renaming step, which is how the
-    // two sides drift while the hash still matches.
+    // tools/uhd_gen/features.py requires q./kernel./device. qualified feature names.
     for(const auto& name : {"q.C", "q.H", "q.N", "q.dtype"})
     {
         EXPECT_NE(asQueryColumns(conv(), true).find(name), std::string::npos) << name;
@@ -62,9 +56,7 @@ TEST(TestCorpusOutput, ColumnsCarryTheQualifierTheTrainerHashes)
 
 TEST(TestCorpusOutput, AQueryArgumentRoundTripsBackToTheSameProblem)
 {
-    // The check the plan called for and never got: what the generator emits is what the
-    // benchmark can read. Without it a quoting or separator change breaks every command in a
-    // ten-thousand-line file at once, and only at harvest time.
+    // What the generator emits must be what the benchmark parses.
     const auto parsed = parseQueryArgument(asQueryArgument(conv()));
 
     std::map<std::string, std::string> recovered(parsed.begin(), parsed.end());
@@ -78,8 +70,6 @@ TEST(TestCorpusOutput, AQueryArgumentRoundTripsBackToTheSameProblem)
 
 TEST(TestCorpusOutput, EveryDeclaredParameterReachesBothForms)
 {
-    // A parameter dropped from one form but not the other is the failure that survives review:
-    // the CSV looks complete and the command under-specifies the problem, or the reverse.
     const auto point = conv();
     const auto header = asQueryColumns(point, true);
     const auto query = asQueryArgument(point);
@@ -95,8 +85,7 @@ TEST(TestCorpusOutput, EveryDeclaredParameterReachesBothForms)
 
 TEST(TestCorpusOutput, BooleansAreSpelledRatherThanNumbered)
 {
-    // The column is categorical, and "0" would be read back as an integer feature by anything
-    // inferring column types -- a boolean silently becoming numeric changes what is learned.
+    // "0"/"1" would be inferred as a numeric feature.
     const ProblemPoint point{{"causal", true}, {"padded", false}};
     EXPECT_EQ(asQueryColumns(point, false), "true,false");
     EXPECT_EQ(asQueryArgument(point), "causal=true,padded=false");
@@ -104,8 +93,7 @@ TEST(TestCorpusOutput, BooleansAreSpelledRatherThanNumbered)
 
 TEST(TestCorpusOutput, MalformedQueriesAreRefusedRatherThanPartlyParsed)
 {
-    // Half a problem read as a whole one is a mislabeled training row, which nothing downstream
-    // can detect. Refusing outright is the only safe reading.
+    // A partly parsed query would be a mislabeled training row.
     EXPECT_TRUE(parseQueryArgument("N=8,,C=64").empty());
     EXPECT_TRUE(parseQueryArgument("N=8,C").empty());
     EXPECT_TRUE(parseQueryArgument("=8").empty());

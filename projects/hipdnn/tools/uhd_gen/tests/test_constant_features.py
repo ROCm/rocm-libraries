@@ -18,11 +18,8 @@ PROVENANCE = {
     "umd": [],
 }
 
-# What `deviceFeatureValues` publishes for the two gfx942 boards a merged sweep spans.
-# Five of the eight fields are identical between them; `total_global_mem`,
-# `memory_clock_rate` and the bandwidth derived from the clock are not. Using the real
-# pair is the point of the test: the rule has to be decided by the numbers, not by the
-# `device.` prefix on the name.
+# Real `deviceFeatureValues` for two gfx942 boards; three fields differ. Pruning must
+# be decided by the values, not by the `device.` prefix.
 MI300X = {
     "device.cu_count": 304,
     "device.multi_processor_count": 304,
@@ -103,12 +100,11 @@ def test_a_constant_column_is_dropped_and_named_with_its_value(tmp_path, evaluat
     descriptor = json.loads((output / "heuristic.uhd.json").read_text(encoding="utf-8"))
     manifest = json.loads((output / "train_manifest.json").read_text(encoding="utf-8"))
     assert descriptor["features_signature"] == ["$kernel.block_size"]
-    # The contract the runtime checks is the pruned one (RFC 0019 §6.3), not the request.
+    # The runtime checks the pruned signature (RFC 0019 §6.3), not the requested one.
     assert descriptor["features_hash"] == compute_features_hash(
         ["$kernel.block_size"], executable=evaluator
     )
-    # Named with its value, so the omission is visible rather than silent: only the author
-    # can say whether a field was pinned by the kernels or missed by the sweep.
+    # Only the author can tell a field pinned by the kernels from one the sweep missed.
     assert manifest["dropped_constant_features"] == [
         {"column": "kernel.tile_m", "value": 128},
         {"column": "device.cu_count", "value": 304},
@@ -127,9 +123,8 @@ def test_a_constant_column_is_dropped_and_named_with_its_value(tmp_path, evaluat
 def test_an_all_constant_feature_set_is_an_error_not_an_empty_signature(
     tmp_path, evaluator
 ):
-    # Dropping everything would leave a model that scores every candidate identically, and
-    # shipping one is worse than shipping none: the engine ranks by a model that cannot
-    # discriminate instead of falling back to its declared order.
+    # A model that cannot discriminate is worse than none: without one the engine
+    # falls back to its declared order.
     code, output = _run(tmp_path, _frame(80), ["kernel.tile_m", "device.cu_count"])
     assert code == 1
     assert not output.exists()
@@ -151,11 +146,8 @@ def test_a_single_board_corpus_keeps_no_device_column(tmp_path, evaluator):
 def test_a_corpus_merged_across_two_boards_keeps_what_genuinely_varies(
     tmp_path, evaluator
 ):
-    # RFC 0019.13 states a normative "single-arch runs MUST NOT pass device.* as
-    # features". That rule is wrong for this codebase:
-    # GenericPlanBuilder::candidateFeatures merges a sweep across several boards of one
-    # arch, and gfx942 spans MI300X and MI325X. A name-based rule would throw away the
-    # three fields that separate them.
+    # Deliberately departs from RFC 0019.13's "single-arch runs MUST NOT pass device.*":
+    # one arch (gfx942) spans boards whose device fields differ.
     merged = pd.concat(
         [_boards(MI300X, rows=40), _boards(MI325X, rows=40)], ignore_index=True
     )

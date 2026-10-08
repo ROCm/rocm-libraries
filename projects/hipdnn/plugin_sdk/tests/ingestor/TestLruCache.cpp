@@ -167,9 +167,8 @@ TEST(TestIngestorLruCache, PutIfAbsentRefreshesRecencyOnAKeyItDidNotWrite)
 
 using Batch = std::vector<std::pair<int, std::string>>;
 
-/// The failure a putIfAbsent() loop has once a batch outgrows the capacity: the newer value
-/// for key 1 is evicted by later inserts, key 1 is absent again, and its older duplicate
-/// gets in. A miss is acceptable; the older value never is.
+/// Key 1's newer value comes first and gets evicted; its older duplicate must still not be
+/// admitted. A miss is acceptable.
 TEST(TestIngestorLruCache, MergeAbsentNeverAdmitsAnOlderDuplicate)
 {
     LruCache<int, std::string> cache(2);
@@ -181,8 +180,7 @@ TEST(TestIngestorLruCache, MergeAbsentNeverAdmitsAnOlderDuplicate)
     EXPECT_EQ(*found, "newer");
 }
 
-/// A key already cached is newer than anything in the batch, and stays so even when the
-/// batch's own inserts evict it: it may go missing, it is never replaced by the batch's.
+/// A key already cached is newer than the whole batch: it may be evicted, never replaced.
 TEST(TestIngestorLruCache, MergeAbsentNeverReplacesAKeyThatWasPresent)
 {
     LruCache<int, std::string> cache(2);

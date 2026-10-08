@@ -13,14 +13,8 @@
 /// @file CorpusOutput.hpp
 /// @brief Rendering a problem point into the corpus's two output forms.
 ///
-/// Lifted out of the tool's main file so it can be tested. It was not testable there, and the
-/// consequence is specific: a corpus is only useful if the `q.*` columns of a CSV row and the
-/// `--query` argument of the command that produced it describe the same problem. Nothing
-/// checked that, and the two are rendered by separate code paths that must agree forever.
-///
-/// The column names are the feature signature `uhd_gen` hashes (tools/uhd_gen/features.py),
-/// so they are emitted in the form the trainer expects rather than renamed downstream. A
-/// renaming step is how the two sides drift while the hash still matches.
+/// The CSV `q.*` columns and the `--query` argument must describe the same problem. Column
+/// names are the feature signature `uhd_gen` hashes (tools/uhd_gen/features.py); do not rename.
 namespace hipdnn_corpus_gen
 {
 
@@ -37,8 +31,7 @@ inline std::string asText(const ParameterValue& value)
             }
             else if constexpr(std::is_same_v<Held, bool>)
             {
-                // Spelled, not printed as 0/1: the column is read back as a categorical value
-                // and "false" is what the declaration calls it.
+                // Spelled, not 0/1: read back as a categorical and the declaration says "false".
                 text += held ? "true" : "false";
             }
             else
@@ -52,9 +45,7 @@ inline std::string asText(const ParameterValue& value)
 
 /// The CSV half: `q.N,q.C,...` when @p namesOnly, otherwise the row of values.
 ///
-/// Both are generated from the same ordered traversal of the point, so a header and its rows
-/// cannot disagree about column order -- which would silently transpose two `q.*` features and
-/// train a model on the wrong ones.
+/// Header and rows come from the same ordered traversal so column order cannot disagree.
 inline std::string asQueryColumns(const ProblemPoint& point, bool namesOnly)
 {
     std::string text;
@@ -86,12 +77,8 @@ inline std::string asQueryArgument(const ProblemPoint& point)
 
 /// @brief Reads a `--query` argument back into name/value pairs.
 ///
-/// The inverse of asQueryArgument, and the reason it exists: without a parser nothing can check
-/// that what the generator emits is what the benchmark can read. Values stay strings because
-/// this is a transport check, not a re-typing of the problem -- the declaration owns the types.
-///
-/// Returns an empty vector for malformed input rather than a partial parse, so a caller cannot
-/// mistake half a problem for a whole one.
+/// The inverse of asQueryArgument. Values stay strings; the declaration owns the types.
+/// Returns an empty vector for malformed input rather than a partial parse.
 inline std::vector<std::pair<std::string, std::string>> parseQueryArgument(const std::string& text)
 {
     std::vector<std::pair<std::string, std::string>> parsed;

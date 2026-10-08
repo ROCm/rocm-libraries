@@ -92,37 +92,13 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
         return _policyOrder;
     }
     // 3. Default policy list — Config first so HIPDNN_HEUR_CONFIG_PATH
-    // rules win when set; UHD (Universal Heuristic Descriptor) provides data-driven
-    // selection when RFC 0017 UED/UKD metadata is available; StaticOrdering is the
-    // canonical last-resort fallback and always succeeds when there is at least
-    // one candidate. Vendor heuristic plugins may be inserted via env or descriptor
-    // attribute above.
+    // rules win when set; StaticOrdering is the last-resort fallback and always succeeds
+    // when there is at least one candidate. Vendor heuristic plugins may be inserted via env
+    // or descriptor attribute above.
     //
-    // NOTE: `SelectionHeuristic::StaticOrdering` here is NOT RFC 0019's `static_order`
-    // UHD adapter, despite the names. They operate at different levels:
-    //
-    //   StaticOrdering (this policy, RFC 0007)  ranks ENGINES. Input is the candidate
-    //     engine ids; the order comes from a fixed vendor precedence in
-    //     sortEngineIds() (MIOpen, ASM_SDPA, rocKE, …), overridable with
-    //     HIPDNN_HEUR_FALLBACK_ENGINE_ORDER.
-    //
-    //   static_order (a UHD adapter, RFC 0019 §5)  ranks KERNELS within one engine.
-    //     The order comes from that engine's own descriptor `order` field
-    //     (priority, id, or any KMD field) and never leaves the engine.
-    //
-    // RFC 0019 §2 draws the same line: kernel selection is UHD's scope, engine
-    // selection is RFC 0007's. Both can run for one graph -- the engine's UHD ranks its own
-    // kernels (RFC 0019 §5: "the engine owns the UHD that ranks it"), then StaticOrdering
-    // ranks whatever engines remain. Read §6 step 6's "degrades to static_order (priority +
-    // id)" as the kernel comparator inside the engine, not as a hand-off to this policy.
-    // SelectionHeuristic::UHD used to sit between these two. It ranked kernels where the
-    // heuristic-plugin ABI can only return engine ids, so it always reported applied=0 and
-    // never changed this chain's outcome; the ranking it computed is now done by the engine.
-    //
-    // Prediction policies (SelectionHeuristic::ModeA / ModeB) are NOT injected here.
-    // RFC 0007 §5.3.2/§5.3.3 make the ordered policy list the only channel for policy
-    // selection: a caller that wants them asks for them by name through
-    // HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT or HIPDNN_HEUR_POLICY_ORDER.
+    // StaticOrdering ranks engines (RFC 0007); it is unrelated to RFC 0019's `static_order`
+    // UHD adapter, which ranks kernels inside one engine. Prediction policies (ModeA/ModeB)
+    // are not injected here: callers request them through the policy order (RFC 0007 §5.3.2).
     std::vector<int64_t> policyIds = {
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"),
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"),
@@ -137,14 +113,11 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
 
 std::string EngineHeuristicDescriptor::resolveRankingMetric() const
 {
-    // RFC 0019 §11.4: the same precedence as the policy order — environment, then the
-    // descriptor attribute, then the default — so an operator can re-rank a deployed
-    // application by another metric without rebuilding it.
+    // RFC 0019 §11.4: environment, then descriptor attribute, then default.
     std::string envStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_HEUR_RANKING_METRIC");
     if(!envStr.empty())
     {
-        // The attribute path refuses an unknown name at set; the environment has no set,
-        // so refuse it here rather than rank by a metric with no direction.
+        // The environment bypasses the set-time check, so validate it here.
         THROW_IF_NULL(hipdnn_data_sdk::utilities::findRankingMetric(envStr),
                       HIPDNN_STATUS_BAD_PARAM,
                       "HIPDNN_HEUR_RANKING_METRIC names unregistered ranking metric '" + envStr
@@ -265,8 +238,8 @@ void EngineHeuristicDescriptor::finalize()
 
     // Get serialized graph from GraphDescriptor
     const hipdnnPluginConstData_t serializedGraph = _graph->getSerializedGraph();
-    // Every prediction a policy sees is asked in the effective metric; the resource manager
-    // turns an answer in any other metric into INVALID (RFC 0019 §11.4).
+    // Predictions are requested in the effective metric; answers in another metric come back
+    // INVALID (RFC 0019 §11.4).
     const heuristics::SelectionHeuristic::PredictionProvider predict
         = [&](int64_t engineId, hipdnnEnginePredictionKind_t kind) {
               hipdnn_flatbuffers_sdk::data_objects::EngineConfigT config;
@@ -472,8 +445,7 @@ void EngineHeuristicDescriptor::getAttribute(hipdnnBackendAttributeName_t attrib
         getPolicyOrder(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT:
-        // The effective metric resolved at finalize, not the attribute as set: a caller
-        // reading it back wants to know what the results were ranked by.
+        // The effective metric resolved at finalize, not the attribute as set.
         getString(_effectiveRankingMetric,
                   attributeType,
                   requestedElementCount,
@@ -689,10 +661,8 @@ void EngineHeuristicDescriptor::getEngineConfigs(hipdnnBackendAttributeType_t at
             {
                 config->setEngineConfig(*resultConfig, true);
             }
-            // RFC 0019 §11.4: the metric travels with the chosen configuration to plan
-            // build, so an engine that picks its own kernel ranks its catalog by the metric
-            // the engines were ranked by. Stamped on every result, with or without a
-            // policy-supplied configuration, overriding whatever metric a plugin wrote.
+            // RFC 0019 §11.4: every result carries the ranking metric to plan build, overriding any
+            // metric a plugin wrote.
             config->setAttribute(HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT,
                                  HIPDNN_TYPE_CHAR,
                                  static_cast<int64_t>(_effectiveRankingMetric.size()),
@@ -852,7 +822,7 @@ void EngineHeuristicDescriptor::setRankingMetric(hipdnnBackendAttributeType_t at
               elementCount,
               arrayOfElements,
               "EngineHeuristicDescriptor failed to set ranking metric");
-    // Refused here, where the request is made, not discovered while sorting (RFC 0019 §4.4).
+    // Refuse an unregistered metric where the request is made (RFC 0019 §4.4).
     std::ignore = heuristics::resolveRankingMetric(metric);
     _rankingMetric = std::move(metric);
 }

@@ -136,34 +136,16 @@ inline void dependency(const nlohmann::json& value, const std::string& where)
     revision(text(value, "revision", where), where);
 }
 
-/// RFC 0019 §4.1: a UHD names what it was generated against, and only that. Two things
-/// can be named, and a model names whichever one applies to the engine that will bind it:
-///
-///   - the descriptor set -- `ued`/`kmd`/`umd`, all three or none -- for a model a UED
-///     role map binds. The loader's UUID and major/minor rule (§8.1) checks it.
-///   - `selector_revision`, the provider build whose behaviour was actually measured, for
-///     a model an engine with no UED binds by declared UUID (Open Question 7, RESOLVED).
-///     That engine has no UED, KMD or UMD to name, and its behaviour is decided by the
-///     vendor library it wraps, so this is the only thing there is to be trained against.
-///     The loader refuses a model whose recorded revision is not the one the provider
-///     reports: L1 is the one score compared ACROSS engines, so a stale estimate does not
-///     merely misreport a number, it changes which engine is selected.
-///
-/// Either form may also carry `feature_semantics_revision` (FeatureSemantics.hpp), the
-/// meaning of the features the model was trained on. It never names what the model binds
-/// to, so on its own it satisfies neither form.
-///
-/// Neither names an engine. A UHD still cannot say what it attaches to -- the binding is
-/// the UED role map or the provider-declared UUID, both of which live in compiled code.
+/// Validate `trained_against` (RFC 0019 §4.1): a descriptor set (`ued`/`kmd`/`umd`, all
+/// three) for UED-bound models, and/or a `selector_revision` for engines without a UED.
+/// `feature_semantics_revision` is optional and does not satisfy either form on its own.
 inline void provenance(const nlohmann::json& value, const std::string& where)
 {
     keys(value, {"ued", "kmd", "umd", "selector_revision", "feature_semantics_revision"}, where);
     if(value.contains("feature_semantics_revision"))
     {
-        // An integer, not a number: 1.0 and 1 must not be two spellings of one revision, and
-        // a bool would otherwise convert to one. Bounded so featureSemanticsRevision's
-        // int64_t read cannot wrap; parsed text is unsigned, a document built in memory
-        // may be signed, and both spell the same revision.
+        // Integer only (not 1.0 or a bool), and must fit int64_t. Parsed JSON is unsigned;
+        // documents built in memory may be signed.
         const auto& recorded = value.at("feature_semantics_revision");
         const bool valid = recorded.is_number_unsigned()
                                ? recorded.get<uint64_t>() >= 1
@@ -184,16 +166,14 @@ inline void provenance(const nlohmann::json& value, const std::string& where)
     }
     if(namesSelector)
     {
-        // text() rejects a non-string and an empty one; the value itself is opaque here,
-        // since only the provider that produced it can say what it means.
+        // Opaque: only the provider that produced it can interpret it.
         (void)text(value, "selector_revision", where);
     }
     if(!namesDescriptorSet)
     {
         return;
     }
-    // All three or none: two thirds of a descriptor set is not a weaker claim, it is an
-    // unverifiable one, and required() below is what says which third is missing.
+    // All three or none: a partial descriptor set is unverifiable.
     dependency(required(value, "ued", where), where + " ued");
     dependency(required(value, "kmd", where), where + " kmd");
     const auto& matchers = required(value, "umd", where);
@@ -218,20 +198,8 @@ inline void provenance(const nlohmann::json& value, const std::string& where)
 } // namespace parser_detail
 
 /// @brief Why a model cannot read this build's features, or "" when it can.
-///
-/// The revision describes what the values behind published feature names mean
-/// (FeatureSemantics.hpp), so it governs exactly the models that read them: those with a
-/// @p featuresSignature. A signature-less ranker -- static order, or a native comparator
-/// over kernel metadata compiled into this same build -- reads no published feature and
-/// cannot be misled by one changing, so a bump does not refuse it.
-///
-/// A validated @p trainedAgainst that records no revision was trained before the revision
-/// existed, which is revision 1 by definition, so today's shipped documents need no edit.
-/// A mismatch in either direction refuses: an older model reads names whose values have
-/// since changed meaning, and a newer one expects meanings this build does not compute.
-/// Neither is wrong about the model itself -- it is simply not this build's -- which is
-/// why every caller that can say so reports it as UNAVAILABLE. The one rule every binding
-/// path asks, so the loader, the L2 ranker and the L1 predictor cannot drift apart.
+/// Applies only to models with a @p featuresSignature. A missing revision means 1; any
+/// mismatch refuses. Callers report it as UNAVAILABLE. Shared by every binding path.
 inline std::string featureSemanticsMismatch(const std::vector<nlohmann::json>& featuresSignature,
                                             const nlohmann::json& trainedAgainst)
 {
@@ -302,10 +270,8 @@ inline nlohmann::json readUhdDocument(const std::filesystem::path& path)
         });
 }
 
-/// @brief The digest of the model artifact at @p path, in the format a UHD declares one
-/// (lowercase SHA-256 hex over the whole file, as every adapter compares it), or "" when
-/// there are no bytes to identify: absent, not a regular file, empty, over the adapters'
-/// 256 MiB bound, or unreadable.
+/// @brief Lowercase SHA-256 hex of the artifact at @p path, or "" when it is absent, not a
+/// regular file, empty, over 256 MiB, or unreadable.
 inline std::string artifactDigest(const std::filesystem::path& path)
 {
     constexpr std::uintmax_t MAX_ARTIFACT_BYTES = std::uintmax_t{256} * 1024 * 1024;
@@ -449,10 +415,8 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
         if(score.contains("metric"))
         {
             result.scoreMetric = text(score, "metric", where);
-            // RFC 0019 §4.4: the registry is closed and owned by hipDNN, because the backend
-            // orders engines by these numbers and must know each metric's units and direction
-            // rather than trust the model that produced them. A name it does not know has
-            // neither, so the document is refused here rather than discovered while sorting.
+            // The metric registry is closed (RFC 0019 §4.4): units and direction come from
+            // hipDNN, not the model.
             if(hipdnn_data_sdk::utilities::findRankingMetric(result.scoreMetric) == nullptr)
             {
                 fail("UHD score.metric '" + result.scoreMetric
@@ -462,12 +426,8 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
         if(score.contains("transform"))
         {
             result.scoreTransform = text(score, "transform", where);
-            // RFC 0019 §4 and §11.3: `score.transform` exists so a consumer can invert it and
-            // recover the metric's registered units, which is what makes the number comparable.
-            // The vocabulary is therefore closed, and this is where it closes -- an unsupported
-            // name reaching applyInverse falls through its identity branch and reports a
-            // transformed number as if it were in the metric's units: still positive, still
-            // ordered, and wrong by whatever the transform was.
+            // Closed vocabulary (RFC 0019 §11.3): applyInverse treats unknown names as
+            // identity, which would silently report transformed values in metric units.
             if(!score_transform::isSupported(result.scoreTransform))
             {
                 fail("UHD score.transform must be one of "
@@ -483,14 +443,12 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
             result.scoreCalibrated = score.at("calibrated").get<bool>();
         }
     }
-    // A calibrated score is a claim that the number is comparable across engines, and a
-    // number is comparable only in a named quantity (RFC 0019 §4.4).
+    // Calibrated means comparable across engines, which needs a named metric (§4.4).
     if(result.scoreCalibrated && result.scoreMetric.empty())
     {
         fail("calibrated UHD score requires score.metric in " + where);
     }
-    // The metric fixes the direction; `objective` only restates it, so the two must agree
-    // or the model ranks one way while engine selection compares the other.
+    // The metric fixes the direction; `objective` must agree with it.
     if(!result.scoreMetric.empty())
     {
         const auto expected = std::string(hipdnn_data_sdk::utilities::objectiveOf(
@@ -514,9 +472,8 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
     const auto& body = root.at(result.adapterType);
     if(result.adapterType == "static_order")
     {
-        // static_order has no parameters: it ranks by UKD priority, then descriptor id
-        // (detail::declaredOrder). Declared criteria would be accepted and silently ignored,
-        // so a body naming them is refused rather than ranked by something it did not ask for.
+        // static_order ranks by UKD priority then descriptor id; refuse criteria it would
+        // silently ignore.
         if(body.contains("order"))
         {
             fail("static_order.order is not supported in " + where
@@ -556,13 +513,9 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
                                         / text(body, custom ? "library" : "artifact", where))
                   .lexically_normal()
                   .string();
-        // Model identity is content (R6): what versions the persistent winner cache and the
-        // selector revision is this digest, so a model that declares none is identified by
-        // the bytes present now. Computed once, here, and then verified by the adapter like
-        // a declared one -- bytes replaced after load are refused rather than scored under
-        // the old identity. Empty only when nothing is deployed yet (deployment is separate
-        // from load, RFC 0019 §5); such a model has no content identity, and the winner
-        // cache declines to persist for it (engineIdentity).
+        // Model identity is its content digest (versions the winner cache). Without a
+        // declared hash, digest the deployed bytes now; the adapter verifies it later.
+        // Empty when not yet deployed (RFC 0019 §5).
         result.modelHash = body.contains("hash") ? text(body, "hash", where)
                                                  : artifactDigest(result.modelArtifactPath);
     }

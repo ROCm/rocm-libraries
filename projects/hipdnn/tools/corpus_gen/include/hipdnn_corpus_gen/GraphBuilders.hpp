@@ -11,35 +11,10 @@
 #include <vector>
 
 /// @file GraphBuilders.hpp
-/// @brief Constructing a graph from an explicit description of a problem.
+/// @brief Builds a graph from an explicit problem description.
 ///
-/// These exist because the test SDK's `FlatbufferGraphTestUtils.hpp` builders answer a
-/// different question. Theirs is "give me a valid graph of this operation", and they answer it
-/// well: 102 of their 135 call sites pass no arguments at all and take a default shape --
-/// a 4x4x4x4 convolution with a 1x1 filter, a 4x8 by 8x5 matmul. Those are the smallest shapes
-/// that exercise a code path, and the parameters exist so the minority of tests that care can
-/// override them.
-///
-/// Corpus generation asks something stricter: give me *exactly* the graph this problem
-/// describes. Under that contract those builders are unfit in ways that are invisible under
-/// theirs -- LayerNorm and RMSNorm accept `inputDataType` and `computeDataType` and ignore
-/// them for the graph header, BatchNorm has no dtype argument at all, Reduction had no
-/// parameters, MoE takes only a mode. None of that is a defect in a fixture. All of it
-/// silently mislabels a corpus row, which records the parameters that were *asked for* rather
-/// than the ones that reached the hardware.
-///
-/// So the contract here is:
-///
-///  - **No defaults.** Every value a graph depends on is a parameter. A builder that can be
-///    called with no arguments will be, and the shape it invents will end up in a corpus.
-///  - **Every parameter reaches the graph.** Enforced by test: changing any argument must
-///    change the emitted bytes. That is the check that would have caught the ignored dtypes.
-///  - **Nothing is hardcoded that a problem might vary**, including the graph-level dtypes,
-///    which is where the LayerNorm fixture goes wrong.
-///
-/// The cost is duplicated construction. The benefit is that a corpus's correctness stops
-/// depending on a file whose purpose is something else, and which is edited freely for reasons
-/// that have nothing to do with us.
+/// No defaults: every parameter must reach the emitted graph (enforced by test), unlike the
+/// test SDK's fixture builders.
 namespace hipdnn_corpus_gen::builders
 {
 
@@ -48,8 +23,7 @@ namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 /// Serialized graph bytes.
 using GraphBytes = std::vector<uint8_t>;
 
-/// One tensor of a problem. Strides are explicit rather than derived, because a layout is part
-/// of a problem: an engine may serve NCHW and refuse the same extents in NHWC.
+/// One tensor of a problem. Strides are explicit because layout is part of the problem.
 struct TensorSpec
 {
     int64_t uid = 0;
@@ -58,24 +32,22 @@ struct TensorSpec
     std::vector<int64_t> strides;
     fb::DataType dataType = fb::DataType::FLOAT;
 
-    /// An intermediate of a multi-node graph: produced by one node and consumed by the next,
-    /// never allocated by the caller.
+    /// An intermediate produced and consumed inside the graph; never allocated by the caller.
     bool isVirtual = false;
 
-    /// Set for a pass-by-value tensor -- a scalar such as a norm's epsilon, whose value is part
-    /// of the graph. The frontend refuses one given as an ordinary tensor.
+    /// Set for a pass-by-value scalar such as a norm's epsilon; the frontend refuses one given
+    /// as an ordinary tensor.
     std::optional<float> scalarValue;
 };
 
-/// The dtypes a graph declares. Three fields because the schema has three, and conflating them
-/// is exactly the LayerNorm fixture's error.
+/// The graph's three declared dtypes, kept separate as in the schema.
 struct GraphTypes
 {
     fb::DataType io = fb::DataType::FLOAT;
     fb::DataType intermediate = fb::DataType::FLOAT;
     fb::DataType compute = fb::DataType::FLOAT;
 
-    /// The common case: one element type throughout.
+    /// One element type throughout.
     static GraphTypes uniform(fb::DataType type)
     {
         return {type, type, type};
@@ -116,11 +88,7 @@ inline GraphBytes finish(flatbuffers::FlatBufferBuilder& builder,
                          std::vector<flatbuffers::Offset<fb::TensorAttributes>>& tensors,
                          std::vector<flatbuffers::Offset<fb::Node>>& nodes)
 {
-    // Named rather than positional on purpose. The generated signature is
-    // (name, compute, intermediate, io) -- not the io-first order the struct lists -- and while
-    // every graph used one type throughout, passing them the wrong way round produced byte
-    // identical output. It stayed wrong until a declaration asked for fp16 operands with fp32
-    // accumulate, which is the ordinary mixed-precision case.
+    // Named arguments: the generated order is (name, compute, intermediate, io).
     const auto graph = fb::CreateGraphDirect(builder,
                                              name.c_str(),
                                              /*compute_data_type=*/types.compute,
@@ -147,10 +115,8 @@ struct ConvGeometry
 
 /// @brief Forward convolution.
 ///
-/// Group count is not a parameter here because it is not one in the schema: the frontend
-/// derives it as `x.dims[1] / w.dims[1]`, so a depthwise convolution is expressed by giving
-/// the weight tensor one input channel. A `groups` argument would be a second way to say the
-/// same thing, and the two could disagree.
+/// No group count: the frontend derives it as `x.dims[1] / w.dims[1]`, so a depthwise
+/// convolution gives @p w one input channel.
 inline GraphBytes convolutionForward(const TensorSpec& x,
                                      const TensorSpec& w,
                                      const TensorSpec& y,
@@ -182,10 +148,9 @@ inline GraphBytes convolutionForward(const TensorSpec& x,
 
 /// @brief Convolution, optional bias add, activation: the fusion MIOpen runs as one plan.
 ///
-/// Three nodes when @p bias is given (conv -> ADD bias -> activation), two otherwise. The
-/// intermediates are virtual fp32 tensors, and the convolution and activation compute in fp32
-/// while the bias add computes in the bias tensor's type -- the contract MIOpen's
-/// ConvFwdBiasActiv builder checks node by node.
+/// Three nodes with @p bias (conv -> ADD -> activation), two without. Intermediates are
+/// virtual fp32; conv and activation compute in fp32 and the bias add in the bias type, as
+/// MIOpen's ConvFwdBiasActiv builder requires.
 inline GraphBytes convolutionBiasActivation(const TensorSpec& x,
                                             const TensorSpec& w,
                                             const std::optional<TensorSpec>& bias,
@@ -267,8 +232,8 @@ inline GraphBytes convolutionBiasActivation(const TensorSpec& x,
     return detail::finish(builder, "conv_bias_activation", types, tensors, nodes);
 }
 
-/// @brief Convolution data gradient. dx's extents are a parameter because they cannot be
-///        derived: several inputs give the same output under a stride.
+/// @brief Convolution data gradient. @p dx extents are explicit: under a stride several
+///        inputs give the same output.
 inline GraphBytes convolutionBackwardData(const TensorSpec& dy,
                                           const TensorSpec& w,
                                           const TensorSpec& dx,
@@ -347,12 +312,10 @@ inline GraphBytes
     return detail::finish(builder, "matmul", types, tensors, nodes);
 }
 
-/// @brief A matmul followed by an epilogue: a bias add, an activation, or both in that order.
+/// @brief A matmul followed by a bias add, an activation, or both in that order.
 ///
-/// Two or three nodes. The matmul's output and the biased intermediate are virtual fp32
-/// tensors, and every node computes in fp32. @p bias, when given, is added to the matmul's
-/// output; @p activation, when given, is applied last. At least one is required -- with
-/// neither this is just `matmul`.
+/// Intermediates are virtual fp32 and every node computes in fp32. At least one of @p bias
+/// and @p activation is required.
 inline GraphBytes matmulEpilogue(const TensorSpec& a,
                                  const TensorSpec& b,
                                  const std::optional<TensorSpec>& bias,
@@ -438,10 +401,8 @@ inline GraphBytes matmulEpilogue(const TensorSpec& a,
 
 /// @brief C = dequantize(A, scaleA) x dequantize(B, scaleB): a block-scaled (MX) matmul.
 ///
-/// Three nodes, as the graph states it: each operand is dequantized by its per-block scale into
-/// a virtual fp32 tensor, and the matmul consumes those. Every node computes in fp32. Whether an
-/// engine can run it -- MX formats are a property of the device -- is the engine's answer; the
-/// graph is the same on every architecture.
+/// Three nodes: each operand is dequantized into a virtual fp32 tensor and the matmul consumes
+/// those. Every node computes in fp32.
 inline GraphBytes blockScaledMatmul(const TensorSpec& a,
                                     const TensorSpec& aScale,
                                     const TensorSpec& b,
@@ -492,17 +453,8 @@ inline GraphBytes blockScaledMatmul(const TensorSpec& a,
     return detail::finish(builder, "block_scaled_matmul", types, tensors, nodes);
 }
 
-/// @brief Binary elementwise pointwise.
-///
-/// The optional tensor uids are left null rather than zero. The schema declares them
-/// `= null`, so a literal 0 references tensor uid 0 -- a tensor a binary pointwise does not
-/// carry -- and the graph then fails to deserialize rather than simply describing something
-/// unusual.
-/// Mode-specific scalars. §12.6 lists them as parameters of a pointwise problem, and they are:
-/// a ReLU with a non-zero lower-clip slope is a leaky ReLU and a different kernel.
-/// Written only when set. The schema leaves each of these null by default, and a present value
-/// changes the operation: a relu_upper_clip of 0 makes ReLU a clamp to [0, 0], which MIOpen
-/// accepts as a clamp and computes as one.
+/// Mode-specific pointwise scalars, written only when set: a present value changes the
+/// operation (a relu_upper_clip of 0 makes ReLU a clamp to [0, 0]).
 struct PointwiseScalars
 {
     flatbuffers::Optional<float> reluLowerClip = flatbuffers::nullopt;
@@ -513,6 +465,10 @@ struct PointwiseScalars
     flatbuffers::Optional<float> softplusBeta = flatbuffers::nullopt;
 };
 
+/// @brief Binary elementwise pointwise.
+///
+/// Unused tensor uids stay null; a literal 0 would reference tensor uid 0 and fail to
+/// deserialize.
 inline GraphBytes pointwiseBinary(const TensorSpec& inA,
                                   const TensorSpec& inB,
                                   const TensorSpec& out,
@@ -549,8 +505,7 @@ inline GraphBytes pointwiseBinary(const TensorSpec& inA,
 
 /// @brief One operand in, one result out: an activation or a unary math function.
 ///
-/// The same node as pointwiseBinary with in_1 left null. Engines that run activations check
-/// for exactly that -- MIOpen's activation builder takes a single-input pointwise node.
+/// in_1 stays null: MIOpen's activation builder requires a single-input pointwise node.
 inline GraphBytes pointwiseUnary(const TensorSpec& in,
                                  const TensorSpec& out,
                                  fb::PointwiseMode mode,
@@ -607,11 +562,6 @@ inline GraphBytes reduction(const TensorSpec& in,
 }
 
 /// @brief LayerNorm forward.
-///
-/// The graph dtypes come from @p types like everything else. The test-SDK equivalent accepts
-/// input and compute types and then writes io=FLOAT, intermediate=HALF, compute=BFLOAT16
-/// regardless, which is why graphs built from it could not be deserialized whatever the
-/// declaration asked for.
 inline GraphBytes layernormForward(const TensorSpec& x,
                                    const TensorSpec& scale,
                                    const TensorSpec& bias,
@@ -648,8 +598,8 @@ inline GraphBytes layernormForward(const TensorSpec& x,
     return detail::finish(builder, "layernorm_fwd", types, tensors, nodes);
 }
 
-/// @brief RMSNorm forward. Bias is optional in the schema and omitted here; a declaration that
-///        needs it wants a separate entry rather than a flag, since it changes the tensor set.
+/// @brief RMSNorm forward, without the schema's optional bias (it changes the tensor set, so
+///        it belongs in a separate entry).
 inline GraphBytes rmsNormForward(const TensorSpec& x,
                                  const TensorSpec& scale,
                                  const TensorSpec& epsilon,
@@ -685,9 +635,7 @@ inline GraphBytes rmsNormForward(const TensorSpec& x,
 // Attention
 // ---------------------------------------------------------------------------
 
-/// Optional behaviour of an attention problem. These are part of the problem, not of the
-/// kernel: a causal attention and a full one do different work and are served by different
-/// kernels, so a corpus that fixed them would be a corpus of one regime.
+/// Attention options. Each is part of the problem and selects different kernels.
 struct SdpaOptions
 {
     bool causalMask = false;
@@ -695,34 +643,25 @@ struct SdpaOptions
     bool alibiMask = false;
     bool generateStats = false;
 
-    /// Softmax scale. Part of the problem: a kernel may fold a known scale into its epilogue.
+    /// Softmax scale; part of the problem since a kernel may fold a known scale in.
     float attnScale = 0.0F;
 
     /// Dropout rate. Non-zero changes the kernel: an RNG and a mask are generated.
     float dropoutProbability = 0.0F;
 
-    /// Sliding-window attention, as rocKE's shape files carry it. -1 means unbounded, which is
-    /// full attention; a finite bound is a different kernel with different work per query.
+    /// Sliding-window bounds; -1 means unbounded (full attention).
     int64_t leftBound = -1;
     int64_t rightBound = -1;
 
-    /// Which corner the causal diagonal is anchored at. Only meaningful under a causal mask,
-    /// and then it is not a detail: at seqlen_q < seqlen_k the two anchors mask different
-    /// triangles, so they are different work -- and an engine that serves one anchor and
-    /// refuses the other is removed from a comparison by the corpus rather than by a
-    /// measurement. Defaults to the schema's default so an unset option writes what a graph
-    /// built before this field did.
+    /// Anchor of the causal diagonal, used only under a causal mask. At seqlen_q < seqlen_k
+    /// the two anchors mask different triangles.
     fb::DiagonalAlignment diagonalAlignment = fb::DiagonalAlignment::TOP_LEFT;
 };
 
 /// @brief Scaled dot-product attention, forward.
 ///
-/// SdpaAttributes declares twenty-eight optional tensor uids -- paged KV, dropout, descale
-/// factors, sinks. All are left null here. Each is a different problem rather than a variation
-/// on this one, and giving them a uid they do not have is how a graph stops deserializing.
-///
-/// With `generateStats` -- the training forward -- @p stats receives the softmax statistics the
-/// backward pass consumes; the flag without the tensor is a graph no engine can run.
+/// The schema's other optional tensor uids (paged KV, dropout, descale, sinks) stay null.
+/// Stats are generated only when `generateStats` is set and @p stats is given.
 inline GraphBytes sdpaForward(const TensorSpec& q,
                               const TensorSpec& k,
                               const TensorSpec& v,
@@ -747,12 +686,9 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
     attributes.add_k_tensor_uid(k.uid);
     attributes.add_v_tensor_uid(v.uid);
     attributes.add_o_tensor_uid(o.uid);
-    // Causality is written as the bounds it means -- right_bound 0, left unbounded -- with the
-    // anchor in diagonal_alignment, and the deprecated causal_mask flag left false. The flag is
-    // not a synonym: providers give it precedence over the bounds and read it as TOP-LEFT
-    // whatever the alignment says (SdpaPlanUtils::getMaskType), so a "bottom-right causal"
-    // graph built with it is top-left, and an engine whose causal kernels are all bottom-right
-    // -- AITER on gfx942 -- declined every causal problem in the corpus.
+    // Causality is written as bounds (right 0, left unbounded) plus diagonal_alignment. The
+    // deprecated causal_mask flag stays false: providers read it as top-left regardless of the
+    // alignment (SdpaPlanUtils::getMaskType).
     const bool causal = options.causalMask && options.rightBound < 0;
     attributes.add_causal_mask(false);
     attributes.add_padding_mask(options.paddingMask);
@@ -826,9 +762,7 @@ inline GraphBytes sdpaBackward(const TensorSpec& q,
     attributes.add_dq_tensor_uid(dq.uid);
     attributes.add_dk_tensor_uid(dk.uid);
     attributes.add_dv_tensor_uid(dv.uid);
-    // Written exactly as sdpaForward writes them, for the same reasons: causality as bounds with
-    // the anchor in diagonal_alignment (the deprecated flag reads as top-left whatever the
-    // alignment says), and the scale stated rather than left to a provider's guess.
+    // Same encoding as sdpaForward: causality as bounds plus diagonal_alignment.
     const bool causal = options.causalMask && options.rightBound < 0;
     attributes.add_causal_mask(false);
     attributes.add_padding_mask(options.paddingMask);
@@ -947,13 +881,8 @@ inline GraphBytes rmsNormBackward(const TensorSpec& dy,
 // Batch normalization
 // ---------------------------------------------------------------------------
 
-/// @brief BatchNorm training forward, with mean and inverse variance produced.
-///
-/// `peer_stats_tensor_uid` is a vector in the schema, for multi-GPU statistic exchange. It is
-/// left empty: a peer-reduced batchnorm is a different problem, and an empty list says so
-/// rather than implying one peer.
-/// Batchnorm training's optional running statistics: previous and next running mean and
-/// variance, blended by a pass-by-value momentum. All five or none.
+/// Optional batchnorm running statistics, blended by a pass-by-value momentum. All five or
+/// none.
 struct BatchnormRunningStats
 {
     TensorSpec prevMean;
@@ -1000,9 +929,9 @@ inline flatbuffers::Offset<fb::Node> activationNode(flatbuffers::FlatBufferBuild
 }
 } // namespace detail
 
-/// Batchnorm training, optionally with running statistics and optionally followed by an
-/// activation. With an activation, batchnorm writes a virtual fp32 tensor and the activation
-/// writes @p y.
+/// @brief BatchNorm training forward, optionally with running statistics and a trailing
+/// activation (then batchnorm writes a virtual fp32 tensor and the activation writes @p y).
+/// `peer_stats_tensor_uid` stays empty: a peer-reduced batchnorm is a different problem.
 inline GraphBytes
     batchnormForwardTraining(const TensorSpec& x,
                              const TensorSpec& scale,
@@ -1077,10 +1006,8 @@ inline GraphBytes
     return detail::finish(builder, "batchnorm_training", types, tensors, nodes);
 }
 
-/// @brief BatchNorm inference. Statistics are inputs here rather than outputs, which is what
-///        distinguishes it from the training pass and gives it different kernels.
-/// Batchnorm inference, optionally followed by an activation (batchnorm then writes a virtual
-/// fp32 tensor and the activation writes @p y).
+/// @brief BatchNorm inference: statistics are inputs, not outputs. With @p activation,
+/// batchnorm writes a virtual fp32 tensor and the activation writes @p y.
 inline GraphBytes batchnormInference(const TensorSpec& x,
                                      const TensorSpec& mean,
                                      const TensorSpec& invVariance,
@@ -1168,12 +1095,10 @@ inline GraphBytes batchnormBackward(const TensorSpec& dy,
     return detail::finish(builder, "batchnorm_bwd", types, tensors, nodes);
 }
 
-/// @brief The backward pass through a fused batchnorm inference and activation.
+/// @brief Backward pass through a fused batchnorm inference and activation.
 ///
-/// Three nodes: batchnorm inference recomputes y (virtual); the activation's backward mode takes
-/// the incoming gradient @p dy and that y, and writes the gradient batchnorm backward consumes
-/// (virtual); batchnorm backward then writes dx, dscale and dbias, reusing inference's x, scale,
-/// mean and inverse variance.
+/// Three nodes: inference recomputes y (virtual), the activation backward writes the gradient
+/// (virtual), and batchnorm backward writes dx, dscale and dbias.
 inline GraphBytes batchnormInferenceActivationBackward(const TensorSpec& x,
                                                        const TensorSpec& mean,
                                                        const TensorSpec& invVariance,
@@ -1274,10 +1199,8 @@ struct ResampleGeometry
     fb::PaddingMode paddingMode = fb::PaddingMode::ZERO_PAD;
 };
 
-/// @brief Resample forward (pooling).
-///
-/// @p index, when given, is written with the position of each window's maximum (max pooling's
-/// generate_index), for a backward pass to route gradients through.
+/// @brief Resample forward (pooling). @p index, when given, receives each window's max
+///        position for the backward pass.
 inline GraphBytes resampleForward(const TensorSpec& x,
                                   const TensorSpec& y,
                                   const ResampleGeometry& geometry,
@@ -1313,9 +1236,7 @@ inline GraphBytes resampleForward(const TensorSpec& x,
     return detail::finish(builder, "resample_fwd", types, tensors, nodes);
 }
 
-/// @brief Resample backward.
-///
-/// @p index, when given, is the forward pass's max positions; max pooling's gradient needs it.
+/// @brief Resample backward. @p index, when given, holds the forward pass's max positions.
 inline GraphBytes resampleBackward(const TensorSpec& dy,
                                    const TensorSpec& dx,
                                    const ResampleGeometry& geometry,
@@ -1417,11 +1338,8 @@ inline GraphBytes blockScaleDequantize(const TensorSpec& x,
 
 /// @brief MoE grouped matmul.
 ///
-/// The routing lives in the *contents* of `firstTokenOffset` and `tokenIndex`, not in any
-/// extent: how many tokens each expert receives decides the size of every grouped GEMM. Two
-/// problems with byte-identical graphs and different routing are different problems, and
-/// nothing here declares those contents: a measurement of this graph covers only whatever
-/// routing the benchmark's buffers happen to hold.
+/// Routing lives in the contents of `firstTokenOffset` and `tokenIndex`, which the graph does
+/// not declare; a measurement covers whatever routing the bench's buffers hold.
 inline GraphBytes moeGroupedMatmul(const TensorSpec& token,
                                    const TensorSpec& weight,
                                    const TensorSpec& firstTokenOffset,

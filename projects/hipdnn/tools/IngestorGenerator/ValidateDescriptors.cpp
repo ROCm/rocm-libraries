@@ -52,16 +52,10 @@
  * typed registration (`discoverDescriptorSets()` -> `registerNativeIngestorSymbols()` ->
  * `loadValidatedDescriptorSets<Handle>()`) and census the loaded bundle.
  *
- * Every UHD a UED binds through a role map (`sort_kernel_catalog`, `predict_engine`,
- * `predict_applicable_kernels`), for every architecture key and -- in the two scoring
- * roles, which name one model per ranking metric -- every listed model, is additionally
- * admitted exactly as the runtime admits that role: its features must read only declared
- * KMD fields and match their `features_hash`; a kernel-scoped model must load through the
- * real `UhdKernelHeuristic::tryCreate` and -- given `--feature-samples` for dynamic
- * bindings -- extract for every candidate kernel; a `predict_engine` model must pass the
- * L1 binding and model guards GenericEngine evaluates it through
- * (`uhd::prediction_detail::validateBinding`/`model`) and extract graph-only, once per
- * sample. No native scorer is ever executed.
+ * Every UHD bound through a role map, for every architecture and metric, is also admitted
+ * as the runtime admits that role: KMD fields and `features_hash` must match, kernel-scoped
+ * models load through `UhdKernelHeuristic::tryCreate`, and `predict_engine` models pass
+ * the L1 guards. No native scorer is ever executed.
  */
 
 namespace
@@ -287,10 +281,8 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
         {
             harvested.dispatch.insert(dispatch.dispatchSymbol);
         }
-        // Every role, every architecture and every metric's model, not only the resolved
-        // `default` ranking model: a native model reachable only through a per-arch key, a
-        // second metric, or an L1 role would otherwise reach the loader unregistered and be
-        // disabled here while the real provider, which registers it, loads it fine.
+        // Every role, architecture and metric: the real provider registers all of them, so a
+        // model left unregistered here would be falsely disabled.
         const auto harvestRole = [&](const auto& references, bool uhdScorer) {
             forEachRoleModel(references, [&](const std::string&, const DescriptorId& id) {
                 const auto* model = detail::findDescriptor(catalog.heuristics, id);
@@ -410,12 +402,8 @@ std::vector<const nlohmann::json*> relevantSamples(const nlohmann::json& samples
     return relevant;
 }
 
-/// `predict_engine`: the L1 admission GenericEngine applies to a bound model -- the
-/// loader's resolved binding, then `prediction_detail::validateBinding` and
-/// `prediction_detail::model` -- never the kernel ranker's loader, which admits
-/// `static_order` and resolves signature-less native models as kernel comparators.
-/// Features extract once per recorded graph: an L1 row has no candidate kernel, so kernel
-/// bindings never stand in for graph values.
+/// `predict_engine`: the L1 admission GenericEngine applies (`validateBinding`, `model`),
+/// not the kernel ranker's loader. Features extract once per graph sample, with no kernel.
 /// @returns The feature rows extracted.
 size_t checkEngineModel(const DescriptorSet& set,
                         const std::string& arch,
@@ -424,8 +412,7 @@ size_t checkEngineModel(const DescriptorSet& set,
                         const nlohmann::json& samples)
 {
     namespace prediction = hipdnn_plugin_sdk::uhd::prediction_detail;
-    // What the engine is constructed with: the loader's resolution, after its provenance
-    // and native-symbol pre-flight. A model it withheld has already logged why.
+    // The loader's resolved binding; a model it withheld has already logged why.
     const HeuristicDescriptor* bound = nullptr;
     if(const auto byMetric = set.enginePredictionsByMetric.find(model.score.metric);
        byMetric != set.enginePredictionsByMetric.end())
@@ -525,9 +512,7 @@ size_t checkKernelModel(const DescriptorSet& set,
     return evaluated;
 }
 
-/// RFC 0019 §6.3 over every role-bound model: KMD fields, features hash, then the
-/// admission the runtime applies to that role and -- where the signature has one --
-/// feature extraction. A failure is logged as an ERROR, so it reaches the sink and fails
+/// RFC 0019 §6.3 over every role-bound model. A failure is logged as an ERROR so it fails
 /// the run.
 nlohmann::json validateModels(const DescriptorCatalog& catalog,
                               const std::vector<DescriptorSet>& sets,
@@ -544,9 +529,8 @@ nlohmann::json validateModels(const DescriptorCatalog& catalog,
 
         const auto checkModel
             = [&](const char* role, const std::string& arch, const DescriptorId& id) {
-                  // `metric` is the ranking metric the model declares (null for a metric-less
-                  // ranker, or when the model did not resolve): a scoring role names one model
-                  // per metric, so (role, arch, metric) is what identifies a binding.
+                  // A scoring role names one model per metric, so (role, arch, metric)
+                  // identifies a binding.
                   nlohmann::json check{{"engine", set.engine.name},
                                        {"role", role},
                                        {"arch", arch},

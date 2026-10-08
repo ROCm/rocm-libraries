@@ -1,12 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""`uhd_gen size`: a learning curve, a measured ceiling, a fit, and quotas for the next corpus.
-
-The pure pieces are pinned directly -- a planted power law is recovered, a target past the
-ceiling is refused, the allocation fills floors before it follows the misses. The run itself
-is driven end to end over collections a fake bench measured, so the curve's models are
-trained and scored exactly as `generate` and `evaluate` would.
-"""
+"""Tests for `uhd_gen size`: learning curve, ceiling, fit, and regime quotas."""
 import csv
 import hashlib
 import json
@@ -31,9 +25,9 @@ KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
 GRAPHS = 150
 
 
-# ------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # The pure pieces.
-# ------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def test_the_fit_recovers_a_planted_power_law():
@@ -79,7 +73,7 @@ def test_the_ceiling_scores_repeats_against_the_label_never_the_label_itself():
     ]
     ceiling = ceiling_from_repeats(labels, measurements, "tflops", 0.10, {"g"})
     assert ceiling["repeats"] == 2 and ceiling["repeat_within"] == 0.5
-    # 104 vs 100 is two errors of ~2.8%; 130 vs 100, two of ~21%: one of each within 10%.
+    # 104 vs 100: two errors of ~2.8%; 130 vs 100: two of ~21%. One of each within 10%.
     assert ceiling["within"] == 0.5
     wide = ceiling_from_repeats(
         labels, [((1, "gpu1"), dict(other_gpu, tflops=113.0))], "tflops", 0.10, {"g"}
@@ -109,7 +103,7 @@ def test_every_regime_reaches_the_floor_before_the_rest_follows_the_misses():
         quotas["unmeasured"] == 30
     ), "a regime nothing has tested gets its floor and no more"
     assert quotas["thin"] >= 26
-    # Per test shape, `weak` misses twice as often as `common`: it gets more per test shape.
+    # Per test shape, `weak` misses twice as often as `common`, so it gets more.
     assert quotas["weak"] / 20 > quotas["common"] / 100
 
 
@@ -138,13 +132,13 @@ def test_the_test_set_is_stratified_and_reproducible():
     assert "o0" not in chosen, "a regime of one shape cannot give it up"
 
 
-# ------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # The run.
-# ------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def _noise(device: str, graph: str) -> float:
-    """Up to +/-8% per (device, shape), a few shapes much worse: a ceiling to measure."""
+    """Up to +/-8% per (device, shape), a few shapes much worse."""
     digest = hashlib.sha256(f"{device}:{graph}".encode()).digest()
     spread = 0.6 if digest[1] < 20 else 0.16
     return 1.0 + (digest[0] / 255.0 - 0.5) * spread

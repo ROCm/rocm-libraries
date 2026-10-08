@@ -156,10 +156,8 @@ inline GraphId makeNilGraphId()
     return GraphId{};
 }
 
-/// A real, serialized single-node graph: C[m, n] = A[m, k] x B[k, n], so the canonical work
-/// model publishes `graph.flops` = 2mnk for it. TestGraph carries no node and therefore no
-/// work, which a test of what a ranker learns from the problem cannot use. @p graphId, when
-/// given, makes the catalog cacheable, which a test of what the catalog cache retains needs.
+/// A serialized single-node matmul C[m, n] = A[m, k] x B[k, n], so `graph.flops` = 2mnk;
+/// TestGraph has no node and so no work. @p graphId, when given, makes the catalog cacheable.
 class MatmulTestGraph
 {
 public:
@@ -212,9 +210,7 @@ inline DeviceProperties testDeviceProperties()
     DeviceProperties properties;
     properties.gcnArchName = "gfx000";
     properties.warpSize = 64;
-    // Non-zero memory facts, so a corpus row emitted through this fixture carries the
-    // `device.*` columns a merged multi-board sweep depends on, rather than a set of
-    // zeroes that would satisfy an "is the column present" check while proving nothing.
+    // Non-zero memory facts, so corpus rows carry meaningful `device.*` columns.
     properties.multiProcessorCount = 304;
     properties.totalGlobalMem = 192ULL * 1024 * 1024 * 1024;
     properties.memoryBusWidth = 8192;
@@ -755,9 +751,8 @@ inline std::unique_ptr<StateManager> makeIdentifiedStateManager(
         winnerCacheCapacity);
 }
 
-/// An engine identified by name alone: no revision, no UHD, no model hash. Every shard
-/// test that predates the identity in the path uses this, and pairs with
-/// `winnerCacheShardPath({engineName}, ...)` naming the same default identity.
+/// An engine identified by name alone: no revision, no UHD, no model hash. Pairs with
+/// `winnerCacheShardPath({engineName}, ...)`.
 inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName)
 {
     return makeIdentifiedStateManager(EngineIdentity{engineName});

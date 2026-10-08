@@ -1,20 +1,10 @@
 #!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Evaluating a two-layer artifact, and the ways it silently reports half a model.
+"""Tests for evaluating two-layer (grouped) artifacts and tree routing.
 
-A grouped model decides twice -- layer 1 picks the group, layer 2 orders within it -- and every
-failure here produces a *plausible* number rather than an error:
-
-- reading only `trees` scores layer 1 alone, which is exactly what a correct single-layer model
-  produces, so nothing about the output looks wrong;
-- `model.lgbm` cannot carry the per-group ensembles at all, so preferring it silently measures
-  half the model on any directory where training kept it;
-- the group decision must be made over ONE problem's candidates: taken across a whole corpus,
-  one problem's winning group blanks out every other problem's candidates, and the regret that
-  comes back is a number about nothing;
-- a rejected group must stay unusable through the score transform -- `expm1(-inf)` is -1.0, a
-  finite value that outranks a genuinely negative score.
+Layer 1 picks a group per problem and layer 2 ranks within it; each failure mode here
+yields a plausible number rather than an error.
 """
 from __future__ import annotations
 
@@ -40,7 +30,7 @@ GROUPS = (0.0, 1.0)
 
 
 def _booster(rows: list[tuple[float, float, float]], num_trees: int = 8) -> lgb.Booster:
-    """A booster over (q.size, kernel.group) -> target, with enough signal to split on."""
+    """A booster over (q.size, kernel.group) -> target with enough signal to split."""
     frame = pd.DataFrame(rows, columns=["q.size", "kernel.group", "y"])
     data = lgb.Dataset(
         frame[["q.size", "kernel.group"]].to_numpy(), label=frame["y"].to_numpy()
@@ -76,8 +66,7 @@ def _write_model(directory: Path, *, grouped: bool, objective: str = "max") -> P
 
     group_models = None
     if grouped:
-        # Within a group, larger q.size is better -- a shape layer 1 does not express, so a
-        # difference in the ranking can only have come from layer 2.
+        # Layer 1 does not express this, so any in-group ordering comes from layer 2.
         group_models = [
             (
                 float(g),
@@ -132,11 +121,7 @@ def _candidates() -> pd.DataFrame:
 
 
 def test_a_grouped_artifact_rejects_every_candidate_outside_the_chosen_group():
-    """The property that distinguishes two layers from one.
-
-    Scoring only `trees` returns a usable score for every row, which is indistinguishable from a
-    correct single-layer model. If nothing here is -inf, the second layer was never consulted.
-    """
+    """If nothing is -inf, only layer 1 (`trees`) was scored."""
     with_tmp = Path(__import__("tempfile").mkdtemp())
     bundle = load_model(_write_model(with_tmp / "grouped", grouped=True))
     scores = bundle.scorer(_candidates())
@@ -148,18 +133,12 @@ def test_a_grouped_artifact_rejects_every_candidate_outside_the_chosen_group():
         scores
     ).any(), "every candidate was rejected; nothing could be picked"
 
-    # Exactly one group survives, and it survives whole.
     survived = _candidates().loc[np.isfinite(scores), "kernel.group"].unique()
     assert len(survived) == 1
 
 
 def test_an_ungrouped_artifact_scores_every_candidate():
-    """The compatibility claim, and the one that protects every shipped single-layer model.
-
-    The grouped path must not engage on an artifact that has no groups: a model written before
-    the two-layer fields existed has `group_by_feature_index = -1`, and blanking candidates on
-    it would break ranking for every UHD already in the field.
-    """
+    """`group_by_feature_index = -1` must not engage the grouped path."""
     with_tmp = Path(__import__("tempfile").mkdtemp())
     bundle = load_model(_write_model(with_tmp / "flat", grouped=False))
     scores = bundle.scorer(_candidates())
@@ -169,11 +148,7 @@ def test_an_ungrouped_artifact_scores_every_candidate():
 
 
 def test_a_grouped_model_is_not_ranked_with_the_booster():
-    """`model.lgbm` holds layer 1 alone; LightGBM cannot represent the per-group ensembles.
-
-    `load_model` prefers the booster when it is present, which on a grouped directory would
-    measure half the model and report a single-layer figure that looks entirely plausible.
-    """
+    """`model.lgbm` holds only layer 1, so grouped models must load `model.bin`."""
     with_tmp = Path(__import__("tempfile").mkdtemp())
     directory = _write_model(with_tmp / "both", grouped=True)
     assert (
@@ -185,12 +160,7 @@ def test_a_grouped_model_is_not_ranked_with_the_booster():
 
 
 def test_the_group_decision_is_made_per_problem():
-    """Each problem chooses its own group.
-
-    `scoreBatch` is handed one query's candidates. Choosing a single group across a corpus would
-    let one problem's winner blank out another's, so a problem whose best group differs would
-    lose every candidate and the regret would describe nothing.
-    """
+    """Like `scoreBatch`, the group is chosen within one query, not across a corpus."""
     with_tmp = Path(__import__("tempfile").mkdtemp())
     bundle = load_model(_write_model(with_tmp / "grouped", grouped=True))
 
@@ -202,9 +172,7 @@ def test_the_group_decision_is_made_per_problem():
 
 @pytest.mark.parametrize("objective, expected", [("max", 1.0), ("min", 0.0)])
 def test_layer_one_picks_the_group_in_the_objective_direction(objective, expected):
-    """At q.size 9 layer 1 scores group 1 near 19 and group 0 near 11. A `max` model keeps
-    the larger; a `min` (time) model the smaller -- taking the argmax there kept the
-    slowest group, the same inversion TreeDataAdapter::scoreBatch had."""
+    """At q.size 9 layer 1 scores group 1 near 19 and group 0 near 11."""
     with_tmp = Path(__import__("tempfile").mkdtemp())
     bundle = load_model(
         _write_model(with_tmp / objective, grouped=True, objective=objective)
@@ -235,12 +203,7 @@ def _corpus() -> pd.DataFrame:
 
 
 def test_two_stage_regret_sums_to_the_total():
-    """The decomposition is only useful if it accounts for the whole shortfall.
-
-    Both parts are measured against the same oracle precisely so they add up; a part computed
-    against the group's own best instead would still look reasonable and would not sum, leaving
-    a total nobody can attribute.
-    """
+    """Both parts are measured against the same oracle, so they must add up."""
     with_tmp = Path(__import__("tempfile").mkdtemp())
     bundle = load_model(_write_model(with_tmp / "grouped", grouped=True))
 
@@ -266,11 +229,7 @@ def test_two_stage_regret_sums_to_the_total():
 
 
 def test_no_decomposition_is_reported_without_a_group_column():
-    """Absent must mean "not a two-layer model", not "the split came out zero".
-
-    A section of zeros would read as a model that never loses anything to its group choice,
-    which is the most flattering possible misreading.
-    """
+    """Absent means "not a two-layer model"; zeros would claim perfect group picks."""
     with_tmp = Path(__import__("tempfile").mkdtemp())
     bundle = load_model(_write_model(with_tmp / "flat", grouped=False))
 
@@ -284,17 +243,12 @@ def test_no_decomposition_is_reported_without_a_group_column():
 def _strict_less_than_model(directory: Path) -> Path:
     """An artifact whose one split uses `<` rather than `<=`.
 
-    Built through the object API rather than by training: LightGBM emits only `<=` and `==`
-    decision types, so `lgbm_to_flatbuffer` always writes `decision_lte=True` and no trained
-    model can exercise the other branch. A hand-written or foreign artifact can -- which is
-    exactly what `TestTreeDataAdapter` and the rocKE model generator produce.
+    Hand-built because LightGBM never emits `<`, so no trained model can exercise it.
     """
     from hipdnn_flatbuffers_sdk.data_objects.GbdtTree import GbdtTreeT
 
     tree = GbdtTreeT()
-    # Root splits slot 0 at 10. Left leaf 1.0, right leaf 9.0, with `<` semantics: a row at
-    # exactly 10 belongs on the RIGHT. Under `<=` it would go left, and under the complement
-    # (`>`) every row would swap sides -- so the three readings give three different answers.
+    # Split at 10 with leaves 1.0/9.0: `<`, `<=` and `>` route rows 5/10/15 differently.
     tree.featureIndices = [0, 0, 0]
     tree.thresholds = [10.0, 0.0, 0.0]
     tree.leftChildren = [1, -1, -1]
@@ -308,8 +262,7 @@ def _strict_less_than_model(directory: Path) -> Path:
 def _single_tree_model(
     directory: Path, tree, *, score: dict | None = None, manifest: dict | None = None
 ) -> Path:
-    """A one-tree, one-feature (`q.size`) artifact written by hand, as a foreign producer
-    would, with the descriptor and training manifest beside it."""
+    """A hand-written one-tree, one-feature (`q.size`) artifact with its descriptor."""
     import flatbuffers
 
     from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
@@ -348,14 +301,7 @@ def _single_tree_model(
 
 
 def test_a_strict_less_than_split_routes_the_way_the_runtime_routes_it():
-    """`decision_lte` false means `<`, and the complement is not the same thing.
-
-    Regression: this traversal used `x > threshold` for the false case, which is the complement
-    of `<=` rather than `<`. Every row went down the opposite subtree, so the evaluator ranked
-    such a model backwards while the C++ runtime scored it correctly -- a disagreement that
-    would read as a bad model rather than a bad reader. The schema and TreeDataAdapter both say
-    `<`; the test mirror in test_converter.py already had it right.
-    """
+    """`decision_lte` false means `<`, not the complement `>` of `<=`."""
     with_tmp = Path(__import__("tempfile").mkdtemp())
     bundle = load_model(_strict_less_than_model(with_tmp / "strict_lt"))
 
@@ -363,8 +309,7 @@ def test_a_strict_less_than_split_routes_the_way_the_runtime_routes_it():
         pd.DataFrame([{"q.size": 5.0}, {"q.size": 10.0}, {"q.size": 15.0}])
     )
 
-    # Under `<`: 5 goes left (1.0), 10 and 15 go right (9.0). The descriptor declares no
-    # transform, which the runtime reads as identity, so the scores are the leaves.
+    # No transform is declared, so scores are the raw leaves.
     assert scores[0] < scores[1], "a value below the threshold took the wrong branch"
     assert scores[1] == pytest.approx(
         scores[2]
@@ -374,7 +319,7 @@ def test_a_strict_less_than_split_routes_the_way_the_runtime_routes_it():
 
 
 def _routing_tree(nodes: int, default_left, decision_lte):
-    """`nodes` 3: a stump at 0. `nodes` 5: the same root, its right child splitting at 2."""
+    """3 nodes: a stump at 0. 5 nodes: same root, right child splitting at 2."""
     from hipdnn_flatbuffers_sdk.data_objects.GbdtTree import GbdtTreeT
 
     tree = GbdtTreeT()
@@ -400,18 +345,15 @@ def _routing_tree(nodes: int, default_left, decision_lte):
     [
         # Both vectors omitted: `<=` everywhere.
         (3, None, None, [1.0, 1.0, 9.0]),
-        # Shorter than the tree: the root's entries apply, and past them a nonempty
-        # `decision_lte` means `<`, so 2 is not below node 2's threshold of 2. Padding with
-        # `<=` would send it left, to 3.
+        # Shorter than the tree: past the given entries a nonempty `decision_lte` means
+        # `<`, so 2 goes right at node 2 (threshold 2), not left to 3.
         (5, [True], [True], [1.0, 1.0, 9.0]),
     ],
 )
 def test_optional_routing_vectors_take_the_runtimes_defaults(
     tmp_path, nodes, default_left, decision_lte, expected
 ):
-    """`default_left` and `decision_lte` are optional and may be short; TreeDataAdapter
-    loads such an artifact and fills them in. The scores are the runtime's for the same
-    bytes (x = -1, 0, 2), not an IndexError."""
+    """Missing or short routing vectors are filled in as TreeDataAdapter does."""
     bundle = load_model(
         _single_tree_model(
             tmp_path / "model", _routing_tree(nodes, default_left, decision_lte)
@@ -422,9 +364,7 @@ def test_optional_routing_vectors_take_the_runtimes_defaults(
 
 
 def test_a_descriptor_declaring_no_transform_is_scored_as_identity(tmp_path):
-    """The engine reads an absent `score.transform` as identity (ScoreTransform.hpp), so the
-    descriptor's raw scores are its estimates; a training manifest saying log1p must not
-    reinterpret the UHD that ships."""
+    """The descriptor, not the training manifest's log1p, decides the transform."""
     bundle = load_model(
         _single_tree_model(
             tmp_path / "model",
@@ -438,13 +378,7 @@ def test_a_descriptor_declaring_no_transform_is_scored_as_identity(tmp_path):
 
 
 def test_a_generated_encoding_survives_train_then_score(tmp_path, evaluator):
-    """The round trip the whole mechanism rests on.
-
-    A string field outside the fixed table can only be a feature if the tool observes its
-    values, ships the map, and the scorer reads it back. Any break gives a model that trains
-    and saves and then cannot be reproduced: before this, training encoded nothing and the
-    runtime threw on the first such value.
-    """
+    """A string feature's derived encoding is shipped and read back by the scorer."""
     import subprocess
     import sys
 
@@ -456,18 +390,14 @@ def test_a_generated_encoding_survives_train_then_score(tmp_path, evaluator):
                 "kernel.pipeline": pipeline,
                 "tflops": size * (2.0 if pipeline == "interwave" else 1.0),
             }
-            # Wide enough to split: LightGBM's default min_data_in_leaf is 20, so a corpus of a
-            # couple of dozen rows trains to a single constant leaf and would fail the ordering
-            # assertion below for a reason that has nothing to do with the encoding.
+            # Enough rows to split past LightGBM's default min_data_in_leaf of 20.
             for size in range(1, 41)
             for pipeline in ("interwave", "intrawave")
         ]
     )
     frame.to_csv(corpus, index=False)
 
-    # `train` refuses to record an unattributable model, so the round trip needs a
-    # provenance snapshot. It is fixture scaffolding: this test is about the encoding
-    # surviving the trip, not about what the snapshot says.
+    # `train` requires a provenance snapshot; its contents are irrelevant here.
     snapshot = tmp_path / "provenance.json"
     snapshot.write_text(
         json.dumps(
@@ -486,10 +416,7 @@ def test_a_generated_encoding_survives_train_then_score(tmp_path, evaluator):
         encoding="utf-8",
     )
 
-    # `evaluator` because training stamps a features_hash, and that digest has one
-    # definition -- the binary. Named on the command line rather than left to the child's
-    # own lookup so the subprocess resolves what the fixture resolved: a checkout with
-    # nothing built skips here instead of failing on a search that came up empty.
+    # Pass the fixture's evaluator explicitly so the subprocess uses the same binary.
     out = tmp_path / "model"
     result = subprocess.run(
         [
@@ -526,8 +453,6 @@ def test_a_generated_encoding_survives_train_then_score(tmp_path, evaluator):
         "$kernel.pipeline": {"interwave": 0, "intrawave": 1}
     }, "the tool did not ship the table it trained with"
 
-    # And the scorer reads it back: passing the raw strings must produce numbers, not an
-    # "is a string and has no categorical encoding" refusal.
     bundle = load_model(out)
     scores = bundle.scorer(
         pd.DataFrame(
@@ -542,10 +467,9 @@ def test_a_generated_encoding_survives_train_then_score(tmp_path, evaluator):
 
 
 def _two_group_time_model(directory: Path, group_zero: float, group_one: float) -> Path:
-    """A grouped `time` ranker whose layer 1 scores group 0 and group 1 as the raw values given.
+    """A grouped `time` ranker with exact layer-1 scores per group.
 
-    Built from dumped ensembles rather than by training, so the layer-1 values are exact:
-    one split on `kernel.group` at 0.5. Each group's layer 2 is a constant.
+    Layer 1 splits on `kernel.group` at 0.5; each group's layer 2 is a constant.
     """
     from uhd_gen.lgbm_to_flatbuffer import build_gbdt_model
 
@@ -607,21 +531,19 @@ def _two_group_time_model(directory: Path, group_zero: float, group_one: float) 
 @pytest.mark.parametrize(
     "group_zero, group_one, rows, survivor",
     [
-        # A negative recovered time is discarded by the runtime, so it cannot choose a group,
-        # even though it is the best raw score under `min`.
+        # The runtime discards a negative recovered time, though it is best under min.
         (-0.5, 0.5, (0.0, 1.0), 1.0),
-        # An exact tie goes to the smaller group value whatever order the rows arrive in.
+        # An exact tie goes to the smaller group value regardless of row order.
         (0.5, 0.5, (1.0, 0.0), 0.0),
-        # Nothing admissible: no group is chosen and every candidate falls to declared order.
+        # Nothing admissible: no group is chosen.
         (-0.5, -0.5, (0.0, 1.0), None),
     ],
 )
 def test_layer_one_chooses_a_group_only_from_scores_the_runtime_admits(
     tmp_path, group_zero, group_one, rows, survivor
 ):
-    """TreeDataAdapter::scoreBatch's group decision: only a row naming a group whose layer-1
-    score is admissible (finite, and positive for a physical score) may choose; the best in
-    the objective's direction wins, exact ties to the smaller group value."""
+    """Mirrors TreeDataAdapter::scoreBatch: only finite (and, for a physical score,
+    positive) layer-1 scores may choose a group."""
     bundle = load_model(
         _two_group_time_model(tmp_path / "model", group_zero, group_one)
     )

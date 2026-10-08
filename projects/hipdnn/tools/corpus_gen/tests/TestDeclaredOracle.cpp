@@ -13,14 +13,9 @@
 #include <string>
 
 /// @file TestDeclaredOracle.cpp
-/// @brief The admission an engineless corpus run rests on.
+/// @brief The declared oracle used for engineless corpus runs.
 ///
-/// A deterministic engine still has to be measured, and measuring it starts with a corpus built
-/// before any handle exists. What decides that corpus is here: the declaration builds the point
-/// or it does not, and the graph fits the benchmarking ceiling or it cannot be timed. The one
-/// distinction worth a test is between those two refusals -- a broken declaration is counted and
-/// named, an oversized graph is neither, because reporting them together describes an engine
-/// that serves nothing.
+/// A broken declaration is counted and named; an oversized graph is refused silently.
 
 using namespace hipdnn_corpus_gen;
 
@@ -69,8 +64,7 @@ TEST(TestDeclaredOracle, APointTheDeclarationCanBuildIsAdmittedWithNoDevice)
 
 TEST(TestDeclaredOracle, AGraphTooLargeToBenchmarkIsRefusedButNotCounted)
 {
-    // Neither the declaration's fault nor an engine's. Counting it here would drown the count
-    // that means something, so the refusal is silent and only the admission changes.
+    // Not a declaration or engine fault, so it is not counted as a build failure.
     const auto metadata = shippedSdpa();
 
     const auto built = buildAdmissible(metadata, sdpaPoint());
@@ -86,15 +80,13 @@ TEST(TestDeclaredOracle, AGraphTooLargeToBenchmarkIsRefusedButNotCounted)
     EXPECT_EQ(failures, 0);
     EXPECT_TRUE(error.empty()) << error;
 
-    // The same point at a ceiling it fits is admitted, so the refusal was the ceiling and not
-    // something else about the point.
+    // Proves the refusal was the ceiling.
     EXPECT_TRUE(makeDeclaredOracle(metadata, nullptr, nullptr, footprint)(sdpaPoint()));
 }
 
 TEST(TestDeclaredOracle, ADeclarationThatCannotBuildIsCountedAndNamed)
 {
-    // Broken for every point, so it would otherwise read as an engine that serves almost
-    // nothing -- and the search would report that tiny region in good faith.
+    // Otherwise it would read as an engine that serves almost nothing.
     const auto metadata = shippedSdpa();
 
     int64_t failures = 0;
@@ -108,8 +100,7 @@ TEST(TestDeclaredOracle, ADeclarationThatCannotBuildIsCountedAndNamed)
 
 TEST(TestDeclaredOracle, TheFirstErrorIsKeptRatherThanTheLast)
 {
-    // One message is worth more than a count, and the first one is the one whose cause is still
-    // the cause -- later failures are usually the same defect seen again.
+    // Later failures are usually the same defect repeated.
     const auto metadata = shippedSdpa();
 
     int64_t failures = 0;

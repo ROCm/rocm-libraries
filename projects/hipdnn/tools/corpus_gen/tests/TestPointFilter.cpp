@@ -11,10 +11,7 @@
 /// @file TestPointFilter.cpp
 /// @brief `--keep`, whose only job is to be exact about what it removed.
 ///
-/// A filter that silently keeps everything is worse than no filter: the run reports itself as
-/// narrow, the corpus comes back broad, and the model trained on it carries a bias nobody looks
-/// for. So the two properties worth pinning are that an undeclared name is refused rather than
-/// ignored, and that a point without the filtered parameter fails rather than passes.
+/// An undeclared name is refused, and a point lacking the filtered parameter fails.
 
 using namespace hipdnn_corpus_gen;
 
@@ -43,8 +40,7 @@ TEST(TestPointFilter, AParameterNoDeclarationDeclaresIsRefusedRatherThanIgnored)
     std::vector<KeepClause> parsed;
     std::string error;
 
-    // `headdim` for `head_dim` is the whole failure mode: ignored, it filters nothing and the
-    // manifest still says the run was filtered.
+    // A typo would otherwise filter nothing while the manifest claims a filter.
     EXPECT_FALSE(parseKeepClauses({"q.headdim=128"}, KNOWN, parsed, error));
     EXPECT_NE(error.find("headdim"), std::string::npos) << error;
 }
@@ -84,9 +80,7 @@ TEST(TestPointFilter, ClausesAreConjunctiveAndAnEmptyFilterKeepsEverything)
 
 TEST(TestPointFilter, RepeatingAParameterWidensItRatherThanEmptyingTheCorpus)
 {
-    // An engine's kernel table covers a set of head dims, not one. Under a conjunctive reading
-    // `--keep q.head_dim=64 --keep q.head_dim=128` names the empty corpus, and a run asked for
-    // two facets would come back with nothing and no error to explain it.
+    // A conjunctive reading would make this the empty corpus.
     const std::vector<KeepClause> either{{"head_dim", "64"}, {"head_dim", "128"}};
 
     EXPECT_TRUE(keeps(either, ProblemPoint{{"head_dim", int64_t{64}}}));
@@ -103,8 +97,6 @@ TEST(TestPointFilter, RepeatingAParameterWidensItRatherThanEmptyingTheCorpus)
 
 TEST(TestPointFilter, APointWithoutTheFilteredParameterFails)
 {
-    // It belongs to an operation that has no such facet. Admitting it would put exactly the
-    // problems the filter was written to exclude into a corpus reporting itself as filtered.
     const ProblemPoint elsewhere{{"m", int64_t{4096}}, {"n", int64_t{4096}}};
     EXPECT_FALSE(keeps({{"dtype", "bf16"}}, elsewhere));
 }

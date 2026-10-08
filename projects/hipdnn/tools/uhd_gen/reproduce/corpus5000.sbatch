@@ -6,41 +6,25 @@
 #SBATCH --time=02:00:00
 #SBATCH --output=%x-%j.log
 #
-# Build one 5000-graph corpus PER ENGINE, each generated FOR that engine: every candidate
-# problem is offered to it, so a corpus holds what the engine serves and nothing it declines.
+# Build one 5000-graph corpus PER ENGINE, generated FOR that engine: every candidate problem
+# is offered to it, so the corpus holds only what it serves. A corpus drawn from another
+# engine's geometries would bias the model, since declines are not random.
 #
-# Per engine, not one shared corpus: an engine trained on the few graphs it can serve out of
-# a corpus drawn from another engine's geometries learns a systematically biased model, and
-# rebuilding its corpus from what it actually serves is what removes that bias.
-#
-# A corpus an engine mostly declines is not a smaller training set; it is a biased one --
-# the declines are not random, they are one end of the shape distribution. That is why the
-# engine is asked here rather than its facets guessed with --keep, which is how these corpora
-# used to be narrowed.
-#
-# Runs for ONE arch, the node's: UHD_ARCH picks the rows (gfx942 by default; submit with
-# --constraint=GFX950 and UHD_ARCH=gfx950 for the other). Partition, account and GPU
-# constraint are passed at submission (reproduce/README.md, "What every job needs").
-#
-# UHD_BUILD=<dir> with UHD_SRC=<dir> reuses an existing build instead of cloning and building,
-# which is how a change is tested before it is pushed.
+# Runs for ONE arch, the node's: UHD_ARCH (default gfx942; use --constraint=GFX950 and
+# UHD_ARCH=gfx950 for the other). Site settings go on submission (reproduce/README.md).
+# UHD_BUILD=<dir> with UHD_SRC=<dir> reuses an existing build.
 set -uo pipefail
 
 SRC=${UHD_SRC:-/tmp/uhd/src}
-# The descriptor root the provider packs as `product`. Unset keeps the provider's own
-# default, the shipped root (src/engines/kernel_ingestor_engine/descriptors) that carries
-# hipkernel:Gfx950AttentionDense; UHD_PRODUCTION_ROOT=<path relative to the checkout>
-# packs another tree instead, e.g. the descriptor-packaging examples fixture tree.
+# Descriptor root packed as `product`, relative to the checkout; unset keeps the provider's
+# shipped root.
 PRODUCTION_ROOT_ARGS=()
 [ -n "${UHD_PRODUCTION_ROOT:-}" ] && \
     PRODUCTION_ROOT_ARGS=(-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/$UHD_PRODUCTION_ROOT")
 BUILD=${UHD_BUILD:-/tmp/uhd/build}
 OUT=${UHD_OUT:-/exchange/corpus-5000}
-# sbatch's --output lands in the job's OWN view of the submit directory, which inside a
-# --container-remap-root container is not the host home that /exchange maps to: the file
-# is written and then thrown away with the container. Everything is teed into /exchange
-# from the first line instead, because a job whose failure is invisible costs a whole
-# run to diagnose.
+# Tee into /exchange: under --container-remap-root, sbatch's --output file is discarded with
+# the container.
 mkdir -p "$OUT"
 exec > >(tee "$OUT/job-${SLURM_JOB_ID:-manual}.log") 2>&1
 ARCH=${UHD_ARCH:-gfx942}
@@ -79,10 +63,8 @@ if [ -z "${UHD_BUILD:-}" ]; then
     fi
     git -C "$SRC" log --oneline -1
 
-    # The providers, not just the tool: an engine is asked, so it has to be built and its
-    # descriptors staged. ALL rather than a target list, because descriptor staging rides on
-    # `add_custom_target(... ALL)` rules that a --target build skips, registering only a
-    # fraction of the engines.
+    # Build ALL: descriptor staging rides on `add_custom_target(... ALL)` rules that a
+    # --target build skips.
     step "build (hipdnn + hip-kernel-provider, $ARCH)"
     cmake -S "$SRC" -B "$BUILD" -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
@@ -116,9 +98,8 @@ OPS="$TOOLS/corpus_gen/operations"
 
 # name|engine|extra hipdnn_corpus_gen arguments, for this arch only.
 #
-# rocKE's pack is a source, not a filter: it proposes the geometries its kernels are compiled
-# for and the engine admits them. AITER has no pack; its corpus is found by the search alone.
-# rocKE ships an attention_dense pack for gfx950 only, so gfx942 has the AITER row alone.
+# rocKE's pack proposes geometries for the engine to admit; AITER has no pack and relies on
+# search alone. rocKE ships an attention_dense pack for gfx950 only.
 case "$ARCH" in
     gfx942) CORPORA="aiter-gfx942|ASM_SDPA_ENGINE|" ;;
     gfx950) CORPORA="rocke-gfx950|hipkernel:Gfx950AttentionDense|--kdp-root PACKS/gfx950_attention_dense
@@ -140,9 +121,8 @@ while IFS='|' read -r name engine args; do
     rc=$?
     echo "rc=$rc"
     grep -E "engine queries|^Generated|^SHORT|saturated|found no served|not registered" "$OUT/$name.log"
-    # 0 is a full corpus or one the engine physically cannot extend; anything else is a
-    # failure the log explains (1: bad arguments or an unregistered engine, 2: empty,
-    # 3: short without the engine being shown to serve no more).
+    # 0: full, or the engine cannot extend it. 1: bad arguments or unregistered engine,
+    # 2: empty, 3: short without proof the engine serves no more.
     if [ $rc -ne 0 ]; then rc_all=1; continue; fi
     python3 - "$dest/manifest.json" <<'PY'
 import json, sys, collections

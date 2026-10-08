@@ -131,9 +131,8 @@ public:
         = std::function<hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT(
             int64_t, hipdnnEnginePredictionKind_t)>;
 
-    /// Runs with borrowed prediction services, released before returning. @p rankingMetric
-    /// is the registered metric the policy ranks by; it reaches the plugin as the host
-    /// table's ranking_metric and must name the metric @p predict answers in.
+    /// Runs with borrowed prediction services, released before returning. @p predict must
+    /// answer in @p rankingMetric, which reaches the plugin as the host table's ranking_metric.
     bool finalize(const PredictionProvider& predict, const std::string& rankingMetric);
 
     /**

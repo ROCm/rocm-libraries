@@ -113,17 +113,9 @@ public:
         std::unique_ptr<IPlan<THandle>> plan;
         DescriptorId packId{};
         DescriptorId dispatchId{};
-        /// The feature values of the (problem, kernel) pair this candidate measures,
-        /// merged flat into its log record so an exporter can name a CSV column after
-        /// every key it finds. Flat rather than nested because the keys already carry
-        /// their UHD namespace (`q.<name>`, `kernel.<name>`) and every envelope key is
-        /// dotless, so the two sets cannot collide and no consumer has to flatten.
-        ///
-        /// Handed in, never derived: extracting features needs the graph match and the
-        /// kernel descriptor, and this class deliberately knows about neither (see
-        /// @c benchmarkId below). An empty object leaves the record byte-identical to
-        /// what it was before features existed, which is what a test double or a direct
-        /// construction gets.
+        /// Feature values for this (problem, kernel) pair, merged flat into the candidate's log
+        /// record. Keys are namespaced (`q.`, `kernel.`), so they cannot collide with the dotless
+        /// envelope keys. Supplied by the caller; empty adds nothing.
         nlohmann::json features = nlohmann::json::object();
     };
 
@@ -145,22 +137,10 @@ public:
     ///        plan's whole life. Only ever called from the sampling sweep, which holds
     ///        _mutex, so it need not be thread-safe.
     /// @throws HipdnnPluginException(INTERNAL_ERROR) if @p candidates is empty.
-    /// @param benchmarkId Opaque identity for the problem being benchmarked, echoed on
-    ///        every per-candidate log record so an exporter can group the rows of one
-    ///        sweep. Opaque on purpose: this class knows nothing about graphs, and the
-    ///        caller already holds the key that identifies one. Empty means unidentified,
-    ///        which is what a test double or a direct construction gets.
-    /// @param deviceIdentity Opaque identity for the device the sweep ran on, echoed the
-    ///        same way. Opaque for the same reason as @p benchmarkId, and threaded from
-    ///        the same caller: this class must not learn to read `DeviceProperties`, or a
-    ///        second notion of "which GPU" would exist that can disagree with the winner
-    ///        cache's. Present because the problem a row belongs to is (graph, device),
-    ///        not graph alone -- the winner cache keys on both. Without it a corpus merged
-    ///        across machines collapses rows that belong to different problems, and the
-    ///        RFC 0019.13 §11.2 oracle `v*(p)` becomes a minimum taken across devices, so
-    ///        every regret figure derived from it is understated. Empty means
-    ///        unidentified and omits the field entirely, leaving the record byte-identical
-    ///        to what a test double or a direct construction produced before.
+    /// @param benchmarkId Opaque problem identity echoed on every candidate log record so an
+    ///        exporter can group one sweep's rows; empty means unidentified.
+    /// @param deviceIdentity Opaque device identity, echoed the same way and omitted when
+    ///        empty. Rows group by (benchmark, device), matching the winner cache key.
     BenchmarkPlan(std::vector<Candidate> candidates,
                   const THandle& handle,
                   Timer timer = {},
@@ -224,12 +204,8 @@ private:
         bool timedOut = false;
     };
 
-    /// One candidate's sampled timings.
-    ///
-    /// `robustMeanMs` alone decides the ranking, as it always has. The other four exist
-    /// because the samples that produce it are the training signal a UHD is fitted to
-    /// (RFC 0019.13 §8.3), and reducing them to one number before anything can read them
-    /// throws that signal away one line before it leaves the function.
+    /// One candidate's sampled timings. Only `robustMeanMs` decides the ranking; the rest
+    /// are logged as UHD training signal (RFC 0019.13 §8.3).
     struct CandidateTiming
     {
         double robustMeanMs = 0.0;
@@ -405,9 +381,8 @@ private:
         // excludes the winner can still serve the runner-up.
         std::vector<std::pair<double, size_t>> ranked;
         ranked.reserve(_candidates.size());
-        // Every candidate's outcome from the pass that settles the comparison, logged
-        // only once it has settled: a discarded stalled pass re-measures every candidate,
-        // so logging as sampling went would give one (benchmark, kernel) two records.
+        // Outcomes of the settling pass, logged only after it settles: a discarded stalled pass
+        // re-measures every candidate and would otherwise log each one twice.
         std::vector<SampleOutcome> outcomes;
         outcomes.reserve(_candidates.size());
 
@@ -441,9 +416,8 @@ private:
                     restartUnstalled = true;
                     break;
                 }
-                // A candidate that failed to time is omitted, never appended with a
-                // sentinel time: it must never be served ahead of the normal ranked path.
-                // Its log record is the only trace that it was tried at all.
+                // A failed candidate is omitted, never given a sentinel time: it must never
+                // be served ahead of the normal ranked path.
                 if(outcome.timing.has_value())
                 {
                     ranked.emplace_back(outcome.timing->robustMeanMs, index);
@@ -532,12 +506,9 @@ private:
     /// candidate unusable without the malformed value ever reaching the reduction,
     /// ranking, or cache.
     ///
-    /// Ranking reduces the samples with robustMean() rather than by taking the fastest: a
-    /// kernel that is usually slower but occasionally lucky would win on its best sample
-    /// and then serve its typical time on every dispatch the cached ranking covers.
-    ///
-    /// Every failure names its reason here, because this is the only frame that knows
-    /// which one occurred; resolveChosen() logs it once the comparison settles.
+    /// Ranks by robustMean() rather than the fastest sample, so an occasionally lucky but
+    /// usually slower kernel cannot win. Each failure path names its reason; resolveChosen()
+    /// logs it once the comparison settles.
     template <typename DefaultTimer>
     SampleOutcome sampleCandidate(size_t index,
                                   const THandle& handle,
@@ -677,10 +648,8 @@ private:
         }
     }
 
-    /// min / mean / population stddev / count, alongside the ranking statistic.
-    ///
-    /// Population rather than sample stddev: these are every iteration that ran, not a
-    /// draw from a larger set, so there is no Bessel correction to make.
+    /// min, mean, population stddev, and count alongside the ranking statistic. Population
+    /// stddev because the samples are every iteration that ran, not a draw.
     static CandidateTiming summarize(const std::vector<double>& samples)
     {
         CandidateTiming timing;
@@ -706,16 +675,8 @@ private:
         return timing;
     }
 
-    /// One JSON object per timed candidate, at INFO.
-    ///
-    /// JSON rather than the surrounding prose because this record is read by a tool, not
-    /// a person: it is the per-kernel measurement a UHD is trained on, and the winner is
-    /// the only row the cache keeps. A losing kernel's time appears here or nowhere.
-    ///
-    /// At INFO deliberately. The plugin SDK's TRACE macro is byte-identical to its INFO
-    /// one -- same guard, same sink -- so there is no quieter level to hide in, and the
-    /// guard short-circuits before the object is built, so a default run (log level off)
-    /// pays nothing.
+    /// Logs one JSON record per timed candidate at INFO: the per-kernel measurement a UHD is
+    /// trained on, since the cache keeps only the winner. Nothing is built when INFO is off.
     void logCandidateTiming(const Candidate& candidate, const CandidateTiming& timing) const
     {
         if(!HIPDNN_PLUGIN_LOG_IS_INFO_ENABLED())
@@ -732,12 +693,8 @@ private:
         HIPDNN_PLUGIN_LOG_INFO(record.dump());
     }
 
-    /// The same record for a candidate that could not be measured.
-    ///
-    /// Emitted rather than skipped: RFC 0019.13 §8.3 wants an `is_valid=False` row with a
-    /// reason, and the winner cache deliberately drops failed candidates so a broken
-    /// kernel can never be served from it. The log is therefore the only place a failure
-    /// is recorded at all.
+    /// Logs a `failed` record with its reason (RFC 0019.13 §8.3). The winner cache drops
+    /// failed candidates, so this is the only place a failure is recorded.
     void logCandidateFailure(const Candidate& candidate, const std::string& reason) const
     {
         if(!HIPDNN_PLUGIN_LOG_IS_INFO_ENABLED())
@@ -750,25 +707,10 @@ private:
         HIPDNN_PLUGIN_LOG_INFO(record.dump());
     }
 
-    /// The fields every candidate record carries, however it ended, plus whatever
-    /// features the candidate was handed.
-    ///
-    /// `event` is the grep handle an exporter selects on; `benchmark` and `device`
-    /// together group the rows of one problem, since a process can benchmark several
-    /// graphs and the lines interleave, and a corpus can be merged from several machines.
-    /// Both halves are needed because the winner cache keys on both: the same graph on
-    /// two GPUs is two problems with two different best kernels, and grouping on
-    /// `benchmark` alone would let RFC 0019.13 §11.2's oracle be a minimum taken across
-    /// devices -- wrong in the flattering direction, and silently so.
-    ///
-    /// `device` is omitted rather than emitted empty when unidentified, so a test double
-    /// or a direct construction produces exactly the record it produced before this field
-    /// existed, and an exporter can tell "no device identity" from "the empty device".
-    ///
-    /// The features go in first and the envelope over the top, so the envelope always
-    /// wins: a payload that somehow carried a `kernel` key would otherwise overwrite the
-    /// row's identity, and the row would be attributed to the wrong kernel in the corpus
-    /// rather than merely carrying a bad column.
+    /// The fields common to every candidate record, layered over the candidate's features.
+    /// `benchmark` plus `device` identify one problem, as the winner cache keys on both;
+    /// `device` is omitted when unidentified. The envelope is written last so a feature key
+    /// can never overwrite the row's identity.
     nlohmann::json candidateRecord(const Candidate& candidate) const
     {
         nlohmann::json record = candidate.features;

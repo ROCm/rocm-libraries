@@ -1,16 +1,13 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The CSV-to-Parquet boundary, which is where RFC 0019.13 §8.3's checks are finally applied."""
+"""Tests for the CSV-to-Parquet boundary, where RFC 0019.13 §8.3's checks apply."""
 
 from __future__ import annotations
 
 import pytest
 
-# Module scope, before the imports that need it. pandas is what this module is written against,
-# and importing it at the top would make its absence a collection *error* -- indistinguishable
-# from a broken test -- where the derive suite beside it needs nothing but the standard library
-# and must keep running. The Parquet engine is skipped separately, at the one case that writes.
+# Skip at module scope so a missing pandas is a skip, not a collection error.
 pd = pytest.importorskip("pandas")
 
 from uhd_gen.dataset.publish import (  # noqa: E402  (deliberately after the skip)
@@ -29,8 +26,7 @@ def rows(**overrides) -> pd.DataFrame:
         "q.N": [1024, 1024],
         "q.K": [1024, 1024],
         "q.dtype": ["fp32", "fp32"],
-        # What the engine published beside the shape (RFC 0019 13.6), and the only thing the
-        # metrics are derived from: 2*M*N*K, and three 1024^2 fp32 tensors.
+        # Engine-published costs (RFC 0019 13.6): 2*M*N*K and three 1024^2 fp32 tensors.
         "q.flops": [2 * 1024**3, 2 * 1024**3],
         "q.bytes": [3 * 1024**2 * 4, 3 * 1024**2 * 4],
         "kernel.tile_m": [64, 128],
@@ -51,17 +47,11 @@ def test_metrics_are_added_and_collection_bookkeeping_is_dropped():
 
     assert "tflops" in out.columns and "gbs" in out.columns
     assert out["tflops"].iloc[0] == pytest.approx(2 * 1024**3 / 1.1e-3 / 1e12)
-    # shard_id distinguishes CSV parts during the gather and means nothing once merged.
     assert "shard_id" not in out.columns
 
 
 def test_the_published_rate_names_the_winner_the_calibrated_label_names():
-    """Rates come from `avgTimeMs`, the statistic a calibrated label is defined on.
-
-    A has the faster best run (1.0 vs 1.5 ms) and the slower typical one (2.0 vs 1.6 ms). A
-    min-derived rate made A the winner, so a model trained on the published `tflops` learned
-    the opposite of what generate's own avg-derived label teaches.
-    """
+    """Rates come from `avgTimeMs`, the statistic a calibrated label is defined on."""
     out = build_dataset(rows(minTimeMs=[1.0, 1.5], avgTimeMs=[2.0, 1.6]))
     assert out.loc[out["tflops"].idxmax(), "kernel.tile_m"] == 128
     assert out["tflops"].tolist() == pytest.approx(
@@ -76,9 +66,7 @@ def test_absent_optional_columns_take_their_defaults():
 
 
 def test_a_failed_row_keeps_null_metrics_and_downgrades_its_problem():
-    """The failure is information about a candidate, so the row stays -- but the problem can no
-    longer claim its space was fully measured, or regret over it reads as exact when it is not.
-    """
+    """A failed candidate keeps its row, but its problem is no longer complete."""
     frame = rows(
         minTimeMs=[1.0, None],
         avgTimeMs=[1.1, None],
@@ -102,16 +90,14 @@ def test_a_row_claiming_both_a_measurement_and_an_error_is_rejected():
 
 
 def test_a_row_with_neither_is_rejected():
-    """A pair that was never attempted does not belong in the results at all -- it is a filtered
-    configuration, and those are recorded in the run's report."""
+    """An unattempted pair is a filtered configuration, recorded in the run report."""
     frame = rows(minTimeMs=[1.0, None], avgTimeMs=[1.1, None])
     with pytest.raises(ValidationError, match="neither"):
         build_dataset(frame)
 
 
 def test_a_complete_problem_spanning_two_candidate_sets_is_rejected():
-    """The merge check. Two collections of one problem, each claiming completeness, that repeat a
-    configuration cannot both be the whole candidate set."""
+    """Two complete collections of one problem that repeat a configuration conflict."""
     frame = pd.concat([rows(), rows()], ignore_index=True)
     frame["problem_complete"] = True
     with pytest.raises(ValidationError, match="candidate sets"):
@@ -136,15 +122,7 @@ def test_a_corpus_that_identifies_no_problem_is_rejected():
 
 
 def test_the_problem_namespace_is_the_operations_own_name():
-    """The runtime publishes problem values under the token its matcher bound.
-
-    That token is the operation's name, so `q` is not a root the importer can look for --
-    a corpus swept today carries `matmul.M`, another operation's carries its own. Both are
-    problem columns by the only rule that generalises: namespaced, and not `kernel.*` or
-    `device.*`. The derived metrics prove it went further than validation: the engine's cost
-    is published as `<root>.flops`, and reading it means the namespace really was stripped
-    rather than the column merely tolerated.
-    """
+    """Any namespace other than `kernel.*`/`device.*` is the problem namespace."""
     frame = rows().rename(
         columns=lambda c: c.replace("q.", "matmul.", 1) if c.startswith("q.") else c
     )
@@ -157,12 +135,7 @@ def test_the_problem_namespace_is_the_operations_own_name():
 
 
 def test_shards_concatenate_and_round_trip_through_parquet(tmp_path):
-    """Appending is why collection stays CSV; this is the merge, and the publish after it.
-
-    Skips without pyarrow rather than failing: pandas carries no Parquet engine of its own, and
-    an environment lacking one should report a skip, the way uhd_gen's suite treats a missing
-    lightgbm. requirements.txt declares it for environments that do publish.
-    """
+    """Appending is why collection stays CSV; skips without pyarrow."""
     pytest.importorskip("pyarrow")
     first, second = tmp_path / "a.csv", tmp_path / "b.csv"
     rows().to_csv(first, index=False)
@@ -175,13 +148,10 @@ def test_shards_concatenate_and_round_trip_through_parquet(tmp_path):
     write_parquet(out, destination)
     back = pd.read_parquet(destination)
 
-    # Values, not dtype identity. pyarrow normalises pandas' object column to a real string
-    # dtype on the way back, which is more correct rather than less -- asserting frame equality
-    # would be testing pandas/pyarrow's type mapping instead of anything this module does.
+    # pyarrow normalises object columns to a string dtype; compare values only.
     pd.testing.assert_frame_equal(back, out, check_dtype=False)
 
-    # What the round trip actually has to preserve: a null stays null rather than becoming an
-    # empty string or a zero, since null is the whole signal that a row has no measurement.
+    # A null must survive the round trip rather than become "" or 0.
     nulled = build_dataset(
         rows(
             minTimeMs=[1.0, None],
@@ -211,13 +181,7 @@ def test_an_empty_csv_field_reads_back_as_a_null_metric(tmp_path):
 
 
 def test_a_solver_name_bound_to_two_ids_is_refused():
-    """The signature of a corpus merged across engine versions.
-
-    Nothing else in the file records which version a row came from, so a rename or a reused slot
-    is invisible except here. Left alone it inflates every problem's candidate count -- one
-    solver wearing two names is two candidates -- and regret is then computed over a catalog that
-    existed on no machine.
-    """
+    """One solver under two ids, as in a corpus merged across engine versions."""
     frame = rows(
         **{
             "kernel.solver": ["ConvBinWinoRxS", "ConvBinWinoRxS"],
@@ -229,7 +193,7 @@ def test_a_solver_name_bound_to_two_ids_is_refused():
 
 
 def test_a_solver_id_bound_to_two_names_is_refused():
-    """The other direction: a reused id, which the registrar's policy exists to prevent."""
+    """The other direction: a reused id."""
     frame = rows(
         **{
             "kernel.solver": ["ConvBinWinogradRxSf3x2", "ConvBinWinoRxS<3-2>"],
@@ -257,11 +221,7 @@ def test_a_corpus_without_ids_is_left_alone():
 
 
 def test_the_pairing_is_a_convention_not_a_column_list():
-    """`X`/`X_id` from any producer, not one engine's spelling.
-
-    The rule has to read a corpus whose candidates are not MIOpen solvers, since the
-    producer of a training CSV is whoever wrote the kernel.
-    """
+    """`X`/`X_id` from any producer, not one engine's spelling."""
     frame = rows(**{"kernel.variant": ["fast", "fast"], "kernel.variant_id": [7, 9]})
     with pytest.raises(ValidationError, match="ambiguous"):
         build_dataset(frame)
@@ -278,21 +238,15 @@ def test_an_unpaired_column_is_not_checked():
 
 
 def test_expansion_makes_two_configurations_of_one_kernel_distinguishable():
-    """Unexpanded, a model sees one feature row for every configuration of a kernel.
-
-    A grouped model's second layer then ranks without being able to prefer, which produces no
-    error and no warning -- only a heuristic that never picks the tuned configuration.
-    """
+    """Unexpanded, a model sees one feature row for every configuration of a kernel."""
     frame = rows(**{"kernel.descriptor": ["t,64,4", "t,128,4"]})
     out = expand_descriptors(build_dataset(frame), ["kernel.descriptor"])
 
     assert out["kernel.descriptor.cfg0"].tolist() == [64, 128]
     assert out["kernel.descriptor.cfg1"].tolist() == [4, 4]
-    # The source column survives: it is the readable identity of a configuration, and every
-    # report that names a winner wants it.
+    # The source column is kept as the readable identity of a configuration.
     assert "kernel.descriptor" in out.columns
-    # The word shape stays text: RFC 0019 §6.5 gives the number to the training tool, which
-    # ships the map in the UHD where features_hash covers it.
+    # The word shape stays text; the training tool numbers it (RFC 0019 §6.5).
     assert out["kernel.descriptor.variant"].tolist() == ["t", "t"]
 
 
@@ -303,12 +257,7 @@ def test_expanding_a_column_the_corpus_lacks_is_refused():
 
 
 def test_resolution_keeps_the_latest_occasion_per_problem():
-    """Per problem, not per file.
-
-    Taking the newest occasion in the file would delete every problem that occasion did not
-    cover -- typically the ones an older, broader sweep measured, which carry the widest
-    candidate coverage. Here one problem is re-measured and another is not; both must survive.
-    """
+    """Per problem, not per file: an older sweep's problems must survive."""
     frame = pd.DataFrame(
         {
             "q.M": [1024, 1024, 2048],
@@ -328,14 +277,13 @@ def test_resolution_keeps_the_latest_occasion_per_problem():
 
     out = resolve_duplicates(frame, "date_run", "minTimeMs")
 
-    # The re-measured problem keeps only February; the problem only January measured survives.
     assert sorted(out["q.M"].tolist()) == [1024, 2048]
     assert out.loc[out["q.M"] == 1024, "minTimeMs"].tolist() == [1.0]
     assert out.loc[out["q.M"] == 2048, "minTimeMs"].tolist() == [7.0]
 
 
 def test_a_repeat_within_one_occasion_keeps_the_fastest():
-    """Repeats differ by contention and clocks, not by anything about the kernel."""
+    """Repeats differ by contention and clocks, not by the kernel."""
     frame = pd.DataFrame(
         {
             "q.M": [1024, 1024],
@@ -362,19 +310,13 @@ def test_a_repeat_within_one_occasion_keeps_the_fastest():
 
 
 def test_resolution_settles_what_validation_would_otherwise_reject():
-    """The two halves have to agree, or the option resolves nothing.
-
-    A complete problem carrying one configuration twice is rejected as two merged collections.
-    A re-measured problem trips the same check, and this is the rule that distinguishes them.
-    """
+    """A re-measured problem fails validation until resolution keeps one occasion."""
     frame = pd.DataFrame(
         {
             "q.M": [1024, 1024],
             "q.N": [1024, 1024],
             "q.K": [1024, 1024],
             "q.dtype": ["fp32", "fp32"],
-            # What the engine published beside the shape (RFC 0019 13.6), and the only thing the
-            # metrics are derived from: 2*M*N*K, and three 1024^2 fp32 tensors.
             "q.flops": [2 * 1024**3, 2 * 1024**3],
             "q.bytes": [3 * 1024**2 * 4, 3 * 1024**2 * 4],
             "kernel.tile_m": [64, 64],
@@ -396,11 +338,7 @@ def test_resolution_settles_what_validation_would_otherwise_reject():
 
 
 def test_resolution_keeps_each_boards_problem_apart():
-    """One shape measured on two boards is two problems, each with its own newest occasion.
-
-    Keyed on the shape alone, February's board-B sweep deleted board A's January rows, and on
-    one occasion the two boards' candidates merged into one problem.
-    """
+    """One shape on two boards is two problems, each with its own newest occasion."""
     frame = pd.DataFrame(
         {
             "benchmark": ["g0"] * 4,
@@ -431,13 +369,7 @@ def test_resolution_keeps_each_boards_problem_apart():
 
 
 def test_scoping_gives_each_group_its_own_positions():
-    """A shared position means different things when the schema varies by kernel.
-
-    Two solvers whose descriptors carry unrelated numbers at the same index: unscoped they share
-    one column, so the first layer of a grouped model -- the layer that sees every row -- is
-    asked to split on a column with no consistent meaning. Measured on a real corpus, scoping
-    moved total regret from 0.1007 to 0.0889, effectively all of it in the group decision.
-    """
+    """Descriptor positions are scoped per group when the schema varies by kernel."""
     frame = rows(
         **{
             "kernel.solver_id": [107, 137],
@@ -448,7 +380,6 @@ def test_scoping_gives_each_group_its_own_positions():
         build_dataset(frame), ["kernel.descriptor"], scope_by="kernel.solver_id"
     )
 
-    # One column per (group, position) the group actually fills, and no shared cfgN at all.
     assert out["kernel.descriptor.s107_f0"].tolist() == [64, -1]
     assert out["kernel.descriptor.s107_f1"].tolist() == [4, -1]
     assert out["kernel.descriptor.s137_f0"].tolist() == [-1, 7]
@@ -456,11 +387,7 @@ def test_scoping_gives_each_group_its_own_positions():
 
 
 def test_a_row_outside_its_group_takes_the_absent_value():
-    """Absent, not zero: a kernel with no such field is the state an unfilled slot already has.
-
-    Zero is a legal tuning value, so filling with it would make "this group has no field here"
-    indistinguishable from "this field is set to nothing".
-    """
+    """Absent (-1), not zero: zero is a legal tuning value."""
     frame = rows(
         **{
             "kernel.solver_id": [107, 137],
@@ -486,20 +413,14 @@ def test_scoping_by_a_column_the_corpus_lacks_is_refused():
 
 
 def test_unscoped_expansion_still_shares_one_set_of_positions():
-    """The default is unchanged, for an engine whose schema does not vary."""
+    """The default, for an engine whose schema does not vary."""
     frame = rows(**{"kernel.descriptor": ["a,64,4", "a,128,4"]})
     out = expand_descriptors(build_dataset(frame), ["kernel.descriptor"])
     assert out["kernel.descriptor.cfg0"].tolist() == [64, 128]
 
 
 def test_two_boards_measuring_one_shape_import_as_two_problems():
-    """A corpus spanning two machines is the normal case, not a corrupt merge.
-
-    A problem is (graph, device), so the same shape measured on two boards is two problems with
-    two candidate sets -- not one problem whose candidates repeat. Keyed on `q.*` alone the
-    second board's rows look exactly like a second collection of the first board's problem, and
-    the candidate-set check below refuses a corpus that is simply two GPUs.
-    """
+    """A problem is (graph, device): one shape on two boards is two candidate sets."""
     frame = pd.concat(
         [rows(device=["a", "a"]), rows(device=["b", "b"])], ignore_index=True
     )
@@ -512,10 +433,7 @@ def test_two_boards_measuring_one_shape_import_as_two_problems():
 
 
 def test_a_fault_on_one_board_does_not_downgrade_the_other_boards_problem():
-    """`problem_complete` is what regret depends on: a problem that no longer claims to be a
-    complete measurement of its candidate space reports regret as a lower bound. Charging that
-    to a board that measured everything is a silently pessimistic number about working hardware.
-    """
+    """`problem_complete` is per board, so a healthy board's regret stays exact."""
     healthy = rows(device=["a", "a"])
     faulted = rows(
         device=["b", "b"],
@@ -533,11 +451,7 @@ def test_a_fault_on_one_board_does_not_downgrade_the_other_boards_problem():
 
 
 def test_the_collectors_spelling_of_a_failure_is_republished_as_an_error():
-    """What `uhd_gen export-benchmarks` actually writes: `is_valid=False` plus a `skip_reason`,
-    and no `error` column at all. Untranslated it is a row with neither a measurement nor an
-    error, so every sweep containing a failure would be refused and the documented chain from
-    the collector to the dataset would not compose.
-    """
+    """`export-benchmarks` writes `is_valid=False` and `skip_reason`, no `error`."""
     frame = rows(
         minTimeMs=[1.0, None],
         avgTimeMs=[1.1, None],
@@ -550,16 +464,13 @@ def test_the_collectors_spelling_of_a_failure_is_republished_as_an_error():
     out = build_dataset(frame)
 
     assert out["error"].tolist() == ["", "hip error 700"]
-    # §8.3 records a failure once. A validity flag beside the error is a second spelling that
-    # can disagree with it, so it does not reach the published dataset.
+    # §8.3 records a failure once, as `error`; the validity flag is not republished.
     assert "is_valid" not in out.columns and "skip_reason" not in out.columns
     assert not out["problem_complete"].any()
 
 
 def test_a_row_marked_failed_that_still_carries_a_timing_is_still_rejected():
-    """The translation must not launder a producer bug into a valid row: a candidate that both
-    reports a time and says it never ran cannot be trusted either way.
-    """
+    """A row marked failed that still reports a time is a producer bug."""
     frame = rows(is_valid=["True", "False"], skip_reason=["", "hip error 700"]).drop(
         columns=["error"]
     )
@@ -570,10 +481,9 @@ def test_a_row_marked_failed_that_still_carries_a_timing_is_still_rejected():
 @pytest.mark.parametrize(
     "timing",
     [
-        # What the bench writes: its timing flag is independent of the verdict, so a kernel
-        # that computed the wrong answer quickly still reports a fast time.
+        # The bench reports a time even when the verdict is wrong.
         {"minTimeMs": [1.0, 0.011], "avgTimeMs": [1.1, 0.011], "stddevMs": [0.01, 0.0]},
-        # What `generate` writes: the timing already suppressed, no `error` column value.
+        # `generate` has already suppressed the timing.
         {"minTimeMs": [1.0, None], "avgTimeMs": [1.1, None], "stddevMs": [0.01, None]},
     ],
     ids=["bench", "generated"],
@@ -581,11 +491,7 @@ def test_a_row_marked_failed_that_still_carries_a_timing_is_still_rejected():
 def test_a_numerically_wrong_row_is_published_as_a_failure_with_its_verdict(
     tmp_path, timing
 ):
-    """RFC 0019 §13.2: a candidate shown wrong keeps its row and its marker, never its time.
-
-    Published through the real CSV read path, because that is where the verdict arrives as
-    text. Left alone, the wrong-but-fast row published a 195 TFLOPS label with an empty error.
-    """
+    """RFC 0019 §13.2: a wrong candidate keeps its row and marker, never its time."""
     path = tmp_path / "collected.csv"
     rows(
         **timing,
@@ -603,15 +509,11 @@ def test_a_numerically_wrong_row_is_published_as_a_failure_with_its_verdict(
     assert not wrong["numerically_valid"]
     assert out["numerically_valid"].tolist() == [True, False]
     assert wrong["validation"] == "output_mismatch: tensor 'Y'"
-    # Not a complete measurement of the problem's candidate space any more.
     assert not out["problem_complete"].any()
 
 
 def test_a_numeric_looking_identity_is_read_as_a_name_not_a_number(tmp_path):
-    """Nothing computes with a device id or a benchmark name. Inferred, `0123` becomes the
-    integer 123, the published dataset's dtype then depends on which board was swept, and the
-    CSV and Parquet ends of the pipeline disagree about the type of the same identity.
-    """
+    """Identity columns stay strings, so `0123` is not read as 123."""
     path = tmp_path / "shard.csv"
     rows(benchmark=["0123", "0123"], device=["0007", "0007"]).to_csv(path, index=False)
 
@@ -622,14 +524,7 @@ def test_a_numeric_looking_identity_is_read_as_a_name_not_a_number(tmp_path):
 
 
 def test_a_collected_sdpa_corpus_imports_and_is_given_its_metrics(tmp_path):
-    """The operation we actually generate gfx942 heuristics for, through the real read path.
-
-    The costs come from the engine, not from a declaration: it published `q.flops` and
-    `q.bytes` beside the shape it bound, and this is the whole of where a rate comes from. The
-    causal counts below are the engine's own (attentionFlopsFor), the effective work a mask
-    leaves rather than the dense rectangle -- reproduced here so a corpus arriving with them
-    keeps them intact through the import.
-    """
+    """An SDPA corpus through the real read path, with engine-published causal costs."""
     path = tmp_path / "sdpa.csv"
     pd.DataFrame(
         {
@@ -665,6 +560,6 @@ def test_a_collected_sdpa_corpus_imports_and_is_given_its_metrics(tmp_path):
     assert out["tflops"].iloc[0] == pytest.approx(
         scale * (1024 * 1024 - 1024 * 1023 / 2) / 1.1e-3 / 1e12
     )
-    # One query against 4096 keys is a full row of the mask, not half of it.
+    # A single query sees a full row of the causal mask, not half of it.
     assert out["tflops"].iloc[1] == pytest.approx(scale * 1 * 4096 / 5.5e-4 / 1e12)
     assert out["gbs"].notna().all()

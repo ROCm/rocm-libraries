@@ -27,16 +27,14 @@ private:
     bool _deferWorkspace = false;
     bool _predictionEvaluate = true;
     mutable flatbuffers::DetachedBuffer _predictionBuffer;
-    /// Buffers already handed out. HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT is readable
-    /// while the descriptor still accepts setAttribute, and its bytes are documented to
-    /// live until the descriptor dies, so an invalidated buffer is retired, not freed.
+    /// Prediction buffers already handed out, retired rather than freed because their bytes
+    /// must stay valid until the descriptor is destroyed.
     mutable std::vector<flatbuffers::DetachedBuffer> _retiredPredictions;
     mutable std::mutex _predictionMutex;
 
     void ensureWorkspaceSize() const;
 
-    /// Packs the configuration-kind prediction once per input state; setAttribute retires
-    /// the previous buffer so a caller that still holds it keeps reading valid bytes.
+    /// Packs the configuration-kind prediction once per input state.
     const flatbuffers::DetachedBuffer& ensurePrediction() const;
 
     /// Retires any packed prediction, under the prediction lock.

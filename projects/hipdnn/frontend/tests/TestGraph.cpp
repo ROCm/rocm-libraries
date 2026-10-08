@@ -13604,11 +13604,8 @@ TEST_F(TestGraph, DeserializeLegacyBareGraphBlobReconstructsGraphNoPlan)
     EXPECT_FALSE(graph2.hasExecutionPlan());
 }
 
-// RFC 0007 §5.3.2/§5.3.3: HeuristicMode::A/B are prediction POLICY names, not backend
-// heuristic modes. They must reach the backend as an ordered policy list on
-// HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT -- Config first, the requested prediction
-// policies in request order with duplicates dropped, StaticOrdering last -- while
-// HIPDNN_ATTR_ENGINEHEUR_MODE still carries exactly one FALLBACK mode.
+// Config first, requested prediction policies in order without duplicates, StaticOrdering
+// last; HIPDNN_ATTR_ENGINEHEUR_MODE still carries exactly one FALLBACK mode.
 TEST_F(TestGraph, HeuristicModeAAndBTravelAsPolicyOrderNotAsBackendMode)
 {
     auto* heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9911);
@@ -13668,10 +13665,8 @@ TEST_F(TestGraph, HeuristicModeAAndBTravelAsPolicyOrderNotAsBackendMode)
                                     policyNameToId("SelectionHeuristic::StaticOrdering")}));
 }
 
-// No prediction policy or ranking metric requested -> the frontend must not touch the
-// policy-order or ranking-metric attributes at all, so HIPDNN_HEUR_POLICY_ORDER,
-// HIPDNN_HEUR_RANKING_METRIC and the backend's built-in defaults keep their precedence
-// (RFC 0007 §5.3.3).
+// Leaving both attributes unset keeps HIPDNN_HEUR_POLICY_ORDER, HIPDNN_HEUR_RANKING_METRIC
+// and the backend defaults in charge (RFC 0007 §5.3.3).
 TEST_F(TestGraph, FallbackOnlyHeuristicModeLeavesPolicyOrderUnset)
 {
     EXPECT_CALL(*_mockBackend,
@@ -13705,8 +13700,7 @@ static auto captureStringAttribute(std::string& value)
     };
 }
 
-// Only registered metrics are accepted, and a rejected name leaves the metric already
-// requested in force rather than resetting it to the default.
+// A rejected name keeps the previously requested metric rather than resetting it.
 TEST_F(TestGraph, SetRankingMetricAcceptsOnlyRegisteredMetrics)
 {
     Graph graph;
@@ -13748,8 +13742,6 @@ TEST_F(TestGraph, RankingMetricTravelsOnTheHeuristicDescriptor)
     EXPECT_EQ(metric, "time");
 }
 
-// The metric set on the Graph reaches the heuristic descriptor the Graph itself creates,
-// where the prediction policies rank by it.
 TEST_F(TestGraph, GraphRankingMetricReachesItsHeuristicQueries)
 {
     ::testing::FLAGS_gmock_verbose = "error";
@@ -13794,8 +13786,6 @@ TEST_F(TestGraph, GraphRankingMetricReachesItsHeuristicQueries)
     EXPECT_EQ(metric, "time");
 }
 
-// An engine configuration the Graph builds itself for an explicit engine carries the
-// metric too, so that engine's kernel choice at plan build follows it.
 TEST_F(TestGraph, GraphRankingMetricReachesExplicitEngineConfigs)
 {
     ::testing::FLAGS_gmock_verbose = "error";

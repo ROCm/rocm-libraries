@@ -1,11 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// The pointwise_model pack's kernel. Identical in body to the unit set's PointwiseAdd, and
-// deliberately a separate file: a packed root is validated whole, so an embedded source has
-// to be authored inside the root that names it and registered under a key no other root
-// claims. Borrowing the unit set's file fails that check from both ends -- the source sits
-// outside this root, and its key already belongs to another descriptor.
+// Same body as the unit set's PointwiseAdd, but a packed root's embedded sources must live
+// inside that root under a key no other root claims, so it cannot borrow that file.
 
 extern "C" __global__ void PointwiseModelAdd(const HIP_PLUGIN_POINTWISE_TYPE* a,
                                              const HIP_PLUGIN_POINTWISE_TYPE* b,

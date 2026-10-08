@@ -661,21 +661,12 @@ TEST(TestKernelIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
     EXPECT_EQ(std::get<int64_t>(values[1]), 64);
 }
 
-/// Models what a real ranker does when one candidate is unscorable: the scorer throws on
-/// that candidate and RFC 0019 §5 step 8 degrades the WHOLE ranking to static order rather
-/// than the candidate that failed ("the fallback ... switches the whole ranking rather than
-/// one entry"). That is what makes WHICH candidate set the decision was taken over
-/// observable at all -- with a strictly per-candidate scorer, ranking a subset and
-/// restricting the full order agree trivially and nothing can be asserted.
-///
-/// The degrade itself is rankScored's, not this class's: the fallback under test is the
-/// production one, so a test cannot assert a shape the shipped path does not produce.
+/// Throws on one candidate, so rankScored degrades the whole ranking to static order
+/// (RFC 0019 §5 step 8). That makes the candidate set a ranking was decided over observable.
 class DegradesOnAnUnscorableCandidate : public IKernelHeuristic
 {
 public:
-    /// The block size this ranker cannot score. No kernel that reaches production carries
-    /// it; it stands in for a dangling `$kernel.*` reference or a feature the model was
-    /// never trained on.
+    /// Stands in for a dangling `$kernel.*` reference or an untrained feature.
     static constexpr int64_t UNSCORABLE_BLOCK_SIZE = 999;
 
     double score(const MatchContext& /*context*/,
@@ -712,8 +703,7 @@ std::unique_ptr<StateManager> makeCalibratedStateManager()
     pack.name = "calibrated pack";
     pack.engineId = ENGINE_ID;
     pack.dispatchId = DISPATCH_ID;
-    // No matchers, so every kernel reaches the catalog and the only narrowing in these
-    // tests is the one the test performs itself.
+    // No matchers: every kernel reaches the catalog, and only the test narrows it.
     pack.kernels = {makeKernel(FASTEST_ID, "fastest", 512, "FLOAT", /*priority=*/0),
                     makeKernel(PREFERRED_ID, "preferred", 128, "FLOAT", /*priority=*/10),
                     makeKernel(UNSCORABLE_ID,
@@ -743,15 +733,8 @@ std::vector<KernelDefinition> withoutKernel(const std::vector<KernelDefinition>&
     return kept;
 }
 
-/// RFC 0019 §9.2: "a filtered request restricts the cached order rather than producing its
-/// own." Without that, a pin excluding the one candidate the ranker cannot score let the
-/// narrowed request score normally while the whole catalog degraded to static order -- §5
-/// step 8's named failure, "the two paths would disagree on the winner from the same
-/// inputs". Here the disagreement is total: static order puts `preferred` first, the model
-/// puts `fastest` first.
-///
-/// Falsifying mutation: rank `filtered` directly and ignore the memo, and the narrowed
-/// request answers `fastest` at 512 instead of `preferred` at 0.
+/// RFC 0019 §9.2: a filtered request restricts the cached order rather than ranking its own
+/// subset. Static order puts `preferred` first; the model puts `fastest` first.
 TEST(TestKernelIngestorStateManager, ANarrowedCalibratedRankingRestrictsTheCachedFullOrder)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -778,19 +761,8 @@ TEST(TestKernelIngestorStateManager, ANarrowedCalibratedRankingRestrictsTheCache
         << "the scores are the full catalog's too; a fresh subset ranking would score 128";
 }
 
-/// The cold path has to commute too, and that is the half that did not. RFC 0019 §5 step 8
-/// fixes the basis on the canonical candidate set, "every kernel the matchers admitted for
-/// this graph, before any knob filter narrows it", and a cold pinned request ranked its own
-/// subset instead. The scorer throws only on `unscorable`, so a pin that removed it scored
-/// normally while the unpinned request degraded to static order -- step 8's named failure,
-/// "the two paths would disagree on the winner from the same inputs", reached from the same
-/// graph.
-///
-/// One manager each, so neither request can read the other's memo: both take the cold path,
-/// which is the only place the two can still diverge.
-///
-/// Falsifying mutation: rank `filtered` on a cache miss, and the pinned request answers
-/// `fastest` at 512 while the unpinned one answers `preferred` at 0.
+/// RFC 0019 §5 step 8: a cold pinned request also ranks the canonical candidate set, not its
+/// subset. Separate managers keep both requests on the cold path.
 TEST(TestKernelIngestorStateManager, AColdPinnedCalibratedRankingAgreesWithAnUnpinnedOne)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -849,13 +821,8 @@ public:
     }
 };
 
-/// RFC 0019 §11.4: "Every cache of a ranked order is keyed by metric as well as by model;
-/// otherwise a `time` request could be served an order computed for `tflops`." The sorted
-/// catalog is memoized per (graph, device), so the second request below is a cache hit on
+/// RFC 0019 §11.4: the sorted-catalog cache is keyed by metric, so the second request matches
 /// every key component but the metric.
-///
-/// Falsifying mutation: drop the metric from CatalogKey, and the time request returns the
-/// tflops order, `fastest` first.
 TEST(TestKernelIngestorStateManager, ASortedCatalogIsCachedPerRankingMetric)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
