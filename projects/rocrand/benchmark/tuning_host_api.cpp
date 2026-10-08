@@ -48,7 +48,8 @@ int main(int argc, char* argv[])
     settings.min_gpu_ms_per_batch = 100;
     settings.hot                  = true;
 
-    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
+    settings.sync = true;
+    primbench::executor executor(argc, argv, settings);
 
     auto dimensions
         = executor.get<size_t>("dimensions", 1, "Number of dimensions of quasi-random values");
