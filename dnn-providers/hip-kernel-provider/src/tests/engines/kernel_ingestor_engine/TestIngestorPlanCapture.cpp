@@ -62,10 +62,8 @@ namespace
 
 using hipdnn_data_sdk::utilities::Workspace;
 using hipdnn_plugin_sdk::ingestor::BenchmarkPlan;
-using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::DeviceProperties;
 using hipdnn_plugin_sdk::ingestor::GenericPlan;
-using hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
 using hipdnn_plugin_sdk::ingestor::KernelDispatcher;
 using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
@@ -80,6 +78,7 @@ using serialization::IngestorPlanPayload;
 namespace fixtures = hip_kernel_provider::testing;
 namespace packs = hip_kernel_provider::kernel_ingestor_engine::testing;
 
+using packs::makeStubPlan;
 using packs::PackedPlan;
 using packs::PackedPlanCase;
 
@@ -124,25 +123,6 @@ public:
         return SavedLaunchInputs{"hipkernel.capture_test.unregistered.dispatch.v1", {}};
     }
 };
-
-// A kpack kernel definition that names nothing on disk. The stub handlers never read it.
-KernelDefinition stubKpackKernel(uint8_t seed)
-{
-    KernelDefinition kernel;
-    kernel.kernelId.fill(seed);
-    kernel.name = "capture_stub";
-    kernel.source.kind = KernelSourceKind::KPACK;
-    return kernel;
-}
-
-std::unique_ptr<GenericPlan<Handle>> makeStubPlan(const IKernelDispatchHandler<Handle>& handler,
-                                                  uint8_t seed)
-{
-    const packs::GraphFixture fixture(packs::buildPointwiseGraph());
-    const BoundTokens bound;
-    return std::make_unique<GenericPlan<Handle>>(
-        KernelDispatcher<Handle>{stubKpackKernel(seed), &handler}, fixture.context(), bound);
-}
 
 TEST(TestIngestorPlanCapture, RefusesABenchmarkPlanWithoutAWinner)
 {

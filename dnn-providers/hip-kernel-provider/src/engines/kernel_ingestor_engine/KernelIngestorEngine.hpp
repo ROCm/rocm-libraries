@@ -65,10 +65,19 @@ void rediscoverStateManagersForTesting();
 /// Process-lifetime: a device-property cache with no engine-specific state.
 const HandleDeviceResolver& deviceResolver();
 
-/// The name of the engine with @p engineId when @p handle's provider has loaded it, and a
-/// descriptor set this provider discovered defines it. Reads only the engine names of the
-/// discovered sets. No value for a handle without a container.
-std::optional<std::string> loadedIngestorEngineName(const Handle& handle, int64_t engineId);
+/// True when @p set has at least one kernel, and every kernel of every pack has a source
+/// kind that `serialization::isSerializableSourceKind` accepts.
+bool supportsExecutionPlanSerialization(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set);
+
+/// Returns @p set's engine with the behavior notes this provider computes. Adds
+/// `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION` when
+/// supportsExecutionPlanSerialization() is true and the note is absent.
+hipdnn_plugin_sdk::ingestor::EngineDescriptor
+    engineWithComputedBehaviorNotes(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set);
+
+/// Returns @p set with its engine replaced by engineWithComputedBehaviorNotes().
+hipdnn_plugin_sdk::ingestor::DescriptorSet
+    withComputedBehaviorNotes(hipdnn_plugin_sdk::ingestor::DescriptorSet set);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

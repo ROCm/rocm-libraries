@@ -124,6 +124,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         compilation/KpackKernelLoader.cpp
         compilation/KpackProgram.cpp
     )
+
+    # The plan serialization hooks. They save and load only ingestor plans, so a build
+    # without the ingestor exports none of them.
+    target_sources(hip_kernel_provider_impl PRIVATE
+        core/PluginSerialization.cpp
+    )
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)

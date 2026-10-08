@@ -19,11 +19,14 @@
 
 #include <hip/hip_runtime_api.h>
 
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
 #include "PackedKernelSource.hpp"
@@ -31,6 +34,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
 // Plans built from the packed kpack sets that this build stages for the local device.
 // Read the packed sets only through a copy in a scratch directory. Other suites corrupt
@@ -186,6 +190,55 @@ inline std::vector<hipdnnPluginDeviceBuffer_t>
         buffers.push_back(hipdnnPluginDeviceBuffer_t{uid, pointer});
     }
     return buffers;
+}
+
+// Executes `plan` once on `handle` over `tensors` and writes the output bytes to `output`.
+// The output holds the sentinel before the launch, so an element that the launch does not
+// write cannot match.
+//
+// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
+inline void runPlan(const hipdnn_plugin_sdk::IPlan<Handle>& plan,
+                    const Handle& handle,
+                    hipdnn_test_sdk::utilities::GraphTensorBundle& tensors,
+                    std::vector<uint8_t>& output)
+{
+    ASSERT_EQ(tensors.outputTensorIds.size(), 1U);
+    tensors.sentinelFillOutputTensors();
+
+    const auto buffers = deviceBuffersOf(tensors);
+    const hipdnn_data_sdk::utilities::Workspace<> workspace(plan.getWorkspaceSize(handle));
+    plan.execute(handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get());
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess) << "the launch failed";
+
+    auto& result = tensors.getTensor(*tensors.outputTensorIds.begin());
+    result.markDeviceModified();
+    const auto* bytes = static_cast<const uint8_t*>(result.rawHostData());
+    output.assign(bytes, bytes + (result.elementSpace() * result.elementSize()));
+}
+
+// A kpack kernel definition that names nothing on disk. A stub dispatch handler never reads
+// it.
+inline hipdnn_plugin_sdk::ingestor::KernelDefinition stubKpackKernel(uint8_t seed)
+{
+    hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
+    kernel.kernelId.fill(seed);
+    kernel.name = "stub_kpack_kernel";
+    kernel.source.kind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK;
+    return kernel;
+}
+
+// A GenericPlan over `handler` for the stub kpack kernel of `seed`, on the Pointwise test
+// graph. Builds no code object and needs no device.
+inline std::unique_ptr<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>
+    makeStubPlan(const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>& handler,
+                 uint8_t seed)
+{
+    const GraphFixture fixture(buildPointwiseGraph());
+    const hipdnn_plugin_sdk::ingestor::BoundTokens bound;
+    return std::make_unique<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>(
+        hipdnn_plugin_sdk::ingestor::KernelDispatcher<Handle>{stubKpackKernel(seed), &handler},
+        fixture.context(),
+        bound);
 }
 
 // The number of entries in the kpack module caches of all packs.

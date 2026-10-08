@@ -319,6 +319,25 @@ TEST(TestContainer, GetEngineNameReturnsTheDeclaredNameForEveryIngestorEngine)
         EXPECT_EQ(hipdnn_data_sdk::utilities::engineNameToId(name), engineId);
     }
 }
+
+TEST(TestContainer, EngineNameRegistryHoldsEveryIngestorEngineName)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+
+    for(const auto& set : sets)
+    {
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
+
+        // The save hook gets the engine name from the hipDNN engine-name registry.
+        const auto registered = hipdnn_data_sdk::utilities::tryGetEngineNameFromId(engineId);
+        ASSERT_TRUE(registered.has_value())
+            << "no registered name for descriptor set '" << set.engine.name << "'";
+        EXPECT_EQ(*registered, set.engine.name);
+    }
+}
 #endif
 
 TEST(TestContainer, GetEngineNameNamesEveryAdvertisedEngine)

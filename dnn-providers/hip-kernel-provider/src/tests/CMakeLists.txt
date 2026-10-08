@@ -165,6 +165,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         compilation/TestKpackCodeObjectRead.cpp
         compilation/TestKpackKernelLoader.cpp
         compilation/TestKpackModuleCache.cpp
+        core/TestPluginSerialization.cpp
         engines/kernel_ingestor_engine/TestIngestorPlanCapture.cpp
         engines/kernel_ingestor_engine/TestIngestorPlanRoundTrip.cpp
         engines/kernel_ingestor_engine/packs/TestPointwiseKpackDispatch.cpp

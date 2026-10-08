@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -25,6 +26,7 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
+#include "core/Container.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPlanRestore.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -39,9 +41,9 @@
  * @brief restoreIngestorPlan: each load check refuses on its own, and the checks run in
  *        their documented order.
  *
- * No case needs a device. A fake resolver reports the device, and every case stops at or
- * before the launch-value check, so no case reaches the module load. The code bytes are
- * not a code object.
+ * No case needs a device. A fake resolver reports the device, or the case stops before the
+ * device query. Every case stops at or before the launch-value check, so no case reaches the
+ * module load. The code bytes are not a code object.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -61,6 +63,9 @@ namespace packs = hip_kernel_provider::kernel_ingestor_engine::testing;
 
 constexpr const char* LOADED_ENGINE_NAME = "hipkernel:restore_test_engine";
 constexpr const char* UNLOADED_ENGINE_NAME = "hipkernel:restore_test_absent_engine";
+// Any registered engine name that this provider does not load works here.
+constexpr const char* REGISTERED_UNLOADED_ENGINE_NAME
+    = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME;
 // The fake engine lookup reports another name for the id of this name.
 constexpr const char* RENAMED_ENGINE_NAME = "hipkernel:restore_test_renamed_engine";
 constexpr const char* OTHER_LOADED_NAME = "hipkernel:restore_test_other_engine";
@@ -159,9 +164,9 @@ protected:
                                                               = FakeDeviceResolver()) const
     {
         IngestorPlanRestoreEnvironment environment;
-        environment.loadedIngestorEngineName = fakeLoadedEngineName;
+        environment.loadedEngineName = fakeLoadedEngineName;
         environment.deviceResolver = &resolver;
-        return restoreIngestorPlan(encoded.data(), encoded.size(), _handle, environment);
+        return restoreIngestorPlan(encoded.data(), encoded.size(), _handle, environment).plan;
     }
 
     void expectRefusal(const IngestorPlanPayload& payload,
@@ -211,7 +216,7 @@ TEST_F(TestIngestorPlanRestoreChecks, RefusesAnEngineThatIsNotLoaded)
 
     expectRefusal(payload,
                   HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-                  std::string("no ingestor engine named '") + UNLOADED_ENGINE_NAME + "'");
+                  std::string("no engine named '") + UNLOADED_ENGINE_NAME + "'");
     expectRefusal(
         payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, engineIdHexOf(UNLOADED_ENGINE_NAME));
     expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "descriptor set");
@@ -229,6 +234,35 @@ TEST_F(TestIngestorPlanRestoreChecks, RefusesALoadedEngineWithAnotherName)
                       + "'");
     expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, engineIdHexOf(RENAMED_ENGINE_NAME));
     expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "424242");
+}
+
+TEST_F(TestIngestorPlanRestoreChecks, TheProviderLookupRefusesAnEngineThatIsNotLoaded)
+{
+    ASSERT_TRUE(hipdnn_data_sdk::utilities::tryGetEngineNameFromId(
+                    hipdnn_data_sdk::utilities::engineNameToId(REGISTERED_UNLOADED_ENGINE_NAME))
+                    .has_value());
+
+    Handle withContainer;
+    withContainer.container = std::make_shared<hip_kernel_provider::core::Container>();
+    const Handle withoutContainer;
+    const std::array<const Handle*, 2> handles{&withContainer, &withoutContainer};
+
+    for(const Handle* handle : handles)
+    {
+        for(const char* engineName : {REGISTERED_UNLOADED_ENGINE_NAME, UNLOADED_ENGINE_NAME})
+        {
+            auto payload = validConvFwdPayload();
+            payload.engineName = engineName;
+            const auto encoded = serialization::encodeIngestorPlan(payload);
+
+            expectIngestorPlanRefusal(
+                [&]() {
+                    static_cast<void>(restoreIngestorPlan(encoded.data(), encoded.size(), *handle));
+                },
+                HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                std::string("no engine named '") + engineName + "'");
+        }
+    }
 }
 
 TEST_F(TestIngestorPlanRestoreChecks, RefusesWhenTheHandleNamesNoDevice)
@@ -337,7 +371,7 @@ INSTANTIATE_TEST_SUITE_P(
                       payload.engineName = UNLOADED_ENGINE_NAME;
                       payload.target = FOREIGN_TARGET;
                   },
-                  "no ingestor engine named"},
+                  "no engine named"},
         OrderCase{"TargetBeforeAlias",
                   [](IngestorPlanPayload& payload) {
                       payload.target = FOREIGN_TARGET;

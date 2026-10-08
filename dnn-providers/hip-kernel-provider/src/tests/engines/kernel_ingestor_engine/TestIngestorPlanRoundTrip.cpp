@@ -53,9 +53,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 namespace
 {
 
-using hipdnn_data_sdk::utilities::Workspace;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
-using hipdnn_test_sdk::utilities::GraphTensorBundle;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 using serialization::IngestorPlanPayload;
 
@@ -63,36 +61,13 @@ namespace packs = hip_kernel_provider::kernel_ingestor_engine::testing;
 
 using packs::PackedPlan;
 using packs::PackedPlanCase;
+using packs::runPlan;
 
 constexpr const char* SCRATCH_LABEL = "ingestorplanroundtrip";
 
 int64_t engineIdOf(const PackedPlanCase& packedCase)
 {
     return hipdnn_data_sdk::utilities::engineNameToId(std::string(packedCase.engineName));
-}
-
-// Executes `plan` once on `handle` over `tensors` and writes the output bytes to `output`.
-// The output holds the sentinel before the launch, so an element that the launch does not
-// write cannot match.
-//
-// Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
-void runPlan(const hipdnn_plugin_sdk::IPlan<Handle>& plan,
-             const Handle& handle,
-             GraphTensorBundle& tensors,
-             std::vector<uint8_t>& output)
-{
-    ASSERT_EQ(tensors.outputTensorIds.size(), 1U);
-    tensors.sentinelFillOutputTensors();
-
-    const auto buffers = packs::deviceBuffersOf(tensors);
-    const Workspace<> workspace(plan.getWorkspaceSize(handle));
-    plan.execute(handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get());
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess) << "the launch failed";
-
-    auto& result = tensors.getTensor(*tensors.outputTensorIds.begin());
-    result.markDeviceModified();
-    const auto* bytes = static_cast<const uint8_t*>(result.rawHostData());
-    output.assign(bytes, bytes + (result.elementSpace() * result.elementSize()));
 }
 
 // Builds a plan over the registered handler of `packedCase` from a copy of its packed set
@@ -119,8 +94,7 @@ std::unique_ptr<hipdnn_plugin_sdk::IPlan<Handle>> restore(const std::vector<uint
                                                           const PackedPlanCase& packedCase)
 {
     IngestorPlanRestoreEnvironment environment;
-    environment.loadedIngestorEngineName
-        = [&packedCase](int64_t candidate) -> std::optional<std::string> {
+    environment.loadedEngineName = [&packedCase](int64_t candidate) -> std::optional<std::string> {
         if(candidate == engineIdOf(packedCase))
         {
             return std::string(packedCase.engineName);
@@ -128,7 +102,7 @@ std::unique_ptr<hipdnn_plugin_sdk::IPlan<Handle>> restore(const std::vector<uint
         return std::nullopt;
     };
     environment.deviceResolver = &deviceResolver();
-    return restoreIngestorPlan(encoded.data(), encoded.size(), handle, environment);
+    return restoreIngestorPlan(encoded.data(), encoded.size(), handle, environment).plan;
 }
 
 // ---------------------------------------------------------------------------

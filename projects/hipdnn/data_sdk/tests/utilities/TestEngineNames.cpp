@@ -77,6 +77,21 @@ TEST_F(TestEngineNames, GetEngineNameFromId)
     EXPECT_THROW(getEngineNameFromId(nonExistentId), std::out_of_range);
 }
 
+TEST_F(TestEngineNames, TryGetEngineNameFromIdReturnsTheRegisteredName)
+{
+    const auto name = tryGetEngineNameFromId(HIP_MLOPS_ENGINE_ID);
+    ASSERT_TRUE(name.has_value());
+    EXPECT_EQ(*name, "HIP_MLOPS_ENGINE");
+}
+
+TEST_F(TestEngineNames, TryGetEngineNameFromIdReturnsNoValueForAnUnregisteredId)
+{
+    const int64_t unregisteredId = engineNameToId("TEST_TRY_GET_UNREGISTERED_ENGINE");
+    ASSERT_FALSE(isEngineNameRegistered("TEST_TRY_GET_UNREGISTERED_ENGINE"));
+
+    EXPECT_FALSE(tryGetEngineNameFromId(unregisteredId).has_value());
+}
+
 TEST_F(TestEngineNames, RegisteredRocKEEngineHasStableNameAndId)
 {
     EXPECT_STREQ(ROCKE_ENGINE_NAME, "ROCKE_ENGINE");
