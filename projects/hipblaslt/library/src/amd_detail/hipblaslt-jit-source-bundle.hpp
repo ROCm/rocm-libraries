@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "hipblaslt-jit-component.hpp"
+
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace hipblaslt_jit::source_bundle
@@ -53,23 +56,15 @@ namespace hipblaslt_jit::source_bundle
         return bytes;
     }
 
-    struct SourceFile
-    {
-        std::string          name;
-        std::vector<uint8_t> bytes;
-    };
-
     // The build inputs of a TensileLite source bundle, found by directory
     // convention: library/TensileLibrary.dat is the MsgPack solution library
-    // entry, sources/*.s are assembly, sources/*.hip and sources/*.cpp are HIP
-    // sources, and every other file in sources/ is a header the HIP sources
-    // include.
+    // entry, sources/*.s are assembly units, sources/*.hip and sources/*.cpp
+    // are HIP units, and every other file in sources/ is a header those HIP
+    // units include. A header is a BuildUnit used as an include.
     struct SourceBundle
     {
-        std::vector<uint8_t>    library;
-        std::vector<SourceFile> assembly; // by name
-        std::vector<SourceFile> hip; // by name
-        std::vector<SourceFile> headers; // by name
+        std::vector<uint8_t>   library;
+        std::vector<BuildUnit> units; // assembly, then HIP, each by name
     };
 
     inline SourceBundle readSourceBundle(const fs::path& bundle)
@@ -89,19 +84,36 @@ namespace hipblaslt_jit::source_bundle
         }
         std::sort(names.begin(), names.end());
         size_t total = 0;
+        std::vector<BuildUnit> assembly, hip, headers;
         for(const auto& name : names)
         {
-            SourceFile file{name, readArtifact(artifact(bundle, "sources/" + name))};
+            BuildUnit file;
+            file.name  = name;
+            file.bytes = readArtifact(artifact(bundle, "sources/" + name));
+            file.role  = BuildUnit::Role::Main;
             total += file.bytes.size();
             require(total <= byteLimit, "Source bundle is too large: " + sources.u8string());
             const auto extension = fs::u8path(name).extension();
-            auto&      files     = extension == ".s"                            ? result.assembly
-                                   : extension == ".hip" || extension == ".cpp" ? result.hip
-                                                                                : result.headers;
-            files.push_back(std::move(file));
+            if(extension == ".s")
+            {
+                file.kind = BuildUnit::Kind::Assembly;
+                assembly.push_back(std::move(file));
+            }
+            else if(extension == ".hip" || extension == ".cpp")
+            {
+                file.kind = BuildUnit::Kind::Hip;
+                hip.push_back(std::move(file));
+            }
+            else
+                headers.push_back(std::move(file));
         }
-        require(!result.assembly.empty() || !result.hip.empty(),
-                "No kernel source in " + sources.u8string());
+        require(!assembly.empty() || !hip.empty(), "No kernel source in " + sources.u8string());
+        for(auto& unit : hip)
+            unit.includes = headers;
+        result.units = std::move(assembly);
+        result.units.insert(result.units.end(),
+                            std::make_move_iterator(hip.begin()),
+                            std::make_move_iterator(hip.end()));
         return result;
     }
 }
