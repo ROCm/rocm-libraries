@@ -3,15 +3,16 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
-#include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <cstdint>
 #include <optional>
 #include <ostream>
 #include <utility>
 #include <vector>
+
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 
 namespace test_sdpa_common
 {
