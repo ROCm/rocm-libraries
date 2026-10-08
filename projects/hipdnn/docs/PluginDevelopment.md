@@ -15,6 +15,7 @@
     - [Plugin SDK Knob Utilities](#plugin-sdk-knob-utilities)
     - [Registering Knobs with the Plugin SDK](#registering-knobs-with-the-plugin-sdk)
     - [Accessing Knob Settings in Your Plugin](#accessing-knob-settings-in-your-plugin)
+  - [Saving Execution Plans from Ingestor Engines](#saving-execution-plans-from-ingestor-engines)
   - [Key Files Reference](#key-files-reference)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
@@ -91,6 +92,7 @@ The plugin API defines how kernel engine plugins interact with hipDNN:
 - **Data SDK Objects**: Plugins use Data SDK objects to deserialize and process graphs
 - **Capability Reporting**: Plugins analyze graphs and report whether they can execute them
 - **Execution Interface**: Plugins provide execution methods for supported operations
+- **Execution Plan Serialization (optional)**: A plugin that lets users save and load built execution plans exports three hooks: `hipdnnEnginePluginSerializeExecutionContext`, `hipdnnEnginePluginDestroySerializedExecutionContext` and `hipdnnEnginePluginCreateExecutionContextFromSerialized` (declared in `hipdnn_plugin_sdk/EnginePluginApi.h`). hipDNN uses them only when all three are exported. See [RFC 0009](./rfcs/0009_CompiledPlanSerialization.md#plugin-api).
 
 ## Engine IDs
 
@@ -427,6 +429,17 @@ When a knob is no longer needed, mark it as deprecated rather than removing it. 
 2. **Update documentation** to indicate the deprecation and recommend alternatives.
 
 3. **Remove only during major version updates** to maintain backward compatibility.
+
+### Saving Execution Plans from Ingestor Engines
+
+A provider that builds plans with the generic kernel ingestor can let users save and load them. The plugin SDK supplies the pieces each dispatch handler needs; the provider supplies the payload format and the three plugin hooks. To support saving:
+
+- **Opt in per dispatch handler.** Override `saveLaunchInputs` and `restoreLaunch` in `hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler`. The defaults return no value, which means the handler does not support saving or restoring.
+- **Save launch inputs under a versioned name.** `saveLaunchInputs` returns the handler's named, typed launch inputs (never computed grid or argument values) with a versioned dispatch name. Register the handler under that versioned name as well as under the dispatch symbol its descriptors use, so a loaded plan finds the handler whose contract gives the values their meaning.
+- **Save the chosen plan.** `IPlan::saveablePlan()` gives the single-kernel plan to save. A `BenchmarkPlan` returns one only after its first execute has chosen a kernel.
+- **Export the hooks.** Export the three hooks listed under [Plugin API](#plugin-api). Tell your own plans apart from the plans of your other engines in the save hook, for example by the plan type.
+- **Report the note.** Decide from each engine's kernel source kinds whether it reports `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION`.
+- **Keep the note and the hooks in agreement.** The frontend's `to_binary()` includes the plan for every engine that reports the note, and fails if that save fails, with no fallback to the graph only.
 
 ## Plugin Architecture
 

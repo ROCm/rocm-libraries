@@ -24,6 +24,7 @@
 #include <hip/hip_runtime.h>
 
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -40,6 +41,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "IngestorIntegrationSupport.hpp"
 #include "ScopedPluginLogCapture.hpp"
 
 using namespace hipdnn_frontend;
@@ -72,10 +74,12 @@ constexpr const char* SERVED_ARCH = "gfx950";
 constexpr const char* BLOCK_M_KNOB = "block_m";
 constexpr const char* BLOCK_N_KNOB = "block_n";
 
-/// The heuristic path's selection line (GenericPlanBuilder::buildPlan), which names the
-/// kernel id as the kdp spells it: lowercase, hyphenated.
-constexpr const char* SELECTED_KERNEL_MARKER = "' selected kernel ";
+// The selection line spells the kernel id in lowercase with hyphens, in 36 characters.
 constexpr size_t KERNEL_ID_LENGTH = 36;
+
+// The knob case that the save and load cases build. Its graph sets the scale 1/sqrt(64), so a
+// loaded plan that applies the default scale 1.0 fails the comparison.
+constexpr const char* SAVE_LOAD_CASE = "D64_Bm128Bn64";
 
 constexpr int64_t Q_UID = 1;
 constexpr int64_t K_UID = 2;
@@ -485,7 +489,7 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile&
 std::optional<std::string>
     selectedKernelId(const hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder)
 {
-    const std::string marker = std::string("engine '") + ENGINE_NAME + SELECTED_KERNEL_MARKER;
+    const std::string marker = std::string("engine '") + ENGINE_NAME + detail::SELECTED_KERNEL_LOG;
     for(const auto& log : recorder.getRecordedLogs())
     {
         const auto at = log.message.find(marker);
@@ -656,7 +660,7 @@ TEST_P(IntegrationGpuGfx950AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
 
     // Rank 0: a cold case serves the heuristic's front rather than a fallback past a
     // kernel that failed to load, and a forced case filters to its one kernel.
-    auto selectionLine = std::string(SELECTED_KERNEL_MARKER) + *expectedId + " at rank 0";
+    auto selectionLine = std::string(detail::SELECTED_KERNEL_LOG) + *expectedId + " at rank 0";
     if(testCase.forced)
     {
         selectionLine += " from 1 candidate(s)";
@@ -715,6 +719,133 @@ TEST_P(IntegrationGpuGfx950AttentionDenseKnobFilter, RefusesAKnobPairNoKernelCar
 
     EXPECT_FALSE(selectedKernelId(recorder).has_value()) << "Captured logs:\n"
                                                          << recorder.getRecordedLogsAsString();
+}
+
+class IntegrationGpuGfx950AttentionDenseSaveLoad
+    : public IntegrationGpuGfx950AttentionDenseBase<KnobCase>
+{
+protected:
+    // Builds the forced-tile graph of the save and load knob case, validates one run and saves
+    // the plan in form. Then it destroys the graph, loads the plan with a new handle and
+    // validates two runs of the loaded plan. Every run uses the CPU reference of the original
+    // graph.
+    void roundTripInAFreshHandle(SaveForm form)
+    {
+        const auto cases = knobCases();
+        const auto found = std::find_if(cases.begin(), cases.end(), [](const KnobCase& candidate) {
+            return std::string(candidate.name) == SAVE_LOAD_CASE;
+        });
+        ASSERT_NE(found, cases.end()) << "no knob case is named " << SAVE_LOAD_CASE;
+        ASSERT_TRUE(found->forced);
+        const KnobCase& knobCase = *found;
+
+        auto sdpa = buildSdpaGraph(knobCase.name, knobCase.shape);
+        {
+            const ScopedPluginLogCapture capture(this);
+            ASSERT_NO_FATAL_FAILURE(this->buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
+
+            auto result
+                = sdpa.graph->create_execution_plan_ext(engineId(), knobSettingsFor(knobCase.tile));
+            ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+            result = sdpa.graph->check_support();
+            ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+            result = sdpa.graph->build_plans();
+            ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+            // The load below must log no selection. This check proves that the capture
+            // records selection lines.
+            ASSERT_TRUE(capture.recorder().hasLogContaining(detail::SELECTED_KERNEL_LOG))
+                << "Captured logs:\n"
+                << capture.recorder().getRecordedLogsAsString();
+        }
+
+        int64_t servingEngineId = 0;
+        auto result = sdpa.graph->get_execution_plan_engine_id(servingEngineId);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_EQ(servingEngineId, engineId());
+
+        std::vector<BehaviorNote> notes;
+        result = sdpa.graph->get_behavior_notes_for_engine(engineId(), notes);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_NE(std::find(notes.begin(),
+                            notes.end(),
+                            BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
+                  notes.end());
+
+        VerificationRun run;
+        {
+            GraphVerificationContext context(*sdpa.graph);
+            const float tolerance = sdpaForwardTolerance(knobCase.shape.dataType);
+            ASSERT_NO_FATAL_FAILURE(
+                this->registerValidator(context, sdpa.output, tolerance, tolerance));
+            ASSERT_NO_FATAL_FAILURE(this->prepareVerification(context, /*seed=*/0, run));
+        }
+        ASSERT_NO_FATAL_FAILURE(this->executeAndValidate(run, *sdpa.graph, this->_handle));
+
+        std::vector<uint8_t> saved;
+        {
+            const ScopedPluginLogCapture capture(this);
+            auto save = detail::saveInForm(*sdpa.graph, form);
+            ASSERT_EQ(save.second.code, ErrorCode::OK) << save.second.err_msg;
+            saved = std::move(save.first);
+            EXPECT_FALSE(capture.recorder().hasLogContaining(
+                "does not support execution plan serialization"))
+                << "Captured logs:\n"
+                << capture.recorder().getRecordedLogsAsString();
+        }
+        if(form == SaveForm::GRAPH_AND_PLAN)
+        {
+            int contents = 0;
+            ASSERT_EQ(
+                hipdnnBackendGetSerializedBinaryContents_ext(saved.data(), saved.size(), &contents),
+                HIPDNN_STATUS_SUCCESS);
+            ASSERT_NE(contents & HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN, 0)
+                << "the saved graph holds no execution plan";
+        }
+
+        int64_t originalWorkspaceSize = 0;
+        result = sdpa.graph->get_workspace_size(originalWorkspaceSize);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        const std::weak_ptr<Graph> original = sdpa.graph;
+        sdpa = SdpaGraph{};
+        ASSERT_TRUE(original.expired()) << "another owner keeps the original graph alive";
+
+        const ScopedPluginLogCapture capture(this);
+        ASSERT_NO_FATAL_FAILURE(detail::replaceHandleWithAFreshOne(this->_handle, this->_stream));
+
+        auto loaded = std::make_shared<Graph>();
+        result = detail::loadInForm(*loaded, this->_handle, saved, form);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        EXPECT_TRUE(capture.recorder().hasLogContaining(detail::CREATING_CONTAINER_LOG))
+            << "the new handle did not get a new provider container. Captured logs:\n"
+            << capture.recorder().getRecordedLogsAsString();
+        detail::expectNoKernelSelectionLogged(capture.recorder());
+
+        int64_t loadedEngineId = 0;
+        result = loaded->get_execution_plan_engine_id(loadedEngineId);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        EXPECT_EQ(loadedEngineId, engineId());
+
+        int64_t loadedWorkspaceSize = 0;
+        result = loaded->get_workspace_size(loadedWorkspaceSize);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        EXPECT_EQ(loadedWorkspaceSize, originalWorkspaceSize);
+
+        ASSERT_NO_FATAL_FAILURE(this->executeAndValidate(run, *loaded, this->_handle));
+        ASSERT_NO_FATAL_FAILURE(this->executeAndValidate(run, *loaded, this->_handle));
+    }
+};
+
+TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresGraphAndPlanInAFreshHandle)
+{
+    roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN);
+}
+
+TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresPlanOnlyInAFreshHandle)
+{
+    roundTripInAFreshHandle(SaveForm::PLAN_ONLY);
 }
 
 INSTANTIATE_TEST_SUITE_P(Quick,
