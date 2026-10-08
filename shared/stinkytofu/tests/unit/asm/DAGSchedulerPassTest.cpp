@@ -2218,18 +2218,19 @@ TEST_F(DAGSchedulerPassTest, VgprToGlobalPrefetchHazard_AtLeast16CycleGap) {
                           "vaddr VGPR";
 }
 
-// A lone after-group has no before partner, so overlap placement is none. The
-// half-latency ds_load gap applies only to placement=gap. This kernel must not
-// be held for half the load latency; the token edge still keeps the signal
-// after the load. The WMMAs read the load's VGPR, so they are competing work
-// that cannot pass the load.
-TEST_F(DAGSchedulerPassTest, DsLoadToBarrier_NonePlacementDoesNotForceHalfLatency) {
+// A lone after-group has no before partner, so overlap placement is none.
+// None keeps half the last ds_load latency. Its early release needs another
+// ready barrier closer than (2 + 2*BarrierHalfSlack) WMMA windows; this
+// fixture has no such barrier, so the half latency stands. The WMMAs read the
+// load's VGPR, so they cannot pass it, and each WMMA issueCycles is 1.
+TEST_F(DAGSchedulerPassTest, DsLoadToBarrier_NonePlacementHoldsHalfLatency) {
     constexpr int kLoadLatency = 32;
+    constexpr int kGap = kLoadLatency / 2;
     StinkyInstruction* load = createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
     load->issueCycles = 1;
     load->latencyCycles = kLoadLatency;
 
-    constexpr int kWmmas = 20;
+    constexpr int kWmmas = kGap + 4;
     for (int i = 0; i < kWmmas; ++i) createWmmaScaleF8(/*destStart=*/64 + i * 8, /*src0Start=*/0);
 
     auto [signal, wait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
@@ -2245,7 +2246,21 @@ TEST_F(DAGSchedulerPassTest, DsLoadToBarrier_NonePlacementDoesNotForceHalfLatenc
     const int loadPos = positionOf(*bb, load);
     const int signalPos = positionOf(*bb, signal);
     ASSERT_GE(loadPos, 0);
-    ASSERT_GT(signalPos, loadPos) << "the LDS token edge still orders the signal after the load";
+    ASSERT_GT(signalPos, loadPos);
+
+    int issueGap = 0;
+    int wmmasAfterSignal = 0;
+    int idx = 0;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        if (idx > loadPos && idx < signalPos) issueGap += inst->issueCycles;
+        if (idx > signalPos && isMatrixInstruction(*inst)) wmmasAfterSignal++;
+        idx++;
+    }
+    EXPECT_GE(issueGap, kGap) << "none placement must wait half the ds_load latency";
+    EXPECT_GT(wmmasAfterSignal, 0)
+        << "WMMAs past the half-latency gap must stay behind the barrier";
 }
 
 // ---------------------------------------------------------------------------
