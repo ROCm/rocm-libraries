@@ -217,6 +217,66 @@ class TestStreamKValidator(unittest.TestCase):
                 eng.conv_wgrad_lower_llvm(_spec_dict(spec), "gfx950")
             self.assertIn(why, str(cm.exception))
 
+    # (label, problem, arch, spec overrides). Each rejected config trips one
+    # gate only, so the engines' differing check order cannot pick a different
+    # reason.
+    _AGREEMENT = [
+        ("ok_dp_sk_linear", _DENSE, "gfx950", {}),
+        (
+            "ok_pers_tree",
+            _GROUPED,
+            "gfx950",
+            dict(streamk="persistent", streamk_reduction="tree"),
+        ),
+        (
+            "ok_atomic_fp32",
+            _DENSE,
+            "gfx950",
+            dict(dtype_d="fp32", streamk_reduction="atomic"),
+        ),
+        ("ok_workspace", _GROUPED, "gfx950", dict(streamk_reduction="workspace")),
+        ("ok_gfx942", _DENSE, "gfx942", dict(edge=16, streamk="persistent")),
+        ("ok_auto_ctas", _DENSE, "gfx950", dict(streamk_ctas=-1)),
+        ("ok_off", _DENSE, "gfx950", dict(streamk="off")),
+        ("split_k", _DENSE, "gfx950", dict(split_k=4)),
+        ("split_k_auto", _DENSE, "gfx950", dict(split_k=-1)),
+        ("two_stage", _DENSE, "gfx950", dict(two_stage=True, split_k=2)),
+        ("cshuffle", _DENSE, "gfx950", dict(epilogue="cshuffle")),
+        ("unroll_k", _DENSE, "gfx950", dict(unroll_k=True)),
+        ("chiplet", _DENSE, "gfx950", dict(chiplet_swizzle=True)),
+        ("atomic_fp16", _DENSE, "gfx950", dict(streamk_reduction="atomic")),
+        (
+            "atomic_bf16",
+            _DENSE,
+            "gfx950",
+            dict(dtype_d="bf16", streamk_reduction="atomic"),
+        ),
+        ("ctas_zero", _DENSE, "gfx950", dict(streamk_ctas=0)),
+        ("ctas_minus_two", _DENSE, "gfx950", dict(streamk_ctas=-2)),
+        ("bad_mode", _DENSE, "gfx950", dict(streamk="sideways")),
+        ("bad_reduction", _DENSE, "gfx950", dict(streamk_reduction="sideways")),
+        ("gfx90a", _DENSE, "gfx90a", {}),
+        # wave32 so Python's wave-size check passes and the arch gate decides.
+        ("gfx1250", _DENSE, "gfx1250", dict(wave_size=32, warp_tile_k=32)),
+        ("group_merge", _DW, "gfx950", dict(group_merge=2)),
+    ]
+
+    def test_cpp_validity_agrees(self):
+        eng = _engine()
+        for label, problem, arch, kw in self._AGREEMENT:
+            spec = _spec(problem, **kw)
+            want = is_valid_wgrad_spec(spec, arch)
+            with self.subTest(label):
+                self.assertEqual(label.startswith("ok_"), want[0], want[1])
+                got = eng.conv_wgrad_is_valid_spec(_spec_dict(spec), arch)
+                self.assertEqual(tuple(got), want)
+        # A wave64 spec on gfx1250 trips Python's wave-size check before the
+        # stream-K arch gate, which the C port has no counterpart of; the
+        # reasons differ but both engines reject it.
+        spec = _spec()
+        self.assertFalse(is_valid_wgrad_spec(spec, "gfx1250")[0])
+        self.assertFalse(eng.conv_wgrad_is_valid_spec(_spec_dict(spec), "gfx1250")[0])
+
     def test_cpp_rejects_group_merge_with_the_same_reason(self):
         eng = _engine()
         spec = _spec(_DW, group_merge=2)
@@ -332,6 +392,62 @@ class TestStreamKHostPlan(unittest.TestCase):
                             got["is_deterministic"], reduction in ("linear", "tree")
                         )
 
+    def test_cpp_default_pool_agrees(self):
+        from kernels.common.conv_implicit_gemm_wgrad import wgrad_streamk_default_pool
+        from rocke.helpers.split_k import _ARCH_NUM_CUS
+
+        eng = _engine()
+        # Every arch of the Python CU table, plus one it does not list.
+        for arch in [*_ARCH_NUM_CUS, "gfx90a"]:
+            for reduction in ("linear", "tree", "atomic", "workspace"):
+                with self.subTest(arch=arch, r=reduction):
+                    self.assertEqual(
+                        eng.conv_wgrad_streamk_default_pool(reduction, arch),
+                        wgrad_streamk_default_pool(reduction, arch),
+                    )
+
+    def test_cpp_host_plan_agrees_auto_pool(self):
+        # streamk_ctas=-1 (the spec default) resolves to the arch's CU-based
+        # pool in both engines.
+        eng = _engine()
+        for arch, edge in (("gfx950", 32), ("gfx942", 16)):
+            for problem in (_DENSE, _GROUPED):
+                for mode in ("dp_sk", "persistent"):
+                    for reduction, dtype_d in (
+                        ("linear", "fp16"),
+                        ("tree", "fp16"),
+                        ("atomic", "fp32"),
+                        ("workspace", "fp16"),
+                    ):
+                        spec = _spec(
+                            problem,
+                            dtype_d=dtype_d,
+                            edge=edge,
+                            streamk=mode,
+                            streamk_reduction=reduction,
+                            streamk_ctas=-1,
+                        )
+                        got = eng.conv_wgrad_streamk_host(_spec_dict(spec), arch)
+                        flags, partials = wgrad_streamk_workspace_layout(
+                            spec, arch=arch
+                        )
+                        with self.subTest(
+                            arch=arch, g=problem.groups, mode=mode, r=reduction
+                        ):
+                            self.assertEqual(
+                                tuple(got["grid"]), wgrad_streamk_grid(spec, arch=arch)
+                            )
+                            self.assertEqual(got["flags_bytes"], flags)
+                            self.assertEqual(got["partials_bytes"], partials)
+                            self.assertEqual(
+                                got["workspace_bytes"],
+                                wgrad_streamk_workspace_nbytes(spec, arch=arch),
+                            )
+        # Without an arch both engines default to gfx950.
+        spec = _spec(streamk="persistent", streamk_ctas=-1)
+        got = eng.conv_wgrad_streamk_host(_spec_dict(spec))
+        self.assertEqual(tuple(got["grid"]), wgrad_streamk_grid(spec))
+
 
 class TestStreamKLaunchAbi(unittest.TestCase):
     """The stream-K kernarg ABI and the launch values that fill it."""
@@ -376,9 +492,7 @@ class TestStreamKLaunchAbi(unittest.TestCase):
                         self.assertEqual(v["sk_iters_per_tile"], part.iters_per_tile)
                         self.assertEqual(v["sk_dp_tiles"], part.dp_tiles)
                         self.assertEqual(v["sk_ctas"], part.sk_ctas)
-                        self.assertEqual(
-                            v["sk_iters_per_cta"], max(part.iters_per_sk_cta, 1)
-                        )
+                        self.assertEqual(v["sk_iters_per_cta"], part.iters_per_sk_cta)
                         self.assertEqual(v["sk_extra_iters"], part.extra_iters)
                         self.assertEqual(v["sk_pool"], pool)
                         self.assertEqual(v["sk_tree_rounds"], part.tree_rounds)
@@ -439,14 +553,27 @@ class TestStreamKLaunchAbi(unittest.TestCase):
             ("grouping", ConvProblem(C=32, K=96, groups=2, **base)),
             ("is_3d", ConvProblem(C=32, K=96, Di=4, Z=1, sD=1, pD=0, dD=1, **base)),
             ("is_pointwise", ConvProblem(N=2, Hi=12, Wi=12, C=32, K=96, Y=1, X=1)),
-            ("kpg=36", ConvProblem(C=32, K=36, **base)),
-            ("cpg=20", ConvProblem(C=20, K=96, **base)),
+            (
+                "kpg=36 is not a multiple of the built 8-wide dY",
+                ConvProblem(C=32, K=36, **base),
+            ),
+            (
+                "cpg=20 is not a multiple of the built 8-wide X",
+                ConvProblem(C=20, K=96, **base),
+            ),
         ):
             with self.subTest(needle=needle):
                 for helper in (wgrad_streamk_partition, wgrad_streamk_workspace_nbytes):
                     with self.assertRaises(ValueError) as cm:
                         helper(spec, problem=other)
                     self.assertIn(needle, str(cm.exception))
+        # X and dW both run along cpg; the error names the operand that failed.
+        narrow_b = _spec(vector_size_b=4)
+        with self.assertRaises(ValueError) as cm:
+            wgrad_streamk_partition(narrow_b, problem=ConvProblem(C=20, K=96, **base))
+        self.assertIn(
+            "cpg=20 is not a multiple of the built 8-wide dW", str(cm.exception)
+        )
         # Wider channel runs than the build keep the same code path.
         wgrad_streamk_partition(spec, problem=ConvProblem(C=64, K=192, **base))
 

@@ -22,12 +22,13 @@ from rocke.helpers.streamk import (
 
 # (m_tiles, n_tiles, iters_per_tile, max_active_wgs, persistent) ->
 # (sk_tiles, sk_ctas, iters_per_sk_cta, extra_iters, dp_tiles, grid_size,
-#  max_linear_partners, tree_rounds, flags_bytes)
+#  max_linear_partners, tree_rounds, flags_bytes(n_waves=1))
+# iters_per_sk_cta is clamped to 1 for an all-DP partition (a kernel divisor).
 _VECTORS = (
-    ((4, 4, 8, 16, False), (0, 0, 0, 0, 16, 16, 0, 0, 0)),  # tiles % W == 0
+    ((4, 4, 8, 16, False), (0, 0, 1, 0, 16, 16, 0, 0, 0)),  # tiles % W == 0
     ((2, 3, 10, 8, False), (6, 8, 7, 4, 0, 8, 2, 2, 256)),  # tiles < W
     ((5, 7, 12, 16, False), (19, 16, 14, 4, 16, 32, 1, 1, 256)),  # tiles > W
-    ((1, 3, 2, 8, False), (0, 0, 0, 0, 3, 3, 0, 0, 0)),  # too little SK work
+    ((1, 3, 2, 8, False), (0, 0, 1, 0, 3, 3, 0, 0, 0)),  # too little SK work
     ((5, 7, 12, 16, True), (19, 16, 14, 4, 16, 16, 1, 1, 256)),  # persistent
     ((3, 3, 64, 4, False), (5, 4, 80, 0, 4, 8, 1, 1, 256)),
     ((7, 5, 3, 16, False), (19, 16, 3, 9, 16, 32, 1, 1, 256)),
@@ -44,7 +45,7 @@ def _plan(p: StreamKIterPartition) -> tuple:
         p.grid_size,
         p.max_linear_partners,
         p.tree_rounds,
-        p.flags_bytes,
+        p.flags_bytes(1),
     )
 
 
@@ -73,6 +74,19 @@ class TestStreamKIterPartitionVectors(unittest.TestCase):
             [streamk_end_iter(p, c) for c in range(5)], [207, 222, 237, 252, 266]
         )
 
+    def test_flags_bytes_per_wave(self):
+        # One i32 flag per (stream-K CTA, wave), padded to 256 bytes.
+        for args, n_waves, want in (
+            ((5, 7, 12, 16), 4, 256),  # 4 * 16 * 4 = 256
+            ((5, 7, 12, 16), 8, 512),
+            ((2, 3, 10, 8), 9, 512),  # 4 * 8 * 9 = 288
+            ((4, 4, 8, 16), 4, 0),  # all-DP: no flags
+        ):
+            with self.subTest(args=args, n_waves=n_waves):
+                self.assertEqual(_make(*args).flags_bytes(n_waves), want)
+        with self.assertRaisesRegex(ValueError, "n_waves must be > 0"):
+            _make(5, 7, 12, 16).flags_bytes(0)
+
     def test_rejects_non_positive_counts(self):
         for kw in ("m_tiles", "n_tiles", "iters_per_tile", "max_active_wgs"):
             args = {
@@ -95,12 +109,13 @@ class TestStreamKIterPartitionInvariants(unittest.TestCase):
     def _check(self, p: StreamKIterPartition) -> None:
         ipt = p.iters_per_tile
         self.assertEqual(p.dp_tiles + p.sk_tiles, p.num_tiles)
+        # A kernel divisor even when all-DP.
+        self.assertGreaterEqual(p.iters_per_sk_cta, 1)
         if not p.sk_ctas:
             self.assertEqual(p.sk_tiles, 0)
             return
         # Every SK CTA owns >= 1 iteration and the ranges tile the SK span
         # contiguously.
-        self.assertGreaterEqual(p.iters_per_sk_cta, 1)
         cursor = p.total_dp_iters
         contributors = {}
         for c in range(p.sk_ctas):

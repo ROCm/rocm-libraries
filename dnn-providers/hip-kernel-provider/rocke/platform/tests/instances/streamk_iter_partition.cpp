@@ -33,14 +33,15 @@ struct Vector
 {
     int m, n, ipt, w;
     bool persistent;
+    /* flags_bytes is for n_waves = 1; ipsc is clamped to 1 when all-DP. */
     int sk_tiles, sk_ctas, ipsc, extra, dp_tiles, grid, partners, rounds, flags_bytes;
 };
 
 const Vector k_vectors[] = {
-    {4, 4, 8, 16, false, 0, 0, 0, 0, 16, 16, 0, 0, 0},
+    {4, 4, 8, 16, false, 0, 0, 1, 0, 16, 16, 0, 0, 0},
     {2, 3, 10, 8, false, 6, 8, 7, 4, 0, 8, 2, 2, 256},
     {5, 7, 12, 16, false, 19, 16, 14, 4, 16, 32, 1, 1, 256},
-    {1, 3, 2, 8, false, 0, 0, 0, 0, 3, 3, 0, 0, 0},
+    {1, 3, 2, 8, false, 0, 0, 1, 0, 3, 3, 0, 0, 0},
     {5, 7, 12, 16, true, 19, 16, 14, 4, 16, 16, 1, 1, 256},
     {3, 3, 64, 4, false, 5, 4, 80, 0, 4, 8, 1, 1, 256},
     {7, 5, 3, 16, false, 19, 16, 3, 9, 16, 32, 1, 1, 256},
@@ -69,7 +70,7 @@ void check_vectors()
         CHECK(r.grid_size == v.grid);
         CHECK(r.max_linear_partners == v.partners);
         CHECK(r.tree_rounds == v.rounds);
-        CHECK(r.flags_bytes == v.flags_bytes);
+        CHECK(rocke_streamk_flags_bytes(&r, 1, NULL) == (size_t)v.flags_bytes);
     }
     const rocke_streamk_iter_partition_t p = make(5, 7, 12, 16, false);
     const int starts[] = {192, 207, 222, 237, 252};
@@ -79,6 +80,34 @@ void check_vectors()
         CHECK(rocke_streamk_start_iter(&p, c) == starts[c]);
         CHECK(rocke_streamk_end_iter(&p, c) == ends[c]);
     }
+}
+
+void check_flags_bytes_per_wave()
+{
+    /* One i32 flag per (stream-K CTA, wave), padded to 256 bytes. */
+    struct
+    {
+        int m, n, ipt, w, n_waves;
+        size_t want;
+    } const cases[] = {
+        {5, 7, 12, 16, 4, 256},
+        {5, 7, 12, 16, 8, 512},
+        {2, 3, 10, 8, 9, 512},
+        {4, 4, 8, 16, 4, 0},
+    };
+    for(const auto& c : cases)
+    {
+        const rocke_streamk_iter_partition_t p = make(c.m, c.n, c.ipt, c.w, false);
+        const rocke_streamk_iter_plan_t r = rocke_streamk_iter_plan(&p);
+        rocke_status_t st = ROCKE_ERR_VALUE;
+        CHECK(rocke_streamk_flags_bytes(&r, c.n_waves, &st) == c.want);
+        CHECK(st == ROCKE_OK);
+    }
+    const rocke_streamk_iter_partition_t p = make(5, 7, 12, 16, false);
+    const rocke_streamk_iter_plan_t r = rocke_streamk_iter_plan(&p);
+    rocke_status_t st = ROCKE_OK;
+    CHECK(rocke_streamk_flags_bytes(&r, 0, &st) == 0);
+    CHECK(st == ROCKE_ERR_VALUE);
 }
 
 void check_rejects_non_positive()
@@ -96,9 +125,9 @@ void check_invariants(int m, int n, int ipt, int w)
     const rocke_streamk_iter_partition_t p = make(m, n, ipt, w, false);
     const rocke_streamk_iter_plan_t r = rocke_streamk_iter_plan(&p);
     CHECK(r.dp_tiles + r.sk_tiles == r.num_tiles);
+    CHECK(r.iters_per_sk_cta >= 1); /* a kernel divisor even when all-DP */
     if(!r.sk_ctas)
         return;
-    CHECK(r.iters_per_sk_cta >= 1);
     int cursor = r.total_dp_iters;
     int prev_first_tile = -1;
     int run = 0; /* contributors to the current tile */
@@ -132,6 +161,7 @@ void check_invariants(int m, int n, int ipt, int w)
 int main(void)
 {
     check_vectors();
+    check_flags_bytes_per_wave();
     check_rejects_non_positive();
     const int ipts[] = {1, 2, 3, 5, 8, 13};
     const int ws[] = {1, 2, 3, 4, 7, 8, 16};

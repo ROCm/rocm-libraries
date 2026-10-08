@@ -150,6 +150,7 @@ rocke_streamk_decoded_tile_t rocke_emit_streamk_decode(rocke_ir_builder_t* b,
  *     (its @property values)                + rocke_streamk_iter_plan_t, resolved
  *                                             once by rocke_streamk_iter_plan()
  *   streamk_iter_partition(...)           rocke_streamk_iter_partition_make(...)
+ *   StreamKIterPartition.flags_bytes()    rocke_streamk_flags_bytes(...)
  *   streamk_start_iter / streamk_end_iter rocke_streamk_start_iter / _end_iter
  *   StreamKIterArgs                       rocke_streamk_iter_args_t
  *   emit_streamk_sk_start_iter(...)       rocke_emit_streamk_sk_start_iter(...)
@@ -174,14 +175,13 @@ typedef struct rocke_streamk_iter_plan
     int sk_tiles;
     int sk_ctas;
     int total_sk_iters;
-    int iters_per_sk_cta;
+    int iters_per_sk_cta; /* >= 1; clamped to 1 for an all-DP plan (a divisor) */
     int extra_iters;
     int dp_tiles;
     int total_dp_iters;
     int grid_size;
     int max_linear_partners;
     int tree_rounds;
-    int flags_bytes;
 } rocke_streamk_iter_plan_t;
 
 /* streamk_iter_partition: every count must be > 0. On violation *out_status
@@ -196,6 +196,15 @@ rocke_streamk_iter_partition_t rocke_streamk_iter_partition_make(int m_tiles,
 /* Every StreamKIterPartition @property, resolved once. */
 rocke_streamk_iter_plan_t rocke_streamk_iter_plan(const rocke_streamk_iter_partition_t* p);
 
+/* StreamKIterPartition.flags_bytes(n_waves): bytes of the stream-K fixup flag
+ * table, one i32 flag per (stream-K CTA, wave) padded to 256 bytes; 0 for an
+ * all-DP plan. n_waves is the waves per CTA that signal independently
+ * (warp_m * warp_n for wgrad). n_waves <= 0 (Python ValueError) sets
+ * *out_status (if non-NULL) to ROCKE_ERR_VALUE and returns 0. */
+size_t rocke_streamk_flags_bytes(const rocke_streamk_iter_plan_t* r,
+                                 int n_waves,
+                                 rocke_status_t* out_status);
+
 int rocke_streamk_start_iter(const rocke_streamk_iter_partition_t* p, int sk_cta);
 int rocke_streamk_end_iter(const rocke_streamk_iter_partition_t* p, int sk_cta);
 
@@ -207,7 +216,7 @@ typedef struct rocke_streamk_iter_args
     rocke_value_t* iters_per_tile; /* i32 MAC iterations per output tile */
     rocke_value_t* dp_tiles; /* i32 tiles owned whole by data-parallel CTAs */
     rocke_value_t* total_dp_iters; /* i32 dp_tiles * iters_per_tile */
-    rocke_value_t* iters_per_sk_cta; /* i32 base iterations per stream-K CTA (> 0) */
+    rocke_value_t* iters_per_sk_cta; /* i32 base iterations per stream-K CTA (>= 1) */
     rocke_value_t* extra_iters; /* i32 stream-K CTAs that own one more */
 } rocke_streamk_iter_args_t;
 

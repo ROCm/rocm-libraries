@@ -250,10 +250,23 @@ size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spe
 
 /* ---- stream-K host-side helpers (Python wgrad_streamk_*) ---- */
 
+/* Python wgrad_streamk_default_pool(reduction, arch): the CTA pool an auto
+ * (streamk_ctas == -1) launch uses -- one CTA per CU for linear/tree, four per
+ * CU for atomic/workspace. CU counts come from a static per-arch table that
+ * mirrors rocke.helpers.split_k._ARCH_NUM_CUS (256 for an unknown arch).
+ * A NULL arch is gfx950, Python's default. */
+int rocke_wgrad_conv_streamk_default_pool(const char* reduction, const char* arch);
+
+/* Python wgrad_streamk_launch(spec, arch=arch).pool: streamk_ctas when > 0,
+ * the arch default pool when -1, and 0 for streamk == "off" or an invalid
+ * count. A NULL arch is gfx950. */
+int rocke_wgrad_conv_streamk_ctas(const rocke_implicit_gemm_conv_wgrad_spec_t* s, const char* arch);
+
 /* Python wgrad_streamk_partition(spec): the iteration partition the kernel and
- * its launch grid share.  Requires streamk != "off" and streamk_ctas > 0;
- * otherwise *out_status (if non-NULL) is ROCKE_ERR_VALUE and the result is
- * zeroed. */
+ * its launch grid share.  Requires streamk != "off" and streamk_ctas == -1
+ * (auto, resolved for gfx950 like Python's default arch; resolve it with
+ * rocke_wgrad_conv_streamk_ctas for another arch) or > 0; otherwise
+ * *out_status (if non-NULL) is ROCKE_ERR_VALUE and the result is zeroed. */
 rocke_streamk_iter_partition_t
     rocke_wgrad_conv_streamk_partition(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
                                        rocke_status_t* out_status);

@@ -583,8 +583,8 @@ class ConvArgs:
             "sk_dp_tiles": part.dp_tiles,
             "sk_ctas": part.sk_ctas,
             # A divisor in the kernel's owner lookup, which an all-DP launch
-            # still evaluates; nothing reads it as a length when sk_ctas == 0.
-            "sk_iters_per_cta": max(part.iters_per_sk_cta, 1),
+            # still evaluates; the partition clamps it to >= 1 for that case.
+            "sk_iters_per_cta": part.iters_per_sk_cta,
             "sk_extra_iters": part.extra_iters,
             "sk_pool": part.max_active_wgs,
             "sk_tree_rounds": part.tree_rounds,

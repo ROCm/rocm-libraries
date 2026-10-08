@@ -21,11 +21,12 @@ exposed:
  and is the path CK Tile defaults to.
 
 This module ships the partitioner math (a pure-Python view) and the
-IR-side glue that
-``instances/streamk_gemm.py`` uses. The kernel-shape primitives stay
+IR-side glue that ``instances/streamk_gemm.py`` and the stream-K
+implicit-GEMM wgrad conv kernel use. The kernel-shape primitives stay
 in :mod:`rocke.helpers.atoms` / :mod:`rocke.helpers.loads` /
 :mod:`rocke.helpers.epilogues`; this file is purely about
-*partitioning* the work, not about running the per-tile GEMM.
+*partitioning* the work, not about running the per-tile GEMM or its
+cross-CTA fixup.
 
 What we ship today:
 
@@ -37,12 +38,17 @@ What we ship today:
 * :func:`emit_streamk_decode` -- IR-side decode of a linear partition
  id into the SSA ``(m_tile, n_tile, k_iter, is_first, is_last)``
  bundle the kernel needs.
+* :class:`StreamKIterPartition` and friends -- CK Tile's
+ iteration-balanced (DP + stream-K) partitioner, plus the SSA emitters
+ that map a CTA onto its MAC-iteration range.
 
-v1 implements the ``Atomic`` strategy end-to-end and the
-``Reduction`` strategy's *decode* surface (so the spec layer can
-emit the right kernel shape); the per-tile reduction pass that the
-``Reduction`` strategy needs lands with the StreamK GEMM kernel
-itself in .
+The ``Reduction`` strategy's cross-CTA fixup (partial slots + a
+per-(CTA, wave) flag table, Linear or Tree fan-in) is kernel-specific
+and lives with its kernel; the reference implementation is the nested
+``_emit_streamk_tiles`` of ``build_implicit_gemm_conv_wgrad`` in
+``library/kernels/common/conv_implicit_gemm_wgrad.py`` (C++ twin:
+``wgrad_emit_streamk`` in ``conv_implicit_gemm_wgrad.cpp``).
+:meth:`StreamKIterPartition.flags_bytes` sizes its flag table.
 """
 
 from __future__ import annotations
@@ -62,8 +68,6 @@ __all__ = [
     "compute_streamk_grid_size",
     "emit_streamk_decode",
     "emit_streamk_iter_range",
-    "emit_streamk_partial_load_accumulate",
-    "emit_streamk_partial_store",
     "emit_streamk_sk_start_iter",
     "streamk_end_iter",
     "streamk_iter_partition",
@@ -181,67 +185,6 @@ def emit_streamk_decode(
     )
 
 
-def emit_streamk_partial_store(
-    b: IRBuilder,
-    *,
-    workspace: Value,
-    flag_table: Value,
-    workspace_off: Value,
-    flag_off: Value,
-    value: Value,
-    is_first: Value,
-) -> None:
-    """Cooperative ``Reduction`` strategy partial-store + signal.
-
-    P37: each contributing CTA stores its partial K-sum at the
-    ``(m_tile, n_tile, k_iter)`` slot in the workspace and bumps the
-    flag-table counter for ``(m_tile, n_tile)`` via ``atomic_add(+1)``.
-    The first contributor's store is unconditionally a fresh write
-    (``is_first=True``); later contributors atomic-add into the
-    workspace too so the order doesn't matter.
-
-    Reference: CK Tile ``streamk_common.hpp::SignalStorePartialDone``
-    + ``streamk_gemm_kernel.hpp:448-504`` (Tree-reduction).
-    """
-    # Initial store: lane-0-only write (the workspace is per-lane sized
-    # already in the caller's view) — the consumer in
-    # :func:`emit_streamk_partial_load_accumulate` reads each slot once.
-    with b.scf_if(is_first):
-        b.global_store(workspace, workspace_off, value, align=4)
-    # Non-first contributors: atomic add into the same f32 slot (the
-    # ``is_last`` reducer reads the converged value).
-    with b.scf_if(b.lnot(is_first)):
-        b.global_atomic_add(workspace, workspace_off, value)
-    # Bump the flag counter so the last-finishing CTA can detect "I'm
-    # the reducer" via flag == k_iters_per_tile.
-    b.global_atomic_add(flag_table, flag_off, b.const_i32(1))
-
-
-def emit_streamk_partial_load_accumulate(
-    b: IRBuilder,
-    *,
-    workspace: Value,
-    workspace_off: Value,
-    is_last: Value,
-) -> Value:
-    """Read the converged f32 partial sum at ``workspace_off`` once
-    every contributor has signalled (``is_last == True`` is the
-    caller's responsibility).
-
-    The flag-table-based wait protocol is a busy-loop on
-    ``atomic_load(flag_table[tile_id]) == k_iters_per_tile``; we expose
-    it as a separate helper because the busy-loop shape differs
-    between Linear / Tree reduction. For now the Atomic strategy is
-    the canonical path; this helper plus
-    :func:`emit_streamk_partial_store` give callers the surface
-    needed to opt into the Reduction strategy.
-
-    Reference: CK Tile ``streamk_common.hpp:34-73``
-    (``WaitStorePartialDone``).
-    """
-    return b.global_load_f32(workspace, workspace_off)
-
-
 # ---------------------------------------------------------------------------
 # Iteration-balanced stream-K (CK Tile StreamKTilePartitioner)
 # ---------------------------------------------------------------------------
@@ -313,7 +256,16 @@ class StreamKIterPartition:
 
     @property
     def iters_per_sk_cta(self) -> int:
-        return self.total_sk_iters // self.sk_ctas if self.sk_ctas else 0
+        """Base MAC iterations per stream-K CTA; always >= 1.
+
+        Kernels divide by this value (the owner lookup) on every path,
+        including an all-DP launch, so it is clamped to 1 when there are no
+        stream-K CTAs. With ``sk_ctas > 0`` it is already >= 1 because
+        :attr:`sk_tiles` falls back to all-DP otherwise.
+        """
+        if not self.sk_ctas:
+            return 1
+        return self.total_sk_iters // self.sk_ctas
 
     @property
     def extra_iters(self) -> int:
@@ -355,10 +307,17 @@ class StreamKIterPartition:
         contributors = self.max_linear_partners + 1
         return (contributors - 1).bit_length()
 
-    @property
-    def flags_bytes(self) -> int:
-        """One i32 flag per stream-K CTA, padded to 256 bytes (CK layout)."""
-        return _ceil_div(4 * self.sk_ctas, 256) * 256
+    def flags_bytes(self, n_waves: int) -> int:
+        """Bytes of the fixup flag table: one i32 flag per (stream-K CTA,
+        wave), padded to 256 bytes (CK layout).
+
+        ``n_waves`` is the waves per CTA that publish/wait independently
+        (``warp_m * warp_n`` for the wgrad kernel); pass 1 for one flag per
+        CTA. 0 for an all-DP partition.
+        """
+        if n_waves <= 0:
+            raise ValueError(f"stream-K flags: n_waves must be > 0 (got {n_waves})")
+        return _ceil_div(4 * self.sk_ctas * n_waves, 256) * 256
 
 
 def streamk_iter_partition(
@@ -416,7 +375,7 @@ class StreamKIterArgs(NamedTuple):
     iters_per_tile: Value  # i32 MAC iterations per output tile
     dp_tiles: Value  # i32 tiles owned whole by data-parallel CTAs
     total_dp_iters: Value  # i32 dp_tiles * iters_per_tile
-    iters_per_sk_cta: Value  # i32 base iterations per stream-K CTA (> 0)
+    iters_per_sk_cta: Value  # i32 base iterations per stream-K CTA (>= 1)
     extra_iters: Value  # i32 stream-K CTAs that own one more iteration
 
 

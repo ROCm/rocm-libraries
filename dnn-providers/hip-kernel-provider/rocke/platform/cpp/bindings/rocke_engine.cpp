@@ -3877,15 +3877,41 @@ PYBIND11_MODULE(rocke_engine, m)
         "Formula: groups * ws_replicas * wg_M * wg_N * 4 (always f32).\n"
         "Returns 0 when two_stage=false, or split_k <= 1.");
     m.def(
-        "conv_wgrad_streamk_host",
-        [](const py::dict& d) -> py::dict {
+        "conv_wgrad_is_valid_spec",
+        [](const py::dict& d, const std::string& arch) -> py::tuple {
             std::deque<std::string> store;
             rocke_implicit_gemm_conv_wgrad_spec_t s = conv_wgrad_build_spec(d, store);
+            char reason[1024] = {0};
+            const bool ok = rocke_implicit_gemm_conv_wgrad_is_valid_spec(
+                &s, arch_or_default(arch), reason, sizeof(reason));
+            return py::make_tuple(ok, ok ? std::string("ok") : std::string(reason));
+        },
+        py::arg("spec"),
+        py::arg("arch") = "gfx950",
+        "C port of is_valid_wgrad_spec: (ok, reason), reason 'ok' when accepted.");
+    m.def(
+        "conv_wgrad_streamk_default_pool",
+        [](const std::string& reduction, const std::string& arch) -> int {
+            return rocke_wgrad_conv_streamk_default_pool(reduction.c_str(), arch_or_default(arch));
+        },
+        py::arg("reduction"),
+        py::arg("arch") = "gfx950",
+        "C port of wgrad_streamk_default_pool: the CTA pool of a streamk_ctas=-1 launch.");
+    m.def(
+        "conv_wgrad_streamk_host",
+        [](const py::dict& d, const std::string& arch) -> py::dict {
+            std::deque<std::string> store;
+            rocke_implicit_gemm_conv_wgrad_spec_t s = conv_wgrad_build_spec(d, store);
+            /* Resolve the auto pool (-1) for `arch` up front, as Python
+             * wgrad_streamk_launch does, so every helper below sees it. */
+            const int pool = rocke_wgrad_conv_streamk_ctas(&s, arch_or_default(arch));
+            if(pool > 0)
+                s.streamk_ctas = pool;
             int grid[3] = {0, 0, 0};
             if(rocke_wgrad_conv_streamk_grid(&s, grid) != ROCKE_OK)
                 throw std::runtime_error(
                     "rocke_engine.conv_wgrad_streamk_host: needs streamk != 'off' and "
-                    "streamk_ctas > 0");
+                    "streamk_ctas == -1 or > 0");
             size_t flags_bytes = 0;
             size_t partials_bytes = 0;
             rocke_wgrad_conv_streamk_workspace_layout(&s, &flags_bytes, &partials_bytes);
@@ -3898,6 +3924,7 @@ PYBIND11_MODULE(rocke_engine, m)
             return out;
         },
         py::arg("spec"),
+        py::arg("arch") = "gfx950",
         "Stream-K wgrad host plan of the C port: launch grid, workspace layout\n"
         "and determinism, for cross-checking the Python wgrad_streamk_* helpers.");
 

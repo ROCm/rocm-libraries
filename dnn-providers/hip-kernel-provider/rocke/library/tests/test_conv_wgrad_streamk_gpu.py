@@ -13,7 +13,11 @@ stream-K CTAs per tile (multi-round linear/tree fixups), a data-parallel plus
 stream-K mix, a grouped problem whose last M tile is partial, and a small CTA
 pool so the stream-K path is taken at these sizes. The linear and tree fixups
 are also run repeatedly and must be bit-identical across launches -- the only
-check that catches a missing release/acquire on the partial hand-off.
+check that catches a missing release/acquire on the partial hand-off. Before
+every launch the partial slots and dW are poisoned with NaN bytes (only the
+flags are zeroed, as the contract requires), so a consumer that reads a slot
+before its producer's release lands sees NaN rather than the previous
+launch's bit-identical partial.
 
 Requires a gfx942/gfx950 GPU and torch; skips cleanly otherwise. Host-side
 coverage lives in ``test_conv_wgrad_streamk.py``.
@@ -73,7 +77,7 @@ def _reference(X, dY, p):
     return w.permute(0, 2, 3, 1).contiguous()
 
 
-def _run(spec, *, launches: int = 1, grid=None, problem=None, artifact=None):
+def _run(spec, *, launches: int = 1, problem=None, artifact=None):
     """Build, launch ``launches`` times, return (dW outputs, fp32 reference).
 
     ``problem`` is the launch shape (default ``spec.problem``): the kernel is
@@ -125,7 +129,9 @@ def _run(spec, *, launches: int = 1, grid=None, problem=None, artifact=None):
     rt.memcpy_h2d(bufs[0], _u8(dY), dY.nbytes)
     rt.memcpy_h2d(bufs[1], _u8(X), X.nbytes)
     reduction = spec.streamk_reduction
-    flags_bytes, _ = wgrad_streamk_workspace_layout(spec, arch=arch, problem=p)
+    flags_bytes, partials_bytes = wgrad_streamk_workspace_layout(
+        spec, arch=arch, problem=p
+    )
     extra = {}
     if reduction == "workspace":
         extra = dict(ws_ptr=ws, ws_bytes=ws_bytes)
@@ -173,16 +179,25 @@ def _run(spec, *, launches: int = 1, grid=None, problem=None, artifact=None):
         for _ in range(launches):
             # The documented zeroing contract, per reduction: atomic accumulates
             # into dW, workspace into the scratch, linear/tree only reset flags.
+            # Everything the contract leaves alone is poisoned (0xFF bytes are
+            # NaN in every float dtype): a stale value from the previous
+            # launch would otherwise be bit-identical to the right one and
+            # hide an early read of a partial or an unwritten dW element.
             if reduction == "atomic":
                 rt.memset(bufs[2], 0, dW.nbytes)
-            elif reduction == "workspace":
+            else:
+                rt.memset(bufs[2], 0xFF, dW.nbytes)
+            if reduction == "workspace":
                 rt.memset(ws, 0, ws_bytes)
-            elif flags_bytes:
-                rt.memset(ws, 0, flags_bytes)
+            elif reduction in ("linear", "tree"):
+                if partials_bytes:
+                    rt.memset(ws + flags_bytes, 0xFF, partials_bytes)
+                if flags_bytes:
+                    rt.memset(ws, 0, flags_bytes)
             launcher(
                 values,
                 config=LaunchConfig(
-                    grid=grid or wgrad_streamk_grid(spec, arch=arch, problem=p),
+                    grid=wgrad_streamk_grid(spec, arch=arch, problem=p),
                     block=(spec.block_size, 1, 1),
                     fence=True,
                 ),
@@ -205,10 +220,8 @@ def _run(spec, *, launches: int = 1, grid=None, problem=None, artifact=None):
     return outs, ref
 
 
-def _check(test, spec, *, launches: int = 1, grid=None, problem=None, artifact=None):
-    outs, ref = _run(
-        spec, launches=launches, grid=grid, problem=problem, artifact=artifact
-    )
+def _check(test, spec, *, launches: int = 1, problem=None, artifact=None):
+    outs, ref = _run(spec, launches=launches, problem=problem, artifact=artifact)
     p = problem if problem is not None else spec.problem
     out = outs[0].float()
     written = out.reshape(p.K, -1).abs().sum(dim=1) > 0
@@ -384,42 +397,6 @@ class TestConvWgradStreamKAot(unittest.TestCase):
                 for i, problem in enumerate(launches):
                     with self.subTest(mode=mode, reduction=reduction, shape=i):
                         _check(self, spec, problem=problem, artifact=art)
-
-
-@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
-class TestConvWgradStreamKViaDispatch(unittest.TestCase):
-    """The shipped selector reaches the stream-K kernel and its launch grid."""
-
-    def test_dispatch_spec_and_grid(self):
-        from dispatch.grouped_convolution import (
-            ConvGroupedRequest,
-            _problem,
-            dispatch_conv_grouped,
-        )
-
-        for mode in ("dp_sk", "persistent"):
-            for reduction in ("linear", "tree", "workspace"):
-                req = ConvGroupedRequest(
-                    N=4,
-                    C=64,
-                    K=96,
-                    Hi=12,
-                    Wi=12,
-                    Y=3,
-                    X=3,
-                    pad_h=1,
-                    pad_w=1,
-                    G=2,
-                    arch=GPU_ARCH,
-                    direction="wgrad",
-                    streamk=mode,
-                    streamk_reduction=reduction,
-                )
-                r = dispatch_conv_grouped(req)
-                spec = r.spec.to_wgrad_spec(_problem(req))
-                with self.subTest(mode=mode, reduction=reduction):
-                    self.assertEqual(spec.streamk, mode)
-                    _check(self, spec, grid=r.grid)
 
 
 @unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")

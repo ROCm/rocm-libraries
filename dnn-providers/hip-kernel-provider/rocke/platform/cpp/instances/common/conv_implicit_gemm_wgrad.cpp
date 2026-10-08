@@ -162,14 +162,62 @@ bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad
     return s->split_k <= 1;
 }
 
-/* Python wgrad_streamk_partition. */
+/* Per-arch CU counts. Mirrors the static table rocke.helpers.split_k
+ * _ARCH_NUM_CUS / _DEFAULT_NUM_CUS that Python wgrad_streamk_default_pool
+ * reads; test_conv_wgrad_streamk.py checks the two agree key by key. */
+static int wgrad_arch_num_cus(const char* arch)
+{
+    static const struct
+    {
+        const char* gfx;
+        int num_cus;
+    } table[] = {
+        {"gfx942", 304}, /* MI300X: 8 XCDs * 38 CUs */
+        {"gfx950", 256}, /* MI350X: 8 XCDs * 32 CUs */
+        {"gfx1151", 64}, /* RDNA gfx1151 (WMMA) */
+    };
+    if(arch != NULL)
+        for(const auto& e : table)
+            if(strcmp(arch, e.gfx) == 0)
+                return e.num_cus;
+    return 256; /* _DEFAULT_NUM_CUS */
+}
+
+/* Python _STREAMK_CTAS_PER_CU: CTAs per CU in the default pool of the
+ * reductions that never wait (atomic, workspace). */
+#define ROCKE_WGRAD_STREAMK_CTAS_PER_CU 4
+
+/* Python wgrad_streamk_default_pool. */
+int rocke_wgrad_conv_streamk_default_pool(const char* reduction, const char* arch)
+{
+    const int num_cus = wgrad_arch_num_cus(arch ? arch : "gfx950");
+    const char* red = reduction ? reduction : "linear";
+    if(strcmp(red, "linear") == 0 || strcmp(red, "tree") == 0)
+        return num_cus;
+    return num_cus * ROCKE_WGRAD_STREAMK_CTAS_PER_CU;
+}
+
+/* Python wgrad_streamk_launch(spec, arch=arch).pool. */
+int rocke_wgrad_conv_streamk_ctas(const rocke_implicit_gemm_conv_wgrad_spec_t* s, const char* arch)
+{
+    if(s == NULL || !wgrad_streamk_on(s))
+        return 0;
+    if(s->streamk_ctas > 0)
+        return s->streamk_ctas;
+    if(s->streamk_ctas == -1)
+        return rocke_wgrad_conv_streamk_default_pool(wgrad_streamk_reduction(s), arch);
+    return 0;
+}
+
+/* Python wgrad_streamk_partition (arch defaults to gfx950, as in Python). */
 rocke_streamk_iter_partition_t
     rocke_wgrad_conv_streamk_partition(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
                                        rocke_status_t* out_status)
 {
     rocke_streamk_iter_partition_t zero;
     memset(&zero, 0, sizeof(zero));
-    if(s == NULL || !wgrad_streamk_on(s) || s->streamk_ctas <= 0)
+    const int pool = rocke_wgrad_conv_streamk_ctas(s, NULL);
+    if(pool <= 0)
     {
         if(out_status)
             *out_status = ROCKE_ERR_VALUE;
@@ -182,7 +230,7 @@ rocke_streamk_iter_partition_t
     return rocke_streamk_iter_partition_make((wg_M + s->tile_m - 1) / s->tile_m * groups,
                                              (wg_N + s->tile_n - 1) / s->tile_n,
                                              (wg_K + s->tile_k - 1) / s->tile_k,
-                                             s->streamk_ctas,
+                                             pool,
                                              strcmp(s->streamk, "persistent") == 0,
                                              out_status);
 }
@@ -215,8 +263,9 @@ rocke_status_t rocke_wgrad_conv_streamk_workspace_layout(
     if(st != ROCKE_OK)
         return st;
     const rocke_streamk_iter_plan_t plan = rocke_streamk_iter_plan(&part);
-    const size_t flags = (size_t)4 * (size_t)plan.sk_ctas * (size_t)(s->warp_m * s->warp_n);
-    *flags_bytes = (flags + 255) / 256 * 256;
+    *flags_bytes = rocke_streamk_flags_bytes(&plan, s->warp_m * s->warp_n, &st);
+    if(st != ROCKE_OK)
+        return st;
     *partials_bytes = (size_t)plan.sk_ctas * (size_t)s->tile_m * (size_t)s->tile_n * sizeof(float);
     return ROCKE_OK;
 }
@@ -627,9 +676,8 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
          *     any grouped conv it disagreed with Python (which tests cpg);
          *   - it did not exempt the two-stage path, which stores f32 to a
          *     workspace and emits no atomic at all.
-         * The local per-group computation is deliberate: the shared
-         * rocke_wgrad_conv_spec_wg_N() helper still returns the dense Z*Y*X*C
-         * and is used for workspace sizing, so it is not interchangeable here. */
+         * The product is recomputed locally in 64-bit rather than through
+         * rocke_wgrad_conv_spec_wg_N() (the same per-group value, as an int). */
         const bool effective_two_stage_gate = s->two_stage && sk > 1;
         const char* dt = s->dtype_d ? s->dtype_d : "fp16";
         if(!effective_two_stage_gate && (strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0))
@@ -2865,6 +2913,17 @@ static void wgrad_emit_streamk(rocke_conv_build_ctx_t* ctx,
         for(int i = 0; i < ctx->num_accs; ++i)
             tile_accs[i] = ctx->final_accs[i];
 
+        /* Whether this item covers the start / the end of its tile. Built only
+         * for the flag-handoff fixups, so the atomic and workspace bodies carry
+         * no dead compares. Mirrors Python. */
+        rocke_value_t* started = NULL;
+        rocke_value_t* ended = NULL;
+        if(strcmp(reduction, "linear") == 0 || strcmp(reduction, "tree") == 0)
+        {
+            started = rocke_b_cmp_eq(b, lo, c0);
+            ended = rocke_b_cmp_eq(b, hi, c_ipt);
+        }
+
         if(strcmp(reduction, "atomic") == 0)
         {
             wgrad_emit_split_k_epilogue_f32(b, ctx, spec, dW, wg_M, wg_N);
@@ -2876,8 +2935,6 @@ static void wgrad_emit_streamk(rocke_conv_build_ctx_t* ctx,
         }
         else if(strcmp(reduction, "linear") == 0)
         {
-            rocke_value_t* started = rocke_b_cmp_eq(b, lo, c0);
-            rocke_value_t* ended = rocke_b_cmp_eq(b, hi, c_ipt);
             rocke_if_else_t ie = rocke_b_scf_if_else(b, started);
             rocke_b_region_enter(b, ie.then_region);
             {
@@ -2919,8 +2976,6 @@ static void wgrad_emit_streamk(rocke_conv_build_ctx_t* ctx,
             /* Tree: the round count is a kernarg, so the rounds are a loop
              * carrying the partial sums, the pair stride and a dropped-out
              * flag (see the Python comment). */
-            rocke_value_t* started = rocke_b_cmp_eq(b, lo, c0);
-            rocke_value_t* ended = rocke_b_cmp_eq(b, hi, c_ipt);
             rocke_value_t* not_started = rocke_b_lnot(b, started);
             rocke_value_t* owner = wgrad_sk_cta_of(&e, tile_start);
             rocke_value_t* local = rocke_b_sub(b, sk_cta, owner);

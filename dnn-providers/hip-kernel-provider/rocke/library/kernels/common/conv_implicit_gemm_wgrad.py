@@ -1279,18 +1279,20 @@ def _wgrad_streamk_launch_problem(spec: WgradConvSpec, problem=None) -> ConvProb
                 f"launch problem is incompatible with the built kernel: {what} "
                 f"differs (built {want}, launch {got}); build a kernel for this shape"
             )
+    # Both X (operand B) and dW (operand D) run along cpg, with their own
+    # vector widths, so each check names the operand it guards.
     chans = (
-        ("kpg", built.kpg, problem.kpg, spec.data.dtype_a, spec.vector_size_a),
-        ("cpg", built.cpg, problem.cpg, spec.data.dtype_b, spec.vector_size_b),
-        ("cpg", built.cpg, problem.cpg, spec.data.dtype_d, spec.vector_size_c),
+        ("dY", "kpg", built.kpg, problem.kpg, spec.data.dtype_a, spec.vector_size_a),
+        ("X", "cpg", built.cpg, problem.cpg, spec.data.dtype_b, spec.vector_size_b),
+        ("dW", "cpg", built.cpg, problem.cpg, spec.data.dtype_d, spec.vector_size_c),
     )
-    for what, want, got, dtype, cap in chans:
+    for operand, what, want, got, dtype, cap in chans:
         width = _vec(want, dtype, cap)
         if got % width:
             raise ValueError(
                 f"launch problem is incompatible with the built kernel: {what}="
-                f"{got} is not a multiple of the built {width}-wide vector "
-                f"({what}={want}); build a kernel for this shape"
+                f"{got} is not a multiple of the built {width}-wide {operand} "
+                f"vector ({what}={want}); build a kernel for this shape"
             )
     return problem
 
@@ -1343,8 +1345,7 @@ def wgrad_streamk_workspace_layout(
     if spec.streamk_reduction not in ("linear", "tree"):
         return 0, 0
     part = wgrad_streamk_partition(spec, arch=arch, problem=problem)
-    flags = 4 * part.sk_ctas * spec.warp_m * spec.warp_n
-    flags_bytes = -(-flags // 256) * 256
+    flags_bytes = part.flags_bytes(spec.warp_m * spec.warp_n)
     partials_bytes = part.sk_ctas * spec.tile_m * spec.tile_n * 4
     return flags_bytes, partials_bytes
 
@@ -2804,6 +2805,14 @@ def build_implicit_gemm_conv_wgrad(
                 b.scf_yield(*new_accs)
             tile_accs = for_op.results
 
+            if reduction in ("linear", "tree"):
+                # Whether this item covers the start / the end of its tile. A
+                # data-parallel tile (and every tile of an all-DP partition)
+                # has both. Built only for the flag-handoff fixups, so the
+                # atomic and workspace bodies carry no dead compares.
+                started = b.cmp_eq(lo, c0)
+                ended = b.cmp_eq(hi, c_ipt)
+
             if reduction == "atomic":
                 _emit_wgrad_split_k_epilogue(
                     b,
@@ -2838,10 +2847,8 @@ def build_implicit_gemm_conv_wgrad(
                     replica_sel=cta,
                 )
             elif reduction == "linear":
-                # A data-parallel tile (and every tile of an all-DP partition)
-                # has started and ended, so it folds no partners and stores.
-                started = b.cmp_eq(lo, c0)
-                ended = b.cmp_eq(hi, c_ipt)
+                # A data-parallel tile has started and ended, so it folds no
+                # partners and stores.
                 with b.scf_if_else(started) as (owner, contributor):
                     with owner:
                         # Fold every later contributor in order, then store once.
@@ -2871,8 +2878,6 @@ def build_implicit_gemm_conv_wgrad(
                 # round count is a kernarg (0 for an all-DP partition), so the
                 # rounds are a runtime loop carrying the partial sums, the pair
                 # stride and a dropped-out flag; every predicate is uniform.
-                started = b.cmp_eq(lo, c0)
-                ended = b.cmp_eq(hi, c_ipt)
                 not_started = b.lnot(started)
                 local = b.sub(sk_cta, _sk_cta_of(tile_start))
                 zero_acc = b.zero_vec_f32(c_per_lane)

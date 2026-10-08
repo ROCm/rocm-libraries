@@ -196,7 +196,8 @@ rocke_streamk_iter_plan_t rocke_streamk_iter_plan(const rocke_streamk_iter_parti
     }
     r.sk_ctas = r.sk_tiles ? p->max_active_wgs : 0;
     r.total_sk_iters = r.sk_tiles * p->iters_per_tile;
-    r.iters_per_sk_cta = r.sk_ctas ? r.total_sk_iters / r.sk_ctas : 0;
+    /* Clamped to 1 for an all-DP plan: kernels divide by it unconditionally. */
+    r.iters_per_sk_cta = r.sk_ctas ? r.total_sk_iters / r.sk_ctas : 1;
     r.extra_iters = r.sk_ctas ? r.total_sk_iters % r.sk_ctas : 0;
     r.dp_tiles = r.num_tiles - r.sk_tiles;
     r.total_dp_iters = r.dp_tiles * p->iters_per_tile;
@@ -210,8 +211,25 @@ rocke_streamk_iter_plan_t rocke_streamk_iter_plan(const rocke_streamk_iter_parti
     r.tree_rounds = 0;
     for(rest = contributors - 1; rest > 0; rest >>= 1)
         ++r.tree_rounds;
-    r.flags_bytes = sk_ceil_div(4 * r.sk_ctas, 256) * 256;
     return r;
+}
+
+/* Python StreamKIterPartition.flags_bytes(n_waves): one i32 flag per
+ * (stream-K CTA, wave), padded to 256 bytes. */
+size_t rocke_streamk_flags_bytes(const rocke_streamk_iter_plan_t* r,
+                                 int n_waves,
+                                 rocke_status_t* out_status)
+{
+    if(r == NULL || n_waves <= 0)
+    {
+        if(out_status)
+            *out_status = ROCKE_ERR_VALUE;
+        return 0;
+    }
+    if(out_status)
+        *out_status = ROCKE_OK;
+    const size_t flags = (size_t)4 * (size_t)r->sk_ctas * (size_t)n_waves;
+    return (flags + 255) / 256 * 256;
 }
 
 int rocke_streamk_start_iter(const rocke_streamk_iter_partition_t* p, int sk_cta)
