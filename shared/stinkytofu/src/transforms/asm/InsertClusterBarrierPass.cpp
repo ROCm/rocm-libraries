@@ -525,6 +525,14 @@ void insertRule3HandshakeBefore(IRBase* signalAnchor, IRBase* waitAnchor, AsmIRB
     insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder, archId);
 }
 
+/// `s_wait_tensorcnt 0`: every outstanding tensor load is retired. A second run
+/// of this pass finds that wait sitting where it would insert another.
+bool isFullTensorDrain(const StinkyInstruction& inst) {
+    if (!inst.is(InstFlag::IF_WaitTensorCnt)) return false;
+    const auto* data = inst.getModifier<SWaitTensorCntData>();
+    return data != nullptr && data->tlcnt == 0;
+}
+
 /// Emit `s_wait_tensorcnt 0` immediately before \p anchor (the instruction
 /// right after a cooperative `tensor_load_to_lds` group). Under PGR>=2 the
 /// cooperative load is async and produced by a PEER wave, so the consumer's own
@@ -1928,6 +1936,12 @@ class InsertClusterBarrierPassImpl : public Pass {
             };
             std::vector<TriggerSite> triggers;
             std::unordered_set<StinkyInstruction*> seenTriggers;
+            // One Rule 3 handshake per enclosing loop, the first trigger in
+            // program order. HalfPLR and ExpandPointerSwap emit several copies
+            // that fall through inside one LoopBegin; a later copy is the same
+            // loop. A different head (tail loop, another path, a wave-split
+            // clone) gets its own first handshake.
+            std::unordered_set<StinkyInstruction*> loopsWithHandshake;
             // Anchors (instruction right after each cooperative tensor_load
             // group) for the producer-side drain; see
             // insertProducerTensorDrainBefore.
@@ -1948,19 +1962,28 @@ class InsertClusterBarrierPassImpl : public Pass {
                         findPrecedingWorkgroupBarrierSignalInSegment(segBegin, inst);
                     if (trigger == nullptr) continue;
                     if (!seenTriggers.insert(trigger).second) continue;
-                    if (isImmediatelyPrecededByClusterBarrierWait(trigger)) continue;
 
                     // Rule 3 speaks for the loop body and nowhere else. Outside a loop
                     // there is no next trip to hand a token to and no exit to compensate
                     // at, and the run-up's own load is Rule 2's business.
-                    if (findEnclosingLoopHead(trigger) == nullptr) continue;
+                    StinkyInstruction* head = findEnclosingLoopHead(trigger);
+                    if (head == nullptr) continue;
 
-                    // Emit the cluster wait above the drains the wait-cnt pass
-                    // already anchored on this workgroup signal.
-                    IRBase* waitAnchor = hoistAboveLeadingWaitCnts(trigger);
-                    auto* hoistedInst = dyn_cast<StinkyInstruction>(waitAnchor);
-                    triggers.push_back({trigger, segBegin, waitAnchor,
-                                        (hoistedInst != nullptr) ? hoistedInst : trigger});
+                    // First trigger of this loop only. Claim the loop even when that
+                    // trigger already has its cluster wait, so a re-run does not hand
+                    // the handshake to a later trigger. A later workgroup barrier plus
+                    // tensor_load in the same loop, including a fall-through unroll
+                    // copy, does not get another handshake. The producer drain below
+                    // is not a cluster barrier, so it is still recorded.
+                    if (loopsWithHandshake.insert(head).second &&
+                        !isImmediatelyPrecededByClusterBarrierWait(trigger)) {
+                        // Emit the cluster wait above the drains the wait-cnt pass
+                        // already anchored on this workgroup signal.
+                        IRBase* waitAnchor = hoistAboveLeadingWaitCnts(trigger);
+                        auto* hoistedInst = dyn_cast<StinkyInstruction>(waitAnchor);
+                        triggers.push_back({trigger, segBegin, waitAnchor,
+                                            (hoistedInst != nullptr) ? hoistedInst : trigger});
+                    }
 
                     // Record the instruction right after this cooperative
                     // tensor_load group so a producer-side tensor drain can be
@@ -1979,8 +2002,18 @@ class InsertClusterBarrierPassImpl : public Pass {
                             }
                             break;
                         }
-                        producerDrainAnchors.push_back((postIt != bb.end()) ? postIt.getNodePtr()
-                                                                            : nullptr);
+                        // The slot after the group is already s_wait_tensorcnt 0 when
+                        // this pass has run before. Inserting again would stack
+                        // a second drain in front of that one.
+                        bool alreadyDrained = false;
+                        if (postIt != bb.end()) {
+                            if (auto* next = dyn_cast<StinkyInstruction>(postIt.getNodePtr()))
+                                alreadyDrained = isFullTensorDrain(*next);
+                        }
+                        if (!alreadyDrained) {
+                            producerDrainAnchors.push_back(
+                                (postIt != bb.end()) ? postIt.getNodePtr() : nullptr);
+                        }
                     }
                 }
             }
