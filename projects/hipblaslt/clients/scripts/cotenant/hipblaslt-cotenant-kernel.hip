@@ -28,7 +28,13 @@ try
     const int n_cus
         = parse_arg(argc, argv, 1, 1, 1, INT_MAX, "workgroup count must be an integer >= 1");
     const int max_occupancy
-        = parse_arg(argc, argv, 2, 1, 1, 64, "max occupancy must be an integer in [1, 64]");
+        = parse_arg(argc,
+                    argv,
+                    2,
+                    1,
+                    1,
+                    cotenant::kMaxOccupancy,
+                    "max occupancy must be an integer in [1, 64]");
 
     cotenant::check(hipSetDevice(0));
     const char* hvd = std::getenv("HIP_VISIBLE_DEVICES");

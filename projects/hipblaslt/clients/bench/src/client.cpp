@@ -893,22 +893,12 @@ try
         return 1;
     }
 
-#ifdef _WIN32
-    if(hipblaslt_bench_options::cotenant_cus() != 0)
+    if(const auto err = hipblaslt_cotenant::validate_options(
+           hipblaslt_bench_options::cotenant_cus(),
+           hipblaslt_bench_options::cotenant_max_occupancy());
+       !err.empty())
     {
-        hipblaslt_cerr << "cotenant-cus is not supported on Windows." << std::endl;
-        return 1;
-    }
-#endif
-    if(hipblaslt_bench_options::cotenant_cus() < 0)
-    {
-        hipblaslt_cerr << "cotenant-cus must be >= 0." << std::endl;
-        return 1;
-    }
-    if(hipblaslt_bench_options::cotenant_max_occupancy() < 1
-       || hipblaslt_bench_options::cotenant_max_occupancy() > 64)
-    {
-        hipblaslt_cerr << "cotenant-max-occupancy must be in [1, 64]." << std::endl;
+        hipblaslt_cerr << err << std::endl;
         return 1;
     }
 

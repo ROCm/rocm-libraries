@@ -5,6 +5,44 @@
 
 #include <hip/hip_runtime.h>
 
+#include <stdexcept>
+#include <string>
+
+namespace hipblaslt_cotenant
+{
+    constexpr int kMaxOccupancy = 64;
+
+    // Returns an error message for invalid cotenant options, or an empty string.
+    inline std::string validate_options(int n_cus, int max_occupancy)
+    {
+#ifdef _WIN32
+        if(n_cus != 0)
+            return "cotenant-cus is not supported on Windows.";
+#endif
+        if(n_cus < 0)
+            return "cotenant-cus must be >= 0.";
+        if(max_occupancy < 1 || max_occupancy > kMaxOccupancy)
+            return "cotenant-max-occupancy must be in [1, " + std::to_string(kMaxOccupancy)
+                   + "].";
+        return {};
+    }
+
+    // Dynamic LDS bytes per workgroup so that at most max_occupancy workgroups
+    // fit in lds_per_cu. Rounds down to a 256-byte granule, then adds one granule
+    // if the cap would be exceeded. Throws if the result exceeds the per-block limit.
+    inline int lds_reservation(int lds_per_cu, int block_optin_lds, int max_occupancy)
+    {
+        const int max_block_lds
+            = (block_optin_lds > 0 && block_optin_lds < lds_per_cu) ? block_optin_lds : lds_per_cu;
+        int reserve = (lds_per_cu / (256 * max_occupancy)) * 256;
+        if(reserve == 0 || lds_per_cu / reserve > max_occupancy)
+            reserve += 256;
+        if(reserve > max_block_lds)
+            throw std::runtime_error("cotenant: LDS reservation exceeds the per-block limit");
+        return reserve;
+    }
+}
+
 #ifdef _WIN32
 
 // POSIX-only; the bench rejects --cotenant-cus on Windows.
@@ -24,8 +62,6 @@ namespace hipblaslt_cotenant
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
-#include <stdexcept>
-#include <string>
 #include <thread>
 
 // The clients provide hipblaslt_cerr; the standalone kernel build does not.
@@ -120,22 +156,16 @@ namespace hipblaslt_cotenant
             throw std::runtime_error(
                 "cotenant: workgroup count must be in [1, device CU count] ("
                 + std::to_string(prop.multiProcessorCount) + ")");
-        if(max_occupancy < 1 || max_occupancy > 64)
-            throw std::runtime_error("cotenant: max occupancy must be in [1, 64]");
+        if(max_occupancy < 1 || max_occupancy > kMaxOccupancy)
+            throw std::runtime_error("cotenant: max occupancy must be in [1, "
+                                     + std::to_string(kMaxOccupancy) + "]");
 
         int lds_per_cu = 0;
         check(hipDeviceGetAttribute(
             &lds_per_cu, hipDeviceAttributeMaxSharedMemoryPerMultiprocessor, dev));
         int optin = 0;
         check(hipDeviceGetAttribute(&optin, hipDeviceAttributeSharedMemPerBlockOptin, dev));
-        const int max_block_lds = (optin > 0 && optin < lds_per_cu) ? optin : lds_per_cu;
-        // Round down to a gfx942/gfx950 LDS granule, then enforce the occupancy cap.
-        const int divisor = 256 * max_occupancy;
-        int       reserve = (lds_per_cu / divisor) * 256;
-        if(reserve == 0 || lds_per_cu / reserve > max_occupancy)
-            reserve += 256;
-        if(reserve > max_block_lds)
-            throw std::runtime_error("cotenant: LDS reservation exceeds the per-block limit");
+        const int reserve = lds_reservation(lds_per_cu, optin, max_occupancy);
         check(hipFuncSetAttribute(reinterpret_cast<const void*>(&busy_spin<Stoppable>),
                                   hipFuncAttributeMaxDynamicSharedMemorySize,
                                   reserve));
