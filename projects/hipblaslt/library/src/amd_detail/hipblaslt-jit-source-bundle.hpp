@@ -56,24 +56,15 @@ namespace hipblaslt_jit::source_bundle
         return bytes;
     }
 
-    // The build inputs of a TensileLite source bundle, found by directory
-    // convention: library/TensileLibrary.dat is the MsgPack solution library
-    // entry, sources/*.s are assembly units, sources/*.hip and sources/*.cpp
-    // are HIP units, and every other file in sources/ is a header those HIP
-    // units include. A header is a BuildUnit used as an include.
-    struct SourceBundle
-    {
-        std::vector<uint8_t>   library;
-        std::vector<BuildUnit> units; // assembly, then HIP, each by name
-    };
-
-    inline SourceBundle readSourceBundle(const fs::path& bundle)
+    // The sources of a TensileLite bundle, found by directory convention.
+    // sources/*.s is the assembly main kernel (at most one). sources/*.hip and
+    // sources/*.cpp are HIP: the main kernel when there is no assembly, and
+    // helpers otherwise. Every other file in sources/ is a header. The
+    // TensileLite library entry, when present, is not part of this bundle.
+    inline hipblaslt_jit::SourceCodeBundle readSourceBundle(const fs::path& bundle)
     {
         constexpr size_t fileLimit = 1024, byteLimit = 256 * 1024 * 1024;
-        SourceBundle     result;
-        result.library = readArtifact(artifact(bundle, "library/TensileLibrary.dat"));
-
-        const auto sources = artifact(bundle, "sources", false);
+        const auto       sources = artifact(bundle, "sources", false);
         require(fs::is_directory(sources), "Missing source directory: " + sources.u8string());
         std::vector<std::string> names;
         for(const auto& entry : fs::directory_iterator(sources))
@@ -83,37 +74,44 @@ namespace hipblaslt_jit::source_bundle
             require(entry.is_regular_file(), "Unexpected source entry: " + names.back());
         }
         std::sort(names.begin(), names.end());
-        size_t total = 0;
-        std::vector<BuildUnit> assembly, hip, headers;
+        size_t                               total = 0;
+        std::vector<hipblaslt_jit::Artifact> assembly, hip, headers;
         for(const auto& name : names)
         {
-            BuildUnit file;
+            hipblaslt_jit::Artifact file;
             file.name  = name;
             file.bytes = readArtifact(artifact(bundle, "sources/" + name));
-            file.role  = BuildUnit::Role::Main;
             total += file.bytes.size();
             require(total <= byteLimit, "Source bundle is too large: " + sources.u8string());
             const auto extension = fs::u8path(name).extension();
             if(extension == ".s")
             {
-                file.kind = BuildUnit::Kind::Assembly;
+                file.kind = hipblaslt_jit::Artifact::Kind::Assembly;
                 assembly.push_back(std::move(file));
             }
             else if(extension == ".hip" || extension == ".cpp")
             {
-                file.kind = BuildUnit::Kind::Hip;
+                file.kind = hipblaslt_jit::Artifact::Kind::Hip;
                 hip.push_back(std::move(file));
             }
             else
                 headers.push_back(std::move(file));
         }
         require(!assembly.empty() || !hip.empty(), "No kernel source in " + sources.u8string());
-        for(auto& unit : hip)
-            unit.includes = headers;
-        result.units = std::move(assembly);
-        result.units.insert(result.units.end(),
-                            std::make_move_iterator(hip.begin()),
-                            std::make_move_iterator(hip.end()));
+        require(assembly.size() <= 1, "A source bundle has one main kernel");
+        hipblaslt_jit::SourceCodeBundle result;
+        result.includes = std::move(headers);
+        if(!assembly.empty())
+        {
+            result.mainKernel = std::move(assembly.front());
+            result.helpers    = std::move(hip);
+        }
+        else
+        {
+            result.mainKernel = std::move(hip.front());
+            hip.erase(hip.begin());
+            result.helpers = std::move(hip);
+        }
         return result;
     }
 }

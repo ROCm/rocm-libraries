@@ -77,9 +77,9 @@ namespace hipblaslt_jit::code_object
         // (not ROCM_PATH) for the TheRock layout. See rocmPath().
         std::string              rocmPath;
         std::vector<std::string> includeDirectories;
-        // Extra headers, name and bytes only, offered to every HIP unit as
-        // #include "name". A unit's own includes are added as well.
-        std::vector<hipblaslt_jit::BuildUnit> includes;
+        // Extra headers offered to every HIP source as #include "name".
+        // A bundle's includes are added as well.
+        std::vector<hipblaslt_jit::Artifact> includes;
         // Prepends "-include __clang_hip_runtime_wrapper.h"; comgr omits the HIP
         // runtime wrapper that the clang driver normally injects.
         bool includeHipRuntimeWrapper = true;
@@ -87,10 +87,10 @@ namespace hipblaslt_jit::code_object
 
     struct Result
     {
-        Status            status = Status::InternalError;
-        std::string       log;
-        std::vector<uint8_t> bytes; // uncompressed, unbundled executable ELF
-        bool              ok() const noexcept
+        Status                  status = Status::InternalError;
+        std::string             log;
+        hipblaslt_jit::Artifact codeObject; // Kind::CodeObject when ok
+        bool                    ok() const noexcept
         {
             return status == Status::Success;
         }
@@ -112,12 +112,12 @@ namespace hipblaslt_jit::code_object
         }
     };
 
-    // Assembles every assembly unit and compiles every HIP unit, then links
-    // them into one executable code object. Target::wavefrontSize applies to
-    // assembly; HIP keeps the processor default. Includes are name and bytes.
-    Result build(const std::vector<hipblaslt_jit::BuildUnit>& units,
-                 const Target&                                 target,
-                 const Options&                                options) noexcept;
+    // Assembles or compiles bundle.mainKernel, with bundle.includes, and links
+    // one executable code object. Helpers are not compiled here. Target::wavefrontSize
+    // applies to assembly; HIP keeps the processor default.
+    Result build(const hipblaslt_jit::SourceCodeBundle& bundle,
+                 const Target&                          target,
+                 const Options&                         options) noexcept;
 
     ObjectCheck inspect(const void* elf, std::size_t size) noexcept;
     ObjectCheck inspect(const std::vector<uint8_t>& elf) noexcept;

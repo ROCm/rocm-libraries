@@ -30,13 +30,14 @@ backend is implemented, and no API reaches JIT.
 
 ## Current behavior
 
-The interfaces are in `library/src/amd_detail/hipblaslt-jit-component.hpp`. A
-`GeneratedSolution` holds a TensileLite library entry for one processor with
-one or more solutions, the names of their main kernels, and the source units
-to build. `CodeObjectBuilder::build` builds those units into the code objects of
-a `BuiltSolution`; `GeneratedSolution` has no code-object field. The interfaces
-are for compiled-in implementations and do not establish a stable external
-plugin application binary interface (ABI).
+The interfaces are in `library/src/amd_detail/hipblaslt-jit-component.hpp`. An
+`Artifact` is one file: assembly, HIP source, or a code object. A
+`SourceCodeBundle` is the main kernel, HIP helpers and headers that become one
+solution. It is not a TensileLite library entry. `CodeObjectBuilder::build`
+compiles that bundle with comgr into a code object `Artifact`. `JitLibrary`
+writes the TensileLite solution record when it publishes the code object. The
+interfaces are for compiled-in implementations and do not establish a stable
+external plugin application binary interface (ABI).
 
 ### Build
 
@@ -102,45 +103,36 @@ kernel, problem type and sizes. A row matches the solution's problem type and
 its exact sizes. A solution whose code-object version or kernarg version this
 build cannot run is skipped; the rest of the library still loads. Publishing
 replaces files atomically, in an order that never leaves a reference to a
-missing file. `readTensileSourceBundle`
-still returns a `TensileSource` when a caller has a source directory; the tests
-publish and load the JIT solution library instead of that directory.
+missing file. `readTensileSourceBundle` reads a source directory into a
+`SourceCodeBundle` and the kernel name. A caller that checks predicates loads
+the TensileLite entry with `loadGemmLibrary`. The tests publish and load the
+JIT solution library instead of that directory.
 
-### Loading a built solution
+### Loading a published solution
 
-`hipblaslt-jit-loader.{hpp,cpp}` turns a built TensileLite entry into a loaded
-library of its solutions:
+`JitLibrary` loads a published solution as a TensileLite `ContractionSolution`
+and a `SolutionAdapter`. `loadGemmLibrary` reads a solution record and requires
+local solutions 0 to N-1. `hipblaslt-jit-loader.{hpp,cpp}` does not wrap that
+library in another type.
 
-- `readTensileSourceBundle` reads a source bundle into a `TensileSource`: a
-  `GeneratedSolution` (the library entry, the main kernel names of its
-  solutions, each `sources/*.s` as an assembly unit, and each HIP source with
-  the bundle's headers as a HIP unit) and the TensileLite library parsed from
-  that entry. A caller that needs the library keeps the one
-  `readTensileSourceBundle` returned.
-- `parseTensileBundle` reads a built solution's entry into a TensileLite
-  `MasterSolutionLibrary` for the device's hardware. It requires local
-  solutions 0 to N-1, each naming one of the built kernels and every built
-  kernel named by one of them, and loads no code.
-- `loadTensileBundle` loads the built code object into a new
-  `SolutionAdapter` and resolves every main kernel.
-
-The entry's solutions are listed best first, each with its own `Problem` row.
+The record's solutions are listed best first, each with its own `Problem` row.
 Their hardware and problem predicates decide which problems each one serves,
 so `findBestSolution` on the loaded library selects the first solution that
 serves a problem, and nothing for a problem none of them was generated for.
 
 ### Source bundle format
 
-A source bundle is a generated library entry stored as a directory.
+A source bundle is one kernel's sources stored as a directory.
 `source_bundle::readSourceBundle`, in `hipblaslt-jit-source-bundle.hpp`, reads
-one by directory convention and requires at least one kernel source:
+the sources into a `SourceCodeBundle` and requires one main kernel.
+`readTensileSourceBundle` also reads the library entry for the kernel name.
 
 | Path | Contents |
 | --- | --- |
-| `library/TensileLibrary.dat` | The library entry, stored as uncompressed MsgPack |
-| `sources/*.s` | Kernel assembly |
-| `sources/*.hip`, `sources/*.cpp` | HIP kernel sources |
-| Other files in `sources/` | Headers that the HIP sources include |
+| `library/TensileLibrary.dat` | The TensileLite solution record, uncompressed MsgPack. Not part of `SourceCodeBundle` |
+| `sources/*.s` | The assembly main kernel, at most one |
+| `sources/*.hip`, `sources/*.cpp` | The HIP main kernel when there is no assembly, otherwise HIP helpers |
+| Other files in `sources/` | Headers |
 | `manifest.json` | A JavaScript Object Notation (JSON) provenance record that hipBLASLt does not read |
 
 Artifact paths must be relative and stay inside the bundle, including through
