@@ -1595,6 +1595,40 @@ namespace
         EXPECT_EQ(hipMemset(placed, 0, 4 << 20), hipSuccess);
     }
 
+    // The expected expression is +/- (2^61 - 1), so both modular probes of an
+    // incorrect zero are zero for every seed. Refuse the inexact configuration
+    // from its inputs even when the stored D takes the small-integer fast path.
+    TEST(FastCheckDevice_pre_checkin, modular_alias_of_large_result_is_refused)
+    {
+        float  a = 2, b = 1, bias = -1, d = 0;
+        float* device = nullptr;
+        ASSERT_EQ(hipMalloc(&device, sizeof(float)), hipSuccess);
+        ASSERT_EQ(hipMemcpy(device, &d, sizeof(float), hipMemcpyHostToDevice), hipSuccess);
+        FastCheckProblem p;
+        p.M = p.N = p.K = 1;
+        p.A             = {&a, HIP_R_32F, 1, 1, 1, 1};
+        p.B             = {&b, HIP_R_32F, 1, 1, 1, 1};
+        p.bias          = &bias;
+        for(int sign : {1, -1})
+        {
+            p.alpha = sign * 0x1p60;
+            bias    = float(-sign);
+            p.D     = {&d, HIP_R_32F, 1, 1, 1, 1};
+            auto e  = fast_check_expected(p);
+            EXPECT_FALSE(e.status.passed);
+            EXPECT_FALSE(fast_check_result(p, e).passed);
+            p.D.data = device;
+            EXPECT_FALSE(fast_check_result_device(p, e, nullptr).passed);
+        }
+        EXPECT_EQ(hipFree(device), hipSuccess);
+
+        // The same zero output is correct and accepted for a small exact case.
+        p.alpha  = 1;
+        bias     = -2;
+        p.D.data = &d;
+        EXPECT_TRUE(fast_check_gemm(p).passed);
+    }
+
     TEST(FastCheckDevice_pre_checkin, copy_region_to_host_drops_the_padding)
     {
         DeviceMatrix       m;
