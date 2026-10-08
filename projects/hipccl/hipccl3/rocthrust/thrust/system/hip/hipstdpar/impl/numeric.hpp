@@ -323,9 +323,7 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
 
   ::hipstd::__maybe_bind_globals();
 
-  auto lo = THRUST_NS_QUALIFIER::inclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, op);
-
-  if constexpr (::std::is_trivially_destructible_v<op_t>)
+  if constexpr (::std::is_trivially_destructible_v<Op>)
   {
     // op is safe to copy into the asynchronous scan; only the transform functor
     // (which may capture a non-trivial x) can outlive its kernel.
@@ -362,8 +360,10 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
   {
     // op is non-trivial: keep a device-resident copy alive for the whole stream so
     // that both the scan and the transform (which references op) outlive their kernels.
-    ::hipstd::detail::device_callable_guard<op_t> op_guard(::std::move(op));
-    ::hipstd::detail::callable_proxy<op_t> op_proxy{op_guard.get()};
+    ::hipstd::detail::device_callable_guard<Op> op_guard(::std::move(op));
+    ::hipstd::detail::callable_proxy<Op> op_proxy{op_guard.get()};
+
+    auto lo = THRUST_NS_QUALIFIER::inclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, op_proxy);
 
     auto fn    = [op_proxy, x = ::std::move(x)](auto&& y) { return op_proxy(x, y); };
     using fn_t = decltype(fn);
@@ -373,7 +373,7 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
     try
     {
       result = THRUST_NS_QUALIFIER::transform(
-        THRUST_NS_QUALIFIER::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+        THRUST_NS_QUALIFIER::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{fn_guard.get()});
     }
     catch (...)
     {
@@ -676,6 +676,8 @@ inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, 
     O result;
     try
     {
+        auto lo = ::thrust::transform_inclusive_scan(
+        ::thrust::device, fi, li, fo, ::hipstd::detail::callable_proxy<op1_t>{op1_guard.get()}, op0_proxy);
       result = ::thrust::transform(
         ::thrust::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{fn_guard.get()});
     }

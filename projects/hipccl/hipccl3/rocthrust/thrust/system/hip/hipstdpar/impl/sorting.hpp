@@ -340,7 +340,7 @@ template <typename KeysIt, enable_if_t<hipstd::is_offloadable_iterator<KeysIt>()
 inline void partial_sort(execution::parallel_unsequenced_policy policy, KeysIt first, KeysIt middle, KeysIt last)
 {
   ::hipstd::warn_if_no_xnack();
-  using item_type = thrust::detail::it_value_t<KeysIt>;
+  using item_type = typename iterator_traits<KeysIt>::value_type;
   std::partial_sort(policy, first, middle, last, thrust::less<item_type>());
 }
 // END PARTIAL_SORT
@@ -420,7 +420,7 @@ inline void partial_sort_copy(
   execution::parallel_unsequenced_policy policy, ForwardIt first, ForwardIt last, RandomIt d_first, RandomIt d_last)
 {
   ::hipstd::warn_if_no_xnack();
-  using item_type = thrust::detail::it_value_t<ForwardIt>;
+  using item_type = typename iterator_traits<ForwardIt>::value_type;
   std::partial_sort_copy(policy, first, last, d_first, d_last, thrust::less<item_type>());
 }
 // END PARTIAL_SORT_COPY
@@ -574,7 +574,7 @@ template <typename KeysIt, enable_if_t<hipstd::is_offloadable_iterator<KeysIt>()
 inline void nth_element(execution::parallel_unsequenced_policy policy, KeysIt first, KeysIt nth, KeysIt last)
 {
   ::hipstd::warn_if_no_xnack();
-  using item_type = thrust::detail::it_value_t<KeysIt>;
+  using item_type = typename iterator_traits<KeysIt>::value_type;
   std::nth_element(policy, first, nth, last, thrust::less<item_type>());
 }
 // END NTH_ELEMENT
