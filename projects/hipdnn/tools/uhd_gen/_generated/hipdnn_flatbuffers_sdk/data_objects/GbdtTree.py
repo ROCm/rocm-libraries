@@ -13,7 +13,7 @@ np = import_numpy()
 #
 # Traversal: start at node 0, compare features[feature_indices[i]] against
 # thresholds[i], go left (left_children[i]) if less-or-equal (or less, if
-# decision_type at i is false) or if missing and default_left,
+# decision_lte at i is false) or if missing and default_left,
 # else right (right_children[i]). At a leaf, return leaf_values[i].
 class GbdtTree(object):
     __slots__ = ['_tab']
@@ -205,7 +205,7 @@ class GbdtTree(object):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(14))
         return o == 0
 
-    # Decision type per node: true = use <= (LightGBM default), false = use <.
+    # Comparison per node: true = use <= (LightGBM default), false = use <.
     # If absent, defaults to all true (<=) for LightGBM compatibility.
     # GbdtTree
     def DecisionLte(self, j):

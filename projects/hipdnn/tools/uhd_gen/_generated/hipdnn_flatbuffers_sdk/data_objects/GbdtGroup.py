@@ -6,19 +6,6 @@ import flatbuffers
 from flatbuffers.compat import import_numpy
 np = import_numpy()
 
-# @brief GBDT (Gradient Boosted Decision Tree) model for the tree_data adapter.
-#
-# This is the model artifact format for UHD's default shipping path. The model
-# is exported from LightGBM or XGBoost training and converted to this FlatBuffer
-# format at build time.
-#
-# Prediction: sum leaf_values from all trees after traversal, then add base_score:
-#     score = base_score + sum(leaf_values)
-#
-# learning_rate is metadata only and must NOT be applied here. LightGBM's
-# dump_model() already folds it into leaf_values, so multiplying again double-counts
-# it. A producer whose leaf values exclude the learning rate must scale them before
-# serializing. See TreeDataAdapter::score, which implements this formula.
 # Layer 2 of a grouped model: the trees that rank candidates *within* one group.
 #
 # A grouped model answers two questions -- which group, then which candidate inside it --

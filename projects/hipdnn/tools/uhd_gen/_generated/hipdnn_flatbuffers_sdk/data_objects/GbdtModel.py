@@ -6,6 +6,19 @@ import flatbuffers
 from flatbuffers.compat import import_numpy
 np = import_numpy()
 
+# @brief GBDT (Gradient Boosted Decision Tree) model for the tree_data adapter.
+#
+# This is the model artifact format for UHD's default shipping path. The model
+# is exported from LightGBM or XGBoost training and converted to this FlatBuffer
+# format at build time.
+#
+# Prediction: sum leaf_values from all trees after traversal, then add base_score:
+#     score = base_score + sum(leaf_values)
+#
+# learning_rate is metadata only and must NOT be applied here. LightGBM's
+# dump_model() already folds it into leaf_values, so multiplying again double-counts
+# it. A producer whose leaf values exclude the learning rate must scale them before
+# serializing. See TreeDataAdapter::score, which implements this formula.
 class GbdtModel(object):
     __slots__ = ['_tab']
 
@@ -116,10 +129,11 @@ class GbdtModel(object):
             return self._tab.String(o + self._tab.Pos)
         return None
 
-    # Model provenance (RFC 0019 §9.2, §13).
+    # Model provenance (RFC 0019 §8.3, §13).
     # GPU architectures the model was trained on (e.g., ["gfx942", "gfx1100"]).
-    # Runtime compares $device.arch against this list; warns or degrades to
-    # static_order if the device arch is unseen during training.
+    # The runtime compares the device's architecture against this list; on an unseen
+    # architecture it withholds the calibrated engine estimate and still ranks kernels
+    # with the model, logging a warning.
     # GbdtModel
     def TrainingArches(self, j):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(22))
@@ -149,8 +163,7 @@ class GbdtModel(object):
         return None
 
     # Index into the feature row of the value that names a candidate's group, or -1 for a
-    # single-layer model. Appended, so every artifact written before this field reads as
-    # -1 and evaluates exactly as it always did.
+    # single-layer model. When absent, -1 identifies a single-layer model.
     # GbdtModel
     def GroupByFeatureIndex(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(26))
