@@ -6,6 +6,12 @@
 
 name: hipDNN Superbuild CI
 
+# Dispatch runs name their trigger and selection; for every other event this is
+# empty, and GitHub falls back to its default run name.
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && format('hipDNN Superbuild CI ({0}) lanes={1} engine={2} tier={3}',
+  inputs.trigger_source || github.actor, inputs.lanes, inputs.engine || 'all', inputs.tier || 'all') || '' }}
+
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -14,18 +20,51 @@ on:
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
   schedule:
-    - cron: '17 7 * * *'
+    - cron: '17 7 * * *' # Daily at 07:17 UTC
+  # Every input is optional and its default reproduces a full run, so a bare
+  # dispatch behaves like the schedule. Selection narrows which ctest tests run,
+  # not what is built: every lane still configures and builds everything.
   workflow_dispatch:
+    inputs:
+      trigger_source:
+        description: 'Who or what started this run, shown in the run name (e.g. trigger_ci.py). Defaults to the dispatching user.'
+        type: string
+        required: false
+        default: ''
+      lanes:
+        description: 'Which lanes to run.'
+        type: choice
+        options:
+          - both
+          - linux
+          - windows
+        default: both
+      engine:
+        description: 'ctest label regex selecting tests by engine or provider (e.g. MIOPEN_ENGINE, HIPBLASLT_ENGINE). Empty runs all.'
+        type: string
+        required: false
+        default: ''
+      tier:
+        description: 'ctest tier label (e.g. quick, standard). Tiers are cumulative. Empty runs all.'
+        type: string
+        required: false
+        default: ''
 permissions:
   contents: read
 
+# Dispatch runs also key on their selection, so two differently-filtered runs of
+# the same commit do not cancel each other; an identical re-dispatch still does.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  group: >-
+    ${{ github.workflow }}-${{ github.event.number || github.sha }}${{ github.event_name == 'workflow_dispatch'
+    && format('-dispatch-{0}-{1}-{2}', inputs.lanes, inputs.engine, inputs.tier) || '' }}
   cancel-in-progress: true
 
 jobs:
   hipdnn-windows-superbuild:
     name: HipDNN Windows Superbuild
+    # inputs.lanes is empty outside workflow_dispatch, so other events run both lanes.
+    if: ${{ inputs.lanes != 'linux' }}
     runs-on: azure-windows-scale-rocm
     defaults:
       run:
@@ -245,8 +284,19 @@ jobs:
       - name: Add ROCm bin to PATH
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
 
+      # Dispatch inputs become ctest -L filters; a test must match every one given.
+      # --no-tests=error makes a mistyped label fail instead of passing on zero tests.
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        env:
+          ENGINE_LABEL: ${{ inputs.engine }}
+          TIER_LABEL: ${{ inputs.tier }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ -n "$ENGINE_LABEL" ]]; then args+=(-L "$ENGINE_LABEL"); fi
+          if [[ -n "$TIER_LABEL" ]]; then args+=(-L "$TIER_LABEL"); fi
+          if (( ${#args[@]} )); then args+=(--no-tests=error); fi
+          ctest --test-dir build --output-on-failure ${args[@]+"${args[@]}"}
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
@@ -286,6 +336,8 @@ jobs:
 
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
+    # inputs.lanes is empty outside workflow_dispatch, so other events run both lanes.
+    if: ${{ inputs.lanes != 'windows' }}
     runs-on: azure-linux-scale-rocm
     env:
       # Feeds both -DGPU_TARGETS and the multi-arch nightly device extra
@@ -485,8 +537,19 @@ jobs:
           test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
           printf '%s\n' "${kpacks[@]}"
 
+      # Dispatch inputs become ctest -L filters; a test must match every one given.
+      # --no-tests=error makes a mistyped label fail instead of passing on zero tests.
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        env:
+          ENGINE_LABEL: ${{ inputs.engine }}
+          TIER_LABEL: ${{ inputs.tier }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ -n "$ENGINE_LABEL" ]]; then args+=(-L "$ENGINE_LABEL"); fi
+          if [[ -n "$TIER_LABEL" ]]; then args+=(-L "$TIER_LABEL"); fi
+          if (( ${#args[@]} )); then args+=(--no-tests=error); fi
+          ctest --test-dir build --output-on-failure ${args[@]+"${args[@]}"}
 
       # Golden-data validation used to live here as a schedule-gated re-run of the
       # external integration targets with HIPDNN_TEST_VERIFICATION_MODE=golden-check.
