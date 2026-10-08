@@ -52,7 +52,8 @@ takes them last, so a hold can delay work but never strand it.
 
 ## Knobs
 
-All are `ModuleOptions`, settable from tensilelite. `stinkytofu-opt` flags set the matching
+All are `ModuleOptions`, settable from tensilelite. The full list of scheduler tuning values
+is in [Scheduler tuning parameters](../user/scheduler-tuning-parameters.md). `stinkytofu-opt` flags set the matching
 `dagFeatures` field (default off there).
 
 | ModuleOption | default | stinkytofu-opt flag | meaning |
@@ -62,6 +63,8 @@ All are `ModuleOptions`, settable from tensilelite. `stinkytofu-opt` flags set t
 | `DsSlotFirst` | true | `--ds-slot-first` | ds_load before fillers in a saturated ds stream |
 | `EvenSpreadFillers` | true | – | filler quota per window |
 | `WarGateWmmas` | -1 | `--war-gate-wmmas=N` | WMMA-src → ds_load overwrite gap; -1 = derived |
+| `WmmaQueueDepth` | 1 | `--wmma-queue-depth=N` | WMMAs outstanding in the matrix pipe (it buffers ~8); a WMMA is appended whenever fewer are outstanding. 1 = one WMMA at a time. > 1 also merges the waits of back-to-back WMMAs onto the first one |
+| `WmmaQueueCoverCycles` | 0 (off) | `--wmma-queue-cover-cycles=N` | cycles of queued WMMA work that must remain before a ds_load, filler or tensor_load may issue; below it, with room in the queue, the next ready WMMA goes first. Ignored at depth 1; forced picks (a promoted barrier) are not held |
 
 ## Measured effect
 

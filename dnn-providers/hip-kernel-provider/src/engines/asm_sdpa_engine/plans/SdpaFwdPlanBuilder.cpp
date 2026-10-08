@@ -214,7 +214,7 @@ static bool wouldFwdByteStridesFitUint32(
     return ok;
 }
 
-static std::string getKernelCoPath(std::string coName, const std::string& archId, bool isMi308)
+static std::string getKernelTocKey(std::string coName, const std::string& archId, bool isMi308)
 {
     if(archId == "gfx942")
     {
@@ -228,7 +228,7 @@ static std::string getKernelCoPath(std::string coName, const std::string& archId
             coName = coName.substr(0, pos + 1) + "MI300/" + coName.substr(pos + 1);
         }
     }
-    return asm_kernels::getAsmKernelPath(coName);
+    return asm_kernels::getAsmKernelTocKey(coName);
 }
 
 bool SdpaFwdPlanBuilder::isApplicable(
@@ -453,6 +453,13 @@ bool SdpaFwdPlanBuilder::isApplicable(
         return false;
     }
 
+    // The current causal kernel binaries do not compute LSE stats correctly
+    // when s_lse=1 is set at runtime. Decline causal+stats until the upstream
+    // ASM kernels support this combination.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        hasStats && maskType != plan_utils::MaskType::NO_MASK,
+        "stats (LSE) output is not supported with causal masks on the current ASM kernels");
+
     auto key = getKernelNameKey(deviceString,
                                 dataTypeId,
                                 static_cast<int>(qTensor->dims()->Get(3)),
@@ -576,8 +583,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     }
     else
     {
-        float scaleVal = sdpaAttrs.attn_scale_value().value_or(
-            1.0f / std::sqrt(static_cast<float>(headDimQk)));
+        const float scaleVal = plan_utils::attnScaleOrDefault(sdpaAttrs);
         attnScale = hipdnn_plugin_sdk::ScalarOperand{
             0,
             hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -683,17 +689,18 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     params.tileSizeQo = static_cast<unsigned int>(config.ts_qo);
 
-    // Load kernel module
-    auto coPath = getKernelCoPath(config.co_name, deviceString, isMi308);
+    // Load kernel module from kpack archive
+    auto tocKey = getKernelTocKey(config.co_name, deviceString, isMi308);
 
-    HIPDNN_PLUGIN_LOG_INFO("Using kernel with path: " << coPath);
+    HIPDNN_PLUGIN_LOG_INFO("Using kernel with tocKey: " << tocKey << " arch: " << deviceString);
 
-    auto kernel = moduleCache().getOrLoad(coPath, config.knl_name.c_str());
+    auto kernel = moduleCache().getOrLoad(tocKey, deviceString, config.knl_name.c_str());
     if(!kernel)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "SdpaFwdPlanBuilder::buildPlan: failed to load kernel module from " + coPath);
+            "SdpaFwdPlanBuilder::buildPlan: failed to load kernel tocKey='" + tocKey + "' arch='"
+                + deviceString + "'");
     }
 
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(kernel), params));

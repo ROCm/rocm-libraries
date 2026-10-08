@@ -891,7 +891,8 @@ def _run_fwd(
     u8,
 ) -> int:
     import torch
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_abi import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
 
     _u8 = u8
     p = problem
@@ -924,7 +925,8 @@ def _run_fwd(
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
 
-    sig = conv_args_signature(dtype)
+    sig = conv_args_signature(dtype, is_3d=p.is_3d)
+    # Built per spec below: the tile is part of the args object.
 
     req = ConvGroupedRequest(**req_base)
     specs = list(conv_grouped_sweep_space(req))
@@ -994,14 +996,17 @@ def _run_fwd(
         block = (instance_spec.block_size, 1, 1)
         stream = 0
 
-        values = {
-            "A": A_dev,
-            "B": B_dev,
-            "D": D_dev,
-            "A_bytes": A_t.nbytes,
-            "B_bytes": B_t.nbytes,
-            "D_bytes": D_t.nbytes,
-        }
+        # AOT: full values dict with runtime problem dims.
+        values = ConvArgs.from_problem(
+            p, tile_m=instance_spec.tile_m, tile_n=instance_spec.tile_n
+        ).to_launch_values(
+            int(A_dev),
+            int(B_dev),
+            int(D_dev),
+            A_t.nbytes,
+            B_t.nbytes,
+            D_t.nbytes,
+        )
         cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
         kernel_passed: bool | None = None
@@ -1124,7 +1129,8 @@ def _run_wgrad(
     u8,
 ) -> int:
     import torch
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_abi import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
         build_implicit_gemm_conv_wgrad_two_stage,
     )
@@ -1150,11 +1156,6 @@ def _run_wgrad(
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
-    # dW is the PyTorch grouped-weight layout [K, (Z,) Y, X, C/groups]: the
-    # filter of output channel k only spans its own group's input channels, so
-    # the inner dim is cpg, not the dense C. Allocating the dense C here
-    # over-allocates by a factor of `groups` and, worse, puts the reference and
-    # the kernel on different strides for every grouped shape.
     _cpg = p.C // p.groups
     if p.is_3d:
         _X_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
@@ -1171,7 +1172,8 @@ def _run_wgrad(
     bytes_xfer = float(dY_t.nbytes + X_t.nbytes + dW_t.nbytes)
     flop = float(p.flops)
 
-    sig = conv_args_signature(dtype)
+    sig = conv_args_signature(dtype, direction="wgrad", is_3d=p.is_3d)
+    # Built per spec below: the tile is part of the args object.
 
     req = ConvGroupedRequest(**req_base)
     specs = list(conv_grouped_sweep_space(req))
@@ -1253,17 +1255,25 @@ def _run_wgrad(
                 (wg_M_v + _WGRAD_REDUCE_TILE_M - 1) // _WGRAD_REDUCE_TILE_M,
                 p.groups,
             )
+            _s1_vals = ConvArgs.from_problem(
+                p,
+                direction="wgrad",
+                tile_m=instance_spec.tile_m,
+                tile_n=instance_spec.tile_n,
+                tile_k=instance_spec.tile_k,
+            ).to_launch_values(
+                int(dY_dev),
+                int(X_dev),
+                int(dW_dev),
+                dY_t.nbytes,
+                X_t.nbytes,
+                dW_t.nbytes,
+                split_k=max(1, instance_spec.split_k),
+                ws_ptr=int(ws_dev),
+                ws_bytes=ws_nbytes,
+            )
             values = (
-                {
-                    "A": dY_dev,
-                    "B": X_dev,
-                    "D": dW_dev,
-                    "A_bytes": dY_t.nbytes,
-                    "B_bytes": X_t.nbytes,
-                    "D_bytes": dW_t.nbytes,
-                    "ws_ptr": ws_dev,
-                    "ws_bytes": ws_nbytes,
-                },
+                _s1_vals,
                 {
                     "ws_ptr": ws_dev,
                     "dw_ptr": dW_dev,
@@ -1312,14 +1322,21 @@ def _run_wgrad(
                 kernel_name=artifact.kernel_name,
                 signature=sig,
             )
-            values = {
-                "A": dY_dev,
-                "B": X_dev,
-                "D": dW_dev,
-                "A_bytes": dY_t.nbytes,
-                "B_bytes": X_t.nbytes,
-                "D_bytes": dW_t.nbytes,
-            }
+            values = ConvArgs.from_problem(
+                p,
+                direction="wgrad",
+                tile_m=instance_spec.tile_m,
+                tile_n=instance_spec.tile_n,
+                tile_k=instance_spec.tile_k,
+            ).to_launch_values(
+                int(dY_dev),
+                int(X_dev),
+                int(dW_dev),
+                dY_t.nbytes,
+                X_t.nbytes,
+                dW_t.nbytes,
+                split_k=max(1, instance_spec.split_k),
+            )
             kernel_name = artifact.kernel_name
 
             def _launch(fence: bool, _L=launcher, _v=values, _g=grid):
