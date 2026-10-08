@@ -75,39 +75,70 @@ TEST(TestFlydslSdpaCdnaPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
     EXPECT_EQ(kernelScoped, 1U);
 }
 
-TEST(TestFlydslSdpaCdnaPacks, ShipsOneObjectPerClassAndOneFamilyPerHeadDim)
+TEST(TestFlydslSdpaCdnaPacks, ShipsUniqueObjectsAndOneServeAllDefaultPerClass)
 {
     const auto& set = loadedSet(ENGINE);
 
-    // dtype x family x head_dim x causal x kv_align x any_diagonal x has_bias is the whole
-    // instance key today: a duplicate would make the choice between two objects an
-    // accident of ids.
-    std::set<std::tuple<std::string, std::string, int64_t, int64_t, int64_t, int64_t, int64_t>>
-        classes;
-    // Which kernel family serves each (dtype, head_dim): gfx950 ships the dual-wave
-    // kernel beside the generic one, each for its own head dims.
-    std::map<std::pair<std::string, int64_t>, std::set<std::string>> families;
+    // Everything an object was built with: a duplicate would make the choice between two
+    // objects an accident of ids.
+    using BuildKey = std::tuple<std::string,
+                                std::string,
+                                int64_t,
+                                int64_t,
+                                int64_t,
+                                int64_t,
+                                int64_t,
+                                int64_t,
+                                int64_t,
+                                int64_t,
+                                int64_t>;
+    std::set<BuildKey> builds;
+    // Per graph class -- (dtype, head_dim, causal, has_bias) -- how many objects serve every
+    // shape of it at the default rank: exactly one, so the untuned pick never depends on
+    // a key length or a diagonal, and every other object is a measured companion below it.
+    using ClassKey = std::tuple<std::string, int64_t, int64_t, int64_t>;
+    std::map<ClassKey, size_t> defaults;
+    const std::set<std::string> features = {"none", "rows", "seq_q"};
     size_t kernels = 0;
     for(const auto& pack : set.packs)
     {
         for(const auto& kernel : pack.kernels)
         {
+            const auto field = [&](const char* name) {
+                const auto* value = tryGetMetadataField<int64_t>(kernel.metadata, name);
+                EXPECT_NE(value, nullptr) << kernel.name << " has no " << name;
+                return value == nullptr ? int64_t{-1} : *value;
+            };
             const auto* dtype = tryGetMetadataField<std::string>(kernel.metadata, "dtype");
             const auto* family = tryGetMetadataField<std::string>(kernel.metadata, "kernel");
-            const auto* headDim = tryGetMetadataField<int64_t>(kernel.metadata, "head_dim");
-            const auto* causal = tryGetMetadataField<int64_t>(kernel.metadata, "causal");
-            const auto* kvAlign = tryGetMetadataField<int64_t>(kernel.metadata, "kv_align");
-            const auto* anyDiagonal = tryGetMetadataField<int64_t>(kernel.metadata, "any_diagonal");
-            const auto* hasBias = tryGetMetadataField<int64_t>(kernel.metadata, "has_bias");
+            const auto* feature
+                = tryGetMetadataField<std::string>(kernel.metadata, "prefer_feature");
             ASSERT_NE(dtype, nullptr) << kernel.name;
             ASSERT_NE(family, nullptr) << kernel.name;
-            ASSERT_NE(headDim, nullptr) << kernel.name;
-            ASSERT_NE(causal, nullptr) << kernel.name;
-            ASSERT_NE(kvAlign, nullptr) << kernel.name;
-            ASSERT_NE(anyDiagonal, nullptr) << kernel.name;
-            ASSERT_NE(hasBias, nullptr) << kernel.name;
-            classes.emplace(*dtype, *family, *headDim, *causal, *kvAlign, *anyDiagonal, *hasBias);
-            families[{*dtype, *headDim}].insert(*family);
+            ASSERT_NE(feature, nullptr) << kernel.name;
+            EXPECT_EQ(features.count(*feature), 1U) << kernel.name << ": " << *feature;
+
+            const auto headDim = field("head_dim");
+            const auto causal = field("causal");
+            const auto kvAlign = field("kv_align");
+            const auto anyDiagonal = field("any_diagonal");
+            const auto hasBias = field("has_bias");
+            builds.emplace(*dtype,
+                           *family,
+                           headDim,
+                           causal,
+                           field("block_m"),
+                           kvAlign,
+                           anyDiagonal,
+                           field("waves_per_eu"),
+                           hasBias,
+                           field("setprio"),
+                           field("kv_gpfetch"));
+            auto& count = defaults[{*dtype, headDim, causal, hasBias}];
+            if(kvAlign == 0 && anyDiagonal == 1 && kernel.priority >= 100)
+            {
+                ++count;
+            }
             ++kernels;
 
             EXPECT_EQ(kernel.source.kind, KernelSourceKind::KPACK) << kernel.name;
@@ -116,11 +147,12 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsOneObjectPerClassAndOneFamilyPerHeadDim)
         }
     }
     EXPECT_GT(kernels, 0U);
-    EXPECT_EQ(kernels, classes.size()) << "two objects claim one class";
-    for(const auto& [key, served] : families)
+    EXPECT_EQ(kernels, builds.size()) << "two objects share one build";
+    for(const auto& [key, count] : defaults)
     {
-        EXPECT_EQ(served.size(), 1U) << key.first << " head_dim " << key.second
-                                     << " is served by more than one kernel family";
+        EXPECT_EQ(count, 1U) << std::get<0>(key) << " head_dim " << std::get<1>(key) << " causal "
+                             << std::get<2>(key) << " bias " << std::get<3>(key) << ": " << count
+                             << " serve-all default objects";
     }
 }
 

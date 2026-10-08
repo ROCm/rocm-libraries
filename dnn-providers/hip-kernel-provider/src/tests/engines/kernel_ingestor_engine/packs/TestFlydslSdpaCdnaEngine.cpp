@@ -84,6 +84,9 @@ constexpr const char* CDNA_BLOCK_M_FIELD = "block_m";
 constexpr const char* CDNA_KV_ALIGN_FIELD = "kv_align";
 constexpr const char* CDNA_ANY_DIAGONAL_FIELD = "any_diagonal";
 constexpr const char* CDNA_HAS_BIAS_FIELD = "has_bias";
+constexpr const char* CDNA_PREFER_FEATURE_FIELD = "prefer_feature";
+constexpr const char* CDNA_PREFER_MIN_FIELD = "prefer_min";
+constexpr const char* CDNA_PREFER_MAX_FIELD = "prefer_max";
 constexpr const char* CDNA_BIAS_TOKEN = "flydsl_sdpa_cdna.bias.uid";
 
 /// The model shape the first CDNA objects are built for.
@@ -485,6 +488,48 @@ TEST(TestFlydslSdpaCdnaKernelMatch, HoldsTheKeyLengthToTheCandidatesAlignment)
     auto unstated = anyLength;
     unstated.metadata.erase(std::string(CDNA_KV_ALIGN_FIELD));
     EXPECT_FALSE(admits(256, unstated));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, ScoresACompanionAboveTheDefaultWhereItsRulePrefersIt)
+{
+    const auto scoreAt = [](int64_t batch, int64_t seqLen, const KernelDefinition& kernel) {
+        auto spec = cdnaSpec();
+        spec.batch = batch;
+        spec.seqLenQ = seqLen;
+        spec.seqLenKv = seqLen;
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        return scoreKernel(FLYDSL_SDPA_CDNA, fixture.context(), kernel);
+    };
+    const auto withRule
+        = [](KernelDefinition kernel, const std::string& feature, int64_t low, int64_t high) {
+              kernel.priority = 80;
+              kernel.metadata[CDNA_PREFER_FEATURE_FIELD] = feature;
+              kernel.metadata[CDNA_PREFER_MIN_FIELD] = low;
+              kernel.metadata[CDNA_PREFER_MAX_FIELD] = high;
+              return kernel;
+          };
+
+    // The default carries no rule: it scores its priority at every size.
+    auto defaultTier = withRule(makeCdnaKernel(), "none", 0, 0);
+    defaultTier.priority = 100;
+    EXPECT_EQ(scoreAt(1, 128, defaultTier), 100.0);
+    EXPECT_EQ(scoreAt(8, 8192, defaultTier), 100.0);
+
+    // A short-query companion: above the default below 256 query rows, below it after.
+    const auto shortQuery
+        = withRule(makeCdnaKernel("generic", 128, 0, "bf16", 64), "seq_q", 0, 256);
+    EXPECT_GT(scoreAt(1, 128, shortQuery), scoreAt(1, 128, defaultTier));
+    EXPECT_LT(scoreAt(1, 256, shortQuery), scoreAt(1, 256, defaultTier));
+
+    // A large-problem companion, by batch x heads x query rows (32 heads here), from
+    // its lower bound with no upper one.
+    const auto large = withRule(makeCdnaKernel("generic", 128, 0, "bf16", 256), "rows", 49152, 0);
+    EXPECT_LT(scoreAt(1, 1024, large), scoreAt(1, 1024, defaultTier));
+    EXPECT_GT(scoreAt(2, 1024, large), scoreAt(2, 1024, defaultTier));
+    EXPECT_GT(scoreAt(64, 8192, large), scoreAt(64, 8192, defaultTier));
+
+    // An object that states no rule ranks by its priority alone.
+    EXPECT_EQ(scoreAt(1, 128, makeCdnaKernel()), 100.0);
 }
 
 // ---------------------------------------------------------------------------

@@ -94,6 +94,8 @@ _ABBREV = {
     "kv_align": "kva",
     "any_diagonal": "anydiag",
     "waves_per_eu": "wpe",
+    "setprio": "prio",
+    "kv_gpfetch": "gpf",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -107,6 +109,12 @@ _NAME_OMITTED_WHEN = {
     "kv_align": lambda knobs: knobs["kv_align"] == 0,
     "any_diagonal": lambda knobs: knobs["any_diagonal"] == 1,
     "waves_per_eu": lambda knobs: knobs["waves_per_eu"] == 0,
+    "setprio": lambda knobs: knobs["setprio"] == 1,
+    "kv_gpfetch": lambda knobs: knobs["kv_gpfetch"] == 1,
+    # A pick rule, not a build choice: two objects never differ in it alone.
+    "prefer_feature": lambda knobs: True,
+    "prefer_min": lambda knobs: True,
+    "prefer_max": lambda knobs: True,
     # A symbol, not a choice: the object's name already says it is a decode one.
     "merge_symbol": lambda knobs: True,
 }
@@ -403,87 +411,195 @@ def _assert_unique(instances: list[Instance]) -> None:
 
 # --- SDPA forward, CDNA ---------------------------------------------------------
 
-# FlyDSL's own CDNA kernels (kernels_src/kernels/attention_cdna/), one per arch:
-# gfx950 takes the dual-wave software-pipelined kernel, gfx942 the generic one.
-# Unlike every table above, which tables an op for all of its targets, this one
-# differs by target, so it takes the arch.
-# Which kernel serves which head dims, per arch: (family, head dims, waves_per_eu),
-# with waves_per_eu 0 the kernel's own default. The dual-wave kernel takes 64 and
-# 128 only; the generic one takes powers of two, and at 256 on gfx950 needs one
-# wave per SIMD (waves_per_eu 1) to hold its tile without spilling. At 256 its tile
-# needs more LDS than gfx942's 64 KiB, so gfx942 stops at 128.
-SDPA_CDNA_FAMILIES = {
-    "gfx950": (("dualwave", (64, 128), 0), ("generic", (256,), 1)),
-    "gfx942": (("generic", (64, 128), 0),),
-}
-# Query rows per workgroup: the dual-wave kernel's is fixed; the generic kernel's
-# launcher picks 128 or 256 by problem size, and only 128 is built here.
-SDPA_CDNA_BLOCK_M = {"dualwave": 256, "generic": 128}
+# FlyDSL's own CDNA kernels (kernels_src/kernels/attention_cdna/): the dual-wave
+# software-pipelined kernel (gfx950 only; head_dim 64 and 128) and the generic one
+# (powers of two from 64; up to 128 on gfx942, whose 64 KiB of LDS a 256 tile
+# overflows). Unlike every table above, which tables an op for all of its targets,
+# this one differs by target, so it takes the arch.
+#
+# What ships was chosen by measurement, not by hand (COVERAGE.md section 7.6): every
+# candidate schedule was built and timed on each target against the forward
+# attention graphs of the dnn-benchmarking workloads, and the set below is the
+# smallest found that comes within a few percent of the best candidate on that corpus.
+#
+# A class -- (dtype, head_dim, causal, bias) -- ships one or more tiers. The first is
+# its default; the others are companions for the shapes where another schedule
+# wins, most often short queries (decode, small prefill), where the dual-wave
+# kernel's 256-row tile is mostly idle. A companion that the class's rule prefers
+# for a shape ranks above the default there (see `prefer` below); otherwise it ranks
+# below it and is reached by autotune only.
 
-# The generic kernel's KV tail mask, which a non-causal object can skip when the
-# key length is a multiple of its KV tile: upstream's launcher picks that variant
-# for such lengths, and it is measurably faster. So a non-causal generic object
-# ships twice -- `kv_align` 0 serves any length, `kv_align` 64 only a multiple of
-# 64 and ranks above it. Causal objects bound the KV loop at the diagonal and have
-# no such variant; the dual-wave kernel needs none.
+
+@dataclass(frozen=True)
+class CdnaTier:
+    """One object family of a class: a schedule, and when it is preferred."""
+
+    kernel: str
+    block_m: int
+    # 0 is the kernel's own default.
+    waves_per_eu: int = 0
+    # The dual-wave kernel's s_setprio scheduling hint.
+    setprio: int = 1
+    # The generic kernel's KV global prefetch (gfx942).
+    kv_gpfetch: int = 1
+    # (feature, min, max): preferred when the graph's feature lies in [min, max),
+    # a max of 0 being unbounded. "rows" is batch x query heads x query length;
+    # "seq_q" the query length. ("none", 0, 0) for a tier with no preference.
+    prefer: tuple[str, int, int] = ("none", 0, 0)
+    # Also ship the object that skips the KV tail mask, for key lengths a
+    # multiple of SDPA_CDNA_KV_ALIGN (generic, non-causal only), ranked above this one.
+    kv_aligned: bool = False
+    # Also ship the plain causal build, exact at diagonal offset 0 only, ranked above
+    # this one (dual-wave, causal only).
+    offset_zero: bool = False
+
+
 SDPA_CDNA_KV_ALIGN = 64
-PRIORITY_SDPA_CDNA_KV_ALIGNED = 110
+# Within a tier the specialized variant (kv_aligned / offset_zero) ranks above the
+# plain one; a companion tier ranks below the default tier unless its rule prefers it.
+PRIORITY_SDPA_CDNA_DEFAULT = PRIORITY_SPECIALIZED
+PRIORITY_SDPA_CDNA_DEFAULT_SPECIALIZED = 110
+PRIORITY_SDPA_CDNA_COMPANION = 80
+PRIORITY_SDPA_CDNA_COMPANION_SPECIALIZED = 85
 
-# The dual-wave causal kernel serves an arbitrary diagonal offset only when built
-# with upstream's cross_seqlen, which costs a few percent; at offset 0 -- causal
-# self-attention, the common prefill -- the plain build is exact. So its causal
-# class ships twice: `any_diagonal` 1 for every offset, and `any_diagonal` 0 for
-# offset 0 only, ranked above it. The generic kernel needs no such split.
-PRIORITY_SDPA_CDNA_DIAGONAL_ZERO = 110
+_DW, _GEN = "dualwave", "generic"
+# The short-query companion: the generic kernel's 64-row tile.
+_SHORT_Q = 256
+_SDPA_CDNA_DUALWAVE = {
+    # Non-causal: setprio off measured ~1% faster than upstream's default.
+    (64, 0): (
+        CdnaTier(_DW, 256, setprio=0),
+        CdnaTier(_GEN, 64),
+    ),
+    # d64 causal: the any-diagonal build measured as fast as the offset-0 one, so it
+    # ships alone.
+    (64, 1): (
+        CdnaTier(_DW, 256),
+        CdnaTier(_GEN, 64, prefer=("rows", 0, 24576)),
+    ),
+    (128, 0): (
+        CdnaTier(_DW, 256, setprio=0),
+        CdnaTier(_GEN, 64),
+    ),
+    (128, 1): (
+        CdnaTier(_DW, 256, offset_zero=True),
+        CdnaTier(_GEN, 64, prefer=("seq_q", 0, _SHORT_Q)),
+    ),
+}
+SDPA_CDNA_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
+    "gfx950": {
+        **_SDPA_CDNA_DUALWAVE,
+        # The generic kernel needs one wave per SIMD at 256 to hold its tile.
+        (256, 0): (
+            CdnaTier(_GEN, 128, waves_per_eu=1, kv_aligned=True),
+            CdnaTier(_GEN, 64, waves_per_eu=1, kv_aligned=True),
+        ),
+        (256, 1): (
+            CdnaTier(_GEN, 128, waves_per_eu=1),
+            CdnaTier(_GEN, 64, waves_per_eu=1, prefer=("seq_q", 0, _SHORT_Q)),
+        ),
+    },
+    "gfx942": {
+        (64, 0): (
+            CdnaTier(_GEN, 128, waves_per_eu=3, kv_aligned=True),
+            CdnaTier(_GEN, 64, kv_aligned=True, prefer=("rows", 0, 24576)),
+        ),
+        (64, 1): (
+            CdnaTier(_GEN, 128, waves_per_eu=3),
+            CdnaTier(_GEN, 64, prefer=("rows", 0, 24576)),
+        ),
+        # Upstream's own launcher switches 128 -> 256 rows by problem size.
+        (128, 0): (
+            CdnaTier(_GEN, 128, kv_aligned=True),
+            CdnaTier(_GEN, 64, kv_aligned=True, prefer=("rows", 0, 18432)),
+            CdnaTier(_GEN, 256, kv_aligned=True, prefer=("rows", 49152, 0)),
+        ),
+        (128, 1): (
+            CdnaTier(_GEN, 128, kv_gpfetch=0),
+            CdnaTier(_GEN, 64, prefer=("rows", 0, 18432)),
+            CdnaTier(_GEN, 256, prefer=("rows", 49152, 0)),
+        ),
+    },
+}
+# The dual-wave kernel adds an additive bias in the query's dtype as a compile-time
+# axis; the generic kernel has none. Bias graphs are rare in the corpus, so a bias
+# class ships its default tier only, with upstream's scheduling.
+SDPA_CDNA_BIAS_TIERS = {
+    (64, 0): (CdnaTier(_DW, 256),),
+    (64, 1): (CdnaTier(_DW, 256),),
+    (128, 0): (CdnaTier(_DW, 256),),
+    (128, 1): (CdnaTier(_DW, 256, offset_zero=True),),
+}
 
-# Everything but dtype, head_dim and causal is a kernel argument (vendored-kernel
-# modifications 2-5).
+# Everything else is a kernel argument (vendored-kernel modifications 2-8).
 SDPA_CDNA_DTYPES = ("bf16", "f16")
+
+
+def _cdna_instance(
+    dtype, head_dim, causal, has_bias, tier, priority, kv_align, any_diagonal
+):
+    feature, low, high = tier.prefer
+    return Instance(
+        op="sdpa_cdna",
+        dtype=dtype,
+        priority=priority,
+        knobs={
+            "kernel": tier.kernel,
+            "head_dim": head_dim,
+            "causal": causal,
+            "block_m": tier.block_m,
+            "kv_align": kv_align,
+            "any_diagonal": any_diagonal,
+            "waves_per_eu": tier.waves_per_eu,
+            "has_bias": has_bias,
+            "setprio": tier.setprio,
+            "kv_gpfetch": tier.kv_gpfetch,
+            "prefer_feature": feature,
+            "prefer_min": low,
+            "prefer_max": high,
+        },
+    )
 
 
 def sdpa_cdna_instances(arch: str) -> list[Instance]:
     """The CDNA SDPA-forward instance table for one target."""
-    if arch not in SDPA_CDNA_FAMILIES:
+    if arch not in SDPA_CDNA_TIERS:
         raise KeyError(
-            f"no CDNA SDPA kernel for {arch!r}; known: {', '.join(sorted(SDPA_CDNA_FAMILIES))}"
+            f"no CDNA SDPA kernel for {arch!r}; known: {', '.join(sorted(SDPA_CDNA_TIERS))}"
         )
+    classes = [(key, 0, tiers) for key, tiers in SDPA_CDNA_TIERS[arch].items()]
+    if arch == "gfx950":
+        classes += [(key, 1, tiers) for key, tiers in SDPA_CDNA_BIAS_TIERS.items()]
     instances: list[Instance] = []
     for dtype in SDPA_CDNA_DTYPES:
-        for kernel, head_dims, waves_per_eu in SDPA_CDNA_FAMILIES[arch]:
-            for head_dim in head_dims:
-                for causal in SDPA_CAUSAL:
-                    variants = [(0, 1)]
-                    if kernel == "generic" and not causal:
-                        variants.append((SDPA_CDNA_KV_ALIGN, 1))
-                    if kernel == "dualwave" and causal:
-                        variants.append((0, 0))
-                    # The dual-wave kernel adds an additive bias in the query's dtype
-                    # as a compile-time axis; the generic kernel has none.
-                    biases = (0, 1) if kernel == "dualwave" else (0,)
-                    for has_bias in biases:
-                        for kv_align, any_diagonal in variants:
-                            priority = PRIORITY_SPECIALIZED
-                            if kv_align:
-                                priority = PRIORITY_SDPA_CDNA_KV_ALIGNED
-                            elif not any_diagonal:
-                                priority = PRIORITY_SDPA_CDNA_DIAGONAL_ZERO
-                            instances.append(
-                                Instance(
-                                    op="sdpa_cdna",
-                                    dtype=dtype,
-                                    priority=priority,
-                                    knobs={
-                                        "kernel": kernel,
-                                        "head_dim": head_dim,
-                                        "causal": causal,
-                                        "block_m": SDPA_CDNA_BLOCK_M[kernel],
-                                        "kv_align": kv_align,
-                                        "any_diagonal": any_diagonal,
-                                        "waves_per_eu": waves_per_eu,
-                                        "has_bias": has_bias,
-                                    },
-                                )
-                            )
+        for (head_dim, causal), has_bias, tiers in classes:
+            for index, tier in enumerate(tiers):
+                plain, special = (
+                    (PRIORITY_SDPA_CDNA_DEFAULT, PRIORITY_SDPA_CDNA_DEFAULT_SPECIALIZED)
+                    if index == 0
+                    else (
+                        PRIORITY_SDPA_CDNA_COMPANION,
+                        PRIORITY_SDPA_CDNA_COMPANION_SPECIALIZED,
+                    )
+                )
+                variants = [(0, 1, plain)]
+                if tier.kv_aligned and not causal:
+                    variants.append((SDPA_CDNA_KV_ALIGN, 1, special))
+                if tier.offset_zero and causal:
+                    variants.append((0, 0, special))
+                for kv_align, any_diagonal, priority in variants:
+                    instances.append(
+                        _cdna_instance(
+                            dtype,
+                            head_dim,
+                            causal,
+                            has_bias,
+                            tier,
+                            priority,
+                            kv_align,
+                            any_diagonal,
+                        )
+                    )
     _assert_unique(instances)
     return instances
 

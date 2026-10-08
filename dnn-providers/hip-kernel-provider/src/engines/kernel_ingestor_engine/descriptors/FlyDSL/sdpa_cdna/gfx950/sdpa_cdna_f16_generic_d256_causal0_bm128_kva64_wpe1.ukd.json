@@ -19,7 +19,12 @@
     "kv_align": 64,
     "any_diagonal": 1,
     "waves_per_eu": 1,
-    "has_bias": 0
+    "has_bias": 0,
+    "setprio": 1,
+    "kv_gpfetch": 1,
+    "prefer_feature": "none",
+    "prefer_min": 0,
+    "prefer_max": 0
   },
   "priority": 110,
   "provenance": {
@@ -39,7 +44,12 @@
             "kv_align",
             "any_diagonal",
             "waves_per_eu",
-            "has_bias"
+            "has_bias",
+            "setprio",
+            "kv_gpfetch",
+            "prefer_feature",
+            "prefer_min",
+            "prefer_max"
           ],
           "bindings": {},
           "vocabulary": {}

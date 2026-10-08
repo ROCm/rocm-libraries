@@ -38,6 +38,26 @@
     {
       "name": "has_bias",
       "type": "int"
+    },
+    {
+      "name": "setprio",
+      "type": "int"
+    },
+    {
+      "name": "kv_gpfetch",
+      "type": "int"
+    },
+    {
+      "name": "prefer_feature",
+      "type": "string"
+    },
+    {
+      "name": "prefer_min",
+      "type": "int"
+    },
+    {
+      "name": "prefer_max",
+      "type": "int"
     }
   ]
 }

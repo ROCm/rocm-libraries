@@ -98,6 +98,18 @@ constexpr std::string_view KV_ALIGN_FIELD = "kv_align";
 constexpr std::string_view ANY_DIAGONAL_FIELD = "any_diagonal";
 /// 1 for an object built to add a bias to the scores, 0 for one built without.
 constexpr std::string_view HAS_BIAS_FIELD = "has_bias";
+/// When an object is preferred over its class's default: while the graph's
+/// `prefer_feature` -- "rows" (batch x query heads x query length) or "seq_q" (the query
+/// length) -- lies in [`prefer_min`, `prefer_max`), a `prefer_max` of 0 being unbounded.
+/// "none" for an object with no preference, which ranks by its priority alone.
+constexpr std::string_view PREFER_FEATURE_FIELD = "prefer_feature";
+constexpr std::string_view PREFER_MIN_FIELD = "prefer_min";
+constexpr std::string_view PREFER_MAX_FIELD = "prefer_max";
+constexpr std::string_view PREFER_ROWS = "rows";
+constexpr std::string_view PREFER_SEQ_Q = "seq_q";
+/// Added to a preferred object's priority: more than any gap between priorities, so a
+/// preferred object outranks every one that is not.
+constexpr double PREFERRED_BONUS = 1000.0;
 
 constexpr std::string_view DUALWAVE = "dualwave";
 constexpr std::string_view GENERIC = "generic";
@@ -874,11 +886,55 @@ bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
            && integerMetadata(kernel, CAUSAL_FIELD) == *causal;
 }
 
-double flydslSdpaCdnaScore(const MatchContext& /*context*/,
+/// Whether the graph lies in the range @p kernel declares it is preferred for.
+bool isPreferredFor(const SdpaProblem& problem, const KernelDefinition& kernel)
+{
+    const auto feature = stringMetadata(kernel, PREFER_FEATURE_FIELD);
+    const auto low = integerMetadata(kernel, PREFER_MIN_FIELD);
+    const auto high = integerMetadata(kernel, PREFER_MAX_FIELD);
+    if(!feature.has_value() || !low.has_value() || !high.has_value())
+    {
+        return false;
+    }
+    std::optional<int64_t> value;
+    if(*feature == PREFER_ROWS)
+    {
+        value = checkedProduct({problem.batch, problem.numHeads, problem.seqLenQ});
+    }
+    else if(*feature == PREFER_SEQ_Q)
+    {
+        value = problem.seqLenQ;
+    }
+    if(!value.has_value())
+    {
+        // "none", or rows past int64: no preference.
+        return false;
+    }
+    return *value >= *low && (*high == 0 || *value < *high);
+}
+
+/**
+ * @brief The default ranking: an object's priority, plus PREFERRED_BONUS where its
+ *        class's measured rule prefers it for this graph's size (a short-query
+ *        companion for decode, a larger tile for a large problem).
+ */
+double flydslSdpaCdnaScore(const MatchContext& context,
                            const BoundTokens& /*bound*/,
                            const KernelDefinition& kernel)
 {
-    return static_cast<double>(kernel.priority);
+    auto score = static_cast<double>(kernel.priority);
+    const auto* attributes = sdpaNode(context);
+    if(attributes == nullptr)
+    {
+        return score;
+    }
+    const auto* q = findTensor(context, attributes->q_tensor_uid());
+    const auto* k = findTensor(context, attributes->k_tensor_uid());
+    if(q != nullptr && k != nullptr && isPreferredFor(problemFor(*q, *k), kernel))
+    {
+        score += PREFERRED_BONUS;
+    }
+    return score;
 }
 
 // ---------------------------------------------------------------------------

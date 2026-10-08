@@ -43,7 +43,7 @@ from ._codeobject import (
     verify_arch,
 )
 from ._extract_hsaco import hsaco_from_dump
-from ._instances import SDPA_CDNA_FAMILIES, Instance, instances_for
+from ._instances import SDPA_CDNA_TIERS, Instance, instances_for
 from ._manifest import refresh_source_md, sha256, write_op_manifest
 
 OP = "sdpa_cdna"
@@ -160,6 +160,9 @@ _BLOCK_THREADS = {
 # measurably worse, so they apply only where they were measured to help.
 _GENERIC_LLVM_OPTIONS = {("gfx942", 64): {"amdgpu-use-amdgpu-trackers": True}}
 
+# The generic kernel's switch for its KV global prefetch (the `kv_gpfetch` knob).
+_KV_GPFETCH_ENV = "FLYDSL_FLASH_ATTN_FUNC_ENABLE_KV_GPFETCH"
+
 _TRACE_BATCH = 1
 _TRACE_SEQ = 1024
 # The head counts the objects are traced with. They are kernel arguments, so these
@@ -216,12 +219,18 @@ def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
             # tile the pipeline would otherwise skip masking -- unless the object is
             # the offset-0 one (`any_diagonal` 0), which the matcher holds to that.
             cross_seqlen=bool(knobs["causal"]) and bool(knobs["any_diagonal"]),
+            dualwave_swp_setprio=bool(knobs["setprio"]),
         )
     else:
         from kernels.attention_cdna.flash_attn_generic import (  # noqa: PLC0415
             build_flash_attn_func_module,
         )
 
+        # Read by the generic kernel's traits at build time, and cleared by generate().
+        if not knobs["kv_gpfetch"]:
+            os.environ[_KV_GPFETCH_ENV] = "0"
+        else:
+            os.environ.pop(_KV_GPFETCH_ENV, None)
         launch = build_flash_attn_func_module(
             heads,
             head_dim,
@@ -260,19 +269,28 @@ def _max_flat_workgroup_size(blob: bytes, where: str) -> int:
     return int(document["amdhsa.kernels"][0][".max_flat_workgroup_size"])
 
 
-# VGPR spills accepted for a class, keyed by (kernel, head_dim, has_bias). A spill
-# is refused anywhere else; an accepted one is measured and recorded with the
-# object (`vgpr_spills` in its manifest record), so it cannot creep in unseen.
-# The dual-wave kernel at head_dim 128 with a bias spills a few VGPRs on gfx950 whatever
-# its knobs, upstream's own bias addressing included; measured against the same kernel
-# without a bias, the bias costs what reading it costs, and the spill nothing visible.
-_SPILL_ALLOWANCE: dict[tuple[str, int, int], int] = {("dualwave", 128, 1): 8}
+# VGPR spills accepted for a class, keyed by (arch, kernel, head_dim, block_m,
+# has_bias). A spill is refused anywhere else; an accepted one is measured and
+# recorded with the object (`vgpr_spills` in its manifest record), so it cannot
+# creep in unseen. Each was timed against the candidates that do not spill, and won
+# on the shapes its tier is for (COVERAGE.md section 7.6):
+# - the dual-wave kernel at head_dim 128 with a bias, whatever its knobs, upstream's
+#   own bias addressing included; the bias costs what reading it costs, and the
+#   spill nothing visible;
+# - the generic kernel's 64-row tile at head_dim 128 on gfx950 (causal);
+# - the generic kernel's 256-row tile at head_dim 128 on gfx942.
+_SPILL_ALLOWANCE: dict[tuple[str, str, int, int, int], int] = {
+    ("gfx950", "dualwave", 128, 256, 1): 8,
+    ("gfx950", "generic", 128, 64, 0): 6,
+    ("gfx942", "generic", 128, 256, 0): 2,
+}
 
 
-def _spill_allowance(instance: Instance) -> int:
+def _spill_allowance(instance: Instance, arch: str) -> int:
     knobs = instance.knobs
     return _SPILL_ALLOWANCE.get(
-        (knobs["kernel"], knobs["head_dim"], knobs["has_bias"]), 0
+        (arch, knobs["kernel"], knobs["head_dim"], knobs["block_m"], knobs["has_bias"]),
+        0,
     )
 
 
@@ -312,7 +330,7 @@ def _verify(
             f"{where}: built for {_max_flat_workgroup_size(blob, where)} threads per "
             f"workgroup, but the dispatcher launches {threads}"
         )
-    allowed = _spill_allowance(instance)
+    allowed = _spill_allowance(instance, arch)
     if described.get("vgpr_spill_count", 0) > allowed:
         raise GeneratorError(
             f"{where}: {described['vgpr_spill_count']} VGPRs spilled; the tile does "
@@ -323,8 +341,11 @@ def _verify(
 def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
     env.assert_flydsl_version()
     env.prepare(arch)
-    # The generic kernel reads this at build time; pinned so no shell changes the bytes.
+    # The generic kernel reads these at build time; pinned so no shell changes the
+    # bytes. Its FLYDSL_FLASH_ATTN_FUNC_* switches are left at upstream's defaults.
     os.environ["FLYDSL_LLVM_ENABLE_POST_MISCHED"] = "0"
+    for name in [n for n in os.environ if n.startswith("FLYDSL_FLASH_ATTN_FUNC_")]:
+        del os.environ[name]
 
     op_dir = out_root / OP / arch
     op_dir.mkdir(parents=True, exist_ok=True)
@@ -387,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--arch",
         required=True,
-        help=f"GPU target: one of {', '.join(sorted(SDPA_CDNA_FAMILIES))}; one arch per invocation.",
+        help=f"GPU target: one of {', '.join(sorted(SDPA_CDNA_TIERS))}; one arch per invocation.",
     )
     parser.add_argument(
         "--out-dir",
@@ -404,9 +425,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # Refused before compiling: these kernels are CDNA MFMA code.
-    if args.arch not in SDPA_CDNA_FAMILIES:
+    if args.arch not in SDPA_CDNA_TIERS:
         print(
-            f"error: the CDNA SDPA kernels target {', '.join(sorted(SDPA_CDNA_FAMILIES))}; "
+            f"error: the CDNA SDPA kernels target {', '.join(sorted(SDPA_CDNA_TIERS))}; "
             f"{args.arch!r} is neither",
             file=sys.stderr,
         )

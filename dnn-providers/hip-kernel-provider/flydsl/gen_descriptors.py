@@ -117,6 +117,11 @@ GRAPH_DETERMINED_FIELDS = {
     "kernel",
 }
 
+# Fields that say when an object is preferred rather than how it was built: the
+# score reads them, and like the graph-determined ones they are no knob for autotune,
+# which benchmarks the objects themselves.
+SELECTION_FIELDS = {"prefer_feature", "prefer_min", "prefer_max"}
+
 # uuid5 from a name, so ids are stable across regenerations and adding a
 # thirteenth instance cannot disturb the twelve already shipped. The namespace
 # is itself derived from a URL rather than being a magic constant. The names are
@@ -309,7 +314,11 @@ class OpDescriptors:
                 "graph_match": {"native": f"{self.symbols}.graph_match"},
                 "heuristic": self.uhd_id,
                 "metadata": self.kmd_id,
-                "knobs": [f for f in self.fields if f not in GRAPH_DETERMINED_FIELDS],
+                "knobs": [
+                    f
+                    for f in self.fields
+                    if f not in GRAPH_DETERMINED_FIELDS and f not in SELECTION_FIELDS
+                ],
             },
             f"{self.stem}_kernel_match.umd.json": {
                 "version": DESCRIPTOR_VERSION,

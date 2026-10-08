@@ -12,6 +12,8 @@
     "kv_align",
     "any_diagonal",
     "waves_per_eu",
-    "has_bias"
+    "has_bias",
+    "setprio",
+    "kv_gpfetch"
   ]
 }
