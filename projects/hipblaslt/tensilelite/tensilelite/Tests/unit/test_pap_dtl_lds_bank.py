@@ -16,13 +16,17 @@ pytestmark = pytest.mark.unit
 _PAP_BANK = re.compile(
     r"^s_and_b32 \S+, s\[sgprLocalWriteAddrA\], (0x[0-9a-f]+|\d+)\s+// PAP DTL bank", re.MULTILINE
 )
+# The register the next-tile prefetch records its primed flag (bit 0) and DTL
+# bank in, taken from the kernel's own save code.
+_PAP_STATE = re.compile(r"^s_or_b32 s\[sgpr(\w+)\], s\[sgpr\1\], s\d+\s+// encode PAP DTL LDS bank", re.MULTILINE)
 _INSN = re.compile(r"^([sv]_\w+)\s+([^/]*?)\s*(?://.*)?$")
 _LWA = "s[sgprLocalWriteAddrA]"
 _LWB = "s[sgprLocalWriteAddrB]"
 _LRA = "v[vgprLocalReadAddrA]"
 _LRB = "v[vgprLocalReadAddrB]"
-_PRIMED = "s[sgprSkPrefetchPrimed]"
-_TRACKED = {_LWA, _LWB, _LRA, _LRB, _PRIMED}
+_TRACKED = {_LWA, _LWB, _LRA, _LRB}
+# Not primed: cleared, or reserved for the next work item with no data issued.
+_NOT_PRIMED = (0, 0x80000000)
 
 
 def _value(state, token):
@@ -36,6 +40,7 @@ def _value(state, token):
 
 def _run(lines, state):
     """Evaluate the straight-line scalar/vector address arithmetic in lines."""
+    tracked = _TRACKED | set(state)
     scc = None
     for line in lines:
         insn = _INSN.match(line)
@@ -48,7 +53,11 @@ def _run(lines, state):
             vals = [_value(state, a) for a in args]
             scc = None if None in vals else vals[0] == vals[1]
             continue
-        if op.startswith("s_cmp"):
+        if op == "s_bitcmp1_b32":
+            vals = [_value(state, a) for a in args]
+            scc = None if None in vals else bool(vals[0] >> vals[1] & 1)
+            continue
+        if op.startswith("s_cmp") or op.startswith("s_bitcmp"):
             scc = None
             continue
         dst = args[0]
@@ -63,12 +72,12 @@ def _run(lines, state):
         elif op in ("s_add_u32", "v_add_u32"):
             val = None if None in src else src[0] + src[1]
         else:
-            assert dst not in _TRACKED, f"unexpected update of {dst}: {line}"
+            assert dst not in tracked, f"unexpected update of {dst}: {line}"
             state.pop(dst, None)
             continue
         if op.startswith("s_") and op != "s_mov_b32" and not op.startswith("s_c"):
             scc = None if val is None else (val != 0 if "and" in op else val >= 1 << 32)
-        assert val is not None or dst not in _TRACKED, f"lost track of {dst}: {line}"
+        assert val is not None or dst not in tracked, f"lost track of {dst}: {line}"
         if val is None:
             state.pop(dst, None)
         else:
@@ -88,18 +97,22 @@ def _tail_regions(assembly):
 
 
 def _assert_tail_avoids_pap_bank(assembly, blk):
+    match = _PAP_STATE.search(assembly)
+    assert match, "kernel does not record the DTL PAP bank"
+    assert re.search(rf"^\.set sgpr{match[1]}, \d+", assembly, re.MULTILINE)
+    pap_state = f"s[sgpr{match[1]}]"
     writes, reads = _tail_regions(assembly)
+    states = [(None, s) for s in _NOT_PRIMED] + [(bank, 1 | bank) for bank in (0, blk)]
     for current in (0, blk):
-        for pap_bank in (None, 0, blk):
-            primed = 0 if pap_bank is None else 1 | pap_bank
+        for pap_bank, primed in states:
             # The tail must not overwrite a primed next-tile group, and must read
             # the bank it loaded into.
             expected = 0 if pap_bank is None else blk ^ pap_bank
-            state = _run(writes, {_PRIMED: primed, _LWA: 0x100 | current, _LWB: 0x2040 | current})
+            state = _run(writes, {pap_state: primed, _LWA: 0x100 | current, _LWB: 0x2040 | current})
             assert (state[_LWA], state[_LWB]) == (0x100 | expected, 0x2040 | expected), (
                 f"tail writes bank {state[_LWA] & blk:#x} with PAP bank {pap_bank}"
             )
-            state = _run(reads, {_PRIMED: primed, _LRA: 0x80 | current, _LRB: 0x2080 | current})
+            state = _run(reads, {pap_state: primed, _LRA: 0x80 | current, _LRB: 0x2080 | current})
             assert (state[_LRA], state[_LRB]) == (0x80 | expected, 0x2080 | expected), (
                 f"tail reads bank {state[_LRA] & blk:#x} after writing {expected:#x}"
             )
