@@ -800,7 +800,7 @@ def test_variant_key_for_uses_module_globals(monkeypatch):
 
 
 @pytest.mark.quick
-def test_worker_inherits_parent_sys_path():
+def test_worker_inherits_parent_sys_path(tmp_path, monkeypatch):
     """A pool worker starts with the parent's `sys.path`, conftest inserts and all.
 
     CPython propagates `sys.path` to children under both `spawn` and
@@ -814,19 +814,17 @@ def test_worker_inherits_parent_sys_path():
     pool must be built after parent-side path setup, is documented at the
     construction site.
 
-    The path watched is the rocm_kpack directory conftest inserts from
-    HIPKERNELPROVIDER_ROCM_KPACK_DIR, which no `PYTHONPATH` carries. The hkp_pack
-    package root conftest also inserts is exported by the ctest environment, so a
-    child that re-read `PYTHONPATH` would have it too.
+    The path watched is one the test prepends to the parent's `sys.path` itself, in a
+    directory no `PYTHONPATH` carries, so the premise holds in every environment. An
+    operator-supplied directory such as HIPKERNELPROVIDER_ROCM_KPACK_DIR cannot serve:
+    it can already be a site-packages directory (as in CI), which the child has on its
+    `sys.path` whether or not the parent's propagated.
     """
-    kpack_dir = os.environ.get("HIPKERNELPROVIDER_ROCM_KPACK_DIR")
-    if not kpack_dir:
-        pytest.skip(
-            "HIPKERNELPROVIDER_ROCM_KPACK_DIR is unset, so conftest inserts no "
-            "path that PYTHONPATH does not already carry"
-        )
-    expected = _conftest_only_paths([kpack_dir])
-    assert expected, "the premise: conftest inserted it and PYTHONPATH lacks it"
+    probe = tmp_path / "parent-only-path"
+    probe.mkdir()
+    monkeypatch.syspath_prepend(str(probe))
+    expected = _conftest_only_paths([str(probe)])
+    assert expected, "the premise: the probe is on sys.path and PYTHONPATH lacks it"
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=1) as pool:
         child_path = list(pool.map(_child_sys_path, [None], chunksize=1))[0]
