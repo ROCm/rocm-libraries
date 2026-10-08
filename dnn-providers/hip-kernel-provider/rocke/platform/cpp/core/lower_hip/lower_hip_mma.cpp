@@ -8,9 +8,10 @@
  * Each `_op_*` Python method becomes a static `rocke_h_op_*` handler with the
  * (lw, op) signature from lower_hip_internal.h. Shared helpers
  * (rocke_h_emit / rocke_h_emitf / rocke_h_name / rocke_h_type_to_hip /
- * rocke_h_hip_scalar / rocke_h_require_wmma_arch / rocke_h_require_ds_read_tr /
- * rocke_h_lower_region / rocke_h_push_indent / rocke_h_pop_indent / rocke_attr_get_* /
- * rocke_vector_type) are DEFINED elsewhere (bucket 0); only called here.
+ * rocke_h_hip_scalar / rocke_h_require_hip_scalar / rocke_h_require_wmma_arch /
+ * rocke_h_require_ds_read_tr / rocke_h_lower_region / rocke_h_push_indent /
+ * rocke_h_pop_indent / rocke_attr_get_* / rocke_vector_type) are DEFINED elsewhere
+ * (bucket 0); only called here.
  *
  * The simple handlers reproduce every _emit() format string byte-for-byte.
  * The complex matrix-engine handlers are fully ported too:
@@ -55,11 +56,11 @@ static int h_vcount(const rocke_type_t* t)
 }
 
 /* Python idiom `t.elem.name if isinstance(t, VectorType) else t.name`, mapped
- * to the HIP scalar spelling via _HIP_TYPE (rocke_h_hip_scalar). */
-static const char* h_elem_scalar(const rocke_type_t* t)
+ * to the HIP scalar spelling (rocke_h_require_hip_scalar). */
+static const char* h_elem_scalar(rocke_h_lowerer_t* lw, const rocke_type_t* t)
 {
     const char* nm = (t && t->kind == ROCKE_TYPE_VECTOR) ? t->elem->name : t->name;
-    return rocke_h_hip_scalar(nm);
+    return rocke_h_require_hip_scalar(lw, nm);
 }
 
 /* ============================== mma ====================================== */
@@ -858,7 +859,7 @@ static rocke_status_t rocke_h_op_vector_extract(rocke_h_lowerer_t* lw, const roc
     rocke_attr_get_int(&op->attrs, "index", &i);
     rocke_h_emitf(lw,
                   "%s %s = %s[%d];",
-                  h_elem_scalar(v->type),
+                  h_elem_scalar(lw, v->type),
                   rocke_h_name(lw, r),
                   rocke_h_name(lw, v),
                   (int)i);
@@ -974,7 +975,7 @@ static rocke_status_t rocke_h_op_vector_sum(rocke_h_lowerer_t* lw, const rocke_o
     const char* nice = rocke_h_name(lw, r);
     const char* vn = rocke_h_name(lw, v);
     int n = h_vcount(v->type), i;
-    rocke_h_emitf(lw, "%s %s = %s[0];", h_elem_scalar(v->type), nice, vn);
+    rocke_h_emitf(lw, "%s %s = %s[0];", h_elem_scalar(lw, v->type), nice, vn);
     for(i = 1; i < n; i++)
     {
         rocke_h_emitf(lw, "%s = %s + %s[%d];", nice, nice, vn, i);
@@ -990,7 +991,7 @@ static rocke_status_t rocke_h_op_vector_reduce_max(rocke_h_lowerer_t* lw, const 
     const char* nice = rocke_h_name(lw, r);
     const char* vn = rocke_h_name(lw, v);
     int n = h_vcount(v->type), i;
-    rocke_h_emitf(lw, "%s %s = %s[0];", h_elem_scalar(v->type), nice, vn);
+    rocke_h_emitf(lw, "%s %s = %s[0];", h_elem_scalar(lw, v->type), nice, vn);
     for(i = 1; i < n; i++)
     {
         rocke_h_emitf(lw, "%s = (%s[%d] > %s) ? %s[%d] : %s;", nice, vn, i, nice, vn, i, nice);
@@ -1235,7 +1236,7 @@ static rocke_status_t rocke_h_op_vector_trunc_f32_to(rocke_h_lowerer_t* lw, cons
     {
         target = "f16";
     }
-    elem_cpp = rocke_h_hip_scalar(target);
+    elem_cpp = rocke_h_require_hip_scalar(lw, target);
     rocke_h_emitf(lw, "%s %s;", res_t, nice);
     for(i = 0; i < n; i++)
     {
@@ -1344,15 +1345,11 @@ static rocke_status_t rocke_h_op_scf_for(rocke_h_lowerer_t* lw, const rocke_op_t
     }
     iv_name = (iv_full[0] == '%') ? iv_full + 1 : iv_full; /* [1:] */
     iv_type = rocke_attr_get_str(&op->attrs, "iv_type");
-    iv_ty = iv_type ? rocke_h_hip_scalar(iv_type) : NULL;
-    if(!iv_ty)
+    if(!iv_type)
     {
-        /* Python _HIP_TYPE[...] KeyError parity. */
-        return rocke_h_fail(lw,
-                            ROCKE_ERR_KEY,
-                            "scf.for: no HIP type for iv_type '%s'",
-                            iv_type ? iv_type : "<none>");
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "scf.for: missing 'iv_type' attr");
     }
+    iv_ty = rocke_h_require_hip_scalar(lw, iv_type);
 
     /* Declare for-op results in the enclosing scope (zip stops at min length). */
     for(i = 0; i < meta_n && i < op->num_results; i++)

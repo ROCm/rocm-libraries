@@ -61,6 +61,7 @@ extern "C" {
 #include "rocke/instance_tf32_mma_probe.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
+#include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/rocke_build_id.h"
 #include "rocke/verify.h"
@@ -3656,14 +3657,36 @@ static std::string rocke_engine_flavor_list()
     return out;
 }
 
+/* Parse serialized ck.dsl.ir/v1 text into a kernel owned by `b`, which the
+ * caller has zero-initialised and frees. `entry` names the binding in the
+ * error messages. Throws std::runtime_error on any failure. */
+static const rocke_kernel_def_t*
+    parse_serialized_ir(const std::string& ir_text, const char* entry, rocke_ir_builder_t* b)
+{
+    const std::string prefix = std::string("rocke_engine.") + entry + ": ";
+    if(ir_text.empty())
+    {
+        throw std::runtime_error(prefix + "empty IR input");
+    }
+    if(rocke_ir_builder_init(b, entry) != ROCKE_OK)
+    {
+        throw std::runtime_error(prefix + "builder init failed (OOM)");
+    }
+    rocke_kernel_def_t* kernel = nullptr;
+    const rocke_status_t st = rocke_ir_parse(ir_text.c_str(), b, &kernel);
+    if(st != ROCKE_OK || !kernel)
+    {
+        const char* m = rocke_ir_builder_error(b);
+        throw std::runtime_error(prefix + "parse failed (status " + std::to_string((int)st)
+                                 + "): " + ((m && *m) ? m : "unknown parse error"));
+    }
+    return kernel;
+}
+
 std::string lower_serialized_ir(const std::string& ir_text,
                                 const std::string& arch,
                                 const std::string& flavor)
 {
-    if(ir_text.empty())
-    {
-        throw std::runtime_error("rocke_engine.lower_serialized_ir: empty IR input");
-    }
     const char* a = arch.empty() ? "gfx950" : arch.c_str();
 
     /* flavor: "" => Python AUTO (env override or loaded compiler); a named flavor
@@ -3687,22 +3710,7 @@ std::string lower_serialized_ir(const std::string& ir_text,
     rocke_ir_builder_t b = {};
     std::unique_ptr<rocke_ir_builder_t, decltype(&rocke_ir_builder_free)> builder(
         &b, rocke_ir_builder_free);
-    const auto init_status = rocke_ir_builder_init(&b, "lower_serialized_ir");
-    if(init_status != ROCKE_OK)
-    {
-        throw std::runtime_error("rocke_engine.lower_serialized_ir: builder init failed (OOM)");
-    }
-
-    rocke_kernel_def_t* kernel = nullptr;
-    rocke_status_t st = rocke_ir_parse(ir_text.c_str(), &b, &kernel);
-    if(st != ROCKE_OK || !kernel)
-    {
-        const char* m = rocke_ir_builder_error(&b);
-        std::string msg = std::string("rocke_engine.lower_serialized_ir: parse failed (status ")
-                          + std::to_string((int)st)
-                          + "): " + ((m && *m) ? m : "unknown parse error");
-        throw std::runtime_error(msg);
-    }
+    const rocke_kernel_def_t* kernel = parse_serialized_ir(ir_text, "lower_serialized_ir", &b);
 
     if(fl == ROCKE_LLVM_FLAVOR_AUTO)
         fl = resolve_python_llvm_flavor();
@@ -3710,7 +3718,8 @@ std::string lower_serialized_ir(const std::string& ir_text,
     char* out_ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    st = rocke_lower_kernel_to_llvm_ex(kernel, fl, a, &out_ll, err, sizeof(err));
+    const rocke_status_t st
+        = rocke_lower_kernel_to_llvm_ex(kernel, fl, a, &out_ll, err, sizeof(err));
     std::unique_ptr<char, decltype(&std::free)> text(out_ll, std::free);
     if(st != ROCKE_OK || !out_ll)
     {
@@ -3721,6 +3730,40 @@ std::string lower_serialized_ir(const std::string& ir_text,
     }
 
     return std::string(text.get());
+}
+
+/* lower_serialized_ir_hip(ir_text, arch): the HIP-source twin of
+ * lower_serialized_ir -- parse, then rocke_lower_kernel_to_hip with its
+ * defaults (prologue included, launch bounds from the kernel). Lets a test
+ * compare the C++ HIP lowering of a Python-built kernel, and its refusals,
+ * with rocke.core.lower_hip.lower_kernel_to_hip. */
+std::string lower_serialized_ir_hip(const std::string& ir_text, const std::string& arch)
+{
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    rocke_ir_builder_t b = {};
+    std::unique_ptr<rocke_ir_builder_t, decltype(&rocke_ir_builder_free)> builder(
+        &b, rocke_ir_builder_free);
+    const rocke_kernel_def_t* kernel = parse_serialized_ir(ir_text, "lower_serialized_ir_hip", &b);
+
+    rocke_strbuf_t text;
+    if(rocke_strbuf_init(&text, 0) != 0)
+    {
+        throw std::runtime_error("rocke_engine.lower_serialized_ir_hip: output allocation failed");
+    }
+    std::unique_ptr<rocke_strbuf_t, decltype(&rocke_strbuf_free)> owned_text(&text,
+                                                                             rocke_strbuf_free);
+    rocke_lower_hip_opts_t opts = {};
+    opts.arch = a;
+    const rocke_status_t st = rocke_lower_kernel_to_hip(&b, kernel, &opts, &text);
+    if(st != ROCKE_OK)
+    {
+        const char* m = rocke_ir_builder_error(&b);
+        throw std::runtime_error(std::string("rocke_engine.lower_serialized_ir_hip: lower failed "
+                                             "for arch '")
+                                 + a + "' (status " + std::to_string((int)st)
+                                 + "): " + ((m && *m) ? m : "unknown lowering error"));
+    }
+    return std::string(rocke_strbuf_cstr(&text));
 }
 
 } // namespace
@@ -3781,6 +3824,14 @@ PYBIND11_MODULE(rocke_engine, m)
           "(.ll) text via the C++ engine. Family-agnostic; byte-identical to "
           "the Python lowerer for the same serialized IR. flavor='' resolves "
           "the LLVM flavor automatically; a name from llvm_flavors() pins it.");
+
+    m.def("lower_serialized_ir_hip",
+          &lower_serialized_ir_hip,
+          py::arg("ir_text"),
+          py::arg("arch") = "gfx950",
+          "Parse serialized ck.dsl.ir/v1 text and lower it to HIP source via the "
+          "C++ engine; the twin of rocke.core.lower_hip.lower_kernel_to_hip with "
+          "its default options.");
 
     /* Exposes the engine's flavor ladder so a test can assert it still equals
      * rocke.core.lower_llvm.LLVM_FLAVORS. Without a way to read the C++ list

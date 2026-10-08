@@ -1117,6 +1117,8 @@ def _llvm_type(t: Type) -> str:
         # The value-level type of a smem allocation token is "the pointer
         # to its base", since uses GEP into it.
         return "ptr addrspace(3)"
+    # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
+    # keeps its values out of the IR.
     if t.name == "i1":
         return "i1"
     if t.name == "i8":
@@ -1941,6 +1943,8 @@ class _Lowerer:
         Falls back to the original sequential packing when liveness analysis
         yields no intervals (e.g. zero smem allocations).
         """
+        # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
+        # refuses its LDS tiles.
         _elem_bytes = {
             "i8": 1,
             "fp8e4m3": 1,
@@ -1970,6 +1974,8 @@ class _Lowerer:
             return seg
 
         def _align(stype: "SmemType") -> int:
+            # A packed-only type never reaches here: core/ir.py
+            # _refuse_packed_only_value refuses its LDS tiles.
             if stype.elem.name == "f64":
                 return 8
             return 16 if stype.elem.name in ("i8", "fp8e4m3", "bf8e5m2") else 4

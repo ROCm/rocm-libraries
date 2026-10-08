@@ -23,6 +23,7 @@ int main()
                               {"int32", ROCKE_DTYPE_I32},
                               {"XF32", "tf32"},
                               {" TF32 ", "tf32"},
+                              {"INT8", "i8"},
                               {" Custom_Format ", "custom_format"},
                               {"", ""}};
     for(const auto& entry : cases)
@@ -38,6 +39,11 @@ int main()
     char scratch[64];
     if(strcmp(rocke_normalize_dtype(NULL, scratch, sizeof(scratch)), "") != 0
        || strcmp(rocke_normalize_dtype(" BF6 ", NULL, 0), "fp6e3m2") != 0)
+        return 1;
+    /* "iu8"/"iu4" appear only in RDNA integer WMMA instruction names, so they are
+     * not dtypes: signedness is an instruction operand, not a property of the data. */
+    const rocke_dtype_info_t* i4 = rocke_dtype_info("i4");
+    if(!i4 || i4->encoded_bits != 4 || rocke_dtype_info("iu8") || rocke_dtype_info("iu4"))
         return 1;
     return 0;
 }

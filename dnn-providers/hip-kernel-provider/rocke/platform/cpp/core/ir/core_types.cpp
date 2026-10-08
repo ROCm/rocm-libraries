@@ -46,6 +46,8 @@
     }
 
 ROCKE_SCALAR_SINGLETON(rocke_i1, ROCKE_SCALAR_I1, "i1")
+/* Logical only, like fp4e2m1: no LLVM rendering; its values travel packed. */
+ROCKE_SCALAR_SINGLETON(rocke_i4, ROCKE_SCALAR_I4, "i4")
 ROCKE_SCALAR_SINGLETON(rocke_i8, ROCKE_SCALAR_I8, "i8")
 ROCKE_SCALAR_SINGLETON(rocke_i16, ROCKE_SCALAR_I16, "i16")
 ROCKE_SCALAR_SINGLETON(rocke_i32, ROCKE_SCALAR_I32, "i32")
@@ -72,6 +74,8 @@ const rocke_type_t* rocke_scalar_by_name(const char* name)
         return NULL;
     if(strcmp(name, "i1") == 0)
         return rocke_i1();
+    if(strcmp(name, "i4") == 0)
+        return rocke_i4();
     if(strcmp(name, "i8") == 0)
         return rocke_i8();
     if(strcmp(name, "i16") == 0)

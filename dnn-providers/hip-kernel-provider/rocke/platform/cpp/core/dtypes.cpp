@@ -26,17 +26,40 @@ typedef struct rocke_dtype_alias
 /* Byte-for-byte the _DTYPE_ALIASES map (insertion order is irrelevant: lookup is
  * by exact lowercased key). */
 static const rocke_dtype_alias_t k_dtype_aliases[] = {
-    {"f16", "fp16"},        {"half", "fp16"},         {"fp16", "fp16"},
-    {"bf16", "bf16"},       {"bfloat16", "bf16"},     {"f32", "fp32"},
-    {"float", "fp32"},      {"fp32", "fp32"},         {"tf32", "tf32"},
-    {"xf32", "tf32"},       {"f64", "fp64"},          {"double", "fp64"},
-    {"fp64", "fp64"},       {"iu8", "iu8"},           {"iu4", "iu4"},
-    {"i8", "i8"},           {"int8", "i8"},           {"i4", "i4"},
-    {"int4", "i4"},         {"i32", ROCKE_DTYPE_I32}, {"int32", ROCKE_DTYPE_I32},
-    {"fp8", "fp8e4m3"},     {"fp8e4m3", "fp8e4m3"},   {"e4m3", "fp8e4m3"},
-    {"bf8", "bf8e5m2"},     {"bf8e5m2", "bf8e5m2"},   {"fp6", "fp6e2m3"},
-    {"fp6e2m3", "fp6e2m3"}, {"bf6", "fp6e3m2"},       {"fp6e3m2", "fp6e3m2"},
-    {"fp4", "fp4e2m1"},     {"fp4e2m1", "fp4e2m1"},
+    {"f16", "fp16"},
+    {"half", "fp16"},
+    {"fp16", "fp16"},
+    {"bf16", "bf16"},
+    {"bfloat16", "bf16"},
+    {"f32", "fp32"},
+    {"float", "fp32"},
+    {"fp32", "fp32"},
+    {"tf32", "tf32"},
+    {"xf32", "tf32"},
+    {"f64", "fp64"},
+    {"double", "fp64"},
+    {"fp64", "fp64"},
+    {"fp8", "fp8e4m3"},
+    {"fp8e4m3", "fp8e4m3"},
+    {"e4m3", "fp8e4m3"},
+    {"bf8", "bf8e5m2"},
+    {"bf8e5m2", "bf8e5m2"},
+    {"fp6", "fp6e2m3"},
+    {"fp6e2m3", "fp6e2m3"},
+    {"bf6", "fp6e3m2"},
+    {"fp6e3m2", "fp6e3m2"},
+    {"fp4", "fp4e2m1"},
+    {"fp4e2m1", "fp4e2m1"},
+    /* Integers. RDNA integer WMMA instructions call their 8- and 4-bit operands
+     * "iu8"/"iu4" in the instruction name only; their operand dtypes are i8 / i4,
+     * because signedness is an instruction operand, not a property of the data.
+     * "i32" is the integer accumulator. */
+    {"i8", "i8"},
+    {"int8", "i8"},
+    {"i4", "i4"},
+    {"int4", "i4"},
+    {"i32", ROCKE_DTYPE_I32},
+    {"int32", ROCKE_DTYPE_I32},
 };
 #define K_NUM_DTYPE_ALIASES ((int)(sizeof(k_dtype_aliases) / sizeof(k_dtype_aliases[0])))
 
@@ -124,16 +147,27 @@ const char* rocke_normalize_dtype(const char* name, char* lowered, size_t cap)
 }
 
 static const rocke_dtype_info_t k_dtype_info[] = {
-    {"fp64", ROCKE_DTYPE_FLOAT, 64},   {"fp32", ROCKE_DTYPE_FLOAT, 32},
-    {"tf32", ROCKE_DTYPE_FLOAT, 32},   {"fp16", ROCKE_DTYPE_FLOAT, 16},
-    {"bf16", ROCKE_DTYPE_FLOAT, 16},   {"fp8e4m3", ROCKE_DTYPE_FLOAT, 8},
-    {"bf8e5m2", ROCKE_DTYPE_FLOAT, 8}, {"fp6e2m3", ROCKE_DTYPE_FLOAT, 6},
-    {"fp6e3m2", ROCKE_DTYPE_FLOAT, 6}, {"fp4e2m1", ROCKE_DTYPE_FLOAT, 4},
-    {"e8m0", ROCKE_DTYPE_FLOAT, 8},    {"e5m3", ROCKE_DTYPE_FLOAT, 8},
-    {"i4", ROCKE_DTYPE_INTEGER, 4},    {"iu4", ROCKE_DTYPE_INTEGER, 4},
-    {"i8", ROCKE_DTYPE_INTEGER, 8},    {"iu8", ROCKE_DTYPE_INTEGER, 8},
-    {"i16", ROCKE_DTYPE_INTEGER, 16},  {"i32", ROCKE_DTYPE_INTEGER, 32},
-    {"i64", ROCKE_DTYPE_INTEGER, 64},  {"i1", ROCKE_DTYPE_PREDICATE, 1},
+    /* Floating point, grouped as in _DTYPE_INFO. */
+    {"fp64", ROCKE_DTYPE_FLOAT, 64},
+    {"fp32", ROCKE_DTYPE_FLOAT, 32},
+    {"tf32", ROCKE_DTYPE_FLOAT, 32},
+    {"fp16", ROCKE_DTYPE_FLOAT, 16},
+    {"bf16", ROCKE_DTYPE_FLOAT, 16},
+    {"fp8e4m3", ROCKE_DTYPE_FLOAT, 8},
+    {"bf8e5m2", ROCKE_DTYPE_FLOAT, 8},
+    {"fp6e2m3", ROCKE_DTYPE_FLOAT, 6},
+    {"fp6e3m2", ROCKE_DTYPE_FLOAT, 6},
+    {"fp4e2m1", ROCKE_DTYPE_FLOAT, 4},
+    {"e8m0", ROCKE_DTYPE_FLOAT, 8},
+    {"e5m3", ROCKE_DTYPE_FLOAT, 8},
+    /* Integers. */
+    {"i4", ROCKE_DTYPE_INTEGER, 4},
+    {"i8", ROCKE_DTYPE_INTEGER, 8},
+    {"i16", ROCKE_DTYPE_INTEGER, 16},
+    {"i32", ROCKE_DTYPE_INTEGER, 32},
+    {"i64", ROCKE_DTYPE_INTEGER, 64},
+    /* Predicates. */
+    {"i1", ROCKE_DTYPE_PREDICATE, 1},
 };
 
 const rocke_dtype_info_t* rocke_dtype_info(const char* name)

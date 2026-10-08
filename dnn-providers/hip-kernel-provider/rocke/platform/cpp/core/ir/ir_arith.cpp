@@ -121,6 +121,7 @@ rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem,
         return NULL;
     if(!elem)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "zero_vec elem is NULL");
+    rocke_i_refuse_packed_only_value("zero_vec", elem);
     if(rocke_type_eq(elem, rocke_f32()))
         return rocke_b_zero_vec_f32(b, n);
     if(rocke_type_eq(elem, rocke_f16()) || rocke_type_eq(elem, rocke_bf16())

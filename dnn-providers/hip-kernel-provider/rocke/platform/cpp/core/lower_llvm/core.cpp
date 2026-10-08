@@ -603,7 +603,8 @@ const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
     {
         return "ptr addrspace(3)";
     }
-    /* scalar */
+    /* scalar. No packed-only type has an entry: rocke_i_refuse_packed_only_value
+     * keeps its values out of the IR. */
     const char* n = t->name;
     if(n)
     {
@@ -1213,7 +1214,9 @@ static void
     }
 }
 
-/* Size of one smem allocation in bytes (Python _seg_size). */
+/* Size of one smem allocation in bytes (Python _seg_size).
+ * No packed-only type has an entry: rocke_i_refuse_packed_only_value refuses
+ * its LDS tiles. */
 static int ll_smem_seg_size(const rocke_type_t* stype)
 {
     if(!stype || !stype->elem || !stype->elem->name)
@@ -1236,7 +1239,8 @@ static int ll_smem_seg_size(const rocke_type_t* stype)
     return seg;
 }
 
-/* Alignment for one smem allocation (Python _align). */
+/* Alignment for one smem allocation (Python _align). A packed-only type never
+ * reaches here: rocke_i_refuse_packed_only_value refuses its LDS tiles. */
 static int ll_smem_align(const rocke_type_t* stype)
 {
     if(!stype || !stype->elem || !stype->elem->name)

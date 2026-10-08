@@ -60,11 +60,23 @@ def test_quant_type_recognition_does_not_enable_integer_conversion(dtype):
         dequantize_scalar_to_f32(b, value, scale=scale)
 
 
-def test_unknown_dtype_and_unrepresented_integer_family():
+def test_unknown_dtype_is_rejected():
     with pytest.raises(ValueError, match="unknown dtype"):
         dtype_info("custom_format")
-    with pytest.raises(ValueError, match="no logical IR type"):
-        dtype_to_ir_type("iu4")
+
+
+def test_the_integer_dtypes_are_i8_and_i4_only():
+    # "iu8" / "iu4" appear only in RDNA integer WMMA instruction names: signedness is
+    # an instruction operand, not a property of the data, so they are not dtypes.
+    from rocke.core.ir import I4
+
+    assert dtype_to_ir_type("i8") is I8
+    assert dtype_to_ir_type("i4") is I4
+    assert dtype_info("i4").encoded_bits == 4
+    assert storage_ir_type("i4") is I8
+    for name in ("iu8", "iu4"):
+        with pytest.raises(ValueError, match="unknown dtype"):
+            dtype_info(name)
 
 
 @pytest.mark.parametrize(
