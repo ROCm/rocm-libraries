@@ -746,6 +746,80 @@ class TestHardwareConstantsRoundTrip:
         row.update({f"hw_{k}": v for k, v in hw.items()})
         return pd.DataFrame([row]), GemmUniversalFeatureEngine
 
+    def test_training_refuses_an_arch_the_data_contradicts(self):
+        """feature_spec.json's arch came straight from the flag and was never
+        checked against the rows, while the whole inference side treats it as
+        authoritative -- _resolve_arch cross-checks callers against it and
+        rejects them. --arch does not filter the data either, so a spec could
+        claim gfx1250 over gfx950 rows and pass every other guard: names,
+        count, encoding version and hardware constants all match."""
+        from train import check_arch_matches_data
+
+        df, _ = self._frame(**self.HW)
+        df["arch"] = "gfx950"
+        with pytest.raises(ValueError, match="but the data carries"):
+            check_arch_matches_data(df, "gfx1250")
+
+    def test_main_actually_invokes_the_arch_check(self):
+        """The guard had a test; the line calling it did not.
+
+        Deleting `check_arch_matches_data(df, args.arch)` from main left the
+        suite green -- the identical defect this series already hit with
+        check_capture_hw_arch, repeated one function over. A guard nothing
+        invokes is a comment."""
+        import train
+
+        df, _ = self._frame(**self.HW)
+        df["arch"] = "gfx950"
+
+        with mock.patch.object(
+            train, "build_training_dataset", lambda *a, **k: df.copy()
+        ):
+            argv = [
+                "train.py",
+                "--data_dir",
+                "d",
+                "--out_dir",
+                "o",
+                "--operation",
+                "gemm_universal",
+                "--arch",
+                "gfx1250",
+                "--targets",
+                "tflops",
+            ]
+            with mock.patch.object(sys, "argv", argv):
+                with pytest.raises(ValueError, match="but the data carries"):
+                    train.main()
+
+    def test_training_accepts_a_matching_arch(self):
+        from train import check_arch_matches_data
+
+        df, _ = self._frame(**self.HW)
+        df["arch"] = "gfx950"
+        assert check_arch_matches_data(df, "gfx950") is None
+        # The suffixed spelling names the same part.
+        assert check_arch_matches_data(df, "gfx950:xnack-") is None
+
+    def test_training_refuses_a_mixed_arch_dataset(self):
+        """--arch cannot describe two parts at once, and build_training_dataset
+        never filters on it."""
+        from train import check_arch_matches_data
+
+        df, _ = self._frame(**self.HW)
+        mixed = pd.concat([df, df], ignore_index=True)
+        mixed["arch"] = ["gfx950", "gfx1250"]
+        with pytest.raises(ValueError, match="but the data carries"):
+            check_arch_matches_data(mixed, "gfx950")
+
+    def test_training_tolerates_data_without_an_arch_column(self):
+        """Older parquet carries no arch column; nothing to contradict."""
+        from train import check_arch_matches_data
+
+        df, _ = self._frame(**self.HW)
+        assert "arch" not in df.columns
+        assert check_arch_matches_data(df, "gfx1250") is None
+
     def test_warm_start_rejects_a_changed_constant(self, tmp_path):
         """The guard this class exists for -- and the one this change opened.
 

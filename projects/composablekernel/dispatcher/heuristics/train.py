@@ -38,6 +38,11 @@ from sklearn.model_selection import GroupKFold
 
 from data_pipeline import build_training_dataset
 
+# data_pipeline already puts dispatcher/codegen on sys.path, so this costs no
+# second hop. normalize_gfx_arch is the single source of truth for comparing
+# gfx targets across the dispatcher tree.
+from codegen_common import normalize_gfx_arch  # noqa: E402
+
 
 # Operation-specific target column mappings
 TARGET_COLUMNS = {
@@ -236,6 +241,40 @@ def load_warm_start_model(prev_model_dir: Path, target: str) -> str | None:
     if not model_path.exists():
         return None
     return str(model_path)
+
+
+def check_arch_matches_data(df: pd.DataFrame, arch: str) -> None:
+    """Refuse an ``--arch`` that the rows contradict.
+
+    ``feature_spec.json["arch"]`` is written straight from the flag, and the
+    whole inference side then treats it as authoritative -- ``_resolve_arch``
+    cross-checks a caller against it three ways and raises on disagreement.
+    The write side validated nothing, and ``--arch`` does not filter the data
+    (``build_training_dataset`` keys on op_type and dtype only), so
+    ``--arch gfx1250`` over gfx950 parquet produced a spec claiming gfx1250
+    while the vec engine had computed wave-64 native widths from the rows.
+
+    That spec passes every other guard -- names, count, encoding version and
+    hardware constants all match -- and is then used to reject a legitimate
+    caller. A wrong answer delivered with full confidence by the machinery
+    built to prevent wrong answers.
+
+    Both producers write an ``arch`` column on every row, so the check is free.
+    """
+    if "arch" not in df.columns or df.empty:
+        return
+    found = {normalize_gfx_arch(str(a)) for a in pd.unique(df["arch"].dropna())}
+    if not found:
+        return
+    want = normalize_gfx_arch(str(arch))
+    if found != {want}:
+        raise ValueError(
+            f"--arch is {arch!r} but the data carries {sorted(found)}. The "
+            "recorded arch governs how native vector widths are resolved at "
+            "inference, and --arch does not filter the dataset, so this would "
+            "label the model for a part it was not trained on. Train one "
+            "architecture at a time."
+        )
 
 
 def build_hw_kwargs(df: pd.DataFrame, operation: str) -> dict:
@@ -768,6 +807,9 @@ def main():
     df = build_training_dataset(
         args.data_dir, op_type=base_operation(operation), dtype=args.dtype
     )
+    # Before any work: a mislabelled dataset makes everything after it wrong,
+    # and the label is what inference trusts.
+    check_arch_matches_data(df, args.arch)
     print(f"  Total rows: {len(df)}")
 
     # Print unique shapes based on operation type
