@@ -831,6 +831,27 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
         return rocblaslt_status_invalid_handle;
     }
 
+    if(matA->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED
+       || matB->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED
+       || matC->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED
+       || matD->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED)
+        return rocblaslt_grouped_matmul(handle,
+                                        matmul_descr,
+                                        alpha,
+                                        A,
+                                        matA,
+                                        B,
+                                        matB,
+                                        beta,
+                                        C,
+                                        matC,
+                                        D,
+                                        matD,
+                                        algo,
+                                        workspace,
+                                        workspaceSizeInBytes,
+                                        stream);
+
     // Update for the valid case: ((alpha_in_host && alpha=0) && (A=NULL || B=NULL))
     bool alpha_A_B_violation
         = (!alpha || ((matmul_descr->pointermode || (*((float*)alpha))) && (!A || !B)));
