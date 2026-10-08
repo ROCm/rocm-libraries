@@ -83,6 +83,7 @@ extern "C" size_t hipblaslt_tuning_candidates_for_test(void*  handle,
                                                        size_t workspaceBytes,
                                                        int*   indexes,
                                                        size_t count);
+extern "C" void   hipblaslt_tuning_forget_shapes_for_test();
 
 #ifdef WIN32
 static int setenv(const char* name, const char* value, int overwrite)
@@ -3273,4 +3274,49 @@ namespace
         EXPECT_EQ(valueRowCount(m_path), 0u) << "online wrote a row cache mode will never look up";
         EXPECT_EQ(counters().tuned, 0u);
     }
+
+    // One line per shape, the same bound tune's terminal line is under.
+    //
+    // Reaching it needs one shape to settle twice in a process, which only the
+    // test hook can arrange: the tuner is told to forget everything while the
+    // diagnostics, which are what hold the bound, keep what they have seen. The
+    // second pin is real -- it writes its own row and counts its own winner --
+    // and only the notice is suppressed.
+    TEST_F(TuningOnline_pre_checkin, TheWinnerNoticeIsEmittedOncePerShape)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "a logging variable is set, so the notices do not reach std::cerr";
+
+        OnlineProblem problem(/*pointerArray=*/false);
+        ASSERT_TRUE(problem.create());
+
+        if(problem.distinctCandidates(kOnlineTopK) < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        enterOnline(m_path);
+
+        std::string output;
+        {
+            CerrCapture capture;
+            runToResolution(problem);
+
+            // A settled shape is served from the in-memory cache on every later
+            // dispatch, so nothing of it is measured again. Both the rows and
+            // the file have to go for it to be learned a second time.
+            std::remove(m_path.c_str());
+            hipblaslt_tuning_forget_shapes_for_test();
+
+            runToResolution(problem);
+
+            output = capture.str();
+        }
+
+        ASSERT_EQ(counters().tuned, 2u)
+            << "the shape did not settle twice, so nothing was suppressed and this proves nothing";
+
+        EXPECT_EQ(countOccurrences(output, "online-winner="), 1u)
+            << "the winner notice is not under the gate the tune path's is:\n"
+            << output;
+    }
+
 } // namespace
