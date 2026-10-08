@@ -4,18 +4,47 @@
 # hipBLASLt + TensileLite tests on a gfx1250 runner, run against a prebuilt ROCm
 # artifact inside a container.
 #
-# On-demand only: workflow_dispatch. A developer supplies the run-id of a completed
-# "TheRock Multi-Arch CI" gfx125X-dcgpu build and picks which suites to run. There is
-# no per-PR auto-trigger — the gfx1250 runners are scarce, so runs are manual.
+# Triggers:
+# - workflow_call: called by TheRock CI after gfx125X build completes (presubmit)
+# - schedule: nightly at 2 AM UTC (fetches latest nightly release from S3)
+# - workflow_dispatch: on-demand manual runs. A developer supplies the run-id of a
+#   completed "TheRock Multi-Arch CI" gfx125X-dcgpu build and picks which suites to
+#   run. Leave build_run_id empty to fetch the latest nightly release from S3.
 
 name: gfx1250 HW hipBLASLt + TensileLite Tests
 run-name: ${{ github.ref_name }} @ ${{ github.sha }}
 
 on:
+  workflow_call:
+    inputs:
+      artifact_run_id:
+        description: "CI run ID to download pre-built artifacts from"
+        required: true
+        type: string
+      artifact_group:
+        description: "TheRock artifact group (e.g. gfx125X-dcgpu)"
+        required: false
+        type: string
+        default: "gfx125X-dcgpu"
+      build_repo:
+        description: "Repo that produced the artifact"
+        type: string
+        default: "ROCm/rocm-libraries"
+      run_hipblaslt:
+        description: "Run the hipBLASLt gtest suite"
+        type: boolean
+        default: true
+      run_tensilelite:
+        description: "Run the TensileLite common tests"
+        type: boolean
+        default: true
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
   workflow_dispatch:
     inputs:
       build_run_id:
-        description: "CI run-id of the gfx1250 build to fetch (manual runs only)"
+        description: "CI run-id of the gfx1250 build to fetch (leave empty to use latest nightly)"
         type: string
         required: false
       build_repo:
@@ -50,7 +79,8 @@ concurrency:
 jobs:
   gfx1250-tests:
     name: gfx1250 hipBLASLt + TensileLite
-    if: ${{ inputs.run_hipblaslt || inputs.run_tensilelite }}
+    # For workflow_dispatch: respect input toggles; for workflow_call/schedule: always run both
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_hipblaslt || inputs.run_tensilelite }}
     runs-on: blas-rocm-mi455-sandbox
     timeout-minutes: 360
     # Test container: no ROCm baked in, so the fetched artifact's libraries load
@@ -119,34 +149,41 @@ jobs:
       - name: Fetch prebuilt gfx1250 ROCm artifact
         id: fetch
         env:
-          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          # For workflow_call: artifact_run_id is required
+          # For workflow_dispatch: build_run_id is optional (empty = latest nightly)
+          # For schedule: no input, use latest nightly
+          BUILD_RUN_ID: ${{ inputs.artifact_run_id || inputs.build_run_id || '' }}
           BUILD_REPO: ${{ inputs.build_repo || 'ROCm/rocm-libraries' }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group || 'gfx125X-dcgpu' }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          if [ -z "$BUILD_RUN_ID" ]; then
-            echo "::error::No build run-id (provide build_run_id for manual runs)"; exit 1
-          fi
           set +e
-          python TheRock/build_tools/install_rocm_from_artifacts.py \
-            --run-id "$BUILD_RUN_ID" \
-            --artifact-group gfx125X-dcgpu \
-            --blas --tests \
-            --run-github-repo "$BUILD_REPO" \
-            --output-dir "$ROCM" 2>&1 | tee fetch.log
+          if [ -n "$BUILD_RUN_ID" ]; then
+            # Presubmit (workflow_call) or manual run with specific build
+            echo "Fetching artifacts from run $BUILD_RUN_ID..."
+            python TheRock/build_tools/install_rocm_from_artifacts.py \
+              --run-id "$BUILD_RUN_ID" \
+              --artifact-group "$ARTIFACT_GROUP" \
+              --blas --tests \
+              --run-github-repo "$BUILD_REPO" \
+              --output-dir "$ROCM" 2>&1 | tee fetch.log
+          else
+            # Nightly (schedule) or manual run without build_run_id: use latest S3 release
+            echo "No build_run_id provided, fetching latest nightly release from S3..."
+            python TheRock/build_tools/install_rocm_from_artifacts.py \
+              --latest-release \
+              --artifact-group "$ARTIFACT_GROUP" \
+              --blas --tests \
+              --output-dir "$ROCM" 2>&1 | tee fetch.log
+          fi
           RC=${PIPESTATUS[0]}
           set -e
           if [ "$RC" -ne 0 ]; then
-            # Fail closed: any fetch error is red, never a silent green. A narrow
-            # skip for the reuse-baseline "missing artifact" case can be added once a
-            # validation run reveals its exact signal.
             echo "::error::gfx1250 artifact fetch failed (RC=$RC). See fetch.log."
             {
               echo "### :x: gfx1250 artifact fetch FAILED — NOT tested"
               echo ""
-              echo "Fetch for build run \`${BUILD_RUN_ID}\` failed (RC=$RC). If this was a"
-              echo "reused-baseline build with no artifact under this run-id, that case gets an"
-              echo "explicit narrow skip once its exact signal is confirmed — until then it is a"
-              echo "red failure, never a silent green."
+              echo "Artifact fetch failed (RC=$RC). Check fetch.log for details."
             } >> "$GITHUB_STEP_SUMMARY"
             exit "$RC"
           fi
@@ -162,7 +199,7 @@ jobs:
 
       - name: Run hipBLASLt tests
         timeout-minutes: 120
-        if: ${{ steps.fetch.outputs.artifact_ready == 'true' && inputs.run_hipblaslt }}
+        if: ${{ steps.fetch.outputs.artifact_ready == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_call' || inputs.run_hipblaslt) }}
         env:
           GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
           # StreamKMultiStream.ConcurrentStreamsDoNotDeadlock fails without it.
@@ -186,7 +223,7 @@ jobs:
 
       - name: Run TensileLite common tests
         timeout-minutes: 240
-        if: ${{ always() && steps.fetch.outputs.artifact_ready == 'true' && inputs.run_tensilelite }}
+        if: ${{ always() && steps.fetch.outputs.artifact_ready == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_call' || inputs.run_tensilelite) }}
         env:
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
         run: |

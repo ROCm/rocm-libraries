@@ -5,9 +5,9 @@
 #
 # This workflow runs TheRock's multi-arch CI pipeline on a nightly schedule.
 # It builds and tests for gfx94X, gfx950 (Linux) and gfx1151 (Windows), and
-# additionally build-only validates gfx125X (CDNA5/gfx1250) on Linux since no
-# test hardware exists for that family yet (see amdgpu_family_matrix.py in
-# TheRock, family key "gfx125x": test-runs-on is empty everywhere).
+# gfx125X (gfx1250) on Linux using the blas-rocm-mi455-sandbox runner
+# (see amdgpu_family_matrix.py in TheRock, family key "gfx125x" for runner
+# configuration and tests_on_trigger settings).
 #
 # For manual triggering with custom GPU families, use therock-multi-arch-ci.yml.
 
