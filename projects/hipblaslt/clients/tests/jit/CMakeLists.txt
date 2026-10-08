@@ -67,7 +67,7 @@ add_executable(hipblaslt-jit-builder-test
 target_include_directories(hipblaslt-jit-builder-test PRIVATE
     "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
 target_link_libraries(hipblaslt-jit-builder-test PRIVATE
-    roc::hipblaslt roc::tensilelite-host amd_comgr hip::device)
+    roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} amd_comgr hip::device)
 target_compile_definitions(hipblaslt-jit-builder-test PRIVATE
     "HIPBLASLT_JIT_DATA=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
     "HIPBLASLT_JIT_KERNEL=\"${CMAKE_CURRENT_SOURCE_DIR}/builder_test_kernel.hip\""

@@ -8,6 +8,10 @@
 #include <sstream>
 #include <system_error>
 
+#ifdef TENSILE_MSGPACK
+#include <Tensile/msgpack/SolutionState.hpp>
+#endif
+
 namespace hipblaslt_jit
 {
     namespace
@@ -125,7 +129,13 @@ namespace hipblaslt_jit
                 };
 
                 Artifact mainObject;
-                if(auto status = compile(source.mainKernel, mainObject); !status.ok())
+                if(source.mainKernel.kind == Artifact::Kind::Relocatable)
+                {
+                    if(kind == BuildKind::Relocatable)
+                        return failure("A relocatable build needs a source main kernel", {});
+                    mainObject = source.mainKernel;
+                }
+                else if(auto status = compile(source.mainKernel, mainObject); !status.ok())
                     return status;
                 if(kind == BuildKind::Relocatable)
                 {
@@ -198,6 +208,70 @@ namespace hipblaslt_jit
     std::shared_ptr<const CodeObjectBuilder> makeComgrBuilder()
     {
         return std::make_shared<const ComgrBuilder>();
+    }
+
+    Status TensileliteAssembly::make(const CodeObjectBuilder& builder,
+                                     const SourceCodeBundle&  source,
+                                     TensileliteAssembly&     assembly,
+                                     Artifact&                relocatable)
+    {
+        assembly          = {};
+        relocatable       = {};
+        const auto failed = [](std::string message, std::string log = {}) {
+            Status status{Status::Code::Failed, Stage::Build, std::move(message)};
+            status.log = std::move(log);
+            return status;
+        };
+        if(source.mainKernel.kind != Artifact::Kind::Assembly)
+            return failed("A TensileLite kernel needs its assembly");
+#ifdef TENSILE_MSGPACK
+        const auto&      name  = source.mainKernel.name;
+        SourceCodeBundle alone = source;
+        alone.helpers.clear();
+        alone.kernelNames.clear();
+        Artifact object;
+        if(auto status = builder.build(alone, BuildKind::Relocatable, object); !status.ok())
+            return status;
+        const auto note = co::metadataNote(object.bytes);
+        if(!note.ok())
+            return failed("Cannot read the metadata note of " + name, note.log);
+        const auto defined = co::inspect(object.bytes);
+        if(!defined.ok())
+            return failed("Cannot read the kernels of " + name, defined.log);
+        try
+        {
+            const auto handle = msgpack::unpack(reinterpret_cast<const char*>(note.bytes.data()),
+                                                note.bytes.size());
+            const auto&            metadata = handle.get();
+            const msgpack::object* state    = nullptr;
+            if(metadata.type == msgpack::type::MAP)
+                for(uint32_t i = 0; i < metadata.via.map.size && !state; ++i)
+                {
+                    const auto& entry = metadata.via.map.ptr[i];
+                    if(entry.key.type == msgpack::type::STR
+                       && entry.key.as<std::string>() == "custom.config")
+                        state = &entry.val;
+                }
+            if(!state)
+                return failed("Assembly " + name + " keeps no custom.config in its metadata");
+            auto        solution = TensileLite::solutionFromState(*state);
+            const auto& kernels  = defined.kernelNames;
+            if(std::find(kernels.begin(), kernels.end(), solution->kernelName) == kernels.end())
+                return failed("Assembly " + name + " does not define kernel "
+                              + solution->kernelName);
+            static_cast<Artifact&>(assembly) = source.mainKernel;
+            assembly.target                  = source.target;
+            assembly.solutions               = {std::move(solution)};
+            relocatable                      = std::move(object);
+            return {};
+        }
+        catch(const std::exception& error)
+        {
+            return failed("Cannot read the solution state of " + name + ": " + error.what());
+        }
+#else
+        return failed("A TensileLite assembly needs a MessagePack build of TensileLite");
+#endif
     }
 
     void keepBuildLog(Status& status, const fs::path& scratch)
