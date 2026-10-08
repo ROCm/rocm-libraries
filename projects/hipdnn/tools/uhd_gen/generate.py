@@ -1430,7 +1430,7 @@ def _generate_published(
     if args.uhd_ids:
         # One model: a bare id, or the one METRIC=UUID entry, names it.
         train_args += ["--uhd-id", args.uhd_ids[0].split("=", 1)[-1]]
-    if main(train_args):
+    if main([*train_args, "--no-install-hint"]):
         raise ValueError(
             "training the published dataset failed; no model was published"
         )
@@ -1520,7 +1520,7 @@ def _generate_published(
 
 
 def run_generate(args: argparse.Namespace) -> int:
-    from .__main__ import main
+    from .__main__ import install_hint, main
     from .promote import PromoteError, build_plan, run_promote, add_promote_arguments
 
     stage = None
@@ -1913,7 +1913,7 @@ def run_generate(args: argparse.Namespace) -> int:
                 train_args.extend(["--uhd-id", uhd_ids[requested]])
             if args.feature_evaluator:
                 train_args.extend(["--feature-evaluator", args.feature_evaluator])
-            if main(train_args):
+            if main([*train_args, "--no-install-hint"]):
                 raise ValueError(
                     f"training {requested} failed; no generated model was published"
                 )
@@ -2098,10 +2098,14 @@ def run_generate(args: argparse.Namespace) -> int:
                     raise ValueError(
                         f"promotion failed; validated model and reproducible collection remain at {output}"
                     )
-        for model_dir, _, _ in published_models:
+        for model_dir, _, identity in published_models:
             print(
                 f"Generated {'installable' if args.no_promote else 'installed'} UHD: {model_dir}"
             )
+            if args.no_promote:
+                print(
+                    install_hint(model_dir, args.role, args.arch or arches[0], identity)
+                )
         return 0
     except (OSError, TypeError, ValueError, KeyError, PromoteError) as error:
         # RFC 0019.13 §8.7: measurements outlive the strategy, so a failure after

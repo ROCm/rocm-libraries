@@ -118,6 +118,19 @@ def _looks_like_cost_metric(target: str) -> bool:
     return any(marker in lowered for marker in _COST_METRIC_MARKERS)
 
 
+def install_hint(
+    model_dir, role: str, arch: str | None, uhd_id: str | None = None
+) -> str:
+    """The `promote` command that installs a trained model, as one line to copy."""
+    hint = (
+        f"Install: python3 -m uhd_gen promote --model-dir {model_dir} "
+        f"--descriptor-tree <TREE> --role {role} --arch {arch or '<ARCH>'}"
+    )
+    if uhd_id:
+        hint += f" --uhd-id {uhd_id}"
+    return hint
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="uhd_gen",
@@ -354,6 +367,11 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         required=True,
         dest="output_dir",
         help="Output directory for model artifacts",
+    )
+    # `generate` trains into a staging directory it renames afterwards, and prints the
+    # model's final path itself.
+    parser.add_argument(
+        "--no-install-hint", action="store_true", help=argparse.SUPPRESS
     )
     parser.add_argument(
         "--name",
@@ -984,9 +1002,8 @@ def _run_train(args: argparse.Namespace) -> int:
     print(
         f"UHD generated: {descriptor_path}\nModel: {fb_path}\nFeatures hash: {features_hash}"
     )
-    print(
-        f"Install: python -m uhd_gen promote --model-dir {output_dir} --descriptor-tree <TREE> --role {args.role} --arch {args.arch or '<ARCH>'}"
-    )
+    if not args.no_install_hint:
+        print(install_hint(output_dir, args.role, args.arch, args.uhd_id))
     return 0
 
 
