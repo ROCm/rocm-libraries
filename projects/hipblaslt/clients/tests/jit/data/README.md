@@ -11,10 +11,12 @@ generator:
 | --- | --- |
 | `sources/<kernel>.s` | The main kernel assembly; one or more. Committed |
 
-`TensileliteAssembly::make` assembles the kernel and builds its solution
-record from the kernel's own `custom.config` block (see below): the kernel
-name, the problem type, the tile, split-K and scheduling values, the
-predicates and the argument layout versions all come from there.
+`readTensileSourceBundle` reads the device's `plain` directory as a source
+bundle, which has no `library/` entry, and `TensileliteAssembly::make`
+assembles its kernel and builds the solution record from the kernel's own
+`custom.config` block (see below): the kernel name, the problem type, the
+tile, split-K and scheduling values, the predicates and the argument layout
+versions all come from there.
 `solution_entry.hpp` publishes that solution as `plain`, for K=512. `plain-pair`
 is the plain kernel as two solutions, copies of that solution with typed
 fields changed in C++: the first only when K is a multiple of 512, with

@@ -1,7 +1,7 @@
 # Validate the JIT implementation
 
 The JIT tests check the comgr code-object builder, the source bundle reader,
-the JIT solution library and the TensileLite loader. The JIT headers are not
+the support check and the JIT solution library. The JIT headers are not
 installed. The tests include them from `library/src/amd_detail`. They build the
 gfx90a, gfx942 and gfx950 kernel assembly committed in [`data`](data/README.md)
 and publish it into a JIT solution library, so they need neither Python nor a
@@ -40,11 +40,11 @@ The CTest tests are:
 
 | CTest test | Behavior under test |
 | --- | --- |
-| `jit-source-bundle` | The source bundle reader: assembly, HIP sources and headers sorted by name, relative paths, symbolic links that escape the bundle, size limits, and a library entry that is missing, empty or not named `library/TensileLibrary.dat`. The reader leaves the target, code-object version and kernel names at their defaults |
+| `jit-source-bundle` | The source bundle reader: assembly, HIP sources and headers sorted by name, relative paths, symbolic links that escape the bundle, size limits, and a `library/` entry, which it rejects. The reader leaves the target, code-object version, solutions and kernel names at their defaults |
 | `jit-disabled` | Built only with `HIPBLASLT_ENABLE_JIT=OFF`. The JIT headers are absent from the public include tree, `hipblaslt-ext.hpp` compiles without them, and the extension API links against the disabled library |
 | `jit-builder` | Target-ID parsing, and the comgr builder without a GPU: the hand-written HIP kernel `builder_test_kernel.hip` built for each committed assembly target as an executable and as a relocatable, then each assembly file alone, from its relocatable, whose metadata note holds `custom.config`, and linked with that kernel from its source and from its relocatable. Each build returns one artifact of the kind asked for, and each executable defines its kernels and has the bundle's code-object version. A kernel name the executable does not define, a bundle without a target, a relocatable build with helpers, and a relocatable build of a relocatable fail the build |
-| `jit-publish` | Builds the device's committed assembly, reads its solution from `custom.config`, and publishes, at each K, the solutions that support it into the JIT solution library: `plain` for K=512, both `plain-pair` solutions for K=1024 and its any-K solution for K=256. Each solution gets its own index, at least `2^30`, and publishing again keeps them |
-| `jit-loader` | Loads that library, finds the solutions published for each K in index order, resolves the kernel from its code object, and finds nothing for a transposed A. Both `plain-pair` solutions published for K=1024 map to one entry file that holds them. A library written by TensileLite whose solutions are not 0 to N-1 is rejected. Launches no kernel |
+| `jit-publish` | Reads the device's committed bundle with `readTensileSourceBundle`, which takes its solution from `custom.config`, builds it, and publishes, at each K, the solutions `supportingSolutions` keeps into the JIT solution library: `plain` for K=512, both `plain-pair` solutions for K=1024 and its any-K solution for K=256. Each solution gets its own index, at least `2^30`, and publishing again keeps them. The support check alone keeps solutions in order and drops those whose problem predicate rejects K or a transposed A, whose hardware predicate rejects another processor, or whose required workspace exceeds the limit |
+| `jit-loader` | Loads that library, finds the solutions published for each K in index order, resolves the kernel from its code object, and finds nothing for a transposed A. Both `plain-pair` solutions published for K=1024 map to one entry file that holds them. Launches no kernel |
 | `jit-launch` | Compiles the device's committed `plain` assembly, publishes that executable, retrieves it with `findTopSolutions` and `getSolutionByIndex`, launches the kernel through the TensileLite solution adapter on known FP16 A, B and C, and compares D with a host reference. The library is under `<root>/v1/<git revision>`, and once that directory is renamed to another revision a new library instance finds nothing. Without a GPU, it also stores the HIP helper relocatable under its kernel name: a second acquire does not compile and returns the same bytes, and the gfx950 `plain` assembly linked with it defines both kernels |
 
 ## Test arguments

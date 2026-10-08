@@ -11,7 +11,7 @@ integration is undecided.
 It describes what the code implements today. "Implemented" means present in the
 source, not released or approved as product naming. A JIT backend is the
 generator that turns a request into kernel sources; this page describes the
-parts of hipBLASLt that build and load what a backend generates, and the
+parts of hipBLASLt that build and publish what a backend generates, and the
 JIT solution library that stores a built kernel for a later load. The
 [JIT test guide](clients/tests/jit/README.md) covers building and running the
 tests.
@@ -21,10 +21,9 @@ tests.
 hipBLASLt runs a GEMM with a kernel from its pre-tuned library, so a problem
 that the library serves poorly, or not at all, has no better kernel available.
 JIT generation produces kernels for a problem when they are needed. This page
-describes the parts that turn generated kernel sources into a loaded
-TensileLite solution: a comgr code-object builder, a source bundle reader, a
-TensileLite loader and a JIT solution library. The library does not call them
-yet. The JIT tests build the committed assembly and publish it into the JIT
+describes the parts that turn generated kernel sources into a published
+TensileLite solution: a comgr code-object builder, a source bundle reader and
+a JIT solution library. The library does not call them yet. The JIT tests build the committed assembly and publish it into the JIT
 solution library, and the loader test reads that library back. No generator
 backend is implemented, and no API reaches JIT.
 
@@ -35,8 +34,9 @@ The interfaces are in `library/src/amd_detail/hipblaslt-jit-component.hpp`. An
 `Relocatable` (compiled and not linked) or an `Executable` (a linked code
 object). A `SourceCodeBundle` is the main kernel, helpers and headers that
 become one executable, with the build inputs: the device's `Target`, the
-code-object version and the kernel names the executable must define. It is not
-a TensileLite library entry. `CodeObjectBuilder::build(bundle, kind, out)`
+code-object version, the `ContractionSolution`s the executable runs, best
+first, and any other kernel names, such as helpers', the executable must
+define. It is not a TensileLite library entry. `CodeObjectBuilder::build(bundle, kind, out)`
 builds that bundle with comgr into exactly one `Artifact`: an `Executable` for
 `BuildKind::Executable`, or the main kernel alone as a `Relocatable` for
 `BuildKind::Relocatable`, which is how a helper is built. The interfaces are
@@ -52,7 +52,24 @@ solution with `TensileLite::solutionFromState`. The kernel name and the
 kernel-argument versions are the solution's; the target is a field because a
 solution states its target only as a hardware predicate. An `Executable` build
 accepts that `Relocatable` as its main kernel and links it without assembling
-again. A HIP main kernel stays a plain `Artifact`.
+again. `readTensileSourceBundle` reads a source bundle directory and does this
+for its assembly, so the bundle's main kernel is the `Relocatable` and its
+`solutions` are the kernel's. A HIP main kernel stays a plain `Artifact`, and
+its backend builds the bundle's `ContractionSolution`s itself.
+
+`hipblaslt-jit-component.hpp` also declares the generation flow, which no code
+in this source implements yet. `Backend::generate` returns source bundles, best
+first, each carrying the solutions its executable runs. `Jit::generate` builds
+each bundle, keeps the solutions `supportingSolutions` accepts for the
+request, and publishes the executable with them through its `SolutionStore`,
+a required component whose `publish` takes the executable and those
+`ContractionSolution`s as `JitLibrary::publish` does. The JIT solution library
+is the only place a JIT solution lives: nothing is loaded in process, and a
+bundle whose build, support check or publish fails is reported and contributes
+no solution. `getJitAlgo`, in `hipblaslt-jit.hpp`, sets a
+`hipblasLtMatmulHeuristicResult_t` whose `algo` carries the JIT solution
+library index, from 2^30, and whose `workspaceSize` is the published
+solution's workspace.
 
 A `Target` holds the TensileLite `AMDGPU::Processor`, an `Any`, `On` or `Off`
 setting for each of `sramecc` and `xnack`, and the device's ASIC revision.
@@ -122,8 +139,9 @@ objects. A generator needs no offload bundler.
 
 After linking, the builder reads the executable's metadata and checks that its
 instruction set architecture (ISA) is the device's, that its code-object
-version is the bundle's, and that it defines every name in
-`SourceCodeBundle::kernelNames`. The builder writes no file. A failure's
+version is the bundle's, and that it defines the kernel of every solution in
+`SourceCodeBundle::solutions` and every name in `SourceCodeBundle::kernelNames`.
+The builder writes no file. A failure's
 message carries the first error line of the comgr log, and `Status::log`
 carries the full log. A caller that owns a scratch directory passes the status
 to `keepBuildLog`, which appends the log to `comgr.log` there and names that
@@ -150,11 +168,10 @@ An entry this build cannot read fails the lookup instead of being skipped.
 Publishing holds the build directory's file lock and replaces files
 atomically, in an order that never leaves a reference to a missing file, so
 readers take no lock. A backend contributes one `SourceCodeBundle`. `publish`
-takes the executable built from it and the `ContractionSolution`s that support
-the problem, and adds them as one entry. The same kernels, problem type and
-sizes reuse that entry, and a solution already in it keeps its index.
-`readTensileSourceBundle` reads a source directory into a `SourceCodeBundle`
-and the kernel name. The tests publish and load the JIT solution library.
+takes the executable built from it and the bundle's `ContractionSolution`s
+that support the problem, and adds them as one entry. The same kernels,
+problem type and sizes reuse that entry, and a solution already in it keeps
+its index. The tests publish and load the JIT solution library.
 
 ### Loading a published solution
 
@@ -162,15 +179,14 @@ and the kernel name. The tests publish and load the JIT solution library.
 launches that solution the same way it launches Equality and Origami solutions.
 The stored record is a `ContractionSolution` with the code object, kernel name,
 `ContractionSolution::ProblemType`, and the predicates those libraries already
-expect. `TensileGemmBundle` does not own a `MasterSolutionLibrary`, `Hardware`,
-or `SolutionAdapter`. An in-process handle for one index refers to the solution
-inside `JitLibrary`.
+expect. Nothing else holds a published solution in process.
 
-`loadGemmLibrary` reads a solution record with TensileLite and requires local
-solutions 0 to N-1. It does not require the record to hold exactly one
-solution. A predicate check calls it as a local load inside the backend
-function that needs it. That load is not a field of a bundle type and not a
-second library type.
+`supportingSolutions`, in `hipblaslt-jit-library.hpp`, decides which of a
+bundle's solutions serve a problem before they are published. TensileLite's
+`selectionPredicate` evaluates each solution's problem, task and hardware
+predicates, with the workspace limit as the problem's workspace, and the
+solution's `requiredWorkspaceSize` must fit that limit. It keeps the bundle's
+order, best first.
 
 Each solution of an entry has its own `Problem` row. Their hardware and
 problem predicates decide which problems each one serves, so a lookup lists,
@@ -182,12 +198,13 @@ and nothing for a problem none of them was generated for.
 A source bundle is one kernel's sources stored as a directory.
 `source_bundle::readSourceBundle`, in `hipblaslt-jit-source-bundle.hpp`, reads
 the sources into a `SourceCodeBundle` and requires one main kernel. The caller
-sets the target and kernel names, which the directory does not hold.
-`readTensileSourceBundle` also reads the library entry for the kernel name.
+sets the target and solutions, which the directory does not hold.
+`readTensileSourceBundle` reads the solutions from the assembly's
+`custom.config`, as above. A bundle with a `library/` entry is rejected,
+because a kernel's solutions come from the kernel itself.
 
 | Path | Contents |
 | --- | --- |
-| `library/TensileLibrary.dat` | The TensileLite solution record, uncompressed MsgPack. Not part of `SourceCodeBundle` |
 | `sources/*.s` | The assembly main kernel, at most one |
 | `sources/*.hip`, `sources/*.cpp` | The HIP main kernel when there is no assembly, otherwise HIP helpers |
 | Other files in `sources/` | Headers |
