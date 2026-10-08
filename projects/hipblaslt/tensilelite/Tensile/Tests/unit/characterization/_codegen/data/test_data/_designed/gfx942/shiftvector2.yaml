@@ -7,9 +7,6 @@
 # Target: Tensile/Components/ShiftVectorComponents.py
 # Primary ranges: 47-200 (ShiftVectorComponentsVALU.__call__)
 # Secondary target: 438-439 (PartialThread large-mb branch, target>64 path)
-# Dead-code proof target: 552-784 (ShiftVectorComponentsMFMAAllThread)
-#   -- NOT reachable: glvwAlimit == AllThread threshold by construction;
-#      glvw is capped to exactly the threshold, never exceeding it.
 #
 # Strategy 1 (VALU, lines 47-200):
 #   Sweep VectorWidthA=[1,2,4] on the VALU path (EnableMatrixInstruction=False

@@ -48,6 +48,16 @@ void resetPointwiseModuleCache();
 void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvFwdModuleCache();
 
+/// The engine name gfx950_attention_dense.ued.json declares. The pack table, the pack's
+/// own log lines and the descriptor census (which looks the loaded set up by this name)
+/// all read it here, so a rename that misses the descriptor fails the census.
+inline constexpr std::string_view GFX950_ATTENTION_DENSE_ENGINE_NAME
+    = "hipkernel:Gfx950AttentionDense";
+
+/// @see packs/Gfx950AttentionDenseNative.cpp
+void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950AttentionDenseModuleCache();
+
 /// Drops every pack's cached kpack modules, so the next dispatch re-reads its archive
 /// from disk.
 ///

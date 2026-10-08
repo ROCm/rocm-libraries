@@ -64,6 +64,7 @@
 /projects/hipblas/                                  @ROCm/hipblas-reviewers
 /projects/hipblas-common/                           @ROCm/hipblas-common-reviewers
 /projects/hipblaslt/                                @ROCm/hipblaslt-reviewers
+/projects/hipccl/                                   @ROCm/prims-rands-reviewers
 /projects/hipcub/                                   @ROCm/prims-rands-reviewers
 /projects/hipdnn/                                   @ROCm/hipdnn-core
 /projects/hipfft/                                   @ROCm/fft-reviewers
@@ -147,6 +148,11 @@
 /projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/DECISIONS.md   @ROCm/hipblaslt-reviewers
 /projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/adr/           @ROCm/hipblaslt-reviewers
 
+/projects/hipccl/**/*.md                            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/hipccl/**/*.rst                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/hipccl/**/.readthedocs.yaml               @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/hipccl/**/docs/                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+
 /projects/hipcub/**/*.md                            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/hipcub/**/*.rst                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/hipcub/**/.readthedocs.yaml               @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
@@ -182,8 +188,7 @@
 /projects/hipsparselt/docs/                         @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
 /projects/hipsparselt/library/include/              @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
 
-/projects/miopen/**/*.md                            @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
-/projects/miopen/**/*.rst                           @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+/projects/miopen/CHANGELOG.md                       @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 /projects/miopen/**/.readthedocs.yaml               @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 /projects/miopen/docs/                              @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
 

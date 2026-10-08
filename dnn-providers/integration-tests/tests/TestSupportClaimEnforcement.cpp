@@ -93,7 +93,7 @@ protected:
         return fixtures::loadBundle(_tempDir, name, includeGoldenOutput);
     }
 
-    // A locator whose sidecar really exists, so shouldEnforceClaims() is satisfied.
+    // A locator whose sidecar really exists, so shouldObserveClaims() is satisfied.
     SupportClaimLocator makeLocator() const
     {
         const auto path = _tempDir / "Bundle.support.json";
@@ -164,7 +164,7 @@ protected:
                                                      : fixtures::K_OUTPUT_VALUE + 100.0f);
 
         IntegrationBundleVerificationHarness harness(
-            _mocks.dependencies(testing_support::hostPolicy(mode, /*enforceSupportClaims=*/true)),
+            _mocks.dependencies(testing_support::hostPolicy(mode, ClaimMode::ENFORCE)),
             makeEngineUnderTest());
         drive(harness, loadBundle("Bundle", includeGoldenOutput), results);
     }
@@ -231,10 +231,9 @@ TEST_F(TestSupportClaimEnforcement, NonFullBundleStillQueriesClaims)
     ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
         .WillByDefault(Return(observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)})));
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::AUTO, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
     bundle->metadata.enforcementLevel = EnforcementLevel::APPLICABILITY;
     drive(harness, bundle, &results);
@@ -388,10 +387,9 @@ TEST_F(TestSupportClaimEnforcement, ExecutedWithoutAnOracleStaysAccepted)
     setRefBehavior(RefBehavior::CAPABILITY_MISS);
     EXPECT_CALL(_mocks.engineRunner, execute(_, _, _)).Times(1);
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::AUTO, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/false), &results);
 
     EXPECT_FALSE(testing_support::anyFailed(results));
@@ -419,8 +417,7 @@ TEST_F(TestSupportClaimEnforcement, ReferenceErrorDoesNotDemoteTheClaim)
     setRefBehavior(RefBehavior::ERRORS);
 
     IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::CPU, /*enforceSupportClaims=*/true)),
+        _mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU, ClaimMode::ENFORCE)),
         makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/false), &results);
 
@@ -455,10 +452,9 @@ TEST_F(TestSupportClaimEnforcement, BuildableBundleConfirmsAtItsOwnDepth)
     ON_CALL(_mocks.engineRunner, buildPlans(_, _))
         .WillByDefault(Return(EngineOpResult::succeeded()));
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::AUTO, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
     bundle->metadata.enforcementLevel = EnforcementLevel::BUILDABLE;
     drive(harness, bundle, &results);
@@ -487,10 +483,9 @@ TEST_F(TestSupportClaimEnforcement, UnreachedEnforcementRungStaysAccepted)
             return testing_support::declinedSession();
         });
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::AUTO, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
     bundle->metadata.enforcementLevel = EnforcementLevel::BUILDABLE;
     drive(harness, bundle, &results);
@@ -592,10 +587,9 @@ TEST_F(TestSupportClaimEnforcement, EngineFailureAfterPlansBuiltKeepsTheDepthItR
                                              /*plansBuilt=*/true,
                                              "stub: died executing compiled plans"}));
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::GOLDEN, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::GOLDEN, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
 
     ASSERT_EQ(verdicts.size(), 1u);
@@ -620,10 +614,9 @@ TEST_F(TestSupportClaimEnforcement, EngineFailureBeforePlansBuiltReachedNothing)
     ON_CALL(_mocks.engineRunner, execute(_, _, _))
         .WillByDefault(Return(EngineOpResult::failed("stub: died compiling plans")));
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::GOLDEN, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::GOLDEN, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
 
     ASSERT_EQ(verdicts.size(), 1u);
@@ -654,10 +647,9 @@ TEST_F(TestSupportClaimEnforcement, UnreadableGraphIsNotReportedAsAnUnqueriedSid
             return testing_support::buildErrorSession("stub: truncated graph buffer");
         });
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::AUTO, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
 
     ASSERT_EQ(coverage.size(), 1u);
@@ -708,10 +700,9 @@ TEST_F(TestSupportClaimEnforcement, AThrowOnTheWayToTheCommitStillPublishesTheVe
     ON_CALL(_mocks.engineRunner, execute(_, _, _))
         .WillByDefault(Throw(std::runtime_error("stub: harness bug mid-run")));
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::GOLDEN, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::GOLDEN, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
 
     ASSERT_EQ(verdicts.size(), 1u);
@@ -720,6 +711,111 @@ TEST_F(TestSupportClaimEnforcement, AThrowOnTheWayToTheCommitStillPublishesTheVe
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_NE(testing_support::allMessages(results).find("stub: harness bug mid-run"),
               std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// The two counters the summary subtracts to attribute a shortfall.
+//
+// Everything above asserts on what the harness published *given* that a body ran.
+// These four assert on the publishing itself, at the call sites that decide it.
+// The summary's attribution -- "selected but skipped in SetUp()" versus "ran
+// without being queried" versus "left out by --gtest_filter" -- is nothing but the
+// difference between these two counters, so a refactor that moves either bump past
+// something that can exit first silently rewrites every one of those lines. No
+// assertion elsewhere in the tree notices: the report suites set the counters by
+// hand, which is exactly why these have to go through the reporter.
+// ---------------------------------------------------------------------------
+
+// The bump sits above SetUp()'s skip exits. Move it below applyMetadataGuards() and
+// an arch-guarded lane reports selected == ran == 0, filing its own skips back onto
+// the filter -- the one line the summary must never get wrong, since widening the
+// filter is not the remedy.
+TEST_F(TestSupportClaimEnforcement, ArchSkippedBundleStillCountsAsSelected)
+{
+    ::testing::TestPartResultArray results;
+
+    EXPECT_CALL(_mocks.reporter, recordSelectedWithClaims()).Times(1);
+    // The skip is in SetUp(), so no body runs and nothing may claim one did.
+    EXPECT_CALL(_mocks.reporter, recordReachedBody()).Times(0);
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
+
+    auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
+    // hostPolicy() is on gfx942; golden data stamped gfx90a is not portable here.
+    bundle->metadata.gpuArchitecture = "gfx90a";
+
+    harness.setBundle(bundle, "test/bundle", makeLocator());
+    testing_support::driveHarness(harness, &results);
+
+    ASSERT_TRUE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
+}
+
+// A warn-only run reads the same sidecars and needs the same denominators; only the
+// cost of a bad verdict differs. Counting less here would make the summary a run
+// cannot fail on also a summary it cannot read.
+TEST_F(TestSupportClaimEnforcement, WarnCountsBothSelectedAndReached)
+{
+    ::testing::TestPartResultArray results;
+
+    EXPECT_CALL(_mocks.reporter, recordSelectedWithClaims()).Times(1);
+    EXPECT_CALL(_mocks.reporter, recordReachedBody()).Times(1);
+
+    IntegrationBundleVerificationHarness harness(
+        _mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO, ClaimMode::WARN)),
+        makeEngineUnderTest());
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
+}
+
+// Both bumps go through shouldObserveClaims(), which needs an engine -- the same
+// thing registration needs before it seeds graphsWithClaims. Key either bump on the
+// sidecar alone and the two disagree: zero graphs with claims beside a positive
+// selected count, which the summary reads as a gap it must explain and attributes to
+// a harness defect. It is a missing flag.
+//
+// Nothing is lost by declining to count here: a run that names no engine has nothing
+// to check claims against, and a named engine that did not load exits non-zero before
+// a body runs. See countersAreConsistent() for the invariant this keeps.
+TEST_F(TestSupportClaimEnforcement, MissingEngineCountsNeitherSelectedNorReached)
+{
+    ::testing::TestPartResultArray results;
+
+    EXPECT_CALL(_mocks.reporter, recordSelectedWithClaims()).Times(0);
+    EXPECT_CALL(_mocks.reporter, recordReachedBody()).Times(0);
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(
+        testing_support::hostPolicy(VerificationMode::AUTO, ClaimMode::ENFORCE)));
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
+}
+
+// The reason graphsReachedBody is published from the top of TestBody() instead of
+// being derived from the observation: a hand-edited sidecar that does not parse
+// throws, and a fact that was already true when the body started must not be lost
+// with it. Derived, this run would report "selected but skipped before running" for
+// a body that plainly ran -- and point at the arch guard, which never fired.
+TEST_F(TestSupportClaimEnforcement, ReachedBodyIsCountedEvenWhenTheClaimReadThrows)
+{
+    using ::testing::_;
+    using ::testing::Throw;
+
+    ::testing::TestPartResultArray results;
+
+    EXPECT_CALL(_mocks.reporter, recordReachedBody()).Times(1);
+    // The throw is above coverageFor(), so the observation-derived update is the
+    // one thing that legitimately does not survive.
+    EXPECT_CALL(_mocks.reporter, recordCoverage(_)).Times(0);
+
+    ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
+        .WillByDefault(Throw(std::runtime_error("stub: sidecar does not parse")));
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results))
+        << "a throw from the claim read is a harness failure, not a silent pass";
 }
 
 // NOLINTEND(readability-identifier-naming)

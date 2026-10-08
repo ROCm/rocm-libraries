@@ -42,7 +42,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - GlobalReadVectorWidthA: [1]
         - GlobalReadVectorWidthB: [1]
         - VectorWidthA: [1]
@@ -84,7 +85,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - GlobalReadVectorWidthA: [1]
         - GlobalReadVectorWidthB: [1]
         - VectorWidthA: [1]
@@ -126,7 +128,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - StreamK: [0, 3]
+        - TileProcessingStrategy: ["None", StreamK]
+        - WorkAssignment: [StaticGrid]
         - GlobalReadVectorWidthA: [1]
         - GlobalReadVectorWidthB: [1]
         - VectorWidthA: [1]
@@ -175,7 +178,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StreamKAtomic: [0]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [4]
@@ -215,7 +219,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StreamKAtomic: [0]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [4]
@@ -255,7 +260,8 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - StreamKAtomic: [0]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [4]

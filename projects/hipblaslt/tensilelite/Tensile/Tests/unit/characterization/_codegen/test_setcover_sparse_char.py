@@ -25,7 +25,7 @@ _CONFIGS = [
     ("Tensile/Tests/common/sparse/gfx1250/spmm_fp16_ml1.yaml", "cb5b400c97ca", "gfx1250", 12, {0: 2}),
     ("Tensile/Tests/common/sparse/gfx950/spmm_dtl.yaml", "9a74cd29a31a", "gfx950", 18, {0: 5}),
     ("Tensile/Tests/common/sparse/gfx94x/bf16_activation.yaml", "3d798432e6cc", "gfx942", 4, {0: 2}),
-    ("Tensile/Tests/common/sparse/gfx1250/spmm_tdm_all.yaml", "79bef2496f1d", "gfx1250", 8, {0: 8}),
+    ("Tensile/Tests/common/sparse/gfx1250/spmm_tdm_all.yaml", "1f460ed5c6a0", "gfx1250", 16, {0: 8}),
     ("Tensile/Tests/common/sparse/gfx950/bf16_gate_r.yaml", "c89d7cc489d6", "gfx950", 16, {0: 4}),
     ("Tensile/Tests/common/sparse/gfx94x/spmm_i8_mi16.yaml", "5f0fc4210647", "gfx942", 144, {0: 2}),
     ("Tensile/Tests/common/sparse/gfx94x/spmm_vw_lg_one.yaml", "24b66a02a120", "gfx942", 32, {0: 8}),

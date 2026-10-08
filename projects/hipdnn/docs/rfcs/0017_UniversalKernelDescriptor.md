@@ -115,9 +115,9 @@ stays a full provider, one per dependency. This complements build-time codegen.
 | Fusion **matching**: one engine's pattern matches a bounded multi-op subgraph that is the entire graph, run as one kernel | Via the pattern's `native` arm, which is what ships; the declarative `nodes` arm is specified but not yet implemented ([RFC 0020 §4.3](0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)) | matching a fused pattern *inside* a larger graph: JIT |
 | Match criteria: dtype, rank, dim value and relation, stride order, packed, divisibility, attribute value and set, optional-operand presence, graph structure, cross-tensor arithmetic, device property, bounded `or` ([RFC 0018 §3](0018_UniversalMatchDescriptor.md#3-criteria-vocabulary)); opcode is the engine's pattern, not a criterion | Yes | None |
 | General matching: N-ary commutative, unbounded chains, optional/variadic operands | None | JIT |
-| Kernel sources | `kpack`, `hsaco`, and `rocke` (build-only, runs the rocKE AOT build) first; `hip` follows | new authoring adapters, DSLs |
+| Kernel sources | Authored build-time kinds `rocke` (runs the rocKE AOT build), `hip`, and `hsaco` (a prebuilt code object packed as-is); shipped runtime kind `kpack` | new authoring adapters, DSLs |
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables |
-| Runtime drop-in | prebuilt code objects, opt-in, off by default | JIT-compiled sources |
+| Runtime drop-in | None | prebuilt code objects (opt-in, off by default); JIT-compiled sources. Prebuilt code objects ship through build-time packing (`kind: hsaco`) |
 | Multi-kernel launch program (e.g. SDPA backward) | None | composition |
 | Selection composition: UCD (Universal Composite Descriptor) decomposition | None | composition |
 | JIT compilation; normalized providers | None | JIT |
@@ -215,15 +215,15 @@ hand-written code.
 | Descriptor | Purpose | Exists in hipDNN today as |
 |---|---|---|
 | **KMD** (metadata) | One schema per engine, shared across every kernel it owns: the variant fields each kernel carries, each with a type and an optional default (tile size, block size, and the like). Each kernel supplies concrete values, and that completed tuple is the kernel's unique key in the catalog, so the field set must uniquely describe every kernel variant. The heuristic ranks the catalog on it, and matchers read the fields as `$kernel.<field>` | The compile-time template and tuning parameters that distinguish one kernel variant from another |
-| **UHD** (heuristic) | One kernel-selection model, one per engine. Given the kernels that fit a graph, the engine's **catalog** for that graph, it ranks them on kernel metadata, problem shape, and device details, and picks the best one for the problem | A ranking model living inside an engine's dispatcher |
-| **UED** (engine) | One engine, carrying no logic of its own: a stable identity, the **structural pattern** naming the graph shape it serves and the symbols matching it publishes, the KMD fields it exposes as knobs, and its behavior and numerical notes. It **names** the engine's one heuristic (UHD) and one metadata schema (KMD) by id, because a single selector ranks all of the engine's kernels over one feature space. An engine is a named group of kernels | The provider's engine-registration table plus a `HIPDNN_REGISTER_ENGINE` id |
+| **UHD** (heuristic) | A kernel-selection model. Given the kernels that fit a graph, the engine's **catalog** for that graph, it ranks them on kernel metadata, problem shape, and device details, and picks the best one for the problem. An engine carries up to three role-scoped UHDs — kernel-catalog ranking, a cheap engine-level performance estimate, and a future candidate generator — each mapped by architecture ([RFC 0020 §4.6](0020_UniversalEngineDescriptor.md), [RFC 0019](0019_UniversalHeuristicDescriptor.md)) | A ranking model living inside an engine's dispatcher |
+| **UED** (engine) | One engine, carrying no logic of its own: a stable identity, the **structural pattern** naming the graph shape it serves and the symbols matching it publishes, the KMD fields it exposes as knobs, and its behavior and numerical notes. It **names** the engine's role-scoped heuristics (UHDs) and one metadata schema (KMD) by id, arch-keyed, because these selectors rank the engine's kernels over one feature space. An engine is a named group of kernels | The provider's engine-registration table plus a `HIPDNN_REGISTER_ENGINE` id |
 | **UMD** (match) | One applicability check over the graph, device properties, and kernel metadata, written as a declarative criteria expression over the symbols the engine's pattern bound; a pack's matcher **set** is its full applicability test, and what survives it is the engine's catalog for that graph | The provider's entire applicability implementation: graph-level, device-level, and per-kernel checks a hand-written `isApplicable` performs before a kernel is a candidate |
 | **UDD** (dispatch) | How to invoke a kernel: the dispatch application binary interface (ABI), meaning argument binding and ordering, grid, block, shared memory, and workspace | The bespoke launch and argument-wiring code |
 | **UKD** (kernel) | One launchable kernel, carrying no logic of its own: a source, either a compiled kernel or the details for building it ahead of time (AOT), plus concrete values for the fields the engine's KMD declares. It inherits everything else, matchers and dispatch from its pack, heuristic and metadata schema from that pack's engine, and it applies only when **all** of its pack's matchers pass | The compiled kernel module (code object) and its hand-tracked build config |
 | **KDP** (pack) | Bind a matcher set, one engine, and one dispatch over a kernel vector | The engine-registration table plus the per-kernel registration and launch scaffolding |
 
 A UED is 1:1 with a hipDNN engine, so "the engine" and "the UED" name the same unit going
-forward. An engine serves a scoped family of kernels, tight enough that one heuristic and
+forward. An engine serves a scoped family of kernels, tight enough that its heuristics and
 one metadata schema cover the kernels it owns. Legacy engines are not scoped this way
 today; mapping UED onto the existing registration restructures how engines are organized,
 not merely describing current practice.
@@ -280,10 +280,12 @@ follow-up RFC.
 
 There is one family of descriptor formats, one generic engine, and two ways descriptors reach it:
 
-- **Build-time (AOT).** Descriptors and kernel sources in the source tree are compiled and packed
-  per GPU architecture, then installed beside the provider.
-- **Runtime drop-in.** Descriptors backed by a prebuilt code object (or JIT source) are placed in a
-  folder and picked up on demand, with no build step and no restart.
+- **Build-time (AOT).** Descriptors and kernel sources in the source tree are compiled (a prebuilt
+  code object is taken as authored) and packed per GPU architecture, then installed beside the
+  provider.
+- **Runtime drop-in (deferred).** Descriptors backed by a prebuilt code object (or JIT source) are
+  placed in a folder and picked up on demand, with no build step and no restart. Until it lands, a
+  prebuilt code object ships through build-time packing (`kind: hsaco`).
 
 Both paths produce the same thing the generic engine consumes, so everything downstream (matching,
 selection, launch) is identical regardless of how a kernel arrived.
@@ -296,7 +298,7 @@ until something needs the catalog ranked. What the provider keeps up front is on
 descriptor inventory: the ids, kinds, and locations that say what exists
 ([Section 8](#8-end-to-end-flow) has the exact order and what each step loads).
 
-Each UED becomes an engine that names its heuristic (UHD) and metadata schema (KMD) and
+Each UED becomes an engine that names its heuristics (UHDs) and metadata schema (KMD) and
 carries the pattern its kernels match; the KDPs naming it contribute their criteria,
 dispatch, and kernels. Deciding which kernels apply to a graph is two cheap stages: the
 engine's pattern binds the graph once, then each pack's criteria run over that binding,
@@ -446,7 +448,7 @@ each format are specified in that format's follow-up RFC.
   "id":     "efc9eae4-fe33-4cb0-a593-95d771dc13b2",  // stable, unique; referenced by the KDP
   "name":   "rocke:example_attention_fwd",           // globally-unique, scoped `namespace:local`
   "sdk_version": "1.0",   // hipDNN graph schema version this pattern was authored against
-  "heuristic":   "ae896b07-80cd-473c-b3f4-6a8892998519",  // optional: one UHD, the selector for this engine's kernels
+  "sort_kernel_catalog": {"default": "ae896b07-80cd-473c-b3f4-6a8892998519"},  // optional: ranks this engine's kernels, arch-keyed (RFC 0020 §4.6)
   "metadata":    "9ae0b215-32a7-49d1-96df-e9b05e1927ea",  // one KMD: the variant schema this engine's kernels fill
   "graph_match": {        // how this engine matches a graph and binds the symbols every consumer reads
     "nodes": [            // the declarative arm: the graph this engine serves
@@ -530,7 +532,7 @@ solvers to compute a workspace default.
 ```jsonc
 {
   "version": "1.0",
-  "id":     "ae896b07-80cd-473c-b3f4-6a8892998519",       // stable, unique; referenced by the UED (one per engine)
+  "id":     "ae896b07-80cd-473c-b3f4-6a8892998519",       // stable, unique; referenced by a UED heuristic role
   "name":   "Example attention LightGBM selector",
   "kind":   "model",          // "model" | "static_order" | "custom_library"
   "model": {
@@ -580,7 +582,7 @@ so the schema grows to describe the variants the engine spans. This is additive 
 carries no retrain obligation until the new field is exposed to selection
 ([Section 16](#16-risks)).
 
-The KMD is the feature space the engine's heuristic ranks over, which is why the UED owns
+The KMD is the feature space the engine's heuristics rank over, which is why the UED owns
 both the KMD and the one UHD. The coupling is not unconditional: an additive change, a new
 field or new legal values added to an existing field, does not require a retrain until the
 change is exposed, because the old feature space is still valid. A breaking change, one
@@ -744,9 +746,10 @@ The table is a representative vocabulary for reading this RFC, not the normative
 `ceil_div`, `min`, `max`, and `rsqrt` earn their place in real dispatch code: every grid formula here
 is a `ceil_div` over a sequence or spatial dim, and `min`/`max` size a workspace that depends on a
 knob, such as a split-K GEMM whose scratch is the larger of its partials and its reduction, or one
-floored at a minimum. `rsqrt` expresses the SDPA convention's implicit default scale
-(`1/sqrt` of the head extent, read positionally as `$q.dims[3]`), which two kernel families in this
-repository compute today.
+floored at a minimum. `rsqrt` expresses a scale derived from the head extent (`1/sqrt` of
+`$q.dims[3]`, read positionally), the conventional softmax scale a kernel computes for itself. It
+is not the default for SDPA's `attn_scale_value`: hipDNN reads an unset scale as 1.0 (no scaling),
+as cuDNN does, which `value_or_default` with a literal 1.0 expresses.
 `value_or_default(["$field", <fallback>])` reads a possibly-absent optional field and substitutes
 the fallback when unset, so a matcher treats an unset field like an explicitly-defaulted one, the way
 hand-written applicability code already does. The fallback is usually a literal, but it may be any
@@ -889,7 +892,7 @@ it constrains them:
   "version": "1.0",
   "id":   "5c9d1f38-2a74-4b60-8e13-c4f70b2d9a56",
   "name": "rocke:sdpa_fwd",
-  "heuristic": "ae896b07-80cd-473c-b3f4-6a8892998519",   // one UHD, ranked over the symbols below
+  "sort_kernel_catalog": {"default": "ae896b07-80cd-473c-b3f4-6a8892998519"},  // ranks the catalog over the symbols below
   "metadata":  "9ae0b215-32a7-49d1-96df-e9b05e1927ea",   // one KMD, supplying $kernel.*
   "graph_match": {
     "nodes": [
@@ -1077,7 +1080,7 @@ chain as a single kernel.
   "version": "1.0",
   "id":   "6f1a0c93-84be-4d27-9c3a-70b5e2d81f44",
   "name": "rocke:conv_bias_relu",
-  "heuristic": "b3d81a52-0c47-4f9e-8a16-2d7c5e0b943f",
+  "sort_kernel_catalog": {"default": "b3d81a52-0c47-4f9e-8a16-2d7c5e0b943f"},
   "metadata":  "c07e4b31-95a2-4d68-b1fc-3e8a06d25b7c",
   "graph_match": {
     "nodes": [
@@ -1327,8 +1330,9 @@ source; a multi-launch UKD supplies one per Launch. The initial variants:
   // kind-specific fields point at a compiled kernel, or say how to build one; each yields one loadable handle:
   // kpack:  {"library": "rocke_attn.kpack", "symbol": "sdpa_fwd_d128_bf16_gfx942"}
   //           a function symbol resolved from a packed multi-arch library artifact (build-time)
-  // hsaco:  {"file": "sdpa_fwd_d128_bf16_gfx942.co"}
-  //           a prebuilt code-object file (runtime drop-in)
+  // hsaco:  {"file": "sdpa_fwd_d128_bf16_gfx942.co", "symbol": "sdpa_fwd_d128_bf16_gfx942"}
+  //           a prebuilt code object named relative to its descriptor, packed as-is into kpack at
+  //           build time (Section 12); a runtime drop-in form is deferred (Section 9.1)
   // hip:    {"source": "sdpa_fwd.hip", "entry": "sdpa_fwd_kernel"}
   //           a HIP source file, compiled ahead of time and packaged (build-time; covers hipRTC too)
   // rocke:  {"source": "kernels/gfx942/attention_tiled_2d.py",
@@ -1590,11 +1594,13 @@ Adapters come in two delivery classes, which decides where a target is available
 
 ### 9.1 Kernel-Source Adapters
 
-The source variants of [Section 7](#7-kernel-source) are the first built-in adapters: `kpack` and
-`hsaco` ship prebuilt, and `hip` follows as a build-only adapter since it needs the compiler to
-lower its source to a code object ahead of time. Adding a new authoring tool means adding one
-adapter that lowers its form to a code object, never a new launcher or dispatch path: a DSL with
-its own compiler is typically build-only, and a self-contained generator can be build-and-runtime.
+The source variants of [Section 7](#7-kernel-source) are the first built-in adapters: `kpack` ships
+prebuilt; `hsaco` is a build-time input that needs no producer and is packed into `kpack`; and
+`hip` and `rocke` are build-only adapters since each needs its compiler or build to lower its
+source to a code object ahead of time. A runtime drop-in of `hsaco` remains future work.
+Adding a new authoring tool means adding one adapter that lowers its form to a code object, never a
+new launcher or dispatch path: a DSL with its own compiler is typically build-only, and a
+self-contained generator can be build-and-runtime.
 Runtime JIT of source is a future direction (Section 9.3 below).
 
 The rocKE prototype ([PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)) is the first
@@ -1786,9 +1792,11 @@ needed during implementation, on top of the stable descriptor format this RFC de
 The two ingestion paths differ only in where a kernel's code comes from:
 
 - **Build-time (AOT).** Discover and validate descriptors, compile each kernel per target
-  architecture, pack the code objects into per-arch bundles with a self-describing manifest, and
-  install them beside the provider. The manifest records provenance (architecture, toolchain,
-  build id) so incompatible bundles are rejected before load.
+  architecture, or take a prebuilt code object as authored, pack the code objects into per-arch
+  bundles with a self-describing manifest, and install them beside the provider. The manifest
+  records provenance (architecture, toolchain, build id) so incompatible bundles are rejected
+  before load; a prebuilt object records its file and digest instead of a toolchain. The author
+  restricts a prebuilt object to the architecture it was built for.
 - **Runtime drop-in.** The path is opt-in and off by default. When enabled, the provider scans a
   dedicated drop-in location for custom bundles, compiles each descriptor to a matcher once on first
   use, and registers it the same way as an installed one. A single package may declare many
@@ -2357,8 +2365,8 @@ follow-up RFCs.
    descriptor distinguish the two, so an operator can see a kernel's true LDS footprint, or is the
    launch value the only thing dispatch needs?
 6. **Deriving a conventional default versus requiring it explicitly:** where an operation defines a
-   conventional default for an attribute, such as SDPA's implicit `1/sqrt` scale over the head
-   extent, a pack may either derive it or require the graph to supply it
+   conventional default for an attribute, such as SDPA's scale (1.0 when `attn_scale_value` is
+   unset), a pack may either derive it or require the graph to supply it
    ([the worked example's criteria](./examples/0017_UniversalKernelDescriptor_WorkedExample.md#2-the-criteria)). Deriving accepts
    more graphs; requiring keeps the pack's contract narrow and its dispatch free of derived values.
    Should this be an author's choice per pack, as it is today, or a convention the schema settles
@@ -2408,7 +2416,7 @@ choices; none is a dependency.
 - **UED (Universal Engine Descriptor):** one engine: a stable identity, the `graph_match` stating
   how it matches a graph and publishing the symbols every consumer reads, the KMD fields it exposes
   as knobs, and its behavior/numerical notes. It names the engine's one metadata schema (KMD) and,
-  optionally, one heuristic (UHD); many KDPs may share one engine, and they all inherit its one
+  optionally, its role-scoped heuristics (UHDs, arch-keyed); many KDPs may share one engine, and they all inherit its one
   match.
 - **`graph_match`:** the UED member holding stage one, in one of two arms — the declarative
   **structural pattern** (`nodes`) or the **native match** (`native`), the escape hatch that ships
@@ -2417,7 +2425,8 @@ choices; none is a dependency.
   edges the engine matches against the graph. It runs at most once per engine per graph, and its
   binding is what a UMD's criteria, a UDD's formulas, and the UHD's features are all written over.
 - **UHD (Universal Heuristic Descriptor):** one kernel-selection model that ranks the kernels fitting
-  a graph and picks one. One per engine, named by the UED.
+  a graph and picks one. An engine names up to three by role (catalog ranking, engine-level estimate,
+  candidate generator), each mapped by architecture ([RFC 0020 §4.6](0020_UniversalEngineDescriptor.md)).
 - **KMD (Kernel Metadata Descriptor):** despite the name, an **engine-wide schema, not a per-kernel
   file**: one KMD per engine, named by the UED, declaring the variant fields every kernel in that
   engine carries, each with a type and optional default. It is the feature space the UHD ranks over,
@@ -2494,6 +2503,8 @@ choices; none is a dependency.
 - **Code object:** a loadable, prebuilt GPU kernel binary.
 - **kpack:** a packed multi-architecture archive of code objects.
 - **hsaco:** a single prebuilt GPU code-object file (Heterogeneous System Architecture Code Object).
+  Authored as a build-time input (`file`, `symbol`) and packed as-is into kpack; a runtime drop-in
+  is deferred.
 - **hip:** a HIP source file compiled ahead of time into a code object and packaged (covers
   hipRTC-style sources, processed AOT rather than at runtime).
 - **Adapter:** a plug-in that turns one supported authoring form into something the generic engine

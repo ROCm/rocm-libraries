@@ -146,6 +146,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collectives_shfl.cpp
   # read_first_lane 64-bit truncation (append-only leaf)
   unit_test_internal_collectives_readfirstlane.cpp
+  # Per-axis grid-size helpers in rocsparse_grid.hpp (append-only leaf)
+  unit_test_internal_grid.cpp
   unit_test_internal_collectives_boost.cpp
   unit_test_internal_infostructs.cpp
   #10156: distinct anchor to avoid stacked-branch merge conflicts
@@ -158,6 +160,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_hostblocks_itilu0.cpp
   #10153: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_extra_bsrgemm.cpp
+  # --- csrgemm / bsrgemm calc grid.x clamps [AISPARSE-677] -----------------
+  # Distinct anchor (after the bsrgemm host tests) so this leaf does not conflict
+  # with the sibling grid-clamp branches that append at the end of the list.
+  # Drives the public rocsparse_spgemm entry point with
+  # handle->properties.maxGridSize[0] shrunk; no compile-in TUs.
+  unit_test_internal_extra_gemm_calc_grids.cpp
   # Residual in-scope internal-routine coverage: device __global__ wrappers for
   # collective/atomic/hash device helpers, plus host-path primitive helpers.
   # unit_test_internal_primitives_host_extras.cpp additionally needs the
@@ -182,6 +190,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_conversion_extras.cpp
   unit_test_internal_conversion_csr2csc_buffer.cpp
   unit_test_internal_extra_geam.cpp
+  # --- bsrgemm scaling-copy grid.x clamp [AISPARSE-676] ---------------------
+  # Distinct anchor (after the geam internal tests) so this leaf does not
+  # conflict with the sibling grid-clamp branches. Drives the public
+  # rocsparse_Xbsrgemm entry point with handle->properties.maxGridSize[0]
+  # shrunk; no compile-in TUs.
+  unit_test_internal_extra_bsrgemm_scal_grids.cpp
   #10154: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_extra_geam.cpp
   unit_test_internal_level3_sddmm.cpp
