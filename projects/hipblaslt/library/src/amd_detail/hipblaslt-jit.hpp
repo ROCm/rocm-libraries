@@ -19,11 +19,8 @@ namespace hipblaslt_ext::experimental::jit
 {
     namespace detail
     {
-        struct BackendAccess;
         struct OperationRequest;
-        struct RequestAccess;
         struct CompiledSolution;
-        struct SolutionAccess;
     }
 
     // Backend factories configure an opaque, copyable solution generator.
@@ -31,10 +28,19 @@ namespace hipblaslt_ext::experimental::jit
     {
     public:
         Backend() = default;
+        static Backend create(std::shared_ptr<const hipblaslt_jit::Jit> jit)
+        {
+            Backend backend;
+            backend.m_jit = std::move(jit);
+            return backend;
+        }
+        const std::shared_ptr<const hipblaslt_jit::Jit>& get() const
+        {
+            return m_jit;
+        }
 
     private:
-        std::shared_ptr<const hipblaslt_jit::Jit> jit;
-        friend struct detail::BackendAccess;
+        std::shared_ptr<const hipblaslt_jit::Jit> m_jit;
     };
 
     // Operation factories own the description and host scalar values. Device
@@ -43,10 +49,19 @@ namespace hipblaslt_ext::experimental::jit
     {
     public:
         Request() = default;
+        static Request create(std::shared_ptr<const detail::OperationRequest> operation)
+        {
+            Request request;
+            request.m_operation = std::move(operation);
+            return request;
+        }
+        const std::shared_ptr<const detail::OperationRequest>& get() const
+        {
+            return m_operation;
+        }
 
     private:
-        std::shared_ptr<const detail::OperationRequest> implementation;
-        friend struct detail::RequestAccess;
+        std::shared_ptr<const detail::OperationRequest> m_operation;
     };
 
     // Names one published JIT solution library index. An operation adapter
@@ -55,10 +70,19 @@ namespace hipblaslt_ext::experimental::jit
     {
     public:
         Solution() = default;
+        static Solution create(std::shared_ptr<const detail::CompiledSolution> compiled)
+        {
+            Solution solution;
+            solution.m_compiled = std::move(compiled);
+            return solution;
+        }
+        const std::shared_ptr<const detail::CompiledSolution>& get() const
+        {
+            return m_compiled;
+        }
 
     private:
-        std::shared_ptr<const detail::CompiledSolution> implementation;
-        friend struct detail::SolutionAccess;
+        std::shared_ptr<const detail::CompiledSolution> m_compiled;
     };
 
     struct Diagnostics

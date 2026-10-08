@@ -391,6 +391,35 @@ namespace hipblaslt_jit::msgpack_io
         });
     }
 
+    Status writeNames(const std::vector<std::string>& names, std::vector<uint8_t>& bytes)
+    {
+        bytes.clear();
+        return guarded("Invalid JIT name list", [&] {
+            msgpack::sbuffer buffer;
+            Packer           packer(buffer);
+            packer.pack_array(static_cast<uint32_t>(names.size()));
+            for(const auto& name : names)
+                string(packer, name);
+            bytes = contents(buffer);
+        });
+    }
+
+    Status readNames(const std::vector<uint8_t>& bytes, std::vector<std::string>& names)
+    {
+        names.clear();
+        return guarded("Invalid JIT name list", [&] {
+            const auto  handle = parse(bytes, "The name list");
+            const auto& root   = handle.get();
+            if(root.type != msgpack::type::ARRAY)
+                malformed("The name list is not an array");
+            std::vector<std::string> result;
+            result.reserve(root.via.array.size);
+            for(uint32_t i = 0; i < root.via.array.size; ++i)
+                result.push_back(std::string(text(root.via.array.ptr[i], "A name")));
+            names = std::move(result);
+        });
+    }
+
     Status writeAllocator(int64_t next, std::vector<uint8_t>& bytes)
     {
         bytes.clear();
@@ -544,6 +573,14 @@ namespace hipblaslt_jit::msgpack_io
         return unavailable();
     }
     Status readMapping(const std::vector<uint8_t>&, std::map<int32_t, std::string>&)
+    {
+        return unavailable();
+    }
+    Status writeNames(const std::vector<std::string>&, std::vector<uint8_t>&)
+    {
+        return unavailable();
+    }
+    Status readNames(const std::vector<uint8_t>&, std::vector<std::string>&)
     {
         return unavailable();
     }

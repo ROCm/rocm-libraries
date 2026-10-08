@@ -53,6 +53,10 @@ namespace hipblaslt_jit::msgpack_io
     Status writeMapping(const std::map<int32_t, std::string>& mapping, std::vector<uint8_t>& bytes);
     Status readMapping(const std::vector<uint8_t>& bytes, std::map<int32_t, std::string>& mapping);
 
+    // A MessagePack array of strings. A missing file means the default (none).
+    Status writeNames(const std::vector<std::string>& names, std::vector<uint8_t>& bytes);
+    Status readNames(const std::vector<uint8_t>& bytes, std::vector<std::string>& names);
+
     // {"next": <first unallocated index>}.
     Status writeAllocator(int64_t next, std::vector<uint8_t>& bytes);
     Status readAllocator(const std::vector<uint8_t>& bytes, int64_t& next);

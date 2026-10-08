@@ -53,14 +53,20 @@ namespace hipblaslt_jit
             if(!contains(result.solution.kernelNames, solution->kernelName))
                 result.solution.kernelNames.push_back(solution->kernelName);
         for(auto& file : sources.assembly)
-            result.solution.units.push_back(
-                {std::move(file.name), std::move(file.bytes), BuildUnit::Kind::Assembly, {}});
+            result.solution.units.push_back({std::move(file.name),
+                                             std::move(file.bytes),
+                                             BuildUnit::Kind::Assembly,
+                                             BuildUnit::Role::Main,
+                                             {}});
         std::vector<BuildUnit> includes;
         for(auto& header : sources.headers)
             includes.push_back({std::move(header.name), std::move(header.bytes)});
         for(auto& file : sources.hip)
-            result.solution.units.push_back(
-                {std::move(file.name), std::move(file.bytes), BuildUnit::Kind::Hip, includes});
+            result.solution.units.push_back({std::move(file.name),
+                                             std::move(file.bytes),
+                                             BuildUnit::Kind::Hip,
+                                             BuildUnit::Role::Main,
+                                             includes});
         return result;
     }
 
