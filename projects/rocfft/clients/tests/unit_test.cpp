@@ -1196,3 +1196,42 @@ TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
     PROB_SKIP_UNITTEST();
     run_plan_capacity_test(1'000'000);
 }
+
+// Test calling rocfft_destroy after any library singletons are torn down
+TEST(rocfft_DeathTest, plan_destroyed_at_exit)
+{
+    struct exit_time_plan
+    {
+        rocfft_plan plan = nullptr;
+        ~exit_time_plan()
+        {
+            if(plan)
+                (void)rocfft_plan_destroy(plan);
+        }
+    };
+
+    auto create_plan_destroyed_at_exit = []() -> void {
+        // Create object with static lifetime - we're aiming to have this
+        // be destroyed after any library singleton that might do device
+        // memory accounting.
+        static exit_time_plan holder;
+
+        size_t length = 64;
+        if(rocfft_plan_create(&holder.plan,
+                              rocfft_placement_inplace,
+                              rocfft_transform_type_complex_forward,
+                              rocfft_precision_single,
+                              1,
+                              &length,
+                              1,
+                              nullptr)
+           != rocfft_status_success)
+            std::exit(2);
+        std::exit(0);
+    };
+
+    // Death tests run in a fresh process, so library singletons are
+    // created after the static plan holder.
+    ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+    EXPECT_EXIT(create_plan_destroyed_at_exit(), ::testing::ExitedWithCode(0), "");
+}

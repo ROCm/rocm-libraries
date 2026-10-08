@@ -13,6 +13,27 @@ selection is per-UKD on `kernel_source.kind`, never per-folder, so one root feed
 producer into one kpack per arch. Nothing is registered in CMake: adding a descriptor is
 dropping files in a folder.
 
+Two filters decide what a build packs, and both prune exactly as arch pruning does:
+
+- **Family folders.** A descriptor family lives in a top-level child folder of a root
+  (`rocKE/` today; `hip/` has no switch). `HKP_DESCRIPTOR_FAMILIES` in
+  `HkpPackaging.cmake` maps each switchable folder to the option that enables it, and a
+  family whose option is OFF is passed as `--exclude-folder <name>`: its files are
+  never read, under every root. A new family is one entry in that table. A folder is
+  matched by its exact name as a **top-level** child of the root, so a folder of that
+  name deeper in the tree is not a family. A root that is itself placed inside a family
+  folder (for example `descriptors/rocKE/...`) is not filtered by that family's switch:
+  pointing a root there is the user's responsibility.
+- **Producer kinds.** A `kernel_source.kind` this build has no producer for is passed
+  as `--disable-kind <kind>`. Its UKDs are dropped from their KDPs, and a KDP left with
+  none does not ship. The rocKE producer, and the private rocKE wheels and comgr it
+  lowers through, exist only under `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, so with it OFF
+  `rocke` is disabled. A kind outside the vocabulary is still a validation error.
+
+A root, or an arch, left with nothing to pack is skipped, not failed. Only producers
+gated by a build option (rocKE today) are disabled by kind; a kind outside that set is
+not pruned.
+
 The provider wires six roots: production, plus five over the four authored test sets
 (`shared` packs twice, once into each test binary's discovery root).
 
@@ -21,18 +42,37 @@ The provider wires six roots: production, plus five over the four authored test 
 | Production | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH` defaulting to the in-tree `src/engines/kernel_ingestor_engine/descriptors/` | yes |
 | Test | `src/engines/kernel_ingestor_engine/test_descriptors/{shared,unit,integration,archive_fixture}/` | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
 
-Production wiring is gated on the root holding at least one non-hidden `*.kdp.json`,
-since a KDP is what arch pruning consumes. With none, packaging is **dormant** and any
-stale product tree is removed; neither is an error. A root set but not a directory is
-fatal. A KDP that prunes on every arch is a hard failure for a root the build NAMED, and
-dormancy for the inherited default root.
+Before wiring any root, configure asks the packer (`pipeline.shipped_engines` and
+`pipeline.offered_engines`, under the base interpreter, with the same filters) which
+engines each arch's shard would carry and which engines the root carries for any arch. A
+root, production or test, named or inherited alike, that is empty or would ship nothing
+for any arch this build packs for is **dormant** at configure and skipped at pack, and
+any stale output tree is removed; neither is an error, and one STATUS line says why. A
+dormant root is recorded so the census and the embedded-source verify step skip it
+too. Two answers decide which engine-pinned tests are registered:
+
+- **Per-arch registrations** (the census, and the external and gpu_ref integration
+  checks) install into a gfx-specific shard and are gated on
+  `hkp_gfx950_attention_dense_available()`, which reads what the shard for that arch
+  ships.
+- **Host-side sources that pin an engine**, such as the gfx950 knobs suite, are gated on
+  `hkp_product_offers_engine()`, which reads what the product root carries for any arch
+  under this build's filters. It never reads `GPU_TARGETS`: the host libraries and
+  tests must work with another build's arch content.
+
+A probe that cannot answer leaves the root wired, so the packer reports what is wrong
+with it, and both predicates then read `HIPKERNELPROVIDER_ENABLE_ROCKE`. A root set but
+not a directory is fatal.
+
+Test roots hold no family folder today. The first family folder added under
+`test_descriptors/` must also gate the test binary's cases: a fixture root that goes
+dormant still leaves cases in that binary that expect its descriptors.
 
 Two rules govern the walk:
 
 - **Hidden paths are skipped, and said so.** A dot-prefixed path segment or filename is
-  warned and skipped, as is a `*.json` whose name carries no type token. The production
-  content gate drops the same segments, so a KDP under a hidden path does not wire
-  packaging. A type-tagged descriptor that is malformed, missing a field, of unknown
+  warned and skipped, as is a `*.json` whose name carries no type token. A root whose
+  only KDP sits under a hidden path therefore probes empty and goes dormant. A type-tagged descriptor that is malformed, missing a field, of unknown
   type or carrying a dangling reference still fails.
 - **An `embedded_source` `source_file` must act as an identity.** It is never
   normalised, so `..` is rejected (one file would take two identities) and an absolute
@@ -42,7 +82,22 @@ Two rules govern the walk:
 producer runs, and it contributes no code object and no archive entry — the packer only
 stamps the shard architecture and records provenance. A root of only passthrough kinds
 therefore produces descriptors and **no** archive, and a shard with no compiled variant
-holds no `kpack/`. Descriptors but no archive is legal; no descriptors never is.
+holds no `kpack/`. Descriptors but no archive is legal.
+
+`hsaco` names a prebuilt code object: `kernel_source: {kind: "hsaco", file, symbol}`.
+`file` resolves relative to the descriptor that names it, must stay inside the root, and
+has no root-relative fallback — the same rule as a `hip` `source`. No compile runs: the
+bytes are packed as-is into the arch's kpack, the kernel signature is read from the
+object's AMDGPU metadata as for a compiled object, and the UKD ships as `kind: kpack`.
+The toc key derives from the file's resolved root-relative path, so one file serving
+several symbols is one archive entry, and one key claimed by two different files is a
+hard error. The packer does not check the object's format or target processor. An
+`hsaco` UKD must list the arch(es) its object runs on in `arch` (a generic-target
+object lists every arch it runs on); an absent or empty `arch` is rejected. The author's own load test on the target arch
+is the only check; no in-tree load test covers `hsaco`. The shipped provenance records
+`origin_kind: "hsaco"`, the root-relative `file`, its `sha256` and the `symbol`, and makes no
+toolchain claim. As for `hip`, the specialization contract must declare
+`metadata_fields: []`: no compiler ran whose specialization a binding could observe.
 
 ## Compiler-bound specialization agreement
 
@@ -114,7 +169,7 @@ not equivalence of arbitrary machine code or correctness of native dispatch.
 ## Packed `kernel_source`
 
 The runtime consumes packed per-architecture descriptors with source kind KPACK, not
-unlowered rocKE/HIP authoring descriptors. A packed `kernel_source` carries **five
+unlowered rocKE, HIP or hsaco authoring descriptors. A packed `kernel_source` carries **five
 mandatory keys**:
 
 ```json
@@ -252,11 +307,11 @@ its default. The reason is in the `hkp_wire_pack_target()` header in
 
 ```bash
 cd dnn-providers/hip-kernel-provider
-PYTHONPATH=descriptor-packaging/python:rocke/library:rocke/platform/python:/opt/rocm-kpack/python \
+PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
     python3 -m pytest descriptor-packaging/tests -q
 ```
 
-`rocm_kpack` (the third `PYTHONPATH` entry, or `--kpack-python-dir` /
+`rocm_kpack` (the second `PYTHONPATH` entry, or `--kpack-python-dir` /
 `HIPKERNELPROVIDER_ROCM_KPACK_DIR`) is the kpack archive reader/writer most of the suite
 round-trips through. Its absence is diagnosed once by the `rocm_kpack_dir` fixture in
 `tests/conftest.py`: every test needing it skips with one message naming the dependency.
@@ -265,6 +320,32 @@ Set `HIPKERNELPROVIDER_KPACK_REQUIRE_ROCM_KPACK=1` (mirroring `_REQUIRE_HIPCC` /
 
 `-m quick` selects the load-time/pure-unit subset needing neither `hipcc` nor
 `rocm_kpack`/comgr.
+
+Every rocKE test lives in `tests/rocke/`, whose own `conftest.py` owns the rocKE
+fixtures (`rocke_available`, `rocke_importable`, `rocke_ukd`) and puts the in-tree rocke
+platform and kernels library on `sys.path`, so the command above needs no rocke path. No
+test outside that directory imports rocke or needs the rocKE toolchain, so a new rocKE
+test goes there. Tests outside it may still author or read rocKE descriptors as JSON:
+the disabled-kind and disabled-folder tests in `tests/test_hkp_pack_layout.py` hand
+them to a build without rocKE, which must prune them before any producer runs. With
+`HIPKERNELPROVIDER_ENABLE_ROCKE=OFF` the registered ctest entries pass
+`--ignore=<tests>/rocke` and never collect it; this runs the suite as that build does:
+
+```bash
+PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
+    python3 -m pytest descriptor-packaging/tests -q \
+        --ignore=descriptor-packaging/tests/rocke
+```
+
+`tests/test_hkp_pack_wiring.py` drives real sub-configures of `HkpPackaging.cmake` to
+hold that build's CMake wiring: a root wired with `ENABLE_ROCKE OFF` packs under an
+interpreter without pip with rocke disabled and the excluded folders passed, the
+configure-time `shipped_engines` probe answers under that interpreter, and the
+registered entries ignore `tests/rocke/`.
+
+The two `conftest.py` files both import as `conftest`, so neither exports helpers, and no
+test module imports from another. Helpers both sides use live in plain modules:
+`tests/synthesised_objects.py`, `tests/pack_helpers.py` and `tests/cmake_harness.py`.
 
 ### Desk-check a variant set (`hkp_pack.desk_check`, `tools/hkp_desk_check.py`)
 
@@ -307,9 +388,10 @@ contract is an input to invariant 1, not a bound on it, since confining the audi
 contract's fields would exit 0 on drift in a third. `--drift-field` narrows it explicitly,
 and in the log, for a field whose two sides speak deliberately different vocabularies.
 
-`tests/test_desk_check_invariants.py` exercises the shipped module. Keep structural
-identity, real packed observations and tampered-evidence checks distinct from native
-registration and numerical tests.
+`tests/test_desk_check_invariants.py` exercises the shipped module, with
+`tests/rocke/test_desk_check_rocke_corpus.py` holding the cases that need rocKE output.
+Keep structural identity, real packed observations and tampered-evidence checks distinct
+from native registration and numerical tests.
 
 ### Embedded-source verification (`tools/hkp_verify_embedded_sources.py`)
 
@@ -336,16 +418,16 @@ verifier pass*. An absent root, an empty root, a root with no `embedded_source`
 descriptor and an absent key table each pass — which is why a pass reports the two counts
 it compared.
 
-### Real-corpus builder-signature guards (`tests/test_hkp_pack_rocke.py`)
+### Real-corpus builder-signature guards (`tests/rocke/test_hkp_pack_rocke.py`)
 
 The real gfx942 `build_*` functions in `rocke/library/kernels/gfx942/` must satisfy
 `_require_spec_arch_signature`'s `(spec, *, arch)` contract. The real-builder cases in
-`tests/test_hkp_pack_rocke.py` and the rejection cases in
-`tests/test_hkp_pack_producer_guards.py` cover complementary paths. Signature acceptance
-alone is not effective-specialization or numerical proof.
+`tests/rocke/test_hkp_pack_rocke.py` and the rejection cases in
+`tests/rocke/test_hkp_pack_producer_guards.py` cover complementary paths. Signature
+acceptance alone is not effective-specialization or numerical proof.
 
 ```bash
-PYTHONPATH=descriptor-packaging/python:rocke/library:rocke/platform/python:/opt/rocm-kpack/python \
-    python3 -m pytest descriptor-packaging/tests/test_hkp_pack_rocke.py \
-        descriptor-packaging/tests/test_hkp_pack_producer_guards.py -q
+PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
+    python3 -m pytest descriptor-packaging/tests/rocke/test_hkp_pack_rocke.py \
+        descriptor-packaging/tests/rocke/test_hkp_pack_producer_guards.py -q
 ```

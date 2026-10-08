@@ -754,6 +754,209 @@ static bool rocke_i_apply_indirect(rocke_ir_builder_t* b,
     return rocke_i_map_set(b, out, cv);
 }
 
+/* ====================================================================== */
+/* Dynamic (AOT) transform apply implementations                           */
+/* ====================================================================== */
+
+/* PadDynamic.apply — value passes through; validity &= (lo_v <= x < hi_v).
+ * Mirrors transforms.PadDynamic.apply with SSA lo/hi Values. */
+static bool rocke_i_apply_pad_dynamic(rocke_ir_builder_t* b,
+                                      const rocke_transform_t* t,
+                                      const rocke_i_coord_map_t* in,
+                                      rocke_i_coord_map_t* out)
+{
+    const rocke_coord_var_t* u = rocke_i_map_get(in, t->upper[0]);
+    rocke_value_t* bounds = NULL;
+    rocke_coord_var_t cv;
+
+    if(u == NULL)
+    {
+        return rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "PadDynamic: missing upper coord '%s'", t->upper[0]);
+    }
+    if(t->lo_v != NULL || t->lo_const_valid)
+    {
+        rocke_value_t* lo = (t->lo_v != NULL) ? t->lo_v : rocke_b_const_i32(b, t->lo_const);
+        bounds = rocke_i_and(b, bounds, rocke_i_ge(b, u->value, lo));
+    }
+    if(t->hi_v != NULL || t->hi_const_valid)
+    {
+        rocke_value_t* hi = (t->hi_v != NULL) ? t->hi_v : rocke_b_const_i32(b, t->hi_const);
+        bounds = rocke_i_and(b, bounds, rocke_i_lt(b, u->value, hi));
+    }
+    cv.name = t->lower[0];
+    cv.value = u->value;
+    cv.valid = rocke_i_and(b, u->valid, bounds);
+    return rocke_i_map_set(b, out, cv);
+}
+
+/* do_magic_division_dynamic: same as do_magic_division but mult/shift are SSA.
+ * Mirrors transforms.do_magic_division_dynamic. */
+static rocke_value_t* rocke_i_do_magic_division_dynamic(rocke_ir_builder_t* b,
+                                                        rocke_value_t* dividend,
+                                                        rocke_value_t* mult_v,
+                                                        rocke_value_t* shift_v)
+{
+    rocke_value_t* tmp;
+    rocke_value_t* summed;
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    tmp = rocke_b_umul_hi_i32(b, dividend, mult_v);
+    summed = rocke_b_add(b, tmp, dividend);
+    /* lshr unconditionally (shift==0 is a no-op) */
+    return rocke_b_lshr(b, summed, shift_v);
+}
+
+/* UnmergeMagicDynamic.apply — split upper via runtime magic triples.
+ * Mirrors transforms.UnmergeMagicDynamic.apply. */
+static bool rocke_i_apply_unmerge_magic_dynamic(rocke_ir_builder_t* b,
+                                                const rocke_transform_t* t,
+                                                const rocke_i_coord_map_t* in,
+                                                rocke_i_coord_map_t* out)
+{
+    const rocke_coord_var_t* u = rocke_i_map_get(in, t->upper[0]);
+    rocke_value_t* tmp;
+    int i;
+
+    if(u == NULL)
+    {
+        return rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "UnmergeMagicDynamic: missing upper coord '%s'", t->upper[0]);
+    }
+
+    tmp = u->value;
+    /* Walk last -> 1, peeling off the remainder against each triple. */
+    for(i = t->n_lower - 1; i >= 1; --i)
+    {
+        int tri = i - 1; /* triple[i-1] is for into[i] */
+        rocke_value_t* quot;
+        rocke_value_t* rem;
+        rocke_coord_var_t cv;
+
+        /* Python _v(): a Value as is, an int as a fresh const, built in the
+         * order mult, shift, dim before the dim == 1 check. */
+        rocke_value_t* mult_v = t->triples_mult_v[tri] != NULL
+                                    ? t->triples_mult_v[tri]
+                                    : rocke_b_const_i32(b, t->triples_mult_c[tri]);
+        rocke_value_t* shift_v = t->triples_shift_v[tri] != NULL
+                                     ? t->triples_shift_v[tri]
+                                     : rocke_b_const_i32(b, t->triples_shift_c[tri]);
+        rocke_value_t* dim_v = t->triples_dim_v[tri] != NULL
+                                   ? t->triples_dim_v[tri]
+                                   : rocke_b_const_i32(b, t->triples_dim_c[tri]);
+        if(t->triples_dim_v[tri] == NULL && t->triples_dim_c[tri] == 1)
+        {
+            /* A literal dim of 1: no division, remainder 0. */
+            rem = rocke_b_const_i32(b, 0);
+            quot = tmp;
+        }
+        else
+        {
+            quot = rocke_i_do_magic_division_dynamic(b, tmp, mult_v, shift_v);
+            if(quot == NULL)
+            {
+                return false;
+            }
+            rem = rocke_b_sub(b, tmp, rocke_b_mul(b, quot, dim_v));
+        }
+        cv.name = t->lower[i];
+        cv.value = rem;
+        cv.valid = u->valid;
+        if(!rocke_i_map_set(b, out, cv))
+        {
+            return false;
+        }
+        tmp = quot;
+    }
+    {
+        rocke_coord_var_t cv0;
+        cv0.name = t->lower[0];
+        cv0.value = tmp;
+        cv0.valid = u->valid;
+        return rocke_i_map_set(b, out, cv0);
+    }
+}
+
+/* EmbedDynamic.apply — affine map with runtime strides/offset/lo/hi.
+ * Mirrors transforms.EmbedDynamic.apply. */
+static bool rocke_i_apply_embed_dynamic(rocke_ir_builder_t* b,
+                                        const rocke_transform_t* t,
+                                        const rocke_i_coord_map_t* in,
+                                        rocke_i_coord_map_t* out)
+{
+    rocke_value_t* acc = NULL;
+    rocke_value_t* valid_acc = NULL;
+    rocke_value_t* bounds = NULL;
+    rocke_coord_var_t lower_cv;
+    int i;
+
+    for(i = 0; i < t->n_upper; ++i)
+    {
+        const rocke_coord_var_t* u = rocke_i_map_get(in, t->upper[i]);
+        rocke_value_t* stride_v;
+        rocke_value_t* term;
+
+        if(u == NULL)
+        {
+            return rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "EmbedDynamic: missing upper coord '%s'", t->upper[i]);
+        }
+        valid_acc = rocke_i_and(b, valid_acc, u->valid);
+        /* Python materialises the stride constant FIRST and only then decides
+         * whether to skip the multiply, so an int stride of 1 still consumes
+         * an SSA id even though nothing uses it. Emitting it here keeps the
+         * numbering aligned; DCE drops the dead constant from the .ll. */
+        stride_v = (t->strides_v[i] != NULL)
+                       ? t->strides_v[i]
+                       : rocke_b_const_i32(b, t->strides_const_valid[i] ? t->strides_const[i] : 1);
+        if(t->strides_v[i] == NULL && t->strides_const_valid[i] && t->strides_const[i] == 1)
+        {
+            /* Python skips the multiply for a literal stride of 1. */
+            term = u->value;
+        }
+        else
+        {
+            term = rocke_b_mul(b, u->value, stride_v);
+        }
+        acc = (acc == NULL) ? term : rocke_b_add(b, acc, term);
+    }
+    {
+        /* Python materialises the offset constant unconditionally and only
+         * then decides whether to add it, so the const_i32 exists either way. */
+        rocke_value_t* off_v = t->offset_v;
+        int skip_add = 0;
+        if(off_v == NULL && t->offset_const_valid)
+        {
+            off_v = rocke_b_const_i32(b, t->offset_const);
+            skip_add = (t->offset_const == 0);
+        }
+        if(off_v != NULL && !skip_add)
+        {
+            acc = (acc == NULL) ? off_v : rocke_b_add(b, acc, off_v);
+        }
+        if(acc == NULL)
+        {
+            acc = (off_v != NULL) ? off_v : rocke_b_const_i32(b, 0);
+        }
+    }
+    if(t->lo_v != NULL || t->lo_const_valid)
+    {
+        rocke_value_t* lo = (t->lo_v != NULL) ? t->lo_v : rocke_b_const_i32(b, t->lo_const);
+        bounds = rocke_i_and(b, bounds, rocke_i_ge(b, acc, lo));
+    }
+    if(t->hi_v != NULL || t->hi_const_valid)
+    {
+        rocke_value_t* hi = (t->hi_v != NULL) ? t->hi_v : rocke_b_const_i32(b, t->hi_const);
+        bounds = rocke_i_and(b, bounds, rocke_i_lt(b, acc, hi));
+    }
+    lower_cv.name = t->lower[0];
+    lower_cv.value = acc;
+    lower_cv.valid = rocke_i_and(b, valid_acc, bounds);
+    return rocke_i_map_set(b, out, lower_cv);
+}
+
 /* Dispatch one transform's apply onto the coord map (in place). */
 static bool rocke_i_transform_apply(rocke_ir_builder_t* b,
                                     const rocke_transform_t* t,
@@ -773,6 +976,12 @@ static bool rocke_i_transform_apply(rocke_ir_builder_t* b,
         return rocke_i_apply_pad(b, t, coords, coords);
     case ROCKE_XFORM_INDIRECT:
         return rocke_i_apply_indirect(b, t, coords, coords);
+    case ROCKE_XFORM_PAD_DYNAMIC:
+        return rocke_i_apply_pad_dynamic(b, t, coords, coords);
+    case ROCKE_XFORM_UNMERGE_MAGIC_DYNAMIC:
+        return rocke_i_apply_unmerge_magic_dynamic(b, t, coords, coords);
+    case ROCKE_XFORM_EMBED_DYNAMIC:
+        return rocke_i_apply_embed_dynamic(b, t, coords, coords);
     default:
         return false;
     }
@@ -1039,11 +1248,37 @@ rocke_tensor_descriptor_t*
             }
         }
 
-        d = (rocke_tensor_descriptor_t*)rocke_arena_calloc(&b->arena,
-                                                           sizeof(rocke_tensor_descriptor_t));
-        if(d == NULL)
+        /* Python's .transform() is dataclasses.replace(), which preserves the
+         * concrete class -- a DynamicTensorDescriptor stays dynamic. Allocate
+         * the wider struct and carry the runtime strides across, or the chained
+         * descriptor silently falls back to the compile-time stride path. */
+        if(desc->is_dynamic)
         {
-            return NULL;
+            const rocke_dynamic_tensor_descriptor_t* src
+                = (const rocke_dynamic_tensor_descriptor_t*)desc;
+            rocke_dynamic_tensor_descriptor_t* dd
+                = (rocke_dynamic_tensor_descriptor_t*)rocke_arena_calloc(
+                    &b->arena, sizeof(rocke_dynamic_tensor_descriptor_t));
+            int si;
+            if(dd == NULL)
+            {
+                return NULL;
+            }
+            dd->n_dynamic = src->n_dynamic;
+            for(si = 0; si < src->n_dynamic; ++si)
+            {
+                dd->dynamic_strides[si] = src->dynamic_strides[si];
+            }
+            d = &dd->base;
+        }
+        else
+        {
+            d = (rocke_tensor_descriptor_t*)rocke_arena_calloc(&b->arena,
+                                                               sizeof(rocke_tensor_descriptor_t));
+            if(d == NULL)
+            {
+                return NULL;
+            }
         }
         /* replace(self, chain=new_chain, upper_names=tuple(ordered)) -- all
          * other fields copied verbatim from desc (they share arena storage). */
@@ -1052,6 +1287,7 @@ rocke_tensor_descriptor_t*
         d->base_lengths = desc->base_lengths;
         d->base_strides = desc->base_strides;
         d->n_base = desc->n_base;
+        d->is_dynamic = desc->is_dynamic;
         d->chain = (const rocke_transform_t* const*)new_chain;
         d->n_chain = new_n_chain;
         d->upper_names = (const char* const*)ordered;
@@ -1233,6 +1469,21 @@ bool rocke_transforms_descriptor_offset(rocke_ir_builder_t* b,
     if(!rocke_i_live(b))
     {
         return false;
+    }
+
+    /* A DynamicTensorDescriptor overrides offset() to multiply each base coord
+     * by its runtime stride. Dispatching here keeps every conv call site
+     * agnostic to which kind of descriptor it was handed. */
+    if(desc->is_dynamic)
+    {
+        return rocke_dynamic_tensor_descriptor_offset(
+            b,
+            (const rocke_dynamic_tensor_descriptor_t*)desc,
+            in_names,
+            in_values,
+            n_in,
+            out_offset,
+            out_valid);
     }
 
     /* Python _run_chain prologue: every upper_name must be supplied. */
@@ -1439,6 +1690,338 @@ bool rocke_transforms_descriptor_offset_i64_split(rocke_ir_builder_t* b,
     if(out_within != NULL)
     {
         *out_within = within;
+    }
+    if(out_valid != NULL)
+    {
+        *out_valid = valid;
+    }
+    return true;
+}
+
+/* ====================================================================== */
+/* Dynamic (AOT) transform constructors                                    */
+/* ====================================================================== */
+
+rocke_transform_t* rocke_pad_dynamic(rocke_ir_builder_t* b,
+                                     const char* coord,
+                                     rocke_value_t* lo,
+                                     rocke_value_t* hi)
+{
+    rocke_transform_t* t;
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    t = rocke_i_new_transform(b);
+    if(t == NULL)
+    {
+        return NULL;
+    }
+    t->kind = ROCKE_XFORM_PAD_DYNAMIC;
+    t->upper = rocke_i_dup_name1(b, coord);
+    t->n_upper = 1;
+    t->lower = rocke_i_dup_name1(b, coord);
+    t->n_lower = 1;
+    t->lo_v = lo;
+    t->hi_v = hi;
+    /* Compile-time lo/hi are unused for DYNAMIC variant; zero them. */
+    t->lo = 0;
+    t->hi = 0;
+    if(t->upper == NULL || t->lower == NULL)
+    {
+        return NULL;
+    }
+    return t;
+}
+
+rocke_transform_t*
+    rocke_pad_dynamic_lo_const(rocke_ir_builder_t* b, const char* coord, int lo, rocke_value_t* hi)
+{
+    rocke_transform_t* t = rocke_pad_dynamic(b, coord, NULL, hi);
+    if(t == NULL)
+    {
+        return NULL;
+    }
+    t->lo_const_valid = 1;
+    t->lo_const = lo;
+    return t;
+}
+
+rocke_transform_t* rocke_embed_dynamic_lo_const(rocke_ir_builder_t* b,
+                                                const char* const* upper,
+                                                int n_upper,
+                                                const char* into,
+                                                rocke_value_t* const* strides,
+                                                rocke_value_t* offset,
+                                                int lo,
+                                                rocke_value_t* hi)
+{
+    rocke_transform_t* t = rocke_embed_dynamic(b, upper, n_upper, into, strides, offset, NULL, hi);
+    if(t == NULL)
+    {
+        return NULL;
+    }
+    t->lo_const_valid = 1;
+    t->lo_const = lo;
+    return t;
+}
+
+rocke_transform_t* rocke_embed_dynamic_mixed(rocke_ir_builder_t* b,
+                                             const char* const* upper,
+                                             int n_upper,
+                                             const char* into,
+                                             rocke_value_t* const* strides_v,
+                                             const int* strides_const,
+                                             rocke_value_t* offset_v,
+                                             int offset_const,
+                                             int lo,
+                                             rocke_value_t* hi)
+{
+    rocke_transform_t* t
+        = rocke_embed_dynamic(b, upper, n_upper, into, strides_v, offset_v, NULL, hi);
+    int i;
+    if(t == NULL)
+    {
+        return NULL;
+    }
+    for(i = 0; i < n_upper; ++i)
+    {
+        if(strides_const != NULL && (strides_v == NULL || strides_v[i] == NULL))
+        {
+            t->strides_const_valid[i] = 1;
+            t->strides_const[i] = strides_const[i];
+        }
+    }
+    if(offset_v == NULL)
+    {
+        t->offset_const_valid = 1;
+        t->offset_const = offset_const;
+    }
+    t->lo_const_valid = 1;
+    t->lo_const = lo;
+    return t;
+}
+
+rocke_transform_t* rocke_unmerge_magic_dynamic(rocke_ir_builder_t* b,
+                                               const char* upper,
+                                               const char* const* into,
+                                               int n_lower,
+                                               const rocke_magic_triple_t* triples)
+{
+    rocke_transform_t* t;
+    int i;
+
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(n_lower < 1 || n_lower > 8)
+    {
+        return (rocke_transform_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "UnmergeMagicDynamic: n_lower must be in [1,8], got %d", n_lower);
+    }
+    t = rocke_i_new_transform(b);
+    if(t == NULL)
+    {
+        return NULL;
+    }
+    t->kind = ROCKE_XFORM_UNMERGE_MAGIC_DYNAMIC;
+    t->upper = rocke_i_dup_name1(b, upper);
+    t->n_upper = 1;
+    t->lower = rocke_i_dup_names(b, into, n_lower);
+    t->n_lower = n_lower;
+    /* n_lower-1 triples: triples[i] is for into[i+1]. */
+    t->n_triples = n_lower - 1;
+    for(i = 0; i < t->n_triples; ++i)
+    {
+        t->triples_mult_v[i] = triples[i].mult;
+        t->triples_shift_v[i] = triples[i].shift;
+        t->triples_dim_v[i] = triples[i].dim;
+        /* Only read where the matching Value is NULL. */
+        t->triples_mult_c[i] = triples[i].mult == NULL ? triples[i].mult_c : 0;
+        t->triples_shift_c[i] = triples[i].shift == NULL ? triples[i].shift_c : 0;
+        t->triples_dim_c[i] = triples[i].dim == NULL ? triples[i].dim_c : 0;
+    }
+    if(t->upper == NULL || t->lower == NULL)
+    {
+        return NULL;
+    }
+    return t;
+}
+
+rocke_transform_t* rocke_embed_dynamic(rocke_ir_builder_t* b,
+                                       const char* const* upper,
+                                       int n_upper,
+                                       const char* into,
+                                       rocke_value_t* const* strides,
+                                       rocke_value_t* offset,
+                                       rocke_value_t* lo,
+                                       rocke_value_t* hi)
+{
+    rocke_transform_t* t;
+    int i;
+
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(n_upper < 0 || n_upper > 8)
+    {
+        return (rocke_transform_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "EmbedDynamic: n_upper must be in [0,8], got %d", n_upper);
+    }
+    t = rocke_i_new_transform(b);
+    if(t == NULL)
+    {
+        return NULL;
+    }
+    t->kind = ROCKE_XFORM_EMBED_DYNAMIC;
+    t->upper = rocke_i_dup_names(b, upper, n_upper);
+    t->n_upper = n_upper;
+    t->lower = rocke_i_dup_name1(b, into);
+    t->n_lower = 1;
+    for(i = 0; i < n_upper; ++i)
+    {
+        t->strides_v[i] = (strides != NULL) ? strides[i] : NULL;
+    }
+    t->offset_v = offset;
+    t->lo_v = lo;
+    t->hi_v = hi;
+    /* Compile-time counterparts unused for DYNAMIC variant. */
+    t->offset = 0;
+    t->lo = 0;
+    t->hi = 0;
+    if(t->upper == NULL || t->lower == NULL)
+    {
+        return NULL;
+    }
+    return t;
+}
+
+/* ====================================================================== */
+/* DynamicTensorDescriptor (rocke_tensor_descriptor_naive_dynamic)         */
+/* ====================================================================== */
+
+rocke_dynamic_tensor_descriptor_t*
+    rocke_tensor_descriptor_naive_dynamic(rocke_ir_builder_t* b,
+                                          const char* name,
+                                          const char* const* coord_names,
+                                          int n_coords,
+                                          rocke_value_t* const* strides)
+{
+    rocke_dynamic_tensor_descriptor_t* ddesc;
+    int i;
+    /* Fake lengths (all 0) — never used for offset computation in dynamic path */
+    int fake_lengths[8];
+
+    if(!rocke_i_live(b) || n_coords < 1 || n_coords > 8)
+    {
+        return NULL;
+    }
+    ddesc = (rocke_dynamic_tensor_descriptor_t*)rocke_arena_calloc(
+        &b->arena, sizeof(rocke_dynamic_tensor_descriptor_t));
+    if(ddesc == NULL)
+    {
+        return NULL;
+    }
+
+    for(i = 0; i < n_coords; ++i)
+    {
+        fake_lengths[i] = 0;
+    }
+
+    /* Build the static base using fake lengths (never used for dynamic offset). */
+    {
+        /* Use row-major int strides of all-1 as placeholder. */
+        int fake_strides[8];
+        for(i = 0; i < n_coords; ++i)
+        {
+            fake_strides[i] = 1;
+        }
+        /* We construct the base descriptor fields directly. */
+        rocke_tensor_descriptor_t* base = rocke_tensor_descriptor_naive(
+            b, name, fake_lengths, n_coords, fake_strides, coord_names, n_coords);
+        if(base == NULL)
+        {
+            return NULL;
+        }
+        ddesc->base = *base;
+    }
+
+    /* Override with runtime strides. */
+    ddesc->n_dynamic = n_coords;
+    for(i = 0; i < n_coords; ++i)
+    {
+        ddesc->dynamic_strides[i] = strides[i];
+    }
+    ddesc->base.is_dynamic = 1;
+    return ddesc;
+}
+
+bool rocke_dynamic_tensor_descriptor_offset(rocke_ir_builder_t* b,
+                                            const rocke_dynamic_tensor_descriptor_t* desc,
+                                            const char* const* in_names,
+                                            rocke_value_t* const* in_values,
+                                            int n_in,
+                                            rocke_value_t** out_off,
+                                            rocke_value_t** out_valid)
+{
+    /* Run the transform chain (same as static offset but then use dynamic strides). */
+    rocke_i_coord_map_t coords;
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
+    int i;
+    const rocke_tensor_descriptor_t* base = &desc->base;
+    int run_result;
+
+    if(!rocke_i_map_init(b, &coords, n_in + base->n_chain + 4))
+    {
+        return false;
+    }
+    for(i = 0; i < n_in; ++i)
+    {
+        rocke_coord_var_t cv;
+        cv.name = in_names[i];
+        cv.value = in_values[i];
+        cv.valid = NULL;
+        if(!rocke_i_map_set(b, &coords, cv))
+        {
+            return false;
+        }
+    }
+
+    run_result = rocke_i_run_chain(b, base, &coords, /*require_all=*/true);
+    if(run_result <= 0)
+    {
+        return false;
+    }
+
+    /* Reduce base coords with DYNAMIC strides. */
+    for(i = 0; i < desc->n_dynamic; ++i)
+    {
+        const rocke_coord_var_t* cv = rocke_i_map_get(&coords, base->base_names[i]);
+        rocke_value_t* stride_v;
+        rocke_value_t* term;
+
+        if(cv == NULL)
+        {
+            return rocke_i_set_err(b,
+                                   ROCKE_ERR_VALUE,
+                                   "DynamicTensorDescriptor.offset: base coord '%s' not in map",
+                                   base->base_names[i]);
+        }
+        valid = rocke_i_and(b, valid, cv->valid);
+        stride_v = desc->dynamic_strides[i];
+        term = rocke_b_mul(b, cv->value, stride_v);
+        off = (off == NULL) ? term : rocke_b_add(b, off, term);
+    }
+    if(off == NULL)
+    {
+        off = rocke_b_const_i32(b, 0);
+    }
+    if(out_off != NULL)
+    {
+        *out_off = off;
     }
     if(out_valid != NULL)
     {
