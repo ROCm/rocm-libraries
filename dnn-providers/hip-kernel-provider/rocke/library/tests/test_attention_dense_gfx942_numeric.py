@@ -643,7 +643,9 @@ _SWZ_CONFIGS = (
 
 # (dtype, persist_decode, interleave, sliding_window, configs). Every decode order
 # pinned explicitly: "auto" resolves per shape, which would split the set across
-# keys. interleave only changes the qb_major body, so it rides that order alone.
+# keys. interleave only changes the qb_major body, so it rides that order alone. A
+# window of 1024 is at least as long as the keys for some configs and shorter for
+# others, so one binary balances causal work for some launches and not for others.
 _PERSIST_ONE_BINARY = [
     pytest.param("fp16", "hkv_major", False, 0, _PERSIST_CONFIGS, id="hkv_major"),
     pytest.param("fp16", "qb_major", False, 0, _PERSIST_CONFIGS, id="qb_major"),
@@ -657,6 +659,17 @@ _PERSIST_ONE_BINARY = [
     ),
     pytest.param(
         "bf16", "qb_major", False, 128, _PERSIST_CONFIGS, id="qb_major-swa128"
+    ),
+    *(
+        pytest.param(
+            "bf16",
+            name,
+            False,
+            1024,
+            _SWZ_CONFIGS if name == "hq_minor_swz" else _PERSIST_CONFIGS,
+            id=f"{name}-swa1024",
+        )
+        for name in ("qb_major", "hkv_major", "bt_hkv_minor", "hq_minor_swz")
     ),
 ]
 

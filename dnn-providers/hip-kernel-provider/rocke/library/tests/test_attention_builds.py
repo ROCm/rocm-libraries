@@ -3901,6 +3901,42 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                 "baked into the prune and must split identity",
             )
 
+    def test_window_balancing_is_runtime_for_every_decode(self):
+        """A window at least as long as the keys counts as plain causal, so the
+        decodes' causal balancing (longest-first, fold, pair fold) depends on the
+        launch's seqlen_kv. On the runtime path that is a select on a runtime flag,
+        not a compile-time branch: every pinned decode, on both grids, keeps ONE
+        (key, IR, name) across shapes on both sides of the window."""
+        from dataclasses import replace
+        from kernels.common.attention_dense_decode import NONPERSIST_DECODES
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+
+        window = 1024
+        # (batch, seqlen): window >= keys for the first two, < keys for the rest.
+        shapes = ((2, 512), (1, 1024), (1, 2048), (3, 4096))
+        grids = [dict(nonpersist_decode=n) for n in sorted(NONPERSIST_DECODES)] + [
+            dict(persistent=True, num_persistent=64, persist_decode=n)
+            for n in sorted(
+                Gfx942AttentionDenseSpec.supported_persist_decodes() - {"auto"}
+            )
+        ]
+        for kw in grids:
+            base = self._spec(**self._BASE_KWARGS, sliding_window=window, **kw)
+            arts = set()
+            for bt, sq in shapes:
+                with self.subTest(**kw, shape=(bt, sq)):
+                    spec = replace(base, batch=bt, seqlen_q=sq, seqlen_kv=sq)
+                    self.assertTrue(spec.runtime_shape)
+                    arts.add(
+                        (
+                            attention_dense_cache_key(spec, arch="gfx942"),
+                            self._ir_sha(spec),
+                            spec.kernel_name(),
+                        )
+                    )
+            self.assertEqual(len(arts), 1, f"{kw}: {len(arts)} distinct artifacts")
+
     def test_bf16_d128_default_is_on_the_runtime_path(self):
         """bf16 D128 at the exp2_fast tri-state default is one binary per shape.
 

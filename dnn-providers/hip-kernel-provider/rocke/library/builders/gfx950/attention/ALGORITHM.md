@@ -433,9 +433,14 @@ block-id → work-item map:
 - **`hq_minor_swz`** — Swizzled Head-first (arXiv 2511.02132): grid
   `(M·⌈S_q/256⌉, H_q/M, B)`, $M$ = `chiplet_num_xcds`, so each XCD owns a
   contiguous band of query heads; longest-first under causal masking.
-- **`auto`** (default) — `hq_minor_swz` for causal MHA with ≥16 query blocks and
-  ≥8192 work items, `bt_hkv_minor` for other aligned causal attention, else
-  `qb_minor`.
+- **`auto`** (default) — `hq_minor_swz` for large causal MHA, `bt_hkv_minor`
+  for other aligned causal attention, else `qb_minor`.
+
+Both grids balance causal work (longest-first, fold, pair fold) only without a
+sliding window shorter than the keys: such a window gives every query block
+about the same work, so there the orders keep their blocks in place (`qb_major`
+ascending, `hkv_major` plain fold, as before these orders were added). A window
+at least as long cuts nothing off and counts as plain causal.
 
 Measurements, L2 counters and the orders ruled out are in the
 [dense attention thread-block mapping case study](../../../../platform/dsl_docs/architecture/attention_thread_block_mapping_case_study.md).

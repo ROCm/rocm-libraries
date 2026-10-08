@@ -45,6 +45,13 @@ def _registry(*classes) -> dict:
     return {c.name: c() for c in classes}
 
 
+def balance_causal(spec) -> bool:
+    """Whether the decodes balance causal work (longest-first, fold, pair fold).
+    A sliding window shorter than the keys gives every query block about the
+    same work, so there it only moves blocks; a longer one cuts nothing off."""
+    return spec.causal and not 0 < spec.sliding_window < spec.seqlen_kv
+
+
 class DecodeShape:
     """The problem shape as the decodes see it.
 
@@ -132,9 +139,18 @@ class DecodeShape:
         return b.sub(n, b.mul(self.div(n, name, scale), self.val(name, scale)))
 
     def balance(self):
-        """Whether the decodes balance causal work (longest-first, fold, pair
-        fold): under causal masking. A bool, fixed at compile time."""
-        return bool(self.spec.causal)
+        """:func:`balance_causal` for this shape: a bool when it is fixed at
+        compile time, else an i1 (a window is baked, the keys may not be)."""
+        spec = self.spec
+        if not spec.causal:
+            return False
+        W = spec.sliding_window
+        if W <= 0:
+            return True
+        if not self.runtime("seqlen_kv"):
+            return not W < spec.seqlen_kv
+        b = self.b
+        return b.cmp_ge(b.const_i32(W), self.values["seqlen_kv"])
 
     def pair_fold(self, NP: int):
         """Whether the pair fold applies: balancing, even NQB and more than one
@@ -217,7 +233,7 @@ class NonpersistBtHkvMinor(NonpersistDecode):
     """Grid ``(B, Hq, nqb)`` with the kv head as the low digit of the head axis:
     batch, then kv head, are the fastest digits, so the XCD round-robin spreads
     distinct K/V streams over the XCDs. Query blocks run longest-first under
-    causal masking."""
+    causal masking without a sliding window."""
 
     name = "bt_hkv_minor"
     tag = "npbthkvmin"
@@ -241,7 +257,7 @@ class NonpersistHqMinorSwz(NonpersistDecode):
     ``(M*nqb, Hq/M, B)`` with M = ``chiplet_num_xcds``, so XCD ``a`` owns the
     contiguous query-head band ``[a*Hq/M, (a+1)*Hq/M)`` and runs all its query
     blocks before the next head. Batch is the slowest digit. Query blocks run
-    longest-first under causal masking."""
+    longest-first under causal masking without a sliding window."""
 
     name = "hq_minor_swz"
     tag = "nphqminswz"
@@ -367,7 +383,7 @@ class PersistDecode:
 class PersistQbMajor(PersistDecode):
     """``wi = qb*(Hq*B) + hq*B + bt``: the query block is the slowest digit, so
     grid-stride spreads cheap and expensive blocks over each CTA. Under causal
-    masking the blocks are folded; ``interleave``
+    masking without a sliding window the blocks are folded; ``interleave``
     instead reverses the block for odd ``hq`` (measured behind the fold, so auto
     never sets it). Keying the reversal on ``hq`` keeps it a bijection: each head's
     blocks are either in order or reversed."""
@@ -395,7 +411,7 @@ class PersistQbMajor(PersistDecode):
 class PersistHkvMajor(PersistDecode):
     """``wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt``: each grid-stride
     phase stays within about one kv head, so its K/V stays in L2 across the GQA
-    group. Under causal masking, with even NQB and
+    group. Under causal masking without a sliding window, with even NQB and
     ``W > NP``, one CTA runs both blocks of a fold pair ``{p, NQB-1-p}`` on
     consecutive steps (as ``hq_minor_swz``); otherwise the block is folded."""
 
@@ -434,7 +450,7 @@ class PersistHkvMajor(PersistDecode):
 class PersistBtHkvMinor(PersistDecode):
     """``wi = ((blk*gqa + hql)*Hkv + hkv)*B + bt``: batch, then kv head, are the
     fastest digits, so each XCD's CTAs stride over few K/V streams; query
-    blocks are folded under causal masking."""
+    blocks are folded under causal masking without a sliding window."""
 
     name = "bt_hkv_minor"
     tag = "bthkvmin"
@@ -466,7 +482,8 @@ class PersistBtHkvMinor(PersistDecode):
 
 class PersistHqMinorSwz(PersistDecode):
     """Swizzled Head-first on the persistent grid: XCD ``a`` (``wi % M``, needs
-    ``M | NP``) owns head band ``a``. Under causal masking one CTA runs both blocks of a fold pair ``{p, NQB-1-p}`` on consecutive steps, so per-CTA cost
+    ``M | NP``) owns head band ``a``. Under causal masking without a sliding
+    window one CTA runs both blocks of a fold pair ``{p, NQB-1-p}`` on consecutive steps, so per-CTA cost
     is balanced however NP and NQB divide; the unit's XCD is ``wi % M``. Per XCD,
     fastest first: pair, head in band, batch. With ``W <= NP`` the plain decode
     is emitted.
@@ -487,10 +504,10 @@ class PersistHqMinorSwz(PersistDecode):
             return (
                 f"{self.name} needs num_query_heads and num_persistent divisible by {M}"
             )
-        if spec.causal and _spec_nqb(spec) % 2 != 0:
+        if balance_causal(spec) and _spec_nqb(spec) % 2 != 0:
             return (
                 f"{self.name} needs an even number of query blocks under causal "
-                "masking"
+                "masking without a sliding window"
             )
         return None
 
