@@ -25,6 +25,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Changed
 
 * Replaced the soon-to-be-deprecated `__hip_atomic_*` builtins with the equivalent `__scoped_atomic_*` builtins.
+* `rocprim::run_length_encode`, `rocprim::run_length_encode_non_trivial_runs` and the `rocprim::histogram_*`/`rocprim::multi_histogram_*` functions now take `size_t` for the number of samples (`size`/`columns`), and the run offsets and lengths and the histogram row stride are 64-bit, so inputs with more than 2^32 elements are supported.
 
 ### Resolved Issues
 

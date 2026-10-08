@@ -287,8 +287,8 @@ struct scatter_helper
         }
         else // Two-phase scatter
         {
-            using offset_type = unsigned int;
-            using count_type  = unsigned int;
+            using offset_type = size_t;
+            using count_type  = size_t;
 
             unsigned int lane_id = ::rocprim::detail::logical_lane_id<WarpSize>();
 
@@ -507,7 +507,7 @@ public:
                                      storage_type&        storage)
     {
         static constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-        const std::size_t             block_offset    = block_id * items_per_block;
+        const std::size_t             block_offset    = size_t{block_id} * items_per_block;
 
         // First and last blocks
         const bool is_first_block = block_id == 0;
@@ -869,8 +869,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     static constexpr unsigned int         items_per_block   = block_size * items_per_thread;
 
     using input_type  = ::rocprim::detail::value_type_t<InputIterator>;
-    using offset_type = unsigned int;
-    using count_type  = unsigned int;
+    using offset_type = size_t;
+    using count_type  = size_t;
 
     using block_processor = block_helper<input_type,
                                          offset_type,
