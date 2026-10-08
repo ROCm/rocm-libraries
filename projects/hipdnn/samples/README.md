@@ -371,7 +371,7 @@ Executes the forward pass of a scaled dot-product attention (SDPA) operation on 
 - For query `Q`, key `K`, and value `V` tensors of shape `(B, H, S, D)`, the attention output is computed as:
 
     ```python
-    O = softmax(Q @ K^T / sqrt(D)) @ V
+    O = softmax(scale * Q @ K^T) @ V
     ```
 
     where:
@@ -379,6 +379,7 @@ Executes the forward pass of a scaled dot-product attention (SDPA) operation on 
     - `H` = number of attention heads
     - `S` = sequence length
     - `D` = head dimension
+    - `scale` = the attention scale; the sample sets `1/sqrt(D)`. A graph that sets no scale gets 1.0 (no scaling).
 
 - Supports both `BHSD` (row-major) and `BSHD` (sequence-major) memory layouts via strides.
 - Configurations without engine support are gracefully skipped.

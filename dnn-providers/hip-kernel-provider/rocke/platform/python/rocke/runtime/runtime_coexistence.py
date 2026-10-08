@@ -52,15 +52,17 @@ _PROC_MAPS = "/proc/self/maps"
 
 
 def _mapped_lib(stem: str) -> Optional[str]:
-    """Path of a ``lib<stem>.so[.N...]`` already mapped into this process, or None.
+    """Find a mapped library without guessing between distinct runtime copies.
 
-    A mapped copy is the runtime instance something else in the process (torch)
-    actually loaded, whatever layout it came from, so it is the exact library to
-    share. Linux only: reads :data:`_PROC_MAPS`; anything unreadable is None.
+    A library has several entries in /proc/self/maps. If distinct copies are
+    mapped, prefer the one owned by imported torch or its active ROCm SDK
+    wheel. Address order does not identify which copy torch loaded. Return
+    None when no unique choice exists; Linux only, unreadable maps return None.
     """
     if _IS_WINDOWS:
         return None
     name_re = re.compile(rf"lib{re.escape(stem)}\.so(\.\d+)*")
+    mapped: List[str] = []
     try:
         with open(_PROC_MAPS) as fh:
             for line in fh:
@@ -69,11 +71,28 @@ def _mapped_lib(stem: str) -> Optional[str]:
                 if len(fields) < 6:
                     continue
                 path = fields[5]
-                if name_re.fullmatch(os.path.basename(path)):
-                    return path
+                if name_re.fullmatch(os.path.basename(path)) and path not in mapped:
+                    mapped.append(path)
     except OSError:
         return None
-    return None
+    if len(mapped) == 1:
+        return mapped[0]
+    if not mapped:
+        return None
+
+    torch_mod = sys.modules.get("torch")
+    torch_file = getattr(torch_mod, "__file__", None) if torch_mod else None
+    roots = [os.path.realpath(os.path.dirname(torch_file))] if torch_file else []
+    if "rocm_sdk" in sys.modules:
+        roots.extend(os.path.realpath(loc) for loc in _rocm_sdk_core_dirs())
+    preferred = []
+    for path in mapped:
+        resolved = os.path.realpath(path)
+        if any(
+            resolved == root or resolved.startswith(root + os.sep) for root in roots
+        ):
+            preferred.append(path)
+    return preferred[0] if len(preferred) == 1 else None
 
 
 def _rocm_sdk_core_dirs() -> List[str]:
@@ -158,8 +177,8 @@ def _torch_bundled_lib(stem: str) -> Optional[str]:
 
     To keep both halves of the process on one runtime, return, in order:
 
-    1. the copy already mapped into the process (:func:`_mapped_lib`), which is
-       what torch loaded regardless of wheel layout;
+    1. a uniquely selected mapped copy (:func:`_mapped_lib`); when several
+       copies exist, only one owned by torch or its active ROCm SDK wheel wins;
     2. ``<torch>/lib/lib<stem>.so`` (wheels that bundle the libs in torch);
     3. ``_rocm_sdk_core/lib/lib<stem>.so*`` (see :func:`_rocm_sdk_core_lib`),
        only when ``rocm_sdk`` is imported, i.e. the torch is TheRock's. A
@@ -422,7 +441,9 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
     # mapped _rocm_sdk_core comgr: TheRock's initialize_process loaded it
     # RTLD_GLOBAL, demotion cannot unload it, and loading another comgr beside
     # it aborts in LLVM ("support is already registered"). Keeping it first
-    # means either it handles the ISA or set_isa fails with a clear error.
+    # lets a supported ISA compile; an unsupported one fails at set_isa
+    # instead of aborting. #12919 tracks a clearer diagnostic with the comgr
+    # path, release and remedy for that failure.
     _demote_bundled = (
         bundled is not None
         and stem == "amd_comgr"

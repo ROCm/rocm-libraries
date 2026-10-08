@@ -109,7 +109,7 @@ runtime resolves them WITHOUT importing torch
 
 1. explicit full-path override env var: `ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`;
 2. the lib torch uses, only if torch is already imported (the resolver never
-   imports torch to obtain it): the copy already mapped into the process, else
+   imports torch to obtain it): an unambiguous mapped copy, else
    `<torch>/lib/lib*.so`, else TheRock's `_rocm_sdk_core/lib/lib*.so*` (only
    when `rocm_sdk` is imported, i.e. the torch is TheRock's). Exception for
    comgr only: a stale torch comgr moves below every step 3 candidate (see
@@ -119,6 +119,10 @@ runtime resolves them WITHOUT importing torch
    newest version first (a packaged ROCm 7.2 keeps the runtime under a versioned
    `core-*/lib`, not always plain `/opt/rocm/lib`);
 4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+
+With multiple distinct copies in `/proc/self/maps`, the mapped tier prefers
+the sole copy under imported torch or the active `_rocm_sdk_core`. It skips
+ambiguous mappings rather than treating address order as load order.
 
 Stale torch comgr (`_torch_comgr_is_stale`, comgr only, never HIP): the release
 of torch's comgr is read from its location (in `_rocm_sdk_core`: the wheel's

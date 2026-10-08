@@ -35,8 +35,8 @@ then resolves the library in this order (see
 `runtime/runtime_coexistence.py::_candidate_lib_paths`):
 
 1. `$ROCKE_COMGR_LIB` if set (explicit override; full path).
-2. If `torch` is already in `sys.modules`, the comgr torch uses: the copy
-   already mapped into the process, else `<torch>/lib/libamd_comgr.so`, else
+2. If `torch` is already in `sys.modules`, the comgr torch uses: an
+   unambiguous mapped copy, else `<torch>/lib/libamd_comgr.so`, else
    `_rocm_sdk_core/lib/libamd_comgr.so*` (TheRock wheels, only when
    `rocm_sdk` is imported). Exception: when that comgr is stale (below), it
    moves after step 3.
@@ -44,6 +44,10 @@ then resolves the library in this order (see
    `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib` newest first; in each,
    `libamd_comgr.so` then `.so.3` for the SONAME.
 4. Bare `libamd_comgr.so` via the dynamic linker's search path.
+
+With multiple distinct mapped copies, the mapped tier prefers the sole copy
+under torch or its active `_rocm_sdk_core` wheel. Ambiguous mappings are
+skipped rather than chosen by address order.
 
 Stale torch comgr (`_torch_comgr_is_stale`): rocke reads the release of
 torch's comgr from its location, the same way `resolved_lib_rocm_version`
@@ -136,7 +140,7 @@ options are not automatically validated or included in artifact identity.
 
 The HIP module loader follows the same `_candidate_lib_paths` order as
 COMGR: `$ROCKE_HIP_LIB` override, then, if torch is already imported, the
-`libamdhip64` torch uses (the copy already mapped into the process, else
+`libamdhip64` torch uses (an unambiguous mapped copy, else
 `<torch>/lib/libamdhip64.so`, else `_rocm_sdk_core/lib/libamdhip64.so*` when
 `rocm_sdk` is imported), then the ROCm installs (`libamdhip64.so` and the
 `.so.7` SONAME), then bare `libamdhip64.so` via the dynamic linker.
