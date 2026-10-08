@@ -7449,36 +7449,46 @@ class KernelWriterAssembly(KernelWriter):
     if numG2LA + numG2LB + numG2LMXSA + numG2LMXSB + numG2LMetadata > 0:
       vgprBase = self.vgprPool.checkOutAligned(numG2LA + numG2LB + numG2LMXSA + numG2LMXSB + numG2LMetadata, 2, tag="tailLoopAllocG2LVgpr_vgprBase")
       imod.addComment0("Check out VGPR (numG2LA,numG2LB,numG2LMXSA,numG2LMXSB,numG2LMetadata) = (%d,%d,%d,%d,%d)"%(numG2LA,numG2LB,numG2LMXSA,numG2LMXSB,numG2LMetadata))
+      # The five operands are packed back to back in this order. Derive each base
+      # from the previous one so no range can be given an offset that lands inside
+      # another's; a stray term here aliases two operands' global loads silently.
+      baseG2LA        = vgprBase
+      baseG2LB        = baseG2LA    + numG2LA
+      baseG2LMXSA     = baseG2LB    + numG2LB
+      baseG2LMXSB     = baseG2LMXSA + numG2LMXSA
+      baseG2LMetadata = baseG2LMXSB + numG2LMXSB
+      assert baseG2LMetadata + numG2LMetadata <= vgprBase + numG2LA + numG2LB + numG2LMXSA + numG2LMXSB + numG2LMetadata, \
+        "tailLoopAllocG2LVgpr: G2L ranges exceed the checked-out block"
     if numG2LA > 0:
-      imod.add(RegSet("v", "vgprG2LA_BASE", vgprBase))
+      imod.add(RegSet("v", "vgprG2LA_BASE", baseG2LA))
       if kernel["DirectToLdsA"] and kernel["NonDTLTailLoopA"]:
         imod.add(RegSet("v", "vgprG2LA", "vgprG2LA_BASE", 0))
       else:
         imod.add(self.moduleVgprMacroG2LA)
 
     if numG2LB > 0:
-      imod.add(RegSet("v", "vgprG2LB_BASE", vgprBase + numG2LA + numG2LMXSA))
+      imod.add(RegSet("v", "vgprG2LB_BASE", baseG2LB))
       if kernel["DirectToLdsB"] and kernel["NonDTLTailLoopB"]:
         imod.add(RegSet("v", "vgprG2LB", "vgprG2LB_BASE", 0))
       else:
         imod.add(self.moduleVgprMacroG2LB)
 
     if numG2LMXSA > 0:
-      imod.add(RegSet("v", "vgprG2LMXSA_BASE", vgprBase + numG2LA + numG2LB))
+      imod.add(RegSet("v", "vgprG2LMXSA_BASE", baseG2LMXSA))
       if kernel["DirectToLdsMXSA"] and kernel["NonDTLTailLoopMXSA"]:
         imod.add(RegSet("v", "vgprG2LMXSA", "vgprG2LMXSA_BASE", 0))
       else:
         imod.add(self.moduleVgprMacroG2LMXSA)
 
     if numG2LMXSB > 0:
-      imod.add(RegSet("v", "vgprG2LMXSB_BASE", vgprBase + numG2LA + numG2LB + numG2LMXSA))
+      imod.add(RegSet("v", "vgprG2LMXSB_BASE", baseG2LMXSB))
       if kernel["DirectToLdsMXSB"] and kernel["NonDTLTailLoopMXSB"]:
         imod.add(RegSet("v", "vgprG2LMXSB", "vgprG2LMXSB_BASE", 0))
       else:
         imod.add(self.moduleVgprMacroG2LMXSB)
 
     if numG2LMetadata > 0:
-      imod.add(RegSet("v", "vgprG2LMetadata", vgprBase + numG2LA + numG2LB + numG2LMXSA + numG2LMXSB))
+      imod.add(RegSet("v", "vgprG2LMetadata", baseG2LMetadata))
 
     return imod, vgprBase
 
