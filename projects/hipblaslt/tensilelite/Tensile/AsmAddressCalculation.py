@@ -986,9 +986,14 @@ class AddrCalculation:
                                     comment="incToNextRow(%u): Scale by BPE"%(nr)))
                     return sc
 
-                # Non-CLS: stride before s_add.
+                # Non-CLS: stride before s_add. With a 1-byte BPE and a single row the
+                # scaled stride equals the stride SGPR, so skip the shift and use it directly.
+                incSrc = stmp
                 if not kernel["CompactLoopStore"]:
-                    module.add(_buildStrideCompute(numRows))
+                    if numRows == 1 and log2(tmpBpe) == 0:
+                        incSrc = strideCD1
+                    else:
+                        module.add(_buildStrideCompute(numRows))
 
                 if dst == -1:
                     dstLow = "Srd%s+0"%(tc)
@@ -1000,7 +1005,7 @@ class AddrCalculation:
                 if numRows >= 0:
                     module.add(SAddU32(dst=sgpr(dstLow), \
                                         src0=sgpr(dstLow), \
-                                        src1=sgpr(stmp), \
+                                        src1=sgpr(incSrc), \
                                         comment="incToNextRow(%u): gra SRD += inc(lower)"%(numRows) ))
                     module.add(SAddCU32(dst=sgpr(dstHigh), \
                                         src0=sgpr(dstHigh), \
@@ -1009,7 +1014,7 @@ class AddrCalculation:
                 else: # numRows < 0
                     module.add(SSubU32(dst=sgpr(dstLow), \
                                         src0=sgpr(dstLow), \
-                                        src1=sgpr(stmp), \
+                                        src1=sgpr(incSrc), \
                                         comment="incToNextRow(%u): gra SRD -= inc(lower)"%(numRows) ))
                     module.add(SSubBU32(dst=sgpr(dstHigh), \
                                         src0=sgpr(dstHigh), \

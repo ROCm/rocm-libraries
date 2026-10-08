@@ -352,6 +352,10 @@ inline std::map<std::string, int>
                                               assemblerPath,
                                               "v_cvt_scalef32_pk8_bf8_f32 v[0:1], v[2:9], s0",
                                               isDebug);
+    rv["HasVMaximumMinimumF32"] = tryAssembler(isaVersion,
+                                               assemblerPath,
+                                               "v_maximumminimum_f32 v0, v1, v2, v3",
+                                               isDebug);
 
     rv["HasLDSTrB64B16"] = tryAssembler(
         isaVersion, assemblerPath, "ds_read_b64_tr_b16 v[0:1], v0 offset: 0", isDebug);
