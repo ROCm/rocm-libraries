@@ -3697,6 +3697,26 @@ TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void> ge
     return &data->problem;
 }
 
+// Whether the tuning cache can key on this problem at all.
+//
+// Two classes of problem it cannot. A grouped GEMM is several contractions
+// behind one descriptor, so there is no single shape to write a row under; a
+// pointer-array batch is a list of operands the key does not describe. Cache
+// mode asks this before it looks anything up, so a row recorded for either
+// class could never be found again.
+//
+// Online tuning asks the same question, and must ask it here rather than
+// spelling the test out a second time. What it is deciding is different --
+// whether to spend a shape's visits probing candidates and reordering its
+// ranking -- but it turns on the same fact: a winner the cache cannot key is
+// a winner no later run can replay, so the exploration buys nothing and the
+// row it appends is dead weight in a file shared with tune. Both read this,
+// so widening or narrowing what the cache can key on moves online with it.
+inline bool tuningCacheKeyable(const RocblasltContractionProblem& prob)
+{
+    return !prob.grouped_gemm && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+}
+
 // The problem identity online tuning keys on, shared by the selection hook in
 // getSolutions() and the measurement hook in runContractionProblem().
 //
@@ -5663,8 +5683,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         const bool callerSuppliedAlgo = (algo != nullptr);
 
         const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
-        const bool  keyed  = tuning.reads() && !prob.grouped_gemm
-                           && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+        const bool  keyed  = tuning.reads() && tuningCacheKeyable(prob);
         // Tune mode and no other, because what tunes gates is the blocking
         // search: it waits on tuningLock() and benchmarks on library scratch
         // while this call stands still. writes() is true for online too, since
@@ -5744,12 +5763,17 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // the selection hook in getSolutions() used -- the same data->problem,
         // rewritten from the same prob, so the two meet.
         //
+        // tuningCacheKeyable is the same test the cache's own `keyed` makes
+        // below, and the selection hook makes it too: a problem class the cache
+        // refuses to key is one online leaves entirely alone, so nothing it
+        // dispatched is ever sampled.
+        //
         // Nothing below this point waits on the GPU or takes a lock the caller
         // can be queued behind. harvestPending() reads back the event pairs of
         // launches that have already retired and leaves the rest outstanding;
         // beginMeasurement() hands out a pair for this launch and reads nothing.
         auto&        onlineTuner  = rocblaslt::OnlineTuner::getInstance();
-        const bool   onlineTuning = onlineTuner.enabled();
+        const bool   onlineTuning = onlineTuner.enabled() && tuningCacheKeyable(prob);
         const size_t onlineKey    = onlineTuning ? onlineTuningProblemKey(data->problem) : 0;
 
         if(onlineTuning)
@@ -7269,6 +7293,7 @@ inline bool isCustomKernelForPointerArray(TensileLite::ContractionProblemGemm co
 // lookup and nothing else. The problem's own state is in m_problems, which
 // never evicts, so the tuner keeps answering with the measured winner through
 // the locked path.
+
 inline void recordOnlineTuningWinner(const RocblasltContractionProblem&          prob,
                                      const rocblaslt::OnlineTuner::PinnedWinner& winner,
                                      double                                      winnerTimeUs)
@@ -7589,6 +7614,8 @@ inline bool promoteResolvedOnlineTuningWinner(
 // does not come back through runContractionProblem's measurement hook: a
 // promoted candidate nothing times would spend the shape's visit budget for no
 // samples, and tune mode's own candidate enumeration is not a dispatch at all.
+// A hooked site still declines a problem the tuning cache cannot key; see
+// tuningCacheKeyable.
 //
 // lookup says which contract the caller holds this answer under, which decides
 // whether a probe may be promoted into it at all. It is read only where
@@ -7615,8 +7642,13 @@ inline auto getSolutions(
 
     // Short-circuited on the pointer, so a site online does not serve never
     // builds the tuner and never reads anything off it.
-    const bool onlineTuning
-        = onlineTuningProb != nullptr && rocblaslt::OnlineTuner::getInstance().enabled();
+    //
+    // tuningCacheKeyable last, so a run with the feature off pays exactly what
+    // it paid before: the pointer test, then the member flag. See the function
+    // itself for why online declines the same problem classes the cache does.
+    const bool onlineTuning = onlineTuningProb != nullptr
+                              && rocblaslt::OnlineTuner::getInstance().enabled()
+                              && tuningCacheKeyable(*onlineTuningProb);
 
     // Both hooks key on this, so computing it once here is what lets a resolved
     // problem be recognised -- a masked index and a compare, no lock -- before
