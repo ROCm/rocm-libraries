@@ -229,17 +229,26 @@ namespace TensileLite
 
                 const auto&    counters    = TuningCounters::instance();
                 const uint64_t invalidated = counters.invalidated.load();
+                const uint64_t unrecorded  = counters.unrecorded.load();
 
                 // All zeroes would read as "the cache served nothing" when the
                 // cache was never reached at all.
-                if(shapes == 0 && tuned == 0 && invalidated == 0
+                if(shapes == 0 && tuned == 0 && invalidated == 0 && unrecorded == 0
                    && counters.entriesLoaded.load() == 0)
                     return;
 
                 std::ostringstream msg;
                 msg << "tuning-cache: summary shapes=" << shapes << " matched=" << matched
                     << " fellback=" << fellback << " tuned=" << tuned
-                    << " invalidated=" << invalidated;
+                    << " invalidated=" << invalidated << " unrecorded=" << unrecorded;
+
+                // The one tally that is a fault rather than a count, so it says
+                // so where it is read rather than leaving a bare number to be
+                // recognised. The cause was reported once, when the first one
+                // happened.
+                if(unrecorded != 0)
+                    msg << " (unrecorded winners were measured but could not be written; this "
+                           "run's cache file is incomplete)";
 
                 std::ostream*               os = m_sink ? m_sink : &std::cerr;
                 std::lock_guard<std::mutex> lock(log_mutex);

@@ -80,13 +80,14 @@ namespace
         uint64_t loaded = 0, hits = 0, misses = 0, invalidated = 0;
         uint64_t shapes = 0, matched = 0, fellback = 0;
         uint64_t tuned = 0, skipped = 0, attempts = 0, tunedShapes = 0;
+        uint64_t unrecorded = 0;
     };
 
     Counters counters()
     {
-        uint64_t     v[11] = {};
-        const size_t known = hipblaslt_tuning_stats_for_test(v, 11);
-        EXPECT_GE(known, 11u) << "the library reports fewer tallies than this reads";
+        uint64_t     v[12] = {};
+        const size_t known = hipblaslt_tuning_stats_for_test(v, 12);
+        EXPECT_GE(known, 12u) << "the library reports fewer tallies than this reads";
 
         Counters c;
         c.loaded      = v[0];
@@ -100,6 +101,7 @@ namespace
         c.skipped     = v[8];
         c.attempts    = v[9];
         c.tunedShapes = v[10];
+        c.unrecorded  = v[11];
         return c;
     }
 
@@ -2367,4 +2369,54 @@ namespace
             << output;
     }
 
+    // A winner that cannot be recorded must not fail the matmul that measured
+    // it, must not go unnoticed, and must not report itself once per shape.
+    //
+    // The injected failure stands in for the handler's real reach: a throw out
+    // of the writer, the override map, the counters or the logger. The ordinary
+    // I/O failures are not here because they do not throw -- a read-only path
+    // or a full disk returns false from the writer and the winner's own line
+    // names the path.
+    TEST_F(TuningOnline_pre_checkin, AWinnerThatCannotBeRecordedIsCountedAndReportedOnce)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "a logging variable is set, so the notices do not reach std::cerr";
+
+        OnlineProblem problem(/*pointerArray=*/false);
+        ASSERT_TRUE(problem.create());
+
+        if(problem.distinctCandidates(kOnlineTopK) < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        enterOnline(m_path);
+        hipblaslt_tuning_inject_failure_for_test(5); // TuningFailureStage::OnlineRecord
+
+        std::string output;
+        {
+            CerrCapture capture;
+
+            // Every dispatch still has to succeed: the whole point of swallowing
+            // the failure is that a user's GEMM does not fail because an
+            // optimisation for the next process did not work out. runToResolution
+            // fails the case if any of them does not.
+            runToResolution(problem);
+
+            // Twice, so one failure reported once is distinguishable from one
+            // reported per shape.
+            hipblaslt_tuning_forget_shapes_for_test();
+            runToResolution(problem);
+
+            output = capture.str();
+        }
+
+        const Counters after = counters();
+        EXPECT_EQ(after.unrecorded, 2u)
+            << "a winner that could not be recorded left no trace in the tallies";
+        EXPECT_EQ(after.tuned, 0u) << "a winner that was not recorded was counted as recorded";
+        EXPECT_EQ(valueRowCount(m_path), 0u);
+
+        EXPECT_EQ(countOccurrences(output, "online-winner not recorded"), 1u)
+            << "the write failure was reported more than once, or not at all:\n"
+            << output;
+    }
 } // namespace

@@ -4550,6 +4550,12 @@ namespace
         Enumeration        = 2,
         MidSearch          = 3,
         TruncateAfterFirst = 4,
+
+        // Not a tune stage: makes recording an online winner throw, which is
+        // the one failure the handler there cannot reach any other way. The
+        // ordinary I/O failures do not throw -- appendTuningRow returns false
+        // and the winner line reports it with the path.
+        OnlineRecord = 5,
     };
 
     std::atomic<int> g_injectedTuningFailure{0};
@@ -6821,6 +6827,56 @@ inline void reportNoSolutionFound(TensileLite::ContractionProblemGemm const& ten
 // never evicts, so the tuner keeps answering with the measured winner through
 // the locked path.
 
+// A winner that could not be recorded at all, counted here and explained once.
+//
+// Swallowing the failure is the right call and stays: the only handler above
+// is runContractionProblem's, which would turn a throw into
+// rocblaslt_status_internal_error for a plain hipblasLtMatmul -- a correct
+// GEMM reported as a failure because an optimisation for the next process did
+// not work out. Swallowing it in silence is not: a user whose cache never
+// fills sees tuned=0 and has nothing to read that says why, and a systematic
+// failure looks exactly like the feature working.
+//
+// The counter is the part that is always there, because it is the part that
+// cannot become noise: it is one number in the summary the process already
+// prints at exit, beside the `tuned` it explains, and it reads the same
+// whether one shape failed or a hundred thousand did. A per-shape line cannot
+// say that -- the failures that matter most are the persistent ones, a
+// read-only directory or a logger that throws, and those fail on every shape.
+//
+// So the line is emitted once and never again. It carries what the count
+// cannot: which exception, and which path was being written. Together they
+// answer both halves -- how widespread, and what went wrong -- without either
+// one being able to spam.
+//
+// what may be null for a throw that is not a std::exception. Nothing in here
+// may throw: this runs in an exception handler whose whole purpose is that
+// nothing escapes it.
+inline void noteUnrecordedOnlineWinner(const char* what)
+{
+    TensileLite::TuningCounters::instance().unrecorded++;
+
+    static std::atomic<bool> reported{false};
+    if(reported.exchange(true))
+        return;
+
+    try
+    {
+        std::ostringstream msg;
+        msg << "online-winner not recorded: "
+            << (what ? what : "an exception carrying no description")
+            << "; the winner is used for the rest of this process, but nothing was written to "
+            << TensileLite::TuningModeSingleton::getInstance().cachePath()
+            << ". Reported once; the summary's unrecorded= counts them all";
+
+        log_tuning_lifecycle("recordOnlineTuningWinner", msg.str());
+    }
+    catch(...)
+    {
+        // The diagnostic for a failure to record is not worth a second one.
+    }
+}
+
 inline void recordOnlineTuningWinner(const RocblasltContractionProblem&          prob,
                                      const rocblaslt::OnlineTuner::PinnedWinner& winner,
                                      double                                      winnerTimeUs)
@@ -6837,6 +6893,9 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
     // handler would turn that into an internal error.
     try
     {
+        if(tuningFailureInjected(TuningFailureStage::OnlineRecord))
+            throw std::runtime_error("injected online-record failure");
+
         TensileLite::TunedEntry entry;
         entry.solutionIndex = winner.m_solution->index;
 
@@ -6920,8 +6979,13 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
             log_tuning_lifecycle(__func__, msg.str());
         }
     }
+    catch(const std::exception& e)
+    {
+        noteUnrecordedOnlineWinner(e.what());
+    }
     catch(...)
     {
+        noteUnrecordedOnlineWinner(nullptr);
     }
 }
 
