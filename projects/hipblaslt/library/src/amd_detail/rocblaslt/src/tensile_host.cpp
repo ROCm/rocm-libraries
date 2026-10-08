@@ -7474,6 +7474,36 @@ inline void promoteOnlineTuningCandidate(
 //
 // Empty on anything less than that, which leaves the caller to fetch and to
 // answer the way it always has.
+//
+// KNOWN CAVEAT, MEASURED. That last sentence is the whole cost of the merged
+// key, and it is a stated limit rather than a defect: a problem the key covers
+// but that is not the one the record names never reaches this shortcut, and
+// pays more per dispatch than it would with the tuner switched off. Timing
+// this whole lookup over a long steady-state run, differenced against a
+// shorter one so the cold start cancels, shows the problem that owns the
+// record answered several times faster than with the tuner off, and every
+// sibling -- one differing only in workspace size, one with another epilogue,
+// two alternating -- paying a similar extra amount per dispatch, about as
+// much as the owner saves. That is a small fraction of a small GEMM's own
+// time, and less at every larger size. Most of it is the problem hash that
+// has to be computed to learn this caller is not the one named, and
+// promoteResolvedOnlineTuningWinner with the resize back to the caller's
+// depth; the rest is key, table lookup and extra fetch depth.
+//
+// It is NOT the position hint. Two problems under one key get the same ranking
+// by construction -- onlineTuningProblemKey() hashes what the ranking model
+// ranks on and nothing else -- so the winner sits at the same index for all of
+// them and the hint, written once during exploration, hits from then on. Over
+// the same run the full promote path ran only a few dozen times in every
+// sibling arm, exploration included. Siblings can only shift each other's
+// hint where one of them cannot afford a candidate ranked above the winner,
+// so the workspace filter drops it and renumbers what is left.
+//
+// Removing that extra cost means a record per problem identity rather than per
+// resolution key, which is a second lock-free table and a separation of "the
+// problem a cache row is written under" from "the problem this answer is for".
+// That is a design change, not a fix, and wants a workload that shows merged
+// siblings are both common and hot before it is worth the surface.
 inline std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     resolvedOnlineTuningAnswer(const TensileLite::ContractionProblemGemm& tensile_prob,
                                const rocblaslt::OnlineTuner::Resolution&  resolved,
