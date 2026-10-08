@@ -458,6 +458,10 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         if self.causal_bottom_right:
             raise ValueError(
                 "gfx942 attention_dense: causal_bottom_right not yet supported"

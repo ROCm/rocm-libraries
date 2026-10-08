@@ -243,6 +243,10 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         if self.lds_v_row_pad < 0 or self.lds_v_row_pad % 8 != 0:
             raise ValueError(
                 "lds_v_row_pad must be a non-negative multiple of 8 bf16 "

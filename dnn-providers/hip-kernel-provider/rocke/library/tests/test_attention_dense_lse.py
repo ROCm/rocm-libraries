@@ -31,6 +31,23 @@ def _spec(arch):
 
 
 @pytest.mark.parametrize("arch", sorted(_RUNNERS))
+@pytest.mark.parametrize("bad_emit_lse", ["false", 0, 1, None])
+def test_direct_spec_rejects_non_boolean_emit_lse(arch, bad_emit_lse):
+    spec_type, _ = _RUNNERS[arch]
+    with pytest.raises(ValueError, match="emit_lse must be a bool"):
+        spec_type(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=128,
+            dtype="bf16",
+            emit_lse=bad_emit_lse,
+        )
+
+
+@pytest.mark.parametrize("arch", sorted(_RUNNERS))
 def test_missing_lse_output_rejected_before_input_access(arch):
     """Presence validation must fail before compilation or dereferencing inputs."""
     with pytest.raises(ValueError):
