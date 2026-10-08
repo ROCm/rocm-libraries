@@ -14,11 +14,9 @@ from Tensile import __file__ as tensile_file
 pytestmark = pytest.mark.unit
 
 
-@pytest.mark.parametrize("feature", ["store_remap", "subtile"])
+@pytest.mark.parametrize("feature", ["store_remap", "single_wave"])
 def test_persistent_tdm_constant_operands_assemble(tmp_path, feature):
-    source = ("Tests/common/streamk/gfx1250/data_parallel_cluster_multicast_boundaries.yaml"
-              if feature == "store_remap" else
-              "Tests/common/streamk/gfx1250/core/sk_bf16gemm_tdm_subtile.yaml")
+    source = "Tests/common/streamk/gfx1250/data_parallel_cluster_multicast_boundaries.yaml"
     config = yaml.safe_load((Path(tensile_file).parent / source).read_text())
     config["BenchmarkProblems"] = config["BenchmarkProblems"][:1]
     group = config["BenchmarkProblems"][0][1]
@@ -30,8 +28,12 @@ def test_persistent_tdm_constant_operands_assemble(tmp_path, feature):
     if feature == "store_remap":
         # Whole-tile stores have no runtime GSULog2BpeD register.
         values["StoreRemapVectorWidth"] = [4]
-    # Unstaggered TDM increments can be constants. Assembling the subtile
-    # kernel catches an increment incorrectly referenced as an allocated SGPR.
+    else:
+        # A single wave uses A/B increments directly; paired-wave descriptors
+        # carry their own increments and would not catch this regression.
+        values["MatrixInstruction"] = [[16, 16, 32, 1, 1, 1, 1, 1, 1]]
+    # Unstaggered TDM increments can be constants. Assembly must not refer
+    # to an SGPR that was removed when the increment was folded.
     group["ForkParameters"] = [{key: value} for key, value in values.items()]
     path = tmp_path / (feature + ".yaml")
     path.write_text(yaml.safe_dump(config))
