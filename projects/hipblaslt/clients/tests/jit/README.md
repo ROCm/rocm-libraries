@@ -38,7 +38,7 @@ The CTest tests are:
 
 - `jit-cpu`: `jit-source-bundle` and `jit-builder`. A build with
   `HIPBLASLT_ENABLE_JIT=OFF` has `jit-source-bundle` and `jit-disabled`.
-- `jit-gpu`: `jit-publish`, `jit-loader`, `jit-library`,
+- `jit-gpu`: `jit-publish`, `jit-loader`, `jit-launch`, `jit-library`,
   `jit-library-concurrency`, `jit-end-to-end`, `jit-end-to-end-library`,
   `jit-heuristic-off`, `jit-heuristic-fallback` and `jit-heuristic-forced`,
   when `GPU_TARGETS` include an architecture with committed assembly. CTest
@@ -58,6 +58,7 @@ The CTest tests are:
 | `jit-builder` | The comgr builder, without a GPU, building the hand-written HIP kernel `builder_test_kernel.hip` for each committed assembly target, then each assembly file linked with that kernel into one code object; each code object defines its kernels and has the builder's code-object version, and a kernel name it does not define fails the build |
 | `jit-publish` | Builds the device's committed assembly and publishes it into the JIT solution library: `plain` for K=512, and `plain-pair`'s two solutions for K=1024 and K=256. Indices are at least `2^30` |
 | `jit-loader` | Loads that library, finds each published solution and the pre-generated kernel, resolves the kernel from its code object, and finds nothing for a transposed A. An entry whose solutions are not 0 to N-1 is rejected. Launches no kernel |
+| `jit-launch` | Compiles the device's committed `plain` assembly, publishes that code object, retrieves it with `findTopSolutions` and `getSolutionByIndex`, and launches the kernel through the TensileLite solution adapter |
 | `jit-end-to-end` | `plain-pair` replayed and built with comgr. `getJitAlgo` publishes its first solution for K=512 and its second for K=256 as JIT library indices, and each runs through `hipblasLtMatmul` and `hipblaslt_ext::Gemm` with D checked against a host reference. The first lookup is a miss and generation runs. A second lookup in the same process is a hit and generation does not run. A problem neither solution solves is not supported |
 | `jit-end-to-end-library` | `getLibraryAlgos` publishes the first `plain-pair` solution for K=512 and the second for K=256 into a fresh JIT solution library, each as its own entry, and returns two reserved indices, which `getAlgosFromIndex` and `hipblasLtMatmul` run with checked numerics. Each publish is a miss and generation runs. A later query of the same problem in the same process is a hit and generation does not run |
 | `jit-library` | The JIT solution library: cache-key fields and compiler-environment filtering; rejected group- or other-writable, linked and non-directory roots; the stock TensileLite loader reading a published library; exact-size matching with the solution predicates still applied; deduplication, identity reuse, order, count and excluded kernels; mismatched and tampered keys ignored and left untouched; index allocation up to `INT32_MAX` and exhaustion; a library whose publish stopped before the master, the mapping, or the allocator update; a lock released when its process exits; readers reloading after another instance publishes; and a fused GEMM and all-to-all problem rejected by lookup, publication and the ProblemType key without touching the library, even beside a plain solution of the same sizes |

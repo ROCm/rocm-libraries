@@ -147,6 +147,21 @@ target_compile_definitions(hipblaslt-jit-loader-test PRIVATE
 hipblaslt_jit_catch_test(jit-loader jit-gpu hipblaslt-jit-loader-test)
 set_tests_properties(jit-loader PROPERTIES FIXTURES_REQUIRED jit-publish)
 
+# Compiles the committed assembly, publishes it, retrieves it and launches it.
+add_executable(hipblaslt-jit-launch-test
+    launch_test.cpp
+    "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
+    ${hipblaslt_jit_library_sources})
+target_include_directories(hipblaslt-jit-launch-test PRIVATE
+    "${hipblaslt_jit_source}/rocblaslt/src/include")
+target_link_libraries(hipblaslt-jit-launch-test PRIVATE
+    roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} amd_comgr hip::device)
+target_compile_definitions(hipblaslt-jit-launch-test PRIVATE
+    "HIPBLASLT_JIT_DATA=\"${hipblaslt_jit_data}\""
+    "HIPBLASLT_JIT_LAUNCH_LIBRARY=\"${hipblaslt_jit_scratch}/launch-library\""
+    "HIPBLASLT_JIT_LAUNCH_SCRATCH=\"${hipblaslt_jit_scratch}/launch\"")
+hipblaslt_jit_catch_test(jit-launch jit-gpu hipblaslt-jit-launch-test)
+
 # Compiles the JIT solution library directly. It builds the plain entry of the
 # current device's architecture from the committed assembly and loads no code,
 # but TensileLite queries the current device when it reads an entry.
