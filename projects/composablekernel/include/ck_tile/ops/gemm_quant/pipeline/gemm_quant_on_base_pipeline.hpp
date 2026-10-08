@@ -6,6 +6,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_base.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 #include "ck_tile/ops/gemm_quant/pipeline/gemm_aquant_pipeline_ag_bg_cr_base.hpp"
 #include "ck_tile/ops/gemm_quant/pipeline/gemm_bquant_pipeline_ag_bg_cr_base.hpp"
 #include "ck_tile/ops/gemm_quant/pipeline/tile_gemm_quant_traits.hpp"
@@ -201,6 +202,21 @@ struct GemmQuantOnBasePipeline : QuantPipeline
         BasePipeline,
         GemmQuantBasePolicy<typename rebind_policy<BasePipeline, void>::policy, QuantPolicy, QT>>::
         type;
+
+    // GetScaleDramTileWindowSteps only models the non-preshuffled K movement, and the kernel-call
+    // overloads below drop the runtime m / n arguments. Preshuffled quant scales need the
+    // M/N-dependent movement the dedicated CompV3 quant pipelines implement, so reject them here
+    // instead of silently reading the wrong group scales.
+    static_assert(!Problem::Traits::APreshuffleQuant && !Problem::Traits::BPreshuffleQuant,
+                  "GemmQuantOnBasePipeline does not support preshuffled quant scales. Use the "
+                  "dedicated quant CompV3 pipeline for APreshuffleQuant / BPreshuffleQuant.");
+
+    // The Interwave loops of the shared pipelines call the block gemm as
+    // (c, a_window, b_window, a_load_tr, b_load_tr). BlockGemmQuantStreamAdaptor only provides the
+    // (c, a, b) form and hides the inherited overloads, so such a problem would not compile.
+    static_assert(RebasedPipeline::Scheduler != GemmPipelineScheduler::Interwave,
+                  "GemmQuantOnBasePipeline does not support the Interwave scheduler. Use "
+                  "Intrawave, or a dedicated quant pipeline.");
 
     template <typename P>
     using scale_window_path_t = decltype(P::HasScaleWindowPath);
