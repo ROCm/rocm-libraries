@@ -34,15 +34,25 @@ The interfaces are in `library/src/amd_detail/hipblaslt-jit-component.hpp`. An
 `Artifact` is one file of one kind: `Assembly` or `Hip` source, a
 `Relocatable` (compiled and not linked) or an `Executable` (a linked code
 object). A `SourceCodeBundle` is the main kernel, helpers and headers that
-become one solution, with the build inputs: the device's `Target`, the
+become one executable, with the build inputs: the device's `Target`, the
 code-object version and the kernel names the executable must define. It is not
 a TensileLite library entry. `CodeObjectBuilder::build(bundle, kind, out)`
 builds that bundle with comgr into exactly one `Artifact`: an `Executable` for
 `BuildKind::Executable`, or the main kernel alone as a `Relocatable` for
-`BuildKind::Relocatable`, which is how a helper is built. `JitLibrary` writes
-the TensileLite solution record when it publishes the executable. The
-interfaces are for compiled-in implementations and do not establish a stable
-external plugin application binary interface (ABI).
+`BuildKind::Relocatable`, which is how a helper is built. The interfaces are
+for compiled-in implementations and do not establish a stable external plugin
+application binary interface (ABI).
+
+A `TensileliteAssembly` is a TensileLite kernel's `Assembly` with its `Target`
+and the `ContractionSolution`s it implements. `TensileliteAssembly::make`
+assembles the kernel alone into a `Relocatable`, reads the solution state
+TensileLite keeps in `custom.config` of the kernel's `.amdgpu_metadata` from
+that object's metadata note (`code_object::metadataNote`), and builds the
+solution with `TensileLite::solutionFromState`. The kernel name and the
+kernel-argument versions are the solution's; the target is a field because a
+solution states its target only as a hardware predicate. An `Executable` build
+accepts that `Relocatable` as its main kernel and links it without assembling
+again. A HIP main kernel stays a plain `Artifact`.
 
 A `Target` holds the TensileLite `AMDGPU::Processor`, an `Any`, `On` or `Off`
 setting for each of `sramecc` and `xnack`, and the device's ASIC revision.
@@ -85,16 +95,20 @@ code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
 - Assembly: `AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE`. A unit's
   `.amdgcn_target` directive must name the device's processor and only
   features the device has; it is then rewritten to the device's full target
-  ID. Assembly units that declare different wavefront sizes are rejected.
+  ID. Assembly units that declare different wavefront sizes are rejected. An
+  `Executable` build also accepts a main kernel already assembled into a
+  `Relocatable`.
 - HIP source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
   `--rocm-path` and a `-cuid` taken from the source name. A HIP helper
-  compiles to its own `Relocatable`. The helper library stores that
-  relocatable. A hit reuses it. A miss compiles it once and publishes it into
-  the helper library. A bundle's helpers are HIP sources, which an
-  `Executable` build compiles, or relocatables from the helper library, which
-  it links as they are; the build keeps no second cache. comgr's
-  `AMD_COMGR_CACHE` stays comgr's; it cannot be stored in the library. The
-  ROCm path is `HIP_PATH` when set, otherwise the prefix of the loaded HIP
+  compiles to its own `Relocatable`. `JitLibrary::acquireHelper` stores that
+  relocatable as a file in the cache-key directory, named for the helper
+  kernel's symbol, because a source file name such as a TensileLite
+  `Kernels.cpp` can differ per solution. A hit returns it and does not compile.
+  A miss compiles it once and stores it under the publish lock. A bundle's
+  helpers are HIP sources, which an `Executable` build compiles, or
+  relocatables, which it links as they are; the build keeps no second cache.
+  comgr's `AMD_COMGR_CACHE` stays comgr's; it cannot be stored in the library.
+  The ROCm path is `HIP_PATH` when set, otherwise the prefix of the loaded HIP
   runtime.
 - Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` links the main kernel
   and its helpers into one `Executable`, with `-Xlinker --build-id=sha1`. The
@@ -119,22 +133,28 @@ file in the message.
 
 `JitLibrary` in `hipblaslt-jit-library.{hpp,cpp}` is a TensileLite
 lazy-loading library on disk. Indices start at `2^30` (`jitIndexBase`). Each
-directory holds a master library, an index mapping, one entry file and one
-code object per published solution, all MessagePack, plus `cache-key.msgpack`.
-Directory and entry names are filesystem-safe literals of the device, backend,
-kernel, problem type and sizes. A row matches the solution's problem type and
-its exact sizes. The caller chooses the root directory. Each hipBLASLt build
+slice directory holds a master library, an index mapping, and one entry file
+and one code object per published executable. TensileLite's writer
+(`MessagePackWriteLibraryData` and `MessagePackWriteLibraryMapping`) writes
+them from library objects built in C++. The JIT library's own MessagePack
+documents are `cache-key.msgpack`, the index allocator and the index-to-slice
+map. Directory and entry names are filesystem-safe literals of the device,
+backend, kernels, problem type and sizes. An entry holds every solution
+published with its executable, each under its own index. A master row matches
+a solution's exact sizes and its problem predicate, and selects that
+solution's entry. The caller chooses the root directory. Each hipBLASLt build
 reads and writes only `<root>/v1/<git revision>/`, where the revision is the
 value `hipblasLtGetGitRevision` reports, so a library never serves kernels that
 another build published. A build without a git revision disables the library.
-An entry this build cannot read fails the lookup instead of being skipped. Publishing
-replaces files atomically, in an order that never leaves a reference to a
-missing file. A backend contributes one `SourceCodeBundle`. `publish` takes the
-executable built from it, its TensileLite record and the local indices of the
-record's solutions to add, and adds them to the library, which holds many.
-`readTensileSourceBundle`
-reads a source directory into a `SourceCodeBundle` and the kernel name. The
-tests publish and load the JIT solution library.
+An entry this build cannot read fails the lookup instead of being skipped.
+Publishing holds the build directory's file lock and replaces files
+atomically, in an order that never leaves a reference to a missing file, so
+readers take no lock. A backend contributes one `SourceCodeBundle`. `publish`
+takes the executable built from it and the `ContractionSolution`s that support
+the problem, and adds them as one entry. The same kernels, problem type and
+sizes reuse that entry, and a solution already in it keeps its index.
+`readTensileSourceBundle` reads a source directory into a `SourceCodeBundle`
+and the kernel name. The tests publish and load the JIT solution library.
 
 ### Loading a published solution
 
@@ -152,10 +172,10 @@ solution. A predicate check calls it as a local load inside the backend
 function that needs it. That load is not a field of a bundle type and not a
 second library type.
 
-The record's solutions are listed best first, each with its own `Problem` row.
-Their hardware and problem predicates decide which problems each one serves,
-so `findBestSolution` on the loaded library selects the first solution that
-serves a problem, and nothing for a problem none of them was generated for.
+Each solution of an entry has its own `Problem` row. Their hardware and
+problem predicates decide which problems each one serves, so a lookup lists,
+in index order, every solution of a matching entry that serves the problem,
+and nothing for a problem none of them was generated for.
 
 ### Source bundle format
 
@@ -179,10 +199,10 @@ the file count (1024), each file (64 MiB) and the sources in total (256 MiB).
 
 The JIT tests use one kernel, generated for gfx90a, gfx942 and gfx950, in
 `clients/tests/jit/data`, of which only the assembly is committed. The assembly
-records the kernel-argument and persistent-loop argument layout versions of the
-generator that wrote it. `jit-publish` builds that assembly for the current
-device and publishes it into a JIT solution library: `plain` as one solution
-and `plain-pair` as two. `jit-loader` reads that library and resolves the
-pre-generated kernel.
+keeps the kernel's TensileLite solution state in `custom.config`, which
+`TensileliteAssembly::make` reads. `jit-publish` builds that assembly for the
+current device and publishes it into a JIT solution library: `plain` as one
+solution and `plain-pair` as two solutions in one entry. `jit-loader` reads
+that library and finds each solution at its K.
 [The data README](clients/tests/jit/data/README.md) gives the command that
 generated the assembly.
