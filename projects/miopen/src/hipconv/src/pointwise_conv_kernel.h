@@ -13,7 +13,7 @@ public:
 
     std::string_view name() const override { return "pointwise"; }
 
-    hipconv::Algorithm algorithm() const override { return hipconv::Algorithm::Pointwise; }
+    hipconv::Algorithm algorithm() const override { return hipconv::Algorithm::ExplicitGemm; }
 
     bool is_applicable(const hipconv::ConvParams& par) const override
     {
@@ -21,10 +21,12 @@ public:
 
         const bool ok_fp16bf16 =
             (par.input_type == DataType::fp16 || par.input_type == DataType::bf16) &&
-            par.weight_type == par.input_type &&
-            (par.direction == Direction::Wgrad ? par.weight_grad_type == DataType::fp32
-                                               : par.output_type == par.input_type);
-        if(!ok_fp16bf16)
+            par.weight_type == par.input_type && par.output_type == par.input_type;
+        const bool ok_tf32 = par.input_type == DataType::tf32 &&
+                             par.weight_type == DataType::tf32 && par.output_type == DataType::fp32;
+        if(!ok_fp16bf16 && !ok_tf32)
+            return false;
+        if(par.direction == Direction::Wgrad && par.weight_grad_type != DataType::fp32)
             return false;
         if(par.order != TensorOrder::NHWC)
             return false;
