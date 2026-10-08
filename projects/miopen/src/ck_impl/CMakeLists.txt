@@ -13,10 +13,16 @@ if(NOT MIOPEN_USE_COMPOSABLEKERNEL)
 endif()
 
 # MIOPEN_CK_PLUGIN_TARGETS (top-level CMakeLists.txt) holds the full target ids that get a
-# plugin, one per base arch.
+# plugin, one per base arch; MIOPEN_CK_SELECTED_TARGETS is the selection before targets
+# without a CK library were dropped.
 if(NOT MIOPEN_CK_PLUGIN_TARGETS)
-    message(STATUS "MIOpen CK: no supported GPU targets found in GPU_TARGETS; "
-                   "skipping CK grouped conv library build.")
+    if(MIOPEN_CK_SELECTED_TARGETS)
+        message(STATUS "MIOpen CK: no CK library for any selected GPU target; "
+                       "skipping CK grouped conv library build.")
+    else()
+        message(STATUS "MIOpen CK: no supported GPU targets found in GPU_TARGETS; "
+                       "skipping CK grouped conv library build.")
+    endif()
     return()
 endif()
 

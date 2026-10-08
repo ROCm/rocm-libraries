@@ -414,9 +414,9 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
     # taken from GPU_TARGETS, restricted to the base archs MIOpen has CK grouped conv kernels
     # for. Shared by the CK component request, the unbundle step and src/ck_impl so all three
     # agree on the target set.
-    # Note: this is narrower than CK's own supported arch list - e.g. gfx103x and gfx11x are
-    # CK-capable but MIOpen does not yet provide CK grouped conv kernels for them. Add arches
-    # here when MIOpen adds grouped conv support for them.
+    # Note: this is narrower than CK's own supported arch list - e.g. gfx103x is CK-capable
+    # but MIOpen does not yet provide CK grouped conv kernels for it. Add arches here when
+    # MIOpen adds grouped conv support for them.
     function(miopen_ck_plugin_targets OUT_VAR)
         set(_supported_archs
             gfx908 gfx90a gfx942 gfx950
@@ -443,10 +443,12 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
     # (device_conv_operations_<arch_safe>), OFF when only the unified device_conv_operations
     # exists (older or full CK installs).
     set(MIOPEN_CK_PLUGIN_TARGETS)
+    set(MIOPEN_CK_SELECTED_TARGETS)
     set(MIOPEN_CK_PER_TARGET OFF)
 
     if(MIOPEN_USE_COMPOSABLEKERNEL)
         miopen_ck_plugin_targets(MIOPEN_CK_PLUGIN_TARGETS)
+        set(MIOPEN_CK_SELECTED_TARGETS "${MIOPEN_CK_PLUGIN_TARGETS}")
 
         if(MIOPEN_BUILD_CK)
             include(cmake/Dependencies.cmake)
@@ -466,9 +468,9 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
         else()
             # CK installs that carry per-target conv libraries list each one as a component;
             # older and full installs only have the unified device_conv_operations. The
-            # component list is read from the CK package config itself because
-            # composable_kernel_DIR does not point at the CK install when the package is
-            # reached through a trampoline config (TheRock).
+            # component list comes from the CK package config so detection works however the
+            # package was located: composable_kernel_DIR is not the CK install dir under
+            # TheRock's trampoline or a CMAKE_FIND_PACKAGE_REDIRECTS_DIR redirect.
             find_package(composable_kernel 1.0.0)
             set(_ck_installed_per_target)
             if(composable_kernel_FOUND)
@@ -477,8 +479,8 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
             endif()
             if(_ck_installed_per_target)
                 set(MIOPEN_CK_PER_TARGET ON)
-            else()
-                find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
+            elseif(composable_kernel_FOUND)
+                find_package(composable_kernel 1.0.0 OPTIONAL_COMPONENTS device_conv_operations)
             endif()
         endif()
 
@@ -511,6 +513,17 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
             if(NOT MIOPEN_BUILD_CK AND _ck_components)
                 find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS ${_ck_components})
             endif()
+        endif()
+
+        # CK found without a conv library, or not found: build and link only what is found.
+        # TARGET is used because Configs older than the component-not-found handling never
+        # set composable_kernel_device_conv_operations_FOUND.
+        if(NOT MIOPEN_BUILD_CK AND NOT MIOPEN_CK_PER_TARGET AND NOT TARGET composable_kernel::device_conv_operations)
+            foreach(_gpu_target IN LISTS MIOPEN_CK_PLUGIN_TARGETS)
+                ck_impl_base_arch("${_gpu_target}" _arch_base)
+                message(WARNING "MIOpen CK: no CK library for ${_gpu_target}; skipping MIOpenCKGroupedConv_${_arch_base}")
+            endforeach()
+            set(MIOPEN_CK_PLUGIN_TARGETS)
         endif()
     endif()
 
