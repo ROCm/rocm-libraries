@@ -5,9 +5,11 @@
 from __future__ import annotations
 
 import ast
+import io
 import inspect
 import sys
 import unittest
+from contextlib import redirect_stdout
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest import mock
@@ -16,11 +18,16 @@ from dispatch.attention import (
     ATTENTION_EXECUTION_REGISTRY,
     AttentionRequest,
     attention_dispatch_result,
+    attention_tuning_spec,
+    tuning_spec_with_knobs,
 )
 from benchmarks.common.attention_flops import attention_flops
 from benchmarks.common import attention_combo_sweep as sweep
 from benchmarks.gfx950.attention.decode import decode_table_sweep
 from benchmarks.gfx950.attention.prefill import dense_prefill_table_sweep
+
+
+_DENSE = "attention_gfx950_dense_persist_widedma"
 
 
 def _req(**kw) -> AttentionRequest:
@@ -53,7 +60,6 @@ def _args(**kw):
         kv_block_size=16,
         sliding_window=0,
         num_cus=0,
-        dense_waves_per_eu=0,
         causal=True,
         candidate_prefix="attention_gfx950_dense",
         tuning_id_prefix="",
@@ -70,9 +76,21 @@ def _args(**kw):
         seed=7,
         tolerance=0.03,
         no_check=False,
+        run_knobs="",
     )
     base.update(kw)
     return SimpleNamespace(**base)
+
+
+def _result(tuning_id="grid_wpe2@0123456789abcdef", knobs=()):
+    return SimpleNamespace(
+        candidate=SimpleNamespace(name="candidate"),
+        spec=SimpleNamespace(tuning_id=tuning_id, knobs=knobs),
+    )
+
+
+def replace_ns(ns: SimpleNamespace, **kw) -> SimpleNamespace:
+    return SimpleNamespace(**{**vars(ns), **kw})
 
 
 class TestComboSweepLifecycle(unittest.TestCase):
@@ -187,25 +205,36 @@ class TestComboSweepLifecycle(unittest.TestCase):
         self.assertEqual(idxs, [1, 2])
 
     def test_isolated_child_keeps_outer_timing_count(self):
-        result = SimpleNamespace(candidate=SimpleNamespace(name="candidate"))
         argv = sweep._child_argv(
             _args(benchmark_iterations=7),
             _req(),
-            result,
+            _result(),
         )
         self.assertEqual(argv[argv.index("--benchmark-iterations") + 1], "7")
 
-    def test_dense_wpe_reaches_request_and_isolated_child(self):
-        args = _args(dense_waves_per_eu=3)
-        req = next(sweep._requests(args))
-        self.assertEqual(req.dense_waves_per_eu, 3)
-        result = SimpleNamespace(candidate=SimpleNamespace(name="candidate"))
-        argv = sweep._child_argv(args, req, result)
-        self.assertEqual(argv[argv.index("--dense-waves-per-eu") + 1], "3")
+    def test_requests_carry_no_tuning_fields(self):
+        """Tuning is a spec/tuning-id choice; the swept request is problem plus
+        selectors only, and the isolated child is handed the recorded id and
+        knobs rather than a pickled spec."""
+        import dataclasses
+        import json
+
+        req = next(sweep._requests(_args()))
+        self.assertFalse(
+            [f.name for f in dataclasses.fields(req) if f.name.startswith("dense_")]
+        )
+        result = _result(knobs=(("pv_priority", 2),))
+        argv = sweep._child_argv(_args(), req, result)
+        self.assertFalse([a for a in argv if a.startswith("--dense")])
+        self.assertNotIn("--run-pickle", argv)
+        self.assertEqual(argv[argv.index("--run-tuning-id") + 1], result.spec.tuning_id)
+        self.assertEqual(
+            json.loads(argv[argv.index("--run-knobs") + 1]), {"pv_priority": 2}
+        )
 
     def test_invalid_host_validation_does_not_isolate_or_init_torch(self):
-        req = _req(algorithm="attention_dense")
-        candidate = ATTENTION_EXECUTION_REGISTRY.get("attention_gfx950_dense")
+        candidate = ATTENTION_EXECUTION_REGISTRY.get(_DENSE)
+        req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
         spec = candidate.select_spec(req)
         result = attention_dispatch_result(req, candidate, spec)
         args = _args()
@@ -244,8 +273,8 @@ class TestComboSweepLifecycle(unittest.TestCase):
         init_torch.assert_not_called()
 
     def test_host_validate_reports_support_failures(self):
-        req = _req(algorithm="attention_dense")
-        candidate = ATTENTION_EXECUTION_REGISTRY.get("attention_gfx950_dense")
+        candidate = ATTENTION_EXECUTION_REGISTRY.get(_DENSE)
+        req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
         spec = candidate.select_spec(req)
         result = attention_dispatch_result(
             replace(req, arch="gfx1250"), candidate, spec
@@ -305,6 +334,45 @@ class TestComboSweepLifecycle(unittest.TestCase):
                     module.main()
                 self.assertEqual(raised.exception.code, 2)
 
+    def test_table_list_combos_unwraps_dense_specs_and_prints_both_tile_knobs(self):
+        candidate = ATTENTION_EXECUTION_REGISTRY.get(_DENSE)
+        req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+        spec = candidate.select_spec(req)
+        common = dict(
+            dtype="bf16",
+            algorithm="auto",
+            candidate_prefix="",
+            tuning_id_prefix="",
+            tuning_sample=0,
+            seed=0,
+            sweep_level="production",
+            kv_block_size=16,
+            batch=0,
+            offset=0,
+            limit=0,
+        )
+        cases = (
+            (dense_prefill_table_sweep, [("model", 32, 8, 128, 1024)]),
+            (decode_table_sweep, [("model", 32, 8, 128, 1024, 16)]),
+        )
+        for module, shapes in cases:
+            with (
+                self.subTest(module=module.__name__),
+                mock.patch.object(module, "_iter_shapes", return_value=shapes),
+                mock.patch.object(
+                    module,
+                    "iter_registered_attention_combos",
+                    return_value=((candidate, spec),),
+                ),
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                self.assertEqual(module.list_combos(SimpleNamespace(**common)), 0)
+            text = stdout.getvalue()
+            self.assertIn(f"bm={spec.kernel_spec.block_m}", text)
+            self.assertIn(f"bn={spec.kernel_spec.block_n}", text)
+            self.assertIn("persist=True", text)
+            self.assertIn("wdma=True", text)
+
     def test_table_sweeps_rewrite_json_after_each_row(self):
         import json
         import tempfile
@@ -322,6 +390,128 @@ class TestComboSweepLifecycle(unittest.TestCase):
                     self.assertEqual(
                         json.loads(Path(path).read_text()), [{"i": 1}, {"i": 2}]
                     )
+
+    def test_rows_record_replayable_knobs(self):
+        """A row's ``knobs`` are the canonical overrides of the default spec,
+        and (request, spec_id, tuning_id, knobs) rebuilds the spec that ran."""
+        import json
+
+        candidate = ATTENTION_EXECUTION_REGISTRY.get(_DENSE)
+        req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+        shipped = candidate.select_spec(req)
+        tuned = tuning_spec_with_knobs(
+            req, candidate.spec_id, {"pv_priority": 2, "o_store_width": 2}
+        )
+        self.assertNotEqual(tuned.tuning_id, shipped.tuning_id)
+        # Wide DMA records its problem-dependent default tile.
+        recorded = {"block_m": 256}
+        self.assertEqual(
+            sweep._row_skeleton(req, candidate, shipped, 0)["knobs"], recorded
+        )
+        row = sweep._row_skeleton(req, candidate, tuned, 0)
+        self.assertEqual(
+            row["knobs"], {**recorded, "pv_priority": 2, "o_store_width": 2}
+        )
+        stored = json.loads(json.dumps(row))
+        replayed = attention_tuning_spec(
+            req, stored["spec_id"], stored["tuning_id"], knobs=stored["knobs"]
+        )
+        self.assertEqual(replayed, tuned)
+        # The row also carries what the replay must rebuild.
+        self.assertEqual(
+            stored["spec_hash"],
+            attention_dispatch_result(req, candidate, replayed).kernel_id.spec_hash,
+        )
+        self.assertEqual(sweep._spec_knobs(SimpleNamespace(tuning_id="t@abc")), {})
+
+    def test_run_spec_key_replays_a_full_level_sample(self):
+        from dispatch.attention import iter_registered_attention_combos
+
+        name = "attention_gfx950_dense_grid"
+        args = _args(
+            candidate_prefix=name,
+            sweep_level="full",
+            tuning_sample=4,
+            run_candidate=name,
+            run_tuning_id="",
+        )
+        req = next(sweep._requests(args))
+        offered = [
+            spec
+            for _c, spec in iter_registered_attention_combos(
+                req,
+                candidate_prefix=name,
+                tuning_sample=args.tuning_sample,
+                seed=args.seed,
+                sweep_level=args.sweep_level,
+            )
+        ]
+        self.assertEqual(len(offered), 4)
+        wanted = offered[-1]
+        args.run_spec_key = wanted.tuning_id
+        _req_out, result = sweep._resolve_pinned(args)
+        self.assertEqual(result.spec, wanted)
+        with self.assertRaisesRegex(ValueError, "--sweep-level production"):
+            sweep._resolve_pinned(replace_ns(args, sweep_level="production"))
+        # A bare id still resolves, by searching the space.
+        args.run_spec_key = ""
+        args.run_tuning_id = wanted.tuning_id
+        _req_out, result = sweep._resolve_pinned(args)
+        self.assertEqual(result.spec, wanted)
+        # With its recorded knobs it is rebuilt directly, at any sweep level.
+        import json
+
+        args = replace_ns(
+            args, sweep_level="production", run_knobs=json.dumps(dict(wanted.knobs))
+        )
+        _req_out, result = sweep._resolve_pinned(args)
+        self.assertEqual(result.spec, wanted)
+
+    def test_dense_table_sweep_window_is_per_shape_and_absolute(self):
+        windowed = dense_prefill_table_sweep._windowed
+        args = SimpleNamespace(offset=1, limit=2)
+        self.assertEqual(list(windowed(range(5), args)), [(1, 1), (2, 2)])
+        self.assertEqual(
+            list(windowed(range(5), SimpleNamespace(offset=3, limit=0))),
+            [(3, 3), (4, 4)],
+        )
+        self.assertEqual(list(windowed((), args)), [(0, None)])
+        # Past the end of a non-empty shape is an empty window, not unsupported.
+        self.assertEqual(
+            list(windowed(range(2), SimpleNamespace(offset=5, limit=0))), []
+        )
+
+    def test_dense_table_sweep_skips_lowered_ir_duplicates(self):
+        candidate = ATTENTION_EXECUTION_REGISTRY.get(_DENSE)
+        req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+        shipped = candidate.select_spec(req)
+        tuned = tuning_spec_with_knobs(req, candidate.spec_id, {"pv_priority": 2})
+        results = [
+            attention_dispatch_result(req, candidate, shipped),
+            attention_dispatch_result(req, candidate, tuned),
+        ]
+        rows: list[dict] = []
+        shape = {"model": "m", "seqlen": 1024}
+        args = SimpleNamespace(dedupe=True, output_json="")
+        module = dense_prefill_table_sweep
+        with (
+            mock.patch.object(
+                module, "validate_config", return_value=sweep.Validation(None, "d")
+            ),
+            mock.patch.object(
+                module, "_run_result", return_value={"status": "ok"}
+            ) as run,
+        ):
+            first_by_ir: dict = {}
+            for index, result in enumerate(results):
+                module._sweep_one(
+                    req, result, index, shape, first_by_ir, rows, None, args
+                )
+        run.assert_called_once()
+        self.assertEqual([r["status"] for r in rows], ["ok", "duplicate"])
+        self.assertIn(shipped.tuning_id, rows[1]["reason"])
+        self.assertEqual(rows[1]["knobs"].get("pv_priority"), 2)
+        self.assertEqual(module._rows_exit_code(rows), 0)
 
     def test_table_sweeps_fail_only_for_admitted_execution_failures(self):
         for module in (dense_prefill_table_sweep, decode_table_sweep):

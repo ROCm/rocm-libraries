@@ -211,3 +211,29 @@ rocke_status_t rocke_conv_problem_short(const rocke_conv_problem_t* p,
     }
     return ROCKE_OK;
 }
+
+bool rocke_conv_coalesced_load_ok(const char* operand,
+                                  int tile_rows,
+                                  int tile_cols,
+                                  int block_size,
+                                  int load_vec,
+                                  char* reason,
+                                  size_t reason_cap)
+{
+    /* Python: chunks = (tile_rows * tile_cols) // load_vec
+     *         if chunks % block_size: return f"{operand} load: ..." */
+    const int chunks = load_vec > 0 ? (tile_rows * tile_cols) / load_vec : 0;
+    if(block_size > 0 && load_vec > 0 && chunks % block_size == 0)
+        return true;
+    if(reason != NULL && reason_cap > 0)
+        snprintf(reason,
+                 reason_cap,
+                 "%s load: tile %dx%d / %d = %d not divisible by block_size %d",
+                 operand,
+                 tile_rows,
+                 tile_cols,
+                 load_vec,
+                 chunks,
+                 block_size);
+    return false;
+}

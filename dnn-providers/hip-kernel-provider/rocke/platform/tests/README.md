@@ -25,6 +25,13 @@ python tools/check_byte_identity.py   # build engine fresh + byte-identity gate 
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
 across layers without `__init__.py`.
 
+On Linux, `test_compiler_detection_native.py` compiles its wrapper and fake COMGR
+libraries from stdin and links the production `librocke_core.a`. Installed tests
+carry that archive beside the test module, including in the test artifact. Source
+runs build it in pytest's temporary directory, or use a matching fresh archive
+specified by `ROCKE_TEST_ENGINE_ARCHIVE`. These fixtures require C/C++ compilers;
+source builds also require CMake. They do not need a GPU or private source headers.
+
 See [the pre-merge testing strategy](../../TESTING.md#51-before-merging-source-backends-and-installed-ci)
 for the required source backend matrix and installed CI replay procedure.
 
@@ -131,3 +138,29 @@ An explicit `ROCKE_STORAGE_TEST` overrides discovery and must name an existing
 executable; it does not skip the configured build. With no configured build or
 explicit override, the runner reports native storage parity as skipped; direct
 pytest invocations can use the same override.
+
+## Installed pinned-reference suites
+
+These suites are registered by platform CMake for the installed provider, with
+library tests staged under `tests/library/tests/`. They use NumPy and ROCm in an
+environment without Torch; they do not invoke the offline CPU oracles.
+
+| CTest entry | Scope | Registration |
+|---|---|---|
+| `rocke_reference_common_pytest` | Shared artifact integrity and worker import isolation | Host suite; independent of bundles |
+| `rocke_sdpa_reference_unit_pytest` | SDPA numerical contract and qualification guards | Host suite; independent of bundles |
+| `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
+| `rocke_sdpa_gpu_gfx942_pytest` | Eight gfx942 numerical cases and three failure checks | When the SDPA bundle is installed |
+| `rocke_conv_gpu_gfx942_pytest` | Twelve gfx942 forward cases and three failure checks | When the convolution bundle is installed |
+
+`ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of all published
+operation/architecture pairs. SDPA/gfx942 and convolution/gfx942 are published
+and installed by default for provider builds. Local source/lock overrides
+select replacement candidates. Each operation
+and architecture retains a separate archive, lock, and installed payload.
+
+The optional `conv_reference/check_torch_reference.py` is an explicit offline
+oracle audit. It is excluded from installation and normal pytest discovery.
+See [the installed reference procedure](../../TESTING.md#running-installed-reference-tests-without-torch)
+and the [convolution guide](../../docs/conv-test-reference.md) for commands,
+publication requirements, and coverage limits.

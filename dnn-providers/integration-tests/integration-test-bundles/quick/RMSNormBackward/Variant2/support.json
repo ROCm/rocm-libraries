@@ -85,13 +85,29 @@
           "2_3_4_4_fp32_nhwc_fcfc7a"
         ],
         "support": {
-          "gfx1151": [
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
             "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
           ],
           "gfx90a": [
             "linux"
           ],
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }

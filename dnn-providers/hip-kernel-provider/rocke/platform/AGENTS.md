@@ -365,6 +365,49 @@ python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_trace.
   unavailable, and ISA-only analysis, see
   `dsl_docs/optimization/utilities/skills/capture-kernel-trace-rocke.md`.
 
+## Tiling primitives (`helpers/tiling/`)
+
+A human-approachable, ND tiling + MMA primitives layer (`import rocke.helpers.tiling`). Reach for
+it on **tiling problems**: MMA/GEMM-shaped kernels, wave-tile subtiling, custom thread/register
+distributions, ragged/partial tiles (clipping), interleaved vs canonical operand layouts, and
+target-agnostic MMA authoring — where you'd otherwise hand-write raw `TileDistributionEncoding`
+integers.
+
+**Before writing tiling code, read the docs** (they are the source of truth for what exists and
+how to drive it):
+- `helpers/tiling/docs/tiling_api_surface.md` — the **how-to-use catalog**: every surface, its
+  default (MMA-driven) mode AND its manual override, a composability matrix, and runnable examples.
+  Read this first to decide whether the problem is solvable with what's built.
+- `helpers/tiling/docs/tiling_api_contract.md` — the **contract / why**: the audience tiers
+  (front door / toolbox / machinery), the glass-box principles, and how a custom override is
+  validated identically to a derived one.
+- `helpers/tiling/docs/tiling_interleaving_design.md` — the **interleaved-layout SOT**: the recipe,
+  which atoms interleave (every dense square atom; the proof sweep is the census), and the
+  `InterleavedStyle` API.
+
+**Workflow for a tiling problem:**
+1. Read the API surface + contract docs; map the problem onto the built surface (dense MMA GEMM,
+   wave-tile subtiling with `order`, clipping/bounds, canonical vs interleaved operand layout,
+   arbitrary distributions via `make_tile_desc`, RCR + other data layouts). If a needed feature is
+   only `RESERVED`/`PLANNED` in the composability matrix, say so rather than inventing it.
+2. Author with the front door: `TileMma` resolves the intrinsic and **processes the whole wave tile
+   (owns the M×N×K subtile grid + iteration + `order`)**, taking an optional `style=` (default
+   `CanonicalStyle`; `InterleavedStyle` for the wide-coalesced interleaved layout);
+   `make_tensor_desc`/`make_window` give ptr-free memory + auto-clipping; `make_fragment` + the
+   b-first verbs `load_fragment` / `store_fragment` / `fill_fragment` move data; `make_tile_desc(...)`
+   authors any custom distribution as a quantity-major geometric table (no raw encoding integers).
+3. **Turn knobs / customize freely:** atom selection (shape tuple or intrinsic name), wave-tile
+   size, subtile `order`, operand `style=`, dtypes, target, clip bounds, and fully custom
+   distributions — all are data, composable per the matrix. The recorder + the `analysis/` gates
+   (`verify_lds_roundtrip` / `verify_mma_soundness`) verify a recorded kernel; reflection
+   (`describe`, `render_forward_map`, `render_inverse_map`) shows what any default resolved to.
+4. Verify against a numpy golden reference (the demos are the template; torch is not used).
+
+Tests: `PYTHONPATH=platform/python <venv>/python -m pytest platform/python/rocke/tests/helpers/tiling/ -q`.
+Demos live under `helpers/tiling/kernels/` (e.g. `tiling_gemm_interleaved_demo.py`,
+`tiling_gemm_manual_demo.py`). Built + bit-exact on gfx90a today; interleaved layouts are BUILT for
+dense square atoms (`InterleavedStyle`); `c_transpose`, sparse, and MX remain reserved/planned seams.
+
 ## helpers/ placement
 
 **Default:** new kernel logic goes in `instances/`. Promote to `helpers/` only when
