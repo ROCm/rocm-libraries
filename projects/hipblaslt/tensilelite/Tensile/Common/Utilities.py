@@ -63,13 +63,21 @@ def isSubtileMultiDU(kernel) -> bool:
 def plsinEarlyStoreTile(kernel) -> bool:
     """Whether this tile's fused arm may carry early-store work at all.
 
-    A property of the tile alone, so the knobs that reshape the fused epilogue
-    can all be scoped the same way and a tile that can never benefit keeps its
-    shipped schedule and its paired dwordx4 byte-for-byte.
+    A property of the tile alone. Today its only caller is plsinBlockSchedTile,
+    which narrows it further to the MT256x256 equality, so this bound decides
+    nothing by itself; it is kept separate because the two carry different
+    arguments. The equality there is a scope limit -- MT256x256 is the only
+    geometry block scheduling has been measured on -- whereas the bound here is
+    a register-budget fact about the tile, and collapsing them would read as one
+    arbitrary constant instead of two reasons.
 
-    Excludes MT>256x256, which lends its K=0 operand registers to the store (it
-    needs 284 VGPRs against a 256 cap without them); any store moved earlier
-    would run while those registers are still being read.
+    Note this is narrower than PLSIN itself: MT>256x256 still resolves
+    PostLoopStoreInNll True, through the largeTileLend arm of
+    assignPostLoopStoreInNll. What it cannot take is an *early* store. It lends
+    its K=0 operand registers to the store (it needs 284 VGPRs against a 256 cap
+    without them), so a store moved earlier would run while those registers are
+    still being read; lending keeps every terminal MFMA in-loop instead, which
+    is the weave rather than the early store.
     """
     if not kernel.get("UseSubtileImpl"):
         return False

@@ -44,7 +44,7 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
 from rocisa.functions import scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU, \
-    plsinEarlyStoreTile, isMxf4SubtilePath
+    isMxf4SubtilePath
 from ..Common.DataType import DataType
 from ..Component import GlobalWriteComponents
 from ..Component import Component
