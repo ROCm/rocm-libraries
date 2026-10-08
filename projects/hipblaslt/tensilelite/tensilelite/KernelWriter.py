@@ -7157,7 +7157,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
                                "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
                                "EnableWaitCntInsertion": enableWaitCntInsertion,
-                               "RegisterAllocation": int(globalParameters.get("StinkyTofuRegisterAllocation", 0)),
+                               "RegisterAllocation": self.stinkyTofuRegisterAllocationMode(kernel),
                                # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
                                "EnableESM2": kernel["EnableStinkyTofuESM2"],
                                "EnableESM2TrackValuVsrc": kernel["EnableESM2TrackValuVsrc"],
@@ -10647,10 +10647,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     pass
 
   def stinkyTofuRegisterAllocationMode(self, kernel) -> int:
-    """Effective scalar allocation mode: 0 off, 1 shadow, 2 apply, 3 force apply,
-    higher clamping to 3, and 0 whenever the StinkyTofu path will not run -- the
-    module is built on the same conditions checked here, so mode 3 guarantees the
-    resolver is reached, which is what makes deferring safe.
+    """Effective scalar allocation mode from the kernel parameter: 0 off, 1 shadow,
+    2 apply, 3 force apply, higher clamping to 3, and 0 whenever the StinkyTofu
+    path will not run -- the module is built on the same conditions checked here,
+    so mode 3 guarantees the resolver is reached, which is what makes deferring safe.
 
     Only mode 3 defers: shadow could not lower a count, and plain apply keeps the
     old accept set, so enabling allocation cannot change which solutions survive.
@@ -10660,7 +10660,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if not rocisa.isSupportedByStinkyTofu(self.states.version):
       return 0
     # TODO: ask whether the backend's capabilities include the allocation passes
-    configured = int(globalParameters.get("StinkyTofuRegisterAllocation", 0))
+    configured = int(kernel.get("StinkyTofuRegisterAllocation", 0))
     return max(0, min(configured, 3))
 
   def deferSgprOverflowForAllocation(self, kernel) -> None:
