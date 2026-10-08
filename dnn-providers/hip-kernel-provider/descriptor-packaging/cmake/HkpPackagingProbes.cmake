@@ -157,8 +157,9 @@ endfunction()
 #   descriptors but compiles each compile path, and each value, once. With UKDS, the probe packs exactly the listed UKDs (by
 #   UKD name): KDPs keeping none of them are left out of the derived root, and
 #   configure fails when a listed name is kept by no KDP shipping for ARCH, except that
-#   a probe whose listed UKDs all ship for ARCH but are removed by this build's filters
-#   (a rocke UKD with rocKE OFF) is skipped with a STATUS line, declaring nothing. The
+#   a probe for which this build's filters (rocKE OFF) remove any listed UKD, or every UKD
+#   shipping for ARCH when none are listed, is skipped whole with a STATUS line,
+#   declaring nothing. The
 #   assertion expects exactly the kept UKDs, each with the provenance of its producer
 #   kind (see hkp_probe_assert.py). Adding a pack under an already probed ARCH needs no
 #   new declaration unless the probe lists UKDS.

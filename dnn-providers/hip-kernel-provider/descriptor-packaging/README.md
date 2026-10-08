@@ -322,9 +322,11 @@ Probes read and pack the root under the same filters the production pack gets. W
 `HIPKERNELPROVIDER_ENABLE_ROCKE=OFF` the `rocKE/` family folder and every `rocke` UKD are
 neither packed nor expected, so a probe covers whatever other kinds the arch carries, and
 an architecture whose only content is rocKE gets no probe. Probes run for every producer
-the build has; none is skipped wholesale. A named probe whose listed `UKDS` all ship for its
-`ARCH` but are removed by those filters is skipped with a STATUS line (derive exit 3); a
-listed name that does not exist, or does not ship for `ARCH`, still fails configure.
+the build has; none is skipped wholesale. A probe that those filters leave with nothing to pack is skipped with a STATUS line
+(derive exit 3): a named probe when any listed `UKDS` entry ships for its `ARCH` but is
+removed (skipped whole, never trimmed), one without `UKDS` when every UKD for `ARCH` is
+removed. A listed name that does not exist, or does not ship for `ARCH`, still fails
+configure.
 
 **What a probe proves**
 

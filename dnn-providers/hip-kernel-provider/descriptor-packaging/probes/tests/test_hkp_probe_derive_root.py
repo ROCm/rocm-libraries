@@ -686,6 +686,50 @@ def test_listed_ukd_missing_for_the_arch_is_an_error_even_when_filtered(tmp_path
     assert r.returncode == 2, r.stderr
 
 
+def test_arch_only_a_disabled_kind_ships_for_is_not_listed_or_derived_as_empty(
+    tmp_path,
+):
+    src = tmp_path / "src"
+    _write_root(
+        src,
+        [_hip("h", arch=["gfx950"]), _rocke("r", arch=["gfx1201"])],
+        kdp_arch=("gfx950", "gfx1201"),
+    )
+    assert _list_arches(src) == ["gfx1201", "gfx950"]
+    assert _list_arches(src, "--disable-kind", "rocke") == ["gfx950"]
+    # Asked anyway, derive reports the filters as the reason rather than writing an
+    # empty probe for configure to reject.
+    r = _derive_filtered(src, tmp_path / "w" / "root", [], "--disable-kind", "rocke")
+    assert r.returncode == 0  # gfx950 keeps h
+    cmd = [sys.executable, str(PROBE_DERIVE), "--from", str(src), "--arch", "gfx1201"]
+    cmd += ["--out", str(tmp_path / "w2" / "root"), "--disable-kind", "rocke"]
+    r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    assert r.returncode == 3, r.stderr
+
+
+def test_listed_mixed_ukds_with_one_filtered_out_skip_the_probe_whole(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_rocke("r"), _hip("h")])
+    r = _derive_filtered(
+        src, tmp_path / "w" / "root", ["h", "r"], "--disable-kind", "rocke"
+    )
+    assert r.returncode == 3, r.stderr
+
+
+def test_excluded_folder_alone_removes_its_ukds_from_the_expectation(tmp_path):
+    src = tmp_path / "src"
+    _write_root(src, [_hip("top")])
+    _write_root(src, [_hip("inside")], kdp_file="rocKE/in.kdp.json")
+    out = tmp_path / "w" / "root"
+    r = _derive_filtered(src, out, [], "--exclude-folder", "rocKE")
+    assert r.returncode == 0, r.stderr
+    expect = json.loads((out.parent / "expect.json").read_text())
+    assert [e["name"] for e in expect] == ["top"]
+    assert _derive_filtered(src, out, []).returncode == 0
+    expect = json.loads((out.parent / "expect.json").read_text())
+    assert sorted(e["name"] for e in expect) == ["inside", "top"]
+
+
 # --- the kinds registry -----------------------------------------------------
 def _tool_module(name):
     sys.path.insert(0, str(PROBE_DERIVE.parent))

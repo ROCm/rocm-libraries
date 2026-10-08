@@ -61,8 +61,10 @@ Standalone UKDs (a `kernelDescriptors` entry that is a bare id) are out of probe
 scope by policy: a KDP that would be trimmed and references one is refused.
 
 Exit code 0 on success. Exit code 3 (EXIT_FILTERED), with a message on stderr, when
-`--ukd` names UKDs that ship for `--arch` but that `--exclude-folder` or `--disable-kind`
-removes: the probe does not apply to this build. Exit code 2, with a `hkp_probe_derive: ...` message on
+`--exclude-folder` or `--disable-kind` leaves nothing to probe that would otherwise ship
+for `--arch`: in default mode, every UKD shipping for it is removed; with `--ukd`, any
+listed UKD is removed (the probe is skipped whole, not trimmed, so it never claims
+coverage it does not give). The probe does not apply to this build. Exit code 2, with a `hkp_probe_derive: ...` message on
 stderr, when the root cannot be derived: the packer's loader rejects the root
 (malformed or unreadable descriptor, dangling reference, UKD arch outside its KDP's),
 a KDP that keeps UKDs (or, in default mode, any KDP shipping for `--arch`) references
@@ -294,18 +296,27 @@ def _plan(src, arch, ukds=None, filters=((), ())):
                 entry["kernel_source"] = u["kernel_source"]
             expect.append(entry)
 
-    if ukds is not None:
-        missing = sorted(wanted - {e["name"] for e in expect})
-        if missing and filters != ((), ()):
+    if filters != ((), ()):
+        # What the filters removed, if that is why there is nothing (listed mode: a
+        # listed UKD) to probe, is not an authoring error.
+        missing = sorted(wanted - {e["name"] for e in expect}) if ukds else ()
+        if missing or (ukds is None and not expect):
             try:
                 _, unfiltered = _plan(src, arch, ukds)
             except DeriveError:
                 unfiltered = []
-            if not set(missing) - {e["name"] for e in unfiltered}:
+            unfiltered_names = {e["name"] for e in unfiltered}
+            if (missing and not set(missing) - unfiltered_names) or (
+                not missing and unfiltered
+            ):
                 raise FilteredOut(
-                    f"--ukd {missing} ship for {arch} but are of a disabled kind or in "
-                    "an excluded folder in this build"
+                    f"{'--ukd ' + str(missing) if missing else 'every UKD'} shipping "
+                    f"for {arch} is of a disabled kind or in an excluded folder in "
+                    "this build"
                 )
+
+    if ukds is not None:
+        missing = sorted(wanted - {e["name"] for e in expect})
         if missing:
             raise DeriveError(
                 f"--ukd {missing} matched no inline UKD shipping for {arch} in a KDP "
@@ -316,9 +327,10 @@ def _plan(src, arch, ukds=None, filters=((), ())):
 
 
 def list_arches(src: Path, filters=((), ())) -> list[str]:
-    """Sorted union of the explicit `arch` entries of every KDP and UKD under `src`
-    that survive `filters`: a KDP whose UKDs are all of a disabled kind, or that sits
-    in an excluded folder, names no arch."""
+    """Sorted explicit `arch` entries of every KDP and UKD under `src` that survive
+    `filters` and that some KDP actually ships for (the packer's `kdp_survives`): an
+    arch only a disabled-kind UKD or an excluded folder carries is not listed, so a
+    probe of a listed arch always has content to pack."""
     flat = _load(src, filters)
     arches = set()
     for kdp in flat.kdps():
@@ -328,7 +340,8 @@ def list_arches(src: Path, filters=((), ())) -> list[str]:
                 arches.update(entry.get("arch") or [])
     for ukd in flat.ukds():
         arches.update(ukd.doc.get("arch") or [])
-    return sorted(arches)
+    kdps = [kdp.doc for kdp in flat.kdps()]
+    return sorted(a for a in arches if any(kdp_survives(k, flat, a) for k in kdps))
 
 
 def _same(dest, content):
