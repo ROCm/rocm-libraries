@@ -15217,6 +15217,9 @@ class KernelWriterAssembly(KernelWriter):
       coord0 = tmpV0+3
       waveCoord1 = tmpV0+4
 
+      # GSU and StreamK parallel reduction carry a runtime byte size.
+      # Whole-tile persistent DP and GSU=0 use the final output type and do
+      # not allocate GSULog2BpeD.
       gwvw = kernel["StoreRemapVectorWidth"]
       ldsPad = max(kernel["StoreRemapVectorWidth"],kernel["MIOutputVectorWidth"])
 
@@ -15246,7 +15249,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VMadU32U24(dst=vgpr(coord0), src0=(kernel["MatrixInstM"]*kernel["MatrixInstBM"]), src1=vgpr(waveCoord0), src2=vgpr(coord0), \
                 comment="coord0 += waveCoord0 * wave M shape(blockM*MiM)"))
 
-      if hasStaticAssignment(kernel) and not isPersistentDataParallel(kernel):
+      if self.sgprBpeList:
         module.add(VAddLShiftLeftU32(
           dst=vgpr(storeRemapLW), \
           src0=vgpr(tmpV0), \
@@ -15258,7 +15261,7 @@ class KernelWriterAssembly(KernelWriter):
           dst=vgpr(storeRemapLW), \
           src0=vgpr(tmpV0), \
           src1=vgpr(coord0), \
-          shiftHex=sgpr("GSULog2BpeD"), \
+          shiftHex=log2(self.states.bpeCexternalGSU1), \
           comment="local write C address"))
 
       module.addSpaceLine()
@@ -15288,7 +15291,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VLShiftLeftB32(dst=vgpr(coord0), shiftHex=hex(log2(gwvw)), src=vgpr(coord0), \
                 comment="lds coord0 offset *= gwvw (each thread hold gwvw element)"))
 
-      if hasStaticAssignment(kernel) and not isPersistentDataParallel(kernel):
+      if self.sgprBpeList:
         module.add(VAddLShiftLeftU32(
                   dst=vgpr(storeRemapLR), \
                   src0=vgpr(tmpV0), \
@@ -15300,7 +15303,7 @@ class KernelWriterAssembly(KernelWriter):
                   dst=vgpr(storeRemapLR), \
                   src0=vgpr(tmpV0), \
                   src1=vgpr(coord0), \
-                  shiftHex=sgpr("GSULog2BpeD"), \
+                  shiftHex=log2(self.states.bpeCexternalGSU1), \
                   comment="local read C address"))
       module.addSpaceLine()
 
