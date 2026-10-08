@@ -338,7 +338,8 @@ endfunction()
 #   serial path. Omitted, the packer sizes its pool against the machine. Roots have
 #   no ordering edge between them, so the generator runs them at once: the test
 #   roots name a small cap so their pools do not multiply, and the product root
-#   omits it because it is the root expected to be large enough to repay a full pool.
+#   omits it because it is the root expected to be large enough to repay a full pool,
+#   unless HIPKERNELPROVIDER_PRODUCT_PACK_JOBS names one.
 #
 #   NAME is the source label written into every descriptor's provenance. NAME, the
 #   absolute SOURCE_ROOT, OUT_ROOT and ARCHES go into a global registry read by
@@ -1140,6 +1141,32 @@ packaging dormant.")
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_resolve_product_pack_jobs(<out_var>)
+#   Declare HIPKERNELPROVIDER_PRODUCT_PACK_JOBS and resolve it to the arguments the
+#   production root is wired with: `PACK_JOBS <n>` when it is set, nothing when it is
+#   empty, so the packer sizes its own pool. Only the production root reads it; the test
+#   roots keep their pinned caps. Anything but empty or a positive integer is fatal here
+#   rather than at pack time, where HKP_PACK_JOBS would reject it mid-build.
+# ---------------------------------------------------------------------------
+function(_hkp_resolve_product_pack_jobs out_var)
+    set(HIPKERNELPROVIDER_PRODUCT_PACK_JOBS "" CACHE STRING
+        "Worker processes the production descriptor pack may spawn (HKP_PACK_JOBS for \
+the production root only). Empty lets the packer size its pool against the machine.")
+
+    set(${out_var} "" PARENT_SCOPE)
+    if("${HIPKERNELPROVIDER_PRODUCT_PACK_JOBS}" STREQUAL "")
+        return()
+    endif()
+    if(NOT HIPKERNELPROVIDER_PRODUCT_PACK_JOBS MATCHES "^[0-9]+$"
+       OR HIPKERNELPROVIDER_PRODUCT_PACK_JOBS LESS 1)
+        message(FATAL_ERROR
+            "hkp: HIPKERNELPROVIDER_PRODUCT_PACK_JOBS must be empty or an integer of 1 "
+            "or more, got '${HIPKERNELPROVIDER_PRODUCT_PACK_JOBS}'.")
+    endif()
+    set(${out_var} PACK_JOBS "${HIPKERNELPROVIDER_PRODUCT_PACK_JOBS}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # _hkp_disabled_families(<out_var>)
 #   The folders of HKP_DESCRIPTOR_FAMILIES whose option is OFF in this build. An entry
 #   that is not `<folder>=<option>`, or whose option is not defined, is a configure error.
@@ -1694,6 +1721,8 @@ function(hkp_add_packaging)
     _hkp_disabled_families(_exclude_folders)
     list(APPEND _root_args EXCLUDE_FOLDERS ${_exclude_folders})
 
+    _hkp_resolve_product_pack_jobs(_product_jobs_args)
+
     # Production descriptors.
     _hkp_wire_root(
         NAME product
@@ -1702,6 +1731,7 @@ function(hkp_add_packaging)
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
+        ${_product_jobs_args}
         ${_root_args})
 
     # Test descriptors, one pack per authored set. The shared root is packed into both
