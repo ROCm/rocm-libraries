@@ -499,12 +499,13 @@ class TestGenerateLogicDataAndSolutionsExtra:
     def test_empty_architecture_name_skipped(self, base_assembler, base_isa_map):
         """Line 808-809: architectureName=="" causes the library to be skipped.
 
-        parseLibraryLogicFile receives 7 positional args (filename, assembler, splitGSU,
-        printSolutionRejectionReason, printIndexAssignmentInfo, isaInfoMap, lazyLibraryLoading).
+        parseLibraryLogicFile receives 8 positional args (filename, assembler, splitGSU,
+        printSolutionRejectionReason, printIndexAssignmentInfo, isaInfoMap, lazyLibraryLoading,
+        archRenames).
         """
         from Tensile.SolutionLibrary import MasterSolutionLibrary as MSL
 
-        def _fake_parse(filename, assembler, splitGSU, psr, piai, isaInfoMap, lazy):
+        def _fake_parse(filename, assembler, splitGSU, psr, piai, isaInfoMap, lazy, archRenames):
             lib = MSL({}, None)
             return (None, "", None, None, None, lib, {})
 
@@ -605,6 +606,7 @@ def _make_run_arguments(logic_path, output_path):
         "DisableAsmComments": False,
         "UseCompression": False,
         "KeepBuildTmp": False,
+        "BuildGfx1250v0": False,
     }
 
 

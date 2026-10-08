@@ -35,8 +35,15 @@ def _ck_state(**over):
     }
     problem_type.update(over.pop("ProblemType", {}))
     state = {
-        "CustomKernel": {"name": "k", "macrotile": [128, 256, 64], "threads": [256, 1, 1]},
-        "StreamK": 0,
+        # Workspace keys mirror the setdefaults getCustomKernelConfig applies.
+        "CustomKernel": {
+            "name": "k", "macrotile": [128, 256, 64], "threads": [256, 1, 1],
+            "workspaceType": "None",
+            "workspaceSizePerElemC": 0,
+            "workspaceSizePerElemBias": 0,
+        },
+        "TileProcessingStrategy": "None",
+        "WorkAssignment": "StaticGrid",
         "StreamKAtomic": 0,
         "GlobalSplitUAlgorithm": "",
         "ProblemType": problem_type,
@@ -66,6 +73,106 @@ def test_assign_custom_kernel_params_basic_derivation():
     assert state["GlobalReadVectorWidthB"] == 1
     assert state["StoreVectorWidth"] == 1
     assert state["_GlobalAccumulation"] is None  # GlobalSplitUAlgorithm == ""
+
+
+def test_assign_custom_kernel_params_unset_macrotile_falls_back_to_logic_file():
+    # Any handwritten kernel without MI fields and without an MTxxx name token
+    # reaches here with macrotile [0, 0, 0]. Taking that zero over the logic-file tile put
+    # a 0 in sizeMapping.macroTile, and getNumTiles() then divided by it.
+    state = _ck_state(MacroTile0=256, MacroTile1=256, DepthU=128)
+    state["CustomKernel"]["macrotile"] = [0, 0, 0]
+    Solution._assignCustomKernelParameters(state)
+
+    assert state["MacroTile0"] == 256
+    assert state["MacroTile1"] == 256
+    assert state["DepthU"] == 128
+    # The C++ runtime reads this block directly, so it must agree with the state.
+    assert state["CustomKernel"]["macrotile"] == [256, 256, 128]
+
+
+def test_assign_custom_kernel_params_macrotile_wins_over_logic_file():
+    # When the kernel does declare a tile it stays authoritative.
+    state = _ck_state(MacroTile0=64, MacroTile1=64, DepthU=16)
+    Solution._assignCustomKernelParameters(state)
+
+    assert [state["MacroTile0"], state["MacroTile1"], state["DepthU"]] == [128, 256, 64]
+
+
+def test_assign_custom_kernel_params_unresolvable_macrotile_raises():
+    # Neither source supplies a tile: fail the build rather than emit a library
+    # that divides by zero at solution-selection time.
+    state = _ck_state()
+    state["CustomKernel"]["macrotile"] = [0, 0, 0]
+    with pytest.raises(RuntimeError, match="no usable MacroTile0"):
+        Solution._assignCustomKernelParameters(state)
+
+
+def test_assign_custom_kernel_params_default_depthu_is_not_a_tile():
+    # Logic files default DepthU to -1; that must not be accepted as a tile.
+    state = _ck_state(MacroTile0=256, MacroTile1=256, DepthU=-1)
+    state["CustomKernel"]["macrotile"] = [0, 0, 0]
+    with pytest.raises(RuntimeError, match="no usable DepthU"):
+        Solution._assignCustomKernelParameters(state)
+
+
+@pytest.mark.parametrize("grid", [
+    ["TilesX", "TilesYGSU", "Batch"],
+    ["TilesXYBatchGSU", "One", "One"],
+])
+def test_assign_custom_kernel_params_split_k_grid_is_accepted(grid):
+    state = _ck_state(
+        GlobalSplitU=16,
+        GlobalSplitUAlgorithm="MultipleBufferSingleKernel",
+        InternalSupportParams={"SupportUserGSU": True},
+    )
+    state["CustomKernel"]["grid"] = grid
+    Solution._assignCustomKernelParameters(state)
+    assert state["_GlobalAccumulation"] == "MultipleBufferSingleKernel"
+    assert state["InternalSupportParams"]["SupportUserGSU"] is True
+
+
+@pytest.mark.parametrize("over", [
+    {"GlobalSplitU": 16},
+    {"GlobalSplitU": -1},  # lets the runtime pick a split above 1
+    # generateCustomCall judges the grid alone, so a persistent kernel with a
+    # tile-count grid has to be rejected here too rather than at launch.
+    {"GlobalSplitU": 16, "TileProcessingStrategy": "StreamK"},
+])
+def test_assign_custom_kernel_params_split_k_without_gsu_grid_raises(over):
+    # A split-K kernel reduces into D only once every GSU slice has arrived, so a
+    # grid without a GSU term would launch one slice and leave D unwritten.
+    state = _ck_state(GlobalSplitUAlgorithm="MultipleBufferSingleKernel", **over)
+    state["CustomKernel"]["grid"] = ["TilesX", "TilesY", "Batch"]
+    with pytest.raises(RuntimeError, match="launches one GSU slice per tile"):
+        Solution._assignCustomKernelParameters(state)
+
+
+@pytest.mark.parametrize("gsu", [1, 0])  # 0: GSU disabled
+def test_assign_custom_kernel_params_grid_without_gsu_term_rejects_user_gsu(gsu):
+    # Such a grid launches one GSU slice per tile, so a runtime GSU override has to
+    # be turned away during solution selection rather than fail at launch.
+    state = _ck_state(GlobalSplitU=gsu, InternalSupportParams={"SupportUserGSU": True})
+    state["CustomKernel"]["grid"] = ["TilesX", "TilesY", "Batch"]
+    Solution._assignCustomKernelParameters(state)
+    assert state["InternalSupportParams"]["SupportUserGSU"] is False
+
+
+@pytest.mark.parametrize("strategy,grid", [
+    ("StreamK", ["StreamKWithBatch", "One", "One"]),
+    ("DataParallel", ["PersistentGrid", "One", "One"]),
+    ("None", ["PersistentNoBatch", "One", "One"]),
+])
+def test_assign_custom_kernel_params_persistent_keeps_user_gsu(strategy, grid):
+    # Persistent kernels distribute work through their own grid, so neither the
+    # GSU check nor the override flag applies to them.
+    state = _ck_state(
+        GlobalSplitU=16,
+        TileProcessingStrategy=strategy,
+        InternalSupportParams={"SupportUserGSU": True},
+    )
+    state["CustomKernel"]["grid"] = grid
+    Solution._assignCustomKernelParameters(state)
+    assert state["InternalSupportParams"]["SupportUserGSU"] is True
 
 
 def test_assign_custom_kernel_params_enable_mi_sets_wave_params():
@@ -100,9 +207,49 @@ def test_assign_custom_kernel_params_direct_to_lds(dtl, expect_a, expect_b):
 
 
 def test_assign_custom_kernel_params_streamk_partials_accumulation():
-    state = _ck_state(StreamK=2, StreamKAtomic=0)
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
     Solution._assignCustomKernelParameters(state)
     assert state["_GlobalAccumulation"] == "PartialsBuffer"
+
+
+def test_assign_custom_kernel_params_derives_streamk_workspace():
+    # Non-atomic Stream-K reduces partial tiles through the workspace, so a
+    # block that declares none must be sized from the compute type.
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceType"] == "StreamKWithReduction"
+    assert state["CustomKernel"]["workspaceSizePerElemC"] == 4
+    assert state["_WorkspaceSizePerElemC"] == 4
+
+
+def test_assign_custom_kernel_params_derives_streamk_workspace_from_compute_type():
+    state = _ck_state(
+        TileProcessingStrategy="StreamK",
+        StreamKAtomic=0,
+        ProblemType={"ComputeDataType": DataType("d"), "DestDataType": DataType("d")},
+    )
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceSizePerElemC"] == 8
+
+
+def test_assign_custom_kernel_params_keeps_declared_workspace():
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
+    state["CustomKernel"]["workspaceType"] = "StreamK"
+    state["CustomKernel"]["workspaceSizePerElemC"] = 2
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceType"] == "StreamK"
+    assert state["CustomKernel"]["workspaceSizePerElemC"] == 2
+
+
+@pytest.mark.parametrize("over", [
+    {},                                # not Stream-K at all
+    {"TileProcessingStrategy": "StreamK", "StreamKAtomic": 1},  # atomic needs no reduction buffer
+])
+def test_assign_custom_kernel_params_no_workspace_without_partials(over):
+    state = _ck_state(**over)
+    Solution._assignCustomKernelParameters(state)
+    assert state["CustomKernel"]["workspaceType"] == "None"
+    assert state["_WorkspaceSizePerElemC"] == 0
 
 
 def test_assign_custom_kernel_params_single_buffer_accumulation():

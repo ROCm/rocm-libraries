@@ -218,7 +218,7 @@
 # name: test_get_fp32_mt_config[(2, 1, 2, 2, 2, False)]
   dict({
     64: dict({
-      'pad': 32,
+      'pad': 16,
       'perBlock': 256,
     }),
     96: dict({
@@ -226,23 +226,23 @@
       'perBlock': 0,
     }),
     128: dict({
-      'pad': 32,
+      'pad': 16,
       'perBlock': 512,
     }),
     192: dict({
-      'pad': 32,
+      'pad': 16,
       'perBlock': 256,
     }),
     256: dict({
-      'pad': 32,
+      'pad': 16,
       'perBlock': 1024,
     }),
     384: dict({
-      'pad': 32,
+      'pad': 16,
       'perBlock': 512,
     }),
     512: dict({
-      'pad': 16,
+      'pad': 8,
       'perBlock': 1024,
     }),
   })

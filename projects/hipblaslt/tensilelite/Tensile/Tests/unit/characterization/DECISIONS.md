@@ -448,3 +448,222 @@ description for the exact before/after counts).
   two tests* — rejected: both are reachable from real call sites, and
   "fixing" the test to assert the buggy behavior would have pinned a real
   regression as if it were intended, exactly what this suite exists to catch.
+
+## D26 — LibraryIO characterization: add-only mutation-kill snapshot cases
+**Decision:** The LibraryIO mutation-hardening slice pins additional *current*
+LibraryIO behavior by appending new syrupy cases to three existing goldens
+(`test_parse_integration_char.ambr`, `test_serializers_char.ambr`,
+`test_writesolutions_char.ambr`); no existing snapshot value is re-recorded.
+**Classification:** category (a) intended behavior capture -- new cases pinning
+previously-unsnapshotted read/write/parse behavior to raise mutation kill power,
+not a change to any pinned behavior. The diffs are insertion-only (+258/-0,
++9/-0, +54/-0) and confined to the LibraryIO node, so no ADR is required (nothing
+behavior-changing or known-wrong is pinned); this registry line is the record.
+The parse_integration additions begin in the mutation infra base and continue
+in this slice.
+**Re-run:** goldens byte-identical on two further no-update runs; `-m unit` green.
+
+## D27 — Solution.py mutation kill: pickle-free `.ambr` derivation golden
+**Decision:** Kill the `Solution.assignDerivedParameters` mutant giant with a
+syrupy `.ambr` full-derived-state golden regenerated from in-tree designed YAML
+configs, committing no pickle. See ADR 0003.
+**Why:** the giant (~18820 mutants across the `depthU`/`adp` families) is only
+observable by asserting the complete derived `_state`; a pickle golden is opaque,
+version-coupled, and undiffable, against the suite's add-only diffable-golden
+discipline. Unlike the LibraryIO add-only cases in D24, this introduces a new
+golden *vehicle* with a non-obvious regeneration mechanism, so it lands with an
+ADR (0003), not just this registry line.
+**Equivalence evidence:** verified kill-equivalent to the interim pickle corpus
+over 8 stratified windows (lines 1567-2857, 684 mutants, 0 per-key exit-code
+divergence). Byte-stability confirmed by two further no-update runs.
+**Harness fixes (not source):** derivation moved out of collection (a
+collection-time try/except was swallowing raising mutants); `_sanitize` now
+recurses into any `Mapping` so `ProblemType` is deep-compared, closing 4
+`MirrorDimsMetadata` mutants a `str()`-only render missed.
+**Regeneration:** on an intentional derivation/config change, rerun with
+`--snapshot-update`, confirm byte-stability with two clean runs, and log the
+regeneration here.
+
+## D28 — Per-file ratchet audit after wave-2 (r8 + HUX crossover)
+**Decision:** Keep the current `develop` floors for the six files flagged in
+review, except for two reproducible increases: raise `Configuration.py` from
+91.18% to 92.53% and `StreamK.py` from 82.18% to 82.24%. Do not import the
+higher floors measured on `users/davidd-amd/mut-v2-coverage` at e69017042cf.
+
+**Evidence:** The local combined report and the uploaded #11967 report agree to
+two decimal places: Configuration 92.53%, segment_interleave 94.41%, Solution
+70.40%, Component 93.49%, GSU 73.72%, and StreamK 82.24%. The gate passes all
+172 files with the existing one-point tolerance. No floor is lowered;
+Solution.py remains at 70.55% even though the current measurement is 0.15 points
+lower.
+
+The e69017042cf report was produced from a different source and test tree. That
+tree has 101 test files absent from this layer, while this layer has 58 other
+test files and 198 modified tests. Relative to that tree, segment_interleave,
+Solution, GSU, and StreamK also changed substantially. The old 99.25%, 100.00%,
+74.58%, 97.20%, 75.86%, and 84.29% values therefore cannot be used as floors for
+this earlier stack layer.
+
+**Classification:** None of the six reported drops is run-to-run measurement
+noise; repeated local and hosted runs reproduce the current values. Configuration
+and Component lost indirect execution supplied by the other test tree.
+segment_interleave, Solution, GSU, and StreamK combine a different test set with
+source growth. Restoring the old floors requires new tests rather than another
+baseline reduction: cover ExpressionEvaluator and reverse-operator branches in
+Configuration, asymmetric aligned layouts in segment_interleave, consolidated
+derived-state cases in Solution, LDS token selection in Component, and focused
+reduction/fixup paths in GSU and StreamK.
+
+## D29 — Remove unstable set-cover basename snapshots
+
+**ADR:** [`adr/0026-remove-setcover-basename-snapshots.md`](adr/0026-remove-setcover-basename-snapshots.md)
+
+**Decision:** Remove the three basename-only set-cover saved-result files.
+Keep the 75 selected configuration cases as bounded generation checks, capture
+derivation rejection reasons, and use focused source patterns where final
+assembly exposes a stable behavior. Superseded by D32, which defines exact
+observables for the bounded sample.
+
+## D30 — Select set-cover problem groups by complete content
+
+**ADR:** [`adr/0024-select-problem-groups-by-content.md`](adr/0024-select-problem-groups-by-content.md)
+
+**Decision:** Replace positional `BenchmarkProblems` indexes with fingerprints
+of complete entries. Superseded by D31 because complete entries include runtime
+problem sizes that do not affect solution generation.
+
+## D31 — Select problem groups by solution-generation inputs
+
+**ADR:** [`adr/0027-select-problem-groups-by-generation-inputs.md`](adr/0027-select-problem-groups-by-generation-inputs.md)
+
+**Decision:** Fingerprint the problem type and generation parameters while
+excluding `BenchmarkFinalParameters`. Use `list_config_fingerprints.py` to list
+the selectors after an intentional generation-input change.
+
+## D32 — Strengthen bounded set-cover observables
+
+**ADR:** [`adr/0028-strengthen-bounded-set-cover-observables.md`](adr/0028-strengthen-bounded-set-cover-observables.md)
+
+**Decision:** Record each selected group's complete fork-permutation count and
+the exact emitter-status multiset for its bounded sample. Remove throwaway
+warm-up emits because canonicalization already removes the known scheduler-state
+difference.
+
+## D33 — Correct the disabled TDMSplit characterization
+
+**ADR:** [`adr/0015-correct-disabled-tdmsplit-test.md`](adr/0015-correct-disabled-tdmsplit-test.md)
+
+**Decision:** Replace the unreachable TDMSplit emission and saved-result checks
+with assertions that normal solution derivation returns no kernels and reports
+`TDMSplit is currently disabled`. The test no longer claims coverage of emitter
+code that product validation prevents it from reaching.
+
+## D34 — Refresh S00-S07 emit results after develop changes
+
+**ADR:** [`adr/0016-refresh-s00-s07-results-after-develop.md`](adr/0016-refresh-s00-s07-results-after-develop.md)
+
+**Decision:** Re-record only the 20 failing S00-S07 saved-result nodes with an
+in-tree `rocisa` build. Every node retains its kernel count and emitter return
+codes; only the content-derived basenames change.
+
+## D35 — Refresh S08-S11 emit results after develop changes
+
+**ADR:** [`adr/0017-refresh-s08-s11-results-after-develop.md`](adr/0017-refresh-s08-s11-results-after-develop.md)
+
+**Decision:** Re-record only the 11 failing S08-S11 saved-result nodes with an
+in-tree `rocisa` build. Every node retains its kernel count and emitter return
+codes; only the content-derived basenames change.
+
+## D36 — Rebaseline coverage after the develop rebase
+
+**ADR:** [`adr/0018-rebaseline-coverage-after-develop.md`](adr/0018-rebaseline-coverage-after-develop.md)
+
+**Decision:** Regenerate the per-file baseline from the green post-rebase unit
+run. The update raises 16 floors, adds 14 current files, removes two entries for
+files deleted by develop, and explicitly lowers the nine reproducibly stale
+floors listed in ADR 0018. The tolerance remains 1 percentage point. Superseded
+by D40, which corrects the reduction count and file classification.
+
+## D37 — Config-driven saved results include emitted assembly
+
+**ADR:** [`adr/0019-pin-config-driven-assembly.md`](adr/0019-pin-config-driven-assembly.md)
+
+**Decision:** Record a SHA-256 digest of the emitted opcode set next to each
+config-driven kernel's name and return code. This makes a change in instruction
+kinds observable while ignoring known register, label, count, and order
+variation. Superseded by D41 after the digest proved compiler-sensitive in the
+shared coverage lane.
+
+## D38 — Reject zero-width MX local reads before code generation
+
+**ADR:** [`adr/0020-reject-zero-width-mx-local-reads.md`](adr/0020-reject-zero-width-mx-local-reads.md)
+
+**Decision:** Reject a WMMA_V3 in-memory-swizzled MX solution during derivation
+when `MatrixInstK // MXBlock` is non-positive or an M-major local read is
+narrower than one scale block. Remove three tests that counted code reached only
+before the previous code-generation exception.
+
+## D39 — Select config problem groups explicitly
+
+**ADR:** [`adr/0021-select-config-problem-groups.md`](adr/0021-select-config-problem-groups.md)
+
+**Decision:** Include a `BenchmarkProblems` index in every set-cover case and
+pass it through the config-driven harness. This records which problem group is
+measured when a shared YAML contains more than one group. Superseded by D42
+because an index still changes meaning when a group is inserted or reordered.
+
+## D40 — Correct and refresh the post-mutation coverage baseline
+
+**ADR:** [`adr/0022-correct-coverage-rebaseline.md`](adr/0022-correct-coverage-rebaseline.md)
+
+**Decision:** Correct ADR 0018's accounting from nine to ten original floor
+reductions and document the omitted `Configuration.py` and `Solution.py`
+changes. This proposed refresh was subsequently superseded by D43; none of its
+floor reductions remain in the rebased branch.
+
+## D41 — Separate code-generation smoke coverage from semantic assertions
+
+**ADR:** [`adr/0023-separate-codegen-smoke-from-semantics.md`](adr/0023-separate-codegen-smoke-from-semantics.md)
+
+**Decision:** Remove the compiler-sensitive opcode-set hash from shared saved
+results and remove basename snapshots from the 75 set-cover cases and 29
+S00-S11 designed smoke cases. These tests require successful generation except
+where an existing emitter failure is allowed. Tests that claim a specific
+emitted behavior use explicit source-pattern assertions; the S11a conversion
+test still detects replacement of `v_cvt_f32_i32`, while cases without a stable
+final-assembly observable remain explicitly labeled generation smoke tests.
+
+## D42 — Select set-cover problem groups by content
+
+**ADR:** [`adr/0024-select-problem-groups-by-content.md`](adr/0024-select-problem-groups-by-content.md)
+
+**Decision:** Identify each selected `BenchmarkProblems` entry by a short
+SHA-256 fingerprint of its complete normalized YAML value. The harness searches
+for that fingerprint instead of assuming a list position, so inserting or
+reordering another group cannot silently redirect a set-cover test.
+
+## D43 — Verify the repaired coverage baseline
+
+**ADR:** [`adr/0025-verify-repaired-coverage-baseline.md`](adr/0025-verify-repaired-coverage-baseline.md)
+
+**Decision:** After reproducing ADR 0022's values with a green pre-rebase
+`coverage-unit` run, rebase the complete stack and retain current `develop`'s
+newer baseline through every conflict. The rebased run passed at 84.14%; use its
+report to raise 38 per-file floors without lowering any, and raise the exact
+whole-project floor from 75% to 82%.
+
+## D44 — Canonical persistent execution policy in generated names and schemas
+
+[ADR 0014](adr/0014-canonical-persistent-policy-names.md) records the intended
+policy-field migration in generated names, derived solution state, parameter
+registries, and serialized defaults. The scoped codegen updates preserve
+fixture membership, kernel counts, and emission return codes. Explicit names
+for prebuilt kernels remain part of the compatibility contract.
+
+## D30 — DataParallel scheduling arguments
+
+[ADR 0015](adr/0015-data-parallel-scheduling-arguments.md) supersedes ADR 0014's
+retained six-word payload for generated DataParallel kernels. Generated DP uses
+two scheduling words and a tile cursor; prebuilt version-zero layouts retain
+their recorded argument contract. ABI, emitted-control-flow, and numerical
+tests carry the evidence for this change.

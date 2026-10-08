@@ -56,8 +56,8 @@ import argparse
 import os
 import sys
 
-from Tensile.Common.Utilities import deriveWaveParams
-from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters
+from .Common.Utilities import deriveWaveParams
+from .Common.ValidParameters import checkParametersAreValid, validParameters
 
 
 FEATURE_FLAGS = [

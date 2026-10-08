@@ -23,21 +23,22 @@
 ################################################################################
 
 from .CustomKernels import getCustomKernelConfig
+from .ExecutionPolicy import normalize_execution_policy_with_defaults
 from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
 from .CustomYamlLoader import load_yaml_stream
-from Tensile import __version__
-from Tensile.Common import printExit, printWarning, print2, \
+from . import __version__
+from .Common import printExit, printWarning, print2, \
                            versionIsCompatible, IsaInfo
-from Tensile.Common.TimingInstrumentation import timing_context
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.SolutionStructs import Solution, ProblemSizes
-from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
-from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
+from .Common.TimingInstrumentation import timing_context
+from .Common.Architectures import gfxToIsa
+from .SolutionStructs import Solution, ProblemSizes
+from .SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
+from .SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
 from typing import IO, NamedTuple, List, Dict, Optional, Any
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, GateTypeArgs
+from .Common.GlobalParameters import defaultSolution
+from .SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, GateTypeArgs
 from copy import deepcopy
 import io
 import os
@@ -114,7 +115,6 @@ try:
     import msgpack
 except ImportError:
     print("Message pack python library not detected. Must use YAML backend instead.")
-
 
 
 ###################
@@ -549,7 +549,8 @@ def parseLibraryLogicFile(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool
+        lazyLibraryLoading: bool,
+        archRenames: Optional[Dict[str, str]] = None,
     ):
     """Wrapper function to read and parse a library logic file."""
     return parseLibraryLogicData(
@@ -560,7 +561,8 @@ def parseLibraryLogicFile(
                printSolutionRejectionReason,
                printIndexAssignmentInfo,
                isaInfoMap,
-               lazyLibraryLoading
+               lazyLibraryLoading,
+               archRenames,
            )
 
 
@@ -597,6 +599,8 @@ def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
         data["Library"]["indexOrder"] = data["IndexOrder"]
         data["Library"]["table"] = data["ExactLogic"]
         data["Library"]["distance"] = libraryType
+        if data.get("UseKdTree", False):
+            data["Library"]["useKdTree"] = True
 
 
 def reorderSolutionsParams(data: Dict[str, Any]) -> None:
@@ -670,9 +674,14 @@ def parseLibraryLogicData(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool
+        lazyLibraryLoading: bool,
+        archRenames: Optional[Dict[str, str]] = None,
     ):
-    """Parses the data of a library logic file."""
+    """Parses the data of a library logic file.
+
+    ``archRenames`` maps a declared ArchitectureName to the name the library is
+    keyed and its files are named by, for a build alias (see ARCH_BUILD_ALIASES).
+    """
     # Reset the type mismatch collector at the start to capture all type
     # mismatches from both ProblemType and Solution constructors
     resetTypeMismatchCollector()
@@ -682,6 +691,8 @@ def parseLibraryLogicData(
     elif isinstance(data, dict):
         prepareLibraryLogicDict(data)
 
+    if archRenames:
+        data["ArchitectureName"] = archRenames.get(data["ArchitectureName"], data["ArchitectureName"])
     if "CUCount" not in data:
         data["CUCount"] = None
     if 'MacDataTypeA' not in data["ProblemType"]: #it will either be set as d['MacDataType'] or a specified input
@@ -720,10 +731,8 @@ def parseLibraryLogicData(
 
     # unpack solution
     def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Optional[Solution]:
-        # Fill missing keys: library DefaultSolution, then GlobalParameters defaultSolution.
-        for key, val in libDefaults.items():
-            if key not in solutionState:
-                solutionState[key] = val
+        # Normalize before global defaults can look like explicit selectors.
+        solutionState = normalize_execution_policy_with_defaults(solutionState, libDefaults)
         for key, val in defaultSolution.items():
             if key not in solutionState:
                 solutionState[key] = val
@@ -757,8 +766,7 @@ def parseLibraryLogicData(
                 printWarning(f"Skipping custom kernel '{customKernelName}': "
                              f"missing or invalid custom.config ({e})")
                 return None
-            for key, value in customConfig.items():
-                solutionState[key] = value
+            solutionState = normalize_execution_policy_with_defaults(customConfig, solutionState)
 
             if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:
                 raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")
@@ -828,7 +836,11 @@ def parseLibraryLogicList(data, srcFile="?"):
 
     if isinstance(data[2], dict):
         rv["ArchitectureName"] = data[2]["Architecture"]
-        rv["CUCount"] = data[2]["CUCount"]
+        rv["CUCount"] = data[2].get("CUCount")
+        # Optional, and carried only when declared, so a file written before this
+        # key existed parses to exactly the dict it did before.
+        if data[2].get("UseKdTree", False):
+            rv["UseKdTree"] = True
     else:
         rv["ArchitectureName"] = data[2]
         rv["CUCount"] = None
@@ -871,6 +883,8 @@ def parseLibraryLogicList(data, srcFile="?"):
         rv["Library"]["indexOrder"] = data[6]
         rv["Library"]["table"] = data[7]
         rv["Library"]["distance"] = libraryType
+        if rv.get("UseKdTree"):
+            rv["Library"]["useKdTree"] = True
 
     return rv
 
@@ -883,8 +897,16 @@ def rawLibraryLogic(data):
 
         architectureName = data.get("ArchitectureName")
         cuCount = data.get("CUCount")
-        if cuCount is not None:
-            architectureName = {"Architecture": architectureName, "CUCount": cuCount}
+        useKdTree = data.get("UseKdTree", False)
+        if cuCount is not None or useKdTree:
+            architectureName = {"Architecture": architectureName}
+            # Each key is emitted only when set, so unaffected files round-trip
+            # byte-identically and a table that is not CU-scoped can still
+            # declare UseKdTree without inventing a null CUCount.
+            if cuCount is not None:
+                architectureName["CUCount"] = cuCount
+            if useKdTree:
+                architectureName["UseKdTree"] = True
 
         deviceNames = data.get("DeviceNames")
         problemTypeState = data.get("ProblemType")
