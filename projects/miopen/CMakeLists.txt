@@ -464,15 +464,18 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
             # The in-tree CK is built with MIOPEN_REQ_LIBS_ONLY, so it only has per-target libraries.
             set(MIOPEN_CK_PER_TARGET ON)
         else()
-            # CK installs that carry per-target conv libraries export each one as its own
-            # component; older and full installs only have the unified device_conv_operations.
+            # CK installs that carry per-target conv libraries list each one as a component;
+            # older and full installs only have the unified device_conv_operations. The
+            # component list is read from the CK package config itself because
+            # composable_kernel_DIR does not point at the CK install when the package is
+            # reached through a trampoline config (TheRock).
             find_package(composable_kernel 1.0.0)
-            set(_ck_per_target_exports)
+            set(_ck_installed_per_target)
             if(composable_kernel_FOUND)
-                file(GLOB _ck_per_target_exports
-                    "${composable_kernel_DIR}/composable_kerneldevice_conv_operations_*Targets.cmake")
+                set(_ck_installed_per_target ${_composable_kernel_supported_components})
+                list(FILTER _ck_installed_per_target INCLUDE REGEX "^device_conv_operations_.")
             endif()
-            if(_ck_per_target_exports)
+            if(_ck_installed_per_target)
                 set(MIOPEN_CK_PER_TARGET ON)
             else()
                 find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
@@ -492,7 +495,7 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
                     endif()
                 else()
                     set(_ck_has_lib FALSE)
-                    if(EXISTS "${composable_kernel_DIR}/composable_kerneldevice_conv_operations_${_arch_safe}Targets.cmake")
+                    if("device_conv_operations_${_arch_safe}" IN_LIST _ck_installed_per_target)
                         set(_ck_has_lib TRUE)
                     endif()
                 endif()
