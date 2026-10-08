@@ -1084,15 +1084,29 @@ class TestEmittedInventory:
 
     @staticmethod
     def _census_row(rendered: str, arch: str) -> str:
-        """The body of ``arch``'s rendered ``ExpectedInventory``, scoped to the ONE row
-        the census selects and compares by set equality."""
+        """The bodies of the name arrays ``arch``'s rendered ``ExpectedInventory`` builds
+        its sets from, scoped to the ONE row the census selects and compares by set
+        equality."""
         match = re.search(
-            r'\{"' + re.escape(arch) + r'",\s*\n\s*ExpectedInventory\{(.*?)\n\s*\}\},',
+            r'\{"' + re.escape(arch) + r'",\s*ExpectedInventory\{'
+            r"nameSet\((\w+)\),\s*nameSet\((\w+)\)\}\},",
             rendered,
-            re.DOTALL,
         )
         assert match, f"no census row rendered for {arch}"
-        return match.group(1)
+        bodies = []
+        for array in match.groups():
+            body = re.search(
+                r"constexpr std::array<const char\*, (\d+)> "
+                + array
+                + r" = \{\n(.*?)^\};",
+                rendered,
+                re.DOTALL | re.MULTILINE,
+            )
+            assert body, f"census row {arch} names no array {array}"
+            # The declared size is the element count: one name per line.
+            assert int(body.group(1)) == body.group(2).count("\n"), array
+            bodies.append(body.group(2))
+        return "".join(bodies)
 
     @staticmethod
     def _assert_every_inventory_row_is_rendered(generator, config):
