@@ -82,8 +82,8 @@ inline void rocblas_internal_trsm_workspace_error(rocblas_handle handle, Ss... s
                             << "ERROR: Device memory allocation size is too small for TRSM; "
                             << (roundup_device_memory_size(sizes) + ...) << " bytes required, "
                             << handle->get_available_workspace()
-                            << " bytes available; increase the workspace or use "
-                               "rocblas_start_device_memory_size_query"
+                            << " bytes available; increase the workspace, or set a 0-byte "
+                               "workspace to let rocBLAS manage it"
                             << std::endl;
 }
 

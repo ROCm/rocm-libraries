@@ -19335,10 +19335,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri_strided_batched(rocblas_handle     
     and is no larger than 10 of these blocks, the API takes advantage of utilizing preallocated
     memory found in the handle to increase overall performance (where ``k`` is ``m``
     when ``rocblas_side_left`` and ``n`` when ``rocblas_side_right``).
-    Unless the problem is small, trsm also uses temporary device memory from the handle.
-    If the handle has a fixed-size workspace that is too small, trsm returns
-    ``rocblas_status_memory_error`` even when free device memory is available.
-    Use ``rocblas_start_device_memory_size_query`` to find the required size.
+    Unless the problem is small, trsm also uses temporary device memory from the handle;
+    see Device Memory Allocation in the API Reference Guide.
 
     Although not widespread, some gemm kernels used by trsm might use atomic operations.
     See Atomic Operations in the API Reference Guide for more information.
@@ -19533,9 +19531,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_64(rocblas_handle                han
     memory found in the handle to increase overall performance (where ``k`` is ``m``
     when ``rocblas_side_left`` and ``n`` when ``rocblas_side_right``).
     Unless the problem is small, trsm also uses temporary device memory from the handle
-    that grows linearly with ``batch_count``. If the handle has a fixed-size workspace that is
-    too small, trsm returns ``rocblas_status_memory_error`` even when free device memory is
-    available. Use ``rocblas_start_device_memory_size_query`` to find the required size.
+    that grows linearly with ``batch_count``; see Device Memory Allocation in the API
+    Reference Guide.
 
     @param[in]
     handle    [rocblas_handle]
@@ -19725,9 +19722,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_batched_64(rocblas_handle           
     memory found in the handle to increase overall performance (where ``k`` is ``m``
     when ``rocblas_side_left`` and ``n`` when ``rocblas_side_right``).
     Unless the problem is small, trsm also uses temporary device memory from the handle
-    that grows linearly with ``batch_count``. If the handle has a fixed-size workspace that is
-    too small, trsm returns ``rocblas_status_memory_error`` even when free device memory is
-    available. Use ``rocblas_start_device_memory_size_query`` to find the required size.
+    that grows linearly with ``batch_count``; see Device Memory Allocation in the API
+    Reference Guide.
 
     @param[in]
     handle    [rocblas_handle]

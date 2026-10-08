@@ -158,7 +158,7 @@ The following two function return values indicate insufficient memory:
 
 With a fixed-size workspace, ``rocblas_status_memory_error`` means the workspace is too small for the call, even if free device memory is available.
 The memory needed by batched functions such as ``trsm_batched`` grows with ``batch_count``.
-Use the functions for determining memory requirements to size the workspace for the largest call.
+To let rocBLAS manage and grow the workspace instead, call ``rocblas_set_workspace`` with a null address or a size of 0.
 
 .. _stream order alloc:
 
