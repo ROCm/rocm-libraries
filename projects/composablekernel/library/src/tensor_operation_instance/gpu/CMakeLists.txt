@@ -677,39 +677,38 @@ endif()
 
 # Create device_conv_operations from CK_DEVICE_CONV_INSTANCES (like the old approach)
 if(CK_DEVICE_CONV_INSTANCES AND (NOT HIPTENSOR_REQ_LIBS_ONLY OR MIOPEN_REQ_LIBS_ONLY))
-    add_library(device_conv_operations ${CK_DEVICE_CONV_INSTANCES})
-    add_library(composablekernels::device_conv_operations ALIAS device_conv_operations)
-    target_compile_features(device_conv_operations PUBLIC)
-    set_target_properties(device_conv_operations PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    set_target_properties(device_conv_operations
-        PROPERTIES
-        VERSION ${CMAKE_PROJECT_VERSION}
-        SOVERSION ${CMAKE_PROJECT_VERSION_MAJOR}
-    )
-    target_include_directories(device_conv_operations PUBLIC
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/conv_tensor_rearrange>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_data>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_weight>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd>
-    )
-    rocm_install(TARGETS device_conv_operations
-        EXPORT device_conv_operationsTargets)
-    rocm_install(EXPORT device_conv_operationsTargets
-        FILE composable_kerneldevice_conv_operationsTargets.cmake
-        NAMESPACE composable_kernel::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/composable_kernel
-    )
+    # Unified library. MIOpen-only builds ship per-target copies instead.
+    if(NOT MIOPEN_REQ_LIBS_ONLY)
+        add_library(device_conv_operations ${CK_DEVICE_CONV_INSTANCES})
+        add_library(composablekernels::device_conv_operations ALIAS device_conv_operations)
+        target_compile_features(device_conv_operations PUBLIC)
+        set_target_properties(device_conv_operations PROPERTIES POSITION_INDEPENDENT_CODE ON)
+        set_target_properties(device_conv_operations
+            PROPERTIES
+            VERSION ${CMAKE_PROJECT_VERSION}
+            SOVERSION ${CMAKE_PROJECT_VERSION_MAJOR}
+        )
+        target_include_directories(device_conv_operations PUBLIC
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/conv_tensor_rearrange>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_data>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_weight>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd>
+        )
+        rocm_install(TARGETS device_conv_operations
+            EXPORT device_conv_operationsTargets)
+        rocm_install(EXPORT device_conv_operationsTargets
+            FILE composable_kerneldevice_conv_operationsTargets.cmake
+            NAMESPACE composable_kernel::
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/composable_kernel
+        )
 
-    if(MIOPEN_REQ_LIBS_ONLY)
-        message(STATUS "Created device_conv_operations STATIC library (MIOpen-required layouts only)")
-    else()
         message(STATUS "Created device_conv_operations STATIC library (all layouts)")
     endif()
 
     # Per-target copies of device_conv_operations. They share the already-compiled
     # objects, so each copy holds the full unified contents under a unique name.
-    if(MIOPEN_SPLIT_LIBS AND MIOPEN_REQ_LIBS_ONLY)
+    if(MIOPEN_REQ_LIBS_ONLY)
         set(_ck_conv_arches ${SUPPORTED_GPU_TARGETS})
         list(REMOVE_DUPLICATES _ck_conv_arches)
         foreach(_ck_arch IN LISTS _ck_conv_arches)

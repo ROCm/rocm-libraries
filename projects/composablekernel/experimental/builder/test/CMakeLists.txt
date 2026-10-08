@@ -223,8 +223,11 @@ target_link_libraries(test_ckb_build_bwd_data_instances PRIVATE utility)
 #
 # Many tests are commented out pending CI support across all GPU architectures.
 
-# Tests the testing utilities themselves
-add_ck_factory_test(test_ckb_testing_utils test_testing_utils.cpp)
+# Tests the testing utilities themselves. Factory tests link the unified
+# device_conv_operations, which MIOPEN_REQ_LIBS_ONLY builds replace with per-target copies.
+if(NOT MIOPEN_REQ_LIBS_ONLY)
+    add_ck_factory_test(test_ckb_testing_utils test_testing_utils.cpp)
+endif()
 
 # TODO: Re-enable these tests once we have CI working across all GPU architectures.
 # add_ck_factory_test(test_ckb_factory_grouped_convolution_forward test_ck_factory_grouped_convolution_forward.cpp)

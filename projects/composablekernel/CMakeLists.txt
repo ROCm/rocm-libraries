@@ -55,10 +55,6 @@ include(CTest)
 
 option(ENABLE_CLANG_CPP_CHECKS "Enables clang tidy, cppcheck" ON)
 option(MIOPEN_REQ_LIBS_ONLY "Build only the MIOpen required libraries" OFF)
-option(MIOPEN_SPLIT_LIBS "With MIOPEN_REQ_LIBS_ONLY, also build device_conv_operations_<arch>, one uniquely named copy of the convolution library per GPU target" OFF)
-if(MIOPEN_SPLIT_LIBS AND NOT MIOPEN_REQ_LIBS_ONLY)
-    message(WARNING "MIOPEN_SPLIT_LIBS has no effect without MIOPEN_REQ_LIBS_ONLY")
-endif()
 option(HIPTENSOR_REQ_LIBS_ONLY "Build only the HipTensor required libraries" OFF)
 option(CK_EXPERIMENTAL_BUILDER "Enable experimental builder" OFF)
 option(CK_TILE_DISPATCHER "Use CK Tile Dispatcher for profiler convolution kernels" OFF)
@@ -437,7 +433,7 @@ endif()
 rocm_check_target_ids(SUPPORTED_GPU_TARGETS
         TARGETS ${CK_GPU_TARGETS})
 
-# Per-target convolution library names (MIOPEN_SPLIT_LIBS) use the full target id, so xnack
+# Per-target convolution library names (MIOPEN_REQ_LIBS_ONLY) use the full target id, so xnack
 # variants stay separate. The name mapping is the one MIOpen uses (miopen_sanitize_arch in
 # projects/miopen/CMakeLists.txt): gfx942:xnack+ -> gfx942_xnackp.
 function(ck_sanitize_arch ARCH OUT_VAR)
