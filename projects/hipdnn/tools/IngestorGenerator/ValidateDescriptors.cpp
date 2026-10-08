@@ -400,9 +400,9 @@ try
 
     std::vector<std::string> engineNames;
     engineNames.reserve(validatedSets.size());
-    for(const auto& set : validatedSets)
+    for(const auto& validated : validatedSets)
     {
-        engineNames.push_back(set.engine.name);
+        engineNames.push_back(validated.set.engine.name);
     }
 
     const auto diagnostics = DiagnosticSink::instance().take();
@@ -471,9 +471,9 @@ try
         {
             std::cout << "  (none)\n";
         }
-        for(const auto& set : validatedSets)
+        for(const auto& name : engineNames)
         {
-            std::cout << "  " << set.engine.name << "\n";
+            std::cout << "  " << name << "\n";
         }
 
         std::cout << "Diagnostics:\n";

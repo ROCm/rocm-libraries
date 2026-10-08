@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string>
@@ -1092,6 +1093,10 @@ TEST(TestGfx950AttentionDenseGraphMatch, LogsTheCauseOfEachOtherDecline)
     composite.implementation = data_objects::AttentionImplementation::COMPOSITE;
     cases.push_back({"implementation", composite, "implementation"});
 
+    GraphSpec largeScale;
+    largeScale.attnScaleValue = 0x1p5F;
+    cases.push_back({"scale", largeScale, "scale"});
+
     for(const auto& testCase : cases)
     {
         SCOPED_TRACE(testCase.name);
@@ -1626,6 +1631,32 @@ TEST(TestGfx950AttentionDenseGraphMatch, AbsentAttentionScaleBindsOne)
     ASSERT_TRUE(bound.has_value());
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, SCALE_BITS_TOKEN).value_or(-1),
               ieee754Bits(0.5F));
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAttentionScaleOutsideSupportedRange)
+{
+    for(const float scale : {0.0F,
+                             -0.0F,
+                             -0.5F,
+                             std::numeric_limits<float>::quiet_NaN(),
+                             std::numeric_limits<float>::infinity(),
+                             -std::numeric_limits<float>::infinity(),
+                             1e-30F,
+                             0x1p-65F,
+                             0x1p5F})
+    {
+        GraphSpec spec;
+        spec.attnScaleValue = scale;
+        EXPECT_FALSE(matchGraph(spec).has_value()) << "scale=" << scale;
+    }
+
+    // The range is inclusive: both bounds are still served.
+    for(const float scale : {0x1p-64F, 0x1p4F})
+    {
+        GraphSpec spec;
+        spec.attnScaleValue = scale;
+        EXPECT_TRUE(matchGraph(spec).has_value()) << "scale=" << scale;
+    }
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBothDeprecatedCausalBooleans)
