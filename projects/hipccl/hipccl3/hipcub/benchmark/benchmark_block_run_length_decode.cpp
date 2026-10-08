@@ -168,6 +168,10 @@ class block_run_length_decode_benchmark : public primbench::benchmark_interface
                     d_output,
                     true);
             });
+
+        HIP_CHECK(hipFree(d_run_items));
+        HIP_CHECK(hipFree(d_run_offsets));
+        HIP_CHECK(hipFree(d_output));
     }
 };
 
