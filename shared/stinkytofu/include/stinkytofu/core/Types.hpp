@@ -80,6 +80,12 @@ struct PassFeatureConfig {
         AscendingCache,  ///< Zigzag for cache reuse: A0 B0 B1 A1
     };
 
+    /// How the rule (4) ds_load cap (dsReadPerCap per dsIssueCapSpanCycles) expires.
+    enum class DsIssueCapMode {
+        Sliding,   ///< Each ds_load frees its slot span cycles after its own issue
+        Periodic,  ///< A period opens at its first ds_load; all slots free span cycles later
+    };
+
     struct DagFeatures {
         bool distributeGlobalRead = false;                 ///< Enable global read distribution
         DsReadOrder dsReadOrder = DsReadOrder::Ascending;  ///< DS read reorder strategy
@@ -114,12 +120,29 @@ struct PassFeatureConfig {
         /// (wmmaIssueConfig.latency), or the arch constant
         /// (CDNA5Config::dsIssueCapSpanCycles) where no matrix op sets one.
         int dsIssueCapSpanCycles = 0;
+        /// Sliding mimics the LDS queue and keeps it from running busy; Periodic is a
+        /// hard "at most dsReadPerCap per dsIssueCapSpanCycles period" kernel limit.
+        DsIssueCapMode dsIssueCapMode = DsIssueCapMode::Sliding;
         int tensorLoadWmmaSpace = 0;
+        /// WMMA issue queue: max WMMAs outstanding in the matrix pipe (the pipe buffers
+        /// ~8 on gfx1250). A WMMA is appended whenever fewer are outstanding, instead
+        /// of waiting for the previous one to finish. 1 = the single-window model.
+        int wmmaQueueDepth = 1;
+        /// Cycles of queued WMMA work that must remain before a non-WMMA pick (ds_load,
+        /// filler, tensor_load) may issue; below it, and with room in the queue, the next
+        /// ready WMMA goes first so the pipe never runs dry. Picks the scheduler is forced
+        /// to make (a promoted barrier) are not held. 0 = off; ignored at depth 1.
+        int wmmaQueueCoverCycles = 0;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
         /// WMMA windows by the region's matrix latency. 0 disables the extra
         /// gap. Mirrors ModuleOptions::TensorLoadDsLoadGapCycles.
         int tensorLoadDsLoadGapCycles = 64;
+        /// WMMA windows kept inside one signal/wait pair. separationSlack is
+        /// barrierHalfSlack + barrierHalfSlack + 1 (the extra 1 is the tensor
+        /// load). 0, the default, leaves the pair on one threshold. Mirrors
+        /// ModuleOptions::BarrierHalfSlack.
+        int barrierHalfSlack = 0;
         /// Max cycle-distance between two adjacent barrier groups for
         /// StinkyMergeBarrierPass to merge them into a single multi-token
         /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).

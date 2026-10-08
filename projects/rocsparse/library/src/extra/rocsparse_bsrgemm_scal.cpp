@@ -31,6 +31,7 @@
 #include "rocsparse_bsrgemm_calc.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -101,16 +102,31 @@ rocsparse_status rocsparse::bsrgemm_scal_core(rocsparse_handle          handle,
     // Copy column entries, if D != C
     if(bsr_col_ind_C != bsr_col_ind_D)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrgemm_copy<BSRGEMM_DIM>),
-                                           dim3((nnzb_D - 1) / BSRGEMM_DIM + 1),
-                                           dim3(BSRGEMM_DIM),
-                                           0,
-                                           stream,
-                                           nnzb_D,
-                                           bsr_col_ind_D,
-                                           bsr_col_ind_C,
-                                           descr_D->base,
-                                           descr_C->base);
+        const int64_t  bsrgemm_copy_blocks = (static_cast<int64_t>(nnzb_D) - 1) / BSRGEMM_DIM + 1;
+        const uint32_t bsrgemm_copy_grid
+            = rocsparse::get_grid_size_x(handle, bsrgemm_copy_blocks, BSRGEMM_DIM);
+        const auto launch_copy = [&](auto grid_stride) -> rocsparse_status {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::bsrgemm_copy<BSRGEMM_DIM, decltype(grid_stride)::value>),
+                dim3(bsrgemm_copy_grid),
+                dim3(BSRGEMM_DIM),
+                0,
+                stream,
+                nnzb_D,
+                bsr_col_ind_D,
+                bsr_col_ind_C,
+                descr_D->base,
+                descr_C->base);
+            return rocsparse_status_success;
+        };
+        if(bsrgemm_copy_grid < bsrgemm_copy_blocks)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(launch_copy(std::true_type{}));
+        }
+        else
+        {
+            RETURN_IF_ROCSPARSE_ERROR(launch_copy(std::false_type{}));
+        }
     }
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrgemm_copy_scale<BSRGEMM_DIM>),

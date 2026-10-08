@@ -162,6 +162,10 @@ class ClusterLoadTDM(ClusterLoad):
             else:
                 mod.add(SLShiftLeftB32(dst=sgpr(dst), shiftHex=sgpr(shiftReg), src=hex(maskConst),
                                        comment=comment))
+            # The mask is ORed into D# Group1 dword0, whose bits 15:0 are workgroup_mask
+            # and bits 16+ are data_size/pad fields. Keep a bad shift from corrupting them.
+            mod.add(SAndB32(dst=sgpr(dst), src0=sgpr(dst), src1=hex(0xFFFF),
+                            comment="keep workgroup_mask bits 15:0"))
 
         if kernel["enableTDMMetadata"]:
             if kernel["ProblemType"]["Sparse"] == 1:
