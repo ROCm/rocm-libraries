@@ -187,11 +187,11 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             found.clear();
             const auto& variants = detail::resources().variants;
             if(std::none_of(variants.begin(), variants.end(), [&](const detail::Variant& variant) {
-                   return variant.isa.gfx == target.isa;
+                   return variant.processor == target.processor;
                }))
                 return {Status::Code::TargetMismatch,
                         Stage::Configure,
-                        "HipKittens has no kernel for " + target.isa};
+                        "HipKittens has no kernel for " + target.processorName()};
             const auto problem = hipblaslt_jit::RocblasltToTensileContractionProblemGemm(request);
             try
             {
@@ -213,7 +213,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                             "HipKittens kernels need tensors smaller than 4 GiB"};
             for(const auto& variant : variants)
             {
-                if(variant.isa.gfx != target.isa)
+                if(variant.processor != target.processor)
                     continue;
                 std::shared_ptr<Master> library;
                 try
@@ -273,21 +273,16 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                        || std::find(skip.begin(), skip.end(), variant->kernelName) != skip.end())
                         continue;
                     hipblaslt_jit::SourceCodeBundle bundle;
-                    bundle.mainKernel = variant->source;
-                    bundle.mainKernel.kind = hipblaslt_jit::Artifact::Kind::Hip;
-                    bundle.includes       = m_headers;
-                    bundle.hipFlags       = variant->hipFlags;
+                    bundle.mainKernel        = variant->source;
+                    bundle.mainKernel.kind   = hipblaslt_jit::Artifact::Kind::Hip;
+                    bundle.includes          = m_headers;
+                    bundle.hipFlags          = variant->hipFlags;
+                    bundle.target            = request.target;
+                    bundle.codeObjectVersion = request.codeObjectVersion;
+                    bundle.kernelNames       = {variant->kernelName};
                     solutions.push_back(std::move(bundle));
                 }
                 return {};
-            }
-
-            std::vector<std::string>
-                kernelNames(const hipblaslt_jit::SourceCodeBundle& source) const override
-            {
-                const auto* variant = match(source);
-                return variant ? std::vector<std::string>{variant->kernelName}
-                               : std::vector<std::string>{};
             }
 
             std::vector<uint8_t>

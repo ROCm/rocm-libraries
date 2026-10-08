@@ -70,6 +70,11 @@ namespace hipblaslt_ext::experimental::jit::replay
                     if(!library || library->solutions.empty())
                         throw std::invalid_argument("The bundle " + path
                                                     + " holds no GEMM solution");
+                    auto& names = replayed.source.kernelNames;
+                    for(const auto& [index, solution] : library->solutions)
+                        if(std::find(names.begin(), names.end(), solution->kernelName)
+                           == names.end())
+                            names.push_back(solution->kernelName);
                     m_replayed.push_back(std::move(replayed));
                 }
             }
@@ -112,12 +117,15 @@ namespace hipblaslt_ext::experimental::jit::replay
                     if(!fresh)
                         continue;
                     solving += entrySolving;
-                    solutions.push_back(replayed.source);
+                    auto source              = replayed.source;
+                    source.target            = request.target;
+                    source.codeObjectVersion = request.codeObjectVersion;
+                    solutions.push_back(std::move(source));
                 }
                 if(!targeted)
                     return {Status::Code::TargetMismatch,
                             Stage::Configure,
-                            "No replayed solution targets " + request.target.isa};
+                            "No replayed solution targets " + request.target.processorName()};
                 if(!solves)
                     return {Status::Code::NotSupported,
                             Stage::Generate,
@@ -126,20 +134,6 @@ namespace hipblaslt_ext::experimental::jit::replay
                         Stage::Generate,
                         "Replayed " + std::to_string(solutions.size())
                             + (solutions.size() == 1 ? " bundle" : " bundles")};
-            }
-
-            std::vector<std::string>
-                kernelNames(const hipblaslt_jit::SourceCodeBundle& source) const override
-            {
-                const auto* replayed = find(source);
-                if(!replayed)
-                    return {};
-                const auto               library = hipblaslt_jit::loadGemmLibrary(replayed->record);
-                std::vector<std::string> names;
-                for(const auto& [index, solution] : library->solutions)
-                    if(std::find(names.begin(), names.end(), solution->kernelName) == names.end())
-                        names.push_back(solution->kernelName);
-                return names;
             }
 
             std::vector<uint8_t>

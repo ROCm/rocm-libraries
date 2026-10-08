@@ -12,6 +12,13 @@
 // a JIT build.
 namespace hipblaslt_jit
 {
+    class JitLibrary;
+
+    // The process's JIT solution library, rooted at HIPBLASLT_JIT_LIBRARY_PATH or,
+    // when that is unset or empty, /tmp/hipblaslt-jit-<uid> (%TEMP%\hipblaslt-jit-<user>
+    // on Windows). Never destroyed, so views and adapters stay valid until exit.
+    JitLibrary& processLibrary();
+
     // True when this process has a backend that publishes into the JIT solution
     // library. A HipKittens build uses that backend. Otherwise the backend
     // replays the committed kernels when they are compiled in. A build with

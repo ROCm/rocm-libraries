@@ -528,8 +528,7 @@ namespace
             out << "            {\n"
                 << "                Variant variant;\n"
                 << "                variant.name = " << cxxString(variant.name) << ";\n"
-                << "                variant.isa.gfx = \"gfx950\";\n"
-                << "                variant.isa.wavefrontSize = 64;\n"
+                << "                variant.processor = hipblaslt_jit::Processor::gfx950;\n"
                 << "                variant.kernelName = " << cxxString(variant.kernel) << ";\n"
                 << "                variant.source.name = " << cxxString(std::string(variant.name) + ".hip")
                 << ";\n"

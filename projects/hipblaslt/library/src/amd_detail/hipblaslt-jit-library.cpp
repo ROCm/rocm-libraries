@@ -133,9 +133,9 @@ namespace hipblaslt_jit
             document.backendVersion    = key.backendVersion;
             document.comgr             = key.comgr;
             document.rocmPath          = key.rocmPath;
-            document.targetId          = key.targetId;
-            document.isa               = key.isa;
-            document.libraryArch       = key.libraryArch;
+            document.targetId          = key.target.targetId();
+            document.isa               = key.target.processorName();
+            document.libraryArch       = key.target.libraryArch();
             document.codeObjectVersion = key.codeObjectVersion;
             document.schema            = jitLibrarySchema;
             document.wavefrontSize     = key.wavefrontSize;
@@ -145,14 +145,14 @@ namespace hipblaslt_jit
 
         // A stored field that is absent keeps this build's value. comgr, the
         // ROCm path, the schema and the code-object version never reject a
-        // directory: compatibility is decided per solution.
+        // directory: only this build writes under its revision directory.
         bool directoryAgrees(const msgpack_io::CacheKeyDocument& stored, const CacheKey& key)
         {
-            if(stored.hasIsa && stored.isa != key.isa)
+            if(stored.hasIsa && stored.isa != key.target.processorName())
                 return false;
-            if(stored.hasTargetId && stored.targetId != key.targetId)
+            if(stored.hasTargetId && stored.targetId != key.target.targetId())
                 return false;
-            if(stored.hasLibraryArch && stored.libraryArch != key.libraryArch)
+            if(stored.hasLibraryArch && stored.libraryArch != key.target.libraryArch())
                 return false;
             if(stored.hasWavefront && stored.wavefrontSize != key.wavefrontSize)
                 return false;
@@ -161,44 +161,6 @@ namespace hipblaslt_jit
             if(stored.hasBackendVersion && stored.backendVersion != key.backendVersion)
                 return false;
             return true;
-        }
-
-        // ELF ABI version (e_ident[EI_ABIVERSION] is code object version - 2).
-        // -1 when the file is missing or is an ELF this build cannot run.
-        // -2 when the bytes are not an AMDGPU ELF, so there is no version to reject.
-        int codeObjectVersionOf(const fs::path& path)
-        {
-            std::ifstream input(path, std::ios::binary);
-            unsigned char elf[64] = {};
-            if(!input.read(reinterpret_cast<char*>(elf), sizeof(elf)))
-                return -1;
-            if(std::memcmp(elf, "\x7f" "ELF", 4) != 0 || elf[4] != 2 || elf[5] != 1)
-                return -2;
-            constexpr unsigned char amdhsaAbi = 64;
-            if(elf[7] != amdhsaAbi)
-                return -1;
-            const unsigned machine = elf[18] | (elf[19] << 8);
-            if(machine != 224)
-                return -1;
-            return static_cast<int>(elf[8]) + 2;
-        }
-
-        bool solutionRunnable(const TensileLite::ContractionSolution& solution,
-                              const fs::path&                         directory)
-        {
-            const int version = solution.internalArgsSupport.version;
-            const int loop    = solution.internalArgsSupport.persistentLoopArgsVersion;
-            if(version < 0 || version > 3 || loop < 0 || loop > 1)
-                return false;
-            if(loop == 1 && version != 3)
-                return false;
-            const int codeObject
-                = codeObjectVersionOf(directory / solution.codeObjectFilename.load());
-            // A placeholder that is not an AMDGPU ELF has no code-object version.
-            // An unreadable file, or an ELF whose version this build cannot run, is skipped.
-            if(codeObject == -2)
-                return true;
-            return codeObject >= 4 && codeObject <= 6;
         }
 
         Status ensureEntryParents(const fs::path& root, const fs::path& file)
@@ -285,9 +247,7 @@ namespace hipblaslt_jit
                                          compilerEnvironment(environ)};
 #endif
         CacheKey key;
-        key.targetId          = target.targetId;
-        key.isa               = target.isa;
-        key.libraryArch       = target.libraryArch;
+        key.target            = target;
         key.wavefrontSize     = target.wavefrontSize;
         key.backendId         = backend.id;
         key.backendVersion    = backend.version;
@@ -302,9 +262,11 @@ namespace hipblaslt_jit
     {
         // One path component. Toolchain identity (comgr, ROCm path, compiler
         // environment) is recorded in the cache key and is not part of the name.
-        auto name = filesystemLiteral(isa) + "_" + filesystemLiteral(targetId) + "_"
-                    + filesystemLiteral(libraryArch) + "_wf" + std::to_string(wavefrontSize) + "_"
-                    + filesystemLiteral(backendId) + "_" + std::to_string(backendVersion);
+        auto name = filesystemLiteral(target.processorName()) + "_"
+                    + filesystemLiteral(target.targetId()) + "_"
+                    + filesystemLiteral(target.libraryArch()) + "_wf"
+                    + std::to_string(wavefrontSize) + "_" + filesystemLiteral(backendId) + "_"
+                    + std::to_string(backendVersion);
         if(name == "." || name == "..")
             name.insert(name.begin(), 'x');
         return name;
@@ -476,26 +438,26 @@ namespace hipblaslt_jit
             files::FileIdentity                               masterFile, mappingFile;
             std::map<int, TensileLite::hip::SolutionAdapter*> adapters;
 
-            fs::path masterPath(const std::string& isa) const
+            fs::path masterPath(const Target& target) const
             {
-                return path / ("TensileLibrary_lazy_" + isa + ".dat");
+                return path / ("TensileLibrary_lazy_" + target.processorName() + ".dat");
             }
-            fs::path mappingPath(const std::string& isa) const
+            fs::path mappingPath(const Target& target) const
             {
-                return path / ("TensileLiteLibrary_lazy_" + isa + "_Mapping.dat");
+                return path / ("TensileLiteLibrary_lazy_" + target.processorName() + "_Mapping.dat");
             }
 
             // Loads this slice's master and mapping only. Callers hold mutex.
-            Status refresh(const std::string& isa)
+            Status refresh(const Target& target)
             {
-                const auto masterNow  = files::identify(masterPath(isa));
-                const auto mappingNow = files::identify(mappingPath(isa));
+                const auto masterNow  = files::identify(masterPath(target));
+                const auto mappingNow = files::identify(mappingPath(target));
                 if(loaded && masterNow == masterFile && mappingNow == mappingFile)
                     return {};
                 std::shared_ptr<GemmMaster> library;
                 if(masterNow.exists)
                 {
-                    const auto file = masterPath(isa).string();
+                    const auto file = masterPath(target).string();
                     library         = std::dynamic_pointer_cast<GemmMaster>(
                         TensileLite::LoadLibraryFilePreload<TensileLite::ContractionProblemGemm>(
                             file, {}));
@@ -526,7 +488,6 @@ namespace hipblaslt_jit
         };
 
         fs::path    path;
-        std::string isa;
         CacheKey    identity;
         Status      failure; // a cache-key.msgpack this directory cannot use
         // The helper-only library: a TensileLite lazy library of helper code
@@ -535,7 +496,6 @@ namespace hipblaslt_jit
 
         std::mutex                                  sliceMutex;
         std::map<std::string, std::unique_ptr<Slice>> slices;
-        std::unique_ptr<Slice>                      legacy;
 
         fs::path keyPath() const
         {
@@ -597,20 +557,6 @@ namespace hipblaslt_jit
             return {};
         }
 
-        // The v1 layout with the master at the key directory, when that file exists.
-        Slice* legacySlice()
-        {
-            std::lock_guard<std::mutex> lock(sliceMutex);
-            if(legacy)
-                return legacy.get();
-            std::error_code error;
-            if(!fs::is_regular_file(path / ("TensileLibrary_lazy_" + isa + ".dat"), error))
-                return nullptr;
-            legacy       = std::make_unique<Slice>();
-            legacy->path = path;
-            return legacy.get();
-        }
-
         // Creates cache-key.msgpack once. An existing file may differ in comgr,
         // the ROCm path, the schema integer or the code-object version; those do
         // not make the directory unusable. A present device or backend field
@@ -649,16 +595,13 @@ namespace hipblaslt_jit
 
     JitLibrary::~JitLibrary() = default;
 
-    fs::path JitLibrary::defaultRoot()
+    std::string JitLibrary::buildRevision()
     {
-#ifdef _WIN32
-        std::error_code error;
-        const auto      temporary = fs::temp_directory_path(error);
-        const char*     user      = std::getenv("USERNAME");
-        return temporary / ("hipblaslt-jit-" + std::string(user && *user ? user : "user"));
-#else
-        return fs::path("/tmp") / ("hipblaslt-jit-" + std::to_string(geteuid()));
-#endif
+#define HIPBLASLT_JIT_TO_STR2(x) #x
+#define HIPBLASLT_JIT_TO_STR(x) HIPBLASLT_JIT_TO_STR2(x)
+        return HIPBLASLT_JIT_TO_STR(HIPBLASLT_VERSION_TWEAK);
+#undef HIPBLASLT_JIT_TO_STR
+#undef HIPBLASLT_JIT_TO_STR2
     }
 
     const fs::path& JitLibrary::root() const noexcept
@@ -666,14 +609,15 @@ namespace hipblaslt_jit
         return m_root;
     }
 
-    fs::path JitLibrary::schemaDirectory() const
+    fs::path JitLibrary::buildDirectory() const
     {
-        return m_root / ("v" + std::to_string(jitLibrarySchema));
+        return m_root / ("v" + std::to_string(jitLibrarySchema))
+               / filesystemLiteral(buildRevision());
     }
 
     fs::path JitLibrary::directory(const CacheKey& key) const
     {
-        return schemaDirectory() / key.directoryName();
+        return buildDirectory() / key.directoryName();
     }
 
     void JitLibrary::disable(const std::string& reason)
@@ -692,7 +636,9 @@ namespace hipblaslt_jit
 #ifndef TENSILE_MSGPACK
             m_disabled = "hipBLASLt was built to read YAML libraries";
 #endif
-            for(const auto& path : {m_root, schemaDirectory()})
+            if(m_disabled.empty() && buildRevision().empty())
+                m_disabled = "this hipBLASLt build has no git revision";
+            for(const auto& path : {m_root, buildDirectory().parent_path(), buildDirectory()})
                 if(m_disabled.empty())
                     if(auto status = files::privateDirectory(path); !status.ok())
                         m_disabled = status.message;
@@ -711,8 +657,7 @@ namespace hipblaslt_jit
         if(!slot)
         {
             auto opened      = std::make_unique<Directory>();
-            opened->path     = schemaDirectory() / name;
-            opened->isa      = key.isa;
+            opened->path     = buildDirectory() / name;
             opened->identity = key;
             for(const auto& path : {opened->path, opened->staging()})
                 if(auto status = files::privateDirectory(path); !status.ok())
@@ -757,7 +702,8 @@ namespace hipblaslt_jit
         if(!directory)
             return failed(Stage::Build, "The JIT solution library has no helper library");
 
-        const auto prefix = filesystemLiteral(helperName);
+        const auto& target = directory->identity.target;
+        const auto  prefix = filesystemLiteral(helperName);
         auto       locate = [&](Directory::Slice*& slice) -> Status {
             slice = nullptr;
             std::lock_guard<std::mutex> guard(directory->sliceMutex);
@@ -776,10 +722,10 @@ namespace hipblaslt_jit
             if(auto status = locate(slice); !status.ok())
                 return status;
             std::error_code error;
-            if(!fs::is_regular_file(slice->masterPath(directory->isa), error))
+            if(!fs::is_regular_file(slice->masterPath(target), error))
                 return {};
             std::lock_guard<std::mutex> lock(slice->mutex);
-            if(auto status = slice->refresh(directory->isa); !status.ok())
+            if(auto status = slice->refresh(target); !status.ok())
                 return status;
             if(!slice->master)
                 return {};
@@ -804,7 +750,7 @@ namespace hipblaslt_jit
             if(auto status = files::readFile(object, fileLimit, bytes); !status.ok())
                 return status;
             found.name  = helperName;
-            found.kind  = Artifact::Kind::CodeObject;
+            found.kind  = Artifact::Kind::Relocatable;
             found.bytes = std::move(bytes);
             present     = true;
             return {};
@@ -820,9 +766,8 @@ namespace hipblaslt_jit
         if(auto status = compile(compiled); !status.ok())
             return status;
         compiled.name = helperName;
-        compiled.kind = Artifact::Kind::CodeObject;
-        if(compiled.bytes.empty())
-            return failed(Stage::Build, "Helper " + helperName + " produced no code object");
+        if(compiled.kind != Artifact::Kind::Relocatable || compiled.bytes.empty())
+            return failed(Stage::Build, "Helper " + helperName + " produced no relocatable");
 
         Directory::Slice* slice = nullptr;
         if(auto status = locate(slice); !status.ok())
@@ -830,7 +775,7 @@ namespace hipblaslt_jit
         if(auto status = files::privateDirectory(slice->path); !status.ok())
             return status;
         files::FileLock lock;
-        const auto      lockFile = schemaDirectory() / "lock";
+        const auto      lockFile = buildDirectory() / "lock";
         if(auto status = files::FileLock::acquire(lockFile, std::chrono::seconds(120), lock);
            !status.ok())
             return status;
@@ -861,7 +806,7 @@ namespace hipblaslt_jit
 
         std::vector<uint8_t> entry;
         if(auto status = msgpack_io::rewriteEntryIndex(
-               committed::helperEntry(helperName, directory->isa), 0, index, entry);
+               committed::helperEntry(helperName, target.processorName()), 0, index, entry);
            !status.ok())
             return status;
         if(!validEntry(entry, index, helperName))
@@ -880,22 +825,22 @@ namespace hipblaslt_jit
             return status;
 
         std::vector<uint8_t> master;
-        if(fs::is_regular_file(slice->masterPath(directory->isa), error))
-            if(auto status = files::readFile(slice->masterPath(directory->isa), fileLimit, master);
+        if(fs::is_regular_file(slice->masterPath(target), error))
+            if(auto status = files::readFile(slice->masterPath(target), fileLimit, master);
                !status.ok())
                 return status;
         if(auto status = msgpack_io::appendMasterRows(
                master, {{std::vector<size_t>{}, fields.predicate, prefix}}, bytes);
            !status.ok())
             return status;
-        if(auto status = files::writeAtomically(staging, slice->masterPath(directory->isa), bytes);
+        if(auto status = files::writeAtomically(staging, slice->masterPath(target), bytes);
            !status.ok())
             return status;
 
         std::map<int32_t, std::string> mapping;
-        if(fs::is_regular_file(slice->mappingPath(directory->isa), error))
+        if(fs::is_regular_file(slice->mappingPath(target), error))
         {
-            if(auto status = files::readFile(slice->mappingPath(directory->isa), fileLimit, bytes);
+            if(auto status = files::readFile(slice->mappingPath(target), fileLimit, bytes);
                !status.ok())
                 return status;
             if(auto status = msgpack_io::readMapping(bytes, mapping); !status.ok())
@@ -905,12 +850,12 @@ namespace hipblaslt_jit
         if(auto status = msgpack_io::writeMapping(mapping, bytes); !status.ok())
             return status;
         if(auto status
-           = files::writeAtomically(staging, slice->mappingPath(directory->isa), bytes);
+           = files::writeAtomically(staging, slice->mappingPath(target), bytes);
            !status.ok())
             return status;
         {
             std::lock_guard<std::mutex> lockSlice(slice->mutex);
-            if(auto status = slice->refresh(directory->isa); !status.ok())
+            if(auto status = slice->refresh(target); !status.ok())
                 return status;
         }
         out = std::move(compiled);
@@ -923,7 +868,7 @@ namespace hipblaslt_jit
         if(!m_deviceKey || !checkRoot().ok() || !m_deviceKey(device, key).ok())
             return;
         std::error_code error;
-        for(fs::directory_iterator next(schemaDirectory(), error), end; !error && next != end;
+        for(fs::directory_iterator next(buildDirectory(), error), end; !error && next != end;
             next.increment(error))
         {
             if(!next->is_directory())
@@ -965,13 +910,11 @@ namespace hipblaslt_jit
                 return status;
             const auto sliceName = sliceKey(problem);
             auto*      slice     = directory->existingSlice(sliceName);
-            if(!slice)
-                slice = directory->legacySlice();
             std::shared_ptr<GemmMaster> master;
             if(slice)
             {
                 std::lock_guard<std::mutex> lock(slice->mutex);
-                if(auto status = slice->refresh(directory->isa); !status.ok())
+                if(auto status = slice->refresh(directory->identity.target); !status.ok())
                     return status;
                 master = slice->master;
             }
@@ -989,18 +932,18 @@ namespace hipblaslt_jit
                 {
                     solution = row.second->findBestSolution(problem, hardware);
                 }
-                catch(...)
+                catch(const std::exception& error)
                 {
-                    // An unknown field or a kernarg version this build cannot
-                    // run skips this solution. The rest of the library still loads.
-                    continue;
+                    // This build wrote the entry, so a failure is a damaged library.
+                    return failed(Stage::Lookup,
+                                  "Cannot read a JIT solution library entry in "
+                                      + slice->path.u8string() + ": " + error.what());
                 }
                 // Only a hand-edited file can hold an index the mapping cannot resolve.
                 if(!solution || !isJitIndex(solution->index)
                    || !master->libraryMapping.count(solution->index)
                    || std::find(excludeKernels.begin(), excludeKernels.end(), solution->kernelName)
-                          != excludeKernels.end()
-                   || !solutionRunnable(*solution, slice->path))
+                          != excludeKernels.end())
                     continue;
                 found.push_back(solution->index);
             }
@@ -1016,7 +959,9 @@ namespace hipblaslt_jit
     Status JitLibrary::publish(const CacheKey&                           key,
                                int                                       device,
                                const TensileLite::ContractionProblemGemm& problem,
-                               const SupportedSolutions&                 solutions,
+                               const Artifact&                           executable,
+                               const std::vector<uint8_t>&               record,
+                               const std::vector<int>&                   solutions,
                                std::vector<int32_t>&                     indices)
     {
         indices.clear();
@@ -1026,39 +971,34 @@ namespace hipblaslt_jit
             Directory* directory = nullptr;
             if(auto status = attach(key, device, directory); !status.ok())
                 return status;
-            // Each supported solution is added to the library with its code object.
+            const auto& target = directory->identity.target;
+            if(executable.bytes.empty() || executable.kind != Artifact::Kind::Executable)
+                return failed(Stage::Publish, "A built solution has no executable");
+            if(record.empty())
+                return failed(Stage::Publish, "A built solution has no TensileLite record");
+            // Each solution is added to the library with the executable.
             struct Candidate
             {
-                const Artifact*      object = nullptr;
                 std::vector<uint8_t> entry;
                 std::string          kernel;
             };
             std::vector<Candidate> candidates;
-            for(const auto& supported : solutions)
+            for(const auto local : solutions)
             {
-                if(supported.first.codeObject.bytes.empty()
-                   || supported.first.codeObject.kind != Artifact::Kind::CodeObject)
-                    return failed(Stage::Publish, "A built solution has no code object");
-                if(supported.first.record.empty())
-                    return failed(Stage::Publish, "A built solution has no TensileLite record");
-                for(const auto local : supported.second)
-                {
-                    Candidate candidate{&supported.first.codeObject};
-                    // Read the solution TensileLite already parsed. Publishing adds
-                    // that solution; the library holds many.
-                    const auto solution = solutionIn(supported.first.record, local);
-                    if(!solution || solution->kernelName.empty())
-                        return failed(Stage::Publish,
-                                      "A built solution record has no kernel at local index "
-                                          + std::to_string(local));
-                    candidate.kernel = solution->kernelName;
-                    // The stored entry's index bytes are not written by TensileLite.
-                    if(auto status = msgpack_io::rewriteEntryIndex(
-                           supported.first.record, local, 0, candidate.entry);
-                       !status.ok())
-                        return status;
-                    candidates.push_back(std::move(candidate));
-                }
+                Candidate candidate;
+                // Read the solution TensileLite already parsed. Publishing adds
+                // that solution; the library holds many.
+                const auto solution = solutionIn(record, local);
+                if(!solution || solution->kernelName.empty())
+                    return failed(Stage::Publish,
+                                  "A built solution record has no kernel at local index "
+                                      + std::to_string(local));
+                candidate.kernel = solution->kernelName;
+                // The stored entry's index bytes are not written by TensileLite.
+                if(auto status = msgpack_io::rewriteEntryIndex(record, local, 0, candidate.entry);
+                   !status.ok())
+                    return status;
+                candidates.push_back(std::move(candidate));
             }
             if(candidates.empty())
                 return {};
@@ -1066,7 +1006,7 @@ namespace hipblaslt_jit
             const auto sizes = problemSizes(problem);
 
             files::FileLock lock;
-            const auto      lockFile = schemaDirectory() / "lock";
+            const auto      lockFile = buildDirectory() / "lock";
             if(auto status = files::FileLock::acquire(lockFile, std::chrono::seconds(120), lock);
                !status.ok())
                 return status;
@@ -1078,7 +1018,7 @@ namespace hipblaslt_jit
                 return status;
 
             const auto           staging   = directory->staging();
-            const auto           allocator = schemaDirectory() / "allocator.dat";
+            const auto           allocator = buildDirectory() / "allocator.dat";
             std::vector<uint8_t> bytes, master;
             std::error_code      error;
             int64_t              next = jitIndexBase;
@@ -1092,18 +1032,18 @@ namespace hipblaslt_jit
                     return failed(Stage::Publish, allocator.u8string() + " is below the JIT range");
             }
             std::map<int32_t, std::string> mapping;
-            if(fs::exists(slice->mappingPath(directory->isa), error))
+            if(fs::exists(slice->mappingPath(target), error))
             {
-                if(auto status = files::readFile(slice->mappingPath(directory->isa), fileLimit, bytes);
+                if(auto status = files::readFile(slice->mappingPath(target), fileLimit, bytes);
                    !status.ok())
                     return status;
                 if(auto status = msgpack_io::readMapping(bytes, mapping); !status.ok())
                     return status;
             }
             std::vector<std::string> rowPrefixes;
-            if(fs::exists(slice->masterPath(directory->isa), error))
+            if(fs::exists(slice->masterPath(target), error))
             {
-                if(auto status = files::readFile(slice->masterPath(directory->isa), fileLimit, master);
+                if(auto status = files::readFile(slice->masterPath(target), fileLimit, master);
                    !status.ok())
                     return status;
                 if(auto status = msgpack_io::readMasterPrefixes(master, rowPrefixes); !status.ok())
@@ -1171,16 +1111,15 @@ namespace hipblaslt_jit
                     return status;
             }
 
-            // The solution code object is already linked with any helpers. The
-            // helper library holds those helpers; this library stores the executable.
+            // The executable is already linked with any helpers. The helper
+            // library holds those helpers; this library stores the executable.
             for(const auto& placement : placements)
                 if(placement.fresh)
                 {
                     const auto object = slice->path / (placement.prefix + ".co");
                     if(auto status = ensureEntryParents(slice->path, object); !status.ok())
                         return status;
-                    if(auto status = files::writeAtomically(
-                           staging, object, candidates[placement.source].object->bytes);
+                    if(auto status = files::writeAtomically(staging, object, executable.bytes);
                        !status.ok())
                         return status;
                 }
@@ -1218,7 +1157,7 @@ namespace hipblaslt_jit
                 if(auto status = msgpack_io::writeMapping(mapping, bytes); !status.ok())
                     return status;
                 if(auto status
-                   = files::writeAtomically(staging, slice->mappingPath(directory->isa), bytes);
+                   = files::writeAtomically(staging, slice->mappingPath(target), bytes);
                    !status.ok())
                     return status;
                 std::map<int32_t, std::string> indexMap;
@@ -1249,7 +1188,7 @@ namespace hipblaslt_jit
                 if(auto status = msgpack_io::appendMasterRows(master, rows, bytes); !status.ok())
                     return status;
                 if(auto status
-                   = files::writeAtomically(staging, slice->masterPath(directory->isa), bytes);
+                   = files::writeAtomically(staging, slice->masterPath(target), bytes);
                    !status.ok())
                     return status;
             }
@@ -1257,7 +1196,7 @@ namespace hipblaslt_jit
 
             {
                 std::lock_guard<std::mutex> guard(slice->mutex);
-                if(auto status = slice->refresh(directory->isa); !status.ok())
+                if(auto status = slice->refresh(target); !status.ok())
                     return status;
             }
             for(auto placement : placementOf)
@@ -1306,17 +1245,15 @@ namespace hipblaslt_jit
                             continue;
                         }
                     }
-                    Directory::Slice* slice = nullptr;
+                    Directory::Slice* slice   = nullptr;
                     const auto        located = indexMap.find(index);
                     if(located != indexMap.end())
                         slice = directory->existingSlice(located->second);
-                    else
-                        slice = directory->legacySlice();
                     if(!slice)
                         continue;
                     std::lock_guard<std::mutex> lock(slice->mutex);
                     if(reload)
-                        if(auto status = slice->refresh(directory->isa); !status.ok())
+                        if(auto status = slice->refresh(directory->identity.target); !status.ok())
                         {
                             reloadFailure = std::move(status);
                             continue;

@@ -47,7 +47,7 @@ namespace hipblaslt_jit
     // directory, and other keys' directories are never read or deleted.
     struct CacheKey
     {
-        std::string                        targetId, isa, libraryArch;
+        Target                             target; // with the device's asicRevision
         int                                wavefrontSize = 0;
         std::string                        backendId;
         uint32_t                           backendVersion = 0;
@@ -87,10 +87,11 @@ namespace hipblaslt_jit
     // The solution library's code object is the fully linked executable. The
     // helper library stores the helper relocatable that link consumed, keyed by
     // backend id and helper name. A query opens one solution slice only.
-    // Library files are MessagePack, including cache-key.msgpack. A solution
-    // whose code-object version or kernarg version this build cannot run is
-    // skipped; the rest of the library still loads.
-    // Publishing holds the root's file lock and replaces files atomically, in an
+    // Library files are MessagePack, including cache-key.msgpack. Each hipBLASLt
+    // build reads and writes only <root>/v<schema>/<git revision>/, so a library
+    // never serves kernels another build published. A build without a git
+    // revision cannot tell itself apart from other builds and disables the library.
+    // Publishing holds the build directory's file lock and replaces files atomically, in an
     // order that never lets a reader see a reference to a missing file, so
     // readers take no lock. Thread-safe.
     //
@@ -109,22 +110,21 @@ namespace hipblaslt_jit
         // Sets key to device's cache key with empty backend fields.
         using DeviceKey = std::function<Status(int device, CacheKey& key)>;
 
-        // Touches no file until first use. Without deviceKey, resolve() finds
-        // only indices in directories this instance has looked up or published to.
+        // The caller chooses root. Touches no file until first use. Without
+        // deviceKey, resolve() finds only indices in directories this instance
+        // has looked up or published to.
         explicit JitLibrary(std::filesystem::path root, DeviceKey deviceKey = nullptr);
         JitLibrary(const JitLibrary&)            = delete;
         JitLibrary& operator=(const JitLibrary&) = delete;
         ~JitLibrary();
 
-        // /tmp/hipblaslt-jit-<uid> (%TEMP%\hipblaslt-jit-<user> on Windows).
-        // HIPBLASLT_JIT_LIBRARY_PATH is applied by process(), not here.
-        static std::filesystem::path defaultRoot();
-        // Rooted at HIPBLASLT_JIT_LIBRARY_PATH, or defaultRoot(). Never
-        // destroyed, so views and adapters stay valid until exit.
-        static JitLibrary& process();
+        // hipblasLtGetGitRevision's value for this build; empty outside a git checkout.
+        static std::string buildRevision();
 
         const std::filesystem::path& root() const noexcept;
-        std::filesystem::path        directory(const CacheKey& key) const;
+        // <root>/v<schema>/<git revision>: everything this build reads and writes.
+        std::filesystem::path buildDirectory() const;
+        std::filesystem::path directory(const CacheKey& key) const;
 
         // Publishes the shortfall. indices receives new library indices. failure
         // is set when nothing new was published.
@@ -190,16 +190,18 @@ namespace hipblaslt_jit
                       const std::vector<std::string>&           excludeKernels,
                       std::vector<int32_t>&                     indices);
 
-        // Returns one index per supported solution, in order. A backend contributes
-        // one SourceCodeBundle; publishing adds that solution to this library.
-        // A solution already published for the same kernel and sizes keeps its
-        // index. solutions are code-object artifacts plus the TensileLite record
-        // this library extends. The problem's ContractionSolution::ProblemType
-        // is what problemTypeKey stores.
+        // Returns one index per solution, in order. A backend contributes one
+        // SourceCodeBundle; publishing adds the Executable built from it, with
+        // the solutions at the local indices of its TensileLite record, to this
+        // library. A solution already published for the same kernel and sizes
+        // keeps its index. The problem's ContractionSolution::ProblemType is
+        // what problemTypeKey stores.
         Status publish(const CacheKey&                           key,
                        int                                       device,
                        const TensileLite::ContractionProblemGemm& problem,
-                       const SupportedSolutions&                 solutions,
+                       const Artifact&                           executable,
+                       const std::vector<uint8_t>&               record,
+                       const std::vector<int>&                   solutions,
                        std::vector<int32_t>&                     indices);
 
         // The library that maps index on device, and the adapter that loads its
@@ -209,11 +211,11 @@ namespace hipblaslt_jit
         // when the index is newer than this process has seen. Empty, with why
         // set, otherwise.
         View resolve(int device, int32_t index, Status& why);
-        // The helper relocatable stored for key's backend and helperName. A hit
+        // The helper Relocatable stored for key's backend and helperName. A hit
         // returns the object from this library's helper library and does not
-        // call compile. A miss calls compile once and publishes that object
-        // through the same TensileLite library path as a solution. Fails,
-        // without calling compile, when this library cannot be used.
+        // call compile. A miss calls compile once and publishes the Relocatable
+        // it returns through the same TensileLite library path as a solution.
+        // Fails, without calling compile, when this library cannot be used.
         Status acquireHelper(const CacheKey&                            key,
                              int                                        device,
                              const std::string&                         helperName,
@@ -225,7 +227,6 @@ namespace hipblaslt_jit
     private:
         struct Directory;
 
-        std::filesystem::path schemaDirectory() const;
         // Callers hold m_mutex.
         Status     checkRoot();
         Directory* open(const std::string& name, const CacheKey& key, Status& why);

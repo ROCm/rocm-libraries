@@ -57,7 +57,8 @@ function(hipblaslt_jit_test name label test_target)
 endfunction()
 
 add_executable(hipblaslt-jit-source-bundle-test source_bundle_test.cpp)
-target_link_libraries(hipblaslt-jit-source-bundle-test PRIVATE roc::hipblaslt hip::host)
+target_link_libraries(hipblaslt-jit-source-bundle-test PRIVATE
+    roc::hipblaslt roc::tensilelite-host hip::device)
 target_compile_definitions(hipblaslt-jit-source-bundle-test PRIVATE
     "HIPBLASLT_JIT_SCRATCH=\"${hipblaslt_jit_scratch}/source-bundle\"")
 hipblaslt_jit_catch_test(jit-source-bundle jit-cpu hipblaslt-jit-source-bundle-test)
@@ -86,8 +87,8 @@ if(NOT HIPBLASLT_ENABLE_JIT)
 endif()
 
 # Compiles the comgr builder directly and builds a hand-written HIP kernel and
-# every committed assembly file for its target. Needs no GPU, so every
-# architecture runs it.
+# every committed assembly file for its target, alone and linked with that
+# kernel. Needs no GPU, so every architecture runs it.
 add_executable(hipblaslt-jit-builder-test
     builder_test.cpp
     "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
@@ -95,7 +96,7 @@ add_executable(hipblaslt-jit-builder-test
 target_include_directories(hipblaslt-jit-builder-test PRIVATE
     "${hipblaslt_jit_source}/rocblaslt/src/include")
 target_link_libraries(hipblaslt-jit-builder-test PRIVATE
-    roc::hipblaslt amd_comgr hip::host)
+    roc::hipblaslt roc::tensilelite-host amd_comgr hip::device)
 target_compile_definitions(hipblaslt-jit-builder-test PRIVATE
     "HIPBLASLT_JIT_DATA=\"${hipblaslt_jit_data}\""
     "HIPBLASLT_JIT_KERNEL=\"${CMAKE_CURRENT_SOURCE_DIR}/builder_test_kernel.hip\""
@@ -185,10 +186,15 @@ hipblaslt_jit_catch_test(jit-library jit-gpu hipblaslt-jit-library-test "[librar
 hipblaslt_jit_catch_test(jit-library-concurrency jit-gpu hipblaslt-jit-library-test
     "[library-concurrency]")
 
-add_executable(hipblaslt-jit-end-to-end-test jit_end_to_end_test.cpp)
+add_executable(hipblaslt-jit-end-to-end-test
+    jit_end_to_end_test.cpp
+    "${hipblaslt_jit_source}/hipblaslt-jit-code-object.cpp")
+target_include_directories(hipblaslt-jit-end-to-end-test PRIVATE
+    "${hipblaslt_jit_source}/rocblaslt/src/include")
 target_compile_definitions(hipblaslt-jit-end-to-end-test PRIVATE
     "HIPBLASLT_JIT_DATA=\"${hipblaslt_jit_data}\"")
-target_link_libraries(hipblaslt-jit-end-to-end-test PRIVATE roc::hipblaslt hip::device)
+target_link_libraries(hipblaslt-jit-end-to-end-test PRIVATE
+    roc::hipblaslt roc::tensilelite-host amd_comgr hip::device)
 hipblaslt_jit_catch_test(jit-end-to-end jit-gpu hipblaslt-jit-end-to-end-test
     "replayed JIT GEMM solutions run end to end")
 hipblaslt_jit_catch_test(jit-end-to-end-library jit-gpu hipblaslt-jit-end-to-end-test

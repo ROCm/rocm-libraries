@@ -54,13 +54,13 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
 
         struct Variant
         {
-            std::string                        name;
-            hipblaslt_jit::code_object::Target isa;
-            std::string                        kernelName;
-            hipblaslt_jit::Artifact            source; // HIP main kernel
-            std::vector<uint8_t>               entry; // the one-solution library skeleton
-            std::vector<std::string>           hipFlags;
-            KernelResources                    resources;
+            std::string              name;
+            hipblaslt_jit::Processor processor;
+            std::string              kernelName;
+            hipblaslt_jit::Artifact  source; // HIP main kernel
+            std::vector<uint8_t>     entry; // the one-solution library skeleton
+            std::vector<std::string> hipFlags;
+            KernelResources          resources;
         };
 
         // Written at build time by hipkittens/write_entries.cpp. manifest is the

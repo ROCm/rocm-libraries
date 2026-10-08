@@ -5,23 +5,32 @@
 #include "hipblaslt-jit-code-object.hpp"
 #include "hipblaslt-jit-library.hpp"
 #include <Tensile/Contractions.hpp>
+#include <catch2/catch_test_macros.hpp>
 #include <hip/hip_runtime_api.h>
 
 #ifndef _WIN32
 extern "C" char** environ;
 #endif
 
-// The cache key and GEMM the publish test writes and the loader test reads.
+// The device target, cache key and GEMM the publish test writes and the
+// loader and launch tests read.
 namespace hipblaslt_jit_test
 {
+    inline hipblaslt_jit::Target deviceTarget(const hipDeviceProp_t& properties)
+    {
+        auto target = hipblaslt_jit::Target::fromTargetId(properties.gcnArchName);
+        {
+            INFO(("Unknown target ID " + std::string(properties.gcnArchName)));
+            REQUIRE((target.has_value()));
+        }
+        target->asicRevision = properties.asicRevision;
+        return *target;
+    }
+
     inline hipblaslt_jit::CacheKey pregeneratedKey(const hipDeviceProp_t& properties)
     {
-        const std::string target(properties.gcnArchName);
-        const auto        arch = target.substr(0, target.find(':'));
         hipblaslt_jit::CacheKey key;
-        key.targetId          = target;
-        key.isa               = arch;
-        key.libraryArch       = arch;
+        key.target            = deviceTarget(properties);
         key.wavefrontSize     = properties.warpSize;
         key.backendId         = "pregenerated";
         key.backendVersion    = 1;

@@ -13,7 +13,6 @@
 #include "hipblaslt-jit-replay-catalog.hpp"
 #include "hipblaslt-jit-replay.hpp"
 #include "rocblaslt.h"
-#include "rocblaslt_arch_revision.hpp"
 #include <Tensile/hip/HipHardware.hpp>
 #include <algorithm>
 #include <cstring>
@@ -59,20 +58,30 @@ namespace hipblaslt_jit
             return {Status::Code::Failed,
                     Stage::Configure,
                     std::string("Cannot query HIP device properties: ") + hipGetErrorString(error)};
-        target.targetId      = target.properties.gcnArchName;
-        target.isa           = target.targetId.substr(0, target.targetId.find(':'));
-        target.libraryArch   = rocblaslt_revisioned_arch_name(target.isa,
-                                                            target.properties.asicRevision);
-        target.wavefrontSize = target.properties.warpSize;
-        target.cuCount       = target.properties.multiProcessorCount;
-        target.hardware      = TensileLite::hip::GetDevice(target.properties, device);
+        const auto parsed = Target::fromTargetId(target.properties.gcnArchName);
+        if(!parsed)
+            return {Status::Code::NotSupported,
+                    Stage::Configure,
+                    std::string("Unknown target ID ") + target.properties.gcnArchName};
+        static_cast<Target&>(target) = *parsed;
+        target.asicRevision          = target.properties.asicRevision;
+        target.wavefrontSize         = target.properties.warpSize;
+        target.cuCount               = target.properties.multiProcessorCount;
+        target.hardware              = TensileLite::hip::GetDevice(target.properties, device);
         return {};
     }
 
-    JitLibrary& JitLibrary::process()
+    JitLibrary& processLibrary()
     {
         // The library path is read here, at the process edge, and passed in.
-        auto root = defaultRoot();
+#ifdef _WIN32
+        std::error_code error;
+        const char*     user = std::getenv("USERNAME");
+        auto            root = std::filesystem::temp_directory_path(error)
+                    / ("hipblaslt-jit-" + std::string(user && *user ? user : "user"));
+#else
+        auto root = std::filesystem::path("/tmp") / ("hipblaslt-jit-" + std::to_string(geteuid()));
+#endif
         if(const char* path = rocblaslt_secure_getenv("HIPBLASLT_JIT_LIBRARY_PATH"); path && *path)
         {
             std::error_code error;
@@ -122,10 +131,12 @@ namespace hipblaslt_jit
                                         indices);
             }
 
-            Status publish(const GemmRequest&   request,
-                           const DeviceTarget&       target,
-                           const SupportedSolutions& solutions,
-                           std::vector<int32_t>&     indices) const override
+            Status publish(const GemmRequest&          request,
+                           const DeviceTarget&         target,
+                           const Artifact&             executable,
+                           const std::vector<uint8_t>& record,
+                           const std::vector<int>&     solutions,
+                           std::vector<int32_t>&       indices) const override
             {
                 indices.clear();
                 if(!target.hardware)
@@ -133,6 +144,8 @@ namespace hipblaslt_jit
                 return m_library.publish(CacheKey::make(target, m_backend, m_codeObjectVersion),
                                          target.device,
                                          RocblasltToTensileContractionProblemGemm(request),
+                                         executable,
+                                         record,
                                          solutions,
                                          indices);
             }
@@ -237,7 +250,7 @@ namespace hipblaslt_ext::experimental
             if(!target.hardware || !hipblaslt_jit::isJitIndex(index))
                 return 0;
             hipblaslt_jit::Status why;
-            auto                  solution = hipblaslt_jit::JitLibrary::process().solutionByIndex(
+            auto                  solution = hipblaslt_jit::processLibrary().solutionByIndex(
                 target.device, *target.hardware, index, why);
             if(!solution)
                 return 0;
@@ -271,7 +284,7 @@ namespace hipblaslt_ext::experimental
             }
             const bool capturing = streamIsCapturing(gemm->problem.stream);
             auto       problem   = hipblaslt_jit::RocblasltToTensileContractionProblemGemm(*gemm);
-            auto&      library   = hipblaslt_jit::JitLibrary::process();
+            auto&      library   = hipblaslt_jit::processLibrary();
             const auto backend  = jit->components().backend ? jit->components().backend->info()
                                                            : hipblaslt_jit::BackendInfo{};
             library.beginQuery(

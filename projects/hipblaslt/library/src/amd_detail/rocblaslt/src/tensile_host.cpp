@@ -43,6 +43,7 @@
 #include "tensile_host.hpp"
 #ifdef HIPBLASLT_ENABLE_JIT
 #include "../../hipblaslt-jit-gemm-internal.hpp"
+#include "../../hipblaslt-jit-heuristic.hpp"
 #include "../../hipblaslt-jit-library.hpp"
 #include "../../hipblaslt-jit-loader.hpp"
 #include "../../hipblaslt-jit-problem-type.hpp"
@@ -3192,7 +3193,7 @@ namespace
                     if((!mapping.empty() && hipblaslt_jit::isJitIndex(mapping.rbegin()->first))
                        || (!solutions.empty()
                            && hipblaslt_jit::isJitIndex(solutions.rbegin()->first)))
-                        hipblaslt_jit::JitLibrary::process().disable(
+                        hipblaslt_jit::processLibrary().disable(
                             tensileLibPath.string()
                             + " uses solution indices reserved for JIT solutions");
 #endif
@@ -3260,7 +3261,7 @@ namespace
         if(hipblaslt_jit::isJitIndex(index))
         {
             hipblaslt_jit::Status why;
-            const auto view = hipblaslt_jit::JitLibrary::process().resolve(device, index, why);
+            const auto view = hipblaslt_jit::processLibrary().resolve(device, index, why);
             if(view.master)
             {
                 master  = view.master;
@@ -5209,7 +5210,7 @@ rocblaslt_status
         hipblaslt_jit::Status why;
         auto                  solution
             = hipblaslt_jit::isJitIndex(index)
-                  ? hipblaslt_jit::JitLibrary::process().solutionByIndex(
+                  ? hipblaslt_jit::processLibrary().solutionByIndex(
                       handle->device, *hardware, index, why)
                   : library->getSolutionByIndex(*hardware, index);
         if(!why.ok())
@@ -6047,21 +6048,21 @@ namespace hipblaslt_jit
         class TensileLoader final : public SolutionLoader
         {
         public:
-            Status support(const CompiledCode& code,
-                           const GemmRequest&  request,
-                           const DeviceTarget& target,
-                           size_t              workspaceLimit,
-                           std::vector<int>&   indices) const override
+            Status support(const std::vector<uint8_t>& record,
+                           const GemmRequest&          request,
+                           const DeviceTarget&         target,
+                           size_t                      workspaceLimit,
+                           std::vector<int>&           indices) const override
             {
                 indices.clear();
-                if(code.record.empty())
+                if(record.empty())
                     return {Status::Code::Failed,
                             Stage::Support,
                             "A built solution has no TensileLite record"};
                 if(!target.hardware)
                     return {Status::Code::Failed, Stage::Support, "TensileLite hardware is required"};
                 // Local load. The bundle does not keep this library.
-                const auto  library = loadGemmLibrary(code.record);
+                const auto  library = loadGemmLibrary(record);
                 std::string reason;
                 for(const auto& [index, solution] : library->solutions)
                 {
@@ -6087,7 +6088,8 @@ namespace hipblaslt_jit
                 return {};
             }
 
-            Status load(const CompiledCode& code,
+            Status load(const Artifact&             executable,
+                        const std::vector<uint8_t>& record,
                         const GemmRequest&,
                         const DeviceTarget&,
                         size_t,
@@ -6095,10 +6097,9 @@ namespace hipblaslt_jit
                         std::vector<std::shared_ptr<const KernelBundle>>& out) const override
             {
                 out.clear();
-                if(code.codeObject.bytes.empty()
-                   || code.codeObject.kind != Artifact::Kind::CodeObject)
-                    throw std::runtime_error("A built solution has no code object");
-                const auto library = loadGemmLibrary(code.record);
+                if(executable.bytes.empty() || executable.kind != Artifact::Kind::Executable)
+                    throw std::runtime_error("A built solution has no executable");
+                const auto library = loadGemmLibrary(record);
                 for(const auto index : indices)
                 {
                     auto bundle      = std::make_shared<TensileGemmBundle>();

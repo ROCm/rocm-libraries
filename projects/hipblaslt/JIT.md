@@ -115,20 +115,44 @@ interface, so that each implementation can be replaced and tested on its own.
 
 | Stage | Interface | Contract |
 | --- | --- | --- |
-| Generate | `Backend::generate(GenerationRequest, std::vector<SourceCodeBundle>&)` | Returns up to `GenerationRequest::count` source bundles, best first, and builds and loads nothing. A `SourceCodeBundle` is the main kernel, HIP helpers and headers that become one solution. It is not a TensileLite library entry. `NotSupported` means the request is outside the backend's domain. |
-| Build | `CodeObjectBuilder::build(SourceCodeBundle, BuildRequest, CompiledCode&)` | Links the main kernel and its helpers into one code-object `Artifact`. Helper relocatables come from the helper library when the caller has one. |
+| Generate | `Backend::generate(GenerationRequest, std::vector<SourceCodeBundle>&)` | Returns up to `GenerationRequest::count` source bundles, best first, and builds and loads nothing. A `SourceCodeBundle` is the main kernel, helpers and headers that become one solution, with the device's `Target`, the code-object version and the kernel names the executable must define. It is not a TensileLite library entry. `NotSupported` means the request is outside the backend's domain. |
+| Build | `CodeObjectBuilder::build(SourceCodeBundle, BuildKind, Artifact&)` | Builds the bundle into one `Artifact`. Helper relocatables come from the helper library when the caller has one. |
 | Support | `SolutionLoader::support` | Evaluates the predicates and workspace of the record's solutions for the request, returns the local indices of those that support it, best first, and loads no code. |
-| Publish | `SolutionStore::publish` | Stores the supported code objects and returns one library index per solution, in order. `JitLibrary` writes the TensileLite solution record. `SolutionStore::lookup` returns the indices of stored solutions for exactly a request. |
-| Load | `SolutionLoader::load` | Loads the code objects once and returns a process-local executable `KernelBundle` for each supported solution. |
+| Publish | `SolutionStore::publish` | Stores one executable with the supported solutions of its record and returns one library index per solution, in order. `JitLibrary` writes the TensileLite solution record. `SolutionStore::lookup` returns the indices of stored solutions for exactly a request. |
+| Load | `SolutionLoader::load` | Loads the executable once and returns a process-local executable `KernelBundle` for each supported solution. |
+
+An `Artifact` is one file of one kind: `Assembly` or `Hip` source, a
+`Relocatable` (compiled and not linked) or an `Executable` (a linked code
+object). `CodeObjectBuilder::build(bundle, kind, out)` builds a bundle with
+comgr into exactly one `Artifact`: an `Executable` for `BuildKind::Executable`,
+or the main kernel alone as a `Relocatable` for `BuildKind::Relocatable`, which
+is how a helper is built. `JitLibrary` writes the TensileLite solution record
+when it publishes the executable.
+
+A `Target` holds the TensileLite `AMDGPU::Processor`, an `Any`, `On` or `Off`
+setting for each of `sramecc` and `xnack`, and the device's ASIC revision.
+`Target::fromTargetId` parses a target ID, such as
+`hipDeviceProp_t::gcnArchName` or the ID in an assembly `.amdgcn_target`
+directive, and rejects an unknown processor, including `gfx000`, and any other
+feature. Strings come only from `processorName()`, `targetId()`, `isaName()`
+(the comgr ISA name) and `libraryArch()` (the GEMM library subtree, `gfx1250v0`
+for a gfx1250 A0 part), so library directory names and `cache-key.msgpack`
+fields are the strings earlier builds wrote. `DeviceTarget::make` parses the
+device's `gcnArchName` and takes its `asicRevision`; a device whose target ID
+is unknown is not supported.
 
 `Jit::generate` is the only code that sequences these stages. It asks the
 backend for at most the requested count of solutions in a private scratch
 directory, forwarding the workspace limit and the kernels the caller already
 has. It then builds each source bundle and checks the support of its solutions
-until the count of supported solutions is reached. With a store it publishes the
-supported solutions, and loads them only when publishing fails; without a
-store it loads them. A failure in one bundle's build, support or load skips
-that bundle and keeps the rest.
+until the count of supported solutions is reached. A HIP helper the helper
+library does not hold is built as a `Relocatable` and stored there; the bundle
+is then built as one `Executable` linked with the stored relocatables. A failed
+build appends the comgr log to `comgr.log` in the scratch directory. With a
+store it publishes each executable with its supported solutions, and loads an
+executable only when publishing it fails; without a store it loads them. A
+failure in one bundle's build, support or load skips that bundle and keeps the
+rest.
 
 Each failure is recorded with its stage (configure, generate, build, support,
 load or publish) in `Jit::Outcome::failures`, in the order it happened.
@@ -167,14 +191,16 @@ The implementations are:
   It implements `Backend`, so `Jit` builds and loads its sources with the same
   builder and loader as any other backend. Tests reach it through
   `jit::replay::createBackend` in `hipblaslt-jit-replay.hpp`, and every JIT
-  build compiles it.
+  build compiles it. Each bundle it returns names the request's target and
+  code-object version and the kernels of its record's solutions.
 - HipKittens backend: `hipblaslt-jit-hipkittens.cpp`, built when
   `HIPBLASLT_JIT_ENABLE_HIPKITTENS` is on and `GPU_TARGETS` includes gfx950.
   It compiles the gfx950 TN templates in `library/src/amd_detail/hipkittens`
   with comgr's generic HIP path. The HipKittens headers are staged next to
   the library; `HIPBLASLT_JIT_HIPKITTENS_PATH` overrides that directory.
-  Heuristic queries use this backend when it is compiled in. A build without
-  the option replays the committed kernels.
+  Each bundle it returns names the request's target and code-object version
+  and its variant's kernel. Heuristic queries use this backend when it is
+  compiled in. A build without the option replays the committed kernels.
 
 ### Build
 
@@ -237,21 +263,27 @@ publishes. A hit skips generation. Any process then passes an index to
 prebuilt index. Heuristic results are those indices. A second process gets
 the same index and does not generate.
 
-**Location and permissions.** The root is `HIPBLASLT_JIT_LIBRARY_PATH` or, when
-that is unset or empty, `/tmp/hipblaslt-jit-<uid>/` on Linux and
-`%TEMP%\hipblaslt-jit-<user>` on Windows. hipBLASLt creates missing directories
+**Location and permissions.** `JitLibrary` takes its root from the caller. The
+heuristic queries and `jit::getJitAlgo` use one process library whose root is
+`HIPBLASLT_JIT_LIBRARY_PATH` or, when that is unset or empty,
+`/tmp/hipblaslt-jit-<uid>/` on Linux and `%TEMP%\hipblaslt-jit-<user>` on
+Windows. hipBLASLt creates missing directories
 with mode 0700. On Linux it refuses the root, and each directory it uses below
 the root, when the path is a symbolic link or not a directory, is owned by
 another user, or is writable by group or others; a readable directory such as
 0755 is accepted. Windows checks only for reparse points and non-directories.
 There is no setting that accepts a shared, writable directory. A refused
-directory, a privileged (setuid or setgid) process and a build that reads YAML
-libraries disable the library for the process, and each use then fails with
+directory, a privileged (setuid or setgid) process, a build that reads YAML
+libraries and a build without a git revision disable the library for the
+process, and each use then fails with
 `JIT solution library disabled: <reason>`. A prebuilt library that already uses
 the reserved index range also disables it.
 
-**Layout.** Under a `v1` schema directory, each device and backend has its own
-directory. The directory name is a filesystem-safe literal of the ISA, target
+**Layout.** Under a `v1` schema directory, each hipBLASLt build has its own
+directory, named by the git revision `hipblasLtGetGitRevision` reports. A build
+reads and writes only its own directory, so it never loads kernels that another
+build published, even when that build packs kernel arguments differently.
+Within it, each device and backend has its own directory. The directory name is a filesystem-safe literal of the ISA, target
 ID, library architecture, wavefront size, backend id and backend version. It
 does not include the comgr path or the ROCm path. A query opens one slice of
 that directory. The slice key is TensileLite's lazy placeholder grain: the
@@ -269,22 +301,23 @@ example:
 ```text
 $HIPBLASLT_JIT_LIBRARY_PATH/
 └── v1/
-    ├── allocator.dat                  next free solution index
-    ├── lock                           publication lock for the whole root
-    └── gfx950_..._replay_1/           one directory per device and backend
-        ├── cache-key.msgpack
-        ├── indices.msgpack            solution index to slice key
-        ├── helpers/                       helper-only TensileLite library
-        │   ├── TensileLibrary_lazy_gfx950.dat
-        │   ├── TensileLiteLibrary_lazy_gfx950_Mapping.dat
-        │   ├── <helper>.dat
-        │   └── <helper>.co              relocatable linked into a solution
-        ├── slices/<slice key>/
-        │   ├── TensileLibrary_lazy_gfx950.dat
-        │   ├── TensileLiteLibrary_lazy_gfx950_Mapping.dat
-        │   ├── k/<kernel>/t/<problem>/s/<sizes>.dat
-        │   └── k/<kernel>/t/<problem>/s/<sizes>.co
-        └── staging/                   temporary files before rename
+    └── <git revision>/                    one directory per hipBLASLt build
+        ├── allocator.dat                  next free solution index
+        ├── lock                           publication lock for this build
+        └── gfx950_..._replay_1/           one directory per device and backend
+            ├── cache-key.msgpack
+            ├── indices.msgpack            solution index to slice key
+            ├── helpers/                   helper-only TensileLite library
+            │   ├── TensileLibrary_lazy_gfx950.dat
+            │   ├── TensileLiteLibrary_lazy_gfx950_Mapping.dat
+            │   ├── <helper>.dat
+            │   └── <helper>.co            relocatable linked into a solution
+            ├── slices/<slice key>/
+            │   ├── TensileLibrary_lazy_gfx950.dat
+            │   ├── TensileLiteLibrary_lazy_gfx950_Mapping.dat
+            │   ├── k/<kernel>/t/<problem>/s/<sizes>.dat
+            │   └── k/<kernel>/t/<problem>/s/<sizes>.co
+            └── staging/                   temporary files before rename
 ```
 
 An entry name is a filesystem-safe literal of the kernel, the problem type and
@@ -296,10 +329,9 @@ entry's code object beside it. Each master row is
 problem predicate>)` pointing to a placeholder for the entry, so a lookup
 matches only the exact sizes within the full ProblemType. The solution's own
 hardware, problem and task predicates, including its workspace requirement,
-still run on every match. On load, a solution whose code-object version or
-kernarg version this build cannot run is skipped. The rest of the library
-still loads. A different schema integer, comgr path or ROCm path does not
-reject the directory.
+still run on every match. An entry this build cannot read fails the lookup
+instead of being skipped, because only this build wrote it. A different comgr
+path or ROCm path does not reject the directory.
 
 **Cache key.** `cache-key.msgpack` records:
 
@@ -357,31 +389,34 @@ code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
   features the device has; it is then rewritten to the device's full target
   ID. The declared wavefront size is the one the assembler uses.
 - HIP source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
-  `--rocm-path` and a `-cuid` taken from the source name. A HIP helper is its
-  own code object. The helper library stores that relocatable. A hit reuses
-  it. A miss compiles it once and publishes it into the helper library. The
-  solution library then stores one executable: the main kernel linked with
-  those helpers. A build with no library compiles and links each helper and
-  does not keep a second cache. comgr's `AMD_COMGR_CACHE` stays comgr's; it
-  cannot be stored in the library. The ROCm path is `HIP_PATH` when set,
-  otherwise the prefix of the loaded HIP runtime.
+  `--rocm-path` and a `-cuid` taken from the source name. A HIP helper
+  compiles to its own `Relocatable`. The helper library stores that
+  relocatable. A hit reuses it. A miss compiles it once and publishes it into
+  the helper library. A bundle's helpers are HIP sources, which an
+  `Executable` build compiles, or relocatables from the helper library, which
+  it links as they are; the build keeps no second cache. comgr's
+  `AMD_COMGR_CACHE` stays comgr's; it cannot be stored in the library. The
+  ROCm path is `HIP_PATH` when set, otherwise the prefix of the loaded HIP
+  runtime.
 - Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` links the main kernel
-  into one code object, with `-Xlinker --build-id=sha1`. The helper code
-  objects and the main kernel are ready to add to `JitLibrary`.
+  and its helpers into one `Executable`, with `-Xlinker --build-id=sha1`. The
+  solution library stores that executable.
 
 The generator and the builder use the same code-object version, which
-`GenerationRequest::codeObjectVersion` and `BuildRequest::codeObjectVersion`
+`GenerationRequest::codeObjectVersion` and `SourceCodeBundle::codeObjectVersion`
 carry (4 by default). The output is a
 raw, uncompressed executable code object. comgr cannot bundle or compress it,
 and `hipModuleLoadData` accepts raw executable and linkable format (ELF)
 objects. A generator needs no offload bundler.
 
-After linking, the builder reads the code object's metadata and checks that its
-instruction set architecture (ISA) is the device's and that it defines every
-kernel named by the build request. Its message
-carries the first error line of the comgr log, and the builder appends the full
-log to `comgr.log` in `BuildRequest::scratch` and names that file in the
-message.
+After linking, the builder reads the executable's metadata and checks that its
+instruction set architecture (ISA) is the device's, that its code-object
+version is the bundle's, and that it defines every name in
+`SourceCodeBundle::kernelNames`. The builder writes no file. A failure's
+message carries the first error line of the comgr log, and `Status::log`
+carries the full log. A caller that owns a scratch directory passes the status
+to `keepBuildLog`, which appends the log to `comgr.log` there and names that
+file in the message.
 
 ### Loading a published solution
 
@@ -399,8 +434,9 @@ solution. A predicate check calls it as a local load inside the replay or
 HipKittens backend function. That load is not a field of a bundle type and not
 a second library type. `readTensileSourceBundle` reads a source directory into
 a `SourceCodeBundle` and the kernel name. A backend contributes one
-`SourceCodeBundle`. Publishing adds that solution to the library, which holds
-many.
+`SourceCodeBundle`. `publish` takes the executable built from it, its
+TensileLite record and the local indices of the record's solutions to add, and
+adds them to the library, which holds many.
 
 The record's solutions are listed best first, each with its own `Problem` row.
 Their hardware and problem predicates decide which problems each one serves,
@@ -411,7 +447,8 @@ serves a problem, and nothing for a problem none of them was generated for.
 
 A source bundle is one kernel's sources stored as a directory.
 `source_bundle::readSourceBundle`, in `hipblaslt-jit-source-bundle.hpp`, reads
-the sources into a `SourceCodeBundle` and requires one main kernel.
+the sources into a `SourceCodeBundle` and requires one main kernel. The caller
+sets the target and kernel names, which the directory does not hold.
 `readTensileSourceBundle` also reads the library entry for the kernel name.
 
 | Path | Contents |
