@@ -67,7 +67,7 @@ Two packer rules govern what that walk accepts:
 - **An `embedded_source` `source_file` must be able to act as an identity.** It is never
   normalised, so a `..` segment is rejected (one file would take two identities) and an
   absolute path is rejected (the emitted key must be the same on every machine). Write
-  it relative to the descriptor's own folder, for example `kernels/MyKernel.cpp`.
+  it relative to the descriptor's own folder, for example `kernels/<Kernel>.cpp`.
 
 The one registration a generated engine needs is the **kernel source**, and only for
 `kernel_source.kind == "embedded_source"`:
