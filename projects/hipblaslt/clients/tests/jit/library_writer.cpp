@@ -1,0 +1,76 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+#include "library_fixture.hpp"
+#include "solution_entry.hpp"
+#include <catch2/catch_test_macros.hpp>
+#include <hip/hip_runtime_api.h>
+
+#include <filesystem>
+#include <string>
+
+// Builds the committed assembly for this device and publishes each described
+// solution into the JIT solution library. CTest runs this before the loader.
+namespace
+{
+    namespace fs = std::filesystem;
+    namespace hj = hipblaslt_jit;
+}
+
+TEST_CASE("pre-generated kernels publish into the JIT solution library", "[jit-gpu]")
+{
+    int             device = 0;
+    hipDeviceProp_t properties{};
+    {
+        INFO(("Cannot query the current HIP device"));
+        REQUIRE((hipGetDevice(&device) == hipSuccess
+            && hipGetDeviceProperties(&properties, device) == hipSuccess));
+    }
+    const std::string target(properties.gcnArchName);
+    const auto        arch    = target.substr(0, target.find(':'));
+    const auto        libraryRoot = fs::u8path(HIPBLASLT_JIT_LIBRARY);
+    const auto        scratch = fs::u8path(HIPBLASLT_JIT_SCRATCH);
+    fs::remove_all(libraryRoot);
+    fs::remove_all(scratch);
+    fs::create_directories(scratch);
+
+    hj::JitLibrary library(libraryRoot);
+    const auto     key       = hipblaslt_jit_test::pregeneratedKey(properties);
+    const auto     prepared  = hipblaslt_jit_test::prepareSolutions(fs::u8path(HIPBLASLT_JIT_DATA));
+    int            published = 0;
+    for(const auto& item : prepared)
+    {
+        if(item.arch != arch)
+            continue;
+        hj::CompiledCode built;
+        hj::BuildRequest request{target, hj::jitCodeObjectVersion, scratch, item.kernelNames};
+        const auto       builtStatus = hj::makeComgrBuilder()->build(item.source, request, built);
+        {
+            INFO(("The build for " + target + " failed: " + builtStatus.message));
+            REQUIRE((builtStatus.ok()));
+        }
+        built.record = item.record;
+        for(const auto& publication : item.publications)
+        {
+            std::vector<int32_t>  indices;
+            hj::SupportedSolutions solutions{{built, std::vector<int>{publication.local}}};
+            const auto            status = library.publish(key,
+                                                device,
+                                                hipblaslt_jit_test::fp16Gemm(false, publication.k),
+                                                solutions,
+                                                indices);
+            {
+                INFO((item.name + " K=" + std::to_string(publication.k) + ": " + status.message));
+                REQUIRE((status.ok()));
+            }
+            {
+                INFO((item.name + " did not receive a JIT solution index"));
+                REQUIRE((indices.size() == 1 && hj::isJitIndex(indices[0])));
+            }
+            ++published;
+        }
+    }
+    {
+        INFO(("Expected the plain solution and both plain-pair solutions"));
+        REQUIRE((published == 3));
+    }
+}
