@@ -317,7 +317,7 @@ namespace
 
     // gfx90a, gfx942 and gfx950, and the committed plain bundles, are wave64.
     // The target id is the device processor with the sramecc+/xnack- feature spelling.
-    hj::CacheKey testKey(const Context& ctx, const std::string& backendVersion = "1")
+    hj::CacheKey testKey(const Context& ctx, uint32_t backendVersion = 1)
     {
         hj::CacheKey key;
         key.targetId       = ctx.arch + ":sramecc+:xnack-";
@@ -350,7 +350,7 @@ namespace
             [](auto& k) { k.libraryArch += "v1"; },
             [](auto& k) { k.wavefrontSize = 32; },
             [](auto& k) { k.backendId = "other"; },
-            [](auto& k) { k.backendVersion = "2"; },
+            [](auto& k) { k.backendVersion = 2; },
         };
         const std::vector<std::function<void(hj::CacheKey&)>> toolchain{
             [](auto& k) { k.codeObjectVersion = 5; },
@@ -393,8 +393,12 @@ namespace
                                      "MALFORMED",
                                      nullptr};
         const std::map<std::string, std::string> expected{
+            {"AMD_COMGR_CACHE", "0"},
+            {"AMD_COMGR_CACHE_DIR", "/cache"},
+            {"AMD_COMGR_CACHE_POLICY", "prune"},
             {"AMD_COMGR_DRIVER_OPTIONS_APPEND", "-O3"},
             {"AMD_COMGR_HOTSWAP_PLUGIN", "/plugin.so"},
+            {"AMD_COMGR_USE_VFS", "0"},
             {"HIP_PATH", "/hip"},
             {"LLVM_PATH", "/llvm"}};
         {
@@ -756,22 +760,22 @@ namespace
         const auto root = ctx.fresh("mismatch");
         {
             hj::JitLibrary library(root);
-            publish(library, testKey(ctx, "1"), gemm(256), {ctx.entry});
+            publish(library, testKey(ctx, 1), gemm(256), {ctx.entry});
         }
-        const auto directory = hj::JitLibrary(root).directory(testKey(ctx, "1"));
+        const auto directory = hj::JitLibrary(root).directory(testKey(ctx, 1));
         const auto snapshot  = tree(directory);
         {
             hj::JitLibrary library(root);
             {
                 INFO(("Another backend version reused an entry"));
-                REQUIRE((ctx.find(library, testKey(ctx, "2"), gemm(256)).empty()));
+                REQUIRE((ctx.find(library, testKey(ctx, 2), gemm(256)).empty()));
             }
             {
                 INFO(("Indices are not unique across keys"));
-                REQUIRE((publish(library, testKey(ctx, "2"), gemm(256), {ctx.entry})
+                REQUIRE((publish(library, testKey(ctx, 2), gemm(256), {ctx.entry})
                     == std::vector<int32_t>{base + 1}));
             }
-            const auto published = ctx.find(library, testKey(ctx, "1"), gemm(256));
+            const auto published = ctx.find(library, testKey(ctx, 1), gemm(256));
             const std::vector<std::function<void(hj::CacheKey&)>> toolchain{
                 [](auto& k) { k.comgr = "3.1"; },
                 [](auto& k) { k.rocmPath = "/opt/rocm-other"; },
@@ -780,7 +784,7 @@ namespace
             };
             for(const auto& change : toolchain)
             {
-                auto changed = testKey(ctx, "1");
+                auto changed = testKey(ctx, 1);
                 change(changed);
                 {
                     INFO(("A toolchain field hid a published entry"));
@@ -788,7 +792,7 @@ namespace
                 }
             }
             {
-                auto changed = testKey(ctx, "1");
+                auto changed = testKey(ctx, 1);
                 changed.targetId = ctx.arch + ":sramecc-:xnack-";
                 INFO(("A different target reused an entry"));
                 REQUIRE((ctx.find(library, changed, gemm(256)).empty()));
@@ -806,13 +810,13 @@ namespace
         {
             hj::JitLibrary       library(root);
             std::vector<int32_t> indices;
-            auto status = library.lookup(testKey(ctx, "1"), 0, gemm(256), ctx.hardware, 1, {}, indices);
+            auto status = library.lookup(testKey(ctx, 1), 0, gemm(256), ctx.hardware, 1, {}, indices);
             {
                 INFO(("A tampered cache key was accepted: " + status.message));
                 REQUIRE((!status.ok() && indices.empty() && status.stage == hj::Stage::Lookup
                     && status.message.find("cache key") != std::string::npos));
             }
-            status = library.publish(testKey(ctx, "1"), 0, gemm(256), {built(ctx.entry)}, indices);
+            status = library.publish(testKey(ctx, 1), 0, gemm(256), {built(ctx.entry)}, indices);
             {
                 INFO(("Publishing into a tampered directory was accepted"));
                 REQUIRE((!status.ok() && status.stage == hj::Stage::Publish));
@@ -820,7 +824,7 @@ namespace
             {
                 INFO(("A tampered directory affected another key"));
                 REQUIRE((
-                    ctx.find(library, testKey(ctx, "2"), gemm(256)) == std::vector<int32_t>{base + 1}));
+                    ctx.find(library, testKey(ctx, 2), gemm(256)) == std::vector<int32_t>{base + 1}));
             }
         }
         {
@@ -1036,7 +1040,7 @@ namespace
 
         const auto deviceKey = [&ctx](std::string comgr) {
             return [&ctx, comgr](int, hj::CacheKey& k) {
-                k       = testKey(ctx, "");
+                k       = testKey(ctx);
                 k.comgr = comgr.empty() ? k.comgr : comgr;
                 return hj::Status{};
             };

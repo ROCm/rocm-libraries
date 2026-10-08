@@ -191,6 +191,28 @@ namespace hipblaslt_jit
         outcome.summary = std::move(status.message);
 
         BuildRequest build{target.targetId, generation.codeObjectVersion, scratch->path()};
+        const bool   needsHelpers = std::any_of(
+            generated.begin(), generated.end(), [](const SourceCodeBundle& source) {
+                return !source.helpers.empty();
+            });
+        if(needsHelpers && c.backend)
+        {
+            Status cacheStatus;
+            build.helpers = JitLibrary::process().helperCache(
+                CacheKey::make(target, c.backend->info(), generation.codeObjectVersion),
+                target.device,
+                cacheStatus);
+            if(!build.helpers)
+            {
+                record(Stage::Build,
+                       cacheStatus.ok() ? Status{Status::Code::Failed,
+                                                 Stage::Build,
+                                                 "The JIT solution library has no helper cache"}
+                                        : std::move(cacheStatus));
+                scratch->keep();
+                return outcome;
+            }
+        }
         SupportedSolutions supported;
         size_t             solutions = 0;
         for(const auto& source : generated)
