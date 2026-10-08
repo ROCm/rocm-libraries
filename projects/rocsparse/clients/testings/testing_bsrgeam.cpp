@@ -119,9 +119,135 @@ void testing_bsrgeam_bad_arg(const Arguments& arg)
 #undef PARAMS_NNZB
 }
 
+// Regression: value offsets BLOCKDIM * BLOCKDIM * row_begin exceed 2^32 for block_dim = 2.
+// Needs ~75 GB of device memory; only reached for M >= 2^28, block_dim = 2, float.
+static void testing_bsrgeam_large_value_offset(const Arguments& arg)
+{
+    const rocsparse_int  block_dim = 2;
+    const rocsparse_int  Mb        = (arg.M + block_dim - 1) / block_dim;
+    const rocsparse_int  Nb        = Mb;
+    const rocsparse_int  per_row   = 9;
+    const rocsparse_int  nnzb      = Mb * per_row;
+    const size_t         nval      = size_t(nnzb) * block_dim * block_dim;
+    const float          alpha     = 1.0f;
+    const float          beta      = 2.0f;
+    auto                 val_A     = [](size_t j) { return float(j % 127); };
+    auto                 val_B     = [](size_t j) { return float(j % 61); };
+    auto                 col_of    = [&](size_t k) {
+        return rocsparse_int((k % per_row) + per_row * ((k / per_row) & 0xFFFF));
+    };
+
+    rocsparse_local_handle    handle;
+    rocsparse_local_mat_descr descrA;
+    rocsparse_local_mat_descr descrB;
+    rocsparse_local_mat_descr descrC;
+
+    std::vector<rocsparse_int> hptr(size_t(Mb) + 1);
+    for(size_t i = 0; i <= size_t(Mb); i++)
+    {
+        hptr[i] = rocsparse_int(i * per_row);
+    }
+
+    device_vector<rocsparse_int> dptr_A(Mb + 1), dptr_B(Mb + 1), dptr_C(Mb + 1);
+    device_vector<rocsparse_int> dcol_A(nnzb), dcol_B(nnzb);
+    device_vector<float>         dval_A(nval), dval_B(nval);
+    CHECK_HIP_ERROR(hipMemcpy(dptr_A, hptr.data(), hptr.size() * sizeof(rocsparse_int), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dptr_B, hptr.data(), hptr.size() * sizeof(rocsparse_int), hipMemcpyHostToDevice));
+    hptr.clear();
+    hptr.shrink_to_fit();
+
+    const size_t chunk = size_t(1) << 24;
+    {
+        std::vector<rocsparse_int> hc;
+        std::vector<float>         hv;
+        for(size_t k0 = 0; k0 < size_t(nnzb); k0 += chunk)
+        {
+            size_t n = std::min(chunk, size_t(nnzb) - k0);
+            hc.resize(n);
+            for(size_t i = 0; i < n; i++)
+            {
+                hc[i] = col_of(k0 + i);
+            }
+            CHECK_HIP_ERROR(hipMemcpy((rocsparse_int*)dcol_A + k0, hc.data(), n * sizeof(rocsparse_int), hipMemcpyHostToDevice));
+            CHECK_HIP_ERROR(hipMemcpy((rocsparse_int*)dcol_B + k0, hc.data(), n * sizeof(rocsparse_int), hipMemcpyHostToDevice));
+        }
+        for(size_t j0 = 0; j0 < nval; j0 += chunk)
+        {
+            size_t n = std::min(chunk, nval - j0);
+            hv.resize(n);
+            for(size_t i = 0; i < n; i++)
+            {
+                hv[i] = val_A(j0 + i);
+            }
+            CHECK_HIP_ERROR(hipMemcpy((float*)dval_A + j0, hv.data(), n * sizeof(float), hipMemcpyHostToDevice));
+            for(size_t i = 0; i < n; i++)
+            {
+                hv[i] = val_B(j0 + i);
+            }
+            CHECK_HIP_ERROR(hipMemcpy((float*)dval_B + j0, hv.data(), n * sizeof(float), hipMemcpyHostToDevice));
+        }
+    }
+
+    rocsparse_int nnzb_C = 0;
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+    CHECK_ROCSPARSE_ERROR(rocsparse_bsrgeam_nnzb(handle, rocsparse_direction_row, Mb, Nb, block_dim,
+                                                 descrA, nnzb, dptr_A, dcol_A,
+                                                 descrB, nnzb, dptr_B, dcol_B,
+                                                 descrC, dptr_C, &nnzb_C));
+    unit_check_scalar<rocsparse_int>(nnzb, nnzb_C);
+
+    device_vector<rocsparse_int> dcol_C(nnzb_C);
+    device_vector<float>         dval_C(size_t(nnzb_C) * block_dim * block_dim);
+    CHECK_HIP_ERROR(hipMemset(dval_C, 0, size_t(nnzb_C) * block_dim * block_dim * sizeof(float)));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_bsrgeam<float>(handle, rocsparse_direction_row, Mb, Nb, block_dim,
+                                                   &alpha, descrA, nnzb, dval_A, dptr_A, dcol_A,
+                                                   &beta, descrB, nnzb, dval_B, dptr_B, dcol_B,
+                                                   descrC, dval_C, dptr_C, dcol_C));
+
+    // First row whose value offset passes 2^32, plus the last rows.
+    std::vector<size_t> rows;
+    const size_t        first = ((size_t(1) << 32) / (per_row * 4)) + 1;
+    for(size_t r = first; r < first + 4; r++)
+    {
+        rows.push_back(r);
+    }
+    for(size_t r = size_t(Mb) - 16; r < size_t(Mb); r++)
+    {
+        rows.push_back(r);
+    }
+
+    rocsparse_int bad = 0;
+    for(size_t r : rows)
+    {
+        const size_t k0 = r * per_row;
+        std::vector<rocsparse_int> hc(per_row);
+        std::vector<float>         hv(per_row * 4);
+        CHECK_HIP_ERROR(hipMemcpy(hc.data(), (rocsparse_int*)dcol_C + k0, per_row * sizeof(rocsparse_int), hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hv.data(), (float*)dval_C + k0 * 4, per_row * 4 * sizeof(float), hipMemcpyDeviceToHost));
+        for(size_t b = 0; b < size_t(per_row); b++)
+        {
+            bad += (hc[b] != col_of(k0 + b));
+            for(size_t e = 0; e < 4; e++)
+            {
+                const size_t j = (k0 + b) * 4 + e;
+                bad += (hv[b * 4 + e] != alpha * val_A(j) + beta * val_B(j));
+            }
+        }
+    }
+    unit_check_scalar<rocsparse_int>(0, bad);
+}
+
 template <typename T>
 void testing_bsrgeam(const Arguments& arg)
 {
+    if(std::is_same<T, float>::value && arg.block_dim == 2 && arg.direction == rocsparse_direction_row
+       && arg.M >= (1 << 28))
+    {
+        testing_bsrgeam_large_value_offset(arg);
+        return;
+    }
+
     rocsparse_direction                dir       = arg.direction;
     rocsparse_int                      M         = arg.M;
     rocsparse_int                      N         = arg.N;

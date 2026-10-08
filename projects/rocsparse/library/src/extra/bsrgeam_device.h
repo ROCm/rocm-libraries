@@ -134,6 +134,9 @@ namespace rocsparse
                     // Mark nnz
                     table[shf_A] = true;
 
+                    // Value offset of the current block of A (64-bit to avoid overflow)
+                    const int64_t val_A = static_cast<int64_t>(BLOCKDIM * BLOCKDIM) * row_begin_A;
+
                     // Initialize with value of A
                     if(dir == rocsparse_direction_row)
                     {
@@ -143,8 +146,7 @@ namespace rocsparse
                             {
                                 data[BLOCKDIM * BLOCKDIM * shf_A + BLOCKDIM * r + c]
                                     = alpha
-                                      * bsr_val_A[BLOCKDIM * BLOCKDIM * row_begin_A + BLOCKDIM * r
-                                                  + c];
+                                      * bsr_val_A[val_A + BLOCKDIM * r + c];
                             }
                         }
                     }
@@ -156,8 +158,7 @@ namespace rocsparse
                             {
                                 data[BLOCKDIM * BLOCKDIM * shf_A + BLOCKDIM * r + c]
                                     = alpha
-                                      * bsr_val_A[BLOCKDIM * BLOCKDIM * row_begin_A + BLOCKDIM * c
-                                                  + r];
+                                      * bsr_val_A[val_A + BLOCKDIM * c + r];
                             }
                         }
                     }
@@ -188,6 +189,9 @@ namespace rocsparse
                     // Mark nnz
                     table[shf_B] = true;
 
+                    // Value offset of the current block of B (64-bit to avoid overflow)
+                    const int64_t val_B = static_cast<int64_t>(BLOCKDIM * BLOCKDIM) * row_begin_B;
+
                     // Add values of B
                     if(dir == rocsparse_direction_row)
                     {
@@ -198,8 +202,7 @@ namespace rocsparse
                                 data[BLOCKDIM * BLOCKDIM * shf_B + BLOCKDIM * r + c]
                                     = rocsparse::fma(
                                         beta,
-                                        bsr_val_B[BLOCKDIM * BLOCKDIM * row_begin_B + BLOCKDIM * r
-                                                  + c],
+                                        bsr_val_B[val_B + BLOCKDIM * r + c],
                                         data[BLOCKDIM * BLOCKDIM * shf_B + BLOCKDIM * r + c]);
                             }
                         }
@@ -213,8 +216,7 @@ namespace rocsparse
                                 data[BLOCKDIM * BLOCKDIM * shf_B + BLOCKDIM * r + c]
                                     = rocsparse::fma(
                                         beta,
-                                        bsr_val_B[BLOCKDIM * BLOCKDIM * row_begin_B + BLOCKDIM * c
-                                                  + r],
+                                        bsr_val_B[val_B + BLOCKDIM * c + r],
                                         data[BLOCKDIM * BLOCKDIM * shf_B + BLOCKDIM * r + c]);
                             }
                         }
@@ -244,14 +246,18 @@ namespace rocsparse
 
                 // Fill C
                 bsr_col_ind_C[row_begin_C + offset - 1] = lid + chunk_begin + idx_base_C;
+
+                // Value offset of the current block of C (64-bit to avoid overflow)
+                const int64_t val_C
+                    = static_cast<int64_t>(BLOCKDIM * BLOCKDIM) * (row_begin_C + offset - 1);
+
                 if(dir == rocsparse_direction_row)
                 {
                     for(uint32_t r = 0; r < BLOCKDIM; r++)
                     {
                         for(int c = 0; c < BLOCKDIM; c++)
                         {
-                            bsr_val_C[BLOCKDIM * BLOCKDIM * (row_begin_C + offset - 1)
-                                      + BLOCKDIM * r + c]
+                            bsr_val_C[val_C + BLOCKDIM * r + c]
                                 = data[BLOCKDIM * BLOCKDIM * lid + BLOCKDIM * r + c];
                         }
                     }
@@ -262,8 +268,7 @@ namespace rocsparse
                     {
                         for(int c = 0; c < BLOCKDIM; c++)
                         {
-                            bsr_val_C[BLOCKDIM * BLOCKDIM * (row_begin_C + offset - 1)
-                                      + BLOCKDIM * r + c]
+                            bsr_val_C[val_C + BLOCKDIM * r + c]
                                 = data[BLOCKDIM * BLOCKDIM * lid + BLOCKDIM * c + r];
                         }
                     }
