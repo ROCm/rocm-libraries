@@ -130,49 +130,49 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
     const auto* xDims = _inferenceParams.x()->dims();
     const auto* xStrides = _inferenceParams.x()->strides();
 
-    int n = 0;
-    int c = 0;
-    int l = 0;
-    int nStride = 0;
-    int cStride = 0;
-    int lStride = 0;
+    int batches = 0;
+    int channels = 0;
+    int spatialSize = 0;
+    int batchStride = 0;
+    int channelStride = 0;
+    int spatialStride = 0;
 
     // Check if 3D (NCL, NLC), 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
     if(xDims->size() == 3)
     {
-        n = checkedNarrowToInt(xDims->Get(0), "n");
-        c = checkedNarrowToInt(xDims->Get(1), "c");
-        l = checkedNarrowToInt(xDims->Get(2), "l");
+        batches = checkedNarrowToInt(xDims->Get(0), "batches");
+        channels = checkedNarrowToInt(xDims->Get(1), "channels");
+        spatialSize = checkedNarrowToInt(xDims->Get(2), "spatialSize");
 
-        nStride = checkedNarrowToInt(xStrides->Get(0), "nStride");
-        cStride = checkedNarrowToInt(xStrides->Get(1), "cStride");
-        lStride = checkedNarrowToInt(xStrides->Get(2), "lStride");
+        batchStride = checkedNarrowToInt(xStrides->Get(0), "batchStride");
+        channelStride = checkedNarrowToInt(xStrides->Get(1), "channelStride");
+        spatialStride = checkedNarrowToInt(xStrides->Get(2), "spatialStride");
     }
     else if(xDims->size() == 4)
     {
-        n = checkedNarrowToInt(xDims->Get(0), "n");
-        c = checkedNarrowToInt(xDims->Get(1), "c");
-        auto h = checkedNarrowToInt(xDims->Get(2), "h");
-        auto w = checkedNarrowToInt(xDims->Get(3), "w");
-        l = h * w;
+        batches = checkedNarrowToInt(xDims->Get(0), "batches");
+        channels = checkedNarrowToInt(xDims->Get(1), "channels");
+        auto height = checkedNarrowToInt(xDims->Get(2), "height");
+        auto width = checkedNarrowToInt(xDims->Get(3), "width");
+        spatialSize = height * width;
 
-        nStride = checkedNarrowToInt(xStrides->Get(0), "nStride");
-        cStride = checkedNarrowToInt(xStrides->Get(1), "cStride");
-        lStride = checkedNarrowToInt(xStrides->Get(3), "lStride");
+        batchStride = checkedNarrowToInt(xStrides->Get(0), "batchStride");
+        channelStride = checkedNarrowToInt(xStrides->Get(1), "channelStride");
+        spatialStride = checkedNarrowToInt(xStrides->Get(3), "spatialStride");
     }
     else if(xDims->size() == 5)
     {
-        n = checkedNarrowToInt(xDims->Get(0), "n");
-        c = checkedNarrowToInt(xDims->Get(1), "c");
-        auto d = checkedNarrowToInt(xDims->Get(2), "d");
-        auto h = checkedNarrowToInt(xDims->Get(3), "h");
-        auto w = checkedNarrowToInt(xDims->Get(4), "w");
+        batches = checkedNarrowToInt(xDims->Get(0), "batches");
+        channels = checkedNarrowToInt(xDims->Get(1), "channels");
+        auto depth = checkedNarrowToInt(xDims->Get(2), "depth");
+        auto height = checkedNarrowToInt(xDims->Get(3), "height");
+        auto width = checkedNarrowToInt(xDims->Get(4), "width");
         // For 5D, combine D*H*W into spatial dimension
-        l = d * h * w;
+        spatialSize = depth * height * width;
 
-        nStride = checkedNarrowToInt(xStrides->Get(0), "nStride");
-        cStride = checkedNarrowToInt(xStrides->Get(1), "cStride");
-        lStride = checkedNarrowToInt(xStrides->Get(4), "lStride");
+        batchStride = checkedNarrowToInt(xStrides->Get(0), "batchStride");
+        channelStride = checkedNarrowToInt(xStrides->Get(1), "channelStride");
+        spatialStride = checkedNarrowToInt(xStrides->Get(4), "spatialStride");
     }
     else
     {
@@ -181,13 +181,13 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
                                                            + std::to_string(xDims->size()));
     }
 
-    auto inCstride = static_cast<unsigned int>(l);
+    auto inCstride = static_cast<unsigned int>(spatialSize);
 
-    // Detect layout: NHWC has C dimension (index 1) with stride 1, NCHW has stride H*W
+    // Detect layout: NLC/NHWC/NDHWC has C dimension (index 1) with stride 1, NCL/NCHW/NCDHW has stride L/H*W/D*H*W
     const bool isLayoutChannelLast = isChannelLastLayout(_inferenceParams.x());
 
     // Calculate vector size based on layout
-    auto vectorsize = computeVectorSize(isLayoutChannelLast, c, inCstride);
+    auto vectorsize = computeVectorSize(isLayoutChannelLast, channels, inCstride);
 
     // Calculate block and grid dimensions
     size_t xlocalsize = 0;
@@ -200,9 +200,9 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
 
     if(isLayoutChannelLast)
     {
-        xlocalsize = std::min(static_cast<size_t>(c) / vectorsize, maxLocalsize);
-        xgridsize
-            = ((static_cast<size_t>(c) / vectorsize) + xlocalsize - 1) / xlocalsize * xlocalsize;
+        xlocalsize = std::min(static_cast<size_t>(channels) / vectorsize, maxLocalsize);
+        xgridsize = ((static_cast<size_t>(channels) / vectorsize) + xlocalsize - 1) / xlocalsize
+                    * xlocalsize;
 
         ylocalsize = maxLocalsize / xlocalsize;
         ygridsize = (inCstride + ylocalsize - 1) / ylocalsize * ylocalsize;
@@ -210,7 +210,7 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
     else
     {
         xlocalsize = 1;
-        xgridsize = ((static_cast<size_t>(c) + xlocalsize - 1) / xlocalsize) * xlocalsize;
+        xgridsize = ((static_cast<size_t>(channels) + xlocalsize - 1) / xlocalsize) * xlocalsize;
 
         ylocalsize = maxLocalsize;
         ygridsize = ((inCstride / vectorsize + ylocalsize - 1) / ylocalsize) * ylocalsize;
@@ -223,7 +223,7 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
 
     if(activeThreadsXy < maxActiveThreads)
     {
-        zgridsize = std::min(maxActiveThreads / activeThreadsXy, static_cast<size_t>(n));
+        zgridsize = std::min(maxActiveThreads / activeThreadsXy, static_cast<size_t>(batches));
     }
     else
     {
@@ -277,12 +277,12 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
                                  static_cast<unsigned int>(zgridsize / zlocalsize));
 
     // Store kernel launch parameters
-    _channels = static_cast<unsigned int>(c);
+    _channels = static_cast<unsigned int>(channels);
     _inCstride = inCstride;
-    _batchCount = static_cast<unsigned int>(n);
-    _cStride = static_cast<unsigned int>(cStride);
-    _lStride = static_cast<unsigned int>(lStride);
-    _batchStride = static_cast<unsigned int>(nStride);
+    _batchCount = static_cast<unsigned int>(batches);
+    _channelStride = static_cast<unsigned int>(channelStride);
+    _spatialStride = static_cast<unsigned int>(spatialStride);
+    _batchStride = static_cast<unsigned int>(batchStride);
 }
 
 void BatchnormFwdInferenceWithVariancePlan::execute(const Handle& handle,
@@ -337,8 +337,8 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const Handle& handle,
                                 _channels,
                                 _inCstride,
                                 _batchCount,
-                                _cStride,
-                                _lStride,
+                                _channelStride,
+                                _spatialStride,
                                 _batchStride,
                                 activationAlpha,
                                 activationBeta);
@@ -359,8 +359,8 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const Handle& handle,
                                 _channels,
                                 _inCstride,
                                 _batchCount,
-                                _cStride,
-                                _lStride,
+                                _channelStride,
+                                _spatialStride,
                                 _batchStride,
                                 activationAlpha,
                                 activationBeta);

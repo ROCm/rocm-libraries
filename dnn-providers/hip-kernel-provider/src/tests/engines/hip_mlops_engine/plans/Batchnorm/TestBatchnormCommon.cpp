@@ -12,15 +12,22 @@ using namespace hip_kernel_provider::batchnorm;
 namespace
 {
 
-ProblemDescription makeProblem(size_t n,
-                               size_t c,
-                               size_t l,
+ProblemDescription makeProblem(size_t batches,
+                               size_t channels,
+                               size_t spatialSize,
                                bool isLayoutChannelLast,
                                bool isFp32,
                                size_t minWorkgroups = 1,
                                Direction direction = Direction::FORWARD_TRAINING)
 {
-    return {n, c, l, isLayoutChannelLast, !isFp32, false, direction, minWorkgroups};
+    return {batches,
+            channels,
+            spatialSize,
+            isLayoutChannelLast,
+            !isFp32,
+            false,
+            direction,
+            minWorkgroups};
 }
 
 } // namespace
@@ -29,9 +36,9 @@ TEST(TestProblemDescription, ExposesProblemProperties)
 {
     const ProblemDescription problem(32, 64, 128, true, false, true, Direction::BACKWARD, 42);
 
-    EXPECT_EQ(problem.n(), 32);
-    EXPECT_EQ(problem.c(), 64);
-    EXPECT_EQ(problem.l(), 128);
+    EXPECT_EQ(problem.batches(), 32);
+    EXPECT_EQ(problem.channels(), 64);
+    EXPECT_EQ(problem.spatialSize(), 128);
     EXPECT_TRUE(problem.isLayoutChannelLast());
     EXPECT_FALSE(problem.useFp16Mix());
     EXPECT_TRUE(problem.useBfp16Mix());
@@ -47,9 +54,9 @@ TEST(TestProblemDescription, ComputesDerivedDimensions)
 
     EXPECT_TRUE(problem.useFp32());
     EXPECT_EQ(problem.inCstride(), 128);
-    EXPECT_EQ(problem.inNl(), 4096);
-    EXPECT_EQ(problem.inCl(), 8192);
-    EXPECT_EQ(problem.inNcl(), 262144);
+    EXPECT_EQ(problem.inChannelSliceSize(), 4096);
+    EXPECT_EQ(problem.inBatchSize(), 8192);
+    EXPECT_EQ(problem.inTensorSize(), 262144);
 }
 
 // ============================================================================
@@ -362,7 +369,7 @@ TEST(TestDefaultConfigSpatialMultiple, NlcFullConfigCheck)
     defaultConfigSpatialMultiple(makeProblem(128, 64, 256, true, true, 80), 32, config);
     EXPECT_EQ(config.variant, 2);
     EXPECT_EQ(config.vectorsize, 4);
-    EXPECT_EQ(config.nelements, 128);
+    EXPECT_EQ(config.batchElements, 128);
     EXPECT_EQ(config.xlocalsize, 16);
     EXPECT_EQ(config.ylocalsize, 8);
     EXPECT_EQ(config.zlocalsize, 1);
@@ -375,7 +382,7 @@ TEST(TestDefaultConfigSpatialMultiple, NlcFallbackConfigCheck)
     defaultConfigSpatialMultiple(makeProblem(64, 25, 256, true, true, 80), 32, config);
     EXPECT_EQ(config.variant, 2);
     EXPECT_EQ(config.vectorsize, 1);
-    EXPECT_EQ(config.nelements, 64);
+    EXPECT_EQ(config.batchElements, 64);
     EXPECT_EQ(config.xlocalsize, 32);
     EXPECT_EQ(config.ylocalsize, 4);
     EXPECT_EQ(config.zlocalsize, 1);
@@ -388,7 +395,7 @@ TEST(TestDefaultConfigSpatialMultiple, NclFullConfigCheck)
     defaultConfigSpatialMultiple(makeProblem(128, 64, 256, false, true, 80), 32, config);
     EXPECT_EQ(config.variant, 2);
     EXPECT_EQ(config.vectorsize, 1);
-    EXPECT_EQ(config.nelements, 128);
+    EXPECT_EQ(config.batchElements, 128);
     EXPECT_EQ(config.xlocalsize, 1);
     EXPECT_EQ(config.ylocalsize, 256);
     EXPECT_EQ(config.zlocalsize, 1);
@@ -401,7 +408,7 @@ TEST(TestDefaultConfigSpatialMultiple, NclSingleVectorConfig)
     defaultConfigSpatialMultiple(makeProblem(16, 32, 2, false, true, 80), 1, config);
     EXPECT_EQ(config.variant, 2);
     EXPECT_EQ(config.vectorsize, 1);
-    EXPECT_EQ(config.nelements, 16);
+    EXPECT_EQ(config.batchElements, 16);
     EXPECT_EQ(config.xlocalsize, 1);
     EXPECT_EQ(config.ylocalsize, 64);
     EXPECT_EQ(config.zlocalsize, 1);
@@ -414,7 +421,7 @@ TEST(TestDefaultConfigSpatialMultiple, NclOddSpatialFallback)
     defaultConfigSpatialMultiple(makeProblem(64, 64, 15, false, true, 80), 32, config);
     EXPECT_EQ(config.variant, 2);
     EXPECT_EQ(config.vectorsize, 1);
-    EXPECT_EQ(config.nelements, 64);
+    EXPECT_EQ(config.batchElements, 64);
     EXPECT_EQ(config.xlocalsize, 1);
     EXPECT_EQ(config.ylocalsize, 64);
     EXPECT_EQ(config.zlocalsize, 1);
@@ -462,7 +469,7 @@ TEST(TestBatchnormBwdStashFix, OldValueAcceptedAsanShapeIntoVariant2)
 TEST(TestBatchnormBwdStashFix, ApplicabilityGateFlipsOnStashValues)
 {
     // The gate the two tests above reach indirectly. At {2,3,1} NLC fp32 the config
-    // resolves to ylocalsize=256, zlocalsize=1, nelements=2, whose last block holds 2
+    // resolves to ylocalsize=256, zlocalsize=1, batchElements=2, whose last block holds 2
     // stash fields but not 4, so the gate accepts a 2-field request and rejects a
     // 4-field one.
     const auto problem = makeProblem(2, 3, 1, true, true);

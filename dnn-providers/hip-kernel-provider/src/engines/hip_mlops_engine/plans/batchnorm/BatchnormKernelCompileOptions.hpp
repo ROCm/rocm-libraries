@@ -59,20 +59,16 @@ private:
         add("HIP_PLUGIN_BN_GRP2", 1);
         add("HIP_PLUGIN_BN_VARIANT", 255);
         add("HIP_PLUGIN_BN_USESAVED", 0);
-        add("HIP_PLUGIN_BN_NCL", 1);
         add("HIP_PLUGIN_BN_VEC_SIZE", 1);
         add("HIP_PLUGIN_BN_STASH_METHOD", 0);
-        add("HIP_PLUGIN_BN_LOOP_UNROLL_MAXN", 768);
-        add("HIP_PLUGIN_BN_LOOP_UNROLL_MAXL", 2500);
+        add("HIP_PLUGIN_BN_LOOP_UNROLL_MAX_BATCH", 768);
+        add("HIP_PLUGIN_BN_LOOP_UNROLL_MAX_SPATIAL", 2500);
         add("HIP_PLUGIN_BN_LDSGCN_SIZE", 16);
         add("HIP_PLUGIN_BN_LDS_SIZE", 256);
-        add("HIP_PLUGIN_BN_C", 1);
-        add("HIP_PLUGIN_BN_N", 1);
-        add("HIP_PLUGIN_BN_N_ELEMENTS", std::string("HIP_PLUGIN_BN_N"));
-        add("HIP_PLUGIN_BN_NL", 1);
-        add("HIP_PLUGIN_BN_INL", 1);
-        add("HIP_PLUGIN_BN_CL", 1);
-        add("HIP_PLUGIN_BN_L", 1);
+        add("HIP_PLUGIN_BN_CHANNELS", 1);
+        add("HIP_PLUGIN_BN_BATCHES", 1);
+        add("HIP_PLUGIN_BN_BATCH_ELEMENTS", std::string("HIP_PLUGIN_BN_BATCHES"));
+        add("HIP_PLUGIN_BN_SPATIAL_SIZE", 1);
     }
 };
 

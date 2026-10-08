@@ -155,29 +155,23 @@ template <typename HipKernelConfig,
           typename LaunchDim,
           typename Architecture,
           int Variant,
-          int NCL,
-          int NElements,
-          int N,
-          int C,
-          int L,
-          int NL,
-          int CL,
+          int BatchElements,
+          int Batches,
+          int Channels,
+          int SpatialSize,
           int VecSize,
           int StashMethod,
-          int LoopUnrollMaxN,
-          int LoopUnrollMaxL,
+          int LoopUnrollMaxBatch,
+          int LoopUnrollMaxSpatial,
           int LDSGCNSize,
           int LDSSize,
           int UseNodpp>
 struct proto_config
 {
     static_assert(UseNodpp == 0 || UseNodpp == 1, "UseNodpp must be 0 or 1");
-    static_assert(NCL >= 0, "HIP_PLUGIN_BN_NCL should be always >= 0");
-    static_assert(C >= 0, "HIP_PLUGIN_BN_C should be always >= 0");
-    static_assert(N >= 0, "HIP_PLUGIN_BN_N should be always >= 0");
-    static_assert(L >= 0, "HIP_PLUGIN_BN_L should be always >= 0");
-    static_assert(NL >= 0, "HIP_PLUGIN_BN_NL should be always >= 0");
-    static_assert(CL >= 0, "HIP_PLUGIN_BN_CL should be always >= 0");
+    static_assert(Batches >= 0, "HIP_PLUGIN_BN_BATCHES should be always >= 0");
+    static_assert(Channels >= 0, "HIP_PLUGIN_BN_CHANNELS should be always >= 0");
+    static_assert(SpatialSize >= 0, "HIP_PLUGIN_BN_SPATIAL_SIZE should be always >= 0");
 
     static constexpr auto input_type_strategy = HipKernelConfig::input_type_strategy;
 
@@ -198,24 +192,26 @@ struct proto_config
                      : Bf16Max::
                            value); // According to the old FloatTypes mechanism (on which this is based), for mixed-precision cases the max value is defined as the max of the smaller type
     static constexpr auto launch_dim = LaunchDim{};
-    static constexpr unsigned int ncl = static_cast<unsigned int>(NCL);
+    static constexpr unsigned int tensor_size
+        = static_cast<unsigned int>(Batches * Channels * SpatialSize);
 
-    // `max_n` is a limit on the number of batch elements from the x tensor that can be cached in per-thread memory as part of
-    // variant 3 kernels. If batchsize (n_elements) exceeds this limit then the kernel doesn't cache the global memory accesses.
+    // `max_batches` is a limit on the number of batch elements from the x tensor that can be cached in per-thread memory as part of
+    // variant 3 kernels. If batchsize (batch_elements) exceeds this limit then the kernel doesn't cache the global memory accesses.
     // The constant of 65 is related to the heuristic used in `defaultConfigSpatialSingle` where Batchnorm plans select the kernel
     // variant to use. In BN Fwd training, the heuristics only selects variant 3 when N <= 32, so the caching optimization is always
     // used. In BN Bwd training, the heuristics only selects variant 3 when N > 64, so the caching optimization is never used. If
     // there are future changes to how the heuristic selects variant 3 kernels, then it may be worth revisiting this caching limit.
-    static constexpr unsigned int max_n = 65;
-    static constexpr unsigned int n_elements = static_cast<unsigned int>(NElements);
-    static constexpr unsigned int n = static_cast<unsigned int>(N);
-    static constexpr unsigned int c = static_cast<unsigned int>(C);
-    static constexpr unsigned int l = static_cast<unsigned int>(L);
-    static constexpr unsigned int nl = static_cast<unsigned int>(NL);
-    static constexpr unsigned int cl = static_cast<unsigned int>(CL);
+    static constexpr unsigned int max_batches = 65;
+    static constexpr unsigned int batch_elements = static_cast<unsigned int>(BatchElements);
+    static constexpr unsigned int batches = static_cast<unsigned int>(Batches);
+    static constexpr unsigned int channels = static_cast<unsigned int>(Channels);
+    static constexpr unsigned int spatial_size = static_cast<unsigned int>(SpatialSize);
+    static constexpr unsigned int channel_slice_size
+        = static_cast<unsigned int>(Batches * SpatialSize);
+    static constexpr unsigned int batch_size = static_cast<unsigned int>(Channels * SpatialSize);
     static constexpr int stash_method = StashMethod;
-    static constexpr int loop_unroll_max_n = LoopUnrollMaxN;
-    static constexpr int loop_unroll_max_l = LoopUnrollMaxL;
+    static constexpr int loop_unroll_max_batch = LoopUnrollMaxBatch;
+    static constexpr int loop_unroll_max_spatial = LoopUnrollMaxSpatial;
     static constexpr unsigned int lds_gcn_size = static_cast<unsigned int>(LDSGCNSize);
     static constexpr unsigned int lds_size = static_cast<unsigned int>(LDSSize);
     static constexpr bool use_nodpp
@@ -277,17 +273,14 @@ using config = hip_kernel_provider::batchnorm::detail::proto_config<
                                                                 HIP_PLUGIN_GFX120X,
                                                                 HIP_PLUGIN_GFX115X>,
     HIP_PLUGIN_BN_VARIANT,
-    HIP_PLUGIN_BN_NCL,
-    HIP_PLUGIN_BN_N_ELEMENTS,
-    HIP_PLUGIN_BN_N,
-    HIP_PLUGIN_BN_C,
-    HIP_PLUGIN_BN_L,
-    HIP_PLUGIN_BN_NL,
-    HIP_PLUGIN_BN_CL,
+    HIP_PLUGIN_BN_BATCH_ELEMENTS,
+    HIP_PLUGIN_BN_BATCHES,
+    HIP_PLUGIN_BN_CHANNELS,
+    HIP_PLUGIN_BN_SPATIAL_SIZE,
     HIP_PLUGIN_BN_VEC_SIZE,
     HIP_PLUGIN_BN_STASH_METHOD,
-    HIP_PLUGIN_BN_LOOP_UNROLL_MAXN,
-    HIP_PLUGIN_BN_LOOP_UNROLL_MAXL,
+    HIP_PLUGIN_BN_LOOP_UNROLL_MAX_BATCH,
+    HIP_PLUGIN_BN_LOOP_UNROLL_MAX_SPATIAL,
     HIP_PLUGIN_BN_LDSGCN_SIZE,
     HIP_PLUGIN_BN_LDS_SIZE,
     HIP_PLUGIN_BN_NODPP>;
