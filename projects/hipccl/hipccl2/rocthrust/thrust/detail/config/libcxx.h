@@ -48,8 +48,7 @@
 #endif
 
 // If the '::cuda::std' namespace from 'libcudacxx' or 'libhipcxx' is available.
-// Not for HIP: there '<cuda/std/version>' may be NVIDIA's libcu++, which is not HIP-aware.
-// libhipcxx is found through its '<hip/std/version>' alias below.
+// Not for HIP, where this may be NVIDIA's libcu++. libhipcxx is found via <hip/std/version>.
 #if !defined(__HIP__) && THRUST_HAS_INCLUDE(<cuda/std/version>) \
 	&& (USE_LIBCUDACXX || USE_LIBHIPCXX)
 #  include <cuda/std/version>
@@ -102,9 +101,7 @@
 #  define _THRUST_USE_ROCPRIM (THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CPP)
 #endif
 
-// NVIDIA's <nv/target> shares its include guard with rocThrust's HIP version
-// (thrust/system/hip/detail/nv/target.h), but it is not HIP-aware: NV_IF_TARGET
-// would always select the host branch, even in device code.
+// NVIDIA's <nv/target> shares our HIP include guard but always selects host code.
 #if defined(__HIP__) && defined(_NV_COMPILER_NVCC) && !defined(__NVCC__)
-#  error "rocThrust: NVIDIA's <nv/target> (libcu++/CCCL, e.g. /usr/include/nv/target) was included in a HIP compilation. It is not HIP-aware and breaks rocThrust's host/device dispatch. Do not include NVIDIA's <cuda/...> or <nv/...> headers in HIP code."
+#  error "<nv/target> was included in a HIP compilation, which is not HIP-aware and breaks rocThrust's host/device dispatch."
 #endif
