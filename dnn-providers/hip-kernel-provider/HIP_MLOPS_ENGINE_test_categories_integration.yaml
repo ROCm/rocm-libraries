@@ -82,7 +82,7 @@ test_categories:
     # This replaced a list of hand-maintained carve-outs that had to name gtest
     # parameter indices, which shifted silently whenever a shape list changed.
     # The miopen and hipblaslt files are include-lists of the same shape; only
-    # the "full_Layernorm_*" carve-out below is unique to this engine.
+    # the "full_Layernorm*" carve-out below is unique to this engine.
     test_patterns:
       - "quick_*"
       - "standard_*"
@@ -98,16 +98,12 @@ test_categories:
     # cannot append to an aliased sequence, so the shared entry is repeated.
     exclude:
       - "*DISABLED*"
-      # The full-tier Layernorm bundles are the whole reason this job times
-      # out. On the 2026-09-16 gfx110X nightly, full_Layernorm_Default alone
-      # cost 838 s for 320 of its 336 cases -- more than every other full-tier
-      # bundle combined (300 s) -- and the job was killed inside it, before
-      # full_Layernorm_Variant2 (144 more cases, ~0.4x Default's element load)
-      # or any quick/standard bundle had run. Excluded by suite name rather
-      # than by dropping "full_*" wholesale so the cheap full-tier batchnorm
-      # and convolution bundles keep their nightly coverage. Both Layernorm
-      # sweeps still run in the weekly "full" tier below.
-      - "full_Layernorm_*"
+      # The full-tier Layernorm bundles (forward and backward) are omitted
+      # because they take too much time in CI (ROCm/rocm-libraries#11529). The
+      # glob has no underscore after "Layernorm" on purpose so it also matches
+      # full_LayernormBackward_*. They are excluded by suite name rather than by
+      # dropping "full_*" wholesale so the other full-tier bundles still run.
+      - "full_Layernorm*"
     labels:
       - "comprehensive"
       - "nightly"
