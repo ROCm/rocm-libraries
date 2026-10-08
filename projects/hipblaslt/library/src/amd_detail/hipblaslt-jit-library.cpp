@@ -79,14 +79,6 @@ namespace hipblaslt_jit
             return status;
         }
 
-        void reached([[maybe_unused]] PublishStep step)
-        {
-#ifdef HIPBLASLT_JIT_LIBRARY_TESTING
-            if(publishStepHook)
-                publishStepHook(step);
-#endif
-        }
-
         bool startsWith(std::string_view text, std::string_view prefix)
         {
             return text.substr(0, prefix.size()) == prefix;
@@ -258,10 +250,6 @@ namespace hipblaslt_jit
                    && library->solutions.at(index)->kernelName == kernel;
         }
     }
-
-#ifdef HIPBLASLT_JIT_LIBRARY_TESTING
-    void (*publishStepHook)(PublishStep) = nullptr;
-#endif
 
     std::map<std::string, std::string> compilerEnvironment(const char* const* environment)
     {
@@ -853,14 +841,12 @@ namespace hipblaslt_jit
                 return {};
             const auto type  = problemTypeKey(problem);
             const auto sizes = problemSizes(problem);
-            reached(PublishStep::Staged);
 
             files::FileLock lock;
             const auto      lockFile = schemaDirectory() / "lock";
             if(auto status = files::FileLock::acquire(lockFile, std::chrono::seconds(120), lock);
                !status.ok())
                 return status;
-            reached(PublishStep::Locked);
             if(auto status = directory->checkKey(); !status.ok())
                 return status;
             const auto sliceName = sliceKey(problem);
@@ -961,7 +947,6 @@ namespace hipblaslt_jit
                 if(auto status = files::writeAtomically(staging, allocator, bytes); !status.ok())
                     return status;
             }
-            reached(PublishStep::Allocated);
 
             // Helpers first, then main code objects, then entries that name them,
             // then the mapping, then the master. Each file is complete before any
@@ -990,7 +975,6 @@ namespace hipblaslt_jit
                        !status.ok())
                         return status;
                 }
-            reached(PublishStep::CodeObjects);
 
             for(auto& placement : placements)
             {
@@ -1031,7 +1015,6 @@ namespace hipblaslt_jit
                         return status;
                 }
             }
-            reached(PublishStep::Entries);
 
             if(fresh)
             {
@@ -1062,7 +1045,6 @@ namespace hipblaslt_jit
                    !status.ok())
                     return status;
             }
-            reached(PublishStep::Mapping);
 
             std::vector<msgpack_io::MasterRow> rows;
             for(const auto& placement : placements)
@@ -1077,9 +1059,7 @@ namespace hipblaslt_jit
                    !status.ok())
                     return status;
             }
-            reached(PublishStep::Master);
             lock.release();
-            reached(PublishStep::Unlocked);
 
             {
                 std::lock_guard<std::mutex> guard(slice->mutex);
