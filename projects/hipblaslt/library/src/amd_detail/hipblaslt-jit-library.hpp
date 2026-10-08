@@ -77,22 +77,6 @@ namespace hipblaslt_jit
                             const std::string&         kernelName,
                             const std::vector<size_t>& sizes);
 
-    enum class PublishStep
-    {
-        Staged,
-        Locked,
-        Allocated,
-        CodeObjects,
-        Entries,
-        Mapping,
-        Master,
-        Unlocked,
-    };
-#ifdef HIPBLASLT_JIT_LIBRARY_TESTING
-    // Called after each publication step; crash tests exit the process there.
-    extern void (*publishStepHook)(PublishStep);
-#endif
-
     // A persistent library of generated solutions. Each directory holds one
     // slice per kernel family. A query opens that slice only: a TensileLite
     // lazy master, its index mapping, and one entry and code object per
