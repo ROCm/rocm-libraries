@@ -90,6 +90,10 @@ namespace rocalution
         _get_backend_descriptor()->HIP_stream_current
             = _get_backend_descriptor()->HIP_stream_default;
 
+        // HIP_dev may already be set by set_device_rocalution(), so it cannot be used
+        // to tell whether the handles below have been created
+        bool handles_created = false;
+
         int num_dev;
         hip_status_t = hipGetDeviceCount(&num_dev);
 
@@ -138,12 +142,18 @@ namespace rocalution
 
                 if(hip_status_t == hipSuccess)
                 {
-                    if((rocblas_create_handle(static_cast<rocblas_handle*>(
-                            _get_backend_descriptor()->ROC_blas_handle))
-                        == rocblas_status_success)
-                       && (rocsparse_create_handle(static_cast<rocsparse_handle*>(
-                               _get_backend_descriptor()->ROC_sparse_handle))
-                           == rocsparse_status_success)
+                    rocblas_handle* blas_handle
+                        = static_cast<rocblas_handle*>(_get_backend_descriptor()->ROC_blas_handle);
+                    rocsparse_handle* sparse_handle = static_cast<rocsparse_handle*>(
+                        _get_backend_descriptor()->ROC_sparse_handle);
+
+                    bool blas_created
+                        = (rocblas_create_handle(blas_handle) == rocblas_status_success);
+                    bool sparse_created
+                        = blas_created
+                          && (rocsparse_create_handle(sparse_handle) == rocsparse_status_success);
+
+                    if(sparse_created
 #ifdef SUPPORT_MULTINODE
                        && (hipStreamCreate(static_cast<hipStream_t*>(
                                _get_backend_descriptor()->HIP_stream_interior))
@@ -155,10 +165,21 @@ namespace rocalution
                     )
                     {
                         _get_backend_descriptor()->HIP_dev = dev;
+                        handles_created                    = true;
                         break;
                     }
                     else
                     {
+                        if(sparse_created)
+                        {
+                            rocsparse_destroy_handle(*sparse_handle);
+                        }
+
+                        if(blas_created)
+                        {
+                            rocblas_destroy_handle(*blas_handle);
+                        }
+
                         LOG_INFO("HIP device "
                                  << dev
                                  << " cannot create rocBLAS/rocSPARSE context and HIP streams");
@@ -167,7 +188,7 @@ namespace rocalution
             }
         }
 
-        if(_get_backend_descriptor()->HIP_dev == -1)
+        if(handles_created == false)
         {
             LOG_INFO("HIP and rocBLAS/rocSPARSE have NOT been initialized!");
             return false;

@@ -26,6 +26,12 @@ import pytest
 _GATE = Path(__file__).resolve().parents[1] / "tools" / "coverage_gate.py"
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 
+sys.path.insert(
+    0, str(_REPO_ROOT / "dnn-providers/hip-kernel-provider/descriptor-packaging/python")
+)
+
+from hkp_pack import provenance_sidecar  # noqa: E402
+
 #: The env vars naming the authoring profile handed to `--profile`, in precedence
 #: order: unsuffixed, then gfx942, then gfx950. Any of the three serves, since nothing
 #: here asserts a profile's CONTENT; gfx942 precedes gfx950 because `_EXPECT_ENGINE`'s
@@ -190,32 +196,35 @@ def _minimal_tree(tmp_path: Path, name: str = "descriptors") -> Path:
             }
         )
     )
-    (root / "test_engine.kdp.json").write_text(
-        json.dumps(
+    kdp = {
+        "version": "1.0",
+        "id": "66666666-6666-6666-6666-666666666666",
+        "engine": _UED_ID,
+        "arch": ["gfx942"],
+        "kernelDescriptors": [
             {
                 "version": "1.0",
-                "id": "66666666-6666-6666-6666-666666666666",
-                "engine": _UED_ID,
+                "id": "77777777-7777-7777-7777-777777777777",
+                "name": "k0",
                 "arch": ["gfx942"],
-                "kernelDescriptors": [
-                    {
-                        "version": "1.0",
-                        "id": "77777777-7777-7777-7777-777777777777",
-                        "name": "k0",
-                        "arch": ["gfx942"],
-                        "kernel_source": {
-                            "kind": "kpack",
-                            "library": "kpack/test.kpack",
-                            "toc_key": "v0",
-                            "symbol": "s0",
-                            "sha256": "a" * 64,
-                        },
-                        "metadata": {"block_n": 64},
-                    }
-                ],
+                "kernel_source": {
+                    "kind": "kpack",
+                    "library": "kpack/test.kpack",
+                    "toc_key": "v0",
+                    "symbol": "s0",
+                    "sha256": "a" * 64,
+                },
+                "metadata": {"block_n": 64},
+                "provenance": {},
             }
-        )
-    )
+        ],
+    }
+    # Packed trees carry each UKD's provenance in a sidecar beside the KDP, and the
+    # packer's marker in its directory.
+    sidecar, data = provenance_sidecar.detach("test_engine.kdp.json", kdp)
+    (root / sidecar).write_bytes(data)
+    (root / provenance_sidecar.PACKED_MARKER).write_bytes(b"")
+    (root / "test_engine.kdp.json").write_text(json.dumps(kdp))
     return root
 
 
@@ -243,6 +252,51 @@ class TestTheStaticRungNeverOverstatesItself:
         assert result.returncode != 0
         assert "1. STATIC   FAIL" in result.stdout
         assert "static" in result.stdout
+
+    def test_rung_one_reads_sidecars_from_the_provenance_root(self, tmp_path):
+        """An installed tree keeps its sidecars apart; the static rung reads them from
+        the mirrored root it is given, and without it refuses the packed tree."""
+        root = _minimal_tree(tmp_path)
+        provenance = tmp_path / "provenance"
+        provenance.mkdir()
+        sidecar = root / provenance_sidecar.sidecar_name("test_engine.kdp.json")
+        sidecar.rename(provenance / sidecar.name)
+
+        found = _run(
+            "--tree",
+            str(root),
+            "--mode",
+            "structural",
+            "--provenance-root",
+            str(provenance),
+        )
+        missing = _run("--tree", str(root), "--mode", "structural")
+
+        assert "1. STATIC   PASS (STRUCTURAL ONLY" in found.stdout, found.stdout
+        assert "1. STATIC   FAIL" in missing.stdout
+        assert "has no provenance sidecar" in missing.stdout
+
+    def test_a_provenance_root_for_an_unmarked_tree_fails_rung_one(self, tmp_path):
+        """The root only relocates a packed tree's sidecars. The sidecar waits under
+        it here, so a gate taking the root to mean packed would pass."""
+        root = _minimal_tree(tmp_path)
+        provenance = tmp_path / "provenance"
+        provenance.mkdir()
+        sidecar = root / provenance_sidecar.sidecar_name("test_engine.kdp.json")
+        sidecar.rename(provenance / sidecar.name)
+        (root / provenance_sidecar.PACKED_MARKER).unlink()
+
+        result = _run(
+            "--tree",
+            str(root),
+            "--mode",
+            "structural",
+            "--provenance-root",
+            str(provenance),
+        )
+
+        assert "1. STATIC   FAIL" in result.stdout
+        assert "usage error: --provenance-root" in result.stdout
 
 
 class TestRungsStaySeparable:
@@ -401,6 +455,9 @@ class TestAgainstTheRealBuild:
             "spec": {"block_n": 64},
         }
         kdp_path.write_text(json.dumps(doc))
+        # An authored tree carries no marker; one left from the packed fixture would
+        # read the tree as packed, bind the sidecar to a different UKD and fail rung 1.
+        (root / provenance_sidecar.PACKED_MARKER).unlink()
         result = _run(
             "--tree", str(root), "--mode", "structural", "--validator", str(_VALIDATOR)
         )

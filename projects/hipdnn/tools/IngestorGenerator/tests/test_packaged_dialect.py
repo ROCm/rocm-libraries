@@ -49,6 +49,20 @@ class TestKernelSourceEmission:
         doc = ks.as_document()
         assert set(doc) == {"kind", "source", "entry", "build"}
 
+    def test_hsaco_emits_exactly_kind_file_symbol(self):
+        ks = KernelSource(
+            kind="hsaco",
+            file="HsacoFixture.co",
+            symbol="HsacoFixtureAdd",
+            source="X.cpp",
+            spec={"batch": 1},
+        )
+        assert ks.as_document() == {
+            "kind": "hsaco",
+            "file": "HsacoFixture.co",
+            "symbol": "HsacoFixtureAdd",
+        }
+
     def test_unemittable_kind_raises_rather_than_guessing(self):
         with pytest.raises(ValueError, match="no emitter"):
             KernelSource(kind="kpack").as_document()

@@ -9,8 +9,9 @@ derivation and no ``sys.path`` mutation):
     python -m benchmarks.common.attention_combo_sweep --arch gfx942 --list-only
     rocke-attention-combo-sweep --candidate-prefix attention_gfx950_u2d_narrow
 
-The full unified-tuning space is millions of specs per shape, so each tuning
-candidate is randomly sampled (``--tuning-sample``, 0 walks everything). Host
+The full unified-tuning and dense knob spaces are millions of specs per shape,
+so at ``--sweep-level full`` each tuning or dense candidate is randomly sampled
+(``--tuning-sample``, 0 walks everything). Host
 validation (build + verify + lower) runs on ``--jobs`` worker processes, and
 isolated GPU runs are spread over ``--gpus``. Configs whose lowered IR matches
 one already validated for the shape are recorded as ``duplicate`` and not run.
@@ -24,15 +25,14 @@ import hashlib
 import json
 import math
 import os
-import pickle
 import queue
 import subprocess
 import sys
-import tempfile
 import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import ExitStack
+from dataclasses import replace
 from typing import NamedTuple, Optional
 
 from dispatch.attention import (
@@ -42,7 +42,8 @@ from dispatch.attention import (
     iter_dispatch_attention_all,
 )
 from dispatch.attention.common import _problem
-from kernels.common.attention_dense_spec import AttentionDenseSpec
+from rocke.dispatch.core import spec_identity
+from rocke.dispatch.tuning.walk import sample_count, sweep_level
 from benchmarks.common.attention_flops import attention_flops
 from kernels.common.attention_unified import UNIFIED_DTYPES
 
@@ -55,7 +56,7 @@ def _kernel_name(spec) -> str:
 
 
 def _spec_kind(spec) -> str:
-    if isinstance(spec, AttentionDenseSpec):
+    if getattr(spec, "path", "") == "dense":
         return "dense"
     if hasattr(spec, "path") or hasattr(spec, "kernel_spec"):
         return "unified"
@@ -64,6 +65,12 @@ def _spec_kind(spec) -> str:
 
 def _spec_key(spec) -> str:
     return str(getattr(spec, "tuning_id", "") or _kernel_name(spec))
+
+
+def _spec_knobs(spec) -> dict:
+    """The canonical knob overrides a ``tuning_id`` stands for. Recorded next to
+    the id, they replay the spec directly (``tuning_knobs``)."""
+    return dict(getattr(spec, "knobs", ()) or ())
 
 
 def _requests(args):
@@ -84,7 +91,6 @@ def _requests(args):
                     kv_block_size=args.kv_block_size,
                     sliding_window=args.sliding_window,
                     num_cus=args.num_cus,
-                    dense_waves_per_eu=int(getattr(args, "dense_waves_per_eu", 0) or 0),
                 )
 
 
@@ -342,31 +348,53 @@ def iter_shard(args):
 
 
 def _resolve_pinned(args):
-    from dataclasses import replace
+    """The request and result one isolated child runs.
 
-    if getattr(args, "run_pickle", ""):
-        with open(args.run_pickle, "rb") as fh:
-            req, candidate_name, spec = pickle.load(fh)
-        candidate = ATTENTION_EXECUTION_REGISTRY.get(candidate_name)
-        return req, attention_dispatch_result(req, candidate, spec)
+    A tuned spec with recorded knobs is rebuilt from them and checked against
+    its id. A bare key is looked up among the specs the same sweep level /
+    sample / seed offers; a bare ``--run-tuning-id`` not among them falls back
+    to the candidate's (slow) search of its whole space.
+    """
     req = next(_requests(args))
     candidate = ATTENTION_EXECUTION_REGISTRY.get(args.run_candidate)
+    knobs = json.loads(getattr(args, "run_knobs", "") or "{}")
     pinned = replace(
         req,
         algorithm=candidate.algorithm,
         spec_id=candidate.spec_id,
-        attention_tuning_id=args.run_tuning_id or "auto",
+        tuning_id=args.run_tuning_id or "auto",
+        tuning_knobs=knobs,
     )
-    spec = candidate.select_spec(pinned)
     wanted = args.run_tuning_id or args.run_spec_key
-    if wanted and _spec_key(spec) != wanted:
-        for item in candidate.sweep_space(pinned):
-            if _spec_key(item) == wanted:
-                spec = item
-                break
-        else:
-            raise ValueError(f"{wanted!r} not on {candidate.name}")
+    if knobs or not wanted:
+        spec = candidate.select_spec(pinned)
+    else:
+        offered = _offered_specs(candidate, replace(pinned, tuning_id="auto"), args)
+        spec = next((s for s in offered if _spec_key(s) == wanted), None)
+        if spec is None and args.run_tuning_id:
+            spec = candidate.select_spec(pinned)
+        if spec is None:
+            raise ValueError(
+                f"{wanted!r} not on {candidate.name} at --sweep-level "
+                f"{getattr(args, 'sweep_level', 'production')} "
+                f"(--tuning-sample {getattr(args, 'tuning_sample', 0)}, "
+                f"--seed {getattr(args, 'seed', 0)})"
+            )
     return req, attention_dispatch_result(req, candidate, spec)
+
+
+def _offered_specs(candidate, request, args):
+    """The specs a sweep run with the same level / sample / seed offered for
+    ``candidate``, so a key printed by a ``full`` sampled run replays. The
+    stream reads the level when it is created, inside the scope."""
+    level = getattr(args, "sweep_level", "production")
+    sample = sample_count(level, int(getattr(args, "tuning_sample", 0) or 0))
+    with sweep_level(level):
+        if sample > 0 and candidate.sample_space is not None:
+            return candidate.sample_space(
+                request, sample, int(getattr(args, "seed", 0))
+            )
+        return candidate.sweep_space(request)
 
 
 def _row_skeleton(req, candidate, spec, index: int) -> dict:
@@ -381,6 +409,10 @@ def _row_skeleton(req, candidate, spec, index: int) -> dict:
         kernel_name=_kernel_name(spec),
         kind=_spec_kind(spec),
         waves_per_eu=getattr(kernel_spec, "waves_per_eu", None),
+        knobs=_spec_knobs(spec),
+        # What the pin must rebuild: a consumer replaying (spec_id,
+        # tuning_id, knobs) compares its result's KernelId.spec_hash to this.
+        spec_hash=spec_identity(spec),
     )
     return row
 
@@ -402,7 +434,12 @@ def _run_result(req, result, args, index: int) -> dict:
                     int(tensors["k"].shape[0])
                 )
                 result = attention_dispatch_result(req, result.candidate, runtime_spec)
-                row = _row_skeleton(req, result.candidate, runtime_spec, index)
+                # Keep the dispatch-time spec_hash: the i64 specialization is
+                # re-applied at bind time on replay, not part of the pin.
+                row = {
+                    **_row_skeleton(req, result.candidate, runtime_spec, index),
+                    "spec_hash": row["spec_hash"],
+                }
         else:
             row.update(
                 status="error",
@@ -500,8 +537,6 @@ def _child_argv(args, req, result) -> list:
         str(args.sliding_window),
         "--num-cus",
         str(args.num_cus),
-        "--dense-waves-per-eu",
-        str(getattr(args, "dense_waves_per_eu", 0)),
         "--warmup",
         str(args.warmup),
         "--iters",
@@ -518,30 +553,42 @@ def _child_argv(args, req, result) -> list:
         str(req.seqlen_q),
         "--seqlen-k",
         str(req.seqlen_k),
+        "--sweep-level",
+        str(getattr(args, "sweep_level", "production")),
+        "--tuning-sample",
+        str(getattr(args, "tuning_sample", 0)),
     ]
     argv += ["--causal"] if args.causal else ["--no-causal"]
     if args.no_check:
         argv += ["--no-check"]
+    tuning_id = getattr(result.spec, "tuning_id", "")
+    if tuning_id:
+        argv += [
+            "--run-tuning-id",
+            tuning_id,
+            "--run-knobs",
+            json.dumps(_spec_knobs(result.spec), sort_keys=True),
+        ]
+    else:
+        argv += ["--run-spec-key", _spec_key(result.spec)]
     return argv
 
 
 def _run_isolated(args, req, result, index: int, gpu: Optional[str] = None) -> dict:
     """Run one validated config in a child process, optionally pinned to ``gpu``.
 
-    The child receives the exact spec by pickle, so it never re-walks the
-    candidate's sweep space to find a ``tuning_id``.
+    The child rebuilds a tuned spec from its recorded knobs (checked against its
+    ``tuning_id``), the same replay a stored benchmark row supports, so it never
+    re-walks the candidate's sweep space.
     """
     row = _row_skeleton(req, result.candidate, result.spec, index)
     env = None
     if gpu is not None:
         env = dict(os.environ, HIP_VISIBLE_DEVICES=str(gpu))
         row["gpu"] = str(gpu)
-    fd, spec_path = tempfile.mkstemp(suffix=".pkl", prefix="attn_sweep_")
     try:
-        with os.fdopen(fd, "wb") as fh:
-            pickle.dump((req, result.candidate.name, result.spec), fh)
         proc = subprocess.run(
-            _child_argv(args, req, result) + ["--run-pickle", spec_path],
+            _child_argv(args, req, result),
             capture_output=True,
             text=True,
             timeout=args.config_timeout or None,
@@ -553,8 +600,6 @@ def _run_isolated(args, req, result, index: int, gpu: Optional[str] = None) -> d
             reason=f"no result within {args.config_timeout}s",
         )
         return row
-    finally:
-        os.unlink(spec_path)
     for line in reversed([ln for ln in proc.stdout.splitlines() if ln.strip()]):
         try:
             parsed = json.loads(line)
@@ -799,12 +844,6 @@ def main() -> int:
     ap.add_argument("--kv-block-size", type=int, default=16)
     ap.add_argument("--sliding-window", type=int, default=0)
     ap.add_argument("--num-cus", type=int, default=0)
-    ap.add_argument(
-        "--dense-waves-per-eu",
-        type=int,
-        default=0,
-        help="dense-kernel WPE pin: 0 keeps policy/sweep expansion; 1..8 pins it",
-    )
     ap.add_argument("--causal", action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument("--candidate-prefix", default="")
     ap.add_argument("--tuning-id-prefix", default="")
@@ -812,15 +851,18 @@ def main() -> int:
         "--sweep-level",
         choices=("production", "full"),
         default="production",
-        help="production walks the curated stacks exhaustively (no dead-end "
-        "knobs). full samples every kernel knob, dead ends included",
+        help="production walks the curated unified-tuning stacks (no dead-end "
+        "knobs) and sets each dense knob to every legal value one at a time "
+        "from the shipped spec. full samples every knob combination, dead "
+        "ends included",
     )
     ap.add_argument(
         "--tuning-sample",
         type=int,
         default=256,
-        help="with --sweep-level full: random legal specs per tuning candidate, "
-        "seeded by --seed (0 walks the full stream). Ignored for production",
+        help="with --sweep-level full: random legal specs per tuning or dense "
+        "candidate, seeded by --seed (0 walks the full stream). Ignored for "
+        "production. --run-spec-key replays against the same level/sample/seed",
     )
     ap.add_argument(
         "--jobs",
@@ -878,17 +920,20 @@ def main() -> int:
     ap.add_argument("--run-candidate", default="")
     ap.add_argument("--run-tuning-id", default="")
     ap.add_argument("--run-spec-key", default="")
-    ap.add_argument("--run-pickle", default="", help=argparse.SUPPRESS)
+    ap.add_argument(
+        "--run-knobs",
+        default="",
+        help="JSON knob overrides recorded next to --run-tuning-id (a row's "
+        "'knobs'); the child rebuilds that spec from them directly",
+    )
     args = ap.parse_args()
     if args.benchmark_iterations < 1:
         ap.error("--benchmark-iterations must be >= 1")
-    if not 0 <= args.dense_waves_per_eu <= 8:
-        ap.error("--dense-waves-per-eu must be 0 (auto) or in [1, 8]")
     if args.arch is None:
         args.arch = _default_arch()
     if args.list_only:
         return list_only(args)
-    if args.run_candidate or args.run_pickle:
+    if args.run_candidate:
         return run_one(args)
     return sweep(args)
 
