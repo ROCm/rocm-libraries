@@ -123,8 +123,11 @@ directory holds a master library, an index mapping, one entry file and one
 code object per published solution, all MessagePack, plus `cache-key.msgpack`.
 Directory and entry names are filesystem-safe literals of the device, backend,
 kernel, problem type and sizes. A row matches the solution's problem type and
-its exact sizes. A solution whose code-object version or kernarg version this
-build cannot run is skipped; the rest of the library still loads. Publishing
+its exact sizes. The caller chooses the root directory. Each hipBLASLt build
+reads and writes only `<root>/v1/<git revision>/`, where the revision is the
+value `hipblasLtGetGitRevision` reports, so a library never serves kernels that
+another build published. A build without a git revision disables the library.
+An entry this build cannot read fails the lookup instead of being skipped. Publishing
 replaces files atomically, in an order that never leaves a reference to a
 missing file. A backend contributes one `SourceCodeBundle`. `publish` takes the
 executable built from it, its TensileLite record and the local indices of the
