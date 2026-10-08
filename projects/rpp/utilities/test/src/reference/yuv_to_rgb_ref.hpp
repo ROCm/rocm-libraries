@@ -28,6 +28,7 @@ SOFTWARE.
 #include <rpp/rpp.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 
@@ -91,9 +92,9 @@ Notes
   unknown ranges as behaving like studio, so those are the defaults for the
   float path. The CubicV coefficient table follows the kernel, which falls
   back to BT.601 instead; that divergence is in the doc-defect note above.
-  RpptColorStandard_BT2020_CL is deliberately not special-cased: constant
-  luminance is a genuinely different transfer, out of scope for this golden
-  and not gridded.
+  RpptColorStandard_BT2020_CL reuses the BT2020_NCL coefficients on both
+  paths, as the kernel does. True constant luminance is a genuinely different
+  transfer, out of scope for this golden and not gridded.
 */
 
 // Which vertical chroma upsampler the op under test documents.
@@ -116,6 +117,7 @@ inline YuvLumaWeights yuv_luma_weights(RpptColorStandard standard) {
         case RpptColorStandard_SMPTE240M:
             return {0.212, 0.087};
         case RpptColorStandard_BT2020_NCL:
+        case RpptColorStandard_BT2020_CL:
             return {0.2627, 0.0593};
         default:
             return {0.2126, 0.0722};  // BT.709
@@ -205,8 +207,9 @@ inline YuvFixedCoeffs yuv_fixed_coeffs(RpptColorStandard standard, RpptColorRang
     return k;
 }
 
-// Chroma is truncated to an integer luma-table index offset before the luma gain; all shifts are
-// arithmetic, matching FFmpeg's floor behaviour.
+// Chroma is truncated to an integer luma-table index offset before the luma gain. Several shifts
+// are of negative ints: implementation-defined before C++20, but arithmetic (floor) on gcc/clang,
+// which is what FFmpeg relies on too.
 inline void yuv_to_rgb_pixel_fixed(int y, int u, int v, const YuvFixedCoeffs& k, double rgb[3]) {
     const int kr = y + ((v * k.crv) >> 16) - (k.crv >> 9);
     const int kb = y + ((u * k.cbu) >> 16) - (k.cbu >> 9);
@@ -277,6 +280,7 @@ inline void yuv_to_rgb_reference(const Rpp8u* srcY, const Rpp8u* srcUV, Rpp8u* d
                                  Rpp32u srcYPitch, Rpp32u srcUVPitch, Rpp32u dstPitch, Rpp32u width,
                                  Rpp32u height, RpptColorStandard standard, RpptColorRange range,
                                  YuvChromaUpsample upsample) {
+    assert(width % 2 == 0 && height % 2 == 0 && height >= 2);  // NV12: even extents
     const Rpp32u chromaHeight = height / 2;
     const int last = static_cast<int>(chromaHeight) - 1;
     const bool cubic = (upsample == YuvChromaUpsample::CubicV);

@@ -44,6 +44,11 @@ Description
   op that touches hue or saturation converts and rounds identically, and a
   single reviewed copy backs them all.
 
+  Channels must already be in [0,1]. to_unit() passes F16/F32 through
+  unchanged, so float inputs rely on fill_input() keeping them in range; an
+  out-of-range channel can give S > 1, which the saturation clamp would then
+  alter even at factor 1.
+
 Expression
   H in [0,360), S and V in [0,1]
   V = max(R, G, B)

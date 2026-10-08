@@ -79,6 +79,7 @@ std::vector<double> tensor_stddev_reference(const T* src, const RpptDesc& d, con
 
     std::vector<double> out(reduction_length(d), 0.0);
     for (Rpp32u n = 0; n < d.n; ++n) {
+        if (N[n] == 0) continue;  // empty ROI: leave 0 rather than 0/0 = NaN
         for (Rpp32u c = 0; c < d.c; ++c)
             out[n * stride + c] = std::sqrt(sq[n * stride + c] / static_cast<double>(N[n]));
         if (d.c == 3) out[n * stride + 3] = std::sqrt(sqImg[n] / (3.0 * static_cast<double>(N[n])));

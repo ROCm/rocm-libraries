@@ -50,9 +50,12 @@ Expression
   dst(x, y, c) = (2/pi) * atan2( src1, src2 )
 
 Per-type form
-  atan2 is scale-invariant in a common positive factor, so integers may be
-  combined in stored [0,255] space directly; I8 is shifted into that space
-  first.
+  atan2 is scale-invariant in a common positive factor, so U8 may be
+  combined in stored [0,255] space directly. I8 is deliberately evaluated on
+  its unsigned byte reinterpretation (a+128, b+128), as the kernel does; that
+  shift is a translation, so the angle differs from the phase of the signed
+  values. The F16/F32 clamp assumes inputs in [0,1]; a negative src1 would
+  clamp to 0.
 
     U8      clamp[0,255]   ( round( (2/pi) * atan2(a, b)         * 255 ) )
     I8      clamp[-128,127]( round( (2/pi) * atan2(a+128, b+128) * 255 ) - 128 )

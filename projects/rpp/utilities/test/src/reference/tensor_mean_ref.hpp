@@ -67,6 +67,7 @@ std::vector<double> tensor_mean_reference(const T* src, const RpptDesc& d, const
 
     std::vector<double> out(reduction_length(d), 0.0);
     for (Rpp32u n = 0; n < d.n; ++n) {
+        if (N[n] == 0) continue;  // empty ROI: leave 0 rather than 0/0 = NaN
         for (Rpp32u c = 0; c < d.c; ++c)
             out[n * stride + c] = sum[n * stride + c] / static_cast<double>(N[n]);
         if (d.c == 3)
