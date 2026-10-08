@@ -12,14 +12,6 @@
       "type": "string"
     },
     {
-      "name": "num_heads",
-      "type": "int"
-    },
-    {
-      "name": "num_kv_heads",
-      "type": "int"
-    },
-    {
       "name": "head_dim",
       "type": "int"
     },

@@ -41,6 +41,14 @@ diff against upstream plus the modifications below.
    The launchers default it to `1/sqrt(head_dim)`, so a caller that passes nothing
    gets upstream's behaviour. Upstream callers of the contexts that pass no scale
    are unchanged.
+3. **Runtime head counts** (both kernels) **and token strides** (the generic
+   kernel). The dual-wave kernel takes trailing `num_heads_q, num_heads_kv`; the
+   generic one those and `stride_q_n, stride_kv_n` (its token pitches had been
+   `num_heads * head_dim`, baked). The head arithmetic is done in 32 bits, since an
+   `Index` divide is a 64-bit one. Only the dual-wave kernel's default grid mapping
+   reads the runtime counts; its swizzled and batch-interleaved mappings refuse
+   them. The launchers pass the build-time values, so upstream callers are
+   unchanged.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

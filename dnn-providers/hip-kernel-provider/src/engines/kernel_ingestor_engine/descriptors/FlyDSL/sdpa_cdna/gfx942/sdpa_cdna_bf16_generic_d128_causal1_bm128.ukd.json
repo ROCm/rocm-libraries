@@ -1,26 +1,24 @@
 {
   "version": "1.0",
-  "id": "dd6edc86-1ebf-59a5-b6f0-708a61db2f46",
-  "name": "sdpa_cdna_bf16_generic_hq32_hkv8_d128_causal0_bm128_kva64",
+  "id": "0dc4ceef-ba1a-5688-90e7-f5fe95e449ab",
+  "name": "sdpa_cdna_bf16_generic_d128_causal1_bm128",
   "arch": [
     "gfx942"
   ],
   "kernel_source": {
     "kind": "hsaco",
-    "file": "sdpa_cdna_bf16_generic_hq32_hkv8_d128_causal0_bm128_kva64.hsaco",
+    "file": "sdpa_cdna_bf16_generic_d128_causal1_bm128.hsaco",
     "symbol": "flash_attn_generic_kernel_0"
   },
   "metadata": {
     "dtype": "bf16",
     "kernel": "generic",
-    "num_heads": 32,
-    "num_kv_heads": 8,
     "head_dim": 128,
-    "causal": 0,
+    "causal": 1,
     "block_m": 128,
-    "kv_align": 64
+    "kv_align": 0
   },
-  "priority": 110,
+  "priority": 100,
   "provenance": {
     "specialization_contract": {
       "schema_version": 1,
@@ -32,8 +30,6 @@
           "matcher_only_fields": [
             "dtype",
             "kernel",
-            "num_heads",
-            "num_kv_heads",
             "head_dim",
             "causal",
             "block_m",

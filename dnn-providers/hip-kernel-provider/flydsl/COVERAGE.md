@@ -468,8 +468,8 @@ meet the CDNA ones. The kernels are FlyDSL's own MFMA flash-attention forwards,
 vendored whole under
 [`kernels_src/kernels/attention_cdna/`](kernels_src/kernels/attention_cdna/README.md),
 whose README lists the modifications (an import path, a runtime row guard in
-the cooperative K/V loads that FlyDSL 0.3.4 cannot trace in a helper, and a
-runtime softmax scale).
+the cooperative K/V loads that FlyDSL 0.3.4 cannot trace in a helper, a runtime
+softmax scale, and runtime head counts and token strides).
 The native half is
 [`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp).
 
@@ -489,10 +489,9 @@ baked field at a time (§7.3).
 | Baked per object | Runtime kernel argument |
 |---|---|
 | dtype (`bf16`) | batch |
-| query heads (32) and KV heads (8) | sequence length (one value: `Sq == Skv`) |
-| `head_dim` (128) | softmax scale |
-| causal (bottom-right), or none | |
-| contiguous BSHD strides | |
+| `head_dim` (128) | sequence length (one value: `Sq == Skv`) |
+| causal (bottom-right), or none | query and KV head counts (MHA, GQA, MQA) |
+| contiguous BSHD strides | softmax scale |
 | gfx942 non-causal: whether the KV tail is masked (`kv_align`) | |
 
 Two objects per arch, causal and non-causal, and on gfx942 a third. The generic
@@ -514,7 +513,7 @@ One SDPA-forward node, and:
 | Q, K, V, O rank 4, device operands, **not ragged**, **contiguous BSHD** (strides `(S·H·D, D, H·D, 1)` on the logical B, H, S, D axes) | The kernels address each operand by a baked token pitch; no other layout reads correctly. |
 | One dtype for all four; an object exists only for `bf16` | The graph matcher accepts `HALF` as well, and the kernel matcher then finds no object. |
 | `Sq == Skv`; `Hq % Hk == 0`; V shaped as K, O as Q | The kernels take one sequence length. |
-| Heads and `head_dim` equal to an object's baked values | Checked by the kernel matcher against each candidate's metadata. |
+| `head_dim` equal to an object's baked value | Checked by the kernel matcher against each candidate's metadata. |
 | No mask, or causal: top-left, bottom-right or `right_bound == 0` | With equal lengths the three are the same mask, the kernels' own. Any `left_bound` or other band declines. |
 | Scale: `attn_scale_value` (> 0), a pass-by-value scalar tensor, or absent | Absent is `1/√head_dim`, the reference's default. The running max is over unscaled scores, which orders them correctly only for a positive scale. |
 | Key length a multiple of 64, for a `kv_align` 64 object | That object does not mask the last KV tile. |
@@ -532,7 +531,8 @@ against the coverage it buys. In order:
 | | What it takes |
 |---|---|
 | ~~Runtime scale~~ | Done: a trailing f32 argument on both kernels (modification 2). |
-| Runtime head counts and strides | Kernel arguments in place of the baked values; the largest win in objects served per object shipped. |
+| ~~Runtime head counts~~ | Done: trailing i32 arguments on both kernels, and the generic kernel's token pitches with them (modification 3). |
+| Full strides: BHSD, packed QKV | The head stride is still `head_dim` and the batch stride derived from the token pitch; both need arguments. |
 | LSE output | Upstream's kernels already carry the LSE operand. |
 | `Sq ≠ Skv`, bottom-right and top-left causal separately, windows | Upstream's kernels take `seq_len_kv` separately; the mask needs the diagonal offset. |
 | `head_dim` 64 and f16 | Both kernels build them; rows in the instance table. |
@@ -565,9 +565,14 @@ the harness's own bias. The measurements are kept outside the repository.
 | gfx942 non-causal: mask the KV tail (a correctness fix) | the masked object is measurably slower at lengths a multiple of 64, on every shape | kept, plus the unmasked object beside it for those lengths (`kv_align` 64) |
 | Runtime softmax scale, gfx950 | same registers and instruction count; slower by a fraction of a percent at mid-size shapes, sign repeating | runtime, for coverage — **deferred** |
 | Runtime softmax scale, gfx942 | 2–4 more registers (the scale is splatted into a VGPR pair for packed multiplies; the `kv_align` 64 object moves 4 values into AGPRs), a few more instructions; slower by a fraction of a percent, sign repeating on the long shapes | runtime, for coverage — **deferred** |
+| Runtime head counts, both kernels (and the generic kernel's token pitches) | same VGPRs; a 32-bit divide or two per workgroup and, on gfx942, runtime token pitches in the KV loads. Slower by under a percent on most shapes and up to a couple of percent on the shortest; the gfx950 causal object also pays on long shapes, so part of the cost is in how the loop is scheduled, not only the divides. Done in 64-bit arithmetic it cost more | runtime, for coverage — **deferred** |
 
 **Deferred performance work** -- costs accepted for coverage, to revisit:
 
 1. *Runtime scale, both kernels.* Options: a baked-`1/√head_dim` object beside
    each runtime-scale one (the common scale at full speed), or a formulation that
    keeps the scale out of the packed multiplies on gfx942.
+2. *Runtime head counts.* Divide by the head counts with host-computed
+   multiply-and-shift constants instead of a divide sequence; find what moves
+   in the gfx950 causal object's loop; or ship baked-head objects for the most
+   common head configurations beside the runtime ones.

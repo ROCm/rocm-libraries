@@ -417,11 +417,9 @@ SDPA_CDNA_BLOCK_M = {"dualwave": 256, "generic": 128}
 SDPA_CDNA_KV_ALIGN = 64
 PRIORITY_SDPA_CDNA_KV_ALIGNED = 110
 
-# Upstream bakes the head counts and the softmax scale (1/sqrt(head_dim)) into
-# each object, so until those are runtime arguments every model shape needs its
-# own objects. This first set is one model shape, to bring the CDNA engine up
-# end to end; it is not a coverage claim.
-SDPA_CDNA_HEADS = ((32, 8),)
+# The head counts and the softmax scale are kernel arguments (vendored-kernel
+# modifications 2 and 3); head_dim and dtype are still baked, and this set is one
+# of each while the remaining runtime features land.
 SDPA_CDNA_HEAD_DIMS = (128,)
 SDPA_CDNA_DTYPES = ("bf16",)
 
@@ -435,33 +433,30 @@ def sdpa_cdna_instances(arch: str) -> list[Instance]:
     kernel = SDPA_CDNA_KERNEL[arch]
     instances: list[Instance] = []
     for dtype in SDPA_CDNA_DTYPES:
-        for num_heads, num_kv_heads in SDPA_CDNA_HEADS:
-            for head_dim in SDPA_CDNA_HEAD_DIMS:
-                for causal in SDPA_CAUSAL:
-                    aligns = (0,)
-                    if kernel == "generic" and not causal:
-                        aligns = (0, SDPA_CDNA_KV_ALIGN)
-                    for kv_align in aligns:
-                        instances.append(
-                            Instance(
-                                op="sdpa_cdna",
-                                dtype=dtype,
-                                priority=(
-                                    PRIORITY_SDPA_CDNA_KV_ALIGNED
-                                    if kv_align
-                                    else PRIORITY_SPECIALIZED
-                                ),
-                                knobs={
-                                    "kernel": kernel,
-                                    "num_heads": num_heads,
-                                    "num_kv_heads": num_kv_heads,
-                                    "head_dim": head_dim,
-                                    "causal": causal,
-                                    "block_m": SDPA_CDNA_BLOCK_M[kernel],
-                                    "kv_align": kv_align,
-                                },
-                            )
+        for head_dim in SDPA_CDNA_HEAD_DIMS:
+            for causal in SDPA_CAUSAL:
+                aligns = (0,)
+                if kernel == "generic" and not causal:
+                    aligns = (0, SDPA_CDNA_KV_ALIGN)
+                for kv_align in aligns:
+                    instances.append(
+                        Instance(
+                            op="sdpa_cdna",
+                            dtype=dtype,
+                            priority=(
+                                PRIORITY_SDPA_CDNA_KV_ALIGNED
+                                if kv_align
+                                else PRIORITY_SPECIALIZED
+                            ),
+                            knobs={
+                                "kernel": kernel,
+                                "head_dim": head_dim,
+                                "causal": causal,
+                                "block_m": SDPA_CDNA_BLOCK_M[kernel],
+                                "kv_align": kv_align,
+                            },
                         )
+                    )
     _assert_unique(instances)
     return instances
 

@@ -278,10 +278,24 @@ def build_flash_attn_func_module_primary(
         BlockTable: fx.Tensor,
         block_table_stride: fx.Int32,
         sm_scale: fx.Float32,
+        num_heads_q: fx.Int32,
+        num_heads_kv: fx.Int32,
+        stride_q_n: fx.Int32,
+        stride_kv_n: fx.Int32,
     ):
         # Make shape/mode traits visible to the JIT cache key.
         _ = _flash_attn_generic_cache_tag
-        ctx = GenericFlashAttnContext(traits, K, V, seq_len, seq_len_kv)
+        ctx = GenericFlashAttnContext(
+            traits,
+            K,
+            V,
+            seq_len,
+            seq_len_kv,
+            num_heads_q=num_heads_q,
+            num_heads_kv=num_heads_kv,
+            stride_token_q=stride_q_n,
+            stride_token_kv=stride_kv_n,
+        )
         ctx.init_types_and_pointers()
         gemm_helper = GenericGemmHelper(ctx)
         softmax_helper = GenericSoftmaxHelper(ctx)
@@ -614,6 +628,10 @@ def build_flash_attn_func_module_primary(
         seq_len: fx.Int32,
         seq_len_kv: fx.Int32,
         sm_scale: fx.Float32,
+        num_heads_q: fx.Int32,
+        num_heads_kv: fx.Int32,
+        stride_q_n: fx.Int32,
+        stride_kv_n: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         bs_idx = fx.Index(batch_size)
@@ -642,6 +660,10 @@ def build_flash_attn_func_module_primary(
             BlockTable,
             block_table_stride,
             sm_scale,
+            num_heads_q,
+            num_heads_kv,
+            stride_q_n,
+            stride_kv_n,
             value_attrs={
                 "rocdl.waves_per_eu": waves_per_eu,
                 "rocdl.flat_work_group_size": (
@@ -719,6 +741,10 @@ def build_flash_attn_func_module_primary(
                 seq_len,
                 skv,
                 scale,
+                traits.NUM_HEADS_Q,
+                traits.NUM_HEADS_KV,
+                traits.STRIDE_TOKEN_Q,
+                traits.STRIDE_TOKEN_KV,
                 fx.Stream(stream),
             )
 
@@ -758,6 +784,10 @@ def build_flash_attn_func_module_primary(
                 seq_len,
                 skv,
                 scale,
+                traits.NUM_HEADS_Q,
+                traits.NUM_HEADS_KV,
+                traits.STRIDE_TOKEN_Q,
+                traits.STRIDE_TOKEN_KV,
                 fx.Stream(stream),
             )
 

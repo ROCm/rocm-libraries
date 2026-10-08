@@ -95,6 +95,8 @@ _PARAMS = {
         ("bias_stride0", "i32"),
         ("alibi_stride_b", "i32"),
         ("sm_scale", "f32"),
+        ("num_heads_q", "i32"),
+        ("num_heads_kv", "i32"),
     ),
     "generic": (
         ("Q", "tensor"),
@@ -109,6 +111,10 @@ _PARAMS = {
         ("BlockTable", "tensor"),
         ("block_table_stride", "i32"),
         ("sm_scale", "f32"),
+        ("num_heads_q", "i32"),
+        ("num_heads_kv", "i32"),
+        ("stride_q_n", "i32"),
+        ("stride_kv_n", "i32"),
     ),
 }
 
@@ -128,6 +134,10 @@ _BLOCK_THREADS = {
 
 _TRACE_BATCH = 1
 _TRACE_SEQ = 1024
+# The head counts the objects are traced with. They are kernel arguments, so these
+# only satisfy the builders' own checks; nothing about them is baked.
+_TRACE_HEADS = 32
+_TRACE_KV_HEADS = 8
 
 
 def _build_one(instance: Instance, dump_dir: Path) -> bytes:
@@ -137,11 +147,7 @@ def _build_one(instance: Instance, dump_dir: Path) -> bytes:
     knobs = instance.knobs
     env.set_dump_dir(dump_dir)
     dtype = {"bf16": torch.bfloat16, "f16": torch.float16}[instance.dtype]
-    heads, kv_heads, head_dim = (
-        knobs["num_heads"],
-        knobs["num_kv_heads"],
-        knobs["head_dim"],
-    )
+    heads, kv_heads, head_dim = _TRACE_HEADS, _TRACE_KV_HEADS, knobs["head_dim"]
     q = torch.empty(
         _TRACE_BATCH, _TRACE_SEQ, heads, head_dim, dtype=dtype, device="meta"
     )

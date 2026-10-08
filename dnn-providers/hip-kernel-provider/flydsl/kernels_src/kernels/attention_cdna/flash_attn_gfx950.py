@@ -229,6 +229,8 @@ def build_flash_attn_dualwave_swp_module(
         bias_stride0: fx.Int32,
         alibi_stride_b: fx.Int32,
         sm_scale: fx.Float32,
+        num_heads_q: fx.Int32,
+        num_heads_kv: fx.Int32,
     ):
         ctx = DualwaveKernelContext(
             traits,
@@ -248,6 +250,8 @@ def build_flash_attn_dualwave_swp_module(
             block_table_stride,
             LSE=LSE,
             sm_scale=sm_scale,
+            num_heads_q=num_heads_q,
+            num_heads_kv=num_heads_kv,
         )
         ctx.init_types_and_constants()
         ctx.init_runtime_indices()
@@ -1094,6 +1098,8 @@ def build_flash_attn_dualwave_swp_module(
         bias_stride0: fx.Int32,
         alibi_stride_b: fx.Int32,
         sm_scale: fx.Float32,
+        num_heads_q: fx.Int32,
+        num_heads_kv: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         # Make shape/mode traits visible to the JIT cache key.
@@ -1136,6 +1142,8 @@ def build_flash_attn_dualwave_swp_module(
             bias_stride0,
             alibi_stride_b,
             sm_scale,
+            num_heads_q,
+            num_heads_kv,
             value_attrs={
                 "rocdl.waves_per_eu": traits.WAVES_PER_EU,
                 "rocdl.flat_work_group_size": f"{traits.BLOCK_SIZE},{traits.BLOCK_SIZE}",
@@ -1338,6 +1346,8 @@ def build_flash_attn_dualwave_swp_module(
                     bias_stride0,
                     alibi_stride_b,
                     sm_scale,
+                    traits.NUM_HEADS_Q,
+                    traits.NUM_HEADS_KV,
                 )
             return launch_flash_attn_dualwave_swp(
                 Q,
@@ -1362,6 +1372,8 @@ def build_flash_attn_dualwave_swp_module(
                 bias_stride0,
                 alibi_stride_b,
                 sm_scale,
+                traits.NUM_HEADS_Q,
+                traits.NUM_HEADS_KV,
                 stream=stream,
             )
 
@@ -1452,6 +1464,8 @@ def build_flash_attn_dualwave_swp_module(
                 bias_stride0,
                 alibi_stride_b,
                 sm_scale,
+                traits.NUM_HEADS_Q,
+                traits.NUM_HEADS_KV,
                 fx.Stream(stream),
             )
 

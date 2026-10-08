@@ -1,23 +1,21 @@
 {
   "version": "1.0",
-  "id": "eccc4a16-737a-5eb0-b35c-5d2e18c5577e",
-  "name": "sdpa_cdna_bf16_generic_hq32_hkv8_d128_causal0_bm128",
+  "id": "8fd00e6a-3060-5756-9cab-ca6bff24d9b2",
+  "name": "sdpa_cdna_bf16_dualwave_d128_causal1_bm256",
   "arch": [
-    "gfx942"
+    "gfx950"
   ],
   "kernel_source": {
     "kind": "hsaco",
-    "file": "sdpa_cdna_bf16_generic_hq32_hkv8_d128_causal0_bm128.hsaco",
-    "symbol": "flash_attn_generic_kernel_0"
+    "file": "sdpa_cdna_bf16_dualwave_d128_causal1_bm256.hsaco",
+    "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
   },
   "metadata": {
     "dtype": "bf16",
-    "kernel": "generic",
-    "num_heads": 32,
-    "num_kv_heads": 8,
+    "kernel": "dualwave",
     "head_dim": 128,
-    "causal": 0,
-    "block_m": 128,
+    "causal": 1,
+    "block_m": 256,
     "kv_align": 0
   },
   "priority": 100,
@@ -32,8 +30,6 @@
           "matcher_only_fields": [
             "dtype",
             "kernel",
-            "num_heads",
-            "num_kv_heads",
             "head_dim",
             "causal",
             "block_m",

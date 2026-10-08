@@ -76,8 +76,6 @@ constexpr const char* CDNA_SCALE_TOKEN = "flydsl_sdpa_cdna.scale";
 
 constexpr const char* CDNA_DTYPE_FIELD = "dtype";
 constexpr const char* CDNA_KERNEL_FIELD = "kernel";
-constexpr const char* CDNA_NUM_HEADS_FIELD = "num_heads";
-constexpr const char* CDNA_NUM_KV_HEADS_FIELD = "num_kv_heads";
 constexpr const char* CDNA_HEAD_DIM_FIELD = "head_dim";
 constexpr const char* CDNA_CAUSAL_FIELD = "causal";
 constexpr const char* CDNA_BLOCK_M_FIELD = "block_m";
@@ -99,8 +97,6 @@ SdpaGraphSpec cdnaSpec()
 
 /// A kernel carrying exactly the metadata this pack's KMD declares.
 KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
-                                int64_t heads = 32,
-                                int64_t kvHeads = 8,
                                 int64_t headDim = 128,
                                 int64_t causal = 0,
                                 const std::string& dtype = "bf16",
@@ -111,8 +107,6 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
     kernel.name = "sdpa_cdna_" + dtype + "_" + family;
     kernel.metadata = {{CDNA_DTYPE_FIELD, dtype},
                        {CDNA_KERNEL_FIELD, family},
-                       {CDNA_NUM_HEADS_FIELD, heads},
-                       {CDNA_NUM_KV_HEADS_FIELD, kvHeads},
                        {CDNA_HEAD_DIM_FIELD, headDim},
                        {CDNA_CAUSAL_FIELD, causal},
                        {CDNA_BLOCK_M_FIELD, blockM},
@@ -288,8 +282,26 @@ TEST(TestFlydslSdpaCdnaKernelMatch, AdmitsTheCandidateBuiltForTheGraphsShape)
     EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), makeCdnaKernel(), *bound));
     EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA,
                               fixture.context(),
-                              makeCdnaKernel("generic", 32, 8, 128, 0, "bf16", 128),
+                              makeCdnaKernel("generic", 128, 0, "bf16", 128),
                               *bound));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, AdmitsAnyHeadCountBecauseTheyAreKernelArguments)
+{
+    for(const auto& [heads, kvHeads] : {std::pair<int64_t, int64_t>{8, 8},
+                                        std::pair<int64_t, int64_t>{16, 1},
+                                        std::pair<int64_t, int64_t>{40, 5},
+                                        std::pair<int64_t, int64_t>{64, 8}})
+    {
+        auto spec = cdnaSpec();
+        spec.heads = heads;
+        spec.kvHeads = kvHeads;
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+        ASSERT_TRUE(bound.has_value()) << heads << "/" << kvHeads;
+        EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), makeCdnaKernel(), *bound))
+            << heads << "/" << kvHeads;
+    }
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, DeclinesEachBakedFieldThatDisagrees)
@@ -300,11 +312,9 @@ TEST(TestFlydslSdpaCdnaKernelMatch, DeclinesEachBakedFieldThatDisagrees)
     const auto declines = [&](const KernelDefinition& kernel) {
         return !matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), kernel, *bound);
     };
-    EXPECT_TRUE(declines(makeCdnaKernel("dualwave", 16, 8)));
-    EXPECT_TRUE(declines(makeCdnaKernel("dualwave", 32, 4)));
-    EXPECT_TRUE(declines(makeCdnaKernel("dualwave", 32, 8, 64)));
-    EXPECT_TRUE(declines(makeCdnaKernel("dualwave", 32, 8, 128, 1)));
-    EXPECT_TRUE(declines(makeCdnaKernel("dualwave", 32, 8, 128, 0, "f16")));
+    EXPECT_TRUE(declines(makeCdnaKernel("dualwave", 64)));
+    EXPECT_TRUE(declines(makeCdnaKernel("dualwave", 128, 1)));
+    EXPECT_TRUE(declines(makeCdnaKernel("dualwave", 128, 0, "f16")));
     EXPECT_TRUE(declines(makeCdnaKernel("wmma")));
 }
 
@@ -319,8 +329,8 @@ TEST(TestFlydslSdpaCdnaKernelMatch, HoldsTheKeyLengthToTheCandidatesAlignment)
         return bound.has_value()
                && matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), kernel, *bound);
     };
-    const auto aligned = makeCdnaKernel("generic", 32, 8, 128, 0, "bf16", 128, 64);
-    const auto anyLength = makeCdnaKernel("generic", 32, 8, 128, 0, "bf16", 128, 0);
+    const auto aligned = makeCdnaKernel("generic", 128, 0, "bf16", 128, 64);
+    const auto anyLength = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0);
     EXPECT_TRUE(admits(256, aligned));
     EXPECT_FALSE(admits(333, aligned)) << "the object skips the KV tail mask";
     EXPECT_TRUE(admits(256, anyLength));
@@ -605,6 +615,34 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ReadsARuntimeScaleAtExecute)
     spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
     spec.scaleKind = SdpaScale::RUNTIME_TENSOR;
     spec.scale = 0.2F;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesMultiHeadAttention)
+{
+    auto spec = cdnaSpec();
+    spec.heads = 8;
+    spec.kvHeads = 8;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesMultiQueryAttention)
+{
+    auto spec = cdnaSpec();
+    spec.heads = 16;
+    spec.kvHeads = 1;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesAnOddGroupSizeAtARaggedLength)
+{
+    // Five query heads per KV head, and a length that is not a multiple of any tile.
+    auto spec = cdnaSpec();
+    spec.heads = 40;
+    spec.kvHeads = 8;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 200;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 

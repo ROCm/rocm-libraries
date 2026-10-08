@@ -1263,9 +1263,31 @@ def _init_dualwave_thread_mapping(ctx):
     ctx.wave_q_offset = ctx.wave_id * traits.ROWS_PER_WAVE
     ctx.q_start = ctx.q_block_idx * traits.BLOCK_M
 
-    ctx.h_kv_idx = ctx.h_idx % traits.NUM_HEADS_KV
-    ctx.group_id = ctx.h_idx // traits.NUM_HEADS_KV
-    ctx.q_head_idx = ctx.h_kv_idx * traits.GQA_GROUP_SIZE + ctx.group_id
+    num_heads_kv = getattr(ctx, "num_heads_kv", None)
+    if num_heads_kv is None:
+        ctx.h_kv_idx = ctx.h_idx % traits.NUM_HEADS_KV
+        ctx.group_id = ctx.h_idx // traits.NUM_HEADS_KV
+        ctx.q_head_idx = ctx.h_kv_idx * traits.GQA_GROUP_SIZE + ctx.group_id
+    else:
+        # Runtime head counts (modification 3). Only the default mapping, where the
+        # grid's x is the query head, reads them; the swizzled and batch-interleaved
+        # mappings still use the build-time count.
+        if const_expr(
+            traits.XCD_SWIZZLE or batch_interleave_group > 1 or traits.SPLITK
+        ):
+            raise ValueError(
+                "runtime head counts serve only the default dual-wave grid mapping"
+            )
+        # In 32 bits: an Index divide is a 64-bit one, many times the instructions,
+        # and every workgroup pays it before its first load.
+        h_i32 = fx.Int32(ctx.h_idx)
+        num_heads_kv_i32 = fx.Int32(num_heads_kv)
+        group_size_i32 = fx.Int32(ctx.num_heads_q) // num_heads_kv_i32
+        h_kv_i32 = h_i32 % num_heads_kv_i32
+        group_id_i32 = h_i32 // num_heads_kv_i32
+        ctx.h_kv_idx = fx.Index(h_kv_i32)
+        ctx.group_id = fx.Index(group_id_i32)
+        ctx.q_head_idx = fx.Index(h_kv_i32 * group_size_i32 + group_id_i32)
     ctx.kv_head_idx = ctx.h_kv_idx
 
 
@@ -2485,12 +2507,29 @@ def _make_paged_dualwave_swp_fp8_traits(
 class GenericFlashAttnContext:
     """Runtime setup state for the generic flash-attention kernel."""
 
-    def __init__(self, traits, K, V, seq_len, seq_len_kv):
+    def __init__(
+        self,
+        traits,
+        K,
+        V,
+        seq_len,
+        seq_len_kv,
+        num_heads_q=None,
+        num_heads_kv=None,
+        stride_token_q=None,
+        stride_token_kv=None,
+    ):
         self.traits = traits
         self.K = K
         self.V = V
         self.seq_len = seq_len
         self.seq_len_kv = seq_len_kv
+        # Runtime head counts and token strides (modification 3); None keeps the
+        # traits' build-time value.
+        self.num_heads_q = num_heads_q
+        self.num_heads_kv = num_heads_kv
+        self.stride_token_q = stride_token_q
+        self.stride_token_kv = stride_token_kv
 
     def init_types_and_pointers(self):
         traits = self.traits
@@ -2513,6 +2552,20 @@ class GenericFlashAttnContext:
     def init_sequence_indices(self):
         self.seq_len_v = fx.Index(self.seq_len)
         self.seq_len_kv_v = fx.Index(self.seq_len_kv)
+        traits = self.traits
+
+        def _shape(value, built):
+            return fx.Index(built if value is None else value)
+
+        self.num_heads_q_v = _shape(self.num_heads_q, traits.NUM_HEADS_Q)
+        self.num_heads_kv_v = _shape(self.num_heads_kv, traits.NUM_HEADS_KV)
+        self.runtime_heads = self.num_heads_q is not None
+        if self.runtime_heads:
+            # Head arithmetic in 32 bits: an Index divide is a 64-bit one.
+            self.num_heads_q_i32 = fx.Int32(self.num_heads_q)
+            self.gqa_group_i32 = self.num_heads_q_i32 // fx.Int32(self.num_heads_kv)
+        self.stride_token_q_v = _shape(self.stride_token_q, traits.STRIDE_TOKEN_Q)
+        self.stride_token_kv_v = _shape(self.stride_token_kv, traits.STRIDE_TOKEN_KV)
 
     def init_lds_view(self, shared_storage):
         lds = fx.SharedAllocator().allocate(shared_storage).peek()
@@ -2536,17 +2589,27 @@ class GenericFlashAttnContext:
 
     def init_block_mapping(self):
         traits = self.traits
-        self.q_head_idx = self.block_id % traits.NUM_HEADS_Q
-        self.batch_q_tile_id = self.block_id // traits.NUM_HEADS_Q
+        if self.runtime_heads:
+            block_id_i32 = fx.Int32(self.block_id)
+            q_head_i32 = block_id_i32 % self.num_heads_q_i32
+            self.q_head_idx = fx.Index(q_head_i32)
+            self.batch_q_tile_id = fx.Index(block_id_i32 // self.num_heads_q_i32)
+            self.kv_head_idx_i32 = q_head_i32 // self.gqa_group_i32
+        else:
+            self.q_head_idx = self.block_id % traits.NUM_HEADS_Q
+            self.batch_q_tile_id = self.block_id // traits.NUM_HEADS_Q
         self.num_q_tiles = (self.seq_len_v + traits.BLOCK_M - 1) // traits.BLOCK_M
         self.q_tile_idx = self.batch_q_tile_id % self.num_q_tiles
         self.batch_idx = self.batch_q_tile_id // self.num_q_tiles
         self.q_start = self.q_tile_idx * traits.BLOCK_M
-        self.kv_head_idx = (
-            self.q_head_idx
-            if traits.GQA_GROUP_SIZE == 1
-            else self.q_head_idx // traits.GQA_GROUP_SIZE
-        )
+        if self.runtime_heads:
+            self.kv_head_idx = fx.Index(self.kv_head_idx_i32)
+        else:
+            self.kv_head_idx = (
+                self.q_head_idx
+                if traits.GQA_GROUP_SIZE == 1
+                else self.q_head_idx // traits.GQA_GROUP_SIZE
+            )
 
     def init_load_mapping(self):
         traits = self.traits
@@ -2626,7 +2689,7 @@ class GenericFlashAttnContext:
         # Dense/varlen fold batch into raw K/V pointers; paged adds page_id per tile.
         traits = self.traits
         if const_expr(not traits.PAGED):
-            off = self.kv_tok_base * fx.Index(traits.STRIDE_TOKEN_KV)
+            off = self.kv_tok_base * self.stride_token_kv_v
             self.k_ptr = buffer_ops.get_element_ptr(
                 self.k_ptr, off, elem_type=self.elem_type
             )
@@ -2639,16 +2702,16 @@ class GenericFlashAttnContext:
         # keeping 32-bit offsets small while preserving arbitrary-seqlen OOB behavior.
         traits = self.traits
         self.kv_nrec_bytes = as_mlir_value(
-            self.seqlen_kv_b * fx.Index(traits.STRIDE_TOKEN_KV * 2)
+            self.seqlen_kv_b * (self.stride_token_kv_v * fx.Index(2))
         )
         self.kv_batch_byte_off = as_mlir_value(
-            self.kv_tok_base * fx.Index(traits.STRIDE_TOKEN_KV * 2)
+            self.kv_tok_base * (self.stride_token_kv_v * fx.Index(2))
         )
         q_nrec_bytes = as_mlir_value(
-            self.seqlen_q_b * fx.Index(traits.STRIDE_TOKEN_Q * 2)
+            self.seqlen_q_b * (self.stride_token_q_v * fx.Index(2))
         )
         q_batch_byte_off = as_mlir_value(
-            self.q_tok_base * fx.Index(traits.STRIDE_TOKEN_Q * 2)
+            self.q_tok_base * (self.stride_token_q_v * fx.Index(2))
         )
         self.q_rsrc = buffer_ops.create_buffer_resource(
             Q,
@@ -2664,7 +2727,7 @@ class GenericFlashAttnContext:
         )
         # LSE output: fp32 [batch, num_heads, seq_len], per-batch descriptor.
         if const_expr(traits.RETURN_LSE):
-            self.lse_per_batch_elems = fx.Index(traits.NUM_HEADS_Q) * self.seq_len_v
+            self.lse_per_batch_elems = self.num_heads_q_v * self.seq_len_v
             # OOB sentinel (== num records) the buffer bound drops; predicates the store.
             self.lse_oob_off = self.lse_per_batch_elems
             _lse_nrec_bytes = as_mlir_value(self.lse_per_batch_elems * fx.Index(4))
@@ -2705,13 +2768,13 @@ class GenericFlashAttnContext:
     def global_idx_q(self, token_idx, col):
         traits = self.traits
         return (
-            token_idx * traits.STRIDE_TOKEN_Q + self.q_head_idx * traits.HEAD_DIM + col
+            token_idx * self.stride_token_q_v + self.q_head_idx * traits.HEAD_DIM + col
         )
 
     def global_idx_kv(self, token_idx, col):
         traits = self.traits
         return (
-            token_idx * traits.STRIDE_TOKEN_KV
+            token_idx * self.stride_token_kv_v
             + self.kv_head_idx * traits.HEAD_DIM
             + col
         )
@@ -3272,7 +3335,7 @@ class GenericKvGmemToLdsLoader:
                 tile_start + row_in_tile
             )  # 0-based: batch base folded into k/v_rsrc
             global_byte = (
-                global_row * fx.Index(traits.STRIDE_TOKEN_KV * 2)
+                global_row * (ctx.stride_token_kv_v * fx.Index(2))
                 + ctx.kv_head_idx * fx.Index(traits.HEAD_DIM * 2)
                 + col_byte
             )
@@ -3312,7 +3375,7 @@ class GenericKvGmemToLdsLoader:
                     fx.Int64(lds_addr), address_space=3
                 )
                 global_byte = (
-                    global_row * fx.Index(traits.STRIDE_TOKEN_KV * 2)
+                    global_row * (ctx.stride_token_kv_v * fx.Index(2))
                     + ctx.kv_head_idx * fx.Index(traits.HEAD_DIM * 2)
                     + col_byte
                 )
@@ -4025,6 +4088,8 @@ class DualwaveKernelContext:
         block_table_stride=None,
         LSE=None,
         sm_scale=None,
+        num_heads_q=None,
+        num_heads_kv=None,
     ):
         if isinstance(traits_or_ctx, DualwaveKernelContext):
             self.__dict__.update(traits_or_ctx.__dict__)
@@ -4049,6 +4114,8 @@ class DualwaveKernelContext:
         self.head_dim_runtime = head_dim_runtime
         self.block_table_stride = block_table_stride
         self.sm_scale = sm_scale
+        self.num_heads_q = num_heads_q
+        self.num_heads_kv = num_heads_kv
 
     def init_types_and_constants(self, head_dim_runtime=None):
         if head_dim_runtime is None:
@@ -5217,7 +5284,11 @@ class DualwaveStoreHelper(DualwaveKernelContext):
         # sm_scale*log2e-scaled). Fully-masked row has l_row == 0 -> -inf.
         traits = self.traits
         lse_base_i64 = fx.Int64(fx.ptrtoint(fx.get_iter(self.LSE)))
-        lse_per_batch_elems = fx.Index(traits.NUM_HEADS_Q) * self.seq_len_v
+        num_heads_q = getattr(self, "num_heads_q", None)
+        lse_per_batch_elems = (
+            fx.Index(traits.NUM_HEADS_Q if num_heads_q is None else num_heads_q)
+            * self.seq_len_v
+        )
         lse_per_batch_bytes = lse_per_batch_elems * fx.Index(4)
         lse_rsrc = _make_ws_rsrc(
             lse_base_i64, self.batch_idx * lse_per_batch_bytes, lse_per_batch_bytes

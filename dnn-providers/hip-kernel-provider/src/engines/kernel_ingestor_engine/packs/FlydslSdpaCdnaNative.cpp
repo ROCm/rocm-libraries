@@ -53,11 +53,11 @@
  * vendored under `flydsl/kernels_src/kernels/attention_cdna/` -- the dual-wave
  * software-pipelined kernel on gfx950, the generic MFMA kernel on gfx942.
  *
- * Those kernels bake more than the RDNA ones: the query and KV head counts, the causal
- * flag, and a contiguous BSHD layout; their causal mask is bottom-right and they assume
- * equal query and key lengths. Batch, sequence length and the softmax scale are runtime
+ * Those kernels bake more than the RDNA ones: head_dim, the causal flag, and a contiguous
+ * BSHD layout; their causal mask is bottom-right and they assume equal query and key
+ * lengths. Batch, sequence length, both head counts and the softmax scale are runtime
  * arguments. So the matcher accepts exactly that envelope and declines everything else,
- * and each object serves one (dtype, head counts, head_dim, causal) model shape. The
+ * and each object serves one (dtype, head_dim, causal) class. The
  * remaining baked fields become runtime one by one, each measured against the object
  * it replaces (flydsl/COVERAGE.md section 7).
  *
@@ -87,8 +87,6 @@ constexpr std::string_view DTYPE_FIELD = "dtype";
 /// "dualwave" (gfx950) or "generic" (gfx942): the kernel family, which fixes the argument
 /// list and the grid.
 constexpr std::string_view KERNEL_FIELD = "kernel";
-constexpr std::string_view NUM_HEADS_FIELD = "num_heads";
-constexpr std::string_view NUM_KV_HEADS_FIELD = "num_kv_heads";
 constexpr std::string_view HEAD_DIM_FIELD = "head_dim";
 constexpr std::string_view CAUSAL_FIELD = "causal";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
@@ -562,8 +560,7 @@ std::optional<std::array<int64_t, 3>> candidateGrid(const SdpaProblem& problem,
 /**
  * @brief Kernel-scoped applicability: do THIS candidate's baked fields fit the graph?
  *
- * dtype, both head counts, head_dim and the causal flag are all baked, so each must equal
- * the graph's; the key length must be a multiple of the candidate's `kv_align`, since an
+ * dtype, head_dim and the causal flag are baked, so each must equal the graph's; the key length must be a multiple of the candidate's `kv_align`, since an
  * object built without the KV tail mask reads past the end of a ragged last tile; and the
  * candidate must declare a launch shape this pack knows.
  */
@@ -598,8 +595,6 @@ bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
     const auto dataTypeName = kernelDataTypeName(problem.dataType);
     const auto causal = tryGetBoundInt(bound, CAUSAL_TOKEN);
     return dataTypeName.has_value() && stringMetadata(kernel, DTYPE_FIELD) == *dataTypeName
-           && integerMetadata(kernel, NUM_HEADS_FIELD) == problem.numHeads
-           && integerMetadata(kernel, NUM_KV_HEADS_FIELD) == problem.numKvHeads
            && integerMetadata(kernel, HEAD_DIM_FIELD) == problem.headDim && causal.has_value()
            && integerMetadata(kernel, CAUSAL_FIELD) == *causal;
 }
@@ -646,27 +641,38 @@ FlydslLayout4 bshdLayout(int64_t batch, int64_t sequence, int64_t heads, int64_t
  * Dual-wave (flash_attn_gfx950.py): Q, K, V, O, LSE, DebugCounts, CuSeqQ, CuSeqKv,
  * BlockTable, Bias, AlibiSlopes, Sink (each a pointer and its layout); then seq_len,
  * seq_len_kv, stride_q_n, stride_kv_n, head_dim_runtime, block_table_stride,
- * bias_stride0, alibi_stride_b (i32); sm_scale (f32). Generic (flash_attn_generic.py):
- * Q, K, V, O, LSE; seq_len, seq_len_kv (i32); CuSeqQ, CuSeqKv, BlockTable;
- * block_table_stride (i32); sm_scale (f32). A 4-byte scalar slot is the same to the
- * signature check whichever type it holds.
+ * bias_stride0, alibi_stride_b (i32); sm_scale (f32); num_heads_q, num_heads_kv (i32).
+ * Generic (flash_attn_generic.py): Q, K, V, O, LSE; seq_len, seq_len_kv (i32); CuSeqQ,
+ * CuSeqKv, BlockTable; block_table_stride (i32); sm_scale (f32); num_heads_q,
+ * num_heads_kv, stride_q_n, stride_kv_n (i32). A 4-byte scalar slot is the same to the
+ * signature check whichever type it holds, so each list is written as runs of tensors
+ * and scalars.
  */
-std::vector<KernelArgument> signatureOf(std::initializer_list<bool> tensorOrScalar)
+struct ArgumentRun
+{
+    int count;
+    bool tensors;
+};
+
+std::vector<KernelArgument> signatureOf(std::initializer_list<ArgumentRun> runs)
 {
     const KernelArgument pointer{"global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
     const KernelArgument layout{"by_value", static_cast<uint32_t>(sizeof(FlydslLayout4)), 0, ""};
     const KernelArgument i32{"by_value", static_cast<uint32_t>(sizeof(int32_t)), 0, ""};
     std::vector<KernelArgument> signature;
-    for(const bool isTensor : tensorOrScalar)
+    for(const auto& run : runs)
     {
-        if(isTensor)
+        for(int i = 0; i < run.count; ++i)
         {
-            signature.push_back(pointer);
-            signature.push_back(layout);
-        }
-        else
-        {
-            signature.push_back(i32);
+            if(run.tensors)
+            {
+                signature.push_back(pointer);
+                signature.push_back(layout);
+            }
+            else
+            {
+                signature.push_back(i32);
+            }
         }
     }
     return signature;
@@ -674,16 +680,14 @@ std::vector<KernelArgument> signatureOf(std::initializer_list<bool> tensorOrScal
 
 const std::vector<KernelArgument>& dualwaveSignature()
 {
-    static const std::vector<KernelArgument> s_signature
-        = signatureOf({true, true,  true,  true,  true,  true,  true,  true,  true,  true, true,
-                       true, false, false, false, false, false, false, false, false, false});
+    static const std::vector<KernelArgument> s_signature = signatureOf({{12, true}, {11, false}});
     return s_signature;
 }
 
 const std::vector<KernelArgument>& genericSignature()
 {
     static const std::vector<KernelArgument> s_signature
-        = signatureOf({true, true, true, true, true, false, false, true, true, true, false, false});
+        = signatureOf({{5, true}, {2, false}, {3, true}, {6, false}});
     return s_signature;
 }
 
@@ -857,6 +861,11 @@ public:
         const auto kvLayout
             = bshdLayout(problem.batch, problem.seqLen, problem.numKvHeads, problem.headDim);
         const auto seqLen = static_cast<int32_t>(problem.seqLen);
+        const auto numHeads = static_cast<int32_t>(problem.numHeads);
+        const auto numKvHeads = static_cast<int32_t>(problem.numKvHeads);
+        // One token's pitch in contiguous BSHD.
+        const auto strideQ = static_cast<int32_t>(problem.numHeads * problem.headDim);
+        const auto strideKv = static_cast<int32_t>(problem.numKvHeads * problem.headDim);
         const int32_t zero = 0;
         auto& kernel = preparedSdpa.kernelForStream(handle.getStream());
 
@@ -865,8 +874,6 @@ public:
         // dualwaveSignature() / genericSignature() with them.
         if(preparedSdpa.dualwave())
         {
-            const auto strideQ = static_cast<int32_t>(problem.numHeads * problem.headDim);
-            const auto strideKv = static_cast<int32_t>(problem.numKvHeads * problem.headDim);
             const auto headDim = static_cast<int32_t>(problem.headDim);
             kernel.launch(handle.getStream(),
                           q,
@@ -901,7 +908,9 @@ public:
                           zero,
                           zero,
                           zero,
-                          scale);
+                          scale,
+                          numHeads,
+                          numKvHeads);
             return;
         }
         kernel.launch(handle.getStream(),
@@ -924,7 +933,11 @@ public:
                       o, // BlockTable
                       qLayout,
                       zero,
-                      scale);
+                      scale,
+                      numHeads,
+                      numKvHeads,
+                      strideQ,
+                      strideKv);
     }
 
 private:
