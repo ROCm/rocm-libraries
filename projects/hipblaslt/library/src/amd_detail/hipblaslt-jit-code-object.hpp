@@ -113,8 +113,9 @@ namespace hipblaslt_jit::code_object
     };
 
     // Assembles or compiles bundle.mainKernel, with bundle.includes, and links
-    // one executable code object. Helpers are not compiled here. Target::wavefrontSize
-    // applies to assembly; HIP keeps the processor default.
+    // one executable code object. ComgrBuilder compiles helpers itself, asking
+    // JitLibrary before it does, so they are not compiled here.
+    // Target::wavefrontSize applies to assembly; HIP keeps the processor default.
     Result build(const hipblaslt_jit::SourceCodeBundle& bundle,
                  const Target&                          target,
                  const Options&                         options) noexcept;

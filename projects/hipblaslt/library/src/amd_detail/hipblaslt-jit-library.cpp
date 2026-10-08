@@ -240,30 +240,128 @@ namespace hipblaslt_jit
                 items.push_back(item);
         }
 
-        bool validEntry(const std::vector<uint8_t>& entry, int32_t index, const std::string& kernel)
+        std::shared_ptr<TensileLite::ContractionSolution>
+            solutionIn(const std::vector<uint8_t>& entry, int index)
         {
             const auto library = std::dynamic_pointer_cast<GemmMaster>(
                 TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(entry));
-            return library && library->solutions.size() == 1 && library->solutions.count(index)
-                   && library->solutions.at(index)
-                   && library->solutions.at(index)->kernelName == kernel;
+            if(!library)
+                return {};
+            const auto found = library->solutions.find(index);
+            return found == library->solutions.end() ? nullptr : found->second;
         }
+
+        bool validEntry(const std::vector<uint8_t>& entry, int32_t index, const std::string& kernel)
+        {
+            const auto solution = solutionIn(entry, index);
+            return solution && solution->kernelName == kernel;
+        }
+
+        // Helper code objects for one backend directory, keyed by helper name.
+        class DirectoryHelpers final : public HelperCache
+        {
+        public:
+            DirectoryHelpers(fs::path root, std::string backendId, fs::path staging)
+                : m_root(std::move(root))
+                , m_backendId(std::move(backendId))
+                , m_staging(std::move(staging))
+            {
+            }
+
+            Artifact find(const std::string& helperName) const override
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                Artifact                    out;
+                bool                        present = false;
+                static_cast<void>(read(helperName, out, present));
+                return present ? out : Artifact{};
+            }
+
+            Status publish(const Artifact& helper) override
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                return publishUnlocked(helper);
+            }
+
+            Status acquire(const std::string&                       helperName,
+                           const std::function<Status(Artifact&)>& compile,
+                           Artifact&                                out) override
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                bool                        present = false;
+                if(auto status = read(helperName, out, present); !status.ok())
+                    return status;
+                if(present)
+                    return {};
+                Artifact compiled;
+                if(auto status = compile(compiled); !status.ok())
+                    return status;
+                compiled.name = helperName;
+                compiled.kind = Artifact::Kind::CodeObject;
+                if(compiled.bytes.empty())
+                    return failed(Stage::Build, "Helper " + helperName + " produced no code object");
+                if(auto status = publishUnlocked(compiled); !status.ok())
+                    return status;
+                out = std::move(compiled);
+                return {};
+            }
+
+        private:
+            fs::path file(const std::string& helperName) const
+            {
+                return m_root / "helpers" / filesystemLiteral(m_backendId)
+                       / (filesystemLiteral(helperName) + ".co");
+            }
+
+            Status read(const std::string& helperName, Artifact& out, bool& present) const
+            {
+                present = false;
+                out     = {};
+                const auto      path = file(helperName);
+                std::error_code error;
+                if(!fs::is_regular_file(path, error))
+                    return {};
+                std::vector<uint8_t> bytes;
+                if(auto status = files::readFile(path, fileLimit, bytes); !status.ok())
+                    return status;
+                out.name  = helperName;
+                out.kind  = Artifact::Kind::CodeObject;
+                out.bytes = std::move(bytes);
+                present   = true;
+                return {};
+            }
+
+            Status publishUnlocked(const Artifact& helper)
+            {
+                if(helper.name.empty() || helper.bytes.empty())
+                    return failed(Stage::Publish, "A helper code object has no name");
+                const auto      path = file(helper.name);
+                std::error_code error;
+                if(fs::is_regular_file(path, error))
+                    return {};
+                if(auto status = ensureEntryParents(m_root, path); !status.ok())
+                    return status;
+                return files::writeAtomically(m_staging, path, helper.bytes);
+            }
+
+            fs::path            m_root;
+            std::string         m_backendId;
+            fs::path            m_staging;
+            mutable std::mutex  m_mutex;
+        };
     }
 
     std::map<std::string, std::string> compilerEnvironment(const char* const* environment)
     {
+        // Logging, temporary files and time statistics do not change code-object bytes.
         static constexpr std::string_view ignored[]
-            = {"AMD_COMGR_CACHE",
-               "AMD_COMGR_CACHE_DIR",
-               "AMD_COMGR_CACHE_POLICY",
-               "AMD_COMGR_SAVE_TEMPS",
+            = {"AMD_COMGR_SAVE_TEMPS",
                "AMD_COMGR_SAVE_LLVM_TEMPS",
                "AMD_COMGR_REDIRECT_LOGS",
                "AMD_COMGR_EMIT_VERBOSE_LOGS",
                "AMD_COMGR_LOG_LEVEL",
                "AMD_COMGR_TIME_STATISTICS",
-               "AMD_COMGR_TIME_STATISTICS_GRANULARITY",
-               "AMD_COMGR_USE_VFS"};
+               "AMD_COMGR_TIME_STATISTICS_GRANULARITY"};
         std::map<std::string, std::string> result;
         for(auto variable = environment; variable && *variable; ++variable)
         {
@@ -314,7 +412,7 @@ namespace hipblaslt_jit
         // environment) is recorded in the cache key and is not part of the name.
         auto name = filesystemLiteral(isa) + "_" + filesystemLiteral(targetId) + "_"
                     + filesystemLiteral(libraryArch) + "_wf" + std::to_string(wavefrontSize) + "_"
-                    + filesystemLiteral(backendId) + "_" + filesystemLiteral(backendVersion);
+                    + filesystemLiteral(backendId) + "_" + std::to_string(backendVersion);
         if(name == "." || name == "..")
             name.insert(name.begin(), 'x');
         return name;
@@ -539,6 +637,7 @@ namespace hipblaslt_jit
         std::string isa;
         CacheKey    identity;
         Status      failure; // a cache-key.msgpack this directory cannot use
+        std::shared_ptr<HelperCache> helpers;
 
         std::mutex                                  sliceMutex;
         std::map<std::string, std::unique_ptr<Slice>> slices;
@@ -722,6 +821,8 @@ namespace hipblaslt_jit
             opened->path     = schemaDirectory() / name;
             opened->isa      = key.isa;
             opened->identity = key;
+            opened->helpers  = std::make_shared<DirectoryHelpers>(
+                opened->path, key.backendId, opened->staging());
             for(const auto& path : {opened->path, opened->staging()})
                 if(auto status = files::privateDirectory(path); !status.ok())
                 {
@@ -748,6 +849,15 @@ namespace hipblaslt_jit
         if(attached)
             addOnce(m_routes[device], attached);
         return why;
+    }
+
+    std::shared_ptr<HelperCache> JitLibrary::helperCache(const CacheKey& key, int device, Status& why)
+    {
+        Directory* directory = nullptr;
+        why                   = attach(key, device, directory);
+        if(!why.ok() || !directory)
+            return {};
+        return directory->helpers;
     }
 
     void JitLibrary::discover(int device)
@@ -860,7 +970,7 @@ namespace hipblaslt_jit
             Directory* directory = nullptr;
             if(auto status = attach(key, device, directory); !status.ok())
                 return status;
-            // Each supported solution as a one-solution entry with its code object.
+            // Each supported solution is added to the library with its code object.
             struct Candidate
             {
                 const Artifact*      object = nullptr;
@@ -878,17 +988,20 @@ namespace hipblaslt_jit
                     return failed(Stage::Publish, "A built solution has no TensileLite record");
                 for(const auto local : supported.second)
                 {
-                    Candidate               candidate{&supported.first.codeObject};
-                    msgpack_io::EntryFields fields;
+                    Candidate candidate{&supported.first.codeObject};
+                    // Read the solution TensileLite already parsed. Publishing adds
+                    // that solution; the library holds many.
+                    const auto solution = solutionIn(supported.first.record, local);
+                    if(!solution || solution->kernelName.empty())
+                        return failed(Stage::Publish,
+                                      "A built solution record has no kernel at local index "
+                                          + std::to_string(local));
+                    candidate.kernel = solution->kernelName;
+                    // The stored entry's index bytes are not written by TensileLite.
                     if(auto status = msgpack_io::rewriteEntryIndex(
                            supported.first.record, local, 0, candidate.entry);
                        !status.ok())
                         return status;
-                    if(auto status = msgpack_io::readEntry(candidate.entry, fields); !status.ok())
-                        return status;
-                    if(fields.kernelName.empty())
-                        return failed(Stage::Publish, "A built solution names no kernel");
-                    candidate.kernel = std::move(fields.kernelName);
                     for(const auto& helper : supported.first.helpers)
                         if(!helper.name.empty() && !helper.bytes.empty())
                             candidate.helpers.emplace_back(helper.name, &helper.bytes);

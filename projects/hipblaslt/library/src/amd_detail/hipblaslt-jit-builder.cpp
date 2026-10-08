@@ -114,7 +114,50 @@ namespace hipblaslt_jit
 
                 auto assemblyTarget          = target;
                 assemblyTarget.wavefrontSize = wavefrontSize;
-                auto linked                  = co::build(source, assemblyTarget, options);
+
+                // Helpers first. A cache hit reuses the code object. A miss compiles
+                // once, publishes it, and only then is the main kernel compiled.
+                auto compileHelper = [&](const Artifact& helper, Artifact& out) -> Status {
+                    if(helper.name.empty() || helper.kind != Artifact::Kind::Hip)
+                        return failure(request, "A helper source has no HIP name", {});
+                    SourceCodeBundle helperSource;
+                    helperSource.mainKernel = helper;
+                    helperSource.includes   = source.includes;
+                    helperSource.hipFlags   = source.hipFlags;
+                    auto helperObject       = co::build(helperSource, assemblyTarget, options);
+                    if(!helperObject.ok())
+                        return failure(request,
+                                       "comgr could not build helper " + helper.name,
+                                       helperObject.log);
+                    const auto helperMeta = co::inspect(helperObject.codeObject.bytes);
+                    if(!helperMeta.ok() || helperMeta.isaName != target.isaName()
+                       || helperMeta.codeObjectVersion != request.codeObjectVersion)
+                        return failure(request,
+                                       "Helper " + helper.name + " is not a code object for "
+                                           + target.isaName(),
+                                       helperObject.log + helperMeta.log);
+                    out      = std::move(helperObject.codeObject);
+                    out.name = helper.name;
+                    out.kind = Artifact::Kind::CodeObject;
+                    return {};
+                };
+                for(const auto& helper : source.helpers)
+                {
+                    Artifact builtHelper;
+                    Status   helperStatus;
+                    if(request.helpers)
+                        helperStatus = request.helpers->acquire(
+                            helper.name,
+                            [&](Artifact& out) { return compileHelper(helper, out); },
+                            builtHelper);
+                    else
+                        helperStatus = compileHelper(helper, builtHelper);
+                    if(!helperStatus.ok())
+                        return helperStatus;
+                    built.helpers.push_back(std::move(builtHelper));
+                }
+
+                auto linked = co::build(source, assemblyTarget, options);
                 if(!linked.ok())
                     return failure(request, "comgr could not build the code object", linked.log);
 
@@ -146,31 +189,6 @@ namespace hipblaslt_jit
                 built.codeObject      = std::move(linked.codeObject);
                 built.codeObject.kind = Artifact::Kind::CodeObject;
                 built.codeObject.name = names.front();
-                for(const auto& helper : source.helpers)
-                {
-                    if(helper.name.empty() || helper.kind != Artifact::Kind::Hip)
-                        return failure(request, "A helper source has no HIP name", {});
-                    SourceCodeBundle helperSource;
-                    helperSource.mainKernel = helper;
-                    helperSource.includes   = source.includes;
-                    helperSource.hipFlags   = source.hipFlags;
-                    auto helperObject       = co::build(helperSource, assemblyTarget, options);
-                    if(!helperObject.ok())
-                        return failure(request,
-                                       "comgr could not build helper " + helper.name,
-                                       helperObject.log);
-                    const auto helperMeta = co::inspect(helperObject.codeObject.bytes);
-                    if(!helperMeta.ok() || helperMeta.isaName != target.isaName()
-                       || helperMeta.codeObjectVersion != request.codeObjectVersion)
-                        return failure(request,
-                                       "Helper " + helper.name + " is not a code object for "
-                                           + target.isaName(),
-                                       helperObject.log + helperMeta.log);
-                    Artifact builtHelper = std::move(helperObject.codeObject);
-                    builtHelper.name     = helper.name;
-                    builtHelper.kind     = Artifact::Kind::CodeObject;
-                    built.helpers.push_back(std::move(builtHelper));
-                }
                 return {};
             }
 
