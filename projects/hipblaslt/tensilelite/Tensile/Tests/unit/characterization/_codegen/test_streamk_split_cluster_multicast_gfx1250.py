@@ -78,8 +78,10 @@ def test_static_streamk_cluster_shadow_init_assembles(tmp_path):
         assert "cluster_barrier wait" in src[skip - 500:skip]
         from Tensile.CustomKernels import getCustomKernelConfig
         (tmp_path / (base + ".s")).write_text(src)
-        with pytest.raises(ValueError, match="Custom kernels do not yet support clustered StreamK"):
-            getCustomKernelConfig(base, {}, str(tmp_path))
+        descriptor = getCustomKernelConfig(base, {}, str(tmp_path))
+        assert descriptor["InternalSupportParams"]["PersistentLoopArgsVersion"] == 2
+        assert descriptor["CustomKernel"]["grid"] == ["PersistentGrid", "One", "One"]
+        assert any(arg["semantic"] == "AddressFlags" for arg in descriptor["CustomKernel"]["args"])
 
 
 def test_ordinary_streamk_tree_reduction_still_assembles(tmp_path):
