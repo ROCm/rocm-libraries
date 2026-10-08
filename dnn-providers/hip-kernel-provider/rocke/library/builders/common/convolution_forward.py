@@ -757,21 +757,34 @@ def gfx950_conv_fwd_serves(
         runtime = replace(
             spec, **{f.name: getattr(problem, f.name) for f in fields(_ProblemFields)}
         )
-        error = _direct_error(runtime)
-        if error:
-            return False, error
-        for label, baked, actual in (
-            ("filter", caps.filter_hw, (problem.Y, problem.X)),
-            ("stride", caps.stride_hw, (problem.sH, problem.sW)),
-            ("padding", caps.pad_hw, (problem.pH, problem.pW)),
-        ):
-            if baked != actual:
-                return (
-                    False,
-                    f"direct kernel compiled for {label} {baked}, problem has {actual}",
-                )
-        return True, "ok"
+        return _direct_serves(caps, runtime)
     return _implicit_gemm_serves(caps, problem, spec.tile_m, spec.tile_n)
+
+
+def _direct_serves(
+    caps: Gfx950ConvFwdCapabilities, runtime: Gfx950ConvFwdSpec
+) -> tuple[bool, str]:
+    """Whether a direct depthwise binary with ``caps`` computes ``runtime``: the
+    runtime problem on the binary's direct tuning, which already passed the problem
+    checks. It must pass the direct guard and have the compiled filter, stride and
+    padding (the guard already pins dilation to 1).
+
+    Shared by :func:`gfx950_conv_fwd_serves` and :func:`gfx950_conv_fwd_aot_serves`.
+    """
+    error = _direct_error(runtime)
+    if error:
+        return False, error
+    for label, baked, actual in (
+        ("filter", caps.filter_hw, (runtime.Y, runtime.X)),
+        ("stride", caps.stride_hw, (runtime.sH, runtime.sW)),
+        ("padding", caps.pad_hw, (runtime.pH, runtime.pW)),
+    ):
+        if baked != actual:
+            return (
+                False,
+                f"direct kernel compiled for {label} {baked}, problem has {actual}",
+            )
+    return True, "ok"
 
 
 def _implicit_gemm_serves(
@@ -830,12 +843,15 @@ class _ProblemFields:
 # ---------------------------------------------------------------------------
 #
 # rocKE's AOT conv kernels take the problem as kernel arguments, so one binary
-# serves every problem its build-time capabilities admit. An instance is the
-# forward implicit-GEMM subset of rocKE's ``KernelIdentity``
-# (``benchmarks/common/kernel_cache.py``): tuning and capability fields, no
-# problem extents. ``instance_id`` is that identity's ``stable_hash()``; this
-# layer cannot import ``benchmarks``, so the catalog tool computes it and
-# ``library/tests`` checks the correspondence.
+# serves every problem its build-time capabilities admit. An instance is one
+# forward rocKE ``KernelIdentity`` (``benchmarks/common/kernel_cache.py``):
+# tuning and capability fields, no problem extents. Two families are packaged:
+# the implicit-GEMM identities of the AOT sweep (``kernel_sweep.py``) and the
+# direct depthwise identities of the direct sweep (``direct_kernel_sweep.py``)
+# that the exact-shape direct launch runs, ``direct_depthwise`` (std) and
+# ``direct_depthwise_spatial``. ``instance_id`` is the identity's
+# ``stable_hash()``; this layer cannot import ``benchmarks``, so the catalog
+# tool computes it and ``library/tests`` checks the correspondence.
 
 #: Vector widths rocKE's AOT sweep builds (``CACHE_VECS``).
 _AOT_VECTOR_WIDTHS = (1, 2, 4, 8)
@@ -843,15 +859,61 @@ _AOT_VECTOR_WIDTHS = (1, 2, 4, 8)
 _AOT_PIPELINES = _PACKAGED_PIPELINES
 #: ``KernelIdentity.stable_hash()`` is a SHA-1 hex digest.
 _AOT_INSTANCE_ID_LENGTH = 40
+#: The implicit-GEMM fields of a direct instance hold exactly what the direct
+#: sweep writes into a direct identity (``direct_kernel_sweep._identity``).
+_AOT_DIRECT_PLACEHOLDERS = {
+    "tile_m": 0,
+    "tile_n": 0,
+    "tile_k": 0,
+    "warp_m": 0,
+    "warp_n": 0,
+    "warp_tile_m": 0,
+    "warp_tile_n": 0,
+    "warp_tile_k": 0,
+    "pipeline": "direct",
+    "epilogue": "direct",
+    "vector_size_a": 0,
+    "vector_size_b": 0,
+    "vector_size_c": 0,
+    "unroll_k": 0,
+    "async_dma": 0,
+    "async_chunk_a": 0,
+    "async_chunk_b": 0,
+    "grouped": 0,
+}
+#: Direct fields appended after the implicit-GEMM ones. An implicit-GEMM
+#: instance leaves each at this value (the KMD default), so its descriptor and
+#: spec stay as they were before the direct family existed.
+_AOT_FAMILY_DEFAULTS = {
+    "kernel_family": KERNEL_FAMILY_IMPLICIT_GEMM,
+    "direct_variant": DIRECT_VARIANT_NONE,
+    "filter_h": 0,
+    "filter_w": 0,
+    "stride_h": 0,
+    "stride_w": 0,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 0,
+    "dilation_w": 0,
+    "block_w": 0,
+    "block_waves": 0,
+}
 
 
 @dataclass(frozen=True)
 class Gfx950ConvFwdAotSpec:
-    """One shape-generic forward implicit-GEMM instance.
+    """One shape-generic forward instance.
 
     Booleans are ints (0/1) so every field is a descriptor ``int`` or
     ``string``. ``async_chunk_a``/``async_chunk_b`` are the async loaders'
     chunk widths, a capability of an ``async_dma`` binary (0 otherwise).
+
+    The trailing fields describe a direct depthwise instance
+    (``kernel_family`` is ``KERNEL_FAMILY_DIRECT_DEPTHWISE``): the compiled
+    filter, stride, padding and dilation, and the std/spatial block knobs
+    (``block_w`` is 0 for spatial, which derives it from the runtime group
+    count). Its implicit-GEMM fields hold ``_AOT_DIRECT_PLACEHOLDERS``. An
+    implicit-GEMM instance leaves them at ``_AOT_FAMILY_DEFAULTS``.
     """
 
     dtype: str
@@ -876,15 +938,52 @@ class Gfx950ConvFwdAotSpec:
     grouped: int
     instance_id: str
     layout: str = "NHWC"
+    kernel_family: int = KERNEL_FAMILY_IMPLICIT_GEMM
+    direct_variant: str = DIRECT_VARIANT_NONE
+    filter_h: int = 0
+    filter_w: int = 0
+    stride_h: int = 0
+    stride_w: int = 0
+    pad_h: int = 0
+    pad_w: int = 0
+    dilation_h: int = 0
+    dilation_w: int = 0
+    block_w: int = 0
+    block_waves: int = 0
 
-    def probe_problem(self) -> _conv.ConvProblem:
-        """The problem rocKE's AOT sweep builds forward kernels against.
+    @property
+    def is_direct(self) -> bool:
+        return self.kernel_family == KERNEL_FAMILY_DIRECT_DEPTHWISE
 
-        Mirrors ``_probe_problem("fwd", caps)`` in
-        ``benchmarks/common/kernel_sweep.py``. The emitted code does not depend
-        on its extents, only on its capability axes (grouped), so this is what
-        makes the packaged binary the one the sweep benchmarked.
+    def probe_problem(self) -> _conv.ConvProblem | _direct.DirectConvProblem:
+        """The problem rocKE's sweep builds this instance against.
+
+        Implicit GEMM mirrors ``_probe_problem("fwd", caps)`` in
+        ``benchmarks/common/kernel_sweep.py``; direct depthwise mirrors
+        ``probe_problem(caps, dtype, variant)`` in
+        ``benchmarks/common/direct_kernel_sweep.py`` for ``cpg == kpg == 1``.
+        The emitted code does not depend on the probe's extents, only on its
+        capability axes, so this is what makes the packaged binary the one the
+        sweep benchmarked.
         """
+        if self.is_direct:
+            # The spatial variant takes fewer groups than a wave.
+            groups = 8 if self.direct_variant == DIRECT_VARIANT_SPATIAL else 256
+            return _direct.DirectConvProblem(
+                N=1,
+                H=64,
+                W=64,
+                groups=groups,
+                cpg=1,
+                kpg=1,
+                KH=self.filter_h,
+                KW=self.filter_w,
+                PAD=self.pad_h,
+                stride=self.stride_h,
+                dtype=self.dtype,
+                dil_h=self.dilation_h,
+                dil_w=self.dilation_w,
+            )
         groups = 2 if self.grouped else 1
         return _conv.ConvProblem(
             N=1,
@@ -905,6 +1004,8 @@ class Gfx950ConvFwdAotSpec:
 
     def to_instance_spec(self) -> _conv.ImplicitGemmConvSpec:
         """The rocKE builder spec, as ``kernel_sweep.build_kernel`` makes it."""
+        if self.is_direct:
+            raise ValueError("a direct depthwise instance has no implicit-GEMM spec")
         return _conv.ImplicitGemmConvSpec(
             problem=self.probe_problem(),
             name=self.kernel_symbol_prefix(),
@@ -929,28 +1030,80 @@ class Gfx950ConvFwdAotSpec:
             async_dma=bool(self.async_dma),
         )
 
+    def to_direct_spec(
+        self,
+    ) -> _direct.DirectDepthwiseSpec | _direct.DirectDepthwiseSpatialSpec:
+        """The rocKE builder spec, as ``direct_kernel_sweep.make_spec`` makes it."""
+        if not self.is_direct:
+            raise ValueError("an implicit-GEMM instance has no direct depthwise spec")
+        if self.direct_variant == DIRECT_VARIANT_SPATIAL:
+            return _direct.DirectDepthwiseSpatialSpec(
+                problem=self.probe_problem(),
+                name=self.kernel_symbol_prefix(),
+                block_waves=self.block_waves,
+                wave_size=self.wave_size,
+            )
+        return _direct.DirectDepthwiseSpec(
+            problem=self.probe_problem(),
+            name=self.kernel_symbol_prefix(),
+            block_w=self.block_w,
+            block_waves=self.block_waves,
+            wave_size=self.wave_size,
+        )
+
     def kernel_symbol_prefix(self) -> str:
         # rocKE appends the probe problem and tuning to this; the instance id
         # alone already makes the symbol unique.
+        if self.is_direct:
+            return f"hkp_conv_fwd_dw_aot_gfx950_{self.instance_id[:24]}"
         return f"hkp_conv_fwd_aot_gfx950_{self.instance_id[:24]}"
 
     def kernel_name(self) -> str:
+        if self.is_direct:
+            return self.to_direct_spec().kernel_name()
         return self.to_instance_spec().kernel_name()
 
+    def runtime_spec(self, problem: Gfx950ConvFwdSpec) -> Gfx950ConvFwdSpec:
+        """The exact-shape direct spec of this instance on ``problem``'s geometry.
+
+        The exact-shape direct guard, grid and launch values read only the
+        problem plus ``direct_variant``/``block_w``/``block_waves``, so a direct
+        instance reuses them unchanged through this.
+        """
+        if not self.is_direct:
+            raise ValueError("only a direct depthwise instance has a runtime spec")
+        return replace(
+            problem,
+            **_DIRECT_PLACEHOLDERS,
+            kernel_family=KERNEL_FAMILY_DIRECT_DEPTHWISE,
+            direct_variant=self.direct_variant,
+            block_w=self.block_w,
+            block_waves=self.block_waves,
+        )
+
     def block(self) -> tuple[int, int, int]:
+        if self.is_direct:
+            return self.block_waves * self.wave_size, 1, 1
         return self.warp_m * self.warp_n * self.wave_size, 1, 1
 
     def grid(self, problem: Gfx950ConvFwdSpec) -> tuple[int, int, int]:
-        """``(K/groups tiles, N*Ho*Wo tiles, groups)`` for ``problem``."""
+        """``(K/groups tiles, N*Ho*Wo tiles, groups)`` for ``problem``; a direct
+        instance takes :meth:`Gfx950ConvFwdSpec.grid`'s direct grid."""
+        if self.is_direct:
+            return self.runtime_spec(problem).grid()
         args = self._conv_args(problem)
         return args.num_pid_n, args.num_pid_m, problem.groups
 
     def _conv_args(self, problem: Gfx950ConvFwdSpec) -> ConvArgs:
+        if self.is_direct:
+            return ConvArgs.from_problem(self.runtime_spec(problem).to_direct_problem())
         return ConvArgs.from_problem(
             problem.to_problem(), tile_m=self.tile_m, tile_n=self.tile_n
         )
 
     def launch_signature(self) -> list[dict]:
+        if self.is_direct:
+            return conv_direct_args_signature(self.dtype)
         return conv_args_signature(self.dtype)
 
     def launch_values(
@@ -975,6 +1128,51 @@ def _aot_async_chunks(spec: Gfx950ConvFwdAotSpec) -> tuple[int, int]:
     return a_loader.elems_per_chunk, b_loader.elems_per_chunk
 
 
+def _aot_direct_error(spec: Gfx950ConvFwdAotSpec) -> str:
+    """The direct instance contract, before rocKE's validators; "" when accepted.
+
+    rocKE's direct kernels compile one stride and one padding (they read
+    neither ``sW`` nor ``pW``) and no dilation, and the direct sweep builds
+    square filters only; the per-axis fields state that without a convention.
+    """
+    for name, value in _AOT_DIRECT_PLACEHOLDERS.items():
+        actual = getattr(spec, name)
+        if actual != value or type(actual) is not type(value):
+            return f"a direct depthwise instance must set {name} to {value!r}, got {actual!r}"
+    if spec.wave_size != _DIRECT_WAVE_SIZE:
+        return f"wave_size must be {_DIRECT_WAVE_SIZE} on {_ARCH}"
+    if spec.direct_variant not in _DIRECT_VARIANTS:
+        return (
+            f"direct_variant must be one of {_DIRECT_VARIANTS} for a direct "
+            f"depthwise instance, got {spec.direct_variant!r}"
+        )
+    for name in ("filter_h", "filter_w", "stride_h", "stride_w"):
+        value = getattr(spec, name)
+        if type(value) is not int or not 0 < value <= _INT32_MAX:
+            return f"{name} must be a positive signed 32-bit integer"
+    for name in ("pad_h", "pad_w"):
+        value = getattr(spec, name)
+        if type(value) is not int or not 0 <= value <= _INT32_MAX:
+            return f"{name} must be a nonnegative signed 32-bit integer"
+    if spec.dilation_h != 1 or spec.dilation_w != 1:
+        return "the direct depthwise kernels have no dilation (dilation_h == dilation_w == 1)"
+    if spec.stride_h != spec.stride_w or spec.pad_h != spec.pad_w:
+        return "the direct depthwise kernels compile one stride and one padding"
+    if spec.filter_h != spec.filter_w:
+        return "the direct sweep builds square filters only"
+    if (
+        type(spec.block_waves) is not int
+        or not 1 <= spec.block_waves <= _DIRECT_MAX_BLOCK_WAVES
+    ):
+        return f"block_waves must be an integer in [1, {_DIRECT_MAX_BLOCK_WAVES}]"
+    if spec.direct_variant == DIRECT_VARIANT_SPATIAL:
+        if type(spec.block_w) is not int or spec.block_w != 0:
+            return "the spatial direct variant derives block_w; it must be 0"
+    elif type(spec.block_w) is not int or not 0 < spec.block_w <= _INT32_MAX:
+        return "block_w must be a positive signed 32-bit integer"
+    return ""
+
+
 def supports_gfx950_conv_fwd_aot(
     spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
 ) -> tuple[bool, str]:
@@ -987,6 +1185,40 @@ def supports_gfx950_conv_fwd_aot(
         return False, "the packaged forward contract supports fp16 or bf16 only"
     if spec.layout != "NHWC":
         return False, "the packaged forward contract requires dense NHWC storage"
+    if (
+        type(spec.instance_id) is not str
+        or len(spec.instance_id) != _AOT_INSTANCE_ID_LENGTH
+        or any(c not in "0123456789abcdef" for c in spec.instance_id)
+    ):
+        return False, "instance_id must be a KernelIdentity.stable_hash() (40 hex)"
+    if type(spec.kernel_family) is not int or spec.kernel_family not in (
+        KERNEL_FAMILY_IMPLICIT_GEMM,
+        KERNEL_FAMILY_DIRECT_DEPTHWISE,
+    ):
+        return False, (
+            f"kernel_family must be {KERNEL_FAMILY_IMPLICIT_GEMM} (implicit GEMM) or "
+            f"{KERNEL_FAMILY_DIRECT_DEPTHWISE} (direct depthwise), "
+            f"got {spec.kernel_family!r}"
+        )
+    if spec.is_direct:
+        error = _aot_direct_error(spec)
+        if error:
+            return False, error
+        try:
+            instance = spec.to_direct_spec()
+            instance.validate()
+            if spec.direct_variant == DIRECT_VARIANT_SPATIAL:
+                return _direct.is_valid_depthwise_spatial_spec(instance, arch=arch)
+            return _direct.is_valid_depthwise_spec(instance, arch=arch)
+        except (TypeError, ValueError, ZeroDivisionError) as exc:
+            return False, str(exc)
+    for name, default in _AOT_FAMILY_DEFAULTS.items():
+        value = getattr(spec, name)
+        if value != default or type(value) is not type(default):
+            return False, (
+                f"an implicit-GEMM instance must leave {name} at {default!r}, "
+                f"got {value!r}"
+            )
     for name in (
         "tile_m",
         "tile_n",
@@ -1018,12 +1250,6 @@ def supports_gfx950_conv_fwd_aot(
             return False, f"{name} must be 0 or 1"
     if spec.unroll_k and spec.async_dma:
         return False, "unroll_k and async_dma are separate K-loop drivers"
-    if (
-        type(spec.instance_id) is not str
-        or len(spec.instance_id) != _AOT_INSTANCE_ID_LENGTH
-        or any(c not in "0123456789abcdef" for c in spec.instance_id)
-    ):
-        return False, "instance_id must be a KernelIdentity.stable_hash() (40 hex)"
     try:
         instance = spec.to_instance_spec()
         instance.validate()
@@ -1053,8 +1279,15 @@ def gfx950_conv_fwd_aot_capabilities(
 
     The widths are the identity's own, not derived from a build problem. A and B
     both run along C/groups, so both divide it exactly when their lcm does. The
-    probe problem is 3x3, so an instance is never the pointwise GEMM.
+    probe problem is 3x3, so an instance is never the pointwise GEMM. A direct
+    instance reports its compiled filter, stride and padding.
     """
+    if spec.is_direct:
+        return Gfx950ConvFwdCapabilities(
+            filter_hw=(spec.filter_h, spec.filter_w),
+            stride_hw=(spec.stride_h, spec.stride_w),
+            pad_hw=(spec.pad_h, spec.pad_w),
+        )
     return Gfx950ConvFwdCapabilities(
         load_width=math.lcm(spec.vector_size_a, spec.vector_size_b),
         store_width=spec.vector_size_c,
@@ -1068,35 +1301,48 @@ def gfx950_conv_fwd_aot_serves(
 ) -> tuple[bool, str]:
     """Whether instance ``spec`` computes ``problem`` (only its problem fields).
 
-    The forward subset of ``KernelCache.supports_problem`` plus the launch
-    bounds ``ConvArgs`` enforces: the vector widths and async chunks divide the
-    contiguous per-group runs (A and B along C/groups, D along K/groups), a
-    grouped problem needs a grouped binary, every grid axis fits 65535, and the
-    reduction extent fits the kernel's 24-bit products. A grouped binary was
-    not built as pointwise, so grouped pointwise problems are served.
+    Implicit GEMM: the forward subset of ``KernelCache.supports_problem`` plus
+    the launch bounds ``ConvArgs`` enforces: the vector widths and async chunks
+    divide the contiguous per-group runs (A and B along C/groups, D along
+    K/groups), a grouped problem needs a grouped binary, every grid axis fits
+    65535, and the reduction extent fits the kernel's 24-bit products. A grouped
+    binary was not built as pointwise, so grouped pointwise problems are served.
+
+    Direct depthwise: the exact-shape engine's direct rule (:func:`_direct_serves`)
+    on the instance's compiled filter, stride and padding. Batch, image and
+    group count are kernel arguments.
     """
     error = _problem_error(problem, decline_grouped_pointwise=False)
     if error:
         return False, error
     if problem.dtype != spec.dtype:
         return False, f"dtype {problem.dtype} != instance dtype {spec.dtype}"
+    caps = gfx950_conv_fwd_aot_capabilities(spec)
+    if spec.is_direct:
+        return _direct_serves(caps, spec.runtime_spec(problem))
     cpg = problem.C // problem.groups
     if spec.async_dma:
         for chunk in (spec.async_chunk_a, spec.async_chunk_b):
             if cpg % chunk:
                 return False, f"async chunk {chunk} does not divide cpg={cpg}"
-    return _implicit_gemm_serves(
-        gfx950_conv_fwd_aot_capabilities(spec), problem, spec.tile_m, spec.tile_n
-    )
+    return _implicit_gemm_serves(caps, problem, spec.tile_m, spec.tile_n)
 
 
 def build_gfx950_conv_fwd_aot(
     spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
 ) -> KernelDef:
-    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an instance."""
+    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an instance.
+
+    Dispatches on ``kernel_family``, as :func:`build_gfx950_conv_fwd` does.
+    """
     ok, reason = supports_gfx950_conv_fwd_aot(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid packaged AOT forward instance: {reason}")
+    if spec.is_direct:
+        instance = spec.to_direct_spec()
+        if spec.direct_variant == DIRECT_VARIANT_SPATIAL:
+            return _direct.build_direct_depthwise_spatial(instance, arch=arch)
+        return _direct.build_direct_depthwise(instance, arch=arch)
     return _conv.build_implicit_gemm_conv(spec.to_instance_spec(), arch=arch)
 
 

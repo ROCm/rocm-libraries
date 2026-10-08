@@ -647,6 +647,85 @@ TEST(TestGfx950ConvFwdGeometry, DirectLaunchRefusesEveryGridAxisAbove65535)
     }
 }
 
+TEST(TestGfx950ConvFwdGeometry, DirectInstanceServesOnlyItsCompiledFilterStrideAndPadding)
+{
+    // N, Hi, Wi and the group count are kernel arguments, so one compiled 3x3 stride-1
+    // instance serves every guarded depthwise problem with those values.
+    const DirectInstance instance{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::STD, 4, 1};
+    for(const auto& problem : {depthwise(32, 14, 14, 3, 1, 1),
+                               depthwise(96, 7, 21, 3, 1, 1),
+                               depthwise(1, 64, 64, 3, 1, 1)})
+    {
+        const auto geometry = deriveGeometry(problem);
+        ASSERT_TRUE(geometry);
+        EXPECT_TRUE(directServes(instance.compiled, problem));
+        const auto launch = directInstanceLaunch(problem, *geometry, instance);
+        ASSERT_TRUE(launch);
+        // The exact-shape engine's grid for the same tuning.
+        const auto expected
+            = directLaunchGeometry(problem, *geometry, DirectVariant::STD, 4, 1, DIRECT_WAVE_SIZE);
+        ASSERT_TRUE(expected);
+        EXPECT_EQ(std::tie(launch->gridX, launch->gridY, launch->gridZ, launch->blockX),
+                  std::tie(expected->gridX, expected->gridY, expected->gridZ, expected->blockX));
+    }
+    // A build problem's capabilities are its filter, stride, padding and dilation only.
+    auto build = depthwise(8, 64, 64, 3, 1, 1);
+    build.n = 1;
+    const auto fromBuild = directCapabilities(build);
+    EXPECT_TRUE(directServes(fromBuild, depthwise(32, 14, 14, 3, 1, 1)));
+    for(const auto& other : {depthwise(32, 14, 14, 5, 1, 2), depthwise(32, 17, 17, 3, 2, 1)})
+    {
+        EXPECT_FALSE(directServes(fromBuild, other));
+        const auto geometry = deriveGeometry(other);
+        ASSERT_TRUE(geometry);
+        EXPECT_FALSE(directInstanceLaunch(other, *geometry, instance));
+    }
+    auto dilated = instance;
+    dilated.compiled.dilationH = dilated.compiled.dilationW = 2;
+    const auto problem = depthwise(32, 14, 14, 3, 1, 1);
+    const auto geometry = deriveGeometry(problem);
+    ASSERT_TRUE(geometry);
+    EXPECT_FALSE(directInstanceLaunch(problem, *geometry, dilated));
+}
+
+TEST(TestGfx950ConvFwdGeometry, DirectInstanceLaunchAppliesTheGuardAndTheVariantRules)
+{
+    const DirectInstance spatial{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::SPATIAL, 0, 1};
+    const DirectInstance std3{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::STD, 4, 1};
+    const auto launches = [](const Problem& problem, const DirectInstance& instance) {
+        const auto geometry = deriveGeometry(problem);
+        return geometry && directInstanceLaunch(problem, *geometry, instance).has_value();
+    };
+    // Spatial serves fewer groups than a wave; std serves either side.
+    EXPECT_TRUE(launches(depthwise(63, 14, 14, 3, 1, 1), spatial));
+    EXPECT_FALSE(launches(depthwise(64, 14, 14, 3, 1, 1), spatial));
+    EXPECT_TRUE(launches(depthwise(64, 14, 14, 3, 1, 1), std3));
+    // The direct guard: channel multiplier, ungrouped, and rocKE's padding rule, each with
+    // the instance's own compiled values.
+    EXPECT_FALSE(launches(Problem{2, 16, 32, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 16}, std3));
+    EXPECT_FALSE(launches(Problem{2, 16, 16, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 1}, std3));
+    const DirectInstance unpadded{{3, 3, 1, 1, 0, 0, 1, 1}, DirectVariant::STD, 4, 1};
+    EXPECT_FALSE(launches(depthwise(24, 12, 12, 3, 1, 0), unpadded));
+    // Malformed tuning is refused by the launch geometry.
+    EXPECT_FALSE(launches(depthwise(32, 14, 14, 3, 1, 1),
+                          {{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::SPATIAL, 4, 1}));
+    EXPECT_FALSE(launches(depthwise(32, 14, 14, 3, 1, 1),
+                          {{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::NONE, 4, 1}));
+    EXPECT_FALSE(launches(depthwise(32, 14, 14, 3, 1, 1),
+                          {{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::STD, 4, 17}));
+}
+
+TEST(TestGfx950ConvFwdGeometry, DefaultDirectArmFollowsTheGroupCount)
+{
+    // gfx950_conv_fwd_direct_spec_for_request with no overrides.
+    EXPECT_TRUE(isDefaultDirectArm(63, DirectVariant::SPATIAL, 0, 1));
+    EXPECT_FALSE(isDefaultDirectArm(63, DirectVariant::SPATIAL, 0, 2));
+    EXPECT_FALSE(isDefaultDirectArm(63, DirectVariant::STD, 4, 1));
+    EXPECT_TRUE(isDefaultDirectArm(64, DirectVariant::STD, 4, 1));
+    EXPECT_FALSE(isDefaultDirectArm(64, DirectVariant::STD, 16, 1));
+    EXPECT_FALSE(isDefaultDirectArm(64, DirectVariant::SPATIAL, 0, 1));
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
