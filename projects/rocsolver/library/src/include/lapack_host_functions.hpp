@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,7 +29,6 @@
 
 #include "lib_host_helpers.hpp"
 #include "lib_macros.hpp"
-#include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -598,14 +597,4 @@ static void call_lasv2(T& f, T& g, T& h, T& ssmin, T& ssmax, T& snr, T& csr, T& 
     ssmin = sign(ssmin, tsign * sign(one, f) * sign(one, h));
 }
 
-static inline int constexpr get_nblocks_yz(rocblas_handle handle)
-{
-    return (64 * 1024);
-}
-
-static inline int get_warpSize(rocblas_handle handle)
-{
-    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
-    return (props->warpSize);
-}
 ROCSOLVER_END_NAMESPACE
