@@ -36,7 +36,8 @@
 {% endblock %}
 
 {% block primbench_executor %}
-    auto executor = primbench::executor(1, args, settings, primbench::flags::sync);
+    settings.sync = true;
+    auto executor = primbench::executor(1, args, settings);
 {% endblock %}
 
 {% block benchmark_queue %}

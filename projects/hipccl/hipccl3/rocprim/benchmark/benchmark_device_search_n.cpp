@@ -44,7 +44,8 @@ int main(int argc, char* argv[])
 {
     primbench::settings settings;
     settings.size = 2 * primbench::GiB;
-    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
+    settings.sync = true;
+    primbench::executor executor(argc, argv, settings);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types

@@ -31,7 +31,8 @@ int main(int argc, char* argv[])
 {
     primbench::settings settings;
     settings.size = 128 * primbench::MiB;
-    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
+    settings.sync = true;
+    primbench::executor executor(argc, argv, settings);
 
     CREATE_BENCHMARK(int8_t)
     CREATE_BENCHMARK(int16_t)

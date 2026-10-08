@@ -44,10 +44,11 @@ int main(int argc, char* argv[])
     primbench::settings settings;
     settings.size = 128 * primbench::MiB;
     // Note: this algorithm supports hipGraph, but is doesn't support being executed without
-    // `primbench::flags::sync`. This is because this `__syncthread_or` does somehow break the
+    // `settings.sync`. This is because this `__syncthread_or` does somehow break the
     // stream blocking mechanism of primbench. If we don't use `__syncthread_or`, we can remove
-    // `primbench::flags::sync` from here.
-    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
+    // `settings.sync` from here.
+    settings.sync = true;
+    primbench::executor executor(argc, argv, settings);
 #ifndef BENCHMARK_CONFIG_TUNING
     // Note: custom keys not supported yet
     // using custom_key_float_int16 = common::custom_type<float, int16_t>;
