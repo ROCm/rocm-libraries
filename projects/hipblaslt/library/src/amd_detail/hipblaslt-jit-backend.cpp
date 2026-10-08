@@ -101,7 +101,7 @@ namespace hipblaslt_jit
             {
             }
 
-            Status lookup(const OperationRequest&         request,
+            Status lookup(const GemmRequest&         request,
                           const DeviceTarget&             target,
                           size_t                          count,
                           size_t                          maxWorkspaceBytes,
@@ -109,10 +109,9 @@ namespace hipblaslt_jit
                           std::vector<int32_t>&           indices) const override
             {
                 indices.clear();
-                const auto* gemm = gemmOf(request);
-                if(!gemm || !target.hardware)
+                if(!target.hardware)
                     return unsupported(Stage::Lookup, target);
-                auto problem = lowerForJit(*gemm);
+                auto problem = RocblasltToTensileContractionProblemGemm(request);
                 problem.setWorkspaceSize(maxWorkspaceBytes);
                 return m_library.lookup(CacheKey::make(target, m_backend, m_codeObjectVersion),
                                         target.device,
@@ -123,31 +122,22 @@ namespace hipblaslt_jit
                                         indices);
             }
 
-            Status publish(const OperationRequest&   request,
+            Status publish(const GemmRequest&   request,
                            const DeviceTarget&       target,
                            const SupportedSolutions& solutions,
                            std::vector<int32_t>&     indices) const override
             {
                 indices.clear();
-                const auto* gemm = gemmOf(request);
-                if(!gemm || !target.hardware)
+                if(!target.hardware)
                     return unsupported(Stage::Publish, target);
                 return m_library.publish(CacheKey::make(target, m_backend, m_codeObjectVersion),
                                          target.device,
-                                         lowerForJit(*gemm),
+                                         RocblasltToTensileContractionProblemGemm(request),
                                          solutions,
                                          indices);
             }
 
         private:
-            using GemmRequest = hipblaslt_ext::experimental::jit::detail::GemmRequest;
-
-            static const GemmRequest* gemmOf(const OperationRequest& request)
-            {
-                return request.kind() == GemmRequest::operation
-                           ? dynamic_cast<const GemmRequest*>(&request)
-                           : nullptr;
-            }
             static Status unsupported(Stage stage, const DeviceTarget& target)
             {
                 return {Status::Code::NotSupported,
@@ -204,7 +194,7 @@ namespace hipblaslt_ext::experimental
         struct PreparedQuery
         {
             std::shared_ptr<const hipblaslt_jit::Jit> jit;
-            std::shared_ptr<const OperationRequest>   operation;
+            std::shared_ptr<const GemmRequest>   operation;
             hipblaslt_jit::DeviceTarget               target;
         };
 
@@ -241,18 +231,17 @@ namespace hipblaslt_ext::experimental
         }
 
         size_t publishedWorkspace(const hipblaslt_jit::DeviceTarget& target,
-                                  const OperationRequest&            request,
+                                  const GemmRequest&            request,
                                   int32_t                            index)
         {
-            const auto* gemm = dynamic_cast<const GemmRequest*>(&request);
-            if(!gemm || !target.hardware || !hipblaslt_jit::isJitIndex(index))
+            if(!target.hardware || !hipblaslt_jit::isJitIndex(index))
                 return 0;
             hipblaslt_jit::Status why;
             auto                  solution = hipblaslt_jit::JitLibrary::process().solutionByIndex(
                 target.device, *target.hardware, index, why);
             if(!solution)
                 return 0;
-            auto problem = hipblaslt_jit::lowerForJit(*gemm);
+            auto problem = hipblaslt_jit::RocblasltToTensileContractionProblemGemm(request);
             return solution->requiredWorkspaceSize(problem, *target.hardware);
         }
 
@@ -260,7 +249,7 @@ namespace hipblaslt_ext::experimental
         // A capturing stream may return a hit and does not start a build.
         hipblasStatus_t
             lookupThenPublish(const std::shared_ptr<const hipblaslt_jit::Jit>& jit,
-                              const std::shared_ptr<const OperationRequest>&   operation,
+                              const std::shared_ptr<const GemmRequest>&   operation,
                               const hipblaslt_jit::DeviceTarget&               target,
                               size_t                                           count,
                               size_t                                           workspaceLimit,
@@ -274,14 +263,14 @@ namespace hipblaslt_ext::experimental
                 diagnostics.message = "A valid request and backend are required";
                 return HIPBLAS_STATUS_INVALID_VALUE;
             }
-            const auto* gemm = dynamic_cast<const GemmRequest*>(operation.get());
+            const auto* gemm = operation.get();
             if(!gemm)
             {
                 diagnostics.message = "The JIT solution library holds GEMM solutions";
                 return HIPBLAS_STATUS_NOT_SUPPORTED;
             }
             const bool capturing = streamIsCapturing(gemm->problem.stream);
-            auto       problem   = hipblaslt_jit::lowerForJit(*gemm);
+            auto       problem   = hipblaslt_jit::RocblasltToTensileContractionProblemGemm(*gemm);
             auto&      library   = hipblaslt_jit::JitLibrary::process();
             const auto backend  = jit->components().backend ? jit->components().backend->info()
                                                            : hipblaslt_jit::BackendInfo{};

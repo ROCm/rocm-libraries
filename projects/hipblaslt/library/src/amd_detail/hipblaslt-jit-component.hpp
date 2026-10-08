@@ -122,7 +122,7 @@ namespace hipblaslt_jit
     // object for BuildRequest::targetId.
     std::shared_ptr<const CodeObjectBuilder> makeComgrBuilder();
 
-    using OperationRequest = hipblaslt_ext::experimental::jit::detail::OperationRequest;
+    using GemmRequest = hipblaslt_ext::experimental::jit::detail::GemmRequest;
     using KernelBundle     = hipblaslt_ext::experimental::jit::detail::KernelBundle;
 
     // "configure", "generate", ... as reports name stages.
@@ -144,7 +144,7 @@ namespace hipblaslt_jit
 
     struct GenerationRequest
     {
-        const OperationRequest&  request;
+        const GemmRequest&  request;
         const DeviceTarget&      target;
         size_t                   count      = 1;
         size_t                   workspaceLimit = 0;
@@ -180,7 +180,7 @@ namespace hipblaslt_jit
         // request and returns the local indices of those that support it, best
         // first. Loads no code.
         virtual Status support(const BuiltSolution&,
-                               const OperationRequest&,
+                               const GemmRequest&,
                                const DeviceTarget&,
                                size_t            workspaceLimit,
                                std::vector<int>& indices) const
@@ -188,7 +188,7 @@ namespace hipblaslt_jit
         // Loads the code objects once and returns a process-local executable
         // bundle for each of the solutions at indices.
         virtual Status load(const BuiltSolution&,
-                            const OperationRequest&,
+                            const GemmRequest&,
                             const DeviceTarget&,
                             size_t                                            workspaceLimit,
                             const std::vector<int>&                           indices,
@@ -206,7 +206,7 @@ namespace hipblaslt_jit
         virtual ~SolutionStore() = default;
         // Up to count indices of stored solutions for exactly this request that
         // need at most maxWorkspaceBytes, best first, without excluded kernels.
-        virtual Status lookup(const OperationRequest&,
+        virtual Status lookup(const GemmRequest&,
                               const DeviceTarget&,
                               size_t                          count,
                               size_t                          maxWorkspaceBytes,
@@ -214,7 +214,7 @@ namespace hipblaslt_jit
                               std::vector<int32_t>&           indices) const
             = 0;
         // Returns one library index per supported solution, in order.
-        virtual Status publish(const OperationRequest&,
+        virtual Status publish(const GemmRequest&,
                                const DeviceTarget&,
                                const SupportedSolutions&,
                                std::vector<int32_t>& indices) const
@@ -247,7 +247,7 @@ namespace hipblaslt_jit
         // is no store or publishing failed. Returns at most count solutions
         // that support the request, best first. Thread-safe. Sets the stage of
         // every failure it reports.
-        Outcome generate(const OperationRequest&         request,
+        Outcome generate(const GemmRequest&         request,
                          const DeviceTarget&             target,
                          size_t                          count,
                          size_t                          workspaceLimit,
@@ -278,7 +278,7 @@ namespace hipblaslt_ext::experimental::jit::detail
     struct CompiledSolution
     {
         hipblaslt_jit::DeviceTarget               target;
-        std::shared_ptr<const OperationRequest>   request;
+        std::shared_ptr<const GemmRequest>   request;
         std::shared_ptr<const hipblaslt_jit::Jit> jit;
         int32_t                                   libraryIndex   = 0;
         uint64_t                                  process        = 0;

@@ -55,12 +55,8 @@ namespace hipblaslt_ext::experimental::jit::replay
                             std::vector<hipblaslt_jit::GeneratedSolution>& solutions) const override
             {
                 solutions.clear();
-                const auto* gemm = dynamic_cast<const detail::GemmRequest*>(&request.request);
-                if(!gemm)
-                    return {Status::Code::NotSupported,
-                            Stage::Generate,
-                            "The replay backend replays a GEMM solution"};
-                const auto problem  = hipblaslt_jit::lowerForJit(*gemm);
+                const auto problem
+                    = hipblaslt_jit::RocblasltToTensileContractionProblemGemm(request.request);
                 const auto excluded = [&](const std::string& kernel) {
                     return hipblaslt_jit::excludedKernel(request.excludeKernels, kernel);
                 };

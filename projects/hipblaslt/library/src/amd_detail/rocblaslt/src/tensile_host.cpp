@@ -5951,7 +5951,7 @@ CREATECOMPATIBILITYFUNCTION(rocblaslt::RocTuningV2)
 #ifdef HIPBLASLT_ENABLE_JIT
 namespace hipblaslt_jit
 {
-    TensileLite::ContractionProblemGemm lowerForJit(const jit::GemmRequest& request)
+    TensileLite::ContractionProblemGemm RocblasltToTensileContractionProblemGemm(const jit::GemmRequest& request)
     {
         return ConstructTensileProblem(request.problem);
     }
@@ -5977,30 +5977,19 @@ namespace hipblaslt_jit
         }
     }
 
-    std::string_view TensileGemmBundle::operationKind() const noexcept
+    hipblasStatus_t TensileGemmBundle::support(const GemmRequest& request,
+                                               size_t             limit,
+                                               size_t&            workspace,
+                                               Diagnostics&       diagnostics) const
     {
-        return jit::GemmRequest::operation;
-    }
-
-    hipblasStatus_t TensileGemmBundle::support(const OperationRequest& operation,
-                                               size_t                  limit,
-                                               size_t&                 workspace,
-                                               Diagnostics&            diagnostics) const
-    {
-        workspace           = 0;
-        const auto* request = dynamic_cast<const jit::GemmRequest*>(&operation);
-        if(!request || operation.kind() != jit::GemmRequest::operation)
-        {
-            diagnostics.message = "TensileLite does not implement this operation";
-            return HIPBLAS_STATUS_NOT_SUPPORTED;
-        }
+        workspace     = 0;
         auto solution = tensile->library->solutions.at(index);
-        if(!scaleLayoutMatches(*solution, request->problem))
+        if(!scaleLayoutMatches(*solution, request.problem))
         {
             diagnostics.message = "TensileLite solution has a different physical MX scale layout";
             return HIPBLAS_STATUS_NOT_SUPPORTED;
         }
-        auto        problem  = ConstructTensileProblem(request->problem);
+        auto        problem  = ConstructTensileProblem(request.problem);
         const auto& hardware = tensile->hardware;
         bool        hardwareFailed = false;
         if(!gemmSolutionPredicates(
@@ -6031,7 +6020,7 @@ namespace hipblaslt_jit
         {
         public:
             Status support(const BuiltSolution&    built,
-                           const OperationRequest& request,
+                           const GemmRequest& request,
                            const DeviceTarget&     target,
                            size_t                  workspaceLimit,
                            std::vector<int>&       indices) const override
@@ -6060,7 +6049,7 @@ namespace hipblaslt_jit
             }
 
             Status load(const BuiltSolution& built,
-                        const OperationRequest&,
+                        const GemmRequest&,
                         const DeviceTarget& target,
                         size_t,
                         const std::vector<int>&                           indices,
