@@ -58,6 +58,25 @@ Problem MakeSearchProblem(group_conv::GroupConvTestConfig<2u> conv,
     return Problem(y_desc, w_desc, x_desc, conv_desc, direction);
 }
 
+// 3D variant (distinct name, not an overload: a 2-element nested brace can also aggregate-init the
+// 3-field 3D size structs, which would make overload resolution ambiguous). Only used by the
+// host-only advance tests, whose SetNextValue() path ignores the problem; it just needs to be a
+// well-formed ProblemDescription for the requested direction.
+Problem MakeSearchProblem3D(group_conv::GroupConvTestConfig<3u> conv,
+                            miopenDataType_t data_type,
+                            miopenTensorLayout_t layout,
+                            Direction direction)
+{
+    const auto x_desc    = miopen::TensorDescriptor(data_type, layout, conv.GetInput());
+    const auto w_desc    = miopen::TensorDescriptor(data_type, layout, conv.GetWeights());
+    const auto conv_desc = conv.GetConv();
+    const auto y_desc    = conv_desc.GetForwardOutputTensor(x_desc, w_desc, data_type);
+
+    if(direction == Direction::Forward)
+        return Problem(x_desc, w_desc, y_desc, conv_desc, direction);
+    return Problem(y_desc, w_desc, x_desc, conv_desc, direction);
+}
+
 } // namespace
 
 TEST(GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16, SearchStartsAtKernelZero)
@@ -191,4 +210,85 @@ TEST(CPU_PerfConfig3DGroupBwdSeed_NONE, SeedsKernelZero)
     cfg.SeedFirstValidKernel();
     EXPECT_EQ(cfg.index, 0);
     EXPECT_EQ(cfg.kernel_id, "A");
+}
+
+// --- Host-only advance walk for the non-split solvers (2D Fwd, 3D Fwd, 3D Bwd). With valid_kernels
+// pre-populated, SetNextValue() bypasses the CK populate branch and runs only the advance path: it
+// must visit index 0..N-1 in order and then return false without stepping out of bounds. (The
+// split-k Bwd/Wrw advance walk is covered in perf_config_group_deterministic_set_next_value.cpp.)
+
+TEST(CPU_PerfConfigGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
+{
+    const auto problem =
+        MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
+                          miopenHalf,
+                          miopenTensorNHWC,
+                          Direction::Forward);
+
+    FwdConfig cfg(false);
+    cfg.valid_kernels = {"A", "B", "C"};
+    cfg.SeedFirstValidKernel();
+    ASSERT_EQ(cfg.index, 0);
+    ASSERT_EQ(cfg.kernel_id, "A");
+
+    ASSERT_TRUE(cfg.SetNextValue(problem));
+    EXPECT_EQ(cfg.index, 1);
+    EXPECT_EQ(cfg.kernel_id, "B");
+
+    ASSERT_TRUE(cfg.SetNextValue(problem));
+    EXPECT_EQ(cfg.index, 2);
+    EXPECT_EQ(cfg.kernel_id, "C");
+
+    EXPECT_FALSE(cfg.SetNextValue(problem)); // exhausted, last kernel included, no overrun
+    EXPECT_EQ(cfg.index, 2);
+}
+
+TEST(CPU_PerfConfig3DGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
+{
+    const auto problem = MakeSearchProblem3D(
+        {1, 64, 64, 64, {4, 28, 28}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
+        miopenHalf,
+        miopenTensorNDHWC,
+        Direction::Forward);
+
+    Fwd3DConfig cfg(false);
+    cfg.valid_kernels = {"A", "B", "C"};
+    cfg.SeedFirstValidKernel();
+    ASSERT_EQ(cfg.index, 0);
+
+    ASSERT_TRUE(cfg.SetNextValue(problem));
+    EXPECT_EQ(cfg.index, 1);
+    EXPECT_EQ(cfg.kernel_id, "B");
+
+    ASSERT_TRUE(cfg.SetNextValue(problem));
+    EXPECT_EQ(cfg.index, 2);
+    EXPECT_EQ(cfg.kernel_id, "C");
+
+    EXPECT_FALSE(cfg.SetNextValue(problem));
+    EXPECT_EQ(cfg.index, 2);
+}
+
+TEST(CPU_PerfConfig3DGroupBwdAdvance_NONE, WalksEveryKernelThenExhausts)
+{
+    const auto problem = MakeSearchProblem3D(
+        {1, 64, 64, 64, {4, 28, 28}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
+        miopenHalf,
+        miopenTensorNDHWC,
+        Direction::BackwardData);
+
+    Bwd3DConfig cfg(false);
+    cfg.valid_kernels = {"A", "B", "C"};
+    cfg.SeedFirstValidKernel();
+    ASSERT_EQ(cfg.index, 0);
+
+    ASSERT_TRUE(cfg.SetNextValue(problem));
+    EXPECT_EQ(cfg.index, 1);
+    EXPECT_EQ(cfg.kernel_id, "B");
+
+    ASSERT_TRUE(cfg.SetNextValue(problem));
+    EXPECT_EQ(cfg.index, 2);
+    EXPECT_EQ(cfg.kernel_id, "C");
+
+    EXPECT_FALSE(cfg.SetNextValue(problem));
+    EXPECT_EQ(cfg.index, 2);
 }
