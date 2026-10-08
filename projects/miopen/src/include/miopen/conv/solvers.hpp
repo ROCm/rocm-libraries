@@ -3933,6 +3933,13 @@ struct PerformanceConfigHipImplicitGemm3DGroupWrwXdlops
     void DefaultKernelFromList(const ExecutionContext& ctx);
     void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
     MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
+
+    void SeedFirstValidKernel()
+    {
+        index     = 0;
+        split_k   = 1;
+        kernel_id = valid_kernels[index] + "+1";
+    }
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
     {

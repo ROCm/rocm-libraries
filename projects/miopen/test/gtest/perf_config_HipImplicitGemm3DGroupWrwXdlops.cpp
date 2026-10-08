@@ -78,6 +78,21 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32, SearchStartsAtKernelZe
     EXPECT_TRUE(cfg.IsValid(problem));
 }
 
+// Host-only: SeedFirstValidKernel() (the InitValidKernels seed, extracted for testability) sets the
+// first enumerated config to (valid_kernels[0], split_k 1). index/split_k are pre-clobbered to
+// prove the seed resets them. No device or CK library needed.
+TEST(CPU_PerfConfig3DGroupWrwSeed_NONE, SeedsKernelZero)
+{
+    Config cfg(false);
+    cfg.valid_kernels = {"A", "B", "C"};
+    cfg.index         = 7;
+    cfg.split_k       = 64;
+    cfg.SeedFirstValidKernel();
+    EXPECT_EQ(cfg.index, 0);
+    EXPECT_EQ(cfg.split_k, 1);
+    EXPECT_EQ(cfg.kernel_id, "A+1");
+}
+
 // Deterministic walk: with three valid kernels, deterministic SetNextValue() must visit index 1
 // then index 2 before exhausting. The inverted-NextLinear bug exhausted after the first call.
 TEST(CPU_PerfConfig3DGroupWrwDeterministic_NONE, WalksEveryKernelThenExhausts)
