@@ -245,22 +245,31 @@ the reserved index range also disables it.
 **Layout.** Under a `v1` schema directory, each device and backend has its own
 directory. The directory name is a filesystem-safe literal of the ISA, target
 ID, library architecture, wavefront size, backend id and backend version. It
-does not include the comgr path or the ROCm path. Each directory is a standard
-lazy TensileLite library that the stock loader reads: a master file, the index
-mapping, and one entry (`.dat`) and code object (`.co`) per solution. The
-files the library reads and writes are MessagePack. For example:
+does not include the comgr path or the ROCm path. A query opens one slice of
+that directory. The slice key is TensileLite's lazy placeholder grain: the
+operation identifier, the datatypes, the scale suffix (`_SAB` or `_SABV`, and
+MX block and type) and the epilogue flags that change the kernel family. The
+slice is a standard lazy TensileLite library that the stock loader reads: a
+master file, the index mapping, and one entry (`.dat`) and code object (`.co`)
+per solution. Other slices stay unread. Code objects load for the chosen index.
+A HIP helper is compiled once per backend id and helper name and stored beside
+the slices; an entry records the helper name. The files the library reads and
+writes are MessagePack. For example:
 
 ```text
 $HIPBLASLT_JIT_LIBRARY_PATH/
 └── v1/
     ├── allocator.dat                  next free solution index
     ├── lock                           publication lock for the whole root
-    └── gfx950_..._replay_1/           one directory per device and backend
+    └── gfx950_..._replay_replay/      one directory per device and backend
         ├── cache-key.msgpack
-        ├── TensileLibrary_lazy_gfx950.dat
-        ├── TensileLiteLibrary_lazy_gfx950_Mapping.dat
-        ├── k/<kernel>/t/<problem>/s/<sizes>.dat
-        ├── k/<kernel>/t/<problem>/s/<sizes>.co
+        ├── indices.msgpack            solution index to slice key
+        ├── helpers/<backend>/<name>.co
+        ├── slices/<slice key>/
+        │   ├── TensileLibrary_lazy_gfx950.dat
+        │   ├── TensileLiteLibrary_lazy_gfx950_Mapping.dat
+        │   ├── k/<kernel>/t/<problem>/s/<sizes>.dat
+        │   └── k/<kernel>/t/<problem>/s/<sizes>.co
         └── staging/                   temporary files before rename
 ```
 
@@ -303,8 +312,8 @@ solution library, as above. `allocator.dat` holds
 the next index, so indices stay unique across every key directory under a root
 and are never reused while the root exists. Publication fails once the range is
 exhausted. `tensile_host.cpp` routes reserved indices to the JIT solution
-library, with its own solution adapter whose code-object directory is the key
-directory, and all other indices to the prebuilt library. An index that no JIT
+library, with its own solution adapter whose code-object directory is the
+slice, and all other indices to the prebuilt library. An index that no JIT
 library holds resolves to an empty library, so callers report their usual
 missing-solution error.
 

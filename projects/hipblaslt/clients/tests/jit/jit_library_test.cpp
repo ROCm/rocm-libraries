@@ -177,9 +177,9 @@ namespace
     }
 
     // Every master row is mapped, and every mapped index loads with its code object.
-    void consistent(const fs::path&              directory,
-                    const TensileLite::Hardware& hardware,
-                    const std::string&           arch)
+    void consistentSlice(const fs::path&              directory,
+                         const TensileLite::Hardware& hardware,
+                         const std::string&           arch)
     {
         std::vector<std::string> rows;
         ok(hj::msgpack_io::readMasterPrefixes(read(directory / lazyMaster(arch)), rows),
@@ -216,6 +216,21 @@ namespace
             INFO(("Master row " + row + " is not mapped"));
             REQUIRE((mapped.count(row)));
         }
+    }
+
+    // The key directory, and each slice under it. A query's master lives in one slice.
+    void consistent(const fs::path&              directory,
+                    const TensileLite::Hardware& hardware,
+                    const std::string&           arch)
+    {
+        if(fs::is_regular_file(directory / lazyMaster(arch)))
+            consistentSlice(directory, hardware, arch);
+        std::error_code error;
+        if(!fs::exists(directory / "slices", error))
+            return;
+        for(const auto& entry : fs::recursive_directory_iterator(directory / "slices"))
+            if(entry.is_directory() && fs::is_regular_file(entry.path() / lazyMaster(arch)))
+                consistentSlice(entry.path(), hardware, arch);
     }
 
     // Names, modes, sizes and modification times of everything under root.
@@ -319,45 +334,42 @@ namespace
     void keys(const Context& ctx)
     {
         const auto key = testKey(ctx);
-        {
-            INFO(("Unexpected cache key " + key.canonicalJson()));
-            REQUIRE((key.canonicalJson()
-                == std::string(R"({"backend":{"id":"test","version":"1"},"code_object_version":4,)")
-                       + R"("comgr":"3.0:/opt/rocm/lib/libamd_comgr.so:1:2",)"
-                       + R"("compiler_environment":{"LLVM_PATH":"/opt/rocm/llvm"},)"
-                       + R"("rocm_path":"/opt/rocm","schema":1,"target":{"isa":")" + ctx.arch
-                       + R"(","library_arch":")" + ctx.arch + R"(","target_id":")" + ctx.arch
-                       + R"(:sramecc+:xnack-","wavefront_size":64}})"));
-        }
         const auto name = key.directoryName();
         {
             INFO(("Unexpected directory " + name));
-            REQUIRE((name.size() == ctx.arch.size() + 17 && name.rfind(ctx.arch + "-", 0) == 0));
+            REQUIRE((name.find(ctx.arch) != std::string::npos && name.find("test") != std::string::npos
+                && name.find("_wf64_") != std::string::npos && name.find("=3a") != std::string::npos
+                && name.find('/') == std::string::npos));
         }
         // An ISA different from the device, so this field still changes the key.
         const auto otherIsa = ctx.arch == "gfx942" ? "gfx950" : "gfx942";
-        const std::vector<std::function<void(hj::CacheKey&)>> changes{
+        const std::vector<std::function<void(hj::CacheKey&)>> identity{
             [&](auto& k) { k.targetId = ctx.arch + ":sramecc-:xnack-"; },
             [&](auto& k) { k.isa = otherIsa; },
             [](auto& k) { k.libraryArch += "v1"; },
             [](auto& k) { k.wavefrontSize = 32; },
             [](auto& k) { k.backendId = "other"; },
             [](auto& k) { k.backendVersion = "2"; },
+        };
+        const std::vector<std::function<void(hj::CacheKey&)>> toolchain{
             [](auto& k) { k.codeObjectVersion = 5; },
             [](auto& k) { k.comgr = "3.1"; },
             [](auto& k) { k.rocmPath = "/opt/rocm-other"; },
             [](auto& k) { k.environment["AMD_COMGR_DRIVER_OPTIONS_APPEND"] = "-O0"; },
         };
-        std::set<std::string> names{name};
-        for(const auto& change : changes)
+        for(const auto& change : identity)
         {
             auto changed = key;
             change(changed);
-            names.insert(changed.directoryName());
+            INFO(("A device or backend field did not change the directory"));
+            REQUIRE((changed.directoryName() != name));
         }
+        for(const auto& change : toolchain)
         {
-            INFO(("A cache key field does not change the key"));
-            REQUIRE((names.size() == changes.size() + 1));
+            auto changed = key;
+            change(changed);
+            INFO(("A toolchain field changed the directory"));
+            REQUIRE((changed.directoryName() == name));
         }
 
         const char* environment[] = {"HIP_PATH=/hip",
@@ -410,15 +422,15 @@ namespace
         const auto                prefix = hj::entryPrefix(type, "kernel", sizes);
         {
             INFO(("Unexpected entry prefix " + prefix));
-            REQUIRE((prefix.size() == 52 && prefix.rfind("TensileLibrary_JIT_", 0) == 0));
+            REQUIRE((prefix.find("k/") == 0 && prefix.find("/kernel/") != std::string::npos
+                && prefix.find("256x128x1x512") != std::string::npos));
         }
         {
             INFO(("Entry prefixes are not a function of their content"));
             REQUIRE((prefix == hj::entryPrefix(type, "kernel", sizes)
                 && prefix != hj::entryPrefix(type + " ", "kernel", sizes)
                 && prefix != hj::entryPrefix(type, "kernel2", sizes)
-                && prefix != hj::entryPrefix(type, "kernel", {256, 128, 1, 1024})
-                && hj::entryPrefix(type, "kernel", sizes, 2) == prefix + "_2"));
+                && prefix != hj::entryPrefix(type, "kernel", {256, 128, 1, 1024})));
         }
         std::cout << "PASS cache keys, compiler environment, ProblemType keys and entry names\n";
     }
@@ -525,20 +537,20 @@ namespace
         const auto directory = library.directory(key);
         const auto prefix    = hj::entryPrefix(
             hj::problemTypeKey(problem), ctx.entry.kernel, hj::problemSizes(problem));
-        std::set<std::string> names;
-        for(const auto& entry : fs::directory_iterator(directory))
-            names.insert(entry.path().filename().string());
+        const auto slice = directory / "slices" / hj::sliceKey(problem);
         {
             INFO(("Unexpected key directory contents"));
-            REQUIRE((names
-                == std::set<std::string>{lazyMaster(ctx.arch),
-                                         lazyMapping(ctx.arch),
-                                         "cache-key.json",
-                                         "staging",
-                                         prefix + ".co",
-                                         prefix + ".dat"}));
+            REQUIRE((fs::is_regular_file(slice / lazyMaster(ctx.arch))
+                && fs::is_regular_file(slice / lazyMapping(ctx.arch))
+                && fs::is_regular_file(directory / "cache-key.msgpack")
+                && fs::is_regular_file(directory / "indices.msgpack")
+                && fs::is_directory(directory / "staging")
+                && fs::is_regular_file(slice / (prefix + ".co"))
+                && fs::is_regular_file(slice / (prefix + ".dat"))
+                && !fs::exists(directory / "cache-key.json")
+                && !fs::exists(directory / lazyMaster(ctx.arch))));
         }
-        names.clear();
+        std::set<std::string> names;
         for(const auto& entry : fs::directory_iterator(root / "v1"))
             names.insert(entry.path().filename().string());
         {
@@ -550,12 +562,19 @@ namespace
             REQUIRE((fs::is_empty(directory / "staging")));
         }
         {
-            INFO(("cache-key.json does not hold the key"));
-            REQUIRE((readText(directory / "cache-key.json") == key.canonicalJson()));
+            hj::msgpack_io::CacheKeyDocument document;
+            ok(hj::msgpack_io::readCacheKey(read(directory / "cache-key.msgpack"), document),
+               "cache key");
+            INFO(("cache-key.msgpack does not hold the key"));
+            REQUIRE((document.backendId == key.backendId && document.backendVersion == key.backendVersion
+                && document.isa == key.isa && document.targetId == key.targetId
+                && document.libraryArch == key.libraryArch && document.wavefrontSize == key.wavefrontSize
+                && document.comgr == key.comgr && document.rocmPath == key.rocmPath
+                && document.codeObjectVersion == key.codeObjectVersion));
         }
         {
             INFO(("The code object was not stored unchanged"));
-            REQUIRE((read(directory / (prefix + ".co")) == built(ctx.entry).first.object.bytes));
+            REQUIRE((read(slice / (prefix + ".co")) == built(ctx.entry).first.object.bytes));
         }
         int64_t next = 0;
         ok(hj::msgpack_io::readAllocator(read(root / "v1" / "allocator.dat"), next), "allocator");
@@ -564,7 +583,7 @@ namespace
             REQUIRE((next == base + 1));
         }
 
-        const auto master = stock(directory, ctx.arch);
+        const auto master = stock(slice, ctx.arch);
         {
             INFO(("Unexpected index mapping"));
             REQUIRE((master->libraryMapping == std::map<int, std::string>{{base, prefix}}));
@@ -710,20 +729,22 @@ namespace
         }
         consistent(library.directory(key), ctx.hardware, ctx.arch);
 
-        // A published name whose entry holds another kernel is a hash collision.
+        // The same kernel, problem type and sizes name one entry. Rewriting that
+        // file does not allocate another index.
         const auto directory = library.directory(key);
         const auto prefix
             = hj::entryPrefix(hj::problemTypeKey(gemm(2048)), a.kernel, hj::problemSizes(gemm(2048)));
         const auto collided = publish(library, key, gemm(2048), {a})[0];
         std::vector<uint8_t> other;
         ok(hj::msgpack_io::rewriteEntryIndex(b.bytes, 0, collided, other), "rewrite");
-        ok(hj::files::writeAtomically(directory / "staging", directory / (prefix + ".dat"), other),
+        const auto slice = directory / "slices" / hj::sliceKey(gemm(2048));
+        ok(hj::files::writeAtomically(directory / "staging", slice / (prefix + ".dat"), other),
            "replace entry");
         hj::JitLibrary reopened(root);
         const auto     renamedIndex = publish(reopened, key, gemm(2048), {a})[0];
         {
-            INFO(("A hash collision reused another kernel's entry"));
-            REQUIRE((renamedIndex == base + 6 && fs::exists(directory / (prefix + "_1.dat"))));
+            INFO(("The same identity allocated another index"));
+            REQUIRE((renamedIndex == collided && !fs::exists(slice / (prefix + "_1.dat"))));
         }
         consistent(directory, ctx.hardware, ctx.arch);
         std::cout << "PASS deduplication, collisions, publication order, top-N and exclusions\n";
@@ -749,21 +770,27 @@ namespace
                 REQUIRE((publish(library, testKey(ctx, "2"), gemm(256), {ctx.entry})
                     == std::vector<int32_t>{base + 1}));
             }
-            const std::vector<std::function<void(hj::CacheKey&)>> changes{
+            const auto published = ctx.find(library, testKey(ctx, "1"), gemm(256));
+            const std::vector<std::function<void(hj::CacheKey&)>> toolchain{
                 [](auto& k) { k.comgr = "3.1"; },
                 [](auto& k) { k.rocmPath = "/opt/rocm-other"; },
                 [](auto& k) { k.environment["AMD_COMGR_DRIVER_OPTIONS_APPEND"] = "-O0"; },
-                [&](auto& k) { k.targetId = ctx.arch + ":sramecc-:xnack-"; },
                 [](auto& k) { k.codeObjectVersion = 5; },
             };
-            for(const auto& change : changes)
+            for(const auto& change : toolchain)
             {
                 auto changed = testKey(ctx, "1");
                 change(changed);
                 {
-                    INFO(("A mismatched key reused an entry"));
-                    REQUIRE((ctx.find(library, changed, gemm(256)).empty()));
+                    INFO(("A toolchain field hid a published entry"));
+                    REQUIRE((ctx.find(library, changed, gemm(256)) == published));
                 }
+            }
+            {
+                auto changed = testKey(ctx, "1");
+                changed.targetId = ctx.arch + ":sramecc-:xnack-";
+                INFO(("A different target reused an entry"));
+                REQUIRE((ctx.find(library, changed, gemm(256)).empty()));
             }
         }
         {
@@ -771,7 +798,7 @@ namespace
             REQUIRE((tree(directory) == snapshot));
         }
 
-        std::ofstream(directory / "cache-key.json", std::ios::trunc) << "{}";
+        std::ofstream(directory / "cache-key.msgpack", std::ios::trunc) << "{}";
         fs::create_directories(root / "v2" / (ctx.arch + "-0000000000000000"));
         std::ofstream(root / "v2" / "allocator.dat") << "not a library";
         const auto tampered = tree(root);
@@ -842,7 +869,8 @@ namespace
         const auto prefix = hj::entryPrefix(
             hj::problemTypeKey(gemm(256)), ctx.entry.kernel, hj::problemSizes(gemm(256)));
         ok(hj::msgpack_io::rewriteEntryIndex(ctx.entry.bytes, 0, 7, bytes), "rewrite");
-        ok(hj::files::writeAtomically(directory / "staging", directory / (prefix + ".dat"), bytes),
+        const auto slice = directory / "slices" / hj::sliceKey(gemm(256));
+        ok(hj::files::writeAtomically(directory / "staging", slice / (prefix + ".dat"), bytes),
            "tamper");
         hj::JitLibrary reopened(root);
         {
@@ -979,11 +1007,11 @@ namespace
         }
         hj::JitLibrary other(root, deviceKey("3.1"));
         {
-            INFO(("An index resolved from a directory for another toolchain"));
-            REQUIRE((!other.resolve(0, second[0], why).master && !why.ok()));
+            INFO(("A different comgr path hid a published index: " + why.message));
+            REQUIRE((other.resolve(0, second[0], why).master != nullptr));
         }
         std::cout << "PASS readers reload on change, keep superseded snapshots, and find indices "
-                     "in any backend's directory for their toolchain\n";
+                     "in any backend's directory\n";
     }
 
     void fusedA2A(const Context& ctx)
@@ -1196,7 +1224,7 @@ namespace
             REQUIRE((indices.size() == 1));
         }
         const auto directory = root / "v1" / key.directoryName();
-        const auto master    = stock(directory, ctx.arch);
+        const auto master    = stock(directory / "slices" / hj::sliceKey(gemm(256)), ctx.arch);
         std::set<int32_t> mapped;
         for(const auto& [index, prefix] : master->libraryMapping)
             mapped.insert(index);

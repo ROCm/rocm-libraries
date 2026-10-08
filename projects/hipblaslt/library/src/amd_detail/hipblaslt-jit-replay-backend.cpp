@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-gemm-internal.hpp"
-#include "hipblaslt-jit-hash.hpp"
 #include "hipblaslt-jit-loader.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include "hipblaslt-jit-replay.hpp"
 #include <stdexcept>
-#include <string_view>
 
 namespace hipblaslt_ext::experimental::jit::replay
 {
@@ -31,11 +29,6 @@ namespace hipblaslt_ext::experimental::jit::replay
             {
                 if(options.replay.empty())
                     throw std::invalid_argument("The replay backend has no bundle to replay");
-                const auto text = [](const std::vector<uint8_t>& bytes) {
-                    return std::string_view(reinterpret_cast<const char*>(bytes.data()),
-                                            bytes.size());
-                };
-                hipblaslt_jit::Fnv1a version;
                 for(const auto& path : options.replay)
                 {
                     Replayed replayed;
@@ -45,22 +38,12 @@ namespace hipblaslt_ext::experimental::jit::replay
                     if(!replayed.library || replayed.library->solutions.empty())
                         throw std::invalid_argument("The bundle " + path
                                                     + " holds no GEMM solution");
-                    const auto& solution = replayed.solution;
-                    version.add(text(solution.entry));
-                    for(const auto& kernel : solution.kernelNames)
-                        version.add(kernel);
-                    for(const auto& unit : solution.units)
-                    {
-                        version.add(unit.name).add(text(unit.bytes));
-                        for(const auto& include : unit.includes)
-                            version.add(include.name).add(text(include.bytes));
-                    }
                     m_replayed.push_back(std::move(replayed));
                 }
-                // KernArgsVersion and the solution's internalArgsSupport version name the
-                // argument layout. Neither changes when the committed assembly changes, so
-                // the library cache key is a content hash of these bundles.
-                m_info.version = version.hex();
+                // Compatibility is the code-object version and the kernarg version
+                // stored on each solution. The backend version stays this literal
+                // so a rebuilt bundle still opens the same library directory.
+                m_info.version = "replay";
             }
 
             const hipblaslt_jit::BackendInfo& info() const noexcept override
@@ -138,7 +121,7 @@ namespace hipblaslt_ext::experimental::jit::replay
         diagnostics = {"replay", ""};
         try
         {
-            backend = detail::BackendAccess::make(hipblaslt_jit::makeJit(makeBackend(options)));
+            backend = Backend::create(hipblaslt_jit::makeJit(makeBackend(options)));
             return HIPBLAS_STATUS_SUCCESS;
         }
         catch(const std::bad_alloc&)
