@@ -21,7 +21,8 @@ marked **(experimental)** were measured on an unmerged experiments branch (based
 `develop` `7f09e16be8`) or on a prototype. The mapping each one uses is defined in
 this document, and each passed the same correctness gate. Varlen, paged,
 sliding-window and bottom-right-causal attention are not studied. They keep the
-previous orders, apart from the automatic query-block fold described below.
+previous orders, apart from the automatic query-block fold described below (none
+under a sliding window shorter than the keys).
 
 ## 1. Shape sets
 
@@ -168,8 +169,8 @@ and `21ae719`, AOTriton 0.14b (`b5e8cfb`), FlashAttention `e9cf2c1`.
 | non-persistent | `hq_minor_swz` (new) | Swizzled Head-first: XCD `a` owns head band `a`, one head's blocks at a time, longest-first | causal MHA with many heads × batch × blocks, where dispatch picks the non-persistent grid |
 | persistent | `hq_minor_swz` (new) | Swizzled Head-first, pair fold | aligned causal MHA with more than 8 grid-stride rounds of work (`Hq` divisible by 8, even `NQB`) |
 | persistent | `bt_hkv_minor` (new) | `BVGQ`, folded | aligned causal, batch below the XCD count |
-| persistent | `hkv_major` | `BGQV`, now pair fold under causal | GQA with enough work per kv head (the previous rule), including aligned causal from `chiplet_num_xcds` batches |
-| persistent | `qb_major` | `BGVQ`, now folded under causal | everything else on the persistent grid |
+| persistent | `hkv_major` | `BGQV`, now pair fold under causal without a sliding window | GQA with enough work per kv head (the previous rule), including aligned causal from `chiplet_num_xcds` batches |
+| persistent | `qb_major` | `BGVQ`, now folded under causal without a sliding window | everything else on the persistent grid |
 | persistent | `gqa_pair*` | unchanged | explicit only |
 
 - **Knobs:** `nonpersist_decode` is new and mirrors `persist_decode`.
@@ -180,9 +181,13 @@ and `21ae719`, AOTriton 0.14b (`b5e8cfb`), FlashAttention `e9cf2c1`.
   `--nonpersist-decode`.
 - **Kernel name and cache key:** both include the resolved order.
 - **Balance is automatic:** longest-first on the non-persistent grid, fold or pair
-  fold (§2.3) on the persistent grid. There is no knob.
+  fold (§2.3) on the persistent grid. There is no knob. Only without a sliding
+  window shorter than the keys: such a window makes the work per query block
+  about uniform, and the `qb_major` fold measured 4-5% slower there. A window at
+  least as long counts as plain causal.
 - **"Aligned causal"** means causal attention on the plain dense layout: no sliding
-  window, ragged, varlen, paged, or moving bottom-right diagonal.
+  window shorter than the keys, ragged, varlen, paged, or moving bottom-right
+  diagonal.
 - **Default grid (§6.4):**
   - gfx942's default spec takes the persistent grid at D128 for every batch and
     mask, and the non-persistent grid at D64;

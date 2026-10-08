@@ -26,6 +26,7 @@ from kernels.common.attention_dense_decode import (
     PersistHkvMajor,
     PersistHqMinorSwz,
     PersistQbMajor,
+    balance_causal,
 )
 
 
@@ -283,12 +284,11 @@ class AttentionDenseSpec:
         orders were measured."""
         moving_diagonal = self.causal_bottom_right and self.seqlen_q != self.seqlen_kv
         return (
-            self.causal
+            balance_causal(self)
             and not moving_diagonal
             and not self.ragged
             and not self.varlen
             and not self.paged
-            and self.sliding_window == 0
         )
 
     @property

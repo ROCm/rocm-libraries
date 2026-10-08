@@ -176,23 +176,29 @@ def test_nonpersist_decode_linearizes_to_its_documented_order(
             assert _block_linear(spec, qb, hq, bt, nqb) == wid, (name, wid)
 
 
-# Launches one runtime-shape grid binary serves: other batch, seqlen and heads.
+# Launches one runtime-shape grid binary serves: other batch, seqlen and heads,
+# windows shorter and longer than the keys.
 _GRID_LAUNCHES = (
-    (32, 8, 2, 4096),
-    (64, 64, 1, 1024),
-    (40, 8, 3, 512),
-    (16, 4, 2, 1024),
+    (32, 8, 2, 4096, 0),
+    (64, 64, 1, 1024, 0),
+    (40, 8, 3, 512, 512),
+    (40, 8, 1, 2048, 512),
+    (16, 4, 2, 1024, 0),
 )
 
 
 @pytest.mark.parametrize("name", sorted(NONPERSIST_DECODES))
-def test_nonpersist_decode_reads_the_shape_from_the_runtime_params(name):
+@pytest.mark.parametrize("window", (0, 512))
+def test_nonpersist_decode_reads_the_shape_from_the_runtime_params(name, window):
     """Under a runtime shape one binary serves every shape: the decode built for
     one spec and fed another launch's shape must give that launch's baked
-    mapping, not the built spec's."""
+    mapping, not the built spec's (with a window, balancing follows the launch's
+    keys)."""
     decode = NONPERSIST_DECODES[name]
-    built = _spec(32, 8, 2, 2048, True, nonpersist_decode=name)
-    for Hq, Hkv, B, S in _GRID_LAUNCHES:
+    built = _spec(32, 8, 2, 2048, True, sliding_window=window, nonpersist_decode=name)
+    for Hq, Hkv, B, S, w in _GRID_LAUNCHES:
+        if w != window:
+            continue
         launched = dataclasses.replace(
             built,
             batch=B,
@@ -319,7 +325,7 @@ _PERSIST_LAUNCHES = (
 @pytest.mark.parametrize(
     "name", sorted(Gfx942AttentionDenseSpec.supported_persist_decodes() - {"auto"})
 )
-@pytest.mark.parametrize("causal,window", ((True, 0), (False, 0)))
+@pytest.mark.parametrize("causal,window", ((True, 0), (False, 0), (True, 1024)))
 @pytest.mark.parametrize("interleave", (False, True))
 def test_runtime_persist_decode_matches_the_launched_baked_decode(
     name, causal, window, interleave
@@ -355,3 +361,44 @@ def test_runtime_persist_decode_matches_the_launched_baked_decode(
         assert len({(d.qb, d.hq, d.bt) for d in got}) == work
         assert max(dividends, default=0) <= decode.fastdiv_dividend_bound(launched)
     assert built is not None, f"no legal launch for {name}"
+
+
+# Decodes that require causal masking, so have no window-free causal-free order.
+_CAUSAL_ONLY = {"gqa_pair", "gqa_pair_2phase"}
+
+
+@pytest.mark.parametrize("persistent", (True, False))
+def test_sliding_window_orders_blocks_as_without_causal_masking(persistent):
+    """A sliding window gives every query block about the same work, so no
+    decode balances there (longest-first, fold, pair fold): each orders blocks
+    as without causal masking. For qb_major and hkv_major that is the previous
+    order (ascending, plain fold). A window at least as long as the keys cuts
+    nothing off, so there the orders are the causal ones. The window-free causal
+    specs are the control: some decode must still move blocks there."""
+    Hq, Hkv, B, S = 32, 8, 2, 4096
+    nqb = S // 256
+    registry = PERSIST_DECODES if persistent else NONPERSIST_DECODES
+    moved = set()
+    for name in sorted(set(registry) - _CAUSAL_ONLY):
+        kw = (
+            dict(persistent=True, num_persistent=256, persist_decode=name)
+            if persistent
+            else dict(nonpersist_decode=name)
+        )
+        swa = _spec(Hq, Hkv, B, S, True, sliding_window=512, **kw)
+        plain = _spec(Hq, Hkv, B, S, False, **kw)
+        full = _spec(Hq, Hkv, B, S, True, **kw)
+        long = _spec(Hq, Hkv, B, S, True, sliding_window=S, **kw)
+        decode = registry[name]
+        if persistent:
+            orders = [
+                [decode.emit_decode(B_, s, wi, _baked(s)) for wi in range(nqb * Hq * B)]
+                for s in (swa, plain, full, long)
+            ]
+        else:
+            orders = [_decode_all(decode, s, _baked) for s in (swa, plain, full, long)]
+        assert orders[0] == orders[1], name
+        assert orders[3] == orders[2], name
+        if orders[2] != orders[1]:
+            moved.add(name)
+    assert moved, "without a window some decode should balance causal work"
