@@ -88,6 +88,17 @@ namespace hipblaslt_jit
     std::shared_ptr<TensileLite::ContractionSolution>
         copySolution(const std::shared_ptr<TensileLite::ContractionSolution>& solution);
 
+    // The solutions, of those given best first, that serve problem on hardware
+    // within workspaceLimit bytes, best first: their problem, task and hardware
+    // predicates hold, as TensileLite's selectionPredicate evaluates them with
+    // workspaceLimit as the problem's workspace, and requiredWorkspaceSize
+    // fits. Throws what the predicates throw.
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> supportingSolutions(
+        const std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
+        const TensileLite::ContractionProblemGemm&                            problem,
+        const TensileLite::Hardware&                                          hardware,
+        size_t                                                                workspaceLimit);
+
     // A persistent library of generated solutions and of the helpers those
     // solutions are linked with. The solutions form TensileLite lazy libraries,
     // one per slice: a master whose rows match exact sizes, its index mapping,
@@ -200,11 +211,11 @@ namespace hipblaslt_jit
 
         // Returns one index per solution, in order. A backend contributes one
         // SourceCodeBundle; publishing adds the Executable built from it as one
-        // entry holding solutions, the ones that support problem, each under
-        // its own index. Solutions with the same name share an index, and a
-        // solution already published for the same kernels and sizes keeps its
-        // index. The problem's ContractionSolution::ProblemType is what
-        // problemTypeKey stores.
+        // entry holding solutions, those of the bundle supportingSolutions
+        // keeps for problem, each under its own index. Solutions with the same
+        // name share an index, and a solution already published for the same
+        // kernels and sizes keeps its index. The problem's
+        // ContractionSolution::ProblemType is what problemTypeKey stores.
         Status publish(
             const CacheKey&                                                       key,
             int                                                                   device,

@@ -108,7 +108,6 @@ set_tests_properties(jit-publish PROPERTIES FIXTURES_SETUP jit-publish)
 add_executable(hipblaslt-jit-loader-test
     loader_test.cpp
     "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
-    "${hipblaslt_jit_source}/hipblaslt-jit-loader.cpp"
     ${hipblaslt_jit_library_sources})
 target_include_directories(hipblaslt-jit-loader-test PRIVATE
     "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")

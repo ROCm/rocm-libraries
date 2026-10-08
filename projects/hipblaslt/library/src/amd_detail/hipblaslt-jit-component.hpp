@@ -114,11 +114,12 @@ namespace hipblaslt_jit
 
     constexpr int jitCodeObjectVersion = 4;
 
-    // The sources that become one executable in JitLibrary, and how to build
-    // them. Not a TensileLite library entry. helpers are HIP sources, compiled
-    // with the main kernel, or Relocatables, such as those JitLibrary stores per
-    // helper kernel name. includes are headers. hipFlags are appended after the
-    // HIP defaults, so -std=c++20 overrides -std=c++17.
+    // The sources that become one executable in JitLibrary, how to build them,
+    // and the solutions that executable runs. Not a TensileLite library entry.
+    // helpers are HIP sources, compiled with the main kernel, or Relocatables,
+    // such as those JitLibrary stores per helper kernel name. includes are
+    // headers. hipFlags are appended after the HIP defaults, so -std=c++20
+    // overrides -std=c++17.
     struct SourceCodeBundle
     {
         // Assembly or Hip, or for an Executable build a Relocatable built from either
@@ -128,7 +129,11 @@ namespace hipblaslt_jit
         std::vector<std::string> hipFlags;
         Target                   target; // the device's
         int                      codeObjectVersion = jitCodeObjectVersion;
-        // Kernels the executable must define; empty accepts what was built.
+        // The solutions the executable runs, best first: a TensileLite kernel's
+        // from TensileliteAssembly::make, or those a backend with a HIP main
+        // kernel builds itself. An Executable build requires each one's kernel.
+        std::vector<std::shared_ptr<TensileLite::ContractionSolution>> solutions;
+        // Other kernels the executable must define, such as helpers'.
         std::vector<std::string> kernelNames;
     };
 
@@ -150,7 +155,8 @@ namespace hipblaslt_jit
     };
 
     // Builds a SourceCodeBundle with comgr. An Executable build checks the
-    // ISA, the code-object version and the bundle's kernel names. JitLibrary's
+    // ISA, the code-object version, and that the executable defines the
+    // kernels of the bundle's solutions and its kernelNames. JitLibrary's
     // helper store is the helper cache. comgr's own file cache is not part of
     // the library.
     std::shared_ptr<const CodeObjectBuilder> makeComgrBuilder();
@@ -166,22 +172,33 @@ namespace hipblaslt_jit
         Target                                                         target;
 
         // Assembles source.mainKernel, an Assembly, alone into relocatable and
-        // reads assembly from its metadata note. An Executable build of source
-        // with relocatable as its main kernel links it without assembling again.
-        // Needs a MessagePack build of TensileLite and a HIP device, which
-        // TensileLite reads while it builds some predicates.
+        // reads assembly from its metadata note. A bundle with relocatable as
+        // its main kernel and assembly's solutions builds its Executable
+        // without assembling again. Needs a MessagePack build of TensileLite
+        // and a HIP device, which TensileLite reads while it builds some
+        // predicates.
         static Status make(const CodeObjectBuilder& builder,
                            const SourceCodeBundle&  source,
                            TensileliteAssembly&     assembly,
                            Artifact&                relocatable);
     };
 
+    // Reads a TensileLite source bundle directory, as
+    // source_bundle::readSourceBundle does, for target and codeObjectVersion,
+    // and makes its assembly a TensileliteAssembly: source.mainKernel becomes
+    // the assembled Relocatable and source.solutions the kernel's solutions.
+    // HIP sources stay helpers. Fails unless the main kernel is assembly.
+    Status readTensileSourceBundle(const CodeObjectBuilder&     builder,
+                                   const std::filesystem::path& bundle,
+                                   const Target&                target,
+                                   int                          codeObjectVersion,
+                                   SourceCodeBundle&            source);
+
     // Appends status.log to <scratch>/comgr.log, sets status.logPath and names
     // that file in the message. Does nothing without a log or a scratch directory.
     void keepBuildLog(Status& status, const std::filesystem::path& scratch);
 
     using GemmRequest = hipblaslt_ext::experimental::jit::detail::GemmRequest;
-    using KernelBundle     = hipblaslt_ext::experimental::jit::detail::KernelBundle;
 
     // "configure", "generate", ... as reports name stages.
     const char* toString(Stage stage) noexcept;
@@ -224,41 +241,9 @@ namespace hipblaslt_jit
         virtual const BackendInfo& info() const noexcept = 0;
         // Returns up to request.count source bundles for the request, best
         // first, and loads nothing. Each bundle names the request's target, its
-        // code-object version and the kernels it must define. NotSupported
+        // code-object version and the solutions its executable runs. NotSupported
         // means the request is outside the backend's domain.
         virtual Status generate(const GenerationRequest&, std::vector<SourceCodeBundle>&) const
-            = 0;
-        // The TensileLite solution record JitLibrary stores for source, or
-        // empty. Not a library object. A predicate check loads it locally with
-        // loadGemmLibrary inside the backend function; it is not a bundle field.
-        virtual std::vector<uint8_t> solutionRecord(const SourceCodeBundle&) const
-        {
-            return {};
-        }
-    };
-
-    class SolutionLoader
-    {
-    public:
-        virtual ~SolutionLoader() = default;
-        // Evaluates the predicates and workspace of the TensileLite record's
-        // solutions for the request and returns the local indices of those that
-        // support it, best first. Loads no code.
-        virtual Status support(const std::vector<uint8_t>& record,
-                               const GemmRequest&,
-                               const DeviceTarget&,
-                               size_t            workspaceLimit,
-                               std::vector<int>& indices) const
-            = 0;
-        // Loads the executable once and returns a process-local executable
-        // bundle for each of the record's solutions at indices.
-        virtual Status load(const Artifact&             executable,
-                            const std::vector<uint8_t>& record,
-                            const GemmRequest&,
-                            const DeviceTarget&,
-                            size_t                                            workspaceLimit,
-                            const std::vector<int>&                           indices,
-                            std::vector<std::shared_ptr<const KernelBundle>>& bundles) const
             = 0;
     };
 
@@ -275,15 +260,15 @@ namespace hipblaslt_jit
                               const std::vector<std::string>& excludeKernels,
                               std::vector<int32_t>&           indices) const
             = 0;
-        // Publishes the executable with the solutions at the local indices of
-        // its TensileLite record, best first. Returns one library index per
-        // solution, in order.
-        virtual Status publish(const GemmRequest&,
-                               const DeviceTarget&,
-                               const Artifact&             executable,
-                               const std::vector<uint8_t>& record,
-                               const std::vector<int>&     solutions,
-                               std::vector<int32_t>&       indices) const
+        // Publishes executable with solutions, those of its bundle that support
+        // the request, best first, as JitLibrary::publish does. Returns one
+        // library index per solution, in order.
+        virtual Status publish(
+            const GemmRequest&,
+            const DeviceTarget&,
+            const Artifact&                                                       executable,
+            const std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
+            std::vector<int32_t>&                                                 indices) const
             = 0;
     };
 
@@ -294,25 +279,26 @@ namespace hipblaslt_jit
         {
             std::shared_ptr<const Backend>           backend;
             std::shared_ptr<const CodeObjectBuilder> builder;
-            std::shared_ptr<const SolutionLoader>    loader;
-            std::shared_ptr<const SolutionStore>     store; // optional
+            std::shared_ptr<const SolutionStore>     store;
         };
 
         struct Outcome
         {
-            std::vector<int32_t>                             indices; // published, best first
-            std::vector<std::shared_ptr<const KernelBundle>> bundles; // loaded, best first
-            std::vector<Status>                              failures; // in the order they happened
-            std::string                                      summary; // the backend's success note
+            std::vector<int32_t> indices; // published, best first
+            std::vector<Status>  failures; // in the order they happened
+            std::string          summary; // the backend's success note
         };
 
-        // Throws std::invalid_argument when a required component is missing.
+        // Throws std::invalid_argument when a component is missing.
         explicit Jit(Components components);
 
-        // Generate, build and check support, then publish, or load when there
-        // is no store or publishing failed. Returns at most count solutions
-        // that support the request, best first. Thread-safe. Sets the stage of
-        // every failure it reports.
+        // Generate, build, check support with supportingSolutions, then
+        // publish to the store. Returns the library indices of at most count
+        // published solutions that support the request, best first; JitLibrary
+        // is the only place they live, and nothing is loaded in process. A
+        // bundle whose build, support check or publish fails adds a failure
+        // and contributes no solution. Thread-safe. Sets the stage of every
+        // failure it reports.
         Outcome generate(const GemmRequest&         request,
                          const DeviceTarget&             target,
                          size_t                          count,
@@ -328,20 +314,7 @@ namespace hipblaslt_jit
         Components m_components;
     };
 
-    // The comgr builder and the TensileLite loader around one backend.
+    // The comgr builder and a store in the process JIT solution library around
+    // one backend.
     std::shared_ptr<const Jit> makeJit(std::shared_ptr<const Backend> backend);
-}
-
-namespace hipblaslt_ext::experimental::jit::detail
-{
-    struct CompiledSolution
-    {
-        hipblaslt_jit::DeviceTarget               target;
-        std::shared_ptr<const GemmRequest>   request;
-        std::shared_ptr<const hipblaslt_jit::Jit> jit;
-        int32_t                                   libraryIndex   = 0;
-        uint64_t                                  process        = 0;
-        size_t                                    workspaceLimit = 0;
-        size_t                                    workspaceBytes = 0;
-    };
 }

@@ -515,6 +515,27 @@ namespace hipblaslt_jit
         return copied->solutions.begin()->second;
     }
 
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> supportingSolutions(
+        const std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
+        const TensileLite::ContractionProblemGemm&                            problem,
+        const TensileLite::Hardware&                                          hardware,
+        size_t                                                                workspaceLimit)
+    {
+        auto limited = problem;
+        limited.setWorkspaceSize(workspaceLimit);
+        std::vector<std::shared_ptr<TensileLite::ContractionSolution>> result;
+        for(const auto& solution : solutions)
+        {
+            if(!solution)
+                continue;
+            TensileLite::Task task(hardware, limited, *solution);
+            if(TensileLite::selectionPredicate(task, hardware, *solution, limited)
+               && solution->requiredWorkspaceSize(limited, hardware) <= workspaceLimit)
+                result.push_back(solution);
+        }
+        return result;
+    }
+
     struct JitLibrary::Directory
     {
         struct Slice

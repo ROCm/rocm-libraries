@@ -9,14 +9,23 @@
 #include <filesystem>
 #include <set>
 #include <string>
+#include <vector>
 
 // Builds the committed assembly for this device and publishes, at each K the
 // tests use, every solution that supports it into the JIT solution library.
-// CTest runs this before the loader.
+// CTest runs this before the loader. Also checks the support check on its own.
 namespace
 {
     namespace fs = std::filesystem;
     namespace hj = hipblaslt_jit;
+
+    std::vector<std::string> names(const std::vector<hipblaslt_jit_test::Solution>& solutions)
+    {
+        std::vector<std::string> result;
+        for(const auto& solution : solutions)
+            result.push_back(solution->solutionName);
+        return result;
+    }
 }
 
 TEST_CASE("pre-generated kernels publish into the JIT solution library", "[jit-gpu]")
@@ -55,8 +64,8 @@ TEST_CASE("pre-generated kernels publish into the JIT solution library", "[jit-g
         for(const auto k : item.ks)
         {
             const auto problem   = hipblaslt_jit_test::fp16Gemm(false, k);
-            const auto solutions
-                = hipblaslt_jit_test::supported(item.assembly.solutions, problem, *hardware);
+            const auto solutions = hj::supportingSolutions(
+                item.source.solutions, problem, *hardware, hipblaslt_jit_test::workspaceLimit);
             const auto label = item.name + " K=" + std::to_string(k);
             std::vector<int32_t> indices;
             const auto status
@@ -85,5 +94,65 @@ TEST_CASE("pre-generated kernels publish into the JIT solution library", "[jit-g
     {
         INFO(("Expected plain at K=512, both plain-pair solutions at K=1024, and one at K=256"));
         REQUIRE((published.size() == 4 && paired));
+    }
+}
+
+TEST_CASE("the support check applies each solution's predicates and workspace", "[jit-gpu]")
+{
+    int             device = 0;
+    hipDeviceProp_t properties{};
+    {
+        INFO(("Cannot query the current HIP device"));
+        REQUIRE((hipGetDevice(&device) == hipSuccess
+            && hipGetDeviceProperties(&properties, device) == hipSuccess));
+    }
+    const auto target   = hipblaslt_jit_test::deviceTarget(properties);
+    const auto hardware = TensileLite::hip::GetDevice(properties, device);
+    const auto prepared
+        = hipblaslt_jit_test::prepareSolutions(fs::u8path(HIPBLASLT_JIT_DATA), target);
+    const auto& pair = prepared.back().source.solutions;
+    REQUIRE((prepared.back().name == "plain-pair" && pair.size() == 2));
+
+    constexpr auto limit = hipblaslt_jit_test::workspaceLimit;
+    const auto     k1024 = hipblaslt_jit_test::fp16Gemm(false, 1024);
+    const auto     k256  = hipblaslt_jit_test::fp16Gemm(false, 256);
+    {
+        INFO(("K=1024 did not keep both plain-pair solutions, best first"));
+        REQUIRE((names(hj::supportingSolutions(pair, k1024, *hardware, limit)) == names(pair)));
+    }
+    {
+        INFO(("K=256 did not keep only the solution for any K"));
+        REQUIRE((names(hj::supportingSolutions(pair, k256, *hardware, limit))
+                 == names({pair.back()})));
+    }
+    {
+        INFO(("A transposed A kept a solution"));
+        const auto transposed = hipblaslt_jit_test::fp16Gemm(true, 1024);
+        REQUIRE((hj::supportingSolutions(pair, transposed, *hardware, limit).empty()));
+    }
+    {
+        INFO(("Another processor kept a solution"));
+        const auto other = target.processor == hj::Processor::gfx90a ? hj::Processor::gfx942
+                                                                     : hj::Processor::gfx90a;
+        const TensileLite::AMDGPU elsewhere(other, properties.multiProcessorCount, "other");
+        REQUIRE((hj::supportingSolutions(pair, k1024, elsewhere, limit).empty()));
+    }
+
+    // A split-K copy needs workspace for its partial tiles.
+    auto split                               = hj::copySolution(pair.back());
+    split->sizeMapping.globalSplitU          = 4;
+    split->sizeMapping.workspaceSizePerElemC = 4;
+    const auto required                      = split->requiredWorkspaceSize(k256, *hardware);
+    {
+        INFO(("The split-K copy needs no workspace"));
+        REQUIRE((required > 0));
+    }
+    {
+        INFO(("A workspace limit below the requirement kept the split-K copy"));
+        REQUIRE((hj::supportingSolutions({split}, k256, *hardware, required - 1).empty()));
+    }
+    {
+        INFO(("A workspace limit equal to the requirement dropped the split-K copy"));
+        REQUIRE((hj::supportingSolutions({split}, k256, *hardware, required).size() == 1));
     }
 }
