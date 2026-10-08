@@ -12,6 +12,7 @@ KV tensors, after rounding inputs to the tested fp16/bf16 dtype.
 
 import math
 import os
+from collections import OrderedDict
 from dataclasses import replace
 
 import pytest
@@ -325,8 +326,12 @@ def test_strided_kv_decode(
         if graph:
             graph_keys = set(au._3D_GRAPHS) - graphs_before
             # Direct and explicit-spec launches have separate cache identities.
-            assert len(graph_keys) == (2 if kv_layout == "strided" and step else 1)
+            assert len(graph_keys) == 1
             current_graphs = {key: au._3D_GRAPHS[key] for key in graph_keys}
+            if kv_layout == "strided" and step:
+                owned = binding.launch.execution._graphs
+                assert len(owned) == 1
+                current_graphs.update(owned)
             assert all(
                 current_graphs[key] is value for key, value in captured_graphs.items()
             )
@@ -385,8 +390,7 @@ def concurrent_decode(gpu, monkeypatch):
     for target in ("GFX942", "GFX950", "GFX1250"):
         monkeypatch.setenv(f"HIPDNN_{target}_3D_GRAPH", "0")
     # Isolate graph lifetimes between tests, not between concurrent invocations.
-    monkeypatch.setattr(au, "_3D_GRAPHS", {})
-    monkeypatch.setattr(au, "_3D_GRAPH_REFS", {})
+    monkeypatch.setattr(au, "_3D_GRAPHS", OrderedDict())
     streams = [torch.cuda.Stream(), torch.cuda.Stream()]
     try:
         yield torch, arch, streams
@@ -546,3 +550,118 @@ def test_decode_concurrent_workspace(
         )
     if graphs:
         assert len(churn) == 8
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("kv_layout", ["paged", "strided"])
+@pytest.mark.parametrize("graph", [False, True])
+def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
+    """Changing bindings/lengths, graph eviction and scratch reuse on hardware."""
+    torch, arch = gpu
+    if arch == "gfx1250" and (dtype != "bf16" or kv_layout != "paged"):
+        pytest.skip("gfx1250 coverage is paged BF16 D64 GQA-8 decode")
+    from kernels.common import attention_unified as au
+    from rocke.runtime.launcher import no_fence, synchronize_and_release
+
+    monkeypatch.setenv(f"HIPDNN_{arch.upper()}_3D_GRAPH", str(int(graph)))
+    batch, heads, dim, capacity = 2, 8, 64, 65
+    tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
+    rng = torch.Generator().manual_seed(808)
+    q_host = torch.randn(batch, heads, dim, generator=rng).to(tdtype)
+    k_host = torch.randn(batch, 1, capacity, dim, generator=rng).to(tdtype)
+    v_host = torch.randn(batch, 1, capacity, dim, generator=rng).to(tdtype)
+    if kv_layout == "strided":
+        k, v = _cache(torch, k_host, "bshd"), _cache(torch, v_host, "padded")
+        table = None
+    else:
+        k, table = _paged_cache(torch, k_host, 16)
+        v, _ = _paged_cache(torch, v_host, 16)
+    lengths = torch.tensor([capacity, 0], dtype=torch.int32).cuda()
+    stream = torch.cuda.Stream()
+    args = dict(
+        problem=au.UnifiedAttentionProblem(
+            total_q=batch,
+            num_seqs=batch,
+            num_query_heads=heads,
+            num_kv_heads=1,
+            head_size=dim,
+            block_size=16,
+            max_seqlen_q=1,
+            max_seqlen_k=capacity,
+            dtype=dtype,
+            clamp_arch=arch,
+            target_ctas=8,
+        ),
+        q=q_host.cuda(),
+        k=k,
+        v=v,
+        out=torch.empty_like(q_host).cuda(),
+        cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32).cuda(),
+        seqused_k=lengths,
+        block_table=table,
+        softmax_scale=1 / math.sqrt(dim),
+        softcap=0.0,
+        kv_layout=kv_layout,
+        backend="3d",
+        stream=stream.cuda_stream,
+        use_graph=graph,
+    )
+    torch.cuda.synchronize()
+    allocations = []
+    launch = au._launch_3d_pipeline
+
+    def observe(prepared, segment, reduce, stream, *, capturing):
+        allocations.append(
+            (
+                capturing,
+                tuple(
+                    int(segment[n].data_ptr())
+                    for n in ("segm_output_ptr", "segm_max_ptr", "segm_expsum_ptr")
+                ),
+            )
+        )
+        return launch(prepared, segment, reduce, stream, capturing=capturing)
+
+    monkeypatch.setattr(au, "_launch_3d_pipeline", observe)
+    execution = au.prepare_unified_attention_torch(**args)
+    scratch = tuple(t.data_ptr() for t in execution._workspace)
+    try:
+        for step in range(24):
+            lens = [capacity - step % 5, step % capacity]
+            q_step = (q_host.float() + step / 64).to(tdtype)
+            with torch.cuda.stream(stream):
+                lengths.copy_(torch.tensor(lens, dtype=torch.int32), non_blocking=True)
+                # New Q/output objects force graph rebinding, as in decode callers.
+                q = q_step.cuda()
+                output = torch.empty_like(q)
+                with no_fence():
+                    execution.launch(q=q, out=output)
+            synchronize_and_release(stream.cuda_stream)
+            expected = _reference(torch, q_step, k_host, v_host, lens, 0)
+            atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
+            torch.testing.assert_close(
+                output.cpu().float(), expected, atol=atol, rtol=rtol
+            )
+            assert tuple(t.data_ptr() for t in execution._workspace) == scratch
+            assert len(execution._graphs) <= 1
+        eager = [p for capture, p in allocations if not capture]
+        assert all(p == scratch for p in eager)
+        # An outer capture on a different capture stream gets independent scratch.
+        outer = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(outer):
+            execution.launch(q=q, out=output)
+        captured = allocations[-1]
+        assert captured[0] and set(captured[1]).isdisjoint(scratch)
+        synchronize_and_release()
+        with torch.cuda.stream(stream):
+            outer.replay()
+        synchronize_and_release(stream.cuda_stream)
+        torch.testing.assert_close(output.cpu().float(), expected, atol=atol, rtol=rtol)
+    finally:
+        execution.close()
+    assert not execution._graphs and execution._workspace is None
+    churn = [
+        torch.empty((batch, heads, capacity, dim), device="cuda") for _ in range(8)
+    ]
+    torch.cuda.synchronize()
+    assert churn

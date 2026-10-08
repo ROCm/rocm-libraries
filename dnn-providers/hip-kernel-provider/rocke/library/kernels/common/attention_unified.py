@@ -10,7 +10,9 @@ until every required primitive and correctness/perf path is present.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, replace
+from threading import Lock, RLock
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from rocke.core.arch import validate_arch
@@ -37,6 +39,7 @@ from rocke.runtime.launcher import (
     _resolved_fence,
     no_fence,
     release_retained_for_stream,
+    retain_for_stream,
     wait_stream_and_release,
 )
 
@@ -3481,16 +3484,143 @@ def _attn_values(
     return vals
 
 
-def _run_3d_tiled(*, q, stream: int = 0, **kwargs):
-    """Keep Torch allocation/capture and HIP launches on one effective stream."""
+class Attention3DExecution:
+    """Own reusable scratch for one fixed 3D geometry and effective stream.
+
+    Create with :func:`prepare_unified_attention_torch` outside a timed loop.
+    Sequential launches reuse scratch; separate streams need separate owners.
+    ``close`` waits for queued work before releasing bindings and storage.
+    External captures always receive private scratch, independent of this owner.
+    Caller-owned outer graphs and their bindings have a separate lifetime; do not
+    close concurrently with an outer capture, and drain its capture stream.
+    """
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._identity = None
+        self._workspace = None
+        self._arguments = None
+        self._device = None
+        self._stream = None
+        self._closed = False
+        self._graphs = OrderedDict()
+
+    def launch(self, **overrides: Any) -> LaunchSummary:
+        """Launch with prepared bindings, optionally replacing inputs or scalars.
+
+        Geometry, layout, dtype, device and stream must remain fixed. Device
+        length contents may change within the problem's validated maximum.
+        """
+        if self._arguments is None:
+            raise RuntimeError("execution has not been prepared or is closed")
+        arguments = dict(self._arguments, **overrides)
+        arguments["execution"] = self
+        return run_unified_attention_torch(**arguments)
+
+    def close(self) -> None:
+        """Drain the prepared stream and release this owner's resources.
+
+        Caller-owned outer graphs and their capture streams require caller cleanup.
+        Do not close concurrently with an outer capture using these bindings.
+        """
+        import torch
+
+        if not self._lock.acquire(blocking=False):
+            raise RuntimeError("execution is already submitting work")
+        try:
+            if self._closed:
+                return
+            if self._stream is not None:
+                with torch.cuda.device(self._device):
+                    if _torch_stream_capturing():
+                        raise RuntimeError("cannot close execution during capture")
+                    wait_stream_and_release(self._stream)
+            self._graphs.clear()
+            self._workspace = None
+            self._arguments = None
+            self._closed = True
+        finally:
+            self._lock.release()
+
+    def __enter__(self) -> Attention3DExecution:  # noqa: PYI034 - Python 3.10
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+
+def prepare_unified_attention_torch(**arguments: Any) -> Attention3DExecution:
+    """Validate, compile and warm up a reusable 3D execution outside timing.
+
+    Accepts the same tensor arguments as ``run_unified_attention_torch``.
+    Preparation launches once; use ``use_graph=False`` for prepared eager work.
+    Call ``close`` at the completion boundary, or use a context manager.
+    """
+    if "execution" in arguments:
+        raise ValueError("preparation creates its own execution owner")
+    execution = Attention3DExecution()
+    try:
+        run_unified_attention_torch(**arguments, execution=execution)
+        if execution._identity is None:
+            raise ValueError("prepared execution requires a supported 3D path")
+        import torch
+
+        with torch.cuda.device(execution._device):
+            wait_stream_and_release(execution._stream)
+        execution._arguments = dict(arguments)
+        return execution
+    except BaseException:
+        execution.close()
+        raise
+
+
+def clear_attention_3d_graph_cache() -> None:
+    """Drain internal graph streams before releasing their captured resources."""
+    import torch
+
+    with _3D_GRAPH_LOCK:
+        if _torch_stream_capturing():
+            raise RuntimeError("cannot clear the graph cache during capture")
+        for entry in _3D_GRAPHS.values():
+            with torch.cuda.device(entry.device):
+                wait_stream_and_release(entry.stream)
+        _3D_GRAPHS.clear()
+
+
+@dataclass(frozen=True)
+class _Attention3DGraph:
+    graph: Any
+    refs: tuple[Any, ...]
+    device: Any
+    stream: int
+
+
+def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
+    """Keep allocation and complete pair submission on the owner's stream."""
     import torch
     from rocke.runtime.torch_interop import resolve_stream
 
-    stream = resolve_stream(stream, device=q.device)
-    with torch.cuda.device(q.device), torch.cuda.stream(
-        torch.cuda.ExternalStream(stream, device=q.device)
-    ):
-        return _run_3d_tiled_on_stream(q=q, stream=stream, **kwargs)
+    # An outer capture owns its active stream. The prepared eager stream is
+    # retained only as geometry identity; captures never use its workspace.
+    if execution is not None and _torch_stream_capturing():
+        stream = int(torch.cuda.current_stream(q.device).cuda_stream)
+    else:
+        stream = resolve_stream(stream, device=q.device)
+    if execution is not None and not execution._lock.acquire(blocking=False):
+        # Reject reentrant/concurrent submission instead of interleaving pairs.
+        raise RuntimeError("execution is already submitting work")
+    try:
+        if execution is not None and execution._closed:
+            raise RuntimeError("execution is closed")
+        with torch.cuda.device(q.device), torch.cuda.stream(
+            torch.cuda.ExternalStream(stream, device=q.device)
+        ):
+            return _run_3d_tiled_on_stream(
+                q=q, stream=stream, execution=execution, **kwargs
+            )
+    finally:
+        if execution is not None:
+            execution._lock.release()
 
 
 def _run_3d_tiled_on_stream(
@@ -3518,6 +3648,8 @@ def _run_3d_tiled_on_stream(
     use_graph: bool = True,
     tuning_spec=None,
     kv_cache_layout=None,
+    execution=None,
+    capture_refs=None,
 ):
     """Launch the tiled 3D segment + reduce kernels.
 
@@ -3541,35 +3673,42 @@ def _run_3d_tiled_on_stream(
     if kv_cache_layout is not None:
         cache_key = cache_key + ("strided_kv",)
     capturing = _torch_stream_capturing()
-    if use_graph and _enable_3d_graph_replay(problem) and not capturing:
-        graph_key = (
+    if execution is not None:
+        identity = (
+            problem,
             cache_key,
+            num_segments,
+            q.device,
+            execution._stream if capturing else int(stream),
             kv_cache_layout,
-            int(problem.total_q),
-            int(stream),
-            id(q),
-            id(k),
-            id(v),
-            id(out),
-            id(cu_seqlens_q),
-            id(seqused_k),
-            id(block_table),
-            id(sinks) if sinks is not None else 0,
-            id(alibi_slopes) if alibi_slopes is not None else 0,
-            id(qq_bias) if qq_bias is not None else 0,
-            float(softmax_scale),
-            float(k_scale),
-            float(v_scale),
-            float(softcap),
-            int(bt_stride),
-            int(qq_bias_stride_0),
+            tuple(
+                _attention_tensor_layout(t)
+                for t in (
+                    q,
+                    k,
+                    v,
+                    out,
+                    cu_seqlens_q,
+                    seqused_k,
+                    block_table,
+                    sinks,
+                    alibi_slopes,
+                    qq_bias,
+                )
+            ),
         )
-        graph = _3D_GRAPHS.get(graph_key)
-        if graph is None:
-            import torch
-
-            # Build/load launchers and warm up before graph-private allocation.
-            _run_3d_tiled(
+        if execution._identity is None:
+            if capturing:
+                raise RuntimeError("prepare execution before external capture")
+            execution._identity = identity
+            execution._device, execution._stream = q.device, int(stream)
+        elif execution._identity != identity:
+            raise ValueError(
+                "execution geometry, layout, device or stream changed; prepare again"
+            )
+    if use_graph and _enable_3d_graph_replay(problem) and not capturing:
+        with _3D_GRAPH_LOCK:
+            return _run_3d_graph(
                 problem=problem,
                 q=q,
                 k=k,
@@ -3590,62 +3729,12 @@ def _run_3d_tiled_on_stream(
                 stream=stream,
                 k_scale=k_scale,
                 v_scale=v_scale,
-                use_graph=False,
                 tuning_spec=tuning_spec,
                 kv_cache_layout=kv_cache_layout,
+                execution=execution,
+                cache_key=cache_key,
             )
-            graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
-                with no_fence():
-                    _run_3d_tiled(
-                        problem=problem,
-                        q=q,
-                        k=k,
-                        v=v,
-                        out=out,
-                        cu_seqlens_q=cu_seqlens_q,
-                        seqused_k=seqused_k,
-                        softmax_scale=softmax_scale,
-                        block_table=block_table,
-                        softcap=softcap,
-                        sinks=sinks,
-                        bt_stride=bt_stride,
-                        warmup=warmup,
-                        attempts=attempts,
-                        alibi_slopes=alibi_slopes,
-                        qq_bias=qq_bias,
-                        qq_bias_stride_0=qq_bias_stride_0,
-                        # torch.cuda.graph captures on its own current stream;
-                        # launching on the caller's raw stream records no nodes.
-                        stream=int(torch.cuda.current_stream().cuda_stream),
-                        k_scale=k_scale,
-                        v_scale=v_scale,
-                        use_graph=False,
-                        tuning_spec=tuning_spec,
-                        kv_cache_layout=kv_cache_layout,
-                    )
-            _3D_GRAPHS[graph_key] = graph
-            _3D_GRAPH_REFS[graph_key] = (
-                q,
-                k,
-                v,
-                out,
-                cu_seqlens_q,
-                seqused_k,
-                block_table,
-                sinks,
-                alibi_slopes,
-                qq_bias,
-            )
-        # The boundary established the caller's effective Torch stream.
-        graph.replay()
-        if _resolved_fence(True):
-            wait_stream_and_release(int(stream))
-        return LaunchSummary(launches=2)
 
-    # Cache executable code, but give each invocation independent scratch.
-    # During capture Torch allocates from the graph-private pool, so later replay
-    # on another stream cannot alias an eager call or another graph's workspace.
     prepared = _get_3d_pipeline(
         problem,
         cache_key,
@@ -3655,10 +3744,20 @@ def _run_3d_tiled_on_stream(
     )
     import torch
 
-    segm_output, segm_max, segm_expsum = (
-        torch.empty(spec.shape, dtype=spec.dtype, device=spec.device)
-        for spec in _attention_3d_workspace_specs(problem, num_segments, q.device)
-    )
+    # External and internal captures own separate graph-private allocation.
+    # Eager reuse is safe only under the owner's whole-pair submission lock.
+    if execution is None or capturing or execution._workspace is None:
+        workspace = tuple(
+            torch.empty(spec.shape, dtype=spec.dtype, device=spec.device)
+            for spec in _attention_3d_workspace_specs(problem, num_segments, q.device)
+        )
+        if execution is not None and not capturing:
+            execution._workspace = workspace
+    else:
+        workspace = execution._workspace
+    if capture_refs is not None:
+        capture_refs.extend(workspace)
+    segm_output, segm_max, segm_expsum = workspace
     if _resolve_attention_arch() == "gfx1250":
         segm_max.fill_(-1e30)
         segm_expsum.zero_()
@@ -3705,6 +3804,196 @@ def _run_3d_tiled_on_stream(
     )
 
 
+def _attention_tensor_layout(tensor):
+    """Layout identity without reading device contents or retaining storage."""
+    if tensor is None:
+        return None
+    return (
+        str(getattr(tensor, "device", None)),
+        str(getattr(tensor, "dtype", None)),
+        tuple(getattr(tensor, "shape", ())),
+        tuple(tensor.stride()) if hasattr(tensor, "stride") else (),
+    )
+
+
+def _run_3d_graph(
+    *,
+    problem,
+    q,
+    k,
+    v,
+    out,
+    cu_seqlens_q,
+    seqused_k,
+    softmax_scale,
+    block_table,
+    softcap,
+    sinks,
+    bt_stride,
+    warmup,
+    attempts,
+    alibi_slopes,
+    qq_bias,
+    qq_bias_stride_0,
+    stream,
+    k_scale,
+    v_scale,
+    tuning_spec,
+    kv_cache_layout,
+    execution,
+    cache_key,
+):
+    """Paired, bounded graph ownership; called under the graph submission lock."""
+    graph_key = (
+        problem,
+        cache_key,
+        kv_cache_layout,
+        int(problem.total_q),
+        int(stream),
+        tuple(
+            (
+                _attention_tensor_layout(t),
+                int(t.data_ptr()) if hasattr(t, "data_ptr") else 0,
+            )
+            for t in (
+                q,
+                k,
+                v,
+                out,
+                cu_seqlens_q,
+                seqused_k,
+                block_table,
+                sinks,
+                alibi_slopes,
+                qq_bias,
+            )
+        ),
+        id(q),
+        id(k),
+        id(v),
+        id(out),
+        id(cu_seqlens_q),
+        id(seqused_k),
+        id(block_table),
+        id(sinks) if sinks is not None else 0,
+        id(alibi_slopes) if alibi_slopes is not None else 0,
+        id(qq_bias) if qq_bias is not None else 0,
+        float(softmax_scale),
+        float(k_scale),
+        float(v_scale),
+        float(softcap),
+        int(bt_stride),
+        int(qq_bias_stride_0),
+    )
+    graphs = _3D_GRAPHS if execution is None else execution._graphs
+    entry = graphs.get(graph_key)
+    if entry is None:
+        capacity = _3D_GRAPH_CAPACITY if execution is None else 1
+        if len(graphs) >= capacity:
+            # A cold replacement waits only for the evicted entry's stream.
+            # No retired queue can grow behind the bounded resident cache.
+            oldest_key = next(iter(graphs))
+            oldest = graphs[oldest_key]
+            import torch
+
+            with torch.cuda.device(oldest.device):
+                wait_stream_and_release(oldest.stream)
+            del graphs[oldest_key]
+        import torch
+
+        # Build/load launchers and warm up before graph-private allocation.
+        _run_3d_tiled_on_stream(
+            problem=problem,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            cu_seqlens_q=cu_seqlens_q,
+            seqused_k=seqused_k,
+            softmax_scale=softmax_scale,
+            block_table=block_table,
+            softcap=softcap,
+            sinks=sinks,
+            bt_stride=bt_stride,
+            warmup=warmup,
+            attempts=attempts,
+            alibi_slopes=alibi_slopes,
+            qq_bias=qq_bias,
+            qq_bias_stride_0=qq_bias_stride_0,
+            stream=stream,
+            k_scale=k_scale,
+            v_scale=v_scale,
+            use_graph=False,
+            execution=execution,
+            tuning_spec=tuning_spec,
+            kv_cache_layout=kv_cache_layout,
+        )
+        wait_stream_and_release(int(stream))
+        refs = []
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            capture_stream = int(torch.cuda.current_stream().cuda_stream)
+            with no_fence():
+                _run_3d_tiled_on_stream(
+                    problem=problem,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    cu_seqlens_q=cu_seqlens_q,
+                    seqused_k=seqused_k,
+                    softmax_scale=softmax_scale,
+                    block_table=block_table,
+                    softcap=softcap,
+                    sinks=sinks,
+                    bt_stride=bt_stride,
+                    warmup=warmup,
+                    attempts=attempts,
+                    alibi_slopes=alibi_slopes,
+                    qq_bias=qq_bias,
+                    qq_bias_stride_0=qq_bias_stride_0,
+                    # torch.cuda.graph captures on its own current stream;
+                    # launching on the caller's raw stream records no nodes.
+                    stream=int(torch.cuda.current_stream().cuda_stream),
+                    k_scale=k_scale,
+                    v_scale=v_scale,
+                    use_graph=False,
+                    capture_refs=refs,
+                    tuning_spec=tuning_spec,
+                    kv_cache_layout=kv_cache_layout,
+                )
+        # Capture has ended. Drain its raw-launch argument bucket; graph entry
+        # refs own scratch and all captured tensors from here through eviction.
+        wait_stream_and_release(capture_stream)
+        entry = _Attention3DGraph(
+            graph,
+            tuple(refs)
+            + (
+                q,
+                k,
+                v,
+                out,
+                cu_seqlens_q,
+                seqused_k,
+                block_table,
+                sinks,
+                alibi_slopes,
+                qq_bias,
+            ),
+            q.device,
+            int(stream),
+        )
+        graphs[graph_key] = entry
+    graphs.move_to_end(graph_key)
+    # The boundary established the caller's effective Torch stream.
+    entry.graph.replay()
+    if _resolved_fence(True):
+        wait_stream_and_release(int(stream))
+    else:
+        retain_for_stream(int(stream), entry)
+    return LaunchSummary(launches=2)
+
+
 @dataclass(frozen=True)
 class _Attention3DPrepared:
     pipeline: PipelineLauncher
@@ -3718,10 +4007,11 @@ class _Attention2DLaunchMeta:
     block: Tuple[int, int, int]
 
 
-# Shared executable state only. Scratch tensors and argument maps are per call.
+# Compiled state is shared; scratch belongs to an execution, invocation or graph.
 _3D_PIPELINES: Dict[Tuple, _Attention3DPrepared] = {}
-_3D_GRAPHS: Dict[Tuple, Any] = {}
-_3D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
+_3D_GRAPH_CAPACITY = 8
+_3D_GRAPH_LOCK = RLock()
+_3D_GRAPHS: OrderedDict[tuple, _Attention3DGraph] = OrderedDict()
 _2D_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
 _2D_LAUNCH_META: Dict[Tuple, _Attention2DLaunchMeta] = {}
 _2D_GRAPHS: Dict[Tuple, Any] = {}
@@ -4496,6 +4786,8 @@ def run_unified_attention_torch(
     out_scale: float = 1.0,
     tuning_spec=None,
     kv_layout: str = "paged",
+    execution: Attention3DExecution | None = None,
+    use_graph: bool = True,
 ):
     """Launch a CK DSL attention kernel on torch tensors.
 
@@ -4521,9 +4813,16 @@ def run_unified_attention_torch(
     ``stream`` is the HIP stream handle (an `int`) to launch on. In the 3D
     path, zero selects Torch's current stream on Q's device. Scratch allocation,
     initialization and both launches use that stream. Eager calls own separate
-    scratch; captured calls allocate from Torch's graph-private memory pool.
+    scratch unless an execution owner is supplied. Captures use graph-private
+    scratch; ``use_graph=False`` disables internal 3D replay.
     Warm up compilation before enclosing calls in ``torch.cuda.graph``.
     """
+    if execution is not None:
+        if not isinstance(execution, Attention3DExecution):
+            raise TypeError("execution must be an Attention3DExecution")
+        if backend not in ("auto", "3d"):
+            raise ValueError("prepared execution requires the 3D backend")
+        backend = "3d"
     if tuning_spec is not None:
         _require_explicit_tuning_spec(tuning_spec)
         if tuning_spec.arch != _resolve_attention_arch():
@@ -4638,6 +4937,8 @@ def run_unified_attention_torch(
             stream=int(stream),
             tuning_spec=tuning_spec,
             kv_cache_layout=layout,
+            execution=execution,
+            use_graph=use_graph,
         )
     # Paged-only specs (including 2D and gfx1250 3D) have no kv_layout field.
     # Strided specs must declare it explicitly; validation above enforces that.
@@ -4702,6 +5003,8 @@ def run_unified_attention_torch(
         if ok_3d:
             return _run_3d_tiled(
                 problem=problem,
+                execution=execution,
+                use_graph=use_graph,
                 q=q,
                 k=k,
                 v=v,

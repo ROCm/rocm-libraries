@@ -88,12 +88,55 @@ The asynchronous `no_fence()` path retains launch arguments until a runtime
 completion drain such as `synchronize_and_release()`; callers must drain it
 periodically. This adds eager allocator work; no performance claim is made.
 
-Internal graph capture allocates scratch from Torch's graph-private pool;
-cached replay performs no new scratch allocation. External captures use the
-same ownership rule and may replay on a different stream. Warm up compilation
-before capture. If callers explicitly share graph memory pools, they must
-follow Torch's ordering and non-concurrency requirements. Replays of the same
-graph and writes to caller-owned input/output buffers still require ordering.
+For a sequential decoding loop, prepare an execution once outside timing. Keep
+permuted K/V view objects stable, and update their storage and the device length
+contents on the execution's stream. The fixed problem describes the maximum
+length; changing geometry, dtype, layout or stream requires a new execution.
+
+```python
+from kernels import prepare_unified_attention_torch
+
+k_view = k_bshd.permute(0, 2, 1, 3)
+v_view = v_bshd.permute(0, 2, 1, 3)
+with prepare_unified_attention_torch(
+    problem=problem, q=q, k=k_view, v=v_view, out=out,
+    cu_seqlens_q=cu_q, seqused_k=lengths, block_table=None,
+    softmax_scale=scale, softcap=0.0, backend="3d",
+    kv_layout="strided", stream=stream.cuda_stream, use_graph=False,
+) as execution:
+    # Preparation validates, compiles and launches once before this loop.
+    # Queue Q/K/V/length updates on the same stream before each launch.
+    for step in range(steps):
+        execution.launch()
+```
+
+Prepared eager launches reuse three scratch tensors. The complete segment/reducer
+pair is submitted under one owner; concurrent or reentrant submission is rejected.
+Separate streams need separate execution owners. Do not close an execution while
+another thread is inside an outer capture using its bindings. Outer graph bindings
+and replay completion remain the caller's responsibility; closing the execution
+does not close the caller's graph or drain its capture-stream argument bucket.
+Closing waits for the prepared stream's
+queued work and releases scratch and captured bindings. For a dispatched strided
+binding, the launch callable keeps the owner; call `binding.launch.close()` at the
+completion boundary. A binding fixes the effective stream on its first launch.
+
+Internal captures and arbitrary external captures allocate graph-private scratch,
+independent of reusable eager storage. Prepared calls inside an outer capture
+use the active capture stream instead of their saved eager stream. Warm up first. Internal
+direct calls keep at most eight paired graph/resource entries, and a prepared
+execution keeps at most one. A binding change that evicts an entry waits only for
+that entry's stream before releasing it. Stable replay has no new allocation or
+extra completion wait beyond the requested fence. `clear_attention_3d_graph_cache()`
+explicitly drains and clears the direct cache. Tensor identity, address, layout,
+scalar parameters and metadata bindings participate in graph identity.
+
+Asynchronous graph replay retains its resource entry until the stream is drained,
+even if the Python execution owner is discarded. Asynchronous eager launches also
+retain argument buffers and references until completion; scratch reuse bounds
+storage allocations, while argument bookkeeping still grows until the explicit
+drain. If callers share graph memory pools, Torch's ordering requirements apply.
+Replay of one graph and writes to caller-owned inputs/outputs require ordering.
 
 ## Test coverage
 

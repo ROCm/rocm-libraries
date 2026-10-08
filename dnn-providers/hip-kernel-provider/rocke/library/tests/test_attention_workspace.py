@@ -158,3 +158,123 @@ def test_pipeline_drains_only_after_completion(monkeypatch, mode):
         if mode == "fenced"
         else [("launch", 29, False)]
     )
+
+
+def test_prepared_eager_reuses_only_owned_workspace(runtime, monkeypatch):
+    calls = []
+    monkeypatch.setattr(au, "_launch_3d_pipeline", lambda *a, **kw: calls.append(a))
+    monkeypatch.setattr(au, "wait_stream_and_release", lambda stream: None)
+    owner = au.Attention3DExecution()
+    start = len(runtime.allocations)
+    for _ in range(50):
+        au._run_3d_tiled(**_arguments(), execution=owner, use_graph=False)
+    assert len(runtime.allocations) - start == 3
+    assert all(call[1]["segm_output_ptr"] is owner._workspace[0] for call in calls)
+    other = au.Attention3DExecution()
+    au._run_3d_tiled(**_arguments(), execution=other, use_graph=False)
+    assert all(a is not b for a, b in zip(owner._workspace, other._workspace))
+    runtime.capturing = True
+    runtime.stream = 41
+    au._run_3d_tiled(**_arguments(), execution=owner, stream=17, use_graph=False)
+    assert calls[-1][3] == 41
+    assert calls[-1][1]["segm_output_ptr"] is not owner._workspace[0]
+    runtime.capturing = False
+    owner.close()
+    assert owner._workspace is None
+    with pytest.raises(RuntimeError, match="closed"):
+        au._run_3d_tiled(**_arguments(), execution=owner, use_graph=False)
+    other.close()
+
+
+def test_prepared_rejects_changed_geometry_and_stream(runtime, monkeypatch):
+    from dataclasses import replace
+
+    monkeypatch.setattr(au, "_launch_3d_pipeline", lambda *a, **kw: None)
+    owner = au.Attention3DExecution()
+    args = _arguments()
+    au._run_3d_tiled(**args, execution=owner, use_graph=False)
+    with pytest.raises(ValueError, match="prepare again"):
+        au._run_3d_tiled(**args, execution=owner, stream=29, use_graph=False)
+    args["problem"] = replace(args["problem"], max_seqlen_k=128)
+    with pytest.raises(ValueError, match="prepare again"):
+        au._run_3d_tiled(**args, execution=owner, use_graph=False)
+
+
+def test_prepared_pair_cannot_interleave(runtime, monkeypatch):
+    owner = au.Attention3DExecution()
+    calls = []
+
+    def launch(*args, **kwargs):
+        calls.append(args)
+        with pytest.raises(RuntimeError, match="already submitting"):
+            au._run_3d_tiled(**_arguments(), execution=owner, use_graph=False)
+
+    monkeypatch.setattr(au, "_launch_3d_pipeline", launch)
+    au._run_3d_tiled(**_arguments(), execution=owner, use_graph=False)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("owned", [False, True])
+def test_graph_churn_bounds_resources_and_waits_before_eviction(
+    runtime, monkeypatch, owned
+):
+    from collections import OrderedDict
+
+    torch = sys.modules["torch"]
+    operations = []
+
+    class Graph:
+        def replay(self):
+            operations.append(("replay", self))
+
+    @contextmanager
+    def graph_context(graph):
+        previous = runtime.stream
+        runtime.stream = 41
+        runtime.capturing = True
+        try:
+            yield
+        finally:
+            runtime.capturing = False
+            runtime.stream = previous
+
+    torch.cuda.CUDAGraph = Graph
+    torch.cuda.graph = graph_context
+    graphs = OrderedDict()
+    monkeypatch.setattr(au, "_3D_GRAPHS", graphs)
+    monkeypatch.setattr(au, "_3D_GRAPH_CAPACITY", 2)
+    monkeypatch.setattr(au, "_enable_3d_graph_replay", lambda p: True)
+    monkeypatch.setattr(au, "_launch_3d_pipeline", lambda *a, **kw: None)
+
+    def wait(stream):
+        operations.append(("wait", stream, tuple(graphs.values())))
+
+    monkeypatch.setattr(au, "wait_stream_and_release", wait)
+    retained = []
+    monkeypatch.setattr(
+        au, "retain_for_stream", lambda stream, entry: retained.append(entry)
+    )
+    owner = au.Attention3DExecution() if owned else None
+    resident = owner._graphs if owned else graphs
+    args = _arguments()
+    with au.no_fence():
+        au._run_3d_tiled(**args, execution=owner)
+        entry = next(iter(resident.values()))
+        count = len(runtime.allocations)
+        au._run_3d_tiled(**args, execution=owner)
+        assert len(runtime.allocations) == count
+        assert next(iter(resident.values())) is entry
+        assert operations[-1] == ("replay", entry.graph)
+        assert retained[-1] is entry
+        for _ in range(20):
+            args["k"] = object()  # equivalent fresh view identity misses
+            au._run_3d_tiled(**args, execution=owner)
+            assert len(resident) <= (1 if owned else 2)
+            assert all(len(e.refs) == 13 for e in resident.values())
+    assert any(op[0] == "wait" and op[1] == 17 for op in operations)
+    assert all(e.stream == 17 for e in resident.values())
+    if owned:
+        owner.close()
+    else:
+        au.clear_attention_3d_graph_cache()
+    assert not resident

@@ -72,7 +72,10 @@ def make_candidate() -> KernelCandidate:
         )
 
     def bind(request, spec, tensors, *, softmax_scale=None, stream=0):
-        from kernels.common.attention_unified import run_unified_attention_torch
+        from kernels.common.attention_unified import (
+            Attention3DExecution,
+            run_unified_attention_torch,
+        )
         from .bindings import validate_tuning_attention_contract
 
         ok, why = candidate.admits(request)
@@ -111,6 +114,8 @@ def make_candidate() -> KernelCandidate:
         if softmax_scale is None:
             softmax_scale = 1 / math.sqrt(problem.head_size)
 
+        execution = Attention3DExecution()
+
         def launch(*, softmax_scale=softmax_scale, stream=stream):
             return run_unified_attention_torch(
                 problem=problem,
@@ -127,8 +132,13 @@ def make_candidate() -> KernelCandidate:
                 backend="3d",
                 kv_layout="strided",
                 tuning_spec=spec,
+                execution=execution,
             )
 
+        # TorchBinding's platform ABI stays unchanged. Explicit lifecycle is
+        # exposed on the callable for long-lived library bindings.
+        launch.close = execution.close
+        launch.execution = execution
         return TorchBinding(
             launch=launch, grid=spec.launch_grid(problem), block=spec.launch_block()
         )
