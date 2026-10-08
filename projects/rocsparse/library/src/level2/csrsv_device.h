@@ -30,6 +30,34 @@ extern "C" void __builtin_amdgcn_s_sleep(int);
 
 namespace rocsparse
 {
+    // Device scope atomics cannot be resolved in the per XCD L2 of gfx942 and gfx950, so atomics
+    // of all rows on max_nnz serialize. There, the maximum row length is reduced per workgroup
+    // and the last row of the workgroup to finish publishes it with a single atomic.
+    template <typename I>
+    __device__ __forceinline__ void
+        csrsv_analysis_max_nnz(I* max_nnz, I* block_max_nnz, int* block_rows_left, I row_nnz)
+    {
+        if constexpr(rocsparse::done_flag_bypass_l2)
+        {
+            __hip_atomic_fetch_max(
+                block_max_nnz, row_nnz, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);
+
+            if(__hip_atomic_fetch_add(
+                   block_rows_left, -1, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_WORKGROUP)
+               == 1)
+            {
+                rocsparse::atomic_max(max_nnz,
+                                      __hip_atomic_load(block_max_nnz,
+                                                        __ATOMIC_RELAXED,
+                                                        __HIP_MEMORY_SCOPE_WORKGROUP));
+            }
+        }
+        else
+        {
+            rocsparse::atomic_max(max_nnz, row_nnz);
+        }
+    }
+
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrsv_analysis_lower_kernel(J m,
@@ -59,8 +87,22 @@ namespace rocsparse
         // Shared memory to set done flag for intra-block dependencies
         __shared__ int local_done_array[BLOCKSIZE / WF_SIZE];
 
+        // Maximum row length and number of unfinished rows of this block
+        __shared__ I   block_max_nnz;
+        __shared__ int block_rows_left;
+
         // Initialize local done array
         local_done_array[wid] = 0;
+
+        if constexpr(rocsparse::done_flag_bypass_l2)
+        {
+            if(hipThreadIdx_x == 0)
+            {
+                block_max_nnz   = 0;
+                block_rows_left = static_cast<int>(
+                    rocsparse::min(static_cast<J>(BLOCKSIZE / WF_SIZE), m - first_row));
+            }
+        }
 
         // Wait for initialization to finish
         __syncthreads();
@@ -146,7 +188,8 @@ namespace rocsparse
                 &done_array[row], local_max + 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
             // Obtain maximum nnz
-            rocsparse::atomic_max(max_nnz, row_end - row_begin);
+            rocsparse::csrsv_analysis_max_nnz(
+                max_nnz, &block_max_nnz, &block_rows_left, row_end - row_begin);
 
             if(csr_diag_ind[row] == -1 && diag_type == rocsparse_diag_type_non_unit)
             {
@@ -185,8 +228,22 @@ namespace rocsparse
         // Shared memory to set done flag for intra-block dependencies
         __shared__ int local_done_array[BLOCKSIZE / WF_SIZE];
 
+        // Maximum row length and number of unfinished rows of this block
+        __shared__ I   block_max_nnz;
+        __shared__ int block_rows_left;
+
         // Initialize local done array
         local_done_array[wid] = 0;
+
+        if constexpr(rocsparse::done_flag_bypass_l2)
+        {
+            if(hipThreadIdx_x == 0)
+            {
+                block_max_nnz   = 0;
+                block_rows_left = static_cast<int>(
+                    rocsparse::min(static_cast<J>(BLOCKSIZE / WF_SIZE), last_row + 1));
+            }
+        }
 
         // Wait for initialization to finish
         __syncthreads();
@@ -271,7 +328,8 @@ namespace rocsparse
                 &done_array[row], local_max + 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
             // Obtain maximum nnz
-            rocsparse::atomic_max(max_nnz, row_end - row_begin);
+            rocsparse::csrsv_analysis_max_nnz(
+                max_nnz, &block_max_nnz, &block_rows_left, row_end - row_begin);
 
             if(csr_diag_ind[row] == -1 && diag_type == rocsparse_diag_type_non_unit)
             {
@@ -423,10 +481,11 @@ namespace rocsparse
 
             // Spin loop until dependency has been resolved
             rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            rocsparse::acquire_done_rows();
 
             // Local sum computation for each lane
-            local_sum = rocsparse::fma(-local_val, y[local_col * y_inc], local_sum);
+            local_sum = rocsparse::fma(
+                -local_val, rocsparse::load_done_row_data(&y[local_col * y_inc]), local_sum);
         }
 
         // Gather all local sums for each lane
@@ -444,10 +503,17 @@ namespace rocsparse
         if(lid == WF_SIZE - 1)
         {
             // Store the rows result in y
-            rocsparse::nontemporal_store(local_sum, &y[row * y_inc]);
+            if constexpr(rocsparse::done_flag_bypass_l2)
+            {
+                rocsparse::store_done_row_data(&y[row * y_inc], local_sum);
+            }
+            else
+            {
+                rocsparse::nontemporal_store(local_sum, &y[row * y_inc]);
+            }
 
             // Mark row as done
-            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+            rocsparse::set_done_flag(&done_array[row], 1);
         }
     }
 }

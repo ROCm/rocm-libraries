@@ -96,7 +96,10 @@ namespace rocsparse
             }
 
             // Make sure updated X is visible globally
-            __threadfence();
+            if constexpr(!rocsparse::done_flag_bypass_l2)
+            {
+                __threadfence();
+            }
 
             // Wait for spin looping thread to finish as the whole block depends on this row
             __syncthreads();
@@ -116,12 +119,15 @@ namespace rocsparse
                     for(int bj = 0; bj < block_dim; ++bj)
                     {
                         sum = rocsparse::fma(bsr_val[BSR_IND(j, bi, bj, dir)],
-                                             X[(block_dim * local_col + bj) * ldx + col_X],
+                                             rocsparse::load_done_row_data(
+                                                 &X[(block_dim * local_col + bj) * ldx + col_X]),
                                              sum);
                     }
 
                     // Write local sum to X
-                    X[(block_dim * row + bi) * ldx + col_X] -= sum;
+                    T* x_row = &X[(block_dim * row + bi) * ldx + col_X];
+                    rocsparse::store_done_row_data(x_row,
+                                                   rocsparse::load_done_row_data(x_row) - sum);
                 }
             }
         }
@@ -140,7 +146,7 @@ namespace rocsparse
                                    : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
-                T val = X[(block_dim * row + bi) * ldx + col_X];
+                T val = rocsparse::load_done_row_data(&X[(block_dim * row + bi) * ldx + col_X]);
 
                 // Check for numerical pivot
                 if(diag == static_cast<T>(0))
@@ -150,20 +156,23 @@ namespace rocsparse
                 else
                 {
                     // Divide result of bi-th BSR row by diagonal entry
-                    X[(block_dim * row + bi) * ldx + col_X] = val /= diag;
+                    val /= diag;
+                    rocsparse::store_done_row_data(&X[(block_dim * row + bi) * ldx + col_X], val);
                 }
 
                 // Update remaining non-diagonal entries
                 for(int bj = lid; bj < bi; bj += WFSIZE)
                 {
-                    X[(block_dim * row + bj) * ldx + col_X]
-                        -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
+                    T* x_row = &X[(block_dim * row + bj) * ldx + col_X];
+                    rocsparse::store_done_row_data(x_row,
+                                                   rocsparse::load_done_row_data(x_row)
+                                                       - val * bsr_val[BSR_IND(j, bj, bi, dir)]);
                 }
             }
         }
 
         // Make sure X is written to global memory before setting row is done flag
-        __threadfence();
+        rocsparse::release_done_row_data();
 
         // Wait for all threads to finish the threadfence before we mark the row "done"
         __syncthreads();
@@ -249,7 +258,10 @@ namespace rocsparse
             }
 
             // Make sure updated X is visible globally
-            __threadfence();
+            if constexpr(!rocsparse::done_flag_bypass_l2)
+            {
+                __threadfence();
+            }
 
             // Wait for spin looping thread to finish as the whole block depends on this row
             __syncthreads();
@@ -269,12 +281,15 @@ namespace rocsparse
                     for(int bj = 0; bj < block_dim; ++bj)
                     {
                         sum = rocsparse::fma(bsr_val[BSR_IND(j, bi, bj, dir)],
-                                             X[(block_dim * local_col + bj) * ldx + col_X],
+                                             rocsparse::load_done_row_data(
+                                                 &X[(block_dim * local_col + bj) * ldx + col_X]),
                                              sum);
                     }
 
                     // Write local sum to X
-                    X[(block_dim * row + bi) * ldx + col_X] -= sum;
+                    T* x_row = &X[(block_dim * row + bi) * ldx + col_X];
+                    rocsparse::store_done_row_data(x_row,
+                                                   rocsparse::load_done_row_data(x_row) - sum);
                 }
             }
         }
@@ -293,7 +308,7 @@ namespace rocsparse
                              : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
-                T val = X[(block_dim * row + bi) * ldx + col_X];
+                T val = rocsparse::load_done_row_data(&X[(block_dim * row + bi) * ldx + col_X]);
 
                 // Check for numerical pivot
                 if(diag == static_cast<T>(0))
@@ -303,20 +318,23 @@ namespace rocsparse
                 else
                 {
                     // Divide result of bi-th BSR row by diagonal entry
-                    X[(block_dim * row + bi) * ldx + col_X] = val /= diag;
+                    val /= diag;
+                    rocsparse::store_done_row_data(&X[(block_dim * row + bi) * ldx + col_X], val);
                 }
 
                 // Update remaining non-diagonal entries
                 for(int bj = bi + lid + 1; bj < block_dim; bj += WFSIZE)
                 {
-                    X[(block_dim * row + bj) * ldx + col_X]
-                        -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
+                    T* x_row = &X[(block_dim * row + bj) * ldx + col_X];
+                    rocsparse::store_done_row_data(x_row,
+                                                   rocsparse::load_done_row_data(x_row)
+                                                       - val * bsr_val[BSR_IND(j, bj, bi, dir)]);
                 }
             }
         }
 
         // Make sure X is written to global memory before setting row is done flag
-        __threadfence();
+        rocsparse::release_done_row_data();
 
         // Wait for all threads to finish the threadfence before we mark the row "done"
         __syncthreads();

@@ -132,7 +132,7 @@ namespace rocsparse
             J local_col = csr_col_ind[j] - idx_base;
 
             // Corresponding value
-            T local_val = csr_val[j];
+            T local_val = rocsparse::load_done_row_data(&csr_val[j]);
 
             // End of the row that corresponds to local_col
             I local_end = csr_row_ptr[local_col + 1] - idx_base;
@@ -152,10 +152,10 @@ namespace rocsparse
                 ;
 
             // Make sure updated csr_val is visible
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            rocsparse::acquire_done_rows();
 
             // Load diagonal entry
-            T diag_val = csr_val[local_diag];
+            T diag_val = rocsparse::load_done_row_data(&csr_val[local_diag]);
 
             if(diag_val == static_cast<T>(0))
             {
@@ -163,7 +163,8 @@ namespace rocsparse
                 // Skip this row if it has a zero pivot
                 break;
             }
-            csr_val[j] = local_val = local_val / diag_val;
+            local_val = local_val / diag_val;
+            rocsparse::store_done_row_data(&csr_val[j], local_val);
 
             // Loop over the row the current column index depends on
             // Each lane processes one entry
@@ -188,8 +189,11 @@ namespace rocsparse
                     {
                         // Entry found, do ILU computation
                         I idx_data = data[hash];
-                        csr_val[idx_data]
-                            = rocsparse::fma(-local_val, csr_val[k], csr_val[idx_data]);
+                        rocsparse::store_done_row_data(
+                            &csr_val[idx_data],
+                            rocsparse::fma(-local_val,
+                                           rocsparse::load_done_row_data(&csr_val[k]),
+                                           rocsparse::load_done_row_data(&csr_val[idx_data])));
                         break;
                     }
                     else
@@ -207,7 +211,7 @@ namespace rocsparse
         const bool is_diag = (row_diag >= 0);
         if(is_diag)
         {
-            const auto diag_val     = csr_val[row_diag];
+            const auto diag_val     = rocsparse::load_done_row_data(&csr_val[row_diag]);
             const auto abs_diag_val = rocsparse::abs(diag_val);
             if(boost)
             {
@@ -216,7 +220,9 @@ namespace rocsparse
                 {
                     if(lid == 0)
                     {
-                        csr_val[row_diag] = rocsparse::assign_ilu0_boost_value(diag_val, boost_val);
+                        rocsparse::store_done_row_data(
+                            &csr_val[row_diag],
+                            rocsparse::assign_ilu0_boost_value(diag_val, boost_val));
                     };
                 };
             }
@@ -244,12 +250,12 @@ namespace rocsparse
         }
 
         // Make sure updated csr_val is written to global memory
-        __threadfence();
+        rocsparse::release_done_row_data();
 
         if(lid == 0)
         {
             // First lane writes "we are done" flag
-            rocsparse::atomic_store(&done[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+            rocsparse::set_done_flag(&done[row], 1);
         }
     }
 
@@ -456,7 +462,7 @@ namespace rocsparse
                                                           rocsparse_double_complex>(p...) //
                             : (i == rocsparse_datatype_f64_r) //
                                   ? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, HASH, double>(
-                                      p...) //
+                                        p...) //
                                   : nullptr;
     }
 

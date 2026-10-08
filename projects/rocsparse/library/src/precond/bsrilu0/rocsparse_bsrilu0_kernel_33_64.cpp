@@ -102,14 +102,15 @@ namespace rocsparse
                     ;
 
                 // Make sure dependencies are visible in global memory
-                __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+                rocsparse::acquire_done_rows();
 
                 // Load updated BSR block into shared memory
                 for(J p = threadIdx.x; p < block_dim; p += DIMX)
                 {
                     for(J q = threadIdx.y; q < block_dim; q += DIMY)
                     {
-                        sdata[q][p] = bsr_val[BSR_IND(diag_j, p, q, dir)];
+                        sdata[q][p]
+                            = rocsparse::load_done_row_data(&bsr_val[BSR_IND(diag_j, p, q, dir)]);
                     }
                 }
 
@@ -124,7 +125,7 @@ namespace rocsparse
 
                     for(J bk = threadIdx.x; bk < block_dim; bk += DIMX)
                     {
-                        T val = bsr_val[BSR_IND(j, bk, bi, dir)];
+                        T val = rocsparse::load_done_row_data(&bsr_val[BSR_IND(j, bk, bi, dir)]);
 
                         // This has already been checked for zero by previous computations
                         val /= diag;
@@ -132,14 +133,18 @@ namespace rocsparse
                         // Update
                         if(threadIdx.y == 0)
                         {
-                            bsr_val[BSR_IND(j, bk, bi, dir)] = val;
+                            rocsparse::store_done_row_data(&bsr_val[BSR_IND(j, bk, bi, dir)], val);
                         }
 
                         // Do linear combination
                         for(J bj = bi + 1 + threadIdx.y; bj < block_dim; bj += DIMY)
                         {
-                            bsr_val[BSR_IND(j, bk, bj, dir)] = rocsparse::fma(
-                                -val, sdata[bj][bi], bsr_val[BSR_IND(j, bk, bj, dir)]);
+                            rocsparse::store_done_row_data(
+                                &bsr_val[BSR_IND(j, bk, bj, dir)],
+                                rocsparse::fma(-val,
+                                               sdata[bj][bi],
+                                               rocsparse::load_done_row_data(
+                                                   &bsr_val[BSR_IND(j, bk, bj, dir)])));
                         }
                     }
                 }
@@ -176,7 +181,8 @@ namespace rocsparse
                         {
                             for(J qj = threadIdx.y; qj < block_dim; qj += DIMY)
                             {
-                                sdata[qj][p] = bsr_val[BSR_IND(k, p, qj, dir)];
+                                sdata[qj][p] = rocsparse::load_done_row_data(
+                                    &bsr_val[BSR_IND(k, p, qj, dir)]);
                             }
                         }
 
@@ -191,14 +197,19 @@ namespace rocsparse
 
                                 for(J bk = 0; bk < block_dim; ++bk)
                                 {
-                                    sum = rocsparse::fma(
-                                        bsr_val[BSR_IND(j, bi, bk, dir)], sdata[bj][bk], sum);
+                                    sum = rocsparse::fma(rocsparse::load_done_row_data(
+                                                             &bsr_val[BSR_IND(j, bi, bk, dir)]),
+                                                         sdata[bj][bk],
+                                                         sum);
                                 }
 
                                 // Write back to global row m
 
                                 // Do not pre-cache row m as we read/write only once
-                                bsr_val[BSR_IND(m, bi, bj, dir)] -= sum;
+                                rocsparse::store_done_row_data(
+                                    &bsr_val[BSR_IND(m, bi, bj, dir)],
+                                    rocsparse::load_done_row_data(&bsr_val[BSR_IND(m, bi, bj, dir)])
+                                        - sum);
                             }
                         }
                     }
@@ -215,7 +226,8 @@ namespace rocsparse
                 {
                     for(J q = threadIdx.y; q < block_dim; q += DIMY)
                     {
-                        sdata[q][p] = bsr_val[BSR_IND(row_diag, p, q, dir)];
+                        sdata[q][p]
+                            = rocsparse::load_done_row_data(&bsr_val[BSR_IND(row_diag, p, q, dir)]);
                     }
                 }
 
@@ -280,7 +292,8 @@ namespace rocsparse
                 {
                     for(J q = threadIdx.y; q < block_dim; q += DIMY)
                     {
-                        bsr_val[BSR_IND(row_diag, p, q, dir)] = sdata[q][p];
+                        rocsparse::store_done_row_data(&bsr_val[BSR_IND(row_diag, p, q, dir)],
+                                                       sdata[q][p]);
                     }
                 }
             }
@@ -295,7 +308,8 @@ namespace rocsparse
                 {
                     for(J q = threadIdx.y; q < block_dim; q += DIMY)
                     {
-                        sdata[q][p] = bsr_val[BSR_IND(j, p, q, dir)];
+                        sdata[q][p]
+                            = rocsparse::load_done_row_data(&bsr_val[BSR_IND(j, p, q, dir)]);
                     }
                 }
 
@@ -307,9 +321,11 @@ namespace rocsparse
                     {
                         for(J bj = bi + 1 + threadIdx.y; bj < block_dim; bj += DIMY)
                         {
-                            sdata[bk][bj] = rocsparse::fma(-bsr_val[BSR_IND(row_diag, bj, bi, dir)],
-                                                           sdata[bk][bi],
-                                                           sdata[bk][bj]);
+                            sdata[bk][bj]
+                                = rocsparse::fma(-rocsparse::load_done_row_data(
+                                                     &bsr_val[BSR_IND(row_diag, bj, bi, dir)]),
+                                                 sdata[bk][bi],
+                                                 sdata[bk][bj]);
                         }
                     }
                 }
@@ -321,7 +337,8 @@ namespace rocsparse
                 {
                     for(J q = threadIdx.y; q < block_dim; q += DIMY)
                     {
-                        bsr_val[BSR_IND(j, p, q, dir)] = sdata[q][p];
+                        rocsparse::store_done_row_data(&bsr_val[BSR_IND(j, p, q, dir)],
+                                                       sdata[q][p]);
                     }
                 }
             }
@@ -335,7 +352,7 @@ namespace rocsparse
         if(threadIdx.x == 0 && threadIdx.y == 0)
         {
             // First lane writes "we are done" flag
-            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+            rocsparse::set_done_flag(&done_array[row], 1);
 
             if(pivot)
             {

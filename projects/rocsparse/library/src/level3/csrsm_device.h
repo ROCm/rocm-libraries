@@ -199,13 +199,15 @@ namespace rocsparse
             __syncthreads();
 
             // Make sure updated B is visible globally
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            rocsparse::acquire_done_rows();
 
             // Index into X
             const int64_t idx_X = local_col * ldb + col_B;
 
             // Local sum computation for each lane
-            local_sum = (col_B < nrhs) ? rocsparse::fma(-local_val, B[idx_X], local_sum)
+            local_sum = (col_B < nrhs) ? rocsparse::fma(-local_val,
+                                                        rocsparse::load_done_row_data(&B[idx_X]),
+                                                        local_sum)
                                        : static_cast<T>(0);
         }
 
@@ -219,11 +221,11 @@ namespace rocsparse
         // Store result in B
         if(col_B < nrhs)
         {
-            B[idx_B] = local_sum;
+            rocsparse::store_done_row_data(&B[idx_B], local_sum);
         }
 
         // Make sure B is written to global memory before setting row is done flag
-        __threadfence();
+        rocsparse::release_done_row_data();
 
         // Wait for all threads to finish the threadfence before we mark the row "done"
         __syncthreads();

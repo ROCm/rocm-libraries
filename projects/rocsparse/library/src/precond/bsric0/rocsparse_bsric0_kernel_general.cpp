@@ -61,8 +61,7 @@ namespace rocsparse
                 rocsparse::atomic_min(zero_pivot, block_row + idx_base);
 
                 // Last lane in wavefront writes "we are done" flag for its block row
-                rocsparse::atomic_store(
-                    &block_done[block_row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+                rocsparse::set_done_flag(&block_done[block_row], 1);
             }
 
             return;
@@ -100,7 +99,7 @@ namespace rocsparse
                 // Spin loop until dependency has been resolved
 
                 rocsparse::spin_loop<SLEEP>(&block_done[block_col], __MEMORY_SCOPE_DEVICE);
-                __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+                rocsparse::acquire_done_rows();
 
                 for(J k = 0; k < block_dim; k++)
                 {
@@ -108,8 +107,8 @@ namespace rocsparse
                     J col = block_dim * block_col + k;
 
                     // Load diagonal entry
-                    T diag_val
-                        = bsr_val[block_dim * block_dim * local_block_diag + block_dim * k + k];
+                    T diag_val = rocsparse::load_done_row_data(
+                        &bsr_val[block_dim * block_dim * local_block_diag + block_dim * k + k]);
 
                     // Row has numerical zero pivot
                     if(diag_val == static_cast<T>(0))
@@ -130,11 +129,13 @@ namespace rocsparse
                     // Corresponding value
                     if(direction == rocsparse_direction_row)
                     {
-                        val = bsr_val[block_dim * block_dim * j + block_dim * row + k];
+                        val = rocsparse::load_done_row_data(
+                            &bsr_val[block_dim * block_dim * j + block_dim * row + k]);
                     }
                     else
                     {
-                        val = bsr_val[block_dim * block_dim * j + block_dim * k + row];
+                        val = rocsparse::load_done_row_data(
+                            &bsr_val[block_dim * block_dim * j + block_dim * k + row]);
                     }
 
                     // Local row sum
@@ -179,15 +180,21 @@ namespace rocsparse
                                     T vj = static_cast<T>(0);
                                     if(direction == rocsparse_direction_row)
                                     {
-                                        vp = bsr_val[block_dim * block_dim * p + block_dim * k + q];
-                                        vj = bsr_val[block_dim * block_dim * m + block_dim * row
-                                                     + q];
+                                        vp = rocsparse::load_done_row_data(
+                                            &bsr_val[block_dim * block_dim * p + block_dim * k
+                                                     + q]);
+                                        vj = rocsparse::load_done_row_data(
+                                            &bsr_val[block_dim * block_dim * m + block_dim * row
+                                                     + q]);
                                     }
                                     else
                                     {
-                                        vp = bsr_val[block_dim * block_dim * p + block_dim * q + k];
-                                        vj = bsr_val[block_dim * block_dim * m + block_dim * q
-                                                     + row];
+                                        vp = rocsparse::load_done_row_data(
+                                            &bsr_val[block_dim * block_dim * p + block_dim * q
+                                                     + k]);
+                                        vj = rocsparse::load_done_row_data(
+                                            &bsr_val[block_dim * block_dim * m + block_dim * q
+                                                     + row]);
                                     }
 
                                     // If a match has been found, do linear combination
@@ -202,11 +209,13 @@ namespace rocsparse
 
                     if(direction == rocsparse_direction_row)
                     {
-                        bsr_val[block_dim * block_dim * j + block_dim * row + k] = val;
+                        rocsparse::store_done_row_data(
+                            &bsr_val[block_dim * block_dim * j + block_dim * row + k], val);
                     }
                     else
                     {
-                        bsr_val[block_dim * block_dim * j + block_dim * k + row] = val;
+                        rocsparse::store_done_row_data(
+                            &bsr_val[block_dim * block_dim * j + block_dim * k + row], val);
                     }
                 }
             }
@@ -219,18 +228,36 @@ namespace rocsparse
                 // Check if 'col' row is complete
                 if(j == row)
                 {
-                    // Release-store so the consuming lanes of this wavefront observe the
-                    // freshly computed diagonal entry
-                    rocsparse::atomic_store(&bsr_val[row_diag],
-                                            static_cast<T>(rocsparse::sqrt(
-                                                rocsparse::abs(bsr_val[row_diag] - row_sum))),
-                                            __ATOMIC_RELEASE,
-                                            __MEMORY_SCOPE_WVFRNT);
+                    const T diag = static_cast<T>(rocsparse::sqrt(rocsparse::abs(
+                        rocsparse::load_done_row_data(&bsr_val[row_diag]) - row_sum)));
+
+                    if constexpr(rocsparse::done_flag_bypass_l2)
+                    {
+                        rocsparse::store_done_row_data(&bsr_val[row_diag], diag);
+                    }
+                    else
+                    {
+                        // Release-store so the consuming lanes of this wavefront observe the
+                        // freshly computed diagonal entry
+                        rocsparse::atomic_store(
+                            &bsr_val[row_diag], diag, __ATOMIC_RELEASE, __MEMORY_SCOPE_WVFRNT);
+                    }
                 }
 
-                // Acquire-load the diagonal entry; this pairs with the release-store above
-                T diag_val = rocsparse::atomic_load(
-                    &bsr_val[row_diag], __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WVFRNT);
+                T diag_val;
+                if constexpr(rocsparse::done_flag_bypass_l2)
+                {
+                    // Dependent block rows read the diagonal entry as well, so it is exchanged
+                    // with device scope accesses, completed before the other lanes load it
+                    rocsparse::release_done_row_data();
+                    diag_val = rocsparse::load_done_row_data(&bsr_val[row_diag]);
+                }
+                else
+                {
+                    // Acquire-load the diagonal entry; this pairs with the release-store above
+                    diag_val = rocsparse::atomic_load(
+                        &bsr_val[row_diag], __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WVFRNT);
+                }
 
                 // Row has numerical zero pivot
                 if(diag_val == static_cast<T>(0))
@@ -254,11 +281,13 @@ namespace rocsparse
                     // Corresponding value
                     if(direction == rocsparse_direction_row)
                     {
-                        val = bsr_val[block_dim * block_dim * block_row_diag + block_dim * row + j];
+                        val = rocsparse::load_done_row_data(
+                            &bsr_val[block_dim * block_dim * block_row_diag + block_dim * row + j]);
                     }
                     else
                     {
-                        val = bsr_val[block_dim * block_dim * block_row_diag + block_dim * j + row];
+                        val = rocsparse::load_done_row_data(
+                            &bsr_val[block_dim * block_dim * block_row_diag + block_dim * j + row]);
                     }
 
                     // Local row sum
@@ -272,13 +301,17 @@ namespace rocsparse
                         {
                             if(direction == rocsparse_direction_row)
                             {
-                                vk = bsr_val[block_dim * block_dim * k + block_dim * j + q];
-                                vj = bsr_val[block_dim * block_dim * k + block_dim * row + q];
+                                vk = rocsparse::load_done_row_data(
+                                    &bsr_val[block_dim * block_dim * k + block_dim * j + q]);
+                                vj = rocsparse::load_done_row_data(
+                                    &bsr_val[block_dim * block_dim * k + block_dim * row + q]);
                             }
                             else
                             {
-                                vk = bsr_val[block_dim * block_dim * k + block_dim * q + j];
-                                vj = bsr_val[block_dim * block_dim * k + block_dim * q + row];
+                                vk = rocsparse::load_done_row_data(
+                                    &bsr_val[block_dim * block_dim * k + block_dim * q + j]);
+                                vj = rocsparse::load_done_row_data(
+                                    &bsr_val[block_dim * block_dim * k + block_dim * q + row]);
                             }
 
                             // If a match has been found, do linear combination
@@ -290,17 +323,21 @@ namespace rocsparse
                     {
                         if(direction == rocsparse_direction_row)
                         {
-                            vk = bsr_val[block_dim * block_dim * block_row_diag + block_dim * j
-                                         + q];
-                            vj = bsr_val[block_dim * block_dim * block_row_diag + block_dim * row
-                                         + q];
+                            vk = rocsparse::load_done_row_data(
+                                &bsr_val[block_dim * block_dim * block_row_diag + block_dim * j
+                                         + q]);
+                            vj = rocsparse::load_done_row_data(
+                                &bsr_val[block_dim * block_dim * block_row_diag + block_dim * row
+                                         + q]);
                         }
                         else
                         {
-                            vk = bsr_val[block_dim * block_dim * block_row_diag + block_dim * q
-                                         + j];
-                            vj = bsr_val[block_dim * block_dim * block_row_diag + block_dim * q
-                                         + row];
+                            vk = rocsparse::load_done_row_data(
+                                &bsr_val[block_dim * block_dim * block_row_diag + block_dim * q
+                                         + j]);
+                            vj = rocsparse::load_done_row_data(
+                                &bsr_val[block_dim * block_dim * block_row_diag + block_dim * q
+                                         + row]);
                         }
 
                         // If a match has been found, do linear combination
@@ -312,23 +349,26 @@ namespace rocsparse
 
                     if(direction == rocsparse_direction_row)
                     {
-                        bsr_val[block_dim * block_dim * block_row_diag + block_dim * row + j] = val;
+                        rocsparse::store_done_row_data(
+                            &bsr_val[block_dim * block_dim * block_row_diag + block_dim * row + j],
+                            val);
                     }
                     else
                     {
-                        bsr_val[block_dim * block_dim * block_row_diag + block_dim * j + row] = val;
+                        rocsparse::store_done_row_data(
+                            &bsr_val[block_dim * block_dim * block_row_diag + block_dim * j + row],
+                            val);
                     }
                 }
 
-                __threadfence();
+                rocsparse::release_done_row_data();
             }
         }
 
         if(lid == WFSIZE - 1)
         {
             // Last lane writes "we are done" flag for current block row
-            rocsparse::atomic_store(
-                &block_done[block_row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+            rocsparse::set_done_flag(&block_done[block_row], 1);
         }
     }
 

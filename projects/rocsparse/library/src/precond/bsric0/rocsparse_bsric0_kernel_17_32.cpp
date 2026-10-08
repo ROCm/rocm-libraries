@@ -73,8 +73,7 @@ namespace rocsparse
                 rocsparse::atomic_min(zero_pivot, block_row + idx_base);
 
                 // Last lane in wavefront writes "we are done" flag for its block row
-                rocsparse::atomic_store(
-                    &block_done[block_row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+                rocsparse::set_done_flag(&block_done[block_row], 1);
             }
 
             return;
@@ -123,14 +122,16 @@ namespace rocsparse
                 {
                     values[tidy][q]
                         = (tidy < block_dim)
-                              ? bsr_val[block_dim * block_dim * j + block_dim * tidy + q]
+                              ? rocsparse::load_done_row_data(
+                                    &bsr_val[block_dim * block_dim * j + block_dim * tidy + q])
                               : static_cast<T>(0);
                 }
                 else
                 {
                     values[tidy][q]
                         = (tidy < block_dim)
-                              ? bsr_val[block_dim * block_dim * j + block_dim * q + tidy]
+                              ? rocsparse::load_done_row_data(
+                                    &bsr_val[block_dim * block_dim * j + block_dim * q + tidy])
                               : static_cast<T>(0);
                 }
 
@@ -174,7 +175,7 @@ namespace rocsparse
                 &block_done[block_col], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE))
                 ;
 
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            rocsparse::acquire_done_rows();
 
             // Loop over the row the current column index depends on
             // Each lane processes one entry
@@ -192,15 +193,19 @@ namespace rocsparse
                     {
                         if(direction == rocsparse_direction_row)
                         {
-                            T v1      = bsr_val[idx2 + block_dim * q + p];
-                            T v2      = (tidy < block_dim) ? bsr_val[idx + block_dim * tidy + p]
+                            T v1
+                                = rocsparse::load_done_row_data(&bsr_val[idx2 + block_dim * q + p]);
+                            T v2      = (tidy < block_dim) ? rocsparse::load_done_row_data(
+                                                            &bsr_val[idx + block_dim * tidy + p])
                                                            : static_cast<T>(0);
                             local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                         }
                         else
                         {
-                            T v1      = bsr_val[idx2 + block_dim * p + q];
-                            T v2      = (tidy < block_dim) ? bsr_val[idx + block_dim * p + tidy]
+                            T v1
+                                = rocsparse::load_done_row_data(&bsr_val[idx2 + block_dim * p + q]);
+                            T v2      = (tidy < block_dim) ? rocsparse::load_done_row_data(
+                                                            &bsr_val[idx + block_dim * p + tidy])
                                                            : static_cast<T>(0);
                             local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                         }
@@ -218,7 +223,8 @@ namespace rocsparse
                 T val = values[tidy][k];
 
                 // Load diagonal entry
-                T diag_val = bsr_val[block_dim * block_dim * local_block_diag + block_dim * k + k];
+                T diag_val = rocsparse::load_done_row_data(
+                    &bsr_val[block_dim * block_dim * local_block_diag + block_dim * k + k]);
 
                 // Row has numerical zero pivot
                 if(diag_val == static_cast<T>(0))
@@ -239,15 +245,15 @@ namespace rocsparse
                 {
                     if(direction == rocsparse_direction_row)
                     {
-                        T v1
-                            = bsr_val[block_dim * block_dim * local_block_diag + block_dim * k + p];
+                        T v1 = rocsparse::load_done_row_data(
+                            &bsr_val[block_dim * block_dim * local_block_diag + block_dim * k + p]);
                         T v2      = values[tidy][p];
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     else
                     {
-                        T v1
-                            = bsr_val[block_dim * block_dim * local_block_diag + block_dim * p + k];
+                        T v1 = rocsparse::load_done_row_data(
+                            &bsr_val[block_dim * block_dim * local_block_diag + block_dim * p + k]);
                         T v2      = values[tidy][p];
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
@@ -275,16 +281,20 @@ namespace rocsparse
                 {
                     if(direction == rocsparse_direction_row)
                     {
-                        bsr_val[block_dim * block_dim * j + block_dim * tidy + q] = values[tidy][q];
+                        rocsparse::store_done_row_data(
+                            &bsr_val[block_dim * block_dim * j + block_dim * tidy + q],
+                            values[tidy][q]);
                     }
                     else
                     {
-                        bsr_val[block_dim * block_dim * j + block_dim * q + tidy] = values[tidy][q];
+                        rocsparse::store_done_row_data(
+                            &bsr_val[block_dim * block_dim * j + block_dim * q + tidy],
+                            values[tidy][q]);
                     }
                 }
             }
 
-            __threadfence();
+            rocsparse::release_done_row_data();
         }
 
         // Load current diagonal block into shared memory
@@ -292,17 +302,19 @@ namespace rocsparse
         {
             if(direction == rocsparse_direction_row)
             {
-                values[tidy][q]
-                    = (tidy < block_dim)
-                          ? bsr_val[block_dim * block_dim * block_row_diag + block_dim * tidy + q]
-                          : static_cast<T>(0);
+                values[tidy][q] = (tidy < block_dim)
+                                      ? rocsparse::load_done_row_data(
+                                            &bsr_val[block_dim * block_dim * block_row_diag
+                                                     + block_dim * tidy + q])
+                                      : static_cast<T>(0);
             }
             else
             {
-                values[tidy][q]
-                    = (tidy < block_dim)
-                          ? bsr_val[block_dim * block_dim * block_row_diag + block_dim * q + tidy]
-                          : static_cast<T>(0);
+                values[tidy][q] = (tidy < block_dim)
+                                      ? rocsparse::load_done_row_data(
+                                            &bsr_val[block_dim * block_dim * block_row_diag
+                                                     + block_dim * q + tidy])
+                                      : static_cast<T>(0);
             }
         }
 
@@ -365,13 +377,15 @@ namespace rocsparse
             {
                 if(direction == rocsparse_direction_row)
                 {
-                    bsr_val[block_dim * block_dim * block_row_diag + block_dim * tidy + q]
-                        = values[tidy][q];
+                    rocsparse::store_done_row_data(
+                        &bsr_val[block_dim * block_dim * block_row_diag + block_dim * tidy + q],
+                        values[tidy][q]);
                 }
                 else
                 {
-                    bsr_val[block_dim * block_dim * block_row_diag + block_dim * q + tidy]
-                        = values[tidy][q];
+                    rocsparse::store_done_row_data(
+                        &bsr_val[block_dim * block_dim * block_row_diag + block_dim * q + tidy],
+                        values[tidy][q]);
                 }
             }
         }
@@ -379,8 +393,7 @@ namespace rocsparse
         if(tidx == 0 && tidy == 0)
         {
             // First lane in wavefront writes "we are done" flag for its block row
-            rocsparse::atomic_store(
-                &block_done[block_row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+            rocsparse::set_done_flag(&block_done[block_row], 1);
         }
     }
 

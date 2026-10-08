@@ -74,7 +74,7 @@ namespace rocsparse
             J local_col = csr_col_ind[j] - idx_base;
 
             // Corresponding value
-            T local_val = csr_val[j];
+            T local_val = rocsparse::load_done_row_data(&csr_val[j]);
 
             // End of the row that corresponds to local_col
             I local_end = csr_row_ptr[local_col + 1] - idx_base;
@@ -92,10 +92,10 @@ namespace rocsparse
             rocsparse::spin_loop<SLEEP>(&done[local_col], __MEMORY_SCOPE_DEVICE);
 
             // Make sure updated csr_val is visible
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            rocsparse::acquire_done_rows();
 
             // Load diagonal entry
-            T diag_val = csr_val[local_diag];
+            T diag_val = rocsparse::load_done_row_data(&csr_val[local_diag]);
 
             if(diag_val == static_cast<T>(0))
             {
@@ -103,7 +103,8 @@ namespace rocsparse
                 break;
             }
 
-            csr_val[j] = local_val = local_val / diag_val;
+            local_val = local_val / diag_val;
+            rocsparse::store_done_row_data(&csr_val[j], local_val);
 
             // Loop over the row the current column index depends on
             // Each lane processes one entry
@@ -137,7 +138,11 @@ namespace rocsparse
                 if(col_j == col_k)
                 {
                     // If a match has been found, do ILU computation
-                    csr_val[l] = rocsparse::fma(-local_val, csr_val[k], csr_val[l]);
+                    rocsparse::store_done_row_data(
+                        &csr_val[l],
+                        rocsparse::fma(-local_val,
+                                       rocsparse::load_done_row_data(&csr_val[k]),
+                                       rocsparse::load_done_row_data(&csr_val[l])));
                 }
             }
         }
@@ -147,7 +152,7 @@ namespace rocsparse
         const bool is_diag = (row_diag >= 0);
         if(is_diag)
         {
-            const auto diag_val     = csr_val[row_diag];
+            const auto diag_val     = rocsparse::load_done_row_data(&csr_val[row_diag]);
             const auto abs_diag_val = rocsparse::abs(diag_val);
             if(boost)
             {
@@ -156,7 +161,9 @@ namespace rocsparse
                 {
                     if(lid == 0)
                     {
-                        csr_val[row_diag] = rocsparse::assign_ilu0_boost_value(diag_val, boost_val);
+                        rocsparse::store_done_row_data(
+                            &csr_val[row_diag],
+                            rocsparse::assign_ilu0_boost_value(diag_val, boost_val));
                     };
                 };
             }
@@ -184,12 +191,12 @@ namespace rocsparse
         }
 
         // Make sure updated csr_val is written to global memory
-        __threadfence();
+        rocsparse::release_done_row_data();
 
         if(lid == 0)
         {
             // First lane writes "we are done" flag
-            rocsparse::atomic_store(&done[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+            rocsparse::set_done_flag(&done[row], 1);
         }
     }
 
@@ -341,11 +348,13 @@ namespace rocsparse
               typename... P>
     static csrilu0_kernel_launch_t transform_j_type(rocsparse_indextype j, P... p)
     {
-        return (j == rocsparse_indextype_i32) ? rocsparse::
-                       csrilu0_kernel_binsearch_launch<BLOCKSIZE, WF_SIZE, SLEEP, T, I, int32_t>
-               : (j == rocsparse_indextype_i64) ? rocsparse::
-                       csrilu0_kernel_binsearch_launch<BLOCKSIZE, WF_SIZE, SLEEP, T, I, int64_t>
-                                                : nullptr;
+        return (j == rocsparse_indextype_i32)
+                   ? rocsparse::
+                         csrilu0_kernel_binsearch_launch<BLOCKSIZE, WF_SIZE, SLEEP, T, I, int32_t>
+               : (j == rocsparse_indextype_i64)
+                   ? rocsparse::
+                         csrilu0_kernel_binsearch_launch<BLOCKSIZE, WF_SIZE, SLEEP, T, I, int64_t>
+                   : nullptr;
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename T, typename... P>
@@ -363,10 +372,12 @@ namespace rocsparse
     {
         return (i == rocsparse_datatype_f32_r)
                    ? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, float>(p...)
-               : (i == rocsparse_datatype_f32_c) ? rocsparse::
-                       transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, rocsparse_float_complex>(p...)
-               : (i == rocsparse_datatype_f64_c) ? rocsparse::
-                       transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, rocsparse_double_complex>(p...)
+               : (i == rocsparse_datatype_f32_c)
+                   ? rocsparse::
+                         transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, rocsparse_float_complex>(p...)
+               : (i == rocsparse_datatype_f64_c)
+                   ? rocsparse::
+                         transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, rocsparse_double_complex>(p...)
                : (i == rocsparse_datatype_f64_r)
                    ? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, double>(p...)
                    : nullptr;
