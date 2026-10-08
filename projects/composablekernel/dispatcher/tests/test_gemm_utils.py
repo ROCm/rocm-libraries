@@ -738,3 +738,113 @@ class TestBuildFailureReasons(unittest.TestCase):
     def test_empty_stderr_does_not_become_none(self):
         # subprocess with text=True can hand back None if stderr was not piped.
         self.assertEqual(_cu._clip_stderr(None), "")
+
+
+# --- Build-failure reasons reach the caller ---------------------------------
+# The worker end is covered above; this is the bridge end. The reasons used to
+# die at the setup_multiple_gemm_dispatchers boundary, which returns only
+# Optional[Path], so a caller could tell THAT a config failed but never why.
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
+
+import gemm_utils as _gu  # noqa: E402
+
+
+def _buildable_config(name_suffix=""):
+    cfg = _gu.GemmKernelConfig(
+        dtype_a="bf16", dtype_b="bf16", dtype_c="bf16", dtype_acc="fp32",
+        layout_a="row", layout_b="col", layout_c="row",
+        tile_m=256, tile_n=256, tile_k=64,
+        wave_m=2, wave_n=2, wave_k=1,
+        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+        pipeline="compv3", scheduler="intrawave", epilogue="cshuffle",
+        pad_m=True, pad_n=True, pad_k=True, gfx_arch="gfx950",
+    )
+    return cfg
+
+
+class TestBuildErrorsOutParameter(unittest.TestCase):
+    """setup_multiple_gemm_dispatchers(..., errors=d) fills d with the reasons."""
+
+    def _run_bridge(self, codegen_result, compile_result, errors=None):
+        cfg = _buildable_config()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            # The bridge refuses to start unless the static lib and the
+            # variant's ctypes source exist (gemm_utils FileNotFoundError
+            # guard), so stand both up empty -- nothing actually compiles here.
+            (root / "bindings" / "ctypes").mkdir(parents=True)
+            (root / "bindings" / "ctypes" / _gu._ctypes_source_name(cfg)).touch()
+            (root / "build").mkdir()
+            (root / "build" / "libck_tile_dispatcher.a").touch()
+            (root / "generated").mkdir()
+            (root / "codegen.py").touch()
+            with mock.patch.object(_gu._cu, "get_dispatcher_root", return_value=root), \
+                 mock.patch.object(_gu._cu, "get_build_dir", return_value=root / "build"), \
+                 mock.patch.object(_gu._cu, "get_generated_kernels_dir",
+                                   return_value=root / "generated"), \
+                 mock.patch.object(_gu._cu, "get_codegen_path",
+                                   return_value=root / "codegen.py"), \
+                 mock.patch.object(_gu, "_tile_engine_codegen_flags", return_value=[]), \
+                 mock.patch.object(_gu._cu, "_generate_single_kernel_subprocess",
+                                   return_value=codegen_result), \
+                 mock.patch.object(_gu._cu, "_run_hipcc_subprocess",
+                                   return_value=compile_result), \
+                 mock.patch.object(_gu, "ProcessPoolExecutor", ThreadPoolExecutor):
+                # ThreadPoolExecutor is API-compatible with the pool's use here
+                # (submit + as_completed) and runs in-process, so the patched
+                # workers above are the ones actually called. With a real
+                # process pool the children re-import the unpatched module and
+                # every mock is silently bypassed.
+                kw = {} if errors is None else {"errors": errors}
+                return _gu.setup_multiple_gemm_dispatchers(
+                    [cfg], verbose=False, **kw), cfg
+
+    def test_codegen_failure_reason_reaches_the_caller(self):
+        errors = {}
+        paths, cfg = self._run_bridge(
+            codegen_result=(False, None, "Codegen failed: bad tile"),
+            compile_result=(True, "unused.so", ""),
+            errors=errors,
+        )
+        self.assertEqual(paths, [None])
+        self.assertEqual(errors, {cfg.name: "Codegen failed: bad tile"})
+
+    def test_compile_failure_reason_reaches_the_caller(self):
+        errors = {}
+        paths, cfg = self._run_bridge(
+            codegen_result=(True, "k.hpp", ""),
+            compile_result=(False, None, "Compile failed: clang++: not found"),
+            errors=errors,
+        )
+        self.assertEqual(paths, [None])
+        self.assertEqual(errors, {cfg.name: "Compile failed: clang++: not found"})
+
+    def test_reasonless_failure_gets_a_placeholder_not_an_empty_string(self):
+        errors = {}
+        paths, cfg = self._run_bridge(
+            codegen_result=(True, "k.hpp", ""),
+            compile_result=(False, None, ""),
+            errors=errors,
+        )
+        self.assertEqual(paths, [None])
+        self.assertIn("no reason reported", errors[cfg.name])
+
+    def test_successful_build_records_no_error(self):
+        errors = {}
+        paths, _ = self._run_bridge(
+            codegen_result=(True, "k.hpp", ""),
+            compile_result=(True, "k.so", ""),
+            errors=errors,
+        )
+        self.assertEqual(paths, [Path("k.so")])
+        self.assertEqual(errors, {})
+
+    def test_omitting_errors_is_unchanged(self):
+        # The backward-compatibility guarantee for the ~15 other call sites:
+        # they pass no `errors` and must keep getting the same list, with no
+        # exception from the collection path.
+        paths, _ = self._run_bridge(
+            codegen_result=(True, "k.hpp", ""),
+            compile_result=(False, None, "Compile failed: boom"),
+        )
+        self.assertEqual(paths, [None])

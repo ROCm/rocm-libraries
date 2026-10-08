@@ -41,9 +41,11 @@ import json
 import random
 import sys
 import time
+from collections import OrderedDict
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
+from typing import Dict, List
 
 _DISPATCHER = Path(__file__).parent.parent
 sys.path.insert(0, str(_DISPATCHER / "python"))
@@ -296,6 +298,21 @@ def _verify(variant: str, cfg, runner, result, ops: _Operands) -> float:
     return _max_rel(result.output, ref)
 
 
+def _group_build_failures(results) -> "OrderedDict[str, List[str]]":
+    """Distinct build-failure reasons -> the config names that hit each.
+
+    A broken toolchain fails every config with the SAME message -- a missing
+    clang++, a header that does not exist. Printed per config that is 64 copies
+    of one line, and the one thing an operator needs is the line, not the
+    count. Insertion-ordered so the reason the run hit first is reported first.
+    """
+    groups: "OrderedDict[str, List[str]]" = OrderedDict()
+    for r in results:
+        if r.get("status") == "build_fail":
+            groups.setdefault(r.get("error", ""), []).append(r["name"])
+    return groups
+
+
 def run(args) -> int:
     # fallback="" so a failed detection is falsy and the skip below can fire.
     # detect_gpu_arch defaults to fallback="gfx942" (ctypes_utils.py), which
@@ -365,7 +382,15 @@ def run(args) -> int:
     # --- Build ---
     print(f"\nBuilding {len(configs)} .so files (parallel JIT)...")
     t0 = time.time()
-    so_paths = setup_multiple_gemm_dispatchers(configs, verbose=False)
+    # Collect the per-config build reasons. Without this dict they are computed
+    # in the bridge and discarded (verbose=False), which is what turned the
+    # TheRock HIP_CLANG_PATH breakage into 64 "build_fail" lines with nothing
+    # after them. verbose stays False on purpose: the bridge's per-config
+    # chatter is 64 lines of noise, and the grouped summary below is the form
+    # an operator can actually act on.
+    build_errors: Dict[str, str] = {}
+    so_paths = setup_multiple_gemm_dispatchers(
+        configs, verbose=False, errors=build_errors)
     build_ok = sum(1 for p in so_paths if p is not None)
     print(f"  Built {build_ok}/{len(configs)} in {time.time()-t0:.1f}s "
           f"({len(configs)-build_ok} failed)")
@@ -394,7 +419,10 @@ def run(args) -> int:
     for cfg, so in zip(configs, so_paths):
         if so is None:
             n_build_fail += 1
-            results.append({"name": cfg.name, "status": "build_fail"})
+            # Same "error" key run_fail / run_error / verify_error already use,
+            # so this is not a schema change for anything reading the JSON.
+            results.append({"name": cfg.name, "status": "build_fail",
+                            "error": build_errors.get(cfg.name, "")})
             continue
         if gpu_problem:
             n_not_run += 1
@@ -456,6 +484,10 @@ def run(args) -> int:
           f"/ {len(configs)} total")
 
     if args.json:
+        # One record per kernel, NOT deduplicated like the console summary
+        # below: existing consumers and artifact diffs are per kernel, and the
+        # bridge bounds each reason at ~2 kB, so even a total 64-config wipeout
+        # costs ~128 kB.
         out = {"variant": variant, "arch": arch, "size": size, "seed": seed,
                "budget": budget, "total_configs": total, "n_pass": n_pass,
                "n_fail": n_fail, "n_build_fail": n_build_fail, "n_skip": n_skip,
@@ -465,11 +497,25 @@ def run(args) -> int:
         print(f"Results written to {args.json}")
 
     if n_fail > 0 or n_build_fail > 0:
-        print("\nFailed kernels:")
-        for r in results:
-            if r["status"] not in ("pass", "unsupported", "not_run"):
+        # build_fail is reported below, grouped by reason; not_run has no reason
+        # of its own (the single gpu_problem line above is it). Both are
+        # excluded here, so the header only goes out when something follows it.
+        run_failures = [r for r in results if r["status"]
+                        not in ("pass", "unsupported", "not_run", "build_fail")]
+        if run_failures:
+            print("\nFailed kernels:")
+            for r in run_failures:
                 print(f"  {r['name']}: {r['status']} "
                       f"{r.get('error', r.get('max_rel', ''))}")
+        groups = _group_build_failures(results)
+        if groups:
+            print(f"\nBuild failures ({len(groups)} distinct "
+                  f"{'reason' if len(groups) == 1 else 'reasons'}, "
+                  f"{n_build_fail} configs):")
+            for reason, names in groups.items():
+                more = f" (+{len(names) - 1} more)" if len(names) > 1 else ""
+                print(f"  [{len(names)}x] {names[0]}{more}")
+                print(f"      {reason or 'no reason reported by the build'}")
 
     # A build failure is a failure. Excluding it would mean a total codegen or
     # compile breakage -- every kernel failing to build, nothing verified --

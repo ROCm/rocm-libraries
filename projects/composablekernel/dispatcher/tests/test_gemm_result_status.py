@@ -154,7 +154,8 @@ class TestSearchSpaceCountsSkip(unittest.TestCase):
             elementwise_op=None,
         )
 
-    def _run(self, statuses, gpu_problem=None, json_path=None, hip_error=""):
+    def _run(self, statuses, gpu_problem=None, json_path=None, hip_error="",
+             build_errors=None):
         sweep = self.sweep
         cfgs = [SimpleNamespace(name=f"k{i}") for i in range(len(statuses))]
         sos = [Path(f"k{i}.so") for i in range(len(statuses))]
@@ -175,11 +176,24 @@ class TestSearchSpaceCountsSkip(unittest.TestCase):
             verified.append(cfg.name)
             return 0.0
 
+        def build(configs, verbose=True, max_workers=None, errors=None):
+            # Stands in for a build in which nothing compiled. Writing through
+            # `errors` also pins that the sweep passes the out-parameter at all
+            # -- drop it there and this raises on the None.
+            for cfg in configs:
+                errors[cfg.name] = build_errors[cfg.name]
+            return [None] * len(configs)
+
+        build_patch = (
+            mock.patch.object(sweep, "setup_multiple_gemm_dispatchers", side_effect=build)
+            if build_errors is not None
+            else mock.patch.object(
+                sweep, "setup_multiple_gemm_dispatchers", return_value=sos)
+        )
+
         with mock.patch.object(
             sweep, "expand_sweep", return_value=cfgs
-        ), mock.patch.object(
-            sweep, "setup_multiple_gemm_dispatchers", return_value=sos
-        ), mock.patch.object(
+        ), build_patch, mock.patch.object(
             sweep, "_make_runner", side_effect=make_runner
         ), mock.patch.object(sweep, "_invoke", side_effect=invoke), mock.patch.object(
             sweep, "_verify", side_effect=verify
@@ -187,8 +201,13 @@ class TestSearchSpaceCountsSkip(unittest.TestCase):
             sweep, "hip_device_problem", return_value=gpu_problem
         ), mock.patch.object(
             sweep, "hip_last_error", return_value=hip_error
-        ), mock.patch("builtins.print"):
+        ), mock.patch("builtins.print") as printed:
             rc = sweep.run(self._args(json_path))
+        # Kept so tests can assert on the summary the operator actually reads,
+        # not just on the JSON.
+        self.printed = "\n".join(
+            " ".join(str(a) for a in c.args) for c in printed.call_args_list
+        )
         return rc, verified
 
     def test_unsupported_is_skipped_not_failed(self):
@@ -241,6 +260,78 @@ class TestSearchSpaceCountsSkip(unittest.TestCase):
             self._run([STATUS_ERROR], json_path=out, hip_error="")
             data = json.loads(out.read_text())
         self.assertEqual(data["kernels"][0]["error"], "status=-1")
+
+    def test_build_failure_reason_reaches_the_json_and_the_summary(self):
+        # develop #2700: every kernel failed to build and the report said only
+        # "build_fail " with nothing after it, so the lane was undiagnosable.
+        reason = "Compile failed: clang++: not found"
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.json"
+            rc, verified = self._run(
+                [STATUS_OK, STATUS_OK],
+                json_path=out,
+                build_errors={"k0": reason, "k1": reason},
+            )
+            data = json.loads(out.read_text())
+        self.assertEqual(rc, 1)
+        self.assertEqual(verified, [], "nothing built, so nothing is verified")
+        self.assertEqual(data["n_build_fail"], 2)
+        # Per kernel in the JSON -- consumers and artifact diffs are per kernel.
+        self.assertEqual([k["error"] for k in data["kernels"]], [reason, reason])
+
+    def test_identical_build_failures_print_the_reason_once(self):
+        # The whole point of grouping: 64 copies of one compiler message is the
+        # wrong output, and the message is the only part that matters.
+        reason = "Compile failed: clang++: not found"
+        self._run(
+            [STATUS_OK] * 3,
+            build_errors={f"k{i}": reason for i in range(3)},
+        )
+        self.assertEqual(self.printed.count(reason), 1, self.printed)
+        self.assertIn("[3x] k0 (+2 more)", self.printed)
+        self.assertIn("1 distinct reason", self.printed)
+
+    def test_distinct_build_failures_stay_apart(self):
+        self._run(
+            [STATUS_OK] * 2,
+            build_errors={"k0": "Compile failed: A", "k1": "Link failed: B"},
+        )
+        self.assertIn("Compile failed: A", self.printed)
+        self.assertIn("Link failed: B", self.printed)
+        self.assertIn("2 distinct reasons", self.printed)
+
+    def test_reasonless_build_failure_still_says_so(self):
+        # The fallback text must not read as an empty reason, which is exactly
+        # the output this whole change exists to remove.
+        self._run([STATUS_OK], build_errors={"k0": ""})
+        self.assertIn("no reason reported by the build", self.printed)
+
+
+class TestGroupBuildFailures(unittest.TestCase):
+    """_group_build_failures is pure, so test it directly."""
+
+    @classmethod
+    def setUpClass(cls):
+        import test_gemm_search_space as sweep
+
+        cls.group = staticmethod(sweep._group_build_failures)
+
+    def test_groups_by_reason_in_first_seen_order(self):
+        groups = self.group([
+            {"name": "a", "status": "build_fail", "error": "X"},
+            {"name": "b", "status": "build_fail", "error": "Y"},
+            {"name": "c", "status": "build_fail", "error": "X"},
+        ])
+        self.assertEqual(list(groups), ["X", "Y"])
+        self.assertEqual(groups["X"], ["a", "c"])
+
+    def test_ignores_every_other_status(self):
+        groups = self.group([
+            {"name": "a", "status": "pass"},
+            {"name": "b", "status": "run_fail", "error": "status=-1"},
+            {"name": "c", "status": "not_run"},
+        ])
+        self.assertEqual(groups, {})
 
 
 if __name__ == "__main__":
