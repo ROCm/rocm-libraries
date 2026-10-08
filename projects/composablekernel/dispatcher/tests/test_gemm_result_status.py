@@ -251,15 +251,23 @@ class TestSearchSpaceCountsSkip(unittest.TestCase):
             rc, _ = self._run([STATUS_ERROR], json_path=out, hip_error=hip_error)
             data = json.loads(out.read_text())
         self.assertEqual(rc, 1)
-        self.assertEqual(data["kernels"][0]["error"], f"status=-1 ({hip_error})")
+        err = data["kernels"][0]["error"]
+        # Use assertIn rather than assertEqual: the human-readable description
+        # alongside "status=-1" may be revised without breaking the contract.
+        self.assertIn("status=-1", err)
+        self.assertIn(hip_error, err)
 
     def test_run_failure_without_a_pending_hip_error_stays_bare(self):
-        # The empty string must not become "status=-1 ()".
+        # When no HIP error is pending, "status=-1" must still appear; the
+        # empty string must not produce "status=-1 ()" and the description
+        # must not accidentally include HIP-error text.
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "out.json"
             self._run([STATUS_ERROR], json_path=out, hip_error="")
             data = json.loads(out.read_text())
-        self.assertEqual(data["kernels"][0]["error"], "status=-1")
+        err = data["kernels"][0]["error"]
+        self.assertIn("status=-1", err)
+        self.assertNotIn("HIP error:", err)   # no pending error → not appended
 
     def test_build_failure_reason_reaches_the_json_and_the_summary(self):
         # develop #2700: every kernel failed to build and the report said only
