@@ -5652,6 +5652,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                   tuningVec[heuristicTuningIndex[sol]],
                                                   *dWorkspace));
                     }
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
                     hipblaslt_cotenant::Scoped cotenant(
                         hipblaslt_bench_options::cotenant_cus(),
                         hipblaslt_bench_options::cotenant_max_occupancy(),
@@ -5703,6 +5704,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
                     hipblaslt_cotenant::Scoped cotenant(
                         hipblaslt_bench_options::cotenant_cus(),
                         hipblaslt_bench_options::cotenant_max_occupancy(),
@@ -5807,6 +5809,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else
                 {
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
                     hipblaslt_cotenant::Scoped cotenant(
                         hipblaslt_bench_options::cotenant_cus(),
                         hipblaslt_bench_options::cotenant_max_occupancy(),
@@ -5933,6 +5936,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                   gemm_count * sizeof(hipblaslt_ext::UserArguments),
                                                   hipMemcpyHostToDevice));
                     }
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
                     hipblaslt_cotenant::Scoped cotenant(
                         hipblaslt_bench_options::cotenant_cus(),
                         hipblaslt_bench_options::cotenant_max_occupancy(),
@@ -5997,6 +6001,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             stream));
                     }
 
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
                     hipblaslt_cotenant::Scoped cotenant(
                         hipblaslt_bench_options::cotenant_cus(),
                         hipblaslt_bench_options::cotenant_max_occupancy(),

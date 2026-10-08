@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <unistd.h>
 
+namespace cotenant = hipblaslt_cotenant;
+
 // Parse argv[i] as an integer in [lo, hi], or return def when absent.
 static long parse_arg(int argc, char** argv, int i, long def, long lo, long hi, const char* error)
 {
@@ -28,7 +30,7 @@ try
     const int max_occupancy
         = parse_arg(argc, argv, 2, 1, 1, 64, "max occupancy must be an integer in [1, 64]");
 
-    hipblaslt_cotenant::check(hipSetDevice(0));
+    cotenant::check(hipSetDevice(0));
     const char* hvd = std::getenv("HIP_VISIBLE_DEVICES");
     std::fprintf(stderr,
                  "hipblaslt-cotenant-kernel: pid=%d HIP_VISIBLE_DEVICES=%s\n",
@@ -36,14 +38,14 @@ try
                  hvd ? hvd : "<unset>");
 
     int* ready = nullptr;
-    hipblaslt_cotenant::check(
+    cotenant::check(
         hipHostMalloc(reinterpret_cast<void**>(&ready), sizeof(int), hipHostMallocMapped));
     *ready         = 0;
     int* ready_dev = nullptr;
-    hipblaslt_cotenant::check(
+    cotenant::check(
         hipHostGetDevicePointer(reinterpret_cast<void**>(&ready_dev), ready, 0));
-    hipblaslt_cotenant::launch<false>(n_cus, max_occupancy, nullptr, ready_dev);
-    hipblaslt_cotenant::wait_ready(ready, n_cus);
+    cotenant::launch<false>(n_cus, max_occupancy, nullptr, ready_dev);
+    cotenant::wait_ready(ready, n_cus);
     pause();
     return 0;
 }
