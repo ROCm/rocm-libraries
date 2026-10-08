@@ -1,25 +1,65 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #include "hipblaslt-jit-code-object.hpp"
-#include "solution_entry.hpp"
+#include "hipblaslt-jit-component.hpp"
+#include "test_helpers.hpp"
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
 // Builds the hand-written HIP kernel with comgr for each committed assembly
-// target, as an executable and as a relocatable, then each assembly file alone
-// and linked with that kernel from its source and from the relocatable, and
-// checks that each executable defines every expected kernel. Needs no GPU.
+// target, as an executable and as a relocatable, then each assembly file alone,
+// from its relocatable, and linked with that kernel from its source and from
+// the relocatable, and checks that each executable defines every expected
+// kernel. Needs no GPU.
 namespace
 {
     namespace fs = std::filesystem;
     namespace hj = hipblaslt_jit;
 
     const char* const kernelName = "hipblaslt_jit_builder_test_scale";
+
+    // The kernel and target an assembly file declares in its .amdhsa_kernel
+    // and .amdgcn_target directives.
+    struct Assembly
+    {
+        std::string kernel;
+        hj::Target  target;
+    };
+
+    bool after(const std::string& line, const std::string& prefix, std::string& rest)
+    {
+        if(line.rfind(prefix, 0) != 0)
+            return false;
+        rest = line.substr(prefix.size());
+        return true;
+    }
+
+    Assembly readAssembly(const std::string& text)
+    {
+        Assembly           result;
+        std::string        targetId;
+        std::istringstream lines(text);
+        for(std::string line, rest; std::getline(lines, line);)
+        {
+            if(after(line, ".amdhsa_kernel ", rest) && result.kernel.empty())
+                result.kernel = rest;
+            else if(after(line, ".amdgcn_target \"amdgcn-amd-amdhsa--", rest))
+                targetId = rest.substr(0, rest.find('"'));
+        }
+        const auto target = hj::Target::fromTargetId(targetId);
+        {
+            INFO(("The assembly names no kernel or known target"));
+            REQUIRE((!result.kernel.empty() && target));
+        }
+        result.target = *target;
+        return result;
+    }
 
     hj::Artifact build(const hj::SourceCodeBundle& source, hj::BuildKind kind, const fs::path& scratch)
     {
@@ -39,11 +79,11 @@ namespace
         return built;
     }
 
-    void buildAssembly(const fs::path&                      file,
-                       const hipblaslt_jit_test::Assembly& assembly,
-                       const hj::Artifact&                  kernel,
-                       const hj::Artifact&                  relocatable,
-                       const fs::path&                      scratch)
+    void buildAssembly(const fs::path&     file,
+                       const Assembly&     assembly,
+                       const hj::Artifact& kernel,
+                       const hj::Artifact& relocatable,
+                       const fs::path&     scratch)
     {
         const auto           text = hipblaslt_jit_test::readFile(file);
         const auto           name = file.filename().u8string();
@@ -55,6 +95,27 @@ namespace
         source.kernelNames = {assembly.kernel};
         build(source, hj::BuildKind::Executable, scratch);
         std::cout << "PASS comgr built " << name << " for " << assembly.target.targetId() << '\n';
+
+        // The note TensileliteAssembly reads its solution from.
+        auto       assembled = source;
+        assembled.mainKernel = build(source, hj::BuildKind::Relocatable, scratch);
+        const auto note      = hj::code_object::metadataNote(assembled.mainKernel.bytes);
+        {
+            INFO(("The relocatable of " + name + " has no metadata note with custom.config: "
+                  + note.log));
+            const std::string document(note.bytes.begin(), note.bytes.end());
+            REQUIRE((note.ok() && document.find("custom.config") != std::string::npos));
+        }
+        build(assembled, hj::BuildKind::Executable, scratch);
+        hj::Artifact twice;
+        const auto   again
+            = hj::makeComgrBuilder()->build(assembled, hj::BuildKind::Relocatable, twice);
+        {
+            INFO(("A relocatable build accepted a relocatable main kernel"));
+            REQUIRE((!again.ok() && again.stage == hj::Stage::Build));
+        }
+        std::cout << "PASS comgr linked " << name << " from its relocatable, whose metadata note "
+                  << "holds custom.config\n";
 
         source.kernelNames = {assembly.kernel, kernelName};
         for(const auto& helper : {kernel, relocatable})
@@ -126,7 +187,7 @@ TEST_CASE("comgr builds the HIP kernel and every committed assembly file", "[jit
                               hj::Artifact::Kind::Hip,
                               std::vector<uint8_t>(source.begin(), source.end())};
 
-    std::map<std::string, std::vector<std::pair<fs::path, hipblaslt_jit_test::Assembly>>> byTarget;
+    std::map<std::string, std::vector<std::pair<fs::path, Assembly>>> byTarget;
     for(const auto& arch : fs::directory_iterator(fs::u8path(HIPBLASLT_JIT_DATA)))
     {
         if(!arch.is_directory())
@@ -139,8 +200,7 @@ TEST_CASE("comgr builds the HIP kernel and every committed assembly file", "[jit
             {
                 if(file.path().extension() != ".s")
                     continue;
-                const auto assembly
-                    = hipblaslt_jit_test::readAssembly(hipblaslt_jit_test::readFile(file.path()));
+                const auto assembly = readAssembly(hipblaslt_jit_test::readFile(file.path()));
                 byTarget[assembly.target.targetId()].push_back({file.path(), assembly});
             }
         }

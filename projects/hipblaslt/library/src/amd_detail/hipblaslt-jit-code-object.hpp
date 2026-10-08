@@ -120,6 +120,23 @@ namespace hipblaslt_jit::code_object
     ObjectCheck inspect(const void* elf, std::size_t size) noexcept;
     ObjectCheck inspect(const std::vector<uint8_t>& elf) noexcept;
 
+    // The NT_AMDGPU_METADATA note of a relocatable or executable code object:
+    // the MessagePack document the assembler encodes from .amdgpu_metadata. It
+    // holds amdhsa.kernels and whatever else the source put there, such as the
+    // solution state a TensileLite kernel keeps in custom.config.
+    struct MetadataNote
+    {
+        Status               status = Status::InternalError;
+        std::string          log;
+        std::vector<uint8_t> bytes;
+        bool                 ok() const noexcept
+        {
+            return status == Status::Success;
+        }
+    };
+
+    MetadataNote metadataNote(const std::vector<uint8_t>& elf) noexcept;
+
     // "major.minor" of the loaded comgr library, for diagnostics.
     std::string comgrVersion() noexcept;
 

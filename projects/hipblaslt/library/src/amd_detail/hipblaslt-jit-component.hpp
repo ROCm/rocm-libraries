@@ -18,6 +18,7 @@
 namespace TensileLite
 {
     class Hardware;
+    class ContractionSolution;
 }
 
 // Compiled-in stages of JIT solution generation. This is not a plugin ABI.
@@ -95,8 +96,8 @@ namespace hipblaslt_jit
     };
 
     // One file. Assembly and Hip are sources. Relocatable is compiled and not
-    // linked, such as a helper from the helper library. Executable is a linked
-    // code object.
+    // linked, such as a helper from the helper library or an assembled main
+    // kernel. Executable is a linked code object.
     struct Artifact
     {
         std::string name;
@@ -120,7 +121,8 @@ namespace hipblaslt_jit
     // appended after the HIP defaults, so -std=c++20 overrides -std=c++17.
     struct SourceCodeBundle
     {
-        Artifact                 mainKernel; // Assembly or Hip
+        // Assembly or Hip, or for an Executable build a Relocatable built from either
+        Artifact                 mainKernel;
         std::vector<Artifact>    helpers;
         std::vector<Artifact>    includes;
         std::vector<std::string> hipFlags;
@@ -152,6 +154,27 @@ namespace hipblaslt_jit
     // helper library is the helper cache. comgr's own file cache is not part of
     // the library.
     std::shared_ptr<const CodeObjectBuilder> makeComgrBuilder();
+
+    // A TensileLite kernel's assembly and the solutions it implements. They
+    // come from the solution state the kernel keeps in custom.config of its
+    // .amdgpu_metadata, so the kernel name and the kernel-argument versions are
+    // theirs. target is a field because a ContractionSolution states its
+    // target only as a hardware predicate.
+    struct TensileliteAssembly : Artifact
+    {
+        std::vector<std::shared_ptr<TensileLite::ContractionSolution>> solutions;
+        Target                                                         target;
+
+        // Assembles source.mainKernel, an Assembly, alone into relocatable and
+        // reads assembly from its metadata note. An Executable build of source
+        // with relocatable as its main kernel links it without assembling again.
+        // Needs a MessagePack build of TensileLite and a HIP device, which
+        // TensileLite reads while it builds some predicates.
+        static Status make(const CodeObjectBuilder& builder,
+                           const SourceCodeBundle&  source,
+                           TensileliteAssembly&     assembly,
+                           Artifact&                relocatable);
+    };
 
     // Appends status.log to <scratch>/comgr.log, sets status.logPath and names
     // that file in the message. Does nothing without a log or a scratch directory.
