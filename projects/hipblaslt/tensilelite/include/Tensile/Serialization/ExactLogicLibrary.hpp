@@ -30,7 +30,11 @@
 #include <Tensile/Serialization/Predicates.hpp>
 
 #include <Tensile/ExactLogicLibrary.hpp>
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+#include <Tensile/UserKernelLibrary.hpp>
+#endif
 
+#include <memory>
 #include <set>
 #include <type_traits>
 
@@ -63,9 +67,30 @@ namespace TensileLite
             static void mapping(IO& io, Library& lib)
             {
                 iot::mapRequired(io, "rows", lib.rows);
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+                // Only at load: `rows` is read without a lock, so it must not
+                // change once GEMMs run. Not serialized on output.
+                if(!iot::outputting(io))
+                    insertUserTier(lib);
+#endif
             }
 
             const static bool flow = false;
+
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+        private:
+            static void insertUserTier(Library& lib)
+            {
+                typename Library::Base::Row row;
+                row.first = ProblemPredicate<MyProblem>(
+                    std::make_shared<Predicates::Contraction::UserExactMatching>());
+                row.second = globalUserKernelLibrary<MyProblem, MySolution>();
+
+                // At the head, so a mapped user kernel ranks ahead of shipped
+                // kernels.
+                lib.rows.insert(lib.rows.begin(), std::move(row));
+            }
+#endif
         };
 
         template <typename MyProblem, typename MySolution, typename MyPredicate, typename IO>

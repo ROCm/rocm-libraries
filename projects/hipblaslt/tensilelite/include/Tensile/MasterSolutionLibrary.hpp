@@ -40,6 +40,10 @@
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorOps.hpp>
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+#include <Tensile/UserKernelIndex.hpp>
+#include <Tensile/UserKernelLibrary.hpp>
+#endif
 
 #include <tensilelitehost/export.h>
 
@@ -175,6 +179,12 @@ namespace TensileLite
         std::shared_ptr<LibraryGeneration> generation = globalLibraryGeneration();
 #endif
 
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+        // The process-wide user kernel library that registrations go to.
+        std::shared_ptr<UserKernelLibrary<MyProblem, MySolution>> userLibrary
+            = globalUserKernelLibrary<MyProblem, MySolution>();
+#endif
+
         MasterSolutionLibrary() = default;
 
         bool initLibraryMapping(const std::string& tensileLibPath)
@@ -217,6 +227,12 @@ namespace TensileLite
 
         void loadLibrary(const int index) const
         {
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+            // User kernels are already in `solutions` and have no shard; the
+            // lookup below would load an unrelated one.
+            if(isUserKernelIndex(index))
+                return;
+#endif
             // TODO(#7080): point-key + upper_bound misses on above-largest and
             // gap-between-keys; switch to range-encoded mapping.
             auto it = libraryMapping.upper_bound(index);

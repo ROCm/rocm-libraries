@@ -281,7 +281,16 @@ namespace TensileLite
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
-                if(predictionLib
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+                // Prediction mode skips Equality rows but keeps the user row,
+                // which also reports "EqualityMatching".
+                const bool userRow = dynamic_cast<Predicates::Contraction::UserExactMatching*>(
+                                         row.first.value.get())
+                                     != nullptr;
+#else
+                const bool userRow = false;
+#endif
+                if(predictionLib && !userRow
                    && ((row.first.value->type() == "EqualityMatching")
                        || (row.first.value->type() == "RangeMatching")))
                     continue;
