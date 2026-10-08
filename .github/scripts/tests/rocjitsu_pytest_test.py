@@ -143,16 +143,6 @@ def test_hang():
         self.assertEqual(progress["passed"], 0)
         self.assertEqual(progress["skipped"], 1)
 
-    def test_invalid_worker_budget_fails_before_setup(self):
-        result = subprocess.run(
-            ["bash", str(self.scripts / "run_rocjitsu_tensilelite_test.sh")],
-            env={**os.environ, "PYTEST_WORKERS": "0"},
-            capture_output=True,
-            text=True,
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("PYTEST_WORKERS must be a positive integer", result.stderr)
-
 
 if __name__ == "__main__":
     unittest.main()

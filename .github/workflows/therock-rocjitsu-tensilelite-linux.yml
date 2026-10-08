@@ -3,7 +3,8 @@
 #
 # Run TensileLite common GEMM tests under rocjitsu CPU emulation.
 # Advisory (continue-on-error) sidecar job following the same pattern as
-# therock-rocjitsu-race-check-linux.yml.
+# therock-rocjitsu-race-check-linux.yml. The emulator comes from this run's
+# TheRock artifacts (rocjitsu + mirage), so its version follows therock_ref.
 
 name: TheRock rocjitsu tensilelite test Linux
 
@@ -44,10 +45,10 @@ jobs:
       OUTPUT_ARTIFACTS_DIR: ./build
       ROCM_PATH: ${{ github.workspace }}/build
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
-      ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
-      ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
+      SCRIPTS_DIR: ${{ github.workspace }}/rocm-libraries/.github/scripts
       REPORT_DIR: ${{ github.workspace }}/rocjitsu-tensilelite-reports
       PER_TEST_TIMEOUT: "2700"
+      # Leave time within the 345-minute step for cleanup and report generation.
       SUITE_TIMEOUT_SECONDS: "19800"
     steps:
       - name: Checkout TheRock repository
@@ -63,26 +64,6 @@ jobs:
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: true
 
-      - name: Checkout rocm-systems for rocjitsu
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          repository: ROCm/rocm-systems
-          # Keep the emulator fixed so retries compare the same implementation.
-          # Pinned at ROCm/rocm-systems#12515 (reduce VM and wave dispatch overhead).
-          ref: bbd1525f379c1ed3dd7f4d1b8bd77d3802c556ac
-          path: rocm-systems
-          sparse-checkout: |
-            emulation/rocjitsu
-            shared/machine-readable-isa/isa
-          sparse-checkout-cone-mode: true
-
-      - name: Install rocjitsu build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            libdrm-dev
-
       - name: Run setup test environment workflow
         timeout-minutes: 15
         uses: ./.github/actions/setup_test_environment
@@ -91,7 +72,7 @@ jobs:
           ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
           OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
           VENV_DIR: ${{ env.VENV_DIR }}
-          FETCH_ARTIFACT_ARGS: --blas --tests
+          FETCH_ARTIFACT_ARGS: --blas --tests --rocjitsu --mirage
 
       - name: Install TensileLite test requirements
         run: |
@@ -100,22 +81,96 @@ jobs:
 
       - name: Validate rocjitsu harness
         run: |
-          python -m unittest discover -v \
-            -s rocm-libraries/.github/scripts/tests -p 'rocjitsu*_test.py'
+          python -m unittest discover -v -s "${SCRIPTS_DIR}/tests" -p 'rocjitsu*_test.py'
+
+      - name: Configure rocjitsu emulation
+        run: |
+          set -euo pipefail
+          case "${AMDGPU_FAMILIES}" in
+            gfx94*)  target=gfx942;  profile=mi300x; config=gfx942_cdna3_kmd.json ;;
+            gfx950*) target=gfx950;  profile=mi350x; config=gfx950_mi355x_kmd.json ;;
+            gfx125*) target=gfx1250; profile=mi450x; config=gfx1250_mi455x.json ;;
+            *) echo "::error::Unsupported rocjitsu family: ${AMDGPU_FAMILIES}"; exit 1 ;;
+          esac
+          tensilelite_root="${ROCM_PATH}/share/hipblaslt/tensilelite"
+          client="${ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
+          for required in "${ROCM_PATH}/bin/mirage" "${ROCM_PATH}/lib/librocjitsu.so" \
+              "${ROCM_PATH}/share/rocjitsu/configs/${config}" "${tensilelite_root}" "${client}"; do
+            [[ -e "${required}" ]] || { echo "::error::Missing from artifacts: ${required}"; exit 1; }
+          done
+
+          # Each xdist worker's clients run their own in-process emulator, so
+          # split the host between workers instead of oversubscribing it.
+          cores="$(nproc)"
+          workers=$(( cores < 16 ? cores : 16 ))
+          budget=$(( cores / workers ))
+          mkdir -p "${REPORT_DIR}/junit"
+          python - "${ROCM_PATH}/share/rocjitsu/configs/${config}" \
+              "${REPORT_DIR}/rocjitsu-config.json" "${budget}" <<'PY'
+          import json, sys
+          source, destination, budget = sys.argv[1:]
+          config = json.load(open(source))
+          config["cpu_thread_budget"] = int(budget)
+          json.dump(config, open(destination, "w"), indent=2)
+          PY
+
+          # The compiler runtime is flat or under a host-triple directory.
+          llvm_lib="${ROCM_PATH}/lib/llvm/lib"
+          for candidate in "${llvm_lib}" "${llvm_lib}/$(uname -m)-unknown-linux-gnu"; do
+            [[ -e "${candidate}/libomp.so" ]] && llvm_lib_path="${llvm_lib}:${candidate}" && break
+          done
+          [[ -n "${llvm_lib_path:-}" ]] || { echo "::error::libomp.so not found under ${llvm_lib}"; exit 1; }
+
+          {
+            echo "ROCJITSU_TARGET=${target}"
+            echo "MIRAGE_PROFILE=${profile}"
+            echo "PYTEST_WORKERS=${workers}"
+            echo "TENSILELITE_ROOT=${tensilelite_root}"
+            echo "TENSILELITE_CLIENT=${client}"
+            echo "LD_LIBRARY_PATH=${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${llvm_lib_path}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+            echo "PYTHONPATH=${SCRIPTS_DIR}:${tensilelite_root}${PYTHONPATH:+:${PYTHONPATH}}"
+          } >> "${GITHUB_ENV}"
+          echo "${ROCM_PATH}/bin" >> "${GITHUB_PATH}"
+          echo "${ROCM_PATH}/lib/llvm/bin" >> "${GITHUB_PATH}"
+
+          echo "target=${target} profile=${profile} config=${config}"
+          echo "host_cores=${cores} xdist_workers=${workers} cpu_thread_budget=${budget}"
+          "${ROCM_PATH}/bin/mirage" --version
+          grep -a -m2 -oE 'git (revision|commit): [^[:cntrl:]]+' "${ROCM_PATH}/lib/librocjitsu.so" || true
+          python -c 'import sys; print(sys.version)'
+          python -m pip freeze > "${REPORT_DIR}/python-packages.txt"
 
       - name: Run rocjitsu tensilelite tests
         id: tests
         # The suite supervisor stops earlier, leaving time to reap and report.
         timeout-minutes: 345
-        run: bash rocm-libraries/.github/scripts/run_rocjitsu_tensilelite_test.sh
+        run: |
+          set -o pipefail
+          cd "${REPORT_DIR}"
+          python "${SCRIPTS_DIR}/rocjitsu_pytest.py" \
+            --report-dir "${REPORT_DIR}" --timeout "${SUITE_TIMEOUT_SECONDS}" -- \
+            mirage run --profile "${MIRAGE_PROFILE}" --in-process \
+              --config "${REPORT_DIR}/rocjitsu-config.json" -- \
+            python -m pytest "${TENSILELITE_ROOT}/Tensile/Tests/common/test_config.py" \
+              -p rocjitsu_pytest --rocjitsu-report-dir="${REPORT_DIR}" \
+              -m "${ROCJITSU_TARGET}" --gpu-targets="${ROCJITSU_TARGET}" \
+              -v -s -n "${PYTEST_WORKERS}" --client-lock-scope=worker \
+              --timeout="${PER_TEST_TIMEOUT}" \
+              --junit-xml="${REPORT_DIR}/junit/tensilelite.xml" \
+              --prebuilt-client="${TENSILELITE_CLIENT}" \
+              --global-parameters="LibraryFormat='msgpack'" \
+              "--tensile-options=--cxx-compiler,${ROCM_PATH}/bin/amdclang++,--gpu-targets,${ROCJITSU_TARGET}" \
+            2>&1 | tee "${REPORT_DIR}/tensilelite-test.log"
+
+      - name: Summarize test timings
+        if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
+        run: python "${SCRIPTS_DIR}/rocjitsu_junit_summary.py" --report-dir "${REPORT_DIR}"
 
       # A killed test step can still be reported as successful; verify the
       # supervisor's records instead and keep the container's memory counters.
       - name: Check suite completeness
         if: ${{ !cancelled() && steps.tests.conclusion != 'skipped' }}
-        run: |
-          python rocm-libraries/.github/scripts/rocjitsu_check_suite.py \
-            --report-dir "${REPORT_DIR}"
+        run: python "${SCRIPTS_DIR}/rocjitsu_check_suite.py" --report-dir "${REPORT_DIR}"
 
       - name: Upload test reports
         if: ${{ always() }}
