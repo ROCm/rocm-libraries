@@ -164,6 +164,22 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         spec->lds_k_outer = true;
         *arch = "gfx1250";
         return 0;
+    case 14:
+        /* Rejected by both validators: explicit vector_size_a 8 on a 16x32 dY
+         * tile gives 64 chunks for a 128-thread block. */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 16;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 2;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 8;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

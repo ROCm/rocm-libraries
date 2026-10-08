@@ -253,6 +253,8 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
  * the concrete rocke_tensor_descriptor_t is declared in transforms.h, which the
  * internal/body TUs include. */
 struct rocke_tensor_descriptor; /* fwd (full decl in helper transforms header) */
+struct rocke_dynamic_tensor_descriptor; /* fwd (full decl in helper transforms header) */
+struct rocke_conv_build_ctx; /* fwd (full decl in instance_conv_implicit_gemm_internal.h) */
 
 struct rocke_tensor_descriptor* rocke_conv_make_a_descriptor(rocke_ir_builder_t* b,
                                                              const rocke_conv_problem_t* p,
@@ -261,6 +263,74 @@ struct rocke_tensor_descriptor* rocke_conv_make_b_descriptor(rocke_ir_builder_t*
                                                              const rocke_conv_problem_t* p);
 struct rocke_tensor_descriptor* rocke_conv_make_d_descriptor(rocke_ir_builder_t* b,
                                                              const rocke_conv_problem_t* p);
+
+/* AOT runtime-param versions (mirrors Python _make_a/b/d_descriptor_dynamic). */
+/* One (mult, shift) magic pair; `dim` comes from the ctx extent. */
+typedef struct rocke_conv_dyn_magic
+{
+    rocke_value_t* mult;
+    rocke_value_t* shift;
+} rocke_conv_dyn_magic_t;
+
+/* Which strides and magic families a dynamic descriptor should read.
+ *
+ * The forward A descriptor uses the p_A_stride_* slots and the m_/k_ magic
+ * families; wgrad's X operand has the identical transform DAG but reads the
+ * p_X_stride_* slots and the k_/n_ families. Passing the choice in keeps one
+ * builder for both instead of a near-duplicate. */
+typedef struct rocke_conv_dyn_desc_opts
+{
+    const char* name; /* descriptor name                     */
+    /* Upper coord names. NULL falls back to the forward pair ("m", "k").
+     * Coord names do not affect the emitted IR, but the surrounding phase
+     * functions query the descriptor by name, so each direction keeps the
+     * names its own callers use. */
+    const char* spatial_upper;
+    const char* channel_upper;
+    rocke_value_t* stride_n; /* leading (batch) stride              */
+    rocke_value_t* stride_di; /* depth stride (3-D only)             */
+    rocke_value_t* stride_hi; /* row stride                          */
+    rocke_value_t* stride_wi; /* column stride                       */
+    rocke_conv_dyn_magic_t spatial_di; /* divisor Do (3-D only)              */
+    rocke_conv_dyn_magic_t spatial_hi; /* divisor Ho (or Hi for dgrad)       */
+    rocke_conv_dyn_magic_t spatial_wi; /* divisor Wo (or Wi)                 */
+    rocke_conv_dyn_magic_t channel_y; /* divisor Y (3-D only)               */
+    rocke_conv_dyn_magic_t channel_x; /* divisor X                          */
+    rocke_conv_dyn_magic_t channel_c; /* divisor cpg                        */
+} rocke_conv_dyn_desc_opts_t;
+
+/* Takes a mutable ctx: it emits p_pH_neg / p_pW_neg here, where Python emits
+ * them, and records them for the later transform chain. */
+struct rocke_dynamic_tensor_descriptor* rocke_conv_make_a_descriptor_dynamic(
+    rocke_ir_builder_t* b, struct rocke_conv_build_ctx* ctx, bool decompose_m);
+
+/* Same builder with the stride / magic sources supplied explicitly. */
+struct rocke_dynamic_tensor_descriptor*
+    rocke_conv_make_a_descriptor_dynamic_opts(rocke_ir_builder_t* b,
+                                              struct rocke_conv_build_ctx* ctx,
+                                              bool decompose_m,
+                                              const rocke_conv_dyn_desc_opts_t* opts);
+
+/* wgrad dY descriptor: (k, m) -> NHWK, coord-named like the forward A so the
+ * shared load phase can query it unchanged. */
+struct rocke_dynamic_tensor_descriptor*
+    rocke_conv_make_dy_descriptor_dynamic(rocke_ir_builder_t* b,
+                                          const struct rocke_conv_build_ctx* ctx,
+                                          const rocke_conv_dyn_desc_opts_t* opts);
+
+/* B/weight-layout descriptor with explicit stride + magic sources
+ * (k_out, n) -> K[Z]YXC. wgrad's dW uses this with the n_ magic family. */
+struct rocke_dynamic_tensor_descriptor*
+    rocke_conv_make_b_descriptor_dynamic_opts(rocke_ir_builder_t* b,
+                                              const struct rocke_conv_build_ctx* ctx,
+                                              const char* upper_name,
+                                              const rocke_conv_dyn_desc_opts_t* opts);
+struct rocke_dynamic_tensor_descriptor*
+    rocke_conv_make_b_descriptor_dynamic(rocke_ir_builder_t* b,
+                                         const struct rocke_conv_build_ctx* ctx);
+struct rocke_dynamic_tensor_descriptor*
+    rocke_conv_make_d_descriptor_dynamic(rocke_ir_builder_t* b,
+                                         const struct rocke_conv_build_ctx* ctx);
 
 /* ============================================================ *
  * Build-time override callbacks   (Python build_implicit_gemm_conv args)
