@@ -6,11 +6,13 @@
 #include "hipblaslt-jit-fs.hpp"
 #include "hipblaslt-jit-msgpack.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
+#include "hipblaslt-jit-replay-catalog.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include <Tensile/CachingLibrary.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/ExactLogicLibrary.hpp>
 #include <Tensile/Tensile.hpp>
+#include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <algorithm>
 #include <cctype>
@@ -199,23 +201,6 @@ namespace hipblaslt_jit
             return codeObject >= 4 && codeObject <= 6;
         }
 
-        // A missing helper list means this solution names no helper. A list that
-        // this build cannot read skips the solution; the rest of the slice loads.
-        bool helpersReadable(const fs::path& directory, const std::string& codeObjectFilename)
-        {
-            auto prefix = codeObjectFilename;
-            if(prefix.size() >= 3 && prefix.compare(prefix.size() - 3, 3, ".co") == 0)
-                prefix.resize(prefix.size() - 3);
-            const auto      sidecar = directory / (prefix + ".helpers");
-            std::error_code error;
-            if(!fs::is_regular_file(sidecar, error))
-                return true;
-            std::vector<uint8_t> bytes;
-            std::vector<std::string> names;
-            return files::readFile(sidecar, fileLimit, bytes).ok()
-                   && msgpack_io::readNames(bytes, names).ok();
-        }
-
         Status ensureEntryParents(const fs::path& root, const fs::path& file)
         {
             const auto relative = file.parent_path().lexically_relative(root);
@@ -256,100 +241,6 @@ namespace hipblaslt_jit
             const auto solution = solutionIn(entry, index);
             return solution && solution->kernelName == kernel;
         }
-
-        // Helper code objects for one backend directory, keyed by helper name.
-        // The files live in the JIT library. This is not a cache the builder owns.
-        class DirectoryHelpers
-        {
-        public:
-            DirectoryHelpers(fs::path root, std::string backendId, fs::path staging)
-                : m_root(std::move(root))
-                , m_backendId(std::move(backendId))
-                , m_staging(std::move(staging))
-            {
-            }
-
-            Artifact find(const std::string& helperName) const
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                Artifact                    out;
-                bool                        present = false;
-                static_cast<void>(read(helperName, out, present));
-                return present ? out : Artifact{};
-            }
-
-            Status publish(const Artifact& helper)
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                return publishUnlocked(helper);
-            }
-
-            Status acquire(const std::string&                       helperName,
-                           const std::function<Status(Artifact&)>& compile,
-                           Artifact&                                out)
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                bool                        present = false;
-                if(auto status = read(helperName, out, present); !status.ok())
-                    return status;
-                if(present)
-                    return {};
-                Artifact compiled;
-                if(auto status = compile(compiled); !status.ok())
-                    return status;
-                compiled.name = helperName;
-                compiled.kind = Artifact::Kind::CodeObject;
-                if(compiled.bytes.empty())
-                    return failed(Stage::Build, "Helper " + helperName + " produced no code object");
-                if(auto status = publishUnlocked(compiled); !status.ok())
-                    return status;
-                out = std::move(compiled);
-                return {};
-            }
-
-        private:
-            fs::path file(const std::string& helperName) const
-            {
-                return m_root / "helpers" / filesystemLiteral(m_backendId)
-                       / (filesystemLiteral(helperName) + ".co");
-            }
-
-            Status read(const std::string& helperName, Artifact& out, bool& present) const
-            {
-                present = false;
-                out     = {};
-                const auto      path = file(helperName);
-                std::error_code error;
-                if(!fs::is_regular_file(path, error))
-                    return {};
-                std::vector<uint8_t> bytes;
-                if(auto status = files::readFile(path, fileLimit, bytes); !status.ok())
-                    return status;
-                out.name  = helperName;
-                out.kind  = Artifact::Kind::CodeObject;
-                out.bytes = std::move(bytes);
-                present   = true;
-                return {};
-            }
-
-            Status publishUnlocked(const Artifact& helper)
-            {
-                if(helper.name.empty() || helper.bytes.empty())
-                    return failed(Stage::Publish, "A helper code object has no name");
-                const auto      path = file(helper.name);
-                std::error_code error;
-                if(fs::is_regular_file(path, error))
-                    return {};
-                if(auto status = ensureEntryParents(m_root, path); !status.ok())
-                    return status;
-                return files::writeAtomically(m_staging, path, helper.bytes);
-            }
-
-            fs::path            m_root;
-            std::string         m_backendId;
-            fs::path            m_staging;
-            mutable std::mutex  m_mutex;
-        };
     }
 
     std::map<std::string, std::string> compilerEnvironment(const char* const* environment)
@@ -638,7 +529,9 @@ namespace hipblaslt_jit
         std::string isa;
         CacheKey    identity;
         Status      failure; // a cache-key.msgpack this directory cannot use
-        std::unique_ptr<DirectoryHelpers> helpers;
+        // The helper-only library: a TensileLite lazy library of helper code
+        // objects, beside the solution slices.
+        std::unique_ptr<Slice> helpers;
 
         std::mutex                                  sliceMutex;
         std::map<std::string, std::unique_ptr<Slice>> slices;
@@ -656,10 +549,9 @@ namespace hipblaslt_jit
         {
             return path / "indices.msgpack";
         }
-        fs::path helperFile(const std::string& name) const
+        fs::path helperLibraryPath() const
         {
-            return path / "helpers" / filesystemLiteral(identity.backendId)
-                   / (filesystemLiteral(name) + ".co");
+            return path / "helpers";
         }
         fs::path slicePath(const std::string& key) const
         {
@@ -822,8 +714,6 @@ namespace hipblaslt_jit
             opened->path     = schemaDirectory() / name;
             opened->isa      = key.isa;
             opened->identity = key;
-            opened->helpers  = std::make_unique<DirectoryHelpers>(
-                opened->path, key.backendId, opened->staging());
             for(const auto& path : {opened->path, opened->staging()})
                 if(auto status = files::privateDirectory(path); !status.ok())
                 {
@@ -858,12 +748,173 @@ namespace hipblaslt_jit
                                      const std::function<Status(Artifact&)>& compile,
                                      Artifact&                               out)
     {
+        out = {};
+        if(helperName.empty())
+            return failed(Stage::Build, "A helper has no name");
         Directory* directory = nullptr;
         if(auto status = attach(key, device, directory); !status.ok())
             return status;
-        if(!directory || !directory->helpers)
-            return failed(Stage::Build, "The JIT solution library has no helper cache");
-        return directory->helpers->acquire(helperName, compile, out);
+        if(!directory)
+            return failed(Stage::Build, "The JIT solution library has no helper library");
+
+        const auto prefix = filesystemLiteral(helperName);
+        auto       locate = [&](Directory::Slice*& slice) -> Status {
+            slice = nullptr;
+            std::lock_guard<std::mutex> guard(directory->sliceMutex);
+            if(!directory->helpers)
+            {
+                directory->helpers         = std::make_unique<Directory::Slice>();
+                directory->helpers->path   = directory->helperLibraryPath();
+            }
+            slice = directory->helpers.get();
+            return {};
+        };
+        auto readStored = [&](Artifact& found, bool& present) -> Status {
+            present = false;
+            found   = {};
+            Directory::Slice* slice = nullptr;
+            if(auto status = locate(slice); !status.ok())
+                return status;
+            std::error_code error;
+            if(!fs::is_regular_file(slice->masterPath(directory->isa), error))
+                return {};
+            std::lock_guard<std::mutex> lock(slice->mutex);
+            if(auto status = slice->refresh(directory->isa); !status.ok())
+                return status;
+            if(!slice->master)
+                return {};
+            int index = -1;
+            for(const auto& [mapped, name] : slice->master->libraryMapping)
+                if(name == prefix)
+                    index = mapped;
+            if(index < 0)
+                return {};
+            hipDeviceProp_t properties{};
+            if(hipGetDeviceProperties(&properties, device) != hipSuccess)
+                return failed(Stage::Lookup, "Cannot query the device for the helper library");
+            const auto hardware = TensileLite::hip::GetDevice(properties, device);
+            if(!hardware)
+                return failed(Stage::Lookup, "Cannot describe the device for the helper library");
+            const auto solution = slice->master->getSolutionByIndex(*hardware, index);
+            if(!solution || solution->kernelName != helperName)
+                return failed(Stage::Lookup,
+                              "The helper library has no solution named " + helperName);
+            const auto object = slice->path / solution->codeObjectFilename.load();
+            std::vector<uint8_t> bytes;
+            if(auto status = files::readFile(object, fileLimit, bytes); !status.ok())
+                return status;
+            found.name  = helperName;
+            found.kind  = Artifact::Kind::CodeObject;
+            found.bytes = std::move(bytes);
+            present     = true;
+            return {};
+        };
+
+        bool present = false;
+        if(auto status = readStored(out, present); !status.ok())
+            return status;
+        if(present)
+            return {};
+
+        Artifact compiled;
+        if(auto status = compile(compiled); !status.ok())
+            return status;
+        compiled.name = helperName;
+        compiled.kind = Artifact::Kind::CodeObject;
+        if(compiled.bytes.empty())
+            return failed(Stage::Build, "Helper " + helperName + " produced no code object");
+
+        Directory::Slice* slice = nullptr;
+        if(auto status = locate(slice); !status.ok())
+            return status;
+        if(auto status = files::privateDirectory(slice->path); !status.ok())
+            return status;
+        files::FileLock lock;
+        const auto      lockFile = schemaDirectory() / "lock";
+        if(auto status = files::FileLock::acquire(lockFile, std::chrono::seconds(120), lock);
+           !status.ok())
+            return status;
+        if(auto status = readStored(out, present); !status.ok())
+            return status;
+        if(present)
+            return {};
+
+        const auto           staging   = directory->staging();
+        const auto           allocator = slice->path / "allocator.dat";
+        std::vector<uint8_t> bytes;
+        std::error_code      error;
+        int64_t              next = 1;
+        if(fs::is_regular_file(allocator, error))
+        {
+            if(auto status = files::readFile(allocator, fileLimit, bytes); !status.ok())
+                return status;
+            if(auto status = msgpack_io::readAllocator(bytes, next); !status.ok())
+                return status;
+        }
+        if(next > INT32_MAX)
+            return failed(Stage::Publish, "The helper library index range is exhausted");
+        const auto index = static_cast<int32_t>(next++);
+        if(auto status = msgpack_io::writeAllocator(next, bytes); !status.ok())
+            return status;
+        if(auto status = files::writeAtomically(staging, allocator, bytes); !status.ok())
+            return status;
+
+        std::vector<uint8_t> entry;
+        if(auto status = msgpack_io::rewriteEntryIndex(
+               committed::helperEntry(helperName, directory->isa), 0, index, entry);
+           !status.ok())
+            return status;
+        if(!validEntry(entry, index, helperName))
+            return failed(Stage::Publish,
+                          "The helper entry for " + helperName + " does not load");
+        msgpack_io::EntryFields fields;
+        if(auto status = msgpack_io::readEntry(entry, fields); !status.ok())
+            return status;
+        const auto record = slice->path / (prefix + ".dat");
+        const auto object = slice->path / (prefix + ".co");
+        if(auto status = ensureEntryParents(slice->path, record); !status.ok())
+            return status;
+        if(auto status = files::writeAtomically(staging, record, entry); !status.ok())
+            return status;
+        if(auto status = files::writeAtomically(staging, object, compiled.bytes); !status.ok())
+            return status;
+
+        std::vector<uint8_t> master;
+        if(fs::is_regular_file(slice->masterPath(directory->isa), error))
+            if(auto status = files::readFile(slice->masterPath(directory->isa), fileLimit, master);
+               !status.ok())
+                return status;
+        if(auto status = msgpack_io::appendMasterRows(
+               master, {{std::vector<size_t>{}, fields.predicate, prefix}}, bytes);
+           !status.ok())
+            return status;
+        if(auto status = files::writeAtomically(staging, slice->masterPath(directory->isa), bytes);
+           !status.ok())
+            return status;
+
+        std::map<int32_t, std::string> mapping;
+        if(fs::is_regular_file(slice->mappingPath(directory->isa), error))
+        {
+            if(auto status = files::readFile(slice->mappingPath(directory->isa), fileLimit, bytes);
+               !status.ok())
+                return status;
+            if(auto status = msgpack_io::readMapping(bytes, mapping); !status.ok())
+                return status;
+        }
+        mapping.emplace(index, prefix);
+        if(auto status = msgpack_io::writeMapping(mapping, bytes); !status.ok())
+            return status;
+        if(auto status
+           = files::writeAtomically(staging, slice->mappingPath(directory->isa), bytes);
+           !status.ok())
+            return status;
+        {
+            std::lock_guard<std::mutex> lockSlice(slice->mutex);
+            if(auto status = slice->refresh(directory->isa); !status.ok())
+                return status;
+        }
+        out = std::move(compiled);
+        return {};
     }
 
     void JitLibrary::discover(int device)
@@ -949,8 +1000,7 @@ namespace hipblaslt_jit
                    || !master->libraryMapping.count(solution->index)
                    || std::find(excludeKernels.begin(), excludeKernels.end(), solution->kernelName)
                           != excludeKernels.end()
-                   || !solutionRunnable(*solution, slice->path)
-                   || !helpersReadable(slice->path, solution->codeObjectFilename.load()))
+                   || !solutionRunnable(*solution, slice->path))
                     continue;
                 found.push_back(solution->index);
             }
@@ -982,7 +1032,6 @@ namespace hipblaslt_jit
                 const Artifact*      object = nullptr;
                 std::vector<uint8_t> entry;
                 std::string          kernel;
-                std::vector<std::pair<std::string, const std::vector<uint8_t>*>> helpers;
             };
             std::vector<Candidate> candidates;
             for(const auto& supported : solutions)
@@ -1008,9 +1057,6 @@ namespace hipblaslt_jit
                            supported.first.record, local, 0, candidate.entry);
                        !status.ok())
                         return status;
-                    for(const auto& helper : supported.first.helpers)
-                        if(!helper.name.empty() && !helper.bytes.empty())
-                            candidate.helpers.emplace_back(helper.name, &helper.bytes);
                     candidates.push_back(std::move(candidate));
                 }
             }
@@ -1125,22 +1171,8 @@ namespace hipblaslt_jit
                     return status;
             }
 
-            // Helpers first, then main code objects, then entries that name them,
-            // then the mapping, then the master. Each file is complete before any
-            // file that refers to it. A helper already stored for this backend is
-            // reused and not rewritten.
-            for(const auto& candidate : candidates)
-                for(const auto& helper : candidate.helpers)
-                {
-                    const auto object = directory->helperFile(helper.first);
-                    if(fs::is_regular_file(object, error))
-                        continue;
-                    if(auto status = ensureEntryParents(directory->path, object); !status.ok())
-                        return status;
-                    if(auto status = files::writeAtomically(staging, object, *helper.second);
-                       !status.ok())
-                        return status;
-                }
+            // The solution code object is already linked with any helpers. The
+            // helper library holds those helpers; this library stores the executable.
             for(const auto& placement : placements)
                 if(placement.fresh)
                 {
@@ -1176,21 +1208,6 @@ namespace hipblaslt_jit
                 if(auto status = files::writeAtomically(staging, entry, placement.entry);
                    !status.ok())
                     return status;
-                std::vector<std::string> helperNames;
-                for(const auto& helper : candidates[placement.source].helpers)
-                    helperNames.push_back(helper.first);
-                if(!helperNames.empty())
-                {
-                    std::vector<uint8_t> helperList;
-                    if(auto status = msgpack_io::writeNames(helperNames, helperList); !status.ok())
-                        return status;
-                    const auto sidecar = slice->path / (placement.prefix + ".helpers");
-                    if(auto status = ensureEntryParents(slice->path, sidecar); !status.ok())
-                        return status;
-                    if(auto status = files::writeAtomically(staging, sidecar, helperList);
-                       !status.ok())
-                        return status;
-                }
             }
 
             if(fresh)
@@ -1247,31 +1264,6 @@ namespace hipblaslt_jit
                 indices.push_back(placements[placement].index);
             return {};
         });
-    }
-
-    namespace
-    {
-        void loadHelpers(const fs::path&                    slice,
-                         TensileLite::hip::SolutionAdapter* adapter,
-                         const std::string&                 codeObjectFilename,
-                         const fs::path&                    helperDirectory)
-        {
-            if(!adapter)
-                return;
-            auto prefix = codeObjectFilename;
-            if(prefix.size() >= 3 && prefix.compare(prefix.size() - 3, 3, ".co") == 0)
-                prefix.resize(prefix.size() - 3);
-            const auto               sidecar = slice / (prefix + ".helpers");
-            std::error_code          error;
-            std::vector<uint8_t>     bytes;
-            std::vector<std::string> names;
-            if(!fs::is_regular_file(sidecar, error) || !files::readFile(sidecar, fileLimit, bytes).ok()
-               || !msgpack_io::readNames(bytes, names).ok())
-                return;
-            for(const auto& name : names)
-                static_cast<void>(adapter->loadCodeObjectFile(
-                    (helperDirectory / (filesystemLiteral(name) + ".co")).string()));
-        }
     }
 
     JitLibrary::View JitLibrary::resolve(int device, int32_t index, Status& why)
@@ -1331,15 +1323,10 @@ namespace hipblaslt_jit
                         }
                     if(slice->master && slice->master->libraryMapping.count(index))
                     {
-                        auto* adapter = slice->adapter(device);
-                        const auto prefix = slice->master->libraryMapping.at(index);
-                        if(!helpersReadable(slice->path, prefix + ".co"))
-                            continue;
-                        loadHelpers(slice->path,
-                                    adapter,
-                                    prefix + ".co",
-                                    directory->path / "helpers"
-                                        / filesystemLiteral(directory->identity.backendId));
+                        auto*      adapter = slice->adapter(device);
+                        const auto prefix  = slice->master->libraryMapping.at(index);
+                        static_cast<void>(adapter->loadCodeObjectFile(
+                            (slice->path / (prefix + ".co")).string()));
                         view = {slice->master, adapter};
                         return {};
                     }

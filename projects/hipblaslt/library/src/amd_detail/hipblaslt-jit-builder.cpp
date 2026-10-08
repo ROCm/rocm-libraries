@@ -115,45 +115,60 @@ namespace hipblaslt_jit
                 auto assemblyTarget          = target;
                 assemblyTarget.wavefrontSize = wavefrontSize;
 
-                // Helpers left on the bundle are compiled here. JitLibrary is the
-                // helper cache: a caller that has a library acquires each helper
-                // from it and does not leave that source on the bundle. This
-                // builder keeps no cache of its own. comgr's file cache is not
-                // a substitute.
-                auto compileHelper = [&](const Artifact& helper, Artifact& out) -> Status {
-                    if(helper.name.empty() || helper.kind != Artifact::Kind::Hip)
-                        return failure(request, "A helper source has no HIP name", {});
-                    SourceCodeBundle helperSource;
-                    helperSource.mainKernel = helper;
-                    helperSource.includes   = source.includes;
-                    helperSource.hipFlags   = source.hipFlags;
-                    auto helperObject       = co::build(helperSource, assemblyTarget, options);
-                    if(!helperObject.ok())
+                auto compileObject = [&](const SourceCodeBundle& unit,
+                                         const co::Target&     unitTarget,
+                                         Artifact&             out) -> Status {
+                    auto object = co::compileRelocatable(unit, unitTarget, options);
+                    if(!object.ok())
                         return failure(request,
-                                       "comgr could not build helper " + helper.name,
-                                       helperObject.log);
-                    const auto helperMeta = co::inspect(helperObject.codeObject.bytes);
-                    if(!helperMeta.ok() || helperMeta.isaName != target.isaName()
-                       || helperMeta.codeObjectVersion != request.codeObjectVersion)
-                        return failure(request,
-                                       "Helper " + helper.name + " is not a code object for "
-                                           + target.isaName(),
-                                       helperObject.log + helperMeta.log);
-                    out      = std::move(helperObject.codeObject);
-                    out.name = helper.name;
+                                       "comgr could not compile " + unit.mainKernel.name,
+                                       object.log);
+                    out = std::move(object.codeObject);
+                    if(out.name.empty())
+                        out.name = unit.mainKernel.name;
                     out.kind = Artifact::Kind::CodeObject;
                     return {};
                 };
-                for(const auto& helper : source.helpers)
+
+                SourceCodeBundle mainUnit;
+                mainUnit.mainKernel = source.mainKernel;
+                mainUnit.includes   = source.includes;
+                mainUnit.hipFlags   = source.hipFlags;
+                Artifact mainObject;
+                if(auto status = compileObject(mainUnit, assemblyTarget, mainObject); !status.ok())
+                    return status;
+                if(request.relocatable)
                 {
-                    Artifact builtHelper;
-                    const auto helperStatus = compileHelper(helper, builtHelper);
-                    if(!helperStatus.ok())
-                        return helperStatus;
-                    built.helpers.push_back(std::move(builtHelper));
+                    built.codeObject = std::move(mainObject);
+                    return {};
                 }
 
-                auto linked = co::build(source, assemblyTarget, options);
+                std::vector<Artifact> objects{std::move(mainObject)};
+                if(!request.linkInputs.empty())
+                    objects.insert(objects.end(), request.linkInputs.begin(), request.linkInputs.end());
+                else
+                {
+                    // No helper library was supplied. Compile each helper and
+                    // link it once; do not keep a second cache.
+                    for(const auto& helper : source.helpers)
+                    {
+                        if(helper.name.empty() || helper.kind != Artifact::Kind::Hip)
+                            return failure(request, "A helper source has no HIP name", {});
+                        SourceCodeBundle helperUnit;
+                        helperUnit.mainKernel = helper;
+                        helperUnit.includes   = source.includes;
+                        helperUnit.hipFlags   = source.hipFlags;
+                        Artifact helperObject;
+                        auto     hipTarget          = target;
+                        hipTarget.wavefrontSize     = 0;
+                        if(auto status = compileObject(helperUnit, hipTarget, helperObject);
+                           !status.ok())
+                            return status;
+                        objects.push_back(std::move(helperObject));
+                    }
+                }
+
+                auto linked = co::linkRelocatables(objects, target, options);
                 if(!linked.ok())
                     return failure(request, "comgr could not build the code object", linked.log);
 

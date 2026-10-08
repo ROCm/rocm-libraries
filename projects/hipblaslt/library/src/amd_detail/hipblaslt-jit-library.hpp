@@ -81,11 +81,12 @@ namespace hipblaslt_jit
                             const std::string&         kernelName,
                             const std::vector<size_t>& sizes);
 
-    // A persistent library of generated solutions. Each directory holds one
-    // slice per kernel family. A query opens that slice only: a TensileLite
-    // lazy master, its index mapping, and one entry and code object per
-    // solution, matching the full ProblemType and the exact sizes. Shared HIP
-    // helpers live beside the slices, one code object per backend id and name.
+    // A persistent library of generated solutions and of the helpers those
+    // solutions are linked with. Each is a TensileLite solution library: a lazy
+    // master, its index mapping, and one entry and code object per solution.
+    // The solution library's code object is the fully linked executable. The
+    // helper library stores the helper relocatable that link consumed, keyed by
+    // backend id and helper name. A query opens one solution slice only.
     // Library files are MessagePack, including cache-key.msgpack. A solution
     // whose code-object version or kernarg version this build cannot run is
     // skipped; the rest of the library still loads.
@@ -208,11 +209,11 @@ namespace hipblaslt_jit
         // when the index is newer than this process has seen. Empty, with why
         // set, otherwise.
         View resolve(int device, int32_t index, Status& why);
-        // The helper code object stored for key's backend and helperName. A hit
-        // returns that object and does not call compile. A miss calls compile
-        // once, stores the code object beside this library's slices, and returns
-        // it. The same backend id and helper name always name the same file.
-        // Fails, without calling compile, when this library cannot be used.
+        // The helper relocatable stored for key's backend and helperName. A hit
+        // returns the object from this library's helper library and does not
+        // call compile. A miss calls compile once and publishes that object
+        // through the same TensileLite library path as a solution. Fails,
+        // without calling compile, when this library cannot be used.
         Status acquireHelper(const CacheKey&                            key,
                              int                                        device,
                              const std::string&                         helperName,

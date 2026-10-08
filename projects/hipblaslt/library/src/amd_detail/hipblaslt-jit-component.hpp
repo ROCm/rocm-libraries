@@ -94,6 +94,12 @@ namespace hipblaslt_jit
         int                      codeObjectVersion = jitCodeObjectVersion;
         std::filesystem::path    scratch; // receives comgr.log after a failure, or empty
         std::vector<std::string> kernelNames; // kernels the code object must define; empty accepts the object as built
+        // Relocatables from the helper library. Linked into this solution.
+        // Empty: helpers still on the bundle are compiled and linked here.
+        std::vector<Artifact> linkInputs;
+        // Return the relocatable for mainKernel and do not link. The helper
+        // library stores that object.
+        bool relocatable = false;
     };
 
     // The linked code object and any helper code objects. The TensileLite
@@ -114,9 +120,10 @@ namespace hipblaslt_jit
             build(const SourceCodeBundle&, const BuildRequest&, CompiledCode&) const = 0;
     };
 
-    // Compiles the SourceCodeBundle with comgr: each helper still on the bundle,
-    // then the main kernel. This builder keeps no helper cache. JitLibrary is
-    // that cache. comgr's own file cache is not part of the library.
+    // Compiles the SourceCodeBundle with comgr. Helpers on the bundle, or
+    // relocatables in BuildRequest::linkInputs, are linked into the one
+    // executable with the main kernel. JitLibrary's helper library is the
+    // helper cache. comgr's own file cache is not part of the library.
     std::shared_ptr<const CodeObjectBuilder> makeComgrBuilder();
 
     using GemmRequest = hipblaslt_ext::experimental::jit::detail::GemmRequest;
