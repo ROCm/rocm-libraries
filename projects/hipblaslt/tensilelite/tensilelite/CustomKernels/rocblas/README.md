@@ -98,9 +98,9 @@ Replacement assembly must stay at code object version 4 (see `../README.md`)
 and keep its `.amdgcn_target` / `.amdhsa_code_object_version` directives.
 
 ```bash
-python -m Tensile.AddCustomConfig \
-  Tensile/CustomKernels/rocblas/wvSpltK_bf16_tn_m2.s \
-  --yaml Tensile/Tests/custom/custom_rocblas_gemv_bf16_tn_m2.yaml \
+python -m tensilelite.AddCustomConfig \
+  tensilelite/CustomKernels/rocblas/wvSpltK_bf16_tn_m2.s \
+  --yaml tensilelite/Tests/custom/custom_rocblas_gemv_bf16_tn_m2.yaml \
   --origin rocblas \
   --repository https://github.com/ROCm/rocBLAS-internal \
   --version 1.0.0
