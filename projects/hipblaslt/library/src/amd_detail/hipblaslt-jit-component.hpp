@@ -59,7 +59,7 @@ namespace hipblaslt_jit
     };
 
     // One file. Assembly and Hip are sources. CodeObject is a linked executable
-    // or a helper code object stored beside a solution. Relocatables stay inside
+    // or a helper code object stored in the JIT library. Relocatables stay inside
     // the comgr builder.
     struct Artifact
     {
@@ -88,33 +88,12 @@ namespace hipblaslt_jit
 
     constexpr int jitCodeObjectVersion = 4;
 
-    // Published HIP helper code objects. JitLibrary owns the cache and keys it
-    // by backend id and helper name.
-    class HelperCache
-    {
-    public:
-        virtual ~HelperCache() = default;
-        // The published code object, or an empty Artifact when name is absent.
-        virtual Artifact find(const std::string& helperName) const = 0;
-        // Stores a code object. A name that is already published is left unchanged.
-        virtual Status publish(const Artifact& helper)             = 0;
-        // Asks the cache before compiling. A hit returns the published Artifact.
-        // A miss calls compile once, publishes that code object, and returns it.
-        virtual Status acquire(const std::string&                       helperName,
-                               const std::function<Status(Artifact&)>& compile,
-                               Artifact&                                out)
-            = 0;
-    };
-
     struct BuildRequest
     {
         std::string              targetId; // gcnArchName, e.g. "gfx950:sramecc+:xnack-"
         int                      codeObjectVersion = jitCodeObjectVersion;
         std::filesystem::path    scratch; // receives comgr.log after a failure, or empty
-        std::vector<std::string> kernelNames; // main kernels the code object must define
-        // When set, ComgrBuilder asks this cache before compiling each helper.
-        // Null compiles every helper and does not publish it.
-        std::shared_ptr<HelperCache> helpers;
+        std::vector<std::string> kernelNames; // kernels the code object must define; empty accepts the object as built
     };
 
     // The linked code object and any helper code objects. The TensileLite
@@ -135,9 +114,9 @@ namespace hipblaslt_jit
             build(const SourceCodeBundle&, const BuildRequest&, CompiledCode&) const = 0;
     };
 
-    // Compiles the SourceCodeBundle with comgr: each helper code object, then
-    // the main kernel. The CompiledCode is ready to add to JitLibrary. A helper
-    // cache on the request is asked before a helper is compiled.
+    // Compiles the SourceCodeBundle with comgr: each helper still on the bundle,
+    // then the main kernel. This builder keeps no helper cache. JitLibrary is
+    // that cache. comgr's own file cache is not part of the library.
     std::shared_ptr<const CodeObjectBuilder> makeComgrBuilder();
 
     using GemmRequest = hipblaslt_ext::experimental::jit::detail::GemmRequest;
