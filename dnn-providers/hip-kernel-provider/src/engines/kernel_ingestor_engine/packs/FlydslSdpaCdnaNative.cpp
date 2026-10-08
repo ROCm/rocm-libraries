@@ -103,6 +103,9 @@ constexpr std::string_view V_TOKEN = "flydsl_sdpa_cdna.v.uid";
 constexpr std::string_view O_TOKEN = "flydsl_sdpa_cdna.o.uid";
 /// 1 when the graph asks for causal masking, 0 for none.
 constexpr std::string_view CAUSAL_TOKEN = "flydsl_sdpa_cdna.causal";
+/// The uid of the softmax-statistics (LSE) output, or NO_STATS when the graph wants none.
+constexpr std::string_view STATS_TOKEN = "flydsl_sdpa_cdna.stats.uid";
+constexpr int64_t NO_STATS = -1;
 
 constexpr uint32_t SDPA_RANK = 4;
 constexpr uint32_t BATCH_AXIS = 0;
@@ -256,6 +259,37 @@ bool isContiguousBshd(const data_objects::TensorAttributes& tensor,
            && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
 }
 
+/// Whether @p stats is an LSE output the kernels write: f32 [B, H, Sq, 1] in packed
+/// (batch, head, query) order -- the kernels address it as one contiguous [B, H, Sq].
+bool isServableStats(const data_objects::TensorAttributes& stats,
+                     int64_t batch,
+                     int64_t heads,
+                     int64_t sequence)
+{
+    const auto* dims = stats.dims();
+    const auto* strides = stats.strides();
+    if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
+       || strides->size() != SDPA_RANK)
+    {
+        return false;
+    }
+    if(dims->Get(BATCH_AXIS) != batch || dims->Get(HEAD_AXIS) != heads
+       || dims->Get(SEQ_AXIS) != sequence || dims->Get(HEAD_DIM_AXIS) != 1)
+    {
+        return false;
+    }
+    // A stride on an axis of extent 1 is never used to address anything.
+    if((sequence > 1 && strides->Get(SEQ_AXIS) != 1)
+       || (heads > 1 && strides->Get(HEAD_AXIS) != sequence)
+       || (batch > 1 && strides->Get(BATCH_AXIS) != heads * sequence))
+    {
+        return false;
+    }
+    return stats.data_type() == data_objects::DataType::FLOAT && !stats.virtual_()
+           && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&stats)
+           && !stats.ragged_offset_tensor_uid().has_value();
+}
+
 /// Whether the graph's mask is one the kernels apply: none, or plain causal. With equal
 /// query and key lengths top-left and bottom-right causal are the same mask, which is the
 /// kernels' (bottom-right). Bands and windows decline. nullopt for anything else.
@@ -370,11 +404,26 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     {
         return std::nullopt;
     }
-    // No softmax-statistics output: the objects are built without one.
-    if(attributes.stats_tensor_uid().has_value() || attributes.max_tensor_uid().has_value()
-       || attributes.sum_exp_tensor_uid().has_value()
-       || attributes.rng_dump_tensor_uid().has_value()
-       || (attributes.generate_stats().has_value() && attributes.generate_stats().value()))
+    // Softmax statistics: the LSE output is served; the split max / sum-exp outputs and the
+    // RNG dump are not. Asking for stats without naming a tensor to write them to is a graph
+    // the kernels cannot satisfy.
+    if(attributes.max_tensor_uid().has_value() || attributes.sum_exp_tensor_uid().has_value()
+       || attributes.rng_dump_tensor_uid().has_value())
+    {
+        return std::nullopt;
+    }
+    int64_t statsUid = NO_STATS;
+    if(attributes.stats_tensor_uid().has_value())
+    {
+        const auto* stats = findTensor(context, attributes.stats_tensor_uid().value());
+        if(stats == nullptr
+           || !isServableStats(*stats, problem.batch, problem.numHeads, problem.seqLen))
+        {
+            return std::nullopt;
+        }
+        statsUid = attributes.stats_tensor_uid().value();
+    }
+    else if(attributes.generate_stats().has_value() && attributes.generate_stats().value())
     {
         return std::nullopt;
     }
@@ -441,6 +490,7 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     bound[std::string(V_TOKEN)] = attributes.v_tensor_uid();
     bound[std::string(O_TOKEN)] = attributes.o_tensor_uid();
     bound[std::string(CAUSAL_TOKEN)] = *causal ? 1 : 0;
+    bound[std::string(STATS_TOKEN)] = statsUid;
     bound[std::string(SCALE_SOURCE_TOKEN)] = static_cast<int64_t>(scaleSource);
     bound[std::string(SCALE_TOKEN)] = scaleToken;
     return bound;
@@ -454,6 +504,7 @@ struct FlydslSdpaCdnaBinding
     int64_t v = 0;
     int64_t o = 0;
     int64_t causal = 0;
+    int64_t stats = NO_STATS;
     ScaleSource scaleSource = ScaleSource::VALUE;
     int64_t scale = 0;
 };
@@ -478,6 +529,7 @@ FlydslSdpaCdnaBinding flydslSdpaCdnaBinding(const BoundTokens& bound)
     binding.v = read(V_TOKEN);
     binding.o = read(O_TOKEN);
     binding.causal = read(CAUSAL_TOKEN);
+    binding.stats = read(STATS_TOKEN);
     binding.scaleSource = static_cast<ScaleSource>(read(SCALE_SOURCE_TOKEN));
     binding.scale = read(SCALE_TOKEN);
     return binding;
@@ -641,10 +693,10 @@ FlydslLayout4 bshdLayout(int64_t batch, int64_t sequence, int64_t heads, int64_t
  * Dual-wave (flash_attn_gfx950.py): Q, K, V, O, LSE, DebugCounts, CuSeqQ, CuSeqKv,
  * BlockTable, Bias, AlibiSlopes, Sink (each a pointer and its layout); then seq_len,
  * seq_len_kv, stride_q_n, stride_kv_n, head_dim_runtime, block_table_stride,
- * bias_stride0, alibi_stride_b (i32); sm_scale (f32); num_heads_q, num_heads_kv (i32).
- * Generic (flash_attn_generic.py): Q, K, V, O, LSE; seq_len, seq_len_kv (i32); CuSeqQ,
- * CuSeqKv, BlockTable; block_table_stride (i32); sm_scale (f32); num_heads_q,
- * num_heads_kv, stride_q_n, stride_kv_n (i32). A 4-byte scalar slot is the same to the
+ * bias_stride0, alibi_stride_b (i32); sm_scale (f32); num_heads_q, num_heads_kv, lse_on
+ * (i32). Generic (flash_attn_generic.py): Q, K, V, O, LSE; seq_len, seq_len_kv (i32);
+ * CuSeqQ, CuSeqKv, BlockTable; block_table_stride (i32); sm_scale (f32); num_heads_q,
+ * num_heads_kv, stride_q_n, stride_kv_n, lse_on (i32). A 4-byte scalar slot is the same to the
  * signature check whichever type it holds, so each list is written as runs of tensors
  * and scalars.
  */
@@ -680,14 +732,14 @@ std::vector<KernelArgument> signatureOf(std::initializer_list<ArgumentRun> runs)
 
 const std::vector<KernelArgument>& dualwaveSignature()
 {
-    static const std::vector<KernelArgument> s_signature = signatureOf({{12, true}, {11, false}});
+    static const std::vector<KernelArgument> s_signature = signatureOf({{12, true}, {12, false}});
     return s_signature;
 }
 
 const std::vector<KernelArgument>& genericSignature()
 {
     static const std::vector<KernelArgument> s_signature
-        = signatureOf({{5, true}, {2, false}, {3, true}, {6, false}});
+        = signatureOf({{5, true}, {2, false}, {3, true}, {7, false}});
     return s_signature;
 }
 
@@ -855,6 +907,14 @@ public:
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.v, deviceBuffers, numDeviceBuffers).ptr;
         void* o
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.o, deviceBuffers, numDeviceBuffers).ptr;
+        // The objects carry the LSE store; with no stats tensor bound it gets an empty
+        // buffer (lse_on 0) and every LSE store is dropped, so O stands in for the pointer.
+        const bool lseOn = binding.stats != NO_STATS;
+        void* lse = lseOn ? hipdnn_plugin_sdk::findDeviceBuffer(
+                                binding.stats, deviceBuffers, numDeviceBuffers)
+                                .ptr
+                          : o;
+        const int32_t lseFlag = lseOn ? 1 : 0;
 
         const auto qLayout
             = bshdLayout(problem.batch, problem.seqLen, problem.numHeads, problem.headDim);
@@ -884,8 +944,8 @@ public:
                           kvLayout,
                           o,
                           qLayout,
-                          o, // LSE
-                          qLayout,
+                          lse,
+                          qLayout, // read for its pointer only
                           o, // DebugCounts
                           qLayout,
                           o, // CuSeqQ
@@ -910,7 +970,8 @@ public:
                           zero,
                           scale,
                           numHeads,
-                          numKvHeads);
+                          numKvHeads,
+                          lseFlag);
             return;
         }
         kernel.launch(handle.getStream(),
@@ -922,8 +983,8 @@ public:
                       kvLayout,
                       o,
                       qLayout,
-                      o, // LSE
-                      qLayout,
+                      lse,
+                      qLayout, // read for its pointer only
                       seqLen,
                       seqLen,
                       o, // CuSeqQ
@@ -937,7 +998,8 @@ public:
                       numHeads,
                       numKvHeads,
                       strideQ,
-                      strideKv);
+                      strideKv,
+                      lseFlag);
     }
 
 private:

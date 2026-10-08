@@ -469,7 +469,7 @@ vendored whole under
 [`kernels_src/kernels/attention_cdna/`](kernels_src/kernels/attention_cdna/README.md),
 whose README lists the modifications (an import path, a runtime row guard in
 the cooperative K/V loads that FlyDSL 0.3.4 cannot trace in a helper, a runtime
-softmax scale, and runtime head counts and token strides).
+softmax scale, runtime head counts and token strides, and a runtime LSE switch).
 The native half is
 [`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp).
 
@@ -492,6 +492,7 @@ baked field at a time (§7.3).
 | `head_dim` (128) | sequence length (one value: `Sq == Skv`) |
 | causal (bottom-right), or none | query and KV head counts (MHA, GQA, MQA) |
 | contiguous BSHD strides | softmax scale |
+| | whether to write the LSE output |
 | gfx942 non-causal: whether the KV tail is masked (`kv_align`) | |
 
 Two objects per arch, causal and non-causal, and on gfx942 a third. The generic
@@ -517,7 +518,8 @@ One SDPA-forward node, and:
 | No mask, or causal: top-left, bottom-right or `right_bound == 0` | With equal lengths the three are the same mask, the kernels' own. Any `left_bound` or other band declines. |
 | Scale: `attn_scale_value` (> 0), a pass-by-value scalar tensor, or absent | Absent is `1/√head_dim`, the reference's default. The running max is over unscaled scores, which orders them correctly only for a positive scale. |
 | Key length a multiple of 64, for a `kv_align` 64 object | That object does not mask the last KV tile. |
-| Declined outright: bias, padding / varlen, dropout, paged KV, block masks, sinks, FP8 descales, ALiBi, softmax stats / LSE output, a non-`AUTO` implementation | The objects are built without them. |
+| Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor in packed (batch, head, query) order | The kernels write the natural-log LSE of the scaled scores as one contiguous `[B, H, Sq]`. |
+| Declined outright: bias, padding / varlen, dropout, paged KV, block masks, sinks, FP8 descales, ALiBi, the split max / sum-exp stats, a non-`AUTO` implementation | The objects are built without them. |
 | Batch pitch and grid within int32 | 32-bit addressing. |
 
 ### 7.3 What comes next, and the rule it follows
@@ -533,7 +535,7 @@ against the coverage it buys. In order:
 | ~~Runtime scale~~ | Done: a trailing f32 argument on both kernels (modification 2). |
 | ~~Runtime head counts~~ | Done: trailing i32 arguments on both kernels, and the generic kernel's token pitches with them (modification 3). |
 | Full strides: BHSD, packed QKV | The head stride is still `head_dim` and the batch stride derived from the token pitch; both need arguments. |
-| LSE output | Upstream's kernels already carry the LSE operand. |
+| ~~LSE output~~ | Done: compiled in, switched at launch (modification 4). Any stats strides are next, with the full strides. |
 | `Sq ≠ Skv`, bottom-right and top-left causal separately, windows | Upstream's kernels take `seq_len_kv` separately; the mask needs the diagonal offset. |
 | `head_dim` 64 and f16 | Both kernels build them; rows in the instance table. |
 | Varlen, paged KV | Both kernels already take cumulative sequence offsets and a block table, passed unused today. |
@@ -551,7 +553,7 @@ Then the instance set is chosen by the provider's AOT selection process
 | The vendored kernels match FlyDSL but for their recorded modifications | `tools/diff_upstream.py` ([REGEN.md](REGEN.md) §5) |
 | Each arch's shard ships one object per class, one kernel family, each with its family's signature | `TestFlydslSdpaCdnaPacks`, and the shard census that runs it for gfx950 and gfx942 |
 | The accept/decline rules above, the causal and scale bindings, and candidate selection, including `kv_align` | `TestFlydslSdpaCdnaGraphAccepts`, `TestFlydslSdpaCdnaGraphDeclines`, `TestFlydslSdpaCdnaBinding`, `TestFlydslSdpaCdnaKernelMatch` |
-| Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor — against a reference | `TestGpuFlydslSdpaCdnaDispatch`, on gfx950 and gfx942 |
+| Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor, MHA, MQA and an odd group size — and the LSE output, against a reference | `TestGpuFlydslSdpaCdnaDispatch`, on gfx950 and gfx942 |
 
 ### 7.5 Measured costs, and deferred performance work
 
@@ -566,6 +568,7 @@ the harness's own bias. The measurements are kept outside the repository.
 | Runtime softmax scale, gfx950 | same registers and instruction count; slower by a fraction of a percent at mid-size shapes, sign repeating | runtime, for coverage — **deferred** |
 | Runtime softmax scale, gfx942 | 2–4 more registers (the scale is splatted into a VGPR pair for packed multiplies; the `kv_align` 64 object moves 4 values into AGPRs), a few more instructions; slower by a fraction of a percent, sign repeating on the long shapes | runtime, for coverage — **deferred** |
 | Runtime head counts, both kernels (and the generic kernel's token pitches) | same VGPRs; a 32-bit divide or two per workgroup and, on gfx942, runtime token pitches in the KV loads. Slower by under a percent on most shapes and up to a couple of percent on the shortest; the gfx950 causal object also pays on long shapes, so part of the cost is in how the loop is scheduled, not only the divides. Done in 64-bit arithmetic it cost more | runtime, for coverage — **deferred** |
+| LSE output, switched at runtime | 2–4 more VGPRs, no occupancy step; with LSE off, no measurable cost but on the gfx942 causal object, which is slower by a fraction of a percent on every shape | runtime, for coverage — **deferred** (gfx942 causal) |
 
 **Deferred performance work** -- costs accepted for coverage, to revisit:
 
@@ -576,3 +579,5 @@ the harness's own bias. The measurements are kept outside the repository.
    multiply-and-shift constants instead of a divide sequence; find what moves
    in the gfx950 causal object's loop; or ship baked-head objects for the most
    common head configurations beside the runtime ones.
+3. *LSE on the gfx942 causal object.* A second, LSE-free causal object, or
+   moving the LSE math under the store's own predicate.

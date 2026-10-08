@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "95b21dd3e3d44ff4a8ca94f681f23dfd49e4fe5fcb49711df5b78d9032b609d9"
+    "inputs_sha256": "eb7c07cf09ab214c71166f589f7a0bcac2ecc857d93e1bb50bfdfc91d1bd5781"
   },
   "instances": [
     {
@@ -53,15 +53,16 @@
         {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
         {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
         {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
-        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412}
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416}
       ],
       "file": "sdpa_cdna_bf16_generic_d128_causal0_bm128.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 14840,
-      "sha256": "547fbc8ce38785deee43a307a28016ccc8047744f798d106cbf891851c7b6f3b",
-      "kernarg_segment_size": 416,
+      "bytes": 15032,
+      "sha256": "9079f924c471732f9c32ca8b8f083e00c47ef4f132807e18066f0b24daca9ff5",
+      "kernarg_segment_size": 420,
       "lds_bytes": 33792,
-      "vgprs": 284,
+      "vgprs": 288,
       "llvm_options": {},
       "named_args": 0
     },
@@ -108,15 +109,16 @@
         {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
         {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
         {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
-        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412}
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416}
       ],
       "file": "sdpa_cdna_bf16_generic_d128_causal0_bm128_kva64.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 14328,
-      "sha256": "56d9e27d1fcb1200948f4f261aa9e339002f059508f380129894b824b44567fc",
-      "kernarg_segment_size": 416,
+      "bytes": 14584,
+      "sha256": "0624543e769eae0bd6cd8875c6473f2d24021384aece29c2d8c7efbd3586f11c",
+      "kernarg_segment_size": 420,
       "lds_bytes": 33792,
-      "vgprs": 260,
+      "vgprs": 264,
       "llvm_options": {},
       "named_args": 0
     },
@@ -163,15 +165,16 @@
         {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
         {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
         {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
-        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412}
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416}
       ],
       "file": "sdpa_cdna_bf16_generic_d128_causal1_bm128.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 18360,
-      "sha256": "9408b87e5b82b62e615775674a770c4003a5bc9af5d38b193058a71e9c7db740",
-      "kernarg_segment_size": 416,
+      "bytes": 18552,
+      "sha256": "8c0961ee84a21f52fc280634732ae99412d0d1371abdce4ad51fd8f92d64ce04",
+      "kernarg_segment_size": 420,
       "lds_bytes": 33792,
-      "vgprs": 254,
+      "vgprs": 256,
       "llvm_options": {},
       "named_args": 0
     }

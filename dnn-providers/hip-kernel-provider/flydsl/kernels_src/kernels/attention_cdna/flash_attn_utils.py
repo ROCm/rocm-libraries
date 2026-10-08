@@ -2504,6 +2504,17 @@ def _make_paged_dualwave_swp_fp8_traits(
 # Kernel context
 
 
+def _lse_records(lse_on, lse_bytes):
+    """The LSE buffer's record count: all of it, or none when the runtime `lse_on`
+    argument is 0, so every LSE store falls outside the buffer and is dropped
+    (modification 4). None keeps the build-time choice."""
+    if lse_on is None:
+        return lse_bytes
+    return fx.Index(
+        (fx.Int32(lse_on) != fx.Int32(0)).select(fx.Int32(lse_bytes), fx.Int32(0))
+    )
+
+
 class GenericFlashAttnContext:
     """Runtime setup state for the generic flash-attention kernel."""
 
@@ -2518,6 +2529,7 @@ class GenericFlashAttnContext:
         num_heads_kv=None,
         stride_token_q=None,
         stride_token_kv=None,
+        lse_on=None,
     ):
         self.traits = traits
         self.K = K
@@ -2530,6 +2542,7 @@ class GenericFlashAttnContext:
         self.num_heads_kv = num_heads_kv
         self.stride_token_q = stride_token_q
         self.stride_token_kv = stride_token_kv
+        self.lse_on = lse_on
 
     def init_types_and_pointers(self):
         traits = self.traits
@@ -2730,7 +2743,9 @@ class GenericFlashAttnContext:
             self.lse_per_batch_elems = self.num_heads_q_v * self.seq_len_v
             # OOB sentinel (== num records) the buffer bound drops; predicates the store.
             self.lse_oob_off = self.lse_per_batch_elems
-            _lse_nrec_bytes = as_mlir_value(self.lse_per_batch_elems * fx.Index(4))
+            _lse_nrec_bytes = as_mlir_value(
+                _lse_records(self.lse_on, self.lse_per_batch_elems * fx.Index(4))
+            )
             _lse_batch_byte_off = as_mlir_value(
                 self.batch_idx * self.lse_per_batch_elems * fx.Index(4)
             )
@@ -4090,6 +4105,7 @@ class DualwaveKernelContext:
         sm_scale=None,
         num_heads_q=None,
         num_heads_kv=None,
+        lse_on=None,
     ):
         if isinstance(traits_or_ctx, DualwaveKernelContext):
             self.__dict__.update(traits_or_ctx.__dict__)
@@ -4116,6 +4132,7 @@ class DualwaveKernelContext:
         self.sm_scale = sm_scale
         self.num_heads_q = num_heads_q
         self.num_heads_kv = num_heads_kv
+        self.lse_on = lse_on
 
     def init_types_and_constants(self, head_dim_runtime=None):
         if head_dim_runtime is None:
@@ -5290,8 +5307,9 @@ class DualwaveStoreHelper(DualwaveKernelContext):
             * self.seq_len_v
         )
         lse_per_batch_bytes = lse_per_batch_elems * fx.Index(4)
+        lse_records = _lse_records(getattr(self, "lse_on", None), lse_per_batch_bytes)
         lse_rsrc = _make_ws_rsrc(
-            lse_base_i64, self.batch_idx * lse_per_batch_bytes, lse_per_batch_bytes
+            lse_base_i64, self.batch_idx * lse_per_batch_bytes, lse_records
         )
         lse_val = m_row * self.c_ln2_f + fx.log(l_row, fastmath=self.fm_fast)
         lse_local = self.q_head_idx * self.seq_len_v + q_row

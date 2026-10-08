@@ -97,6 +97,7 @@ _PARAMS = {
         ("sm_scale", "f32"),
         ("num_heads_q", "i32"),
         ("num_heads_kv", "i32"),
+        ("lse_on", "i32"),
     ),
     "generic": (
         ("Q", "tensor"),
@@ -115,6 +116,7 @@ _PARAMS = {
         ("num_heads_kv", "i32"),
         ("stride_q_n", "i32"),
         ("stride_kv_n", "i32"),
+        ("lse_on", "i32"),
     ),
 }
 
@@ -156,6 +158,12 @@ def _build_one(instance: Instance, dump_dir: Path) -> bytes:
     )
     v = torch.empty_like(k)
     o = torch.empty_like(q)
+    # The LSE output is compiled in and switched at launch by `lse_on`. The kernels
+    # read only its base pointer, so this stand-in exists to give the argument the
+    # same rank-4, one-unit-stride layout every other tensor argument has.
+    lse = torch.empty(
+        _TRACE_BATCH, heads, _TRACE_SEQ, 2, dtype=torch.float32, device="meta"
+    )
 
     if knobs["kernel"] == "dualwave":
         from kernels.attention_cdna.flash_attn_gfx950 import (  # noqa: PLC0415
@@ -168,6 +176,7 @@ def _build_one(instance: Instance, dump_dir: Path) -> bytes:
             causal=bool(knobs["causal"]),
             dtype_str=instance.dtype,
             num_kv_heads=kv_heads,
+            return_lse=True,
         )
     else:
         from kernels.attention_cdna.flash_attn_generic import (  # noqa: PLC0415
@@ -187,8 +196,9 @@ def _build_one(instance: Instance, dump_dir: Path) -> bytes:
             # length that is not a multiple of the KV tile. `kv_align` says which
             # this object is, and the kernel matcher holds the graph to it.
             skip_kv_pad_mask=bool(knobs["kv_align"]),
+            return_lse=True,
         )
-    launch(q, k, v, o, _TRACE_BATCH, _TRACE_SEQ)
+    launch(q, k, v, o, _TRACE_BATCH, _TRACE_SEQ, lse=lse)
     blob, _ = hsaco_from_dump(dump_dir)
     return blob
 

@@ -73,6 +73,7 @@ const T* tryGetMetadataField(const MetadataValues& values, const char* field)
 constexpr const char* CDNA_CAUSAL_TOKEN = "flydsl_sdpa_cdna.causal";
 constexpr const char* CDNA_SCALE_SOURCE_TOKEN = "flydsl_sdpa_cdna.scale_source";
 constexpr const char* CDNA_SCALE_TOKEN = "flydsl_sdpa_cdna.scale";
+constexpr const char* CDNA_STATS_TOKEN = "flydsl_sdpa_cdna.stats.uid";
 
 constexpr const char* CDNA_DTYPE_FIELD = "dtype";
 constexpr const char* CDNA_KERNEL_FIELD = "kernel";
@@ -168,6 +169,9 @@ std::vector<CdnaCase> acceptedCases()
     auto mha = cdnaSpec();
     mha.kvHeads = 32;
     cases.push_back({"Mha", mha});
+    auto stats = cdnaSpec();
+    stats.stats = SdpaStats::LSE;
+    cases.push_back({"SoftmaxStats", stats});
     return cases;
 }
 
@@ -204,9 +208,15 @@ std::vector<CdnaCase> declinedCases()
     auto bias = cdnaSpec();
     bias.withBias = true;
     cases.push_back({"Bias", bias});
-    auto stats = cdnaSpec();
-    stats.stats = SdpaStats::LSE;
-    cases.push_back({"SoftmaxStats", stats});
+    auto bf16Stats = cdnaSpec();
+    bf16Stats.stats = SdpaStats::LSE_BF16;
+    cases.push_back({"Bf16Stats", bf16Stats});
+    auto wideStats = cdnaSpec();
+    wideStats.stats = SdpaStats::LSE_WRONG_SHAPE;
+    cases.push_back({"StatsOfTheWrongShape", wideStats});
+    auto statsNowhere = cdnaSpec();
+    statsNowhere.stats = SdpaStats::REQUESTED_WITHOUT_TENSOR;
+    cases.push_back({"StatsRequestedWithoutATensor", statsNowhere});
     auto deviceScale = cdnaSpec();
     deviceScale.scaleKind = SdpaScale::DEVICE_TENSOR;
     cases.push_back({"DeviceScaleTensor", deviceScale});
@@ -249,6 +259,18 @@ TEST(TestFlydslSdpaCdnaBinding, BindsTheCausalFlag)
     ASSERT_TRUE(plainBound.has_value());
     EXPECT_EQ(tryGetBoundInt(*causalBound, CDNA_CAUSAL_TOKEN), 1);
     EXPECT_EQ(tryGetBoundInt(*plainBound, CDNA_CAUSAL_TOKEN), 0);
+}
+
+TEST(TestFlydslSdpaCdnaBinding, BindsTheStatsTensorOrNone)
+{
+    auto withStats = cdnaSpec();
+    withStats.stats = SdpaStats::LSE;
+    const auto statsBound = cdnaGraphMatch(withStats);
+    const auto plainBound = cdnaGraphMatch(cdnaSpec());
+    ASSERT_TRUE(statsBound.has_value());
+    ASSERT_TRUE(plainBound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*statsBound, CDNA_STATS_TOKEN), FLYDSL_SDPA_RDNA_STATS_UID);
+    EXPECT_EQ(tryGetBoundInt(*plainBound, CDNA_STATS_TOKEN), -1);
 }
 
 TEST(TestFlydslSdpaCdnaBinding, BindsTheScaleAsAValueOrATensor)
@@ -416,6 +438,9 @@ std::vector<Bf16> fillValues(size_t count, uint32_t seed)
     return values;
 }
 
+/// The LSE is computed in f32 from exact bf16 inputs; its magnitude is about ln(Skv).
+constexpr double LSE_TOLERANCE = 1e-2;
+
 /// Runs @p kernel for @p spec through prepare() and launch() and checks every output element
 /// against a double-precision reference. BSHD memory throughout.
 void expectCandidateMatchesReference(const MatchContext& context,
@@ -456,11 +481,25 @@ void expectCandidateMatchesReference(const MatchContext& context,
     ASSERT_EQ(hipSuccess,
               hipMemcpy(vDevice, v.data(), kvCount * sizeof(Bf16), hipMemcpyHostToDevice));
     ASSERT_EQ(hipSuccess, hipMemset(oDevice, 0, qCount * sizeof(Bf16)));
+    // The LSE output, [B, H, Sq] f32, when the graph asks for it.
+    const bool withStats = spec.stats == SdpaStats::LSE;
+    const auto statsCount = static_cast<size_t>(b * h * s);
+    std::vector<float> stats(statsCount, 0.0F);
+    void* statsDevice = nullptr;
+    if(withStats)
+    {
+        ASSERT_EQ(hipSuccess, hipMalloc(&statsDevice, statsCount * sizeof(float)));
+        ASSERT_EQ(hipSuccess, hipMemset(statsDevice, 0xFF, statsCount * sizeof(float)));
+    }
 
     std::vector<hipdnnPluginDeviceBuffer_t> buffers{{FLYDSL_SDPA_RDNA_Q_UID, qDevice},
                                                     {FLYDSL_SDPA_RDNA_K_UID, kDevice},
                                                     {FLYDSL_SDPA_RDNA_V_UID, vDevice},
                                                     {FLYDSL_SDPA_RDNA_O_UID, oDevice}};
+    if(withStats)
+    {
+        buffers.push_back({FLYDSL_SDPA_RDNA_STATS_UID, statsDevice});
+    }
     // A runtime scale arrives with the buffers, as a host scalar.
     float runtimeScale = spec.scale;
     if(spec.scaleKind == SdpaScale::RUNTIME_TENSOR)
@@ -477,6 +516,14 @@ void expectCandidateMatchesReference(const MatchContext& context,
     static_cast<void>(hipFree(kDevice));
     static_cast<void>(hipFree(vDevice));
     static_cast<void>(hipFree(oDevice));
+    if(withStats)
+    {
+        ASSERT_EQ(
+            hipSuccess,
+            hipMemcpy(
+                stats.data(), statsDevice, statsCount * sizeof(float), hipMemcpyDeviceToHost));
+        static_cast<void>(hipFree(statsDevice));
+    }
 
     // BSHD element (batch, token, head, d).
     const auto at = [](const std::vector<Bf16>& t,
@@ -496,6 +543,8 @@ void expectCandidateMatchesReference(const MatchContext& context,
     const int64_t group = h / hk;
     double worst = 0.0;
     std::string where;
+    double worstLse = 0.0;
+    std::string whereLse;
     std::vector<double> scores(static_cast<size_t>(s));
     for(int64_t bi = 0; bi < b; ++bi)
     {
@@ -523,6 +572,20 @@ void expectCandidateMatchesReference(const MatchContext& context,
                         = std::exp(scores[static_cast<size_t>(j)] - maxScore);
                     sum += scores[static_cast<size_t>(j)];
                 }
+                if(withStats)
+                {
+                    // Natural log of the row's sum of exp(scaled score).
+                    const double expectedLse = maxScore + std::log(sum);
+                    const auto lse
+                        = static_cast<double>(stats[static_cast<size_t>((bi * h + hi) * s + si)]);
+                    const double lseError = std::abs(lse - expectedLse);
+                    if(!(lseError <= LSE_TOLERANCE))
+                    {
+                        worstLse = std::max(worstLse, std::isnan(lseError) ? 1e30 : lseError);
+                        whereLse = "b=" + std::to_string(bi) + " h=" + std::to_string(hi)
+                                   + " s=" + std::to_string(si);
+                    }
+                }
                 for(int64_t e = 0; e < d; ++e)
                 {
                     double expected = 0.0;
@@ -544,6 +607,7 @@ void expectCandidateMatchesReference(const MatchContext& context,
         }
     }
     EXPECT_LE(worst, absoluteTolerance) << "worst error at " << where;
+    EXPECT_EQ(worstLse, 0.0) << "an LSE outside tolerance, worst at " << whereLse;
 }
 
 /// Every staged candidate the matcher admits for @p spec must match the reference.
@@ -643,6 +707,26 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesAnOddGroupSizeAtARaggedLength)
     spec.kvHeads = 8;
     spec.seqLenQ = 200;
     spec.seqLenKv = 200;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, WritesTheLogSumExpOfEachRow)
+{
+    auto spec = cdnaSpec();
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, WritesTheLogSumExpOfACausalRaggedBatch)
+{
+    auto spec = cdnaSpec();
+    spec.batch = 2;
+    spec.seqLenQ = 333;
+    spec.seqLenKv = 333;
+    spec.heads = 16;
+    spec.kvHeads = 4;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 

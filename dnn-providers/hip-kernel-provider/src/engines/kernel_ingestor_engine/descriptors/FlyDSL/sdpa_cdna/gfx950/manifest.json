@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "d37537559d7624ec773cf1c0e92a83f13eced58dcd0360484aabd56572e9b9dd"
+    "inputs_sha256": "edc3d41e0fcbe83b8a6b63374b2590d0e0d36961286c514007f0cf4c6b61a754"
   },
   "instances": [
     {
@@ -64,15 +64,16 @@
         {"name": "alibi_stride_b", "kind": "by_value", "size": 4, "offset": 604},
         {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 608},
         {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 612},
-        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 616}
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 616},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 620}
       ],
       "file": "sdpa_cdna_bf16_dualwave_d128_causal0_bm256.hsaco",
       "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
-      "bytes": 23440,
-      "sha256": "4b41d7afc364914c175274941db86f4756e08ca88ee661965e2605aaa78d0b36",
-      "kernarg_segment_size": 620,
+      "bytes": 23632,
+      "sha256": "ca97799f22667b071136a1b9b52bc97c279033b77c35e37b65fa0fcde415fa5e",
+      "kernarg_segment_size": 624,
       "lds_bytes": 68096,
-      "vgprs": 244,
+      "vgprs": 246,
       "llvm_options": {},
       "named_args": 0
     },
@@ -130,15 +131,16 @@
         {"name": "alibi_stride_b", "kind": "by_value", "size": 4, "offset": 604},
         {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 608},
         {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 612},
-        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 616}
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 616},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 620}
       ],
       "file": "sdpa_cdna_bf16_dualwave_d128_causal1_bm256.hsaco",
       "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
-      "bytes": 24464,
-      "sha256": "0c47ef61bac7ce84467238a74279e957f4e06dd90928c576f134e9c9808b3c7f",
-      "kernarg_segment_size": 620,
+      "bytes": 24592,
+      "sha256": "751488e93a9263106f335c85915da5644b5cdebfb51af9ffdc60a04290e79623",
+      "kernarg_segment_size": 624,
       "lds_bytes": 68096,
-      "vgprs": 246,
+      "vgprs": 250,
       "llvm_options": {},
       "named_args": 0
     }

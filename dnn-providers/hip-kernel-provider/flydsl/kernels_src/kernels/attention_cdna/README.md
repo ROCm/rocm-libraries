@@ -49,6 +49,10 @@ diff against upstream plus the modifications below.
    reads the runtime counts; its swizzled and batch-interleaved mappings refuse
    them. The launchers pass the build-time values, so upstream callers are
    unchanged.
+4. **Runtime LSE switch** (both kernels). Built with `return_lse`, each kernel
+   takes a trailing `lse_on`; at 0 the LSE buffer descriptor gets no records, so
+   every LSE store falls outside it and is dropped -- no branch, and no second
+   object. The launchers pass 1.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

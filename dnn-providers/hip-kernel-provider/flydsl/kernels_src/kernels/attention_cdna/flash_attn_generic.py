@@ -282,6 +282,7 @@ def build_flash_attn_func_module_primary(
         num_heads_kv: fx.Int32,
         stride_q_n: fx.Int32,
         stride_kv_n: fx.Int32,
+        lse_on: fx.Int32,
     ):
         # Make shape/mode traits visible to the JIT cache key.
         _ = _flash_attn_generic_cache_tag
@@ -295,6 +296,7 @@ def build_flash_attn_func_module_primary(
             num_heads_kv=num_heads_kv,
             stride_token_q=stride_q_n,
             stride_token_kv=stride_kv_n,
+            lse_on=lse_on,
         )
         ctx.init_types_and_pointers()
         gemm_helper = GenericGemmHelper(ctx)
@@ -632,6 +634,7 @@ def build_flash_attn_func_module_primary(
         num_heads_kv: fx.Int32,
         stride_q_n: fx.Int32,
         stride_kv_n: fx.Int32,
+        lse_on: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         bs_idx = fx.Index(batch_size)
@@ -664,6 +667,7 @@ def build_flash_attn_func_module_primary(
             num_heads_kv,
             stride_q_n,
             stride_kv_n,
+            lse_on,
             value_attrs={
                 "rocdl.waves_per_eu": waves_per_eu,
                 "rocdl.flat_work_group_size": (
@@ -745,6 +749,7 @@ def build_flash_attn_func_module_primary(
                 traits.NUM_HEADS_KV,
                 traits.STRIDE_TOKEN_Q,
                 traits.STRIDE_TOKEN_KV,
+                1,
                 fx.Stream(stream),
             )
 
@@ -788,6 +793,7 @@ def build_flash_attn_func_module_primary(
                 traits.NUM_HEADS_KV,
                 traits.STRIDE_TOKEN_Q,
                 traits.STRIDE_TOKEN_KV,
+                1,
                 fx.Stream(stream),
             )
 
