@@ -74,7 +74,7 @@ _CONFIGS = [
 
 _SOURCE_PATTERNS = {
     "Tensile/Tests/common/gemm/gfx12/bf6_gfx1250.yaml": (
-        ("scaled fp6 matrix instruction", r"^v_wmma_scale_f32_16x16x128_f8f6f4\b"),
+        ("plain fp6 matrix instruction", r"^v_wmma_f32_16x16x128_f8f6f4\b"),
     ),
     "Tensile/Tests/common/gemm/gfx12/mxf6_tdm_gfx1250.yaml": (
         ("scaled fp6 matrix instruction", r"^v_wmma_scale_f32_16x16x128_f8f6f4\b"),

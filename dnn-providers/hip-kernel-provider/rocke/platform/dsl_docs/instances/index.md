@@ -42,10 +42,11 @@ implementation.
 |-----------------------------------|-------------------------------------------------------------------|------------------------------|
 | `conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec` | `instances/convolution.md` |
 | `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` | `instances/convolution.md` |
+| `conv_direct_nongrouped.py` | `DirectNongroupedConvSpec` (`groups == 1`) | `instances/convolution.md` |
 | `img2col.py` | `Img2ColSpec` | `instances/convolution.md` |
 | `pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp` | `instances/convolution.md` |
 
-ABI: `(A, B, D, A_bytes, B_bytes, D_bytes)` for implicit-GEMM / direct grouped conv. Img2col writes `Y`. Pooling reads `X` and writes `Y`.
+ABI: conv kernels are ahead-of-time compiled and shape-generic. Every implicit-GEMM / direct grouped conv kernel takes `(A, B, D, A_bytes, B_bytes, D_bytes)` followed by the problem block -- extents, strides, padding, dilation, groups and the host-computed magic-division constants -- whose names and order come from `kernels.common.conv_abi` (`conv_arg_names(direction)` / `conv_direct_arg_names(direction)`; C++ twin `instance_conv_abi.h`). Hosts fill them with `kernels.common.conv_args.ConvArgs.from_problem(...).to_launch_values(...)`; wgrad appends the split-K `ks` / `ks_count` pair (and the two-stage `ws_ptr` / `ws_bytes`), dgrad its sub-GEMM table. See `instances/convolution.md`. Img2col writes `Y`. Pooling reads `X` and writes `Y`.
 
 Layouts: NHWC input, KYXC weight, NHWK output for conv. Grouping via `cpg`/`kpg`.
 
@@ -113,7 +114,11 @@ Runtime entry points: `dispatch_gdn_decode(GdnDecodeRequest(...))` (single-token
 
 Linear attention carries a fixed-size recurrent state per value head instead of re-reading past tokens, so cost per token does not grow with sequence length. GDN ships a single-token decode kernel and a split chunkwise prefill mode; gfx950.
 
-Both kernels carry a tuned table, and they band on different quantities: decode picks its tile per **batch**, prefill picks `value_splits` per **`batch_heads`**. Both tune the same tension -- splitting a head's value dimension across workgroups buys parallelism when the natural grid starves, and costs redundant tile reads once it does not.
+GDN decode uses the static `(2, 16, 8)` dispatcher default whenever it is legal;
+batch changes its grid, not its auto tile. GDN prefill picks `value_splits` per
+`batch_heads`. Both tune the same tension -- splitting a head's value dimension
+across workgroups buys parallelism when the natural grid starves, and costs
+redundant tile reads once it does not.
 
 ## Small Ops
 
@@ -176,6 +181,7 @@ From `helpers/README.md`:
 | grouped_gemm | - | planned | - | - | - | yes | - | (wraps gemm_universal) |
 | conv_implicit_gemm | yes (buffer) | full (unmerge+embed+pad) | - | - | - | yes | - | `AsyncTileLoader`, `CoalescedTileLoader`, `CShuffleEpilogue`, `MfmaAtom`, `WarpGrid`, `LdsLayout`, `SchedulePolicy` |
 | conv_direct_grouped | - | input/output/weight + H/W pad | - | - | - | yes | - | `MfmaAtom` (4x4x4 / 16x16x{16,32}) |
+| conv_direct_nongrouped | - | - | - | - | - | yes | - | `chiplet_aware_super_tile_dynamic` (`helpers.grid`), `emit_direct_params` (AOT kernargs) |
 | img2col | - | reuses A descriptor | - | yes | - | yes | - | - |
 | pooling | - | full (input + pad) | - | yes | - | yes | - | - |
 | attention_unified | - | Q + output + paged-KV | - | - | - | yes | - | `OnlineSoftmaxState`, `PagedKvDescriptor` |

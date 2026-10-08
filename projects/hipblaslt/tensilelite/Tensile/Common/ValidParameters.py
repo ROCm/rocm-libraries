@@ -360,8 +360,10 @@ validParameters = { # we need to make sure this matches develop
     # 0: disable
     # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
     # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
-    # Currently we do not support StaggerU (forced off), general batch, 6-bit float,
-    # or Stream-K other than DP-first (StreamK==3). GSU is supported; with a
+    # Currently we do not support StaggerU (forced off), StridedBatched=False kernels,
+    # 6-bit float, or Stream-K other than DP-first (StreamK==3). General batch
+    # (pointer-array mode) is supported on StridedBatched SupportUserArgs kernels,
+    # where ArgType == 3 selects it at runtime. GSU is supported; with a
     # workgroup cluster it forces GlobalSplitUWorkGroupMappingRoundRobin on so the
     # cluster's peers share a K chunk. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
@@ -1187,6 +1189,9 @@ validParameters = { # we need to make sure this matches develop
     # each covering half the macro-tile in the M/N dimension. MX scale tensors (MXSA/MXSB)
     # are not split regardless of this flag. When True, two extra SGPRs are allocated to
     # hold the per-iteration LDS and global address increments for the split loads.
+    # Also supported for Sparse (2:4 structured sparsity): the sparse-tracked operand's
+    # LDS footprint holds the compressed (K/2) data, which the split boundary accounts for;
+    # the metadata tensor itself is never split.
     "TDMSplit": [False, True],
     # Insert a barrier between an urgent and a deferrable tensor_load_to_lds group
     # (different TDM wait groups) so every wave finishes the urgent group before any

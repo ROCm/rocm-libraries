@@ -1882,7 +1882,9 @@ class Solution(collections.abc.Mapping):
 
     Raises:
       RuntimeError: If a macrotile component is supplied by neither the
-        CustomKernel block nor the consuming logic file.
+        CustomKernel block nor the consuming logic file, or if the solution
+        can split K (GlobalSplitU other than 0 or 1) but its grid launches one
+        GSU slice per tile.
     """
     ck = state["CustomKernel"]
 
@@ -1909,6 +1911,24 @@ class Solution(collections.abc.Mapping):
     # ContractionSolution reads customKernel.macrotile directly for custom-kernel
     # tile and workspace sizing.
     ck["macrotile"] = macrotile
+
+    # A split-K kernel reduces into D only once every GSU slice of a tile has
+    # arrived, so a grid sized from tile counts alone would return success with D
+    # unwritten. GSU and persistent grids account for the split themselves.
+    # GlobalSplitU -1 lets the runtime pick a split above 1.
+    gsu = state.get("GlobalSplitU", 1)
+    grid = ck.get("grid", [])
+    oneSlicePerTile = all(
+      g in ("One", "TilesX", "TilesY", "Batch", "TilesXY", "TilesXYBatch") for g in grid)
+    if gsu not in (0, 1) and oneSlicePerTile:
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' runs with GlobalSplitU {gsu}, but its "
+        f"CustomKernel grid {grid} launches one GSU slice per tile; use TilesYGSU "
+        f"or TilesXYBatchGSU.")
+    # The same grid cannot honor a runtime GSU override either; clearing the flag
+    # rejects one during solution selection instead of failing at launch.
+    if oneSlicePerTile:
+      state.setdefault("InternalSupportParams", {})["SupportUserGSU"] = False
 
     # Derive _GlobalAccumulation from GlobalSplitUAlgorithm so the C++
     # runtime sees a non-zero sizeMapping.globalAccumulation for GSU>1
@@ -3624,14 +3644,19 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
       return True
 
-    # Track VALU source operands on VA_VDST (src-operand WAR hazard). On only for
-    # sparse; non-sparse kernels skip the stamp. Pre-armed for when sparse enables ESM2.
+    # Let WMMAs issue back to back (SCHED_MODE DISABLE_XDL_ARB_STALL).
+    # Skipped for sparse and for persistent (StreamK or DataParallel) kernels.
+    def evaluateDisableXdlArbStall() -> bool:
+      return not state["ProblemType"]["Sparse"] and not isPersistent(state)
+
+    # Track VALU source operands on VA_VDST (src-operand WAR hazard).
     def evaluateEnableESM2TrackValuVsrc() -> bool:
-      return bool(state["ProblemType"]["Sparse"])
+      return True
 
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
     state["EnableStinkyTofuESM2"] = evaluateStinkyTofuESM2()
     state["EnableESM2TrackValuVsrc"] = evaluateEnableESM2TrackValuVsrc()
+    state["DisableXdlArbStall"] = evaluateDisableXdlArbStall()
 
     state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
     # Some restrictions for float4 and 6bitFloat:
@@ -4149,9 +4174,9 @@ class Solution(collections.abc.Mapping):
             ## turn-off padding for directToLds
             if state["EnableMatrixInstruction"] and state["TransposeLDSMetadata"] and state["DirectToLdsMetadata"]:
               ldsPadM = 0
-            # TDM's pad_amount field is dword-granular
+            # TDM pads must be an even number of dwords (see LDS_PAD_STEP_BYTES).
             if state["TDMInst"] and ldsPadM != 0:
-              ldsPadM = roundUpToNearestMultiple(int(ldsPadM), 4)
+              ldsPadM = roundUpToNearestMultiple(int(ldsPadM), LDS_PAD_STEP_BYTES)
           assert(ldsPadM >= 0)
 
         def removeLdsPadLogicForDTL(tc, ldsPad):
@@ -4197,7 +4222,7 @@ class Solution(collections.abc.Mapping):
             pads["Metadata"] = ldsPadM  # already in bytes (metadata bpe=1)
           for tc, val in pads.items():
             if val == 0: continue
-            err = ldsPadError(int(val), 4 if tc == "Metadata" else LDS_PAD_STEP_BYTES)
+            err = ldsPadError(int(val), LDS_PAD_STEP_BYTES)
             if err:
               reject(state, printRejectionReason,
                      f"ldsPad{tc}={int(val)}: {err} for the TDM pad_amount field")
@@ -6747,6 +6772,21 @@ class Solution(collections.abc.Mapping):
       epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * vecDT.scaleAlpha(0).turn)
     if state["ProblemType"]["UseScaleAB"] == "Vector":
       epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * (vecDT.scaleA.turn + vecDT.scaleB.turn))
+    # Classic persistent TDM epilogues reuse LDS for vectors. Without PAP,
+    # a tile-end rendezvous lets compute reuse that storage. With PAP, the
+    # successor's compute data is already live during the epilogue, so the
+    # vectors need storage outside every compute bank.
+    state["_PersistentVectorEpilogueLds"] = bool(
+      epilogueSize and isPersistent(state) and state["enableTDMA"] and state["enableTDMB"]
+      and not state["UseSubtileImpl"] and not state["StoreRemapVectorWidth"]
+      and not state["ProblemType"]["Gradient"])
+    state["_SeparateEpilogueLds"] = bool(
+      state["_PersistentVectorEpilogueLds"] and state["PrefetchAcrossPersistent"])
+    if state["_SeparateEpilogueLds"]:
+      epilogueOffset = int(math.ceil(ldsNumBytes / 16) * 16)
+      state["LdsOffsetBias"] = epilogueOffset
+      state["LdsOffsetBiasNonGSU"] = epilogueOffset
+      state["LdsOffsetBiasGSU"] = epilogueOffset
     ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize)
 
     state["LdsBytesNoAmax"] = ldsNumBytes
@@ -6896,8 +6936,10 @@ class Solution(collections.abc.Mapping):
       if isPersistent(state) and not hasStaticAssignment(state):
         reject(state, printRejectionReason, "PrefetchGL2 with persistent execution requires WorkAssignment=StaticGrid")
         return
+      # General batch is supported on StridedBatched SupportUserArgs kernels,
+      # where ArgType == 3 selects it at runtime. StridedBatched=False is not.
       if state["ProblemType"]["Batched"] and not state["ProblemType"]["StridedBatched"]:
-        reject(state, printRejectionReason, "PrefetchGL2 does not support general batch")
+        reject(state, printRejectionReason, "PrefetchGL2 does not support StridedBatched=False")
         return
       if state["ProblemType"]["Sparse"]:
         if state["DirectToVgprSparseMetadata"]:
@@ -7095,8 +7137,8 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "Use E does not support len(PackedC1IndicesX) > 1.")
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Use E only supports BufferStore due to no suppress no store.")
-      if state["StoreRemapVectorWidth"] and (state["GlobalSplitU"] == 1 or state["GlobalSplitU"] == -1):
-        reject(state, printRejectionReason, "Use E does not support StoreRemapVectorWidth if GSU == 1.")
+      if state["StoreRemapVectorWidth"] and (state["GlobalSplitU"] == 1 or state["GlobalSplitU"] == -1 or isPersistent(state)):
+        reject(state, printRejectionReason, "Use E does not support StoreRemapVectorWidth if GSU == 1 or with a persistent TileProcessingStrategy.")
       if state["GroupLoadStore"]:
         reject(state, printRejectionReason, "Use E does not support GroupLoadStore.")
 

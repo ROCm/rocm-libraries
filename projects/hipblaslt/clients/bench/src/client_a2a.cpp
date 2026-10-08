@@ -149,7 +149,7 @@ try
             {
                 launch(0);
                 if(hipStreamSynchronize(res.stream) != hipSuccess
-                   || !check_recv(env, arg, res, hostGold, hostLanded))
+                   || !check_recv(env, arg, res, 0, hostGold, hostLanded))
                     verified = false;
             }
 
@@ -203,7 +203,7 @@ try
         bool ok = hipStreamSynchronize(res.stream) == hipSuccess
                   && lastStatus == HIPBLAS_STATUS_SUCCESS;
         if(ok && (arg.norm_check || arg.allclose_check)
-           && !check_recv(env, arg, res, hostGold, hostLanded))
+           && !check_recv(env, arg, res, 0, hostGold, hostLanded))
             ok = false;
 
         if(!agreement.agree(ok, std::logical_and<>{}))
