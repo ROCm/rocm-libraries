@@ -421,9 +421,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::SetNextValue(const ProblemD
         // advanced 1 -> 2, dropping the "valid_kernels[0]+1" candidate. That candidate was never
         // tuned, even though it is applicable (IsArgsSupported == true) and is offered to the AI
         // heuristic candidate list via FillValidKernels.
-        index     = 0;
-        split_k   = 1;
-        kernel_id = valid_kernels[index] + "+1";
+        SeedFirstValidKernel();
         return true;
     }
 

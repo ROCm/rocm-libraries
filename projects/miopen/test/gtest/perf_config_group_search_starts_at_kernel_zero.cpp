@@ -1,16 +1,21 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Regression tests for the valid_kernels[0] ("first kernel") tuning skip in the 2D grouped CK
-// xdlops solvers (Fwd / Bwd / Wrw). Before the fix, the empty-valid_kernels branch of
-// SetNextValue() returned without seeding kernel_id, so GenericSearch's ComputedIterator skipped
-// the still-unset first config and enumeration began at valid_kernels[1] -- valid_kernels[0] was
-// never tuned even though it is applicable (IsValid() == true). After the fix the first
-// enumerated config is valid_kernels[0], with split_k = 1 for the split-k Bwd/Wrw solvers. The
-// 3D Fwd/Bwd equivalents live in their own perf_config_HipImplicitGemm3DGroup*Xdlops.cpp files.
+// Regression tests for the valid_kernels[0] ("first kernel") tuning skip in the grouped CK xdlops
+// solvers. Before the fix, the empty-valid_kernels branch of SetNextValue() returned without
+// seeding kernel_id, so GenericSearch's ComputedIterator skipped the still-unset first config and
+// enumeration began at valid_kernels[1] -- valid_kernels[0] was never tuned even though it is
+// applicable (IsValid() == true). After the fix the first enumerated config is valid_kernels[0],
+// with split_k = 1 for the split-k Bwd/Wrw solvers.
 //
-// These exercise the real CK lazy-init path inside SetNextValue(), so they require a ROCm device
-// and the installed CK grouped-conv library; both are checked and the test GTEST_SKIPs otherwise.
+// Two layers of coverage:
+//   * GPU_* : exercise the real CK lazy-init path end-to-end for the 2D Fwd/Bwd/Wrw solvers, so
+//     they require a ROCm device and the installed CK grouped-conv library (GTEST_SKIP otherwise).
+//     The 3D Fwd/Bwd end-to-end equivalents live in their own perf_config_HipImplicitGemm3DGroup*
+//     Xdlops.cpp files.
+//   * CPU_* : host-only checks of SeedFirstValidKernel() -- the populate-branch seed extracted for
+//     testability -- for all five fixed solvers. valid_kernels is injected directly, so no device
+//     or CK library is needed and these run in the CPU-only test stage.
 
 #include <gtest/gtest.h>
 #include <gtest/group_conv.hpp>
@@ -27,9 +32,11 @@ namespace {
 using Problem   = miopen::conv::ProblemDescription;
 using Direction = miopen::conv::Direction;
 
-using FwdConfig = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupFwdXdlops;
-using BwdConfig = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupBwdXdlops;
-using WrwConfig = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupWrwXdlops;
+using FwdConfig   = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupFwdXdlops;
+using BwdConfig   = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupBwdXdlops;
+using WrwConfig   = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupWrwXdlops;
+using Fwd3DConfig = miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupFwdXdlops;
+using Bwd3DConfig = miopen::solver::conv::PerformanceConfigHipImplicitGemm3DGroupBwdXdlops;
 
 // Builds a 2D grouped-conv ProblemDescription for the requested direction. input == x,
 // output == y; the backward directions pass tensors in (output, weights, input) order, matching
@@ -123,4 +130,63 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32, SearchStartsAtKernelZero
     EXPECT_EQ(cfg.split_k, 1);
     EXPECT_EQ(cfg.kernel_id, cfg.valid_kernels.front() + "+1");
     EXPECT_TRUE(cfg.IsValid(problem));
+}
+
+// --- Host-only (no device / CK library): SeedFirstValidKernel() must make valid_kernels[0] the
+// first enumerated config. valid_kernels is injected directly; index/split_k are pre-clobbered to
+// prove the seed resets them. Non-split solvers seed kernel_id = valid_kernels[0]; split-k solvers
+// seed split_k = 1 and kernel_id = valid_kernels[0] + "+1".
+
+TEST(CPU_PerfConfigGroupFwdSeed_NONE, SeedsKernelZero)
+{
+    FwdConfig cfg(false);
+    cfg.valid_kernels = {"A", "B", "C"};
+    cfg.index         = 7;
+    cfg.SeedFirstValidKernel();
+    EXPECT_EQ(cfg.index, 0);
+    EXPECT_EQ(cfg.kernel_id, "A");
+}
+
+TEST(CPU_PerfConfigGroupBwdSeed_NONE, SeedsKernelZero)
+{
+    BwdConfig cfg(false);
+    cfg.valid_kernels = {"A", "B", "C"};
+    cfg.index         = 7;
+    cfg.split_k       = 64;
+    cfg.SeedFirstValidKernel();
+    EXPECT_EQ(cfg.index, 0);
+    EXPECT_EQ(cfg.split_k, 1);
+    EXPECT_EQ(cfg.kernel_id, "A+1");
+}
+
+TEST(CPU_PerfConfigGroupWrwSeed_NONE, SeedsKernelZero)
+{
+    WrwConfig cfg(false);
+    cfg.valid_kernels = {"A", "B", "C"};
+    cfg.index         = 7;
+    cfg.split_k       = 64;
+    cfg.SeedFirstValidKernel();
+    EXPECT_EQ(cfg.index, 0);
+    EXPECT_EQ(cfg.split_k, 1);
+    EXPECT_EQ(cfg.kernel_id, "A+1");
+}
+
+TEST(CPU_PerfConfig3DGroupFwdSeed_NONE, SeedsKernelZero)
+{
+    Fwd3DConfig cfg(false);
+    cfg.valid_kernels = {"A", "B", "C"};
+    cfg.index         = 7;
+    cfg.SeedFirstValidKernel();
+    EXPECT_EQ(cfg.index, 0);
+    EXPECT_EQ(cfg.kernel_id, "A");
+}
+
+TEST(CPU_PerfConfig3DGroupBwdSeed_NONE, SeedsKernelZero)
+{
+    Bwd3DConfig cfg(false);
+    cfg.valid_kernels = {"A", "B", "C"};
+    cfg.index         = 7;
+    cfg.SeedFirstValidKernel();
+    EXPECT_EQ(cfg.index, 0);
+    EXPECT_EQ(cfg.kernel_id, "A");
 }

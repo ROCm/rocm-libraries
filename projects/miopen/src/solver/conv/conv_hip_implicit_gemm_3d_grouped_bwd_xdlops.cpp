@@ -221,8 +221,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::SetNextValue(
         // valid_kernels[1] -- valid_kernels[0] was never tuned, even though it is applicable
         // (IsArgsSupported == true) and is offered to the AI heuristic candidate list via
         // FillValidKernels.
-        index     = 0;
-        kernel_id = valid_kernels[index];
+        SeedFirstValidKernel();
         return true;
     }
     if((index + 1) < valid_kernels.size())
