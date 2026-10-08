@@ -2416,7 +2416,7 @@ try
     int                           info = 0;
     hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cublasZgelsBatched(dn->blas_handle,
-                                                         trans,
+                                                         CUBLAS_OP_N,
                                                          m,
                                                          n,
                                                          nrhs,
