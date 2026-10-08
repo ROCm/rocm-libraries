@@ -108,6 +108,99 @@ medians over dispatches, logs `logs/*-pmcc-*`; `alt_timing.py 6 ...` for time):
   hidden. Whether that holds at DepthU 512 is not measured: no conflict-free DepthU 512 layout
   fits in 320 KiB with two buffers.
 
+## DepthU 512 main loop: TDM supply is the limit (open, found 2026-10-08)
+
+All on the DepthU 512 build (`logs/20261007-205701-gen-du512`), (4096, 4096, 1, 65536), GPU 3
+unless noted.
+
+### Measure in cycles, not microseconds
+
+The part is power-throttled, and its clock depends on the data. The unmodified kernel runs the
+same 2.98 M GPU-active cycles with zero A/B as with random data, but at 2.21 vs 1.84 GHz
+(168 vs 203 us). Uniform scales change nothing. Diagnostic builds that drop loads leave stale or
+near-zero data in LDS, so their microsecond timings mix the code change with a clock change.
+`cycles.sh name=dir ...` reports `GRBM_GUI_ACTIVE` cycles and duration per build. The noise is
+about 0.4%: two baseline runs measured 3.022 and 3.009 M.
+
+### Thread trace works with the default target CU
+
+`rocprofv3 --att -d DIR -- tensilelite-client --config-file INI` (defaults: target CU 1,
+shader engine 0) records instruction timing. `configs/rocprof_att.yaml` (and so `run.sh att`)
+gives empty `.att` files, even with `att_target_cu: 1`, shader engine mask 0x1 and no
+`LD_LIBRARY_PATH` override. The 1 GiB buffer, `att_consecutive_kernels: 1`,
+`kernel_include_regex` and `--truncate-kernels` all work from the command line. Suspected but
+untested: `att_gpu_index: "0"` selects physical GPU 0, because `HIP_VISIBLE_DEVICES` does not
+renumber the runtime's agents. Use the command line. Stall-only sums miss part of the
+time. A wave that cannot issue at all is counted under `Idle`, so per-iteration time is
+`Latency + Idle` of the loop instructions. Shader engines 0-3 and CUs 1/3/5 all show the same
+breakdown (2360-2480 cycles of latency per iteration), so CU 1 is representative.
+
+### Where an iteration goes
+
+About 3076 cycles per iteration (latency + idle), 128 WMMAs. The four TDM loads are issued in a
+burst right after barrier 1 (after WMMA 95). Per iteration:
+
+| Point | Cycles |
+| --- | --- |
+| A, B, MXSA `tensor_load_to_lds` issue (idle) | 10 / 10 / 17 |
+| MXSB `tensor_load_to_lds` issue (idle: the wave cannot issue it) | 373 |
+| `s_wait_tensorcnt 4` | 309 |
+| Barrier 2 (after the wait) | 189 |
+| The four `s_wait_dscnt 0` (LDS reads of each K-step) | 257 (26 / 75 / 72 / 83) |
+| WMMA dependency stalls | 246 |
+
+Roughly 870 cycles (28%) are tied to TDM. Moving the TDM issues does not reduce that total
+(`tdm_spread.py`, results correct, 10 default sizes pass, no failures with jitter):
+
+| Build | MXSB issue | Wait | Barrier 2 | Iteration | Kernel cycles |
+| --- | --- | --- | --- | --- | --- |
+| Burst after barrier 1 (current) | 373 | 309 | 189 | 3076 | 3.022 M |
+| spread4: A/B/MXSA/MXSB after WMMA 95/103/111/119, wait 1 | 9 | 755 | 162 | 3066 | -0.3% |
+| spreadMX: A, B at 95, MXSA 107, MXSB 119, wait 2 | 11 | 677 | 226 | 3051 | -1.4 to -1.8% |
+| Wait relaxed to 12 (results wrong) | 470 | 2 | 15 | 3011 | -2.5% |
+
+The issue stall moves into the wait, and a relaxed wait moves back into the issue stall.
+TDM cannot deliver an iteration's data (2 x 64 KiB + 2 x 4 KiB per workgroup) in under about
+3000 cycles, about 45 B/cycle per CU, or about 22 TB/s of L2-to-LDS across the GPU. Scheduling
+changes only move the waiting around.
+
+Not yet explained: dropping both scale TDM loads (6% of the bytes, 10% of the L2 requests)
+saved 26% of cycles, dropping MXSB alone 3.7%, dropping B 29% and all loads 36% (GPU 0, cycles,
+results wrong). That is not proportional to bytes, so the limit may be the number of TDM loads or
+L2 requests rather than bandwidth. L2 counters (`GL2C_*`, three passes because one pass exceeds
+the hardware) show the scale loads read exactly their bytes (4 sectors per 128 B request, no
+waste), and L2 hit rates are high everywhere. Removing the scale LDS padding (384 B after each
+128 B row) or reordering the scale loads changed nothing.
+
+### Scale LDS reads
+
+Each K-step issues 32 `ds_load_b128` (data) and 12 `ds_load_b32` (4 MXSA, 8 MXSB), then
+`s_wait_dscnt 0`. The scale reads are about half of that wait. Removing them all cuts the four
+waits from 257 to 138 cycles per iteration. Replacing them with 3 `ds_load_b128` per K-step (same
+registers and bytes, 48 to 12 instructions per iteration) cuts the waits to 192. In both cases
+most of the saving moves into the TDM wait and barrier. Kernel cycles: -1.3% (wide), 0.0% (all
+removed). Worth doing once the TDM limit moves. A real implementation needs a scale LDS layout
+with each lane's four K-chunks contiguous ([M block][row][K chunk][4 B] instead of
+[M block][K chunk][row][4 B]) and about 4x the live scale VGPRs.
+
+### Ruled out at DepthU 512
+
+- Main-loop buffer swaps (14 `v_xor_b32` + 4 `s_xor_b32`): removing them saves 0.5% of cycles,
+  so unrolling to remove them is not worth it.
+- Deeper prefetch: three DepthU 512 buffers need about 456 KiB, and the relaxed-wait bound above
+  is 2.5%.
+
+### Next
+
+- Find what TDM is limited by (bytes vs loads vs L2 requests): L2 request rates, and variants
+  that change one without the other.
+- Cluster / multicast TDM loads, so workgroups that share A or B rows fetch them once (if gfx1250
+  TDM supports it; Tensile has cluster barrier support).
+- spreadMX in the generator (small, correct win), and the wide scale reads after that.
+- A "fake fuse" test (at most 2 TDM loads per wave, same bytes) hung the GPU. The doubled-row
+  loads of wave 3 and the padded 32-row scale loads probably write past the LDS allocation.
+  Dropped for now.
+
 ## Scale addressing bugs hidden by validation (fixed 2026-10-06)
 
 With the client's MX data generation every block gets the same scale, so validation passes no
@@ -407,7 +500,9 @@ What is left and why:
   together. It does not depend on which tensor is read, and more slack reduces it, so the two
   ports' bursts overlap more in hardware than in the model. Either the ports leave the barrier
   skewed, or reads (the 4-byte scale reads in particular) hold the port longer than modelled.
-  Telling these apart needs per-instruction timing; the ATT trace is empty on gfx1250. Gates
+  Telling these apart needs per-instruction timing. The ATT trace was empty here because it
+  came from `configs/rocprof_att.yaml`. Plain `rocprofv3 --att` works (see "DepthU 512 main
+  loop" above). Gates
   (10,24) cut it by a third but push phase-1 reads toward the barrier; not worth it at 0.08%.
 - With WaveGroup 2x2 the B half follows wave bit 1, so both ports read the same B and SB data.
   B conflicts can only be avoided by timing, and the waves drift slightly apart.
