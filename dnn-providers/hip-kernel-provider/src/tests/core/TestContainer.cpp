@@ -275,13 +275,25 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
         graphBuffer.data(), graphBuffer.size());
 
     auto applicableEngines = engineManager.getApplicableEngineIds(handle, graphWrapper);
+    const auto applies = [&applicableEngines](auto engineId) {
+        return std::find(applicableEngines.begin(), applicableEngines.end(), engineId)
+               != applicableEngines.end();
+    };
 
+    // The engines that serve this graph on gfx942 and gfx950, and no others.
+    size_t expected = 0;
 #ifdef HIPDNN_ENGINE_ASM_SDPA
-    ASSERT_EQ(applicableEngines.size(), 1);
-    EXPECT_EQ(applicableEngines.front(), asm_sdpa_engine::AsmSdpaEngine::staticId());
-#else
-    EXPECT_TRUE(applicableEngines.empty());
+    EXPECT_TRUE(applies(asm_sdpa_engine::AsmSdpaEngine::staticId()));
+    ++expected;
 #endif
+#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
+    // FlyDSL's CDNA SDPA engine, when this build staged objects for the device.
+    if(applies(hipdnn_data_sdk::utilities::engineNameToId("hipkernel:flydsl_sdpa_cdna")))
+    {
+        ++expected;
+    }
+#endif
+    EXPECT_EQ(applicableEngines.size(), expected);
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR

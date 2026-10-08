@@ -247,10 +247,14 @@ constexpr int64_t VECTOR_ELEMENTS = 8;
  *
  * Logical shape [B, H, S, D] with head_dim contiguous; the batch, sequence and head strides
  * are kernel arguments, so BSHD, BHSD and packed-QKV views are all served. Each stride on an
- * axis longer than 1 must be positive and keep every row 16-byte aligned; an axis of extent
- * 1 is never stepped, so its stride is not used. Each (batch, head) slice is one buffer view
- * of (S - 1) * stride_s + D elements, which must stay within 32-bit addressing. A ragged
- * operand would be read as one dense batch, so it declines too.
+ * axis longer than 1 must be positive and keep every row 16-byte aligned. Each (batch, head)
+ * slice is one buffer view of (S - 1) * stride_s + D elements, which must stay within 32-bit
+ * addressing; rows past the sequence -- a query tile's padding rows -- read as zero and
+ * store nowhere only because they fall outside it, which needs a sequence stride of at
+ * least D. So a single-row sequence is given stride D rather than its stated one, which
+ * is never stepped, and overlapping rows decline. A batch or head axis of extent 1 is never
+ * stepped and gets stride 0. A ragged operand would be read as one dense batch, so it
+ * declines too.
  */
 std::optional<OperandStrides> servableStrides(const data_objects::TensorAttributes& tensor,
                                               int64_t batch,
@@ -274,7 +278,7 @@ std::optional<OperandStrides> servableStrides(const data_objects::TensorAttribut
     const auto stepped = [&](uint32_t axis, int64_t extent) -> std::optional<int64_t> {
         if(extent == 1)
         {
-            return 0;
+            return axis == SEQ_AXIS ? headDim : 0;
         }
         const int64_t stride = strides->Get(axis);
         if(stride <= 0 || stride % VECTOR_ELEMENTS != 0 || stride > INT32_LIMIT)
@@ -286,7 +290,8 @@ std::optional<OperandStrides> servableStrides(const data_objects::TensorAttribut
     const auto batchStride = stepped(BATCH_AXIS, batch);
     const auto sequenceStride = stepped(SEQ_AXIS, sequence);
     const auto headStride = stepped(HEAD_AXIS, heads);
-    if(!batchStride.has_value() || !sequenceStride.has_value() || !headStride.has_value())
+    if(!batchStride.has_value() || !sequenceStride.has_value() || !headStride.has_value()
+       || *sequenceStride < headDim)
     {
         return std::nullopt;
     }
