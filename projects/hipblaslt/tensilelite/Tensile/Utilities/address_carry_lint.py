@@ -22,9 +22,11 @@ know which branches go together, so a register reused for an integer can look li
 along a path that never runs. An add of two constants sets the register rather than advancing an
 address, and an add to the result of a bit operation such as xor is integer arithmetic, so
 neither is reported. Nor is an update whose high dword was last set, in the same block, by 32-bit
-integer arithmetic: the pair does not hold an address there. A finding is a lead to read, not a
-proof, and a clean result is not one
-either: the lint does not see addresses held in other forms, such as TDM descriptor groups.
+integer arithmetic: the pair does not hold an address there. Those two rules judge a register by
+the instruction that last wrote it, so they also hide a dropped carry after arithmetic that keeps
+an address, such as a 4 GiB step of the high dword. A finding is a lead to read, not a proof, and
+a clean result is not one either: the lint does not see addresses held in other forms, such as
+TDM descriptor groups.
 
 It is meant for Tensile-generated and hand-written kernels, which keep a 64-bit value in an
 adjacent register pair. Compiler-generated code may keep the two halves of a sum in unrelated

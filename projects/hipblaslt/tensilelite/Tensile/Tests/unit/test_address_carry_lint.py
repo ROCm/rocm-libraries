@@ -470,6 +470,48 @@ def test_a_high_dword_from_a_product_or_a_copy_is_still_an_address():
         assert len(reasons) == 1 and "s48" in reasons[0], high
 
 
+# Known misses, from newling's review. The bit-operation and integer-high-dword rules judge a
+# register by the instruction that last wrote it, and arithmetic can keep an address: advancing
+# its high dword by 4 GiB, or xoring its low dword with 0. A dropped carry after either is not
+# reported. The rules stay because without them the ROCm 10.2 library audit reports about 17,800
+# paths that never run; these tests flip to passing if a later rule tells the two apart.
+_KNOWN_MISS = "the bit-operation and integer-high-dword rules hide this dropped carry"
+
+
+@pytest.mark.xfail(strict=True, reason=_KNOWN_MISS)
+@pytest.mark.parametrize(
+    "setup",
+    ["s_add_u32 s9, s9, 1", "s_xor_b32 s8, s8, 0"],
+    ids=["high-word-arithmetic", "low-word-bit-op"],
+)
+def test_arithmetic_on_address_words_does_not_hide_a_missing_carry(setup):
+    prefix = f"""
+    s_mov_b32 s8, 0xfffffff0
+    s_mov_b32 s9, 0x1234
+    {setup}
+    s_add_u32 s8, s8, 64
+    """
+    use = "s_load_dword s0, s[8:9], 0\n"
+    assert _reasons(prefix + "s_addc_u32 s9, s9, 0\n" + use) == []
+    findings = lint(prefix + use)
+    assert len(findings) == 1
+    assert findings[0].text == "s_add_u32 s8, s8, 64"
+
+
+@pytest.mark.xfail(strict=True, reason=_KNOWN_MISS)
+def test_a_vector_bit_op_does_not_hide_a_missing_carry():
+    prefix = """
+    v_mov_b32 v4, 0xfffffff0
+    v_mov_b32 v5, 0x1234
+    v_xor_b32 v4, 0, v4
+    v_add_co_u32 v4, vcc, 64, v4
+    """
+    use = "global_load_dword v0, v[4:5], off\n"
+    assert _reasons(prefix + "v_addc_co_u32 v5, vcc, v5, 0, vcc\n" + use) == []
+    findings = lint(prefix + use)
+    assert len(findings) == 1 and "v4" in findings[0].reason
+
+
 def test_registers_are_judged_within_their_own_kernel():
     asm = """
     .amdgpu_hsa_kernel first
