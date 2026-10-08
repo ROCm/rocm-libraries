@@ -15,8 +15,11 @@ from codegen.generator import (
     _dedup_key,
     build_kdp,
     build_kdp_documents,
+    build_kernel_match_umd,
     build_kmd,
+    build_udd,
     build_ued,
+    build_uhd,
     emitted_inventory,
     mint_ids,
 )
@@ -933,6 +936,29 @@ class TestAPackEmptiedByDeduplicationIsRefused:
         assert entry["pack_names"] == ["test_alpha", "test_beta"]
         assert entry["pack_count"] == 2
         assert inventory["total_descriptor_count"] == 2
+
+
+class TestBorrowedNativeSymbols:
+    """An engine naming ``native_symbols_from`` points every descriptor at the other
+    engine's registered symbols, and keeps its own name, slug and document ids."""
+
+    def test_every_symbol_reference_names_the_other_engine(self):
+        config = make_minimal_config(
+            engine=make_engine(
+                name="hipkernel:TestSeed", native_symbols_from="hipkernel:Test"
+            )
+        )
+        ids = mint_ids(config)
+        assert build_ued(config, ids)["name"] == "hipkernel:TestSeed"
+        assert build_ued(config, ids)["graph_match"] == {
+            "native": "hipkernel.test.graph_match"
+        }
+        assert build_udd(config, ids)["dispatch_symbol"] == "hipkernel.test.dispatch"
+        assert build_uhd(config, ids)["payload"] == "hipkernel.test.score"
+        assert (
+            build_kernel_match_umd(config, ids)["match_symbol"]
+            == "hipkernel.test.kernel_match"
+        )
 
 
 class TestShardedCatalog:

@@ -45,6 +45,10 @@ from pathlib import Path
 #: Namespace for kernel UUIDs derived from an instance_id (uuid5).
 INSTANCE_UUID_NAMESPACE = uuid.UUID("6b0d3b8e-6a58-5d0f-9f43-3c6f5f2a9c11")
 
+#: The shipped engine. Its native symbols are the ones every bundle this tool emits
+#: names; another engine name (a test-only subset of the catalog) borrows them.
+PRODUCT_ENGINE = "hipkernel:Gfx950ConvFwdAot"
+
 #: A UUID as ``str(uuid.UUID)`` spells it: the form of every generated kernel id.
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
@@ -296,8 +300,22 @@ def _variant(name: str, order: tuple, specs: list) -> dict:
     }
 
 
-def build_config(specs: list) -> dict:
+def engine_slug(engine_name: str) -> str:
+    """The generator's slug for ``engine_name`` (``hipkernel:Gfx950ConvFwdAot`` ->
+    ``gfx950_conv_fwd_aot``)."""
+    local_name = engine_name.split(":", 1)[1]
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
+
+
+def build_config(
+    specs: list, engine_name: str = PRODUCT_ENGINE, authored_subpath: str = ""
+) -> dict:
     """The generator config for ``specs`` (already validated, de-duplicated).
+
+    ``engine_name`` other than :data:`PRODUCT_ENGINE` is a second engine over the
+    same native code: its descriptors name the shipped engine's symbols
+    (``native_symbols_from``). ``authored_subpath`` defaults to
+    ``rocKE/<engine slug>``.
 
     One pack per dtype, each its own KDP, so no file has to hold the whole catalog.
     The packs declare no discriminator: they are shards of one catalog, and the
@@ -341,15 +359,18 @@ def build_config(specs: list) -> dict:
                 "variants": variants,
             }
         )
+    engine = {
+        "name": engine_name,
+        "sdk_version": "1.0.0",
+        "knobs": ["tile_k", "kernel_family"],
+        "heuristic": "native",
+    }
+    if engine_name != PRODUCT_ENGINE:
+        engine["native_symbols_from"] = PRODUCT_ENGINE
     return {
         "dialect": "packaged",
-        "authored_subpath": "rocKE/gfx950_conv_fwd_aot",
-        "engine": {
-            "name": "hipkernel:Gfx950ConvFwdAot",
-            "sdk_version": "1.0.0",
-            "knobs": ["tile_k", "kernel_family"],
-            "heuristic": "native",
-        },
+        "authored_subpath": authored_subpath or f"rocKE/{engine_slug(engine_name)}",
+        "engine": engine,
         "kmd_fields": kmd,
         "kernel_source_kind": "rocke",
         "workspace_policy": "none",
@@ -402,7 +423,7 @@ def dump_config(config: dict, dumper=None) -> str:
     )
 
 
-def stabilize_ids(kdp_path: Path) -> int:
+def stabilize_ids(kdp_path: Path, engine_name: str = PRODUCT_ENGINE) -> int:
     """Re-derive every kernel UUID of one KDP from its instance_id; returns the count.
 
     A kernel id found anywhere else in the file is referenced, and is refused.
@@ -422,16 +443,24 @@ def stabilize_ids(kdp_path: Path) -> int:
                 f"kernel id {old_id} appears {counts[old_id]} times in "
                 f"{kdp_path}; refusing to rewrite a referenced id"
             )
-        new_ids[old_id] = kernel_uuid(kernel["metadata"]["instance_id"])
+        new_ids[old_id] = kernel_uuid(kernel["metadata"]["instance_id"], engine_name)
     kdp_path.write_text(
         _UUID.sub(lambda match: new_ids.get(match.group(0), match.group(0)), text)
     )
     return len(kernels)
 
 
-def kernel_uuid(instance_id: str) -> str:
-    """The kernel UUID an instance is shipped under."""
-    return str(uuid.uuid5(INSTANCE_UUID_NAMESPACE, instance_id))
+def kernel_uuid(instance_id: str, engine_name: str = PRODUCT_ENGINE) -> str:
+    """The kernel UUID an instance is shipped under by ``engine_name``.
+
+    The shipped engine's ids are uuid5 of the instance_id. Any other engine derives
+    them under a namespace of its own name, so an instance it shares with the shipped
+    catalog never carries the same kernel id into one process twice.
+    """
+    namespace = INSTANCE_UUID_NAMESPACE
+    if engine_name != PRODUCT_ENGINE:
+        namespace = uuid.uuid5(INSTANCE_UUID_NAMESPACE, engine_name)
+    return str(uuid.uuid5(namespace, instance_id))
 
 
 def _kernels(node):
@@ -461,6 +490,18 @@ def main(argv=None) -> int:
         help="Drop unsupported identities (each is still reported) instead of failing.",
     )
     parser.add_argument(
+        "--engine-name",
+        default=PRODUCT_ENGINE,
+        help="Engine the bundle declares, and whose kernel ids --stabilize-ids "
+        "derives (default: %(default)s). Another name borrows that engine's native "
+        "symbols.",
+    )
+    parser.add_argument(
+        "--authored-subpath",
+        default="",
+        help="The bundle's authored subpath (default: rocKE/<engine slug>).",
+    )
+    parser.add_argument(
         "--stabilize-ids",
         type=Path,
         nargs="+",
@@ -471,7 +512,8 @@ def main(argv=None) -> int:
 
     if args.stabilize_ids:
         for kdp in args.stabilize_ids:
-            print(f"{kdp}: stabilized {stabilize_ids(kdp)} kernel id(s)")
+            count = stabilize_ids(kdp, args.engine_name)
+            print(f"{kdp}: stabilized {count} kernel id(s)")
         return 0
     if not (args.rocke_root and args.instances and args.output):
         parser.error("--rocke-root, --instances and --output are required")
@@ -507,7 +549,8 @@ def main(argv=None) -> int:
         "# Generated by tools/make_conv_aot_config.py from "
         f"{args.instances.name}; do not edit by hand.\n"
     )
-    args.output.write_text(header + dump_config(build_config(specs)))
+    config = build_config(specs, args.engine_name, args.authored_subpath)
+    args.output.write_text(header + dump_config(config))
     print(
         f"{len(specs)} instance(s) written to {args.output} "
         f"({len(entries) - len(rejected) - len(specs)} duplicate(s), {len(rejected)} unsupported)"

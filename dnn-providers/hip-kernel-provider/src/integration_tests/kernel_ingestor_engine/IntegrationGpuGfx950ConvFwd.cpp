@@ -53,17 +53,22 @@ namespace ingestor = hipdnn_plugin_sdk::ingestor;
 namespace
 {
 
+// Each engine's suites compile only where that engine ships: HKP_TEST_GFX950_CONV_FWD for
+// the exact-shape engine, HKP_TEST_GFX950_CONV_FWD_AOT for the AOT-instance engine and
+// HKP_TEST_GFX950_CONV_FWD_AOT_SEED for its test-only seed (src/integration_tests/CMakeLists.txt).
 constexpr const char* ENGINE_NAME = "hipkernel:Gfx950ConvFwd";
-constexpr const char* TILE_K_KNOB = "tile_k";
 constexpr const char* KERNEL_FAMILY_KNOB = "kernel_family";
 constexpr int64_t IMPLICIT_GEMM_FAMILY = 0;
 constexpr int64_t DIRECT_DEPTHWISE_FAMILY = 1;
+#ifdef HKP_TEST_GFX950_CONV_FWD
+constexpr const char* TILE_K_KNOB = "tile_k";
 // rocKE's AOT kernels take the problem as kernel arguments, so a graph is served by every
 // packaged kernel whose build-time capabilities admit it, not only the one compiled for
 // its shape. Every count below is the number of shipped kernels that
 // gfx950_conv_fwd_serves in convolution_forward.py accepts for the graph, so the native
 // matcher is checked against the Python one.
 constexpr size_t SMOKE_CANDIDATES = 42;
+#endif
 
 struct ConvProblem
 {
@@ -102,6 +107,7 @@ std::string dtypeSuffix(DataType dtype)
     return dtype == DataType::HALF ? "Fp16" : "Bf16";
 }
 
+#ifdef HKP_TEST_GFX950_CONV_FWD
 std::vector<Variant> correctnessVariants()
 {
     // The same synthetic spatial, grouped and depthwise cases, two dtypes and two
@@ -142,6 +148,7 @@ std::vector<Variant> correctnessVariants()
     }
     return variants;
 }
+#endif
 
 std::vector<Variant> withBothDtypes(
     const std::vector<std::tuple<std::string, ConvProblem, size_t, size_t>>& problems)
@@ -158,6 +165,7 @@ std::vector<Variant> withBothDtypes(
     return variants;
 }
 
+#ifdef HKP_TEST_GFX950_CONV_FWD
 std::vector<Variant> directVariants()
 {
     // Every depthwise request in gfx950_conv_fwd.requests.json that carries
@@ -220,6 +228,7 @@ std::vector<Variant> uncatalogedVariants()
         {"Depthwise7x7G12", {2, 12, 12, 15, 13, 7, 7, 1, 1, 3, 3, 1, 1, 12}, 2, 26},
     });
 }
+#endif
 
 std::shared_ptr<Graph>
     buildConvGraph(DataType dtype, const ConvProblem& problem = {}, bool channelsLast = true)
@@ -302,6 +311,7 @@ std::string selectedKernel(const LogRecorderBase& recorder)
     return selected;
 }
 
+#ifdef HKP_TEST_GFX950_CONV_FWD
 const Knob* findKnob(const std::vector<Knob>& knobs, const std::string& name)
 {
     const auto found = std::find_if(
@@ -331,6 +341,7 @@ size_t selectionCount(const LogRecorderBase& recorder)
         return log.message.find("benchmarking selected kernel") != std::string::npos;
     }));
 }
+#endif
 
 class ScopedPluginLogCapture
 {
@@ -578,6 +589,7 @@ protected:
     std::string _arch;
 };
 
+#ifdef HKP_TEST_GFX950_CONV_FWD
 TEST_P(IntegrationGpuGfx950ConvFwd, ForcedVariantMatchesCpuReference)
 {
     const auto& variant = GetParam();
@@ -874,6 +886,8 @@ TEST_P(IntegrationGpuGfx950ConvFwdDirectDeclined, ImplicitGemmServesTheGraphAlon
     ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 11));
 }
 
+#endif // HKP_TEST_GFX950_CONV_FWD
+
 class IntegrationGpuGfx950ConvFwdServing : public IntegrationGpuGfx950ConvFwd
 {
 protected:
@@ -922,28 +936,33 @@ protected:
     }
 };
 
+#ifdef HKP_TEST_GFX950_CONV_FWD
 // Every kernel here was compiled for another shape.
 TEST_P(IntegrationGpuGfx950ConvFwdServing, EveryServingKernelMatchesCpuReference)
 {
     verifyEveryServingKernel(43, 47);
 }
+#endif
 
-#ifdef HKP_TEST_GFX950_CONV_FWD_AOT
+#ifdef HKP_TEST_GFX950_CONV_FWD_AOT_SEED
 
-// ---- hipkernel:Gfx950ConvFwdAot: shape-generic AOT instances ----
+// ---- hipkernel:Gfx950ConvFwdAotSeed: every serving AOT instance, pinned ----
 //
-// The shipped seed catalog holds 8 implicit-GEMM and 4 direct depthwise instances per
-// dtype, each built once against rocKE's probe problem and matched to a graph by
-// capability. Every variant states how many instances of each family serve it, computed
-// by gfx950_conv_fwd_aot_serves in convolution_forward.py, so the native matcher is
-// checked against the Python one.
+// The test-only seed engine runs hipkernel:Gfx950ConvFwdAot's native code over a small
+// catalog (test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed): 8 implicit-GEMM
+// and 4 direct depthwise instances per dtype, each built once against rocKE's probe
+// problem and matched to a graph by capability. Small enough that every instance serving
+// a graph is pinned and checked against the reference. Every variant states how many
+// instances of each family serve it, computed by gfx950_conv_fwd_aot_serves in
+// convolution_forward.py over gfx950_conv_fwd_aot_seed.instances.json, so the native
+// matcher is checked against the Python one.
 
 namespace
 {
 
-constexpr const char* AOT_ENGINE_NAME = "hipkernel:Gfx950ConvFwdAot";
+constexpr const char* AOT_SEED_ENGINE_NAME = "hipkernel:Gfx950ConvFwdAotSeed";
 
-std::vector<Variant> aotVariants()
+std::vector<Variant> aotSeedVariants()
 {
     // Direct instances serve only guarded depthwise graphs with their compiled filter,
     // stride and padding: std 3x3/1 and 5x5/2, spatial (fewer than 64 groups) 3x3/1 and
@@ -978,21 +997,21 @@ std::vector<Variant> aotVariants()
 
 } // namespace
 
-class IntegrationGpuGfx950ConvFwdAot : public IntegrationGpuGfx950ConvFwdServing
+class IntegrationGpuGfx950ConvFwdAotSeed : public IntegrationGpuGfx950ConvFwdServing
 {
 protected:
     const char* engineName() const override
     {
-        return AOT_ENGINE_NAME;
+        return AOT_SEED_ENGINE_NAME;
     }
 };
 
-TEST_P(IntegrationGpuGfx950ConvFwdAot, EveryServingInstanceMatchesCpuReference)
+TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, EveryServingInstanceMatchesCpuReference)
 {
     verifyEveryServingKernel(31, 37);
 }
 
-TEST_P(IntegrationGpuGfx950ConvFwdAot, UnbenchmarkedPlanServesACapableInstance)
+TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, UnbenchmarkedPlanServesACapableInstance)
 {
     const auto& variant = GetParam();
     const ScopedPluginLogCapture capture(this);
@@ -1004,7 +1023,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, UnbenchmarkedPlanServesACapableInstance)
     ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 41));
 }
 
-TEST_P(IntegrationGpuGfx950ConvFwdAot, KernelFamilyKnobSelectsEachFamilysInstances)
+TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, KernelFamilyKnobSelectsEachFamilysInstances)
 {
     const auto& variant = GetParam();
     const ScopedPluginLogCapture capture(this);
@@ -1046,8 +1065,9 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, KernelFamilyKnobSelectsEachFamilysInstanc
     EXPECT_EQ(selectedKernel(recorder), directKernel) << recorder.getRecordedLogsAsString();
 }
 
-#endif // HKP_TEST_GFX950_CONV_FWD_AOT
+#endif // HKP_TEST_GFX950_CONV_FWD_AOT_SEED
 
+#ifdef HKP_TEST_GFX950_CONV_FWD
 INSTANTIATE_TEST_SUITE_P(Correctness,
                          IntegrationGpuGfx950ConvFwd,
                          ::testing::ValuesIn(correctnessVariants()),
@@ -1074,13 +1094,6 @@ INSTANTIATE_TEST_SUITE_P(Uncataloged,
                          ::testing::ValuesIn(uncatalogedVariants()),
                          [](const auto& info) { return info.param.name; });
 
-#ifdef HKP_TEST_GFX950_CONV_FWD_AOT
-INSTANTIATE_TEST_SUITE_P(AotInstances,
-                         IntegrationGpuGfx950ConvFwdAot,
-                         ::testing::ValuesIn(aotVariants()),
-                         [](const auto& info) { return info.param.name; });
-#endif
-
 INSTANTIATE_TEST_SUITE_P(Autotuning,
                          IntegrationGpuGfx950ConvFwdBenchmark,
                          ::testing::Values(Variant{"Fp16", DataType::HALF, 64},
@@ -1088,6 +1101,14 @@ INSTANTIATE_TEST_SUITE_P(Autotuning,
                          [](const ::testing::TestParamInfo<Variant>& info) {
                              return info.param.name;
                          });
+#endif // HKP_TEST_GFX950_CONV_FWD
+
+#ifdef HKP_TEST_GFX950_CONV_FWD_AOT_SEED
+INSTANTIATE_TEST_SUITE_P(AotSeedInstances,
+                         IntegrationGpuGfx950ConvFwdAotSeed,
+                         ::testing::ValuesIn(aotSeedVariants()),
+                         [](const auto& info) { return info.param.name; });
+#endif
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::integration
 

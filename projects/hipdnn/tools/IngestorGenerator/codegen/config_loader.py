@@ -1510,6 +1510,18 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
             f"(FNV-1a) into the global 64-bit engine-id space and requires "
             f"global uniqueness."
         )
+    borrowed = config.engine.native_symbols_from
+    if borrowed and (
+        not isinstance(borrowed, str)
+        or not ENGINE_NAME_PATTERN.match(borrowed)
+        or borrowed == config.engine.name
+    ):
+        raise ConfigError(
+            f"engine.native_symbols_from {borrowed!r} must name ANOTHER engine, "
+            f"scoped 'namespace:local' like engine.name: the engine whose registered "
+            f"native symbols this engine's descriptors name. Omit it to name this "
+            f"engine's own."
+        )
     if config.engine.heuristic not in ("native", "none"):
         raise ConfigError(
             f"engine.heuristic '{config.engine.heuristic}' must be 'native' "
