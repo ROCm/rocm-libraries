@@ -200,7 +200,7 @@ namespace rocsparse
         const I start = (row < m) ? sell_slice_offsets[sliceid] - idx_base : 0;
         const I end   = (row < m) ? sell_slice_offsets[sliceid + 1] - idx_base : 0;
 
-        T row_val = alpha * x[row];
+        const T row_val = (row < m) ? alpha * x[row] : static_cast<T>(0);
 
         for(I j = start + idx; j < end; j += (sell_slice_size * THREADS_PER_ROW))
         {
