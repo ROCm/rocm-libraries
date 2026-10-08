@@ -39,9 +39,16 @@ the data type, and the problem. The architectures which default to hipBLASLt, an
     * - gfx1200, gfx1201, gfx1250
       - All data types.
 
-    * - gfx942, gfx950
+    * - gfx950
       - ``f16_r``, ``bf16_r``, and ``f64_r``, including their mixed-precision ``gemm_ex`` forms. All other data types
         default to Tensile.
+
+    * - gfx942 (MI300X, 304 CUs)
+      - ``f16_r``, ``bf16_r``, and ``f64_r``, including their mixed-precision ``gemm_ex`` forms. All other data types
+        default to Tensile.
+
+    * - gfx942 (MI300A, 228 CUs)
+      - ``f64_r`` only. ``f16_r``, ``bf16_r``, and all other data types default to Tensile.
 
     * - All others
       - None. Tensile is always the default.
