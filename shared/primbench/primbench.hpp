@@ -865,41 +865,6 @@ private:
 
 #endif
 
-/// Namespace for flag definitions and utilities.
-namespace flags
-{
-
-/// Enum representing different flags.
-enum class Flags : uint32_t
-{
-    none = 0x0, ///< No flags set.
-    sync = 0x1, ///< Synchronization flag.
-};
-
-/// Wrapper for Flags with utility operations.
-struct FlagTag
-{
-    Flags value{Flags::none}; ///< Underlying flag value.
-
-    /// Construct from a specific flag.
-    constexpr FlagTag(Flags v) : value(v) {}
-
-    /// Bitwise OR operator for combining flags.
-    friend constexpr FlagTag operator|(FlagTag a, FlagTag b)
-    {
-        return FlagTag(
-            static_cast<Flags>(static_cast<uint32_t>(a.value) | static_cast<uint32_t>(b.value)));
-    }
-
-    /// Check if a flag is set.
-    constexpr bool has(FlagTag f) const
-    {
-        return (static_cast<uint32_t>(value) & static_cast<uint32_t>(f.value)) != 0;
-    }
-};
-
-} // namespace flags
-
 /// Logger for saving benchmark results in JSON format.
 ///
 /// Because the logger writes partial JSON data incrementally, a JSON library is not used.
@@ -932,10 +897,7 @@ public:
     }
 
     /// Initializes the logger, and opens the output JSON and CSV files.
-    void init(std::string_view algorithm,
-              size_t           specialization_count,
-              const settings&  settings,
-              flags::FlagTag   flags)
+    void init(std::string_view algorithm, size_t specialization_count, const settings& settings)
     {
         m_output_batches    = settings.output_batches;
         m_spaces_per_indent = settings.spaces_per_indent;
@@ -958,9 +920,7 @@ public:
             }
         }
 
-        m_json_out << indent(
-            serialize_json_prologue(algorithm, specialization_count, settings, flags),
-            0);
+        m_json_out << indent(serialize_json_prologue(algorithm, specialization_count, settings), 0);
         m_json_out << "[";
         if(m_spaces_per_indent > 0)
             m_json_out << "\n";
@@ -1080,13 +1040,12 @@ private:
     /// It adds the `context` object, and adds the `specializations` key.
     std::string serialize_json_prologue(std::string_view algorithm,
                                         size_t           specialization_count,
-                                        const settings&  settings,
-                                        flags::FlagTag   flags)
+                                        const settings&  settings)
     {
         std::ostringstream ss;
         ss << "{";
 
-        ss << "\"context\":" << serialize_context(algorithm, specialization_count, settings, flags);
+        ss << "\"context\":" << serialize_context(algorithm, specialization_count, settings);
 
         ss << ",";
         if(m_spaces_per_indent > 0)
@@ -1100,13 +1059,12 @@ private:
     /// Serializes the benchmark context into JSON.
     std::string serialize_context(std::string_view algorithm,
                                   size_t           specialization_count,
-                                  const settings&  settings,
-                                  flags::FlagTag   flags) const
+                                  const settings&  settings) const
     {
         std::ostringstream ss;
         ss << "{";
 
-        ss << "\"results_version\":\"4.0.0\"";
+        ss << "\"results_version\":\"5.0.0\"";
         ss << ",\"general\":" << serialize_general(algorithm, specialization_count);
         ss << ",\"settings\":" << serialize_settings(settings);
 
@@ -1115,8 +1073,6 @@ private:
         {
             ss << ",\"custom_settings\":" << custom_cli;
         }
-
-        ss << ",\"flags\":" << serialize_flags(flags);
 
         ss << "}";
         return ss.str();
@@ -1470,16 +1426,6 @@ private:
         }
 
         return out.str();
-    }
-
-    /// Serializes benchmark flags into JSON.
-    std::string serialize_flags(flags::FlagTag flags) const
-    {
-        std::ostringstream ss;
-        ss << "{";
-        ss << "\"sync\":" << std::boolalpha << flags.has(flags::Flags::sync);
-        ss << "}";
-        return ss.str();
     }
 
     /// Outputs specialization information to JSON.
@@ -2112,7 +2058,7 @@ public:
             std::cerr
                 << "\nError: Stream blocking timed out after " << m_stream_blocking_timeout_secs
                 << " seconds.\nThe stream is blocked while queueing kernel calls.\nIf your kernel "
-                   "is synchronous, pass primbench::flags::sync to disable stream blocking.\nYou "
+                   "is synchronous, pass --sync to disable stream blocking.\nYou "
                    "can increase the timeout by passing --stream-blocking-timeout-secs <secs>.\n";
             exit(EXIT_FAILURE);
         }
@@ -2483,7 +2429,6 @@ public:
           logger&          logger,
           stream_blocker&  stream_blocker,
           const settings&  settings,
-          flags::FlagTag   flags,
           size_t           specialization_column_width,
           size_t           index_column_width,
           bool             print_index,
@@ -2498,7 +2443,6 @@ public:
         , m_logger(logger)
         , m_stream_blocker(stream_blocker)
         , m_settings(settings)
-        , m_flags(flags)
         , m_specialization_column_width(specialization_column_width)
         , m_index_column_width(index_column_width)
         , m_print_index(print_index)
@@ -2897,7 +2841,7 @@ private:
             // could capture a timestamp well before the kernel actually begins executing.
             // block_stream() guarantees there is no time gap between recording
             // the start event and queuing the kernel on the GPU.
-            if(!(m_settings.sync || m_flags.has(flags::Flags::sync)))
+            if(!m_settings.sync)
                 m_stream_blocker.block();
 
             // Even events record the start time.
@@ -2911,7 +2855,7 @@ private:
             PRIMBENCH_CHECK(event_record(events[i * 2 + 1], stream));
 
             // Allows the GPU to start running its queued events.
-            if(!(m_settings.sync || m_flags.has(flags::Flags::sync)))
+            if(!m_settings.sync)
                 m_stream_blocker.unblock();
 
             // Catches kernel launch errors.
@@ -2932,7 +2876,7 @@ private:
                 PRIMBENCH_CHECK(get_last_error());
 
                 // Check for blocking kernel timeout after sync.
-                if(!(m_settings.sync || m_flags.has(flags::Flags::sync)))
+                if(!m_settings.sync)
                     m_stream_blocker.check_timeout();
             }
         }
@@ -2943,7 +2887,7 @@ private:
         PRIMBENCH_CHECK(get_last_error());
 
         // Final blocking kernel timeout check.
-        if(!(m_settings.sync || m_flags.has(flags::Flags::sync)))
+        if(!m_settings.sync)
             m_stream_blocker.check_timeout();
     }
 
@@ -3026,8 +2970,6 @@ private:
     stream_blocker& m_stream_blocker;
 
     const settings& m_settings;
-
-    flags::FlagTag m_flags;
 
     size_t m_specialization_column_width;
 
@@ -3501,18 +3443,6 @@ void log(Args&&... args)
     std::cout << detail::reset << std::flush;
 }
 
-/// Namespace for flag definitions and utilities.
-namespace flags
-{
-
-/// FlagTag representing no flags.
-inline constexpr detail::flags::FlagTag none{detail::flags::Flags::none};
-
-/// FlagTag representing the sync flag.
-inline constexpr detail::flags::FlagTag sync{detail::flags::Flags::sync};
-
-} // namespace flags
-
 /// Interface for all benchmark specializations.
 ///
 /// A benchmark implementation describes:
@@ -3578,13 +3508,11 @@ class executor
 {
 public:
     /// Constructs the executor, and runs setup code.
-    executor(int                    argc,
-             char*                  argv[],
-             primbench::settings    settings = {},
-             detail::flags::FlagTag flags    = flags::none,
-             stream_t               stream   = default_stream)
+    executor(int                 argc,
+             char*               argv[],
+             primbench::settings settings = {},
+             stream_t            stream   = default_stream)
         : m_settings(settings)
-        , m_flags(flags)
         , m_stream(stream)
         , m_own_stream(stream == default_stream)
         , m_cli(argc, argv)
@@ -3658,7 +3586,7 @@ public:
 
         std::string algorithm = get_common_algorithm();
 
-        get_logger().init(algorithm, specializations.size(), m_settings, m_flags);
+        get_logger().init(algorithm, specializations.size(), m_settings);
 
         m_specialization_column_width = compute_max_specialization_width(algorithm);
 
@@ -3849,7 +3777,7 @@ private:
             "stream-blocking-timeout-secs",
             s.stream_blocking_timeout_secs,
             "Maximum stream blocking duration in seconds before timing out. Stream is blocked "
-            "while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous.");
+            "while queueing kernel calls. Use `--sync` if kernel is synchronous.");
         if(s.stream_blocking_timeout_secs <= 0.0)
         {
             std::cerr << "Error: --stream-blocking-timeout-secs must be greater than 0\n";
@@ -4028,7 +3956,6 @@ private:
                      get_logger(),
                      *m_stream_blocker,
                      m_settings,
-                     m_flags,
                      m_specialization_column_width,
                      m_index_column_width,
                      m_print_index,
@@ -4089,8 +4016,6 @@ private:
     inline static specializations_t specializations;
 
     settings m_settings; ///< CLI user settings.
-
-    detail::flags::FlagTag m_flags; ///< Executor flags.
 
     stream_t m_stream; ///< Stream used for execution.
     bool     m_own_stream; ///< Whether primbench should create its own stream.

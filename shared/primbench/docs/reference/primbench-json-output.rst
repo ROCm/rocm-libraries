@@ -24,12 +24,12 @@ By default, Primbench writes results to ``results.json``. The output path is con
 The ``context`` object
 ----------------------
 
-The ``context`` object captures every detail of the environment and configuration used for the benchmark run. It includes ``results_version``, ``general``, ``settings``, ``custom_settings`` when custom arguments are registered, and ``flags``.
+The ``context`` object captures every detail of the environment and configuration used for the benchmark run. It includes ``results_version``, ``general``, ``settings``, and ``custom_settings`` when custom arguments are registered.
 
 ``results_version``
 ~~~~~~~~~~~~~~~~~~~
 
-A string indicating the results schema version, for example ``"4.0.0"``. This field appears at the top level of ``context``, not inside a sub-object.
+A string indicating the results schema version, for example ``"5.0.0"``. This field appears at the top level of ``context``, not inside a sub-object.
 
 ``general``
 ~~~~~~~~~~~
@@ -51,7 +51,7 @@ The ``general`` sub-object records information about the GPU, backend, monitorin
 ``settings``
 ~~~~~~~~~~~~
 
-The ``settings`` sub-object is a verbatim serialization of the ``primbench::settings`` struct. It includes every configurable field in ``primbench::settings``, including ``size``, ``hot``, ``seed``, ``json_out``, ``csv_out``, ``filter``, ``dry``, ``min_gpu_ms_per_batch``, ``min_secs``, ``noise_timeout_secs``, ``batch_window_size``, ``noise_tolerance_percent``, ``min_gpu_temp``, ``max_gpu_temp``, ``max_warming_secs``, ``max_cooling_secs``, ``output_batches``, ``spaces_per_indent``, and ``stream_blocking_timeout_secs``. When a setting is provided both programmatically and on the command line, the command-line value takes precedence.
+The ``settings`` sub-object is a verbatim serialization of the ``primbench::settings`` struct. It includes every configurable field in ``primbench::settings``, including ``size``, ``hot``, ``seed``, ``json_out``, ``csv_out``, ``filter``, ``dry``, ``min_gpu_ms_per_batch``, ``min_secs``, ``noise_timeout_secs``, ``batch_window_size``, ``noise_tolerance_percent``, ``min_gpu_temp``, ``max_gpu_temp``, ``max_warming_secs``, ``max_cooling_secs``, ``output_batches``, ``spaces_per_indent``, ``stream_blocking_timeout_secs``, ``sync``, and ``skip_header``. When a setting is provided both programmatically and on the command line, the command-line value takes precedence.
 
 Field descriptions for each setting appear in :doc:`Configure benchmark settings </how-to/configure-settings>` and :doc:`Command-line options </reference/cli-options>`.
 
@@ -59,11 +59,6 @@ Field descriptions for each setting appear in :doc:`Configure benchmark settings
 ~~~~~~~~~~~~~~~~~~~
 
 When the benchmark registers additional command-line arguments through ``executor.get<T>()``, a ``custom_settings`` object appears in ``context``. Each key is the argument name, and the value is the argument's parsed value. This object is omitted when no custom arguments are registered.
-
-``flags``
-~~~~~~~~~
-
-The ``flags`` sub-object records which runtime flags were active. Currently the only flag is ``sync``, a boolean.
 
 The ``specializations`` array
 -----------------------------

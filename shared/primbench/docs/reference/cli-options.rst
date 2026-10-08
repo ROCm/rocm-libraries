@@ -101,6 +101,10 @@ Options reference
      - ``double`` / ``10.0``
      - Maximum duration in seconds before stream blocking times out. Must be greater than ``0``.
 
+   * - ``--sync``
+     - ``bool`` / ``false``
+     - When set, the kernel is synchronous, e.g. it blocks the host until it completes. Disables stream blocking. Boolean options take no value.
+
 Size suffixes
 =============
 
