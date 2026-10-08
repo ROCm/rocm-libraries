@@ -480,7 +480,8 @@ path.
 - **Canonical agent rules / invariants:** [platform/AGENTS.md](platform/AGENTS.md).
 - **Build & test:** [BUILDING.md](BUILDING.md), [TESTING.md](TESTING.md).
 - **Style:** [style/PYTHON_STYLE.md](style/PYTHON_STYLE.md),
-  [style/CPP_STYLE.md](style/CPP_STYLE.md).
+  [style/CPP_STYLE.md](style/CPP_STYLE.md),
+  [style/API_DESIGN_STANDARD.md](style/API_DESIGN_STANDARD.md).
 
 ## Team sharing
 

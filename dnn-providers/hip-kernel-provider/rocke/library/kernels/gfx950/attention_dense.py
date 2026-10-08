@@ -10,7 +10,8 @@ step-1 pipeline with every WINNING lever baked in as always-on (no env gates):
   * **LDS bank-conflict padding on K** (``[NBUF, BN, D+8]``) — kills the 8-way conflict
     on the QK K-reads. The dominant base win (+80% over the naive baseline).
   * **native exp2_fast** (``v_exp_f32``, no overflow guard — the softmax argument is
-    always <= 0) — +11.5%.
+    bounded: at most the lazy-rescale threshold plus a small fma rounding residue) — one
+    instruction per exp.
   * **full-population ``sched_group_barrier`` template** naming DS_READ/MFMA/VALU/TRANS
     per PV step.
   * **diagonal-only causal masking** — a mask-free body loop over below-diagonal KV
@@ -72,6 +73,7 @@ the experiment's ``plan.md`` for their measured results.
 """
 
 import hashlib
+import math
 from contextlib import nullcontext as _nullcontext
 from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
@@ -110,13 +112,43 @@ _DEFAULT_LDS_K_ROW_PAD = 8
 #   VPAD32: 0} and TFLOPS {906, 901, 944, 953} -- i.e. +8 is useless here and
 #   only +32 fully clears the V-read conflicts (matches flyDSL's SMEM_V_PAD).
 # Lazy-rescale re-anchor threshold in the log2 domain: skip the O/l rescale when
-# every lane's (tile_max - running_max) <= this. exp2(8)=256 bounds P safely, so
-# the spec rejects anything larger.
+# every lane's (tile_max - running_max) <= this. exp2(8)=256 bounds P (times the
+# ordinary kernel's small fma rounding residue; see _MAX_SCALE), so the spec
+# rejects anything larger.
 _DEFAULT_LAZY_RESCALE_THRESHOLD = 8.0
 # sched_barrier mask: 11 instruction-class bits (__builtin_amdgcn_sched_barrier).
 _SCHED_BARRIER_MASK_MAX = 0x7FF
 _PV_LOOP_ORDERS = frozenset({"d_major", "k_major"})
 _IGLP_OFF = -1
+# Accepted softmax-scale range, a chosen safety margin (not a hardware limit).
+# The ordinary kernel takes the row max on unscaled scores (valid only for
+# scale > 0) and computes exp2(fma(s, qk_scale, -m)) with m = fl(max * qk_scale).
+# For the row-max element that argument is the product's rounding residue, at
+# most half an ulp of max * qk_scale, so a large scale or score lets it grow
+# until P overflows (first in the fp16 cast before the PV MFMA). At scale 2**4
+# and |raw score| <= 1e6 the residue is at most 1, so P stays within about
+# 2**9 even on top of the lazy-rescale threshold. The bounds also keep the
+# -2**99 mask sentinel exact, finite and far below real scores after the scale.
+# Scales outside [2**-64, 2**4], including NaN, +-inf and scale <= 0, are
+# rejected rather than mis-computed. The hipDNN matcher mirrors this range as
+# the literals 0x1p-64F / 0x1p4F in Gfx950AttentionDenseNative.cpp
+# (gfx950AttentionDenseGraphMatches) and its gtest; change them together.
+# TestScaleValidation pins both bounds to those literals.
+#
+# KNOWN LIMITATION (ordinary grid only): nothing bounds the raw score, so the
+# residue above is bounded only by the size of the log2-domain row max m, not by
+# the scale. Once |m| >= 2**28 (pre-softmax logit |q.k * scale| >~ 1.9e8) the
+# residue can exceed 8 and fp16 P overflows; once |m| >= 2**31 (logit >~ 1.5e9)
+# it can exceed 120 and exp2 itself overflows, for any dtype. The output is then
+# inf/NaN. Real logits are many orders of magnitude smaller, so this is accepted.
+# The persistent grid (which scales each fp32 score before the max), and this
+# kernel's earlier form (Q pre-scaled before the MFMA), use the same rounded score
+# for the max and every exponent, so the row max's exp2 argument is exactly 0 and
+# the output stays finite at any magnitude. If this limit is ever hit, apply the
+# persistent grid's form here: multiply each fp32 score by qk_scale after the QK
+# MFMA and use exp2(s - m). That costs the ordinary path a little speed.
+_MIN_SCALE = 2.0**-64
+_MAX_SCALE = 2.0**4
 
 
 @dataclass(frozen=True)
@@ -651,7 +683,7 @@ def build_attention_dense(
         bt_stride = b.param("block_table_stride", I32)
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
-    # native v_exp_f32 (softmax arg <= lazy threshold) or the guarded exp2
+    # native v_exp_f32 (softmax arg bounded; see _MAX_SCALE) or the guarded exp2
     _exp2 = b.exp2_fast if spec.use_exp2_fast else b.exp2
 
     tid = b.thread_id_x()
@@ -660,7 +692,16 @@ def build_attention_dense(
     lane_m = b.mod(lane, b.const_i32(32))
     lane_h = b.div(lane, b.const_i32(32))
     d_base = b.mul(lane_h, b.const_i32(8))
-    neg_inf = b.const_f32(-1e30)
+    # Mask sentinel, written into RAW (unscaled) scores; it also seeds the running
+    # max m (log2 units) when there are no sinks. It is a power of two so
+    # sentinel * qk_scale is exact. A row fully masked in its first visited tile
+    # then gets, exactly: P = exp2(0) = 1 when qk_scale <= 1 (m = sentinel *
+    # qk_scale), or P = exp2(sentinel * (qk_scale - 1)) = 0 when qk_scale > 1
+    # (m stays at the sentinel). Either way the next tile with a real key has
+    # alpha = exp2(m_old - m_new) = 0, which clears it. A non-power-of-two
+    # sentinel would instead leave a huge rounding residue whose sign depends on
+    # the scale: exp2 of it is 0 when negative and inf (then NaN) when positive.
+    neg_inf = b.const_f32(-(2.0**99))
     if use_sinks:
         rcp_ln2 = b.const_f32(LOG2E)
         one_f = b.const_f32(1.0)
@@ -726,7 +767,10 @@ def build_attention_dense(
         k_lane_grp = None
         k_sub_col = None
 
-    # Q packs (B operand), scaled once by qk_scale = softmax_scale * log2(e).
+    # Q packs (B operand), loaded unscaled. qk_scale = softmax_scale * log2(e) is
+    # applied in fp32 after the QK MFMA (softmax_max + the exp2 FMA below):
+    # rounding Q * qk_scale back to bf16 costs up to 2^-8 relative error per
+    # element, and the score error it causes grows with the scale.
     # ragged: a bounds-checked buffer load returns 0 for OOB query rows (the
     # partial last block), so padded rows are register-zero (their output is
     # dropped by the guarded store). Aligned: direct global load (unchanged IR).
@@ -742,11 +786,7 @@ def build_attention_dense(
             )
         else:
             raw = b.global_load_vN(q, addr, dtype, 8, align=16)
-        elems = [
-            b.cast_f32_to(b.fmul(b.cast_to_f32(b.vec_extract(raw, j)), qk_scale), dtype)
-            for j in range(8)
-        ]
-        q_packs.append(b.vec_pack(elems, dtype))
+        q_packs.append(raw)
 
     # ragged: ceil so the partial last KV tile is visited (its OOB keys load 0
     # into LDS and are masked out); aligned: exact.
@@ -935,6 +975,11 @@ def build_attention_dense(
                     col = b.add(k_sub_col, col)
                 k_pack = b.smem_load_vN(K_lds, kbuf, krow, col, dtype=dtype, n=8)
                 acc = mfma_32x32x16_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
+            # Raw (unscaled) scores. qk_scale is folded into softmax_max (one
+            # multiply on the row max) and into the exp2 argument as one FMA,
+            # so the scale adds no per-score instruction. Needs qk_scale > 0
+            # (max commutes with the scale); the runner enforces the
+            # [_MIN_SCALE, _MAX_SCALE] range.
             s_reg.append([b.vec_extract(acc, i) for i in range(16)])
         return s_reg
 
@@ -983,7 +1028,9 @@ def build_attention_dense(
         for nsub in range(N_SUB):
             for i in range(16):
                 local_max = b.fmax(local_max, s_reg[nsub][i])
-        tile_max = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
+        tile_max_raw = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
+        # Into the log2 domain the running max, threshold, and sinks use.
+        tile_max = b.fmul(tile_max_raw, qk_scale)
         if LAZY_RESCALE:
             m_diff = b.fsub(tile_max, m_i)
             below_i32 = b.select(
@@ -1047,10 +1094,15 @@ def build_attention_dense(
         ]
 
     def pv_fused_exp(o_acc_in, p_packs, vbuf, s_reg, m_new):
-        """Depth-1 cluster: interleave exp2(s - m_new) into the PV MFMA loop so the
+        """Depth-1 cluster: interleave exp2(s * qk_scale - m_new) into the PV MFMA loop so the
         softmax VALU/TRANS co-executes in the MFMA shadow. The full per-step
         instruction population (DS_READ/MFMA/VALU/TRANS) is named to sched_group_barrier
-        so the IGLP grouping matches the real stream."""
+        so the IGLP grouping matches the real stream. The VALU count is an upper
+        bound: the compiler may pair two exp-argument FMAs into one v_pk_fma_f32, so a
+        step can issue fewer VALU ops than named."""
+        # fma(s, qk_scale, -m) is not bounded for huge scores: see the KNOWN
+        # LIMITATION note at _MAX_SCALE.
+        neg_m = b.fneg(m_new)
         slots = [(nsub, i) for nsub in range(N_SUB) for i in range(16)]
         p_vals = [[None] * 16 for _ in range(N_SUB)]
         it = iter(slots)
@@ -1065,7 +1117,7 @@ def build_attention_dense(
                 if slot is None:
                     break
                 nsub, i = slot
-                p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
+                p_vals[nsub][i] = _exp2(b.fma(s_reg[nsub][i], qk_scale, neg_m))
                 n_emit += 1
             if SCHED_GROUP:
                 b.sched_group_barrier(DS_READ, SCHED_GROUP_DS_READ, 0)
@@ -1074,7 +1126,7 @@ def build_attention_dense(
                 b.sched_group_barrier(TRANS, max(1, n_emit), 0)
         for slot in it:
             nsub, i = slot
-            p_vals[nsub][i] = _exp2(b.fsub(s_reg[nsub][i], m_new))
+            p_vals[nsub][i] = _exp2(b.fma(s_reg[nsub][i], qk_scale, neg_m))
         l_local = b.const_f32(0.0)
         for nsub in range(N_SUB):
             for i in range(16):
@@ -1142,8 +1194,10 @@ def build_attention_dense(
 
     m0, alpha0, _skip0 = softmax_max(s0, m_init)
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
+    neg_m0 = b.fneg(m0)  # same unbounded-score limitation; see _MAX_SCALE
     p0_vals = [
-        [_exp2(b.fsub(s0[nsub][i], m0)) for i in range(16)] for nsub in range(N_SUB)
+        [_exp2(b.fma(s0[nsub][i], qk_scale, neg_m0)) for i in range(16)]
+        for nsub in range(N_SUB)
     ]
     l0_local = b.const_f32(0.0)
     for nsub in range(N_SUB):
@@ -1621,13 +1675,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 )
             else:
                 raw = b.global_load_vN(q, addr, dtype, 8, align=16)
-            elems = [
-                b.cast_f32_to(
-                    b.fmul(b.cast_to_f32(b.vec_extract(raw, j)), qk_scale), dtype
-                )
-                for j in range(8)
-            ]
-            q_packs.append(b.vec_pack(elems, dtype))
+            q_packs.append(raw)
 
         def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes):
             """Async DMA one K/V tile (see default builder ``_async_load``).
@@ -1826,7 +1874,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                             K_lds, kbuf, krow, col, dtype=dtype, n=8
                         )
                     acc = mfma_32x32x16_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
-                s_reg.append([b.vec_extract(acc, i) for i in range(16)])
+                s_reg.append(
+                    [b.fmul(b.vec_extract(acc, i), qk_scale) for i in range(16)]
+                )
             return s_reg
 
         def do_mask(s_reg, tile_idx, lower=False, upper=True):
@@ -2363,8 +2413,13 @@ def run_attention_dense_torch(
     """High-level framework entry: compile (cached) + launch the dense prefill
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
     tensors ([B, S, H, D] for q/out, [B, Skv, Hkv, D] for k/v); ``scale`` is the
-    softmax scale (1/sqrt(D)). Returns ``out``. torch is imported lazily by the
-    launcher — this module stays torch-free at import time.
+    softmax scale (1/sqrt(D)) and is supported in ``[2**-64, 2**4]`` (the
+    ordinary kernel takes the row max on unscaled scores and folds the scale
+    into an fma; see ``_MAX_SCALE``). A NaN or infinite scale raises
+    ``ValueError``; a finite scale outside the range raises
+    ``NotImplementedError``. Returns ``out``.
+    torch is imported lazily by the launcher — this module stays torch-free at
+    import time.
 
     Arbitrary (non-256-multiple) sequence lengths are served WITHOUT host
     padding by the in-kernel ragged path: build ``spec`` with ``ragged=True``
@@ -2402,6 +2457,13 @@ def run_attention_dense_torch(
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
+    if not math.isfinite(scale):
+        raise ValueError(f"scale must be finite, got {scale!r}")
+    if not _MIN_SCALE <= scale <= _MAX_SCALE:
+        raise NotImplementedError(
+            "NOT_YET_IMPLEMENTED: the gfx950 dense kernel supports a softmax "
+            f"scale in [2**-64, 2**4], got {scale!r}"
+        )
     if spec.varlen and (cu_seqlens_q is None or cu_seqlens_kv is None):
         raise ValueError(
             "varlen=True requires cu_seqlens_q and cu_seqlens_kv (int32 [batch+1]); "

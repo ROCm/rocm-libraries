@@ -4,8 +4,10 @@ This root holds the descriptors the provider **ships**. Its sibling `test_descri
 stages into the build tree for the unit and integration binaries and is installed only
 under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds one bundle,
 `rocKE/gfx950_attention_dense/`, whose KDP declares gfx950 only, so production packaging
-runs for a build whose GPU targets include gfx950 and is dormant for every other build
-unless the cache variable below is pointed elsewhere.
+runs for a build whose GPU targets include gfx950 and that has rocKE enabled
+(`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk). For
+any other build the root has nothing to pack and production packaging is dormant, unless
+the cache variable below is pointed elsewhere.
 
 ## Authoring a bundle
 
@@ -38,11 +40,12 @@ the same bytes into every shard, and they fail at module load on the wrong devic
 
 `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` is a `CACHE PATH` defaulting to this
 directory; a consumer needing a different root overrides that variable rather than adding
-CMake. Production wiring is gated on at least one non-hidden `*.kdp.json` here, since a
-KDP is what architecture pruning consumes. With none, packaging stays dormant and any
-stale product tree is removed — not an error. A KDP that *is* present but prunes on every
-architecture is a hard failure for a root the build NAMED, and dormancy for this root
-reached as the built-in default.
+CMake. Configure asks the packer what the root would ship for this build's architectures,
+with the build's excluded family folders and disabled kinds applied. A root that would
+ship nothing -- no KDP at all, or KDPs that prune on every architecture or belong to an
+excluded family -- leaves packaging dormant and removes any stale product tree, whether
+the root was named or inherited. That is not an error. A root that is not a directory is
+fatal.
 
 Do not delete this README: git tracks no empty directory, and the cache variable's
 set-but-not-a-directory check is fatal.

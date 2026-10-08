@@ -59,6 +59,9 @@ The fixed-`cpg` variants in the table require `kpg = cpg`.  The generic
 positive multiple of 4.  If neither fits, use the implicit-GEMM kernel
 ([`conv_implicit_gemm.py`](conv_implicit_gemm.py)).
 
+For `groups == 1` these variants degenerate to one wave per output row; use the
+non-grouped direct conv instead ([`README_conv_direct_nongrouped.md`](README_conv_direct_nongrouped.md)).
+
 ### cpg = 1 — Depthwise (`DirectDepthwiseSpec`)
 
 Each output channel is computed independently using scalar FMA.  The kernel
@@ -70,6 +73,14 @@ Tunable parameters:
 - `block_waves` — waves per workgroup (default 2; swept: 1, 2, 4).
 
 Launch grid: `(ceil(W / block_w), ceil(groups / block_ch), N)`.
+
+Large filters (13x13 .. 31x31) go to the output-stationary
+`DirectDepthwiseTiledSpec` (`build_direct_depthwise_tiled`): a runtime loop over
+the filter rows with one weight row and a sliding window of input rows in
+registers, an output tile of `block_h x block_w`, and a grid split over output
+rows too. Its footprint is linear in the filter width, so it avoids the
+register spills and the steep compile cost the row-streaming kernel has at these
+sizes. See `platform/dsl_docs/instances/convolution.md`.
 
 ### cpg = 1 — Column-streamed depthwise (`DirectDepthwiseColSpec`)
 
@@ -460,6 +471,7 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 | Depthwise (`cpg = 1`, `stride = 1`) | Direct-conv depthwise |
 | Backward-weights, gfx950, `cpg` and `kpg` ≥ 16, `stride = 1` | Direct-conv wgrad |
 | Backward-weights, anything else | Implicit-GEMM wgrad |
+| Non-grouped (`groups = 1`), `stride ≤ 2` | Sweep `conv_direct_nongrouped` and implicit-GEMM, keep the faster ([`README_conv_direct_nongrouped.md`](README_conv_direct_nongrouped.md)) |
 
 ---
 
