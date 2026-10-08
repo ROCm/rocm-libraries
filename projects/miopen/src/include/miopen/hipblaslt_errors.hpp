@@ -9,6 +9,10 @@
 
 namespace miopen {
 
+// hipBLASLt exposes no status-to-string function; it returns the hipblasStatus_t enum shared with
+// hipBLAS (hipblas-common.h), whose 0..11 values and names have been stable across releases.
+// This mirrors that header for readability only. The numeric value is always printed too, so an
+// unrecognized status still identifies itself.
 inline const char* HipblasLtStatusString(hipblasStatus_t status)
 {
     switch(status)

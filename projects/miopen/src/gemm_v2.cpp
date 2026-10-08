@@ -274,6 +274,19 @@ std::ostream& operator<<(std::ostream& stream, const GemmDescriptor& gemm_desc)
 
 #if MIOPEN_USE_ROCBLAS
 
+// rocBLAS provides the status name itself, so only the GEMM context is added here.
+static std::string RocblasFailureMessage(rocblas_status status,
+                                         const char* operation,
+                                         const miopen::Handle& handle,
+                                         const miopen::GemmDescriptor& gemm_desc)
+{
+    std::ostringstream message;
+    message << operation << ": rocBLAS gemm failed with " << rocblas_status_to_string(status)
+            << " (" << static_cast<int>(status) << "); device=" << handle.GetDeviceName()
+            << "; gemm_desc=" << gemm_desc;
+    return message.str();
+}
+
 inline rocblas_atomics_mode DisableRocblasAtomics(const miopen::Handle& handle)
 {
     MIOPEN_LOG_I2("");
@@ -339,6 +352,23 @@ struct HipBLASLtMemoryHandles
     }
 };
 
+static std::string HipDataTypeString(hipDataType type)
+{
+    if(type == HIP_R_16F)
+        return "HIP_R_16F";
+    if(type == HIP_R_16BF)
+        return "HIP_R_16BF";
+    if(type == HIP_R_32F)
+        return "HIP_R_32F";
+    if(type == HIP_R_8F_E4M3_FNUZ)
+        return "HIP_R_8F_E4M3_FNUZ";
+#ifdef ENABLE_HIPBLASLT_BF8
+    if(type == HIP_R_8F_E5M2_FNUZ)
+        return "HIP_R_8F_E5M2_FNUZ";
+#endif
+    return "hipDataType(" + std::to_string(static_cast<int>(type)) + ")";
+}
+
 template <typename DataTypeAB, typename DataTypeC>
 static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                   const miopen::GemmDescriptor& gemm_desc,
@@ -355,14 +385,20 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                   std::size_t user_workspace_size)
 {
     HipBLASLtMemoryHandles hipBLASLtHandles;
+
+    const std::size_t offered_workspace_size = user_workspace != nullptr ? user_workspace_size : 0;
+    std::size_t effective_workspace_size     = 0;
+    std::ostringstream heuristic_queries;
+
     const auto failure_context = [&] {
         std::ostringstream message;
         message << "; device=" << handle.GetDeviceName() << "; gemm_desc=" << gemm_desc
-                << "; hip_type_AB=" << static_cast<int>(hip_type_AB)
-                << "; hip_type_C=" << static_cast<int>(hip_type_C)
+                << "; hip_type_AB=" << HipDataTypeString(hip_type_AB)
+                << "; hip_type_C=" << HipDataTypeString(hip_type_C)
                 << "; skip_batches=" << skip_batches
                 << "; deterministic=" << gemm_desc.deterministic
-                << "; workspace_bytes=" << (user_workspace != nullptr ? user_workspace_size : 0);
+                << "; offered_workspace_bytes=" << offered_workspace_size
+                << "; effective_workspace_bytes=" << effective_workspace_size;
         return message.str();
     };
     const auto check_hipblas_status = [&](hipblasStatus_t status, const char* operation) {
@@ -371,36 +407,20 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
                          HipblasLtErrorMessage(status, operation) + failure_context());
     };
 
-    if(gemm_desc.transA)
-    {
-        check_hipblas_status(
-            hipblasLtMatrixLayoutCreate(
-                &hipBLASLtHandles.matA, hip_type_AB, gemm_desc.k, gemm_desc.m, gemm_desc.lda),
-            "hipblasLtMatrixLayoutCreate(A)");
-    }
-    else
-    {
-        check_hipblas_status(
-            hipblasLtMatrixLayoutCreate(
-                &hipBLASLtHandles.matA, hip_type_AB, gemm_desc.m, gemm_desc.k, gemm_desc.lda),
-            "hipblasLtMatrixLayoutCreate(A)");
-    }
-
-    if(gemm_desc.transB)
-    {
-        check_hipblas_status(
-            hipblasLtMatrixLayoutCreate(
-                &hipBLASLtHandles.matB, hip_type_AB, gemm_desc.n, gemm_desc.k, gemm_desc.ldb),
-            "hipblasLtMatrixLayoutCreate(B)");
-    }
-    else
-    {
-        check_hipblas_status(
-            hipblasLtMatrixLayoutCreate(
-                &hipBLASLtHandles.matB, hip_type_AB, gemm_desc.k, gemm_desc.n, gemm_desc.ldb),
-            "hipblasLtMatrixLayoutCreate(B)");
-    }
-
+    const bool a_trans = gemm_desc.transA;
+    const bool b_trans = gemm_desc.transB;
+    check_hipblas_status(hipblasLtMatrixLayoutCreate(&hipBLASLtHandles.matA,
+                                                     hip_type_AB,
+                                                     a_trans ? gemm_desc.k : gemm_desc.m,
+                                                     a_trans ? gemm_desc.m : gemm_desc.k,
+                                                     gemm_desc.lda),
+                         "hipblasLtMatrixLayoutCreate(A)");
+    check_hipblas_status(hipblasLtMatrixLayoutCreate(&hipBLASLtHandles.matB,
+                                                     hip_type_AB,
+                                                     b_trans ? gemm_desc.n : gemm_desc.k,
+                                                     b_trans ? gemm_desc.k : gemm_desc.n,
+                                                     gemm_desc.ldb),
+                         "hipblasLtMatrixLayoutCreate(B)");
     check_hipblas_status(
         hipblasLtMatrixLayoutCreate(
             &hipBLASLtHandles.matC, hip_type_C, gemm_desc.m, gemm_desc.n, gemm_desc.ldc),
@@ -412,50 +432,41 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
 
     if(gemm_desc.batch_count > 1 && !skip_batches)
     {
-        check_hipblas_status(hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matA,
-                                                               HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-                                                               &gemm_desc.batch_count,
-                                                               sizeof(gemm_desc.batch_count)),
-                             "hipblasLtMatrixLayoutSetAttribute(A, BATCH_COUNT)");
-        check_hipblas_status(
-            hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matA,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &gemm_desc.strideA,
-                                              sizeof(gemm_desc.strideA)),
-            "hipblasLtMatrixLayoutSetAttribute(A, STRIDED_BATCH_OFFSET)");
-        check_hipblas_status(hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matB,
-                                                               HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-                                                               &gemm_desc.batch_count,
-                                                               sizeof(gemm_desc.batch_count)),
-                             "hipblasLtMatrixLayoutSetAttribute(B, BATCH_COUNT)");
-        check_hipblas_status(
-            hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matB,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &gemm_desc.strideB,
-                                              sizeof(gemm_desc.strideB)),
-            "hipblasLtMatrixLayoutSetAttribute(B, STRIDED_BATCH_OFFSET)");
-        check_hipblas_status(hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matC,
-                                                               HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-                                                               &gemm_desc.batch_count,
-                                                               sizeof(gemm_desc.batch_count)),
-                             "hipblasLtMatrixLayoutSetAttribute(C, BATCH_COUNT)");
-        check_hipblas_status(
-            hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matC,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &gemm_desc.strideC,
-                                              sizeof(gemm_desc.strideC)),
-            "hipblasLtMatrixLayoutSetAttribute(C, STRIDED_BATCH_OFFSET)");
-        check_hipblas_status(hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matD,
-                                                               HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
-                                                               &gemm_desc.batch_count,
-                                                               sizeof(gemm_desc.batch_count)),
-                             "hipblasLtMatrixLayoutSetAttribute(D, BATCH_COUNT)");
-        check_hipblas_status(
-            hipblasLtMatrixLayoutSetAttribute(hipBLASLtHandles.matD,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &gemm_desc.strideC,
-                                              sizeof(gemm_desc.strideC)),
-            "hipblasLtMatrixLayoutSetAttribute(D, STRIDED_BATCH_OFFSET)");
+        // D shares C's layout, so it takes C's stride.
+        const struct
+        {
+            const char* name;
+            hipblasLtMatrixLayout_t layout;
+            decltype(gemm_desc.strideA) stride;
+        } batched_layouts[]       = {{"A", hipBLASLtHandles.matA, gemm_desc.strideA},
+                                     {"B", hipBLASLtHandles.matB, gemm_desc.strideB},
+                                     {"C", hipBLASLtHandles.matC, gemm_desc.strideC},
+                                     {"D", hipBLASLtHandles.matD, gemm_desc.strideC}};
+        const auto set_batch_attr = [&](const auto& l,
+                                        hipblasLtMatrixLayoutAttribute_t attr,
+                                        const char* attr_name,
+                                        const void* value,
+                                        std::size_t size) {
+            const auto status = hipblasLtMatrixLayoutSetAttribute(l.layout, attr, value, size);
+            if(status != HIPBLAS_STATUS_SUCCESS)
+                check_hipblas_status(status,
+                                     (std::string("hipblasLtMatrixLayoutSetAttribute(") + l.name +
+                                      ", " + attr_name + ")")
+                                         .c_str());
+        };
+        for(const auto& l : batched_layouts)
+        {
+            set_batch_attr(l,
+                           HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
+                           "BATCH_COUNT",
+                           &gemm_desc.batch_count,
+                           sizeof(gemm_desc.batch_count));
+            set_batch_attr(l,
+                           HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                           "STRIDED_BATCH_OFFSET",
+                           &l.stride,
+                           sizeof(l.stride));
+        }
     }
 
     check_hipblas_status(
@@ -479,9 +490,8 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
             hipBLASLtHandles.matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)),
         "hipblasLtMatmulDescSetAttribute(EPILOGUE)");
 
-    size_t max_workspace_size =
-        (user_workspace != nullptr && !gemm_desc.deterministic) ? user_workspace_size : 0;
-    void* workspace = (max_workspace_size != 0) ? user_workspace : nullptr;
+    effective_workspace_size = gemm_desc.deterministic ? 0 : offered_workspace_size;
+    void* workspace          = (effective_workspace_size != 0) ? user_workspace : nullptr;
     check_hipblas_status(hipblasLtMatmulPreferenceCreate(&hipBLASLtHandles.pref),
                          "hipblasLtMatmulPreferenceCreate");
 
@@ -510,6 +520,7 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
                                                              heuristicResult,
                                                              &count),
                              "hipblasLtMatmulAlgoGetHeuristic");
+        heuristic_queries << " [workspace_budget=" << budget << ", solutions=" << count << "]";
         for(int i = 0; i < count; ++i)
         {
             if(heuristicResult[i].workspaceSize <= budget)
@@ -518,24 +529,25 @@ static void miopen_hipblasLt_gemm(const miopen::Handle& handle,
         return -1;
     };
 
-    int chosen_algo = first_fitting_algo(max_workspace_size);
+    int chosen_algo = first_fitting_algo(effective_workspace_size);
 
     // A workspace is an offer, not a requirement, so a problem whose solutions all want more than
     // was granted still runs on the workspace-free set.
-    if(chosen_algo < 0 && max_workspace_size != 0)
+    if(chosen_algo < 0 && effective_workspace_size != 0)
     {
-        MIOPEN_LOG_I2("hipBLASLt: no solution fits " << max_workspace_size
+        MIOPEN_LOG_I2("hipBLASLt: no solution fits " << effective_workspace_size
                                                      << " bytes, retrying without a workspace");
-        max_workspace_size = 0;
-        workspace          = nullptr;
-        chosen_algo        = first_fitting_algo(0);
+        effective_workspace_size = 0;
+        workspace                = nullptr;
+        chosen_algo              = first_fitting_algo(0);
     }
 
     if(chosen_algo < 0)
     {
         MIOPEN_THROW(miopenStatusInternalError,
-                     "hipblasLtMatmulAlgoGetHeuristic: no solution fits the workspace budget" +
-                         failure_context());
+                     "hipblasLtMatmulAlgoGetHeuristic: no returned solution fits the workspace "
+                     "budget; queries:" +
+                         heuristic_queries.str() + failure_context());
     }
 
     float alpha       = gemm_desc.alpha;
@@ -986,7 +998,8 @@ miopenStatus_t CallGemm(const Handle& handle,
             ProfilingRecordStop(handle, start, stop);
 
         if(rb_status != rocblas_status::rocblas_status_success)
-            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+            MIOPEN_THROW(miopenStatusInternalError,
+                         RocblasFailureMessage(rb_status, "CallGemm", handle, gemm_desc));
 
         if(gemm_desc.deterministic)
             SetRocblasAtomics(handle, cur_mode);
@@ -1112,7 +1125,9 @@ miopenStatus_t CallGemm(const Handle& handle,
             ProfilingRecordStop(handle, start, stop);
 
         if(rb_status != rocblas_status::rocblas_status_success)
-            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+            MIOPEN_THROW(
+                miopenStatusInternalError,
+                RocblasFailureMessage(rb_status, "CallGemm (mixed C type)", handle, gemm_desc));
 
         if(gemm_desc.deterministic)
             SetRocblasAtomics(handle, cur_mode);
@@ -1396,7 +1411,9 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
             ProfilingRecordStop(handle, start, stop);
 
         if(rb_status != rocblas_status::rocblas_status_success)
-            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+            MIOPEN_THROW(
+                miopenStatusInternalError,
+                RocblasFailureMessage(rb_status, "CallGemmStridedBatched", handle, gemm_desc));
 
         if(gemm_desc.deterministic)
             SetRocblasAtomics(handle, cur_mode);
@@ -1518,7 +1535,10 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
             ProfilingRecordStop(handle, start, stop);
 
         if(rb_status != rocblas_status::rocblas_status_success)
-            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+            MIOPEN_THROW(
+                miopenStatusInternalError,
+                RocblasFailureMessage(
+                    rb_status, "CallGemmStridedBatched (mixed C type)", handle, gemm_desc));
 
         if(gemm_desc.deterministic)
             SetRocblasAtomics(handle, cur_mode);
@@ -1801,7 +1821,9 @@ miopenStatus_t CallGemmStridedBatchedSequential(const Handle& handle,
             ProfilingRecordStop(handle, start, stop);
 
         if(rb_status != rocblas_status::rocblas_status_success)
-            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+            MIOPEN_THROW(miopenStatusInternalError,
+                         RocblasFailureMessage(
+                             rb_status, "CallGemmStridedBatchedSequential", handle, gemm_desc));
 
         if(gemm_desc.deterministic)
             SetRocblasAtomics(handle, cur_mode);
