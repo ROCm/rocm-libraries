@@ -706,8 +706,9 @@ if(CK_DEVICE_CONV_INSTANCES AND (NOT HIPTENSOR_REQ_LIBS_ONLY OR MIOPEN_REQ_LIBS_
         message(STATUS "Created device_conv_operations STATIC library (all layouts)")
     endif()
 
-    # Per-target copies of device_conv_operations. They share the already-compiled
-    # objects, so each copy holds the full unified contents under a unique name.
+    # Per-target conv libraries, one per GPU target, each linked from the same compiled
+    # objects (CK_DEVICE_CONV_INSTANCES), so each holds the full conv instance set under a
+    # unique name.
     if(MIOPEN_REQ_LIBS_ONLY)
         set(_ck_conv_arches ${SUPPORTED_GPU_TARGETS})
         list(REMOVE_DUPLICATES _ck_conv_arches)
