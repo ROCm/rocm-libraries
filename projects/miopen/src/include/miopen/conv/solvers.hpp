@@ -4642,11 +4642,13 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
 // Tuning state for the vendored hipconv solver.
 //
 // hipconv exposes its per-shape kernels as an ordered, deterministic list
-// (hipconv::get_valid_configs), already filtered to the layer and ranked, so the list
-// index is the entire key and a stored index survives only as long as the list order
-// does. Keying on hipconv::describe_config() would remove that dependence, and waits on
-// descriptor coverage across every family.
-struct PerformanceConfigConvHipConv : PerfConfigBase<PerformanceConfigConvHipConv>
+// (hipconv::get_valid_configs). A config is stored by its descriptor rather than its
+// list index, so a saved config does not depend on the list order of one build or arch.
+//
+// Derives from PerfConfig directly, not PerfConfigBase: the descriptor contains commas,
+// which PerfConfigBase's field reader treats as separators. It is written and read whole,
+// the same way PerfConfigBaseCK handles CK kernel ids.
+struct PerformanceConfigConvHipConv : PerfConfig
 {
     // Arch-neutral kernel identity ("family[field=value,...]", e.g.
     // "direct[tile_size_k=256,...]"). This is the serialized form, so a perf
@@ -4665,10 +4667,21 @@ struct PerformanceConfigConvHipConv : PerfConfigBase<PerformanceConfigConvHipCon
     PerformanceConfigConvHipConv() = default;
     PerformanceConfigConvHipConv(bool) {}
 
-    template <class Self, class F>
-    static void Visit(Self&& self, F f)
+    void Serialize(std::ostream& stream) const override
     {
-        f(self.descriptor, "descriptor");
+        stream.write(descriptor.c_str(), static_cast<std::streamsize>(descriptor.length()));
+    }
+
+    // Takes `s` whole. Clears the resolved index so IsValid() resolves the new
+    // descriptor rather than keeping an index left over from an earlier value.
+    bool Deserialize(const std::string& s) override
+    {
+        if(s.empty())
+            return false;
+        descriptor   = s;
+        index        = -1;
+        config_count = -1;
+        return true;
     }
 
     void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);

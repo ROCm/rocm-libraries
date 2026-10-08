@@ -457,7 +457,9 @@ bool PerformanceConfigConvHipConv::IsValid(const ExecutionContext& ctx,
 
 bool PerformanceConfigConvHipConv::operator==(const PerformanceConfigConvHipConv& other) const
 {
-    return index == other.index;
+    // The descriptor is the config's identity. The index is a per-build cache of it,
+    // unset (-1) on a freshly deserialized config until IsValid() resolves it.
+    return descriptor == other.descriptor;
 }
 
 // ===================== ConvHipConv =====================
