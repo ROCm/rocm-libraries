@@ -296,3 +296,63 @@ def test_direct_instances_are_a_variant_stating_the_family_fields(seed_specs):
     assert config["engine"]["knobs"] == ["tile_k", "kernel_family"]
     # Both families are in the shipped seed.
     assert {s.is_direct for s in seed_specs} == {False, True}
+def _stabilize_ids_one_kernel_at_a_time(kdp_path):
+    """The original quadratic algorithm, kept as the reference for the linear one."""
+    document = json.loads(kdp_path.read_text())
+    text = kdp_path.read_text()
+    for kernel in tool._kernels(document):
+        new_id = str(
+            uuid.uuid5(tool.INSTANCE_UUID_NAMESPACE, kernel["metadata"]["instance_id"])
+        )
+        assert text.count(kernel["id"]) == 1
+        text = text.replace(kernel["id"], new_id)
+    kdp_path.write_text(text)
+
+
+def test_stabilize_ids_matches_the_one_kernel_at_a_time_rewrite(tmp_path):
+    document = json.loads(_SHIPPED_KDP.read_text())
+    for kernel in document["kernelDescriptors"]:
+        kernel["id"] = str(uuid.uuid4())
+    # An unrelated UUID elsewhere in the file is left alone.
+    document["provenance"] = {"note": str(uuid.uuid4())}
+    text = json.dumps(document, indent=2)
+    linear, reference = tmp_path / "linear.kdp.json", tmp_path / "reference.kdp.json"
+    linear.write_text(text)
+    reference.write_text(text)
+
+    assert tool.stabilize_ids(linear) == len(document["kernelDescriptors"])
+    _stabilize_ids_one_kernel_at_a_time(reference)
+    assert linear.read_bytes() == reference.read_bytes()
+    assert linear.read_text() != text
+
+    # Idempotent: stabilized ids map to themselves.
+    tool.stabilize_ids(linear)
+    assert linear.read_bytes() == reference.read_bytes()
+
+
+def test_stabilize_ids_refuses_a_kernel_id_shared_by_two_kernels(tmp_path):
+    document = json.loads(_SHIPPED_KDP.read_text())
+    first, second = document["kernelDescriptors"][:2]
+    second["id"] = first["id"]
+    kdp = tmp_path / "x.kdp.json"
+    kdp.write_text(json.dumps(document))
+    with pytest.raises(SystemExit, match="appears 2 times"):
+        tool.stabilize_ids(kdp)
+
+
+@pytest.mark.skipif(
+    not getattr(yaml, "__with_libyaml__", False), reason="PyYAML without libyaml"
+)
+def test_libyaml_and_python_dumpers_write_the_same_config(seed_specs):
+    config = tool.build_config(seed_specs)
+    text = tool.dump_config(config, yaml.CSafeDumper)
+    assert text == tool.dump_config(config, yaml.SafeDumper)
+    assert text == tool.dump_config(config)
+
+
+def test_dumped_config_has_one_line_per_shape_and_loads_back(seed_specs):
+    config = tool.build_config(seed_specs)
+    text = tool.dump_config(config, yaml.SafeDumper)
+    assert yaml.safe_load(text) == config
+    rows = [line for line in text.splitlines() if line.startswith("    - {dtype: ")]
+    assert len(rows) == len(seed_specs)

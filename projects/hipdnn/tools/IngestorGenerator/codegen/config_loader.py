@@ -67,8 +67,8 @@ class ConfigError(Exception):
 _MERGE_KEY = object()
 
 
-class _DuplicateKeySafeLoader(yaml.SafeLoader):
-    """``SafeLoader`` that refuses a mapping declaring the same key twice.
+class _RejectRepeatedKeys:
+    """Loader mixin that refuses a mapping declaring the same key twice.
 
     Stock construction keeps the last of two equal keys and drops the first
     without a word, so a key repeated while editing a long config silently
@@ -78,6 +78,9 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
     precedence within one ``<<`` sequence, stay stock behaviour. Keys are built
     by the stock constructor, so two spellings YAML resolves to one value (``0x10``
     and ``16``) collide, and ``"off"`` and ``off`` (a string and ``False``) do not.
+
+    Only construction is overridden, so the mixin works over either parser:
+    see `_DuplicateKeySafeLoader`.
     """
 
     def __init__(self, stream):
@@ -117,6 +120,23 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
                     f"this later value",
                     key_node.start_mark,
                 )
+
+
+class _PyDuplicateKeySafeLoader(_RejectRepeatedKeys, yaml.SafeLoader):
+    """`_RejectRepeatedKeys` over PyYAML's pure-Python parser."""
+
+
+if getattr(yaml, "__with_libyaml__", False):
+
+    class _CDuplicateKeySafeLoader(_RejectRepeatedKeys, yaml.CSafeLoader):
+        """`_RejectRepeatedKeys` over libyaml's parser, which reads a large config
+        an order of magnitude faster. Construction, and so every value and every
+        refused key, is the pure-Python loader's; an error's marks carry the same
+        line and column but no source snippet."""
+
+    _DuplicateKeySafeLoader = _CDuplicateKeySafeLoader
+else:
+    _DuplicateKeySafeLoader = _PyDuplicateKeySafeLoader
 
 
 #: Private, never authored: an expanded kernel dict carries the
