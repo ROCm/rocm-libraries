@@ -174,7 +174,9 @@ namespace
     }
 
     // A published index may be returned during capture, and that return does not build.
-    void captureReturnsPublished(hipblasLtHandle_t handle, hipblasLtMatmulDesc_t desc)
+    void captureReturnsPublished(hipblasLtHandle_t     handle,
+                                 hipblasLtMatmulDesc_t desc,
+                                 int                   published)
     {
         jit::Diagnostics diagnostics;
         jit::Request     request;
@@ -214,15 +216,13 @@ namespace
             INFO(("capture hit status " + std::to_string(status)));
             REQUIRE((status == HIPBLAS_STATUS_SUCCESS));
         }
-        {
-            INFO(("capture hit generated: " + diagnostics.message));
-            REQUIRE((diagnostics.message == "1 of 1 solutions came from the JIT solution library"));
-        }
         hipblasLtMatmulHeuristicResult_t result{};
         BLAS(jit::getGemmAlgo(found, result, diagnostics));
+        const int index = hipblaslt_ext::getIndexFromAlgo(result.algo);
         {
-            INFO(("capture hit is not a JIT library index"));
-            REQUIRE((hipblaslt_ext::getIndexFromAlgo(result.algo) >= (1 << 30)));
+            INFO(("capture returned " + std::to_string(index) + ", not "
+                + std::to_string(published)));
+            REQUIRE((index == published));
         }
         {
             INFO(("generation started during stream capture ("
@@ -232,7 +232,7 @@ namespace
         std::cout << "PASS capturing stream returned the published index (" << elapsed << " ms)\n";
     }
 
-    void runGemm(hipblasLtHandle_t handle, hipblasLtMatmulDesc_t desc, hipStream_t stream)
+    int runGemm(hipblasLtHandle_t handle, hipblasLtMatmulDesc_t desc, hipStream_t stream)
     {
         jit::Diagnostics diagnostics;
         int              device = -1;
@@ -273,6 +273,7 @@ namespace
         BLAS(jit::getJitAlgo(device, request, backend, 64 << 20, solution, diagnostics));
         hipblasLtMatmulHeuristicResult_t result{};
         BLAS(jit::getGemmAlgo(solution, result, diagnostics));
+        const int published = hipblaslt_ext::getIndexFromAlgo(result.algo);
         const auto kernel = hipblaslt_ext::getKernelNameFromAlgo(handle, result.algo);
         {
             INFO(("selected '" + kernel + "'"));
@@ -320,6 +321,7 @@ namespace
         hipblasLtMatrixLayoutDestroy(lb);
         hipblasLtMatrixLayoutDestroy(lc);
         hipblasLtMatrixLayoutDestroy(ld);
+        return published;
     }
 }
 
@@ -348,8 +350,8 @@ TEST_CASE("the HipKittens gfx950 backend", "[jit-gpu]")
     HIP(hipStreamCreate(&stream));
 
     captureSkipsCompile(handle, desc);
-    runGemm(handle, desc, stream);
-    captureReturnsPublished(handle, desc);
+    const int published = runGemm(handle, desc, stream);
+    captureReturnsPublished(handle, desc, published);
 
     static_cast<void>(hipStreamDestroy(stream));
     hipblasLtMatmulDescDestroy(desc);
