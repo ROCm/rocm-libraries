@@ -100,7 +100,7 @@ Copy-paste this into your PR description.
 - [ ] `graph.fbs` `NodeAttributes` union updated and include added
 - [ ] `hipdnn_flatbuffers_sdk` target rebuilt; generated headers committed
 - [ ] New/changed tensor-uid fields annotated `(cache_uid)` (or a documented reason they're not); `cachekey_generated.h` regenerated and committed — see [Cache-Key Annotations](#cache-key-annotations)
-- [ ] Attribute table annotated `(umd_opcode: "...")`; every scalar tensor-uid field carries `umd_input_tensor` or `umd_output_tensor` plus `umd_name`, and every tensor-uid vector carries one direction flag only; `op_schema_registry_generated.h` and `op_schema_registry.json` regenerated and committed — see [Op-Schema Registry Annotations](#op-schema-registry-annotations)
+- [ ] Attribute table annotated `(matcher_opcode: "...")`; every scalar tensor-uid field carries `matcher_input_tensor` or `matcher_output_tensor` plus `matcher_name`, and every tensor-uid vector carries one direction flag only; `op_schema_registry_generated.h` and `op_schema_registry.json` regenerated and committed — see [Op-Schema Registry Annotations](#op-schema-registry-annotations)
 - [ ] Backend descriptor type enum value assigned
 - [ ] Backend attribute name range assigned
 - [ ] (If new mode enum) `HipdnnBackendAttributeType.h` type tag added; `Hipdnn<Op>Mode.h` written; `hipdnn_backend.h` updated; `DataTypeConversion.{hpp,cpp}` and `DescriptorAttributeUtils.{hpp,cpp}` updated
@@ -230,16 +230,16 @@ which writes two files from one schema walk:
 
 | Annotation | Where | Meaning |
 |---|---|---|
-| `(umd_opcode: "matmul")` | Table | The opcode a pattern matches. Required on every `NodeAttributes` table; one opcode per table. |
-| `umd_input_tensor` | Field | The field is an operand (input) tensor uid, or a vector of them. |
-| `umd_output_tensor` | Field | The field is a result (output) tensor uid, or a vector of them. |
-| `umd_name: "a"` | Field | The edge name a pattern binds a flagged scalar field by. Not allowed on a vector. |
+| `(matcher_opcode: "matmul")` | Table | The opcode a pattern matches. Required on every `NodeAttributes` table; one opcode per table. |
+| `matcher_input_tensor` | Field | The field is an operand (input) tensor uid, or a vector of them. |
+| `matcher_output_tensor` | Field | The field is a result (output) tensor uid, or a vector of them. |
+| `matcher_name: "a"` | Field | The edge name a pattern binds a flagged scalar field by. Not allowed on a vector. |
 
 ```fbs
-table MatmulAttributes (umd_opcode: "matmul") {
-    a_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "a");
-    b_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "b");
-    c_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "c");
+table MatmulAttributes (matcher_opcode: "matmul") {
+    a_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "a");
+    b_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "b");
+    c_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "c");
 }
 ```
 
@@ -258,11 +258,11 @@ Follow these conventions:
 
 A `[long] (cache_uid)` field, such as `CustomOpAttributes.input_tensor_uids`, is an **edge
 list**: a variable-length set of tensor references. Give it exactly one direction flag and no
-`umd_name`:
+`matcher_name`:
 
 ```fbs
-    input_tensor_uids: [long] (cache_uid, umd_input_tensor);
-    output_tensor_uids: [long] (cache_uid, umd_output_tensor);
+    input_tensor_uids: [long] (cache_uid, matcher_input_tensor);
+    output_tensor_uids: [long] (cache_uid, matcher_output_tensor);
 ```
 
 The registry lists it under `operandLists`/`resultLists` (`operand_lists`/`result_lists` in
@@ -278,30 +278,30 @@ Other vectors, strings, and sub-tables are skipped. A `long` field that is not a
 reference, such as `PointwiseAttributes.axis_tensor_uid`, stays unflagged and is an `int`
 attribute.
 
-A new `.fbs` file must redeclare the `umd_*` annotations it uses, as it does `cache_uid`.
+A new `.fbs` file must redeclare the `matcher_*` annotations it uses, as it does `cache_uid`.
 
 ### Build errors
 
 The generator refuses to write either file, naming the table and field, when:
 
-- A `NodeAttributes` table has no `umd_opcode`.
-- A field carries both `umd_input_tensor` and `umd_output_tensor`.
-- A field carries `umd_name` without a direction flag, or a flagged scalar lacks a non-empty
-  `umd_name`.
+- A `NodeAttributes` table has no `matcher_opcode`.
+- A field carries both `matcher_input_tensor` and `matcher_output_tensor`.
+- A field carries `matcher_name` without a direction flag, or a flagged scalar lacks a non-empty
+  `matcher_name`.
 - A direction flag is on anything other than a scalar `long` or a `[long]` vector.
 - A scalar integer field carries `(cache_uid)` but no direction flag. Every tensor
   reference must be an edge.
 - A vector field carries `(cache_uid)` but no direction flag, or a direction-flagged vector
-  carries `umd_name`. Every tensor-uid vector must be an edge list, and an edge list has no
+  carries `matcher_name`. Every tensor-uid vector must be an edge list, and an edge list has no
   name.
-- Two edges of one op share a `umd_name`, or two attributes share a name (including the
+- Two edges of one op share a `matcher_name`, or two attributes share a name (including the
   `Node` table's attributes).
 - An edge is named `graph`, `kernel`, or `device`, the reserved symbol roots.
-- A `umd_opcode` or `umd_name` is not an identifier (`[A-Za-z_][A-Za-z0-9_]*`).
-- Two tables declare the same opcode, or `umd_opcode` is on a table outside the
+- A `matcher_opcode` or `matcher_name` is not an identifier (`[A-Za-z_][A-Za-z0-9_]*`).
+- Two tables declare the same opcode, or `matcher_opcode` is on a table outside the
   `NodeAttributes` union.
-- A `Node` table field carries any `umd_` annotation. `Node` fields bind as attributes only.
-- An annotation starts with `umd_` but is not one of the four above.
+- A `Node` table field carries any `matcher_` annotation. `Node` fields bind as attributes only.
+- An annotation starts with `matcher_` but is not one of the four above.
 - An attribute is an unsigned 64-bit integer, which cannot be published as a signed `int`.
 
 ### Regenerating
@@ -332,7 +332,7 @@ The complete surface area for a single op, using **Matmul** as the canonical exa
 | FBS union entry | `flatbuffers_sdk/schemas/graph.fbs` (`NodeAttributes` union) |
 | FBS CMake list | `flatbuffers_sdk/CMakeLists.txt` (`SCHEMAS` variable) |
 | Cache-key annotation | `flatbuffers_sdk/schemas/matmul_attributes.fbs` (`(cache_uid)` on tensor-uid fields — see [Cache-Key Annotations](#cache-key-annotations)) |
-| Op-schema registry annotation | `flatbuffers_sdk/schemas/matmul_attributes.fbs` (`umd_opcode` on the table, direction flag and `umd_name` on tensor-uid fields — see [Op-Schema Registry Annotations](#op-schema-registry-annotations)) |
+| Op-schema registry annotation | `flatbuffers_sdk/schemas/matmul_attributes.fbs` (`matcher_opcode` on the table, direction flag and `matcher_name` on tensor-uid fields — see [Op-Schema Registry Annotations](#op-schema-registry-annotations)) |
 | Backend descriptor type enum | `backend/include/HipdnnBackendDescriptorType.h` |
 | Backend attribute name enum | `backend/include/HipdnnBackendAttributeName.h` |
 | Backend attribute type enum | `backend/include/HipdnnBackendAttributeType.h` |

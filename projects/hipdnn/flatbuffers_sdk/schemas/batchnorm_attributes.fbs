@@ -3,25 +3,25 @@
 
 // See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
-attribute "umd_opcode";
-attribute "umd_input_tensor";
-attribute "umd_output_tensor";
-attribute "umd_name";
+attribute "matcher_opcode";
+attribute "matcher_input_tensor";
+attribute "matcher_output_tensor";
+attribute "matcher_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table BatchnormAttributes (umd_opcode: "batchnorm") {
-    x_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "x");
-    scale_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "scale");
-    bias_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "bias");
-    epsilon_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "epsilon");
-    peer_stats_tensor_uid: [long] (cache_uid, umd_input_tensor);
-    prev_running_mean_tensor_uid: long = null (cache_uid, umd_input_tensor, umd_name: "prev_running_mean");
-    prev_running_variance_tensor_uid: long = null (cache_uid, umd_input_tensor, umd_name: "prev_running_variance");
-    momentum_tensor_uid: long = null (cache_uid, umd_input_tensor, umd_name: "momentum");
-    y_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "y");
-    mean_tensor_uid: long = null (cache_uid, umd_output_tensor, umd_name: "mean");
-    inv_variance_tensor_uid: long = null (cache_uid, umd_output_tensor, umd_name: "inv_variance");
-    next_running_mean_tensor_uid: long = null (cache_uid, umd_output_tensor, umd_name: "next_running_mean");
-    next_running_variance_tensor_uid: long = null (cache_uid, umd_output_tensor, umd_name: "next_running_variance");
+table BatchnormAttributes (matcher_opcode: "batchnorm") {
+    x_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "x");
+    scale_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "scale");
+    bias_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "bias");
+    epsilon_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "epsilon");
+    peer_stats_tensor_uid: [long] (cache_uid, matcher_input_tensor);
+    prev_running_mean_tensor_uid: long = null (cache_uid, matcher_input_tensor, matcher_name: "prev_running_mean");
+    prev_running_variance_tensor_uid: long = null (cache_uid, matcher_input_tensor, matcher_name: "prev_running_variance");
+    momentum_tensor_uid: long = null (cache_uid, matcher_input_tensor, matcher_name: "momentum");
+    y_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "y");
+    mean_tensor_uid: long = null (cache_uid, matcher_output_tensor, matcher_name: "mean");
+    inv_variance_tensor_uid: long = null (cache_uid, matcher_output_tensor, matcher_name: "inv_variance");
+    next_running_mean_tensor_uid: long = null (cache_uid, matcher_output_tensor, matcher_name: "next_running_mean");
+    next_running_variance_tensor_uid: long = null (cache_uid, matcher_output_tensor, matcher_name: "next_running_variance");
 }

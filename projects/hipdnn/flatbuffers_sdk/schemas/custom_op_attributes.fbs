@@ -3,19 +3,19 @@
 
 // See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
-attribute "umd_opcode";
-attribute "umd_input_tensor";
-attribute "umd_output_tensor";
-attribute "umd_name";
+attribute "matcher_opcode";
+attribute "matcher_input_tensor";
+attribute "matcher_output_tensor";
+attribute "matcher_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 /// Attributes for a custom (plugin-provided) operation.
-table CustomOpAttributes (umd_opcode: "custom_op") {
+table CustomOpAttributes (matcher_opcode: "custom_op") {
     /// Unique identifier for the plugin operation, using dotted namespace
     /// notation: "<plugin>.<operation>" (e.g. "example.rope", "mylib.fused_add").
     custom_op_id: string;
-    input_tensor_uids: [long] (cache_uid, umd_input_tensor);
-    output_tensor_uids: [long] (cache_uid, umd_output_tensor);
+    input_tensor_uids: [long] (cache_uid, matcher_input_tensor);
+    output_tensor_uids: [long] (cache_uid, matcher_output_tensor);
     data: [ubyte];
 }

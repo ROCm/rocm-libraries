@@ -143,8 +143,8 @@ field-policy reference.
 #### Op-schema registry annotations
 
 Each `NodeAttributes` table also carries op-schema registry annotations, which name the op
-and its tensor edges for Universal Engine Descriptor (UED) patterns: `(umd_opcode: "...")`
-on the table, and `umd_input_tensor` or `umd_output_tensor` plus `umd_name` on every
+and its tensor edges for Universal Engine Descriptor (UED) patterns: `(matcher_opcode: "...")`
+on the table, and `matcher_input_tensor` or `matcher_output_tensor` plus `matcher_name` on every
 tensor-uid field. `scripts/gen_op_schema_registry.py` generates
 `op_schema_registry_generated.h` and `op_schema_registry.json` from them, and the
 `op-schema-registry-hipdnn` pre-commit hook keeps both current. See

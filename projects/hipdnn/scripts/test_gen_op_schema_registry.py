@@ -45,14 +45,14 @@ def field(
     return entry
 
 
-def edge(name, field_id, direction, umd_name, *, optional=False):
+def edge(name, field_id, direction, matcher_name, *, optional=False):
     return field(
         name,
         "Long",
         field_id,
         optional=optional,
         cache_uid=True,
-        **{direction: True, "umd_name": umd_name},
+        **{direction: True, "matcher_name": matcher_name},
     )
 
 
@@ -65,7 +65,7 @@ def edge_list(name, field_id, direction):
 def table(name, fields, opcode=None):
     entry = {"name": f"{NS}.{name}", "fields": fields}
     if opcode is not None:
-        entry["attributes"] = [{"key": "umd_opcode", "value": opcode}]
+        entry["attributes"] = [{"key": "matcher_opcode", "value": opcode}]
     return entry
 
 
@@ -115,9 +115,9 @@ def pointwise_like():
             field("relu_lower_clip", "Float", 1, optional=True),
             # Named like a uid but an axis index: no cache_uid, no flag.
             field("axis_tensor_uid", "Long", 2, optional=True),
-            edge("in_0_tensor_uid", 3, "umd_input_tensor", "in_0"),
-            edge("in_1_tensor_uid", 4, "umd_input_tensor", "in_1", optional=True),
-            edge("out_0_tensor_uid", 5, "umd_output_tensor", "out_0"),
+            edge("in_0_tensor_uid", 3, "matcher_input_tensor", "in_0"),
+            edge("in_1_tensor_uid", 4, "matcher_input_tensor", "in_1", optional=True),
+            edge("out_0_tensor_uid", 5, "matcher_output_tensor", "out_0"),
             field("block_size", "Vector", 6, element="Int"),
             field("in_place", "Bool", 7),
         ],
@@ -166,10 +166,10 @@ class TestRegistryEntry(unittest.TestCase):
                 table(
                     "CustomOpAttributes",
                     [
-                        edge_list("input_tensor_uids", 0, "umd_input_tensor"),
-                        edge("x_tensor_uid", 1, "umd_input_tensor", "x"),
-                        edge_list("output_tensor_uids", 2, "umd_output_tensor"),
-                        edge_list("aux_tensor_uids", 3, "umd_input_tensor"),
+                        edge_list("input_tensor_uids", 0, "matcher_input_tensor"),
+                        edge("x_tensor_uid", 1, "matcher_input_tensor", "x"),
+                        edge_list("output_tensor_uids", 2, "matcher_output_tensor"),
+                        edge_list("aux_tensor_uids", 3, "matcher_input_tensor"),
                     ],
                     opcode="custom_op",
                 )
@@ -210,33 +210,35 @@ class TestBuildErrors(unittest.TestCase):
             "Long",
             0,
             cache_uid=True,
-            umd_input_tensor=True,
-            umd_output_tensor=True,
-            umd_name="x",
+            matcher_input_tensor=True,
+            matcher_output_tensor=True,
+            matcher_name="x",
         )
         self.assertFails([table("Op", [bad], "op")], r"Op\.x_tensor_uid")
 
-    def test_umd_name_without_a_flag_fails(self):
-        bad = field("x_tensor_uid", "Long", 0, umd_name="x")
-        self.assertFails([table("Op", [bad], "op")], r"Op\.x_tensor_uid.*umd_name")
+    def test_matcher_name_without_a_flag_fails(self):
+        bad = field("x_tensor_uid", "Long", 0, matcher_name="x")
+        self.assertFails([table("Op", [bad], "op")], r"Op\.x_tensor_uid.*matcher_name")
 
-    def test_a_flag_without_umd_name_fails(self):
-        bad = field("x_tensor_uid", "Long", 0, cache_uid=True, umd_input_tensor=True)
-        self.assertFails([table("Op", [bad], "op")], r"Op\.x_tensor_uid.*umd_name")
+    def test_a_flag_without_matcher_name_fails(self):
+        bad = field(
+            "x_tensor_uid", "Long", 0, cache_uid=True, matcher_input_tensor=True
+        )
+        self.assertFails([table("Op", [bad], "op")], r"Op\.x_tensor_uid.*matcher_name")
 
-    def test_a_flag_with_an_empty_umd_name_fails(self):
+    def test_a_flag_with_an_empty_matcher_name_fails(self):
         bad = field(
             "x_tensor_uid",
             "Long",
             0,
             cache_uid=True,
-            umd_input_tensor=True,
-            umd_name="",
+            matcher_input_tensor=True,
+            matcher_name="",
         )
-        self.assertFails([table("Op", [bad], "op")], r"Op\.x_tensor_uid.*umd_name")
+        self.assertFails([table("Op", [bad], "op")], r"Op\.x_tensor_uid.*matcher_name")
 
     def test_a_flag_on_a_float_field_fails(self):
-        bad = field("x", "Float", 0, umd_input_tensor=True, umd_name="x")
+        bad = field("x", "Float", 0, matcher_input_tensor=True, matcher_name="x")
         self.assertFails([table("Op", [bad], "op")], r"Op\.x'.*integer")
 
     def test_a_cache_uid_vector_without_a_direction_flag_fails(self):
@@ -251,37 +253,37 @@ class TestBuildErrors(unittest.TestCase):
             0,
             element="Long",
             cache_uid=True,
-            umd_input_tensor=True,
-            umd_output_tensor=True,
+            matcher_input_tensor=True,
+            matcher_output_tensor=True,
         )
         self.assertFails([table("Op", [bad], "op")], r"Op\.xs'.*both")
 
-    def test_umd_name_on_an_edge_list_fails(self):
+    def test_matcher_name_on_an_edge_list_fails(self):
         bad = field(
             "xs",
             "Vector",
             0,
             element="Long",
             cache_uid=True,
-            umd_input_tensor=True,
-            umd_name="xs",
+            matcher_input_tensor=True,
+            matcher_name="xs",
         )
-        self.assertFails([table("Op", [bad], "op")], r"Op\.xs'.*umd_name")
+        self.assertFails([table("Op", [bad], "op")], r"Op\.xs'.*matcher_name")
 
     def test_a_flag_on_a_vector_of_32_bit_integers_fails(self):
         bad = field(
-            "xs", "Vector", 0, element="Int", cache_uid=True, umd_input_tensor=True
+            "xs", "Vector", 0, element="Int", cache_uid=True, matcher_input_tensor=True
         )
         self.assertFails([table("Op", [bad], "op")], r"Op\.xs'.*\[long\]")
 
     def test_a_flag_on_a_32_bit_integer_fails(self):
-        bad = field("x", "Int", 0, umd_input_tensor=True, umd_name="x")
+        bad = field("x", "Int", 0, matcher_input_tensor=True, matcher_name="x")
         self.assertFails([table("Op", [bad], "op")], r"Op\.x'.*64-bit")
 
-    def test_a_duplicate_umd_name_across_operands_and_results_fails(self):
+    def test_a_duplicate_matcher_name_across_operands_and_results_fails(self):
         fields = [
-            edge("x_tensor_uid", 0, "umd_input_tensor", "x"),
-            edge("y_tensor_uid", 1, "umd_output_tensor", "x"),
+            edge("x_tensor_uid", 0, "matcher_input_tensor", "x"),
+            edge("y_tensor_uid", 1, "matcher_output_tensor", "x"),
         ]
         self.assertFails([table("Op", fields, "op")], r"'x'.*Op\.y_tensor_uid")
 
@@ -294,7 +296,7 @@ class TestBuildErrors(unittest.TestCase):
     def test_an_edge_named_for_a_reserved_root_fails(self):
         for root in ("graph", "kernel", "device"):
             with self.subTest(root=root):
-                fields = [edge("g_tensor_uid", 0, "umd_input_tensor", root)]
+                fields = [edge("g_tensor_uid", 0, "matcher_input_tensor", root)]
                 self.assertFails(
                     [table("Op", fields, "op")], r"Op\.g_tensor_uid.*reserved"
                 )
@@ -304,55 +306,57 @@ class TestBuildErrors(unittest.TestCase):
             [table("First", [], "op"), table("Second", [], "op")], r"'First'.*'Second'"
         )
 
-    def test_a_table_without_umd_opcode_fails(self):
+    def test_a_table_without_matcher_opcode_fails(self):
         self.assertFails(
             [table("First", [], "first"), table("MatmulAttributes", [])],
-            r"'MatmulAttributes'.*umd_opcode",
+            r"'MatmulAttributes'.*matcher_opcode",
         )
 
-    def test_a_non_identifier_umd_opcode_fails(self):
-        self.assertFails([table("Op", [], "op-name")], r"umd_opcode.*'Op'.*identifier")
-
-    def test_a_non_identifier_umd_name_fails(self):
-        fields = [edge("x_tensor_uid", 0, "umd_input_tensor", "x.y")]
+    def test_a_non_identifier_matcher_opcode_fails(self):
         self.assertFails(
-            [table("Op", fields, "op")], r"umd_name.*Op\.x_tensor_uid.*identifier"
+            [table("Op", [], "op-name")], r"matcher_opcode.*'Op'.*identifier"
         )
 
-    def test_a_umd_annotation_on_a_node_field_fails(self):
+    def test_a_non_identifier_matcher_name_fails(self):
+        fields = [edge("x_tensor_uid", 0, "matcher_input_tensor", "x.y")]
+        self.assertFails(
+            [table("Op", fields, "op")], r"matcher_name.*Op\.x_tensor_uid.*identifier"
+        )
+
+    def test_a_matcher_annotation_on_a_node_field_fails(self):
         node_fields = [
             field(
                 "compute_data_type",
                 "Byte",
                 0,
                 index=DATA_TYPE_ENUM,
-                umd_name="dtype",
+                matcher_name="dtype",
             ),
-            field("name", "String", 1, cache_ignore=True, umd_input_tensor=True),
+            field("name", "String", 1, cache_ignore=True, matcher_input_tensor=True),
         ]
         for bad in node_fields:
             with self.subTest(field=bad["name"]):
                 self.assertFails(
                     [table("Op", [], "op")],
-                    rf"umd_.*Node\.{bad['name']}",
+                    rf"matcher_.*Node\.{bad['name']}",
                     node_fields=[bad],
                 )
 
-    def test_an_unknown_umd_field_annotation_fails(self):
-        bad = field("x", "Long", 0, umd_inptu_tensor=True)
-        self.assertFails([table("Op", [bad], "op")], r"umd_inptu_tensor.*Op\.x")
+    def test_an_unknown_matcher_field_annotation_fails(self):
+        bad = field("x", "Long", 0, matcher_inptu_tensor=True)
+        self.assertFails([table("Op", [bad], "op")], r"matcher_inptu_tensor.*Op\.x")
 
-    def test_an_unknown_umd_table_annotation_fails(self):
+    def test_an_unknown_matcher_table_annotation_fails(self):
         bad = table("Op", [], "op")
-        bad["attributes"].append({"key": "umd_opcodes", "value": "x"})
-        self.assertFails([bad], r"umd_opcodes.*'Op'")
+        bad["attributes"].append({"key": "matcher_opcodes", "value": "x"})
+        self.assertFails([bad], r"matcher_opcodes.*'Op'")
 
     def test_a_cache_uid_integer_without_a_direction_flag_fails(self):
         # A tensor reference left unflagged would otherwise publish as an Int attribute.
         bad = field("x_tensor_uid", "Long", 0, cache_uid=True)
         self.assertFails([table("Op", [bad], "op")], r"Op\.x_tensor_uid.*cache_uid")
 
-    def test_umd_opcode_on_a_table_outside_the_union_fails(self):
+    def test_matcher_opcode_on_a_table_outside_the_union_fails(self):
         stray = table("Stray", [], "stray")
         self.assertFails([table("Op", [], "op")], r"'Stray'", extra_objects=[stray])
 

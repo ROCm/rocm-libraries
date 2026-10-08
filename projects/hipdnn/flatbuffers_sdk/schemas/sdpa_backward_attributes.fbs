@@ -5,40 +5,40 @@ include "sdpa_attributes.fbs";
 
 // See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
-attribute "umd_opcode";
-attribute "umd_input_tensor";
-attribute "umd_output_tensor";
-attribute "umd_name";
+attribute "matcher_opcode";
+attribute "matcher_input_tensor";
+attribute "matcher_output_tensor";
+attribute "matcher_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table SdpaBackwardAttributes (umd_opcode: "sdpa_bwd") {
+table SdpaBackwardAttributes (matcher_opcode: "sdpa_bwd") {
     // Required input tensor UIDs
-    q_tensor_uid:              long (cache_uid, umd_input_tensor, umd_name: "q");
-    k_tensor_uid:              long (cache_uid, umd_input_tensor, umd_name: "k");
-    v_tensor_uid:              long (cache_uid, umd_input_tensor, umd_name: "v");
-    o_tensor_uid:              long (cache_uid, umd_input_tensor, umd_name: "o");
-    do_tensor_uid:             long (cache_uid, umd_input_tensor, umd_name: "do");
-    stats_tensor_uid:          long (cache_uid, umd_input_tensor, umd_name: "stats");
+    q_tensor_uid:              long (cache_uid, matcher_input_tensor, matcher_name: "q");
+    k_tensor_uid:              long (cache_uid, matcher_input_tensor, matcher_name: "k");
+    v_tensor_uid:              long (cache_uid, matcher_input_tensor, matcher_name: "v");
+    o_tensor_uid:              long (cache_uid, matcher_input_tensor, matcher_name: "o");
+    do_tensor_uid:             long (cache_uid, matcher_input_tensor, matcher_name: "do");
+    stats_tensor_uid:          long (cache_uid, matcher_input_tensor, matcher_name: "stats");
 
     // Required output tensor UIDs
-    dq_tensor_uid:             long (cache_uid, umd_output_tensor, umd_name: "dq");
-    dk_tensor_uid:             long (cache_uid, umd_output_tensor, umd_name: "dk");
-    dv_tensor_uid:             long (cache_uid, umd_output_tensor, umd_name: "dv");
+    dq_tensor_uid:             long (cache_uid, matcher_output_tensor, matcher_name: "dq");
+    dk_tensor_uid:             long (cache_uid, matcher_output_tensor, matcher_name: "dk");
+    dv_tensor_uid:             long (cache_uid, matcher_output_tensor, matcher_name: "dv");
 
     // Optional input tensor UIDs
-    scale_tensor_uid:          long = null (cache_uid, umd_input_tensor, umd_name: "scale");                 // Attention scale tensor (Attn_scale)
-    attn_mask_tensor_uid:      long = null (cache_uid, umd_input_tensor, umd_name: "attn_mask");             // Additive attention bias (Bias)
-    seq_len_q_tensor_uid:      long = null (cache_uid, umd_input_tensor, umd_name: "seq_len_q");
-    seq_len_kv_tensor_uid:     long = null (cache_uid, umd_input_tensor, umd_name: "seq_len_kv");
-    seed_tensor_uid:           long = null (cache_uid, umd_input_tensor, umd_name: "seed");                  // Dropout seed
-    offset_tensor_uid:         long = null (cache_uid, umd_input_tensor, umd_name: "offset");                // Dropout offset
-    dropout_mask_tensor_uid:   long = null (cache_uid, umd_input_tensor, umd_name: "dropout_mask");
-    dropout_scale_tensor_uid:  long = null (cache_uid, umd_input_tensor, umd_name: "dropout_scale");
-    dropout_scale_inv_tensor_uid: long = null (cache_uid, umd_input_tensor, umd_name: "dropout_scale_inv");
+    scale_tensor_uid:          long = null (cache_uid, matcher_input_tensor, matcher_name: "scale");                 // Attention scale tensor (Attn_scale)
+    attn_mask_tensor_uid:      long = null (cache_uid, matcher_input_tensor, matcher_name: "attn_mask");             // Additive attention bias (Bias)
+    seq_len_q_tensor_uid:      long = null (cache_uid, matcher_input_tensor, matcher_name: "seq_len_q");
+    seq_len_kv_tensor_uid:     long = null (cache_uid, matcher_input_tensor, matcher_name: "seq_len_kv");
+    seed_tensor_uid:           long = null (cache_uid, matcher_input_tensor, matcher_name: "seed");                  // Dropout seed
+    offset_tensor_uid:         long = null (cache_uid, matcher_input_tensor, matcher_name: "offset");                // Dropout offset
+    dropout_mask_tensor_uid:   long = null (cache_uid, matcher_input_tensor, matcher_name: "dropout_mask");
+    dropout_scale_tensor_uid:  long = null (cache_uid, matcher_input_tensor, matcher_name: "dropout_scale");
+    dropout_scale_inv_tensor_uid: long = null (cache_uid, matcher_input_tensor, matcher_name: "dropout_scale_inv");
 
     // Optional output tensor UIDs
-    dbias_tensor_uid:          long = null (cache_uid, umd_output_tensor, umd_name: "dbias");  // Gradient of additive attention bias
+    dbias_tensor_uid:          long = null (cache_uid, matcher_output_tensor, matcher_name: "dbias");  // Gradient of additive attention bias
 
     // Boolean flags
     alibi_mask:                bool = false;

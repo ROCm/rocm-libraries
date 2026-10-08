@@ -5,18 +5,18 @@ include "resample_common.fbs";
 
 // See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
-attribute "umd_opcode";
-attribute "umd_input_tensor";
-attribute "umd_output_tensor";
-attribute "umd_name";
+attribute "matcher_opcode";
+attribute "matcher_input_tensor";
+attribute "matcher_output_tensor";
+attribute "matcher_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table ResampleBwdAttributes (umd_opcode: "resample_bwd") {
+table ResampleBwdAttributes (matcher_opcode: "resample_bwd") {
     // Input/Output tensor UIDs
-    dy_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "dy");               // Gradient of output tensor
-    dx_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "dx");              // Gradient of input tensor (result)
-    index_tensor_uid: long = null (cache_uid, umd_input_tensor, umd_name: "index");  // Optional index tensor (from forward max resample)
+    dy_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "dy");               // Gradient of output tensor
+    dx_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "dx");              // Gradient of input tensor (result)
+    index_tensor_uid: long = null (cache_uid, matcher_input_tensor, matcher_name: "index");  // Optional index tensor (from forward max resample)
 
     // Resample parameters (N-dimensional support)
     pre_padding: [long];         // Padding before each spatial dimension

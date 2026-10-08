@@ -3,19 +3,19 @@
 
 // See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
-attribute "umd_opcode";
-attribute "umd_input_tensor";
-attribute "umd_output_tensor";
-attribute "umd_name";
+attribute "matcher_opcode";
+attribute "matcher_input_tensor";
+attribute "matcher_output_tensor";
+attribute "matcher_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table RMSNormBackwardAttributes (umd_opcode: "rms_norm_bwd") {
-    dy_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "dy");
-    x_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "x");
-    scale_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "scale");
-    inv_rms_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "inv_rms");
-    dx_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "dx");
-    dscale_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "dscale");
-    dbias_tensor_uid: long = null (cache_uid, umd_output_tensor, umd_name: "dbias");
+table RMSNormBackwardAttributes (matcher_opcode: "rms_norm_bwd") {
+    dy_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "dy");
+    x_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "x");
+    scale_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "scale");
+    inv_rms_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "inv_rms");
+    dx_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "dx");
+    dscale_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "dscale");
+    dbias_tensor_uid: long = null (cache_uid, matcher_output_tensor, matcher_name: "dbias");
 }

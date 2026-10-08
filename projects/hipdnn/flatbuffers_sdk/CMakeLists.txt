@@ -219,7 +219,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
 
         # The op-schema registry (RFC 0020 Appendix B): the header the kernel ingestor
         # compiles and the JSON hkp_pack validates against, both re-derived by one
-        # generator run from the `umd_*` annotations, which are likewise invisible to
+        # generator run from the `matcher_*` annotations, which are likewise invisible to
         # flatc's C++ output. Same schema DEPENDS and flatc as the cache-key header; the
         # generator imports gen_cache_key.py, so that script is a dependency too.
         set(_op_schema_registry_header

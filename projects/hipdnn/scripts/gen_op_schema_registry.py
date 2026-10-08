@@ -6,8 +6,8 @@
 For every table in the ``NodeAttributes`` union, the registry records the opcode a UED
 pattern names it by, its operand and result tensor edges, its operand and result edge
 lists (tensor-uid vectors), and its scalar attributes (RFC 0020 Appendix B). The policy
-comes from the ``umd_opcode``, ``umd_input_tensor``, ``umd_output_tensor``, and
-``umd_name`` schema annotations, read from the binary schema since flatc's C++ output
+comes from the ``matcher_opcode``, ``matcher_input_tensor``, ``matcher_output_tensor``, and
+``matcher_name`` schema annotations, read from the binary schema since flatc's C++ output
 doesn't expose them.
 
 Emits two files from one schema walk, so they cannot disagree:
@@ -43,19 +43,19 @@ from gen_cache_key import (
 )
 
 # Table annotation: the opcode a pattern names the op by. Required on every union member.
-OPCODE_ATTRIBUTE = "umd_opcode"
+OPCODE_ATTRIBUTE = "matcher_opcode"
 
 # Field flags: the field is an input (operand) or output (result) tensor uid, or a
 # vector of them (an edge list).
-INPUT_ATTRIBUTE = "umd_input_tensor"
-OUTPUT_ATTRIBUTE = "umd_output_tensor"
+INPUT_ATTRIBUTE = "matcher_input_tensor"
+OUTPUT_ATTRIBUTE = "matcher_output_tensor"
 
 # Field string: the edge name a pattern binds a flagged scalar field by. Edge lists
 # are never bound, so they take no name.
-NAME_ATTRIBUTE = "umd_name"
+NAME_ATTRIBUTE = "matcher_name"
 
 FIELD_ATTRIBUTES = frozenset([INPUT_ATTRIBUTE, OUTPUT_ATTRIBUTE, NAME_ATTRIBUTE])
-ANNOTATION_PREFIX = "umd_"
+ANNOTATION_PREFIX = "matcher_"
 
 # Owned by gen_cache_key.py: an integer or integer vector carrying it is a tensor
 # reference, which the registry must classify as an edge or edge list rather than
@@ -455,7 +455,7 @@ class HeaderEmitter:
         self.w("struct EdgeSchema")
         self.w("{")
         self.w(
-            "    std::string_view name; ///< The edge name a pattern binds (umd_name)."
+            "    std::string_view name; ///< The edge name a pattern binds (matcher_name)."
         )
         self.w("    bool optional; ///< The uid field is `= null`.")
         self.w(
@@ -523,7 +523,9 @@ class HeaderEmitter:
         self.w("/// One op: a NodeAttributes table and what a pattern can bind on it.")
         self.w("struct OpSchema")
         self.w("{")
-        self.w("    std::string_view opcode; ///< The table's umd_opcode annotation.")
+        self.w(
+            "    std::string_view opcode; ///< The table's matcher_opcode annotation."
+        )
         self.w('    std::string_view attributesTable; ///< e.g. "PointwiseAttributes".')
         self.w("    NodeAttributes attributesType; ///< The union discriminant.")
         self.w("    SchemaSpan<EdgeSchema> operands; ///< Declaration order.")

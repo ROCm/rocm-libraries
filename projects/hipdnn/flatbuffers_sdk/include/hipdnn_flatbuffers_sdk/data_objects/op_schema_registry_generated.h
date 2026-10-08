@@ -2,8 +2,8 @@
 //
 // The op-schema registry: per NodeAttributes table, the opcode a UED pattern
 // names it by, its operand and result tensor edges and edge lists, and its
-// scalar attributes, taken from the 'umd_opcode', 'umd_input_tensor',
-// 'umd_output_tensor', and 'umd_name' schema annotations. Static tables
+// scalar attributes, taken from the 'matcher_opcode', 'matcher_input_tensor',
+// 'matcher_output_tensor', and 'matcher_name' schema annotations. Static tables
 // read the caller's buffer in place: no allocation, no reflection.
 
 #pragma once
@@ -35,7 +35,7 @@ using ScalarValue = std::variant<bool, int64_t, double, std::string_view>;
 /// An operand or result tensor edge of an op.
 struct EdgeSchema
 {
-    std::string_view name; ///< The edge name a pattern binds (umd_name).
+    std::string_view name; ///< The edge name a pattern binds (matcher_name).
     bool optional; ///< The uid field is `= null`.
     /// The edge's tensor uid; nullopt when an optional uid is absent or the node
     /// does not carry this op's attribute table. Never throws.
@@ -90,7 +90,7 @@ struct SchemaSpan
 /// One op: a NodeAttributes table and what a pattern can bind on it.
 struct OpSchema
 {
-    std::string_view opcode; ///< The table's umd_opcode annotation.
+    std::string_view opcode; ///< The table's matcher_opcode annotation.
     std::string_view attributesTable; ///< e.g. "PointwiseAttributes".
     NodeAttributes attributesType; ///< The union discriminant.
     SchemaSpan<EdgeSchema> operands; ///< Declaration order.

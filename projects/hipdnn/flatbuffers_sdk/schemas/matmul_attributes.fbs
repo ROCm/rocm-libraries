@@ -3,15 +3,15 @@
 
 // See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
-attribute "umd_opcode";
-attribute "umd_input_tensor";
-attribute "umd_output_tensor";
-attribute "umd_name";
+attribute "matcher_opcode";
+attribute "matcher_input_tensor";
+attribute "matcher_output_tensor";
+attribute "matcher_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table MatmulAttributes (umd_opcode: "matmul") {
-    a_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "a");
-    b_tensor_uid: long (cache_uid, umd_input_tensor, umd_name: "b");
-    c_tensor_uid: long (cache_uid, umd_output_tensor, umd_name: "c");
+table MatmulAttributes (matcher_opcode: "matmul") {
+    a_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "a");
+    b_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "b");
+    c_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "c");
 }
