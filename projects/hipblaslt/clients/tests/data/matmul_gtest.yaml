@@ -1366,6 +1366,26 @@ Tests:
   cold_iters: 1
   gpu_arch: '950'
 
+# Stream-K custom TF32 kernel with a large batch: sk.grid already includes the batch, so a
+# StreamKWithBatch launch overflowed the 32-bit global work size (17.8M work groups).
+- name: matmul_tf32_streamk_custom_large_batch
+  category: pre_checkin
+  function:
+    matmul: *xf32_precision
+  M: 256
+  N: 1856
+  K: 320
+  batch_count: 1492
+  transA: N
+  transB: N
+  alpha: 1
+  beta: 0
+  norm_check: 1
+  unit_check: 0
+  iters: 1
+  cold_iters: 1
+  gpu_arch: '950'
+
 - name: matmul_swizzleA
   category: pre_checkin
   function:

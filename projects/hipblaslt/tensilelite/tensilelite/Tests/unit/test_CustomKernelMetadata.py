@@ -867,6 +867,23 @@ def test_build_from_metadata_streamk_batched_grid():
     assert ck["grid"][0] == "StreamKWithBatch"
 
 
+_SK3_TF32_KERNELS = [
+    "Custom_Cijk_Ailk_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
+    "Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
+    "Custom_Cijk_Alik_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
+]
+
+
+@pytest.mark.parametrize("name", _SK3_TF32_KERNELS)
+def test_sk3_tf32_custom_kernel_launches_batch_inclusive_grid(name):
+    # The host's sk.grid already counts every batch's tiles, and these kernels
+    # index the flat problem-wide tile space from WorkGroup0. StreamKWithBatch
+    # would launch sk.grid * batch work groups, which overflows the 32-bit
+    # global work size for large batch counts.
+    config = getCustomKernelConfig(name, {})
+    assert config["CustomKernel"]["grid"] == ["StreamKNoBatch", "One", "One"]
+
+
 @pytest.mark.parametrize("batched", [False, True])
 @pytest.mark.parametrize("num_workgroups_arg", [False, True])
 def test_build_from_metadata_persistent_data_parallel_grid(batched, num_workgroups_arg):
