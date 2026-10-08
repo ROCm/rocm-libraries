@@ -62,15 +62,21 @@ dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_g
   docker run --rm --user $(id -u):$(id -g) --device=/dev/kfd --device=/dev/dri \
     --group-add $(getent group video | cut -d: -f3) \
     --group-add $(getent group render | cut -d: -f3) \
-    -v <checkout>:<checkout> -w <checkout> <image> ...
+    -v <checkout>:<checkout> -v <build>:<build> -v <store>:<store> -v $UHD:$UHD \
+    -e PYTHONPATH=<checkout>/projects/hipdnn/tools \
+    -e HIPDNN_AITER_ASM_DIR=<build>/hip_kernel_provider/asm_kernels \
+    -w <checkout> <image> ...
   ```
+  Mount every directory a step reads or writes at its own path (the checkout, the build, the
+  store, scratch, and `$UHD` for the scripts), and pass `PYTHONPATH` and the engine's
+  kernel-file variables.
   On a machine whose GPUs are shared out (a scheduler grants you some), the container sees
   every GPU whose device node it is given, and an index such as `ROCR_VISIBLE_DEVICES` counts
   within your grant, not within the container's view. Give it only your GPU's nodes: read
   its PCI address where the grant applies (`amd-smi list`, outside the container), and pass
   `/dev/kfd` with `$(readlink -f /dev/dri/by-path/pci-<address>-render)` and
   `$(readlink -f /dev/dri/by-path/pci-<address>-card)` instead of all of `/dev/dri`; pass
-  your granted CPUs as `--cpuset-cpus` (`taskset -cp $$`). Check `rocminfo`
+  your granted CPUs as `--cpuset-cpus $(taskset -cp $$ | awk '{print $NF}')`. Check `rocminfo`
   inside the container lists the gfx agent before running any tool: without the render
   group the GPU is invisible, and every engine appears to serve nothing.
 - After any CMake reconfigure of the hip-kernel-provider build, rebuild its descriptor

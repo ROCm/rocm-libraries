@@ -28,8 +28,10 @@ Take from the user; never guess silently:
     `hipdnn_list_engines` on a build says what registers);
   - the `name` of every shipped `*.ued.json` (below), whose `graph_match` names its operation.
 
-  Keep those that serve the operation on this device's arch (below). None left: stop as in
-  step 0. More than one: ask which.
+  Drop a name with no engine directory (it is reserved, not implemented) and an opaque
+  engine that declares no UHD id (a model of it is never read). Keep those that serve the
+  operation on this device's arch (below). None left: stop as in step 0. More than one: ask
+  which.
 - **device**: the local GPU ([data.md](data.md), "The device"); with several products present,
   ask which one.
 - **tier**: `smoke` (200 graphs), `standard` (2000) or `exhaustive` (5000) **per operation**:
@@ -105,7 +107,8 @@ Read it from the checkout:
    the search found the engine serves, and `Generated M problems` the set after the cut to
    `--count`; `K of T declared regime combinations not tried (maxSkeleton bound)` means the
    first pass tried `--max-skeleton` (default 512) of the operation's declared combinations,
-   which is expected. Move a set that did not exit 0 to `archive/`
+   which is expected; so are `no declared archetype was admitted for ...; that combination is
+   exploration only` lines ([triage.md](triage.md), "Harmless noise"). Move a set that did not exit 0 to `archive/`
    ([data.md](data.md)). On exit 2, rerun one operation with `HIPDNN_LOG_LEVEL=info --count 1`
    into a scratch directory, its log to a file, and look for the engine's own lines
    (`grep isApplicable`): a refusal such as `Device string does not match` says why it serves
@@ -123,6 +126,8 @@ Read it from the checkout:
      --bench <build>/bin/hipdnn_bench --plugin-dir <abs plugin dir> \
      --descriptor-tree <tree> --output-dir <stage dir> [--shard K/N]
    ```
+   `<stage dir>` is any new directory (scratch will do); the collection moves into the store
+   below.
    `--descriptor-tree` is the ONE tree the engine loads while it is measured
    (`HIPDNN_DESCRIPTOR_DIR`), so it is the tree the engine ships in: for an opaque engine of
    the hip-kernel-provider, its descriptor root (`<plugin dir>/arch_content/hip-kernel-provider`);
@@ -137,7 +142,8 @@ Read it from the checkout:
    collection each.
    Then move each collection to `collections/<engine>/<device>/<revision>/<date>/<set>-<time>/`
    ([data.md](data.md)), the revision and `collected_at` read from its
-   `collection_manifest.json`. The engine reports one selector revision for all its operations.
+   `collection_manifest.json`. The engine reports one selector revision for all its operations, even when
+   its name mentions one of them (`asm-sdpa-fwd` covers `sdpa_bwd` too).
    The directory's name becomes the contribution id in the dataset, which `--contribution`
    selects by.
 6. **Store**: `python3 -m uhd_gen.dataset add --into <store>/datasets/<engine>/<device>/<revision>/<role>[/under-<L2 id>]

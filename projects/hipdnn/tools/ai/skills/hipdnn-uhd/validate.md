@@ -80,7 +80,9 @@ python3 $UHD/scripts/decide.py l1 --rows rows.json --candidate-dir <model dir> -
    (candidate mean top-1 regret no worse than shipped's plus noise slack; `--baseline none`
    when the build binds no L2 for the arch).
 
-`passed` is true only when every gate holds; the report names each failing gate's problems.
+`passed` is true only when every gate holds, and `decide.py` exits 1 otherwise; the report
+names each failing gate's problems. For a smoke round, read the gates, not the exit code: a
+smoke round passes with only `accuracy` failing ([generate.md](generate.md), "Tier").
 Every metric's model is validated separately.
 
 ## Install (only with the user's go-ahead)
