@@ -28,7 +28,14 @@
 #define GUARD_TENSOR_VIEW_HPP
 
 #include "miopen_cstdint.hpp"
+// Prefer the real <initializer_list> when a host C++ standard library is
+// reachable; otherwise use MIOpen's freestanding definition so
+// runtime-compiled kernels stay self-contained (see miopen_type_traits.hpp).
+#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !__has_include(<initializer_list>)
+#include "miopen_freestanding_initializer_list.hpp"
+#else
 #include <initializer_list>
+#endif
 
 template <int N>
 struct tensor_layout_t;

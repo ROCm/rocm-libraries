@@ -27,7 +27,14 @@
 #ifndef GUARD_RADIX_H
 #define GUARD_RADIX_H
 
+// Runtime-compiled kernels must not require a host C++ standard library
+// (see miopen_type_traits.hpp). The runtime-compile path below needs only
+// the fixed-width integer typedefs, provided by miopen_cstdint.hpp.
+#ifdef MIOPEN_HIP_RUNTIME_COMPILE
+#include "miopen_cstdint.hpp"
+#else
 #include <limits>
+#endif
 
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
@@ -64,11 +71,11 @@ __device__ inline Radix encode(DTYPE v)
     }
     else if constexpr(std::is_same<int32_t, DTYPE>::value)
     {
-        return static_cast<Radix>(std::numeric_limits<int32_t>::max()) + v + 1;
+        return static_cast<Radix>(__INT32_MAX__) + v + 1;
     }
     else if constexpr(std::is_same<int64_t, DTYPE>::value)
     {
-        return static_cast<Radix>(std::numeric_limits<int64_t>::max()) + v + 1;
+        return static_cast<Radix>(__INT64_MAX__) + v + 1;
     }
     // bfloat16 is passed as ushort in kernel
     else if constexpr(std::is_same<ushort, DTYPE>::value)

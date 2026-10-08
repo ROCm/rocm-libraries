@@ -511,6 +511,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/miopen_math.hpp
         kernels/miopen_rocrand.hpp
         ${ROCRAND_XORWOW_INLINED_PATH}
+        kernels/miopen_freestanding_initializer_list.hpp
         kernels/miopen_freestanding_type_traits.hpp
         kernels/miopen_freestanding_utility.hpp
         kernels/miopen_type_traits.hpp
