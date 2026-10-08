@@ -472,7 +472,7 @@ void stedc_getError(const hipsolverHandle_t   handle,
     using BDescT = typename HMatT::BlockDescriptor;
     using BDescS = typename HMatS::BlockDescriptor;
 
-    int    lgn   = floor(log(n - 1) / log(2)) + 1;
+    int    lgn   = n > 1 ? floor(log(n - 1) / log(2)) + 1 : 0;
     size_t lwork = (COMPLEX) ? n * n : 0;
     size_t lrwork
         = (compz == HIPSOLVER_EIG_COMP_N || n <= 1) ? 1 : 1 + 3 * n + 4 * n * n + 2 * n * lgn;

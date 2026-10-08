@@ -202,11 +202,11 @@ cusolverEigComp_t hip2cuda_evect_comp(hipsolverEigComp_t eig)
     switch(eig)
     {
     case HIPSOLVER_EIG_COMP_N:
-        return CUPSOLVER_EIG_COMP_N;
+        return CUSOLVER_EIG_COMP_N;
     case HIPSOLVER_EIG_COMP_I:
-        return CUPSOLVER_EIG_COMP_I;
+        return CUSOLVER_EIG_COMP_I;
     case HIPSOLVER_EIG_COMP_V:
-        return CUPSOLVER_EIG_COMP_V;
+        return CUSOLVER_EIG_COMP_V;
     default:
         throw HIPSOLVER_STATUS_INVALID_ENUM;
     }

@@ -1603,10 +1603,10 @@ try
 
     // TODO: Update to call 64-bit rocsolver_*stedc_64 once available in rocSOLVER.
     // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int.
-    auto const MAX_INT             = std::numeric_limits<int32_t>::max();
-    bool const is_integer_overflow = (int64_t(ldz) * n) > MAX_INT;
-    if(is_integer_overflow)
-        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    if(n > INT_MAX || ldz > INT_MAX || int64_t(ldz) * n > INT_MAX)
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
+
+    rocblas_evect roc_evect = hipsolver::hip2rocblas_evect_comp(compz);
 
     size_t sz;
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
@@ -1614,51 +1614,47 @@ try
 
     if(dataTypeZ == HIP_R_32F && dataTypeDE == HIP_R_32F && computeType == HIP_R_32F)
     {
-        status = hipsolver::rocblas2hip_status(
-            rocsolver_sstedc((rocblas_handle)handle,
-                             hipsolver::hip2rocblas_evect_comp(compz),
-                             static_cast<rocblas_int>(n),
-                             nullptr,
-                             nullptr,
-                             nullptr,
-                             static_cast<rocblas_int>(ldz),
-                             nullptr));
+        status = hipsolver::rocblas2hip_status(rocsolver_sstedc((rocblas_handle)handle,
+                                                                roc_evect,
+                                                                static_cast<rocblas_int>(n),
+                                                                nullptr,
+                                                                nullptr,
+                                                                nullptr,
+                                                                static_cast<rocblas_int>(ldz),
+                                                                nullptr));
     }
     else if(dataTypeZ == HIP_R_64F && dataTypeDE == HIP_R_64F && computeType == HIP_R_64F)
     {
-        status = hipsolver::rocblas2hip_status(
-            rocsolver_dstedc((rocblas_handle)handle,
-                             hipsolver::hip2rocblas_evect_comp(compz),
-                             static_cast<rocblas_int>(n),
-                             nullptr,
-                             nullptr,
-                             nullptr,
-                             static_cast<rocblas_int>(ldz),
-                             nullptr));
+        status = hipsolver::rocblas2hip_status(rocsolver_dstedc((rocblas_handle)handle,
+                                                                roc_evect,
+                                                                static_cast<rocblas_int>(n),
+                                                                nullptr,
+                                                                nullptr,
+                                                                nullptr,
+                                                                static_cast<rocblas_int>(ldz),
+                                                                nullptr));
     }
     else if(dataTypeZ == HIP_C_32F && dataTypeDE == HIP_R_32F && computeType == HIP_C_32F)
     {
-        status = hipsolver::rocblas2hip_status(
-            rocsolver_cstedc((rocblas_handle)handle,
-                             hipsolver::hip2rocblas_evect_comp(compz),
-                             static_cast<rocblas_int>(n),
-                             nullptr,
-                             nullptr,
-                             nullptr,
-                             static_cast<rocblas_int>(ldz),
-                             nullptr));
+        status = hipsolver::rocblas2hip_status(rocsolver_cstedc((rocblas_handle)handle,
+                                                                roc_evect,
+                                                                static_cast<rocblas_int>(n),
+                                                                nullptr,
+                                                                nullptr,
+                                                                nullptr,
+                                                                static_cast<rocblas_int>(ldz),
+                                                                nullptr));
     }
     else if(dataTypeZ == HIP_C_64F && dataTypeDE == HIP_R_64F && computeType == HIP_C_64F)
     {
-        status = hipsolver::rocblas2hip_status(
-            rocsolver_zstedc((rocblas_handle)handle,
-                             hipsolver::hip2rocblas_evect_comp(compz),
-                             static_cast<rocblas_int>(n),
-                             nullptr,
-                             nullptr,
-                             nullptr,
-                             static_cast<rocblas_int>(ldz),
-                             nullptr));
+        status = hipsolver::rocblas2hip_status(rocsolver_zstedc((rocblas_handle)handle,
+                                                                roc_evect,
+                                                                static_cast<rocblas_int>(n),
+                                                                nullptr,
+                                                                nullptr,
+                                                                nullptr,
+                                                                static_cast<rocblas_int>(ldz),
+                                                                nullptr));
     }
     else
     {
@@ -1706,10 +1702,29 @@ try
 
     // TODO: Update to call 64-bit rocsolver_*stedc_64 once available in rocSOLVER.
     // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int.
-    auto const MAX_INT             = std::numeric_limits<int32_t>::max();
-    bool const is_integer_overflow = (int64_t(ldz) * n) > MAX_INT;
-    if(is_integer_overflow)
-        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    if(n > INT_MAX || ldz > INT_MAX || int64_t(ldz) * n > INT_MAX)
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
+
+    if(workOnDevice && lworkOnDevice)
+        CHECK_ROCBLAS_ERROR(
+            rocblas_set_workspace((rocblas_handle)handle, workOnDevice, lworkOnDevice));
+    else
+    {
+        CHECK_HIPSOLVER_ERROR(hipsolverDnXstedc_bufferSize(handle,
+                                                           params,
+                                                           compz,
+                                                           n,
+                                                           dataTypeDE,
+                                                           D,
+                                                           E,
+                                                           dataTypeZ,
+                                                           Z,
+                                                           ldz,
+                                                           computeType,
+                                                           &lworkOnDevice,
+                                                           &lworkOnHost));
+        CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, lworkOnDevice));
+    }
 
     if(dataTypeZ == HIP_R_32F && dataTypeDE == HIP_R_32F && computeType == HIP_R_32F)
     {
