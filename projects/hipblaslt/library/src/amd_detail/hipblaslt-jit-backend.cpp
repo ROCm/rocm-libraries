@@ -317,8 +317,7 @@ namespace hipblaslt_ext::experimental
                     library.endQuery();
                 }
             } guard{library};
-            const auto foundBefore = hipblaslt_jit::generationCount();
-            auto       solutions   = library.findTopSolutions(
+            auto solutions = library.findTopSolutions(
                 problem, *target.hardware, static_cast<int>(count));
             const auto status = library.queryStatus();
             for(const auto& solution : solutions)
@@ -335,11 +334,7 @@ namespace hipblaslt_ext::experimental
                 diagnostics.message = status.message;
                 return toHipStatus(status.code);
             }
-            const auto fromLibrary = hipblaslt_jit::generationCount() == foundBefore
-                                         ? indices.size()
-                                         : 0;
-            diagnostics.message = std::to_string(fromLibrary) + " of " + std::to_string(indices.size())
-                                  + " solutions came from the JIT solution library";
+            diagnostics.message = std::to_string(indices.size()) + " solutions";
             return HIPBLAS_STATUS_SUCCESS;
         }
     }
