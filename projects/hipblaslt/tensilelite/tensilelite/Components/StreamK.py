@@ -23,8 +23,8 @@
 from ..ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
-from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC, VOP3PModifiers, ContinuousRegister
-from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SLongBranch, SLongBranchPositive
+from rocisa.container import vgpr, sgpr, mgpr, DSModifiers, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC, VOP3PModifiers, ContinuousRegister
+from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, VCmpXLtU32, SLongBranch, SLongBranchPositive
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
@@ -34,6 +34,7 @@ from ..Component import Component
 from .TileProcessingStrategy import TileProcessingStrategy, TileWork
 from .WorkAssignment import QueuePartition, StaticPartition
 from .ClusterTileMapping import ClusterTileMapping
+from ..AsmMemoryHelpers import dsLoad, dsStore
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
 import abc
@@ -1575,9 +1576,105 @@ class StreamK(TileProcessingStrategy):
 
         return module
 
+    @staticmethod
+    def hasInputBiasPartials(kernel):
+        problem = kernel["ProblemType"]
+        return (isStreamKSpatialCluster(kernel) and problem["Gradient"]
+                and problem["UseBias"] and problem["BiasSrc"] in ("A", "B"))
+
+    def inputBiasPartials(self, writer, kernel, logicalProducer, *, reduce=False):
+        """Publish or accumulate the input-bias LDS payload in the tree handshake.
+
+        The payload keeps SumUnroll's lane sums intact. The final tile owner
+        uses the ordinary bias epilogue to reduce lanes and convert the result.
+        Slots follow the GEMM partial region and reserve one wavefront of sums
+        per bias element, a bound independent of the matrix-instruction layout.
+        """
+        module = Module("StreamK input bias partial reduction" if reduce
+                        else "StreamK input bias partial publication")
+        if not self.hasInputBiasPartials(kernel):
+            return module
+        tc = kernel["ProblemType"]["BiasSrc"]
+        tile = kernel["ProblemType"]["Index01" + tc]
+        macroTile = kernel["MacroTile%u" % tile]
+        maxKId = writer.states.lraTileProperties[tile].maxKId
+        assert kernel["ProblemType"]["ComputeDataType"].isSingle()
+        assert maxKId <= kernel["WavefrontSize"]
+        payloadElements = macroTile * maxKId
+        slotBytes = macroTile * kernel["WavefrontSize"] * writer.states.bpeCinternal
+        cs, cn = kernel["ClusterDim"]
+        clusterTileBytes = (cs * cn * kernel["MacroTile0"] * kernel["MacroTile1"]
+                            * writer.states.bpeCinternal)
+        memOrder = Component.StreamKMemoryOrdering.find(writer)
+        tmpV = writer.vgprPool.checkOut(3, "StreamKBiasPartial")
+        with writer.allocTmpSgpr(8, 4, tag="StreamKBiasPartial") as tmpS:
+            srd, offsetLo, offsetHi, slot = tmpS.idx, tmpS.idx + 4, tmpS.idx + 5, tmpS.idx + 6
+            grid = writer.acquirePersistentConstSgpr(kernel, "skGrid")
+            if writer.isPersistentConstantsToVgprEnabled(kernel):
+                module.add(VReadfirstlaneB32(dst=sgpr(grid), src=vgpr(writer.states.persistentConstVgprs["skGrid"])))
+            module.add(SMovB64(dst=sgpr(srd, 2), src=sgpr("AddressWS", 2)))
+            module.add(SMulI32(dst=sgpr(offsetLo), src0=sgpr(grid), src1=clusterTileBytes,
+                              comment="bias workspace follows every GEMM partial slot"))
+            module.add(SMulHIU32(dst=sgpr(offsetHi), src0=sgpr(grid), src1=clusterTileBytes))
+            writer.releasePersistentConstSgpr(grid)
+            module.add(SAddU32(dst=sgpr(srd), src0=sgpr(srd), src1=sgpr(offsetLo)))
+            module.add(SAddCU32(dst=sgpr(srd + 1), src0=sgpr(srd + 1), src1=sgpr(offsetHi)))
+            module.add(ClusterTileMapping.physicalSlot(kernel, slot, logicalProducer))
+            module.add(SMulI32(dst=sgpr(offsetLo), src0=sgpr(slot), src1=slotBytes,
+                              comment="input bias partial slot offset (low word)"))
+            module.add(SMulHIU32(dst=sgpr(offsetHi), src0=sgpr(slot), src1=slotBytes,
+                                comment="input bias partial slot offset (high word)"))
+            module.add(SAddU32(dst=sgpr(srd), src0=sgpr(srd), src1=sgpr(offsetLo)))
+            module.add(SAddCU32(dst=sgpr(srd + 1), src0=sgpr(srd + 1), src1=sgpr(offsetHi)))
+            module.add(SMovB32(dst=sgpr(srd + 2), src=slotBytes))
+            module.add(SMovB32(dst=sgpr(srd + 3), src="Srd127_96"))
+            module.add(self.shiftSrd(writer, srd))
+            module.add(SWaitCnt(dscnt=0, comment="finish local input bias sums"))
+            module.add(SBarrier(comment="input bias LDS sums ready across waves"))
+            module.add(memOrder.preVolatileVmem(writer, comment="drain xnacks before bias partials"))
+            for start in range(0, payloadElements, kernel["NumThreads"]):
+                module.add(VAddU32(dst=vgpr(tmpV), src0=vgpr("Serial"), src1=start))
+                if start + kernel["NumThreads"] > payloadElements:
+                    module.add(VCmpXLtU32(dst=EXEC(), src0=vgpr(tmpV), src1=payloadElements,
+                                        comment="mask input bias payload tail"))
+                module.add(vectorStaticMultiply(vgpr(tmpV), vgpr(tmpV), 4,
+                                                ContinuousRegister(offsetLo, 1)))
+                module.add(dsLoad(4, dst=vgpr(tmpV + 1), src=vgpr(tmpV), ds=DSModifiers(),
+                                  comment="load local input bias partial"))
+                if reduce:
+                    module.add(BufferLoadB32(dst=vgpr(tmpV + 2), vaddr=vgpr(tmpV),
+                                            saddr=sgpr(srd, 4), soffset=0,
+                                            mubuf=memOrder.flagBufferMubuf(),
+                                            comment="load peer input bias partial"))
+                    module.add(SWaitCnt(dscnt=0, vlcnt=0, comment="wait for both input bias partials"))
+                    module.add(VAddF32(dst=vgpr(tmpV + 1), src0=vgpr(tmpV + 1), src1=vgpr(tmpV + 2),
+                                       comment="accumulate peer input bias partial"))
+                    module.add(dsStore(4, dstAddr=vgpr(tmpV), src=vgpr(tmpV + 1), ds=DSModifiers(),
+                                       comment="retain reduced input bias sum in LDS"))
+                else:
+                    module.add(SWaitCnt(dscnt=0, comment="wait for local input bias partial"))
+                    module.add(BufferStoreB32(src=vgpr(tmpV + 1), vaddr=vgpr(tmpV),
+                                             saddr=sgpr(srd, 4), soffset=0,
+                                             mubuf=memOrder.flagBufferMubuf(),
+                                             comment="publish input bias partial before ready flag"))
+                if start + kernel["NumThreads"] > payloadElements:
+                    move = SMovB32 if kernel["WavefrontSize"] == 32 else SMovB64
+                    module.add(move(dst=EXEC(), src=-1, comment="restore all input bias lanes"))
+            if reduce:
+                module.add(SWaitCnt(dscnt=0, comment="finish reduced input bias LDS stores"))
+                module.add(SBarrier(comment="reduced input bias ready for next tree edge or epilogue"))
+        writer.vgprPool.checkIn(tmpV)
+        return module
+
     def partialsWriteProcedure(self, writer, kernel, vectorWidths, elements, alpha, beta, edge, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("StreamK Common partialsWriteProcedure")
         memOrder = Component.StreamKMemoryOrdering.find(writer)
+        if self.hasInputBiasPartials(kernel):
+            producer = writer.acquirePersistentConstSgpr(kernel, "PersistentWorkGroupIndex")
+            if writer.isPersistentConstantsToVgprEnabled(kernel):
+                module.add(VReadfirstlaneB32(dst=sgpr(producer), src=vgpr(writer.states.persistentConstVgprs["PersistentWorkGroupIndex"])))
+            module.add(self.inputBiasPartials(writer, kernel, sgpr(producer)))
+            writer.releasePersistentConstSgpr(producer)
 
         # PreLoopVmcntCaseStr = ""
         # # not generate Case 2 if StoreCInUnroll with StoreVectorWidth==1 (Case 2 will be same as Case 3)
@@ -2214,6 +2311,7 @@ class StreamK(TileProcessingStrategy):
 
     def fixupStep(self, writer, kernel, vectorWidths, elements, edges, tmpVgpr, cvtVgprStruct, sPartialIdx):
         module = Module("StreamK Common fixupStep")
+        module.add(self.inputBiasPartials(writer, kernel, sgpr(sPartialIdx), reduce=True))
 
         fixupLabels = {}
         for edge in edges:

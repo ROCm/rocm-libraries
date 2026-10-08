@@ -1846,7 +1846,8 @@ namespace TensileLite
             if(problemType.useGradient && problem.biasSrc() == ContractionProblemGemm::TENSOR::D
                && inputs.bias != nullptr)
                 args.template append<void const*>("ws_bias",
-                                                  (uint8_t*)inputs.ws + workspaceOffsetInByte);
+                                                  (uint8_t*)inputs.ws + workspaceOffsetInByte
+                                                      + launch.clusterSchedule.biasWorkspaceOffset);
             else
             {
                 if(problemType.stridedBatched)
@@ -3586,7 +3587,8 @@ namespace TensileLite
                     if(problemType.useGradient
                        && problem.biasSrc() == ContractionProblemGemm::TENSOR::D
                        && inputs.bias != nullptr)
-                        rv.args.template append<void const*>("AddressBias", inputs.ws);
+                        rv.args.template append<void const*>("AddressBias",
+                            static_cast<uint8_t*>(inputs.ws) + launch.clusterSchedule.biasWorkspaceOffset);
                     else
                         rv.args.template append<void const*>(
                             "AddressBias",
@@ -5216,8 +5218,6 @@ namespace TensileLite
                 throw std::runtime_error("StreamK cluster multicast requires static non-atomic scheduling, a supported spatial cluster, and PAP off");
             if(problemType.outputAmaxD)
                 throw std::runtime_error("StreamK cluster multicast does not support amax reductions");
-            if(problemType.useGradient && problemType.useBias)
-                throw std::runtime_error("StreamK cluster multicast does not support bias-gradient reductions");
             if(customKernel.name.empty() || customKernel.generated)
                 return;
 
@@ -5630,10 +5630,14 @@ namespace TensileLite
             // Skip if output is null
             if(inputs.bias != nullptr)
             {
+                auto reductionInputs = inputs;
+                if(usesStreamKSpatialCluster())
+                    reductionInputs.ws = static_cast<uint8_t*>(inputs.ws)
+                                         + launch.clusterSchedule.biasWorkspaceOffset;
                 if(debug)
-                    rv.push_back(generateReductionCall<true>(problem, inputs));
+                    rv.push_back(generateReductionCall<true>(problem, reductionInputs));
                 else
-                    rv.push_back(generateReductionCall<false>(problem, inputs));
+                    rv.push_back(generateReductionCall<false>(problem, reductionInputs));
             }
         }
 
@@ -6561,6 +6565,15 @@ namespace TensileLite
         cluster.itersPerTile = static_cast<uint32_t>(iters);
         const size_t totalIters = checkedMultiply(cluster.blocks, iters);
         checkPersistentArgument(totalIters);
+        const bool biasGradient = problemType.useBias && problemType.useGradient;
+        const bool outputBias = biasGradient
+            && problem.biasSrc() == ContractionProblemGemm::TENSOR::D;
+        if(outputBias && problem.getParams().biasEnum() != rocisa::DataType::None)
+        {
+            cluster.biasWorkspaceBytes = checkedMultiply(
+                problem.d().totalLogicalElements(), problem.computeTypeElementSize());
+            launch.workspaceBytes = cluster.biasWorkspaceBytes;
+        }
         if(cluster.blocks == 0)
         {
             cluster.wholeBlocksOnly = true;
@@ -6710,7 +6723,19 @@ namespace TensileLite
                     sizeMapping.workspaceSizePerElemC);
                 if(tileBytes == 0)
                     throw std::runtime_error("StreamK cluster partials require workspace element bytes");
-                cluster.idealWorkspaceBytes = checkedMultiply(slots, tileBytes);
+                const size_t partialBytes = checkedMultiply(slots, tileBytes);
+                size_t biasBytes = cluster.biasWorkspaceBytes;
+                if(biasGradient && !outputBias)
+                {
+                    const bool alongM = (problem.biasSrc() == ContractionProblemGemm::TENSOR::A)
+                                        != problem.transposeC01();
+                    const size_t macroTile = alongM ? sizeMapping.macroTile.x : sizeMapping.macroTile.y;
+                    const size_t wavefront = sizeMapping.waveNum > 0
+                        ? threads / sizeMapping.waveNum : gpu->wavefrontSize;
+                    biasBytes = checkedMultiply(checkedMultiply(slots, macroTile),
+                        checkedMultiply(wavefront, problem.computeTypeElementSize()));
+                }
+                cluster.idealWorkspaceBytes = checkedAdd(partialBytes, biasBytes);
                 if(cluster.idealWorkspaceBytes > problem.workspaceSize())
                 {
                     cluster.workspaceFallback = true;
@@ -6720,6 +6745,9 @@ namespace TensileLite
                 {
                     cluster.partialSlots = slots;
                     cluster.flagEntries = slots;
+                    cluster.partialWorkspaceBytes = partialBytes;
+                    cluster.biasWorkspaceOffset = partialBytes;
+                    cluster.biasWorkspaceBytes = biasBytes;
                     launch.workspaceBytes = cluster.idealWorkspaceBytes;
                 }
             }

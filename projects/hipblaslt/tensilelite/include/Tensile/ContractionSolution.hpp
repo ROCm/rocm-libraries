@@ -400,7 +400,7 @@ namespace TensileLite
 
     struct SizeMapping
     {
-        size_t waveNum;
+        size_t waveNum = 0;
 
         dim3 clusterDim{1, 1, 1};
 
@@ -546,6 +546,9 @@ namespace TensileLite
         size_t partialSlots = 0;
         size_t flagEntries = 0;
         size_t idealWorkspaceBytes = 0;
+        size_t partialWorkspaceBytes = 0;
+        size_t biasWorkspaceOffset = 0;
+        size_t biasWorkspaceBytes = 0;
         uint32_t itersPerTile = 1;
         StreamKStaticSplit split;
         bool wholeBlocksOnly = false;

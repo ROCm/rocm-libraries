@@ -16446,64 +16446,8 @@ class KernelWriterAssembly(KernelWriter):
       elif self.states.useBias == DataDirection.WRITE:
         labelStr = self.labels.getNameInc("Bias")
         if kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B":
-          # Calculate max vgpr for bias write A, B
-          tP          = tPA if kernel["ProblemType"]["BiasSrc"] == "A" else tPB
-          tile01      = tP["tile01Idx"]
-          maxKId      = self.states.lraTileProperties[tile01].maxKId
-          biasMaxVgpr = kernel["VectorWidthA"] * kernel["ProblemType"]["ComputeDataType"].numRegisters() * maxKId
-          maxAlign    = max(1, (kernel["VectorWidthA"] + 1) // 2 * 2)
-          tmpVgpr     = self.vgprPool.checkOutAligned(biasMaxVgpr, maxAlign, "store tmps")
-          tmpVgprRes  = ContinuousRegister(idx=tmpVgpr, size=biasMaxVgpr)
-
-          # Skip bias store
-          skipGlobalStoreLabel = Label(self.labels.getNameInc("SkipBiasStore"), comment="")
-          wgIdx = 1 if tile01 == 0 else 0
-          #module.add(SCmpKLGU32(sgpr("WorkGroup%d"%wgIdx), 0, "WorkGroup%d != 0"%wgIdx))
-          module.add(self.getSCMPKInstruction("LGU32", "WorkGroup%d"%wgIdx, 0, comment="WorkGroup%d != 0"%wgIdx))
-          module.add(SCBranchSCC1(skipGlobalStoreLabel.getLabelName(), "Branch if true"))
-          if (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1) and kernel["_GlobalAccumulation"] == "MultipleBuffer":
-            sourceAddress = "D"
-          else:
-            sourceAddress = "Bias"
-          numRecordsStr = "SizeI" if kernel["ProblemType"]["BiasSrc"] == "A" else "SizeJ"
-          # Init bias Srd (buffer store only; flat store uses the pre-computed 64-bit address)
-          if kernel["BufferStore"]:
-            module.add(self.allocPostLoopSrdSuppressRaw("Bias", sourceAddress, labelStr, sgprLength=sgpr(numRecordsStr)))
-          if sourceAddress == "D":
-            module.add(self.undefineSgpr("AddressD"))
-          multiBiasTypeLabel = []
-          for i in kernel["ProblemType"]["BiasDataTypeList"]:
-            name = self.labels.getNameInc("Write_Bias%s"%i.toNameAbbrev())
-            multiBiasTypeLabel.append(Label(name, ""))
-          writeBiasEndLabel = Label(self.labels.getNameInc("Write_Bias_End"), "")
-          multiBiasTypeLabel.append(writeBiasEndLabel)
-          # Get gwvw
-          '''
-          gwvw is set to max(mt // kernel["NumThreads"], kernel["VectorWidthA"]) instead of kernel["VectorWidthA"] is that we don't want batch exists.
-          If VW is set to 1, MT=512, and flat work group = 256. We will have to set gwvw to 2 to store all the bias data.
-          '''
-          tile01 = tP["tile01Idx"]
-          mt     = kernel["MacroTile%u" % tile01]
-          gwvw   = min(max(mt // kernel["NumThreads"], kernel["VectorWidthA"]), tP["glvw"])
-          offsetVgpr  = self.vgprPool.checkOut(gwvw, tag="globalWriteElements_Bias_offsetVgpr")
-          with self.allocTmpSgpr(5, 2, tag="globalWriteElements_tmpSgprRes3") as tmpSgprRes:
-            if kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1:
-              module.add(self.writeBiasToGlobal(kernel["ProblemType"]["ComputeDataType"], kernel, tP, gwvw, offsetVgpr, tmpSgprRes, tmpVgprRes))
-            elif len(kernel["ProblemType"]["BiasDataTypeList"]) == 1:
-              module.add(self.writeBiasToGlobal(kernel["ProblemType"]["BiasDataTypeList"][0], kernel, tP, gwvw, offsetVgpr, tmpSgprRes, tmpVgprRes))
-            else:
-              for i, label in enumerate(multiBiasTypeLabel[1:]):
-                typeValue = kernel["ProblemType"]["BiasDataTypeList"][i].value
-                module.add(multiBiasTypeLabel[i])
-                #module.add(SCmpKLGU32(sgpr("BiasType"), typeValue, "BiasType != %u"%typeValue))
-                module.add(self.getSCMPKInstruction("LGU32", "BiasType", typeValue, comment="BiasType != %u"%typeValue))
-                module.add(SCBranchSCC1(label.getLabelName(), "Branch if true"))
-                module.add(self.writeBiasToGlobal(kernel["ProblemType"]["BiasDataTypeList"][i], kernel, tP, gwvw, offsetVgpr, tmpSgprRes, tmpVgprRes))
-                module.add(SBranch(labelName=writeBiasEndLabel.getLabelName(), comment="Branch to write bias end"))
-              module.add(writeBiasEndLabel)
-          self.vgprPool.checkIn(offsetVgpr)
-          self.vgprPool.checkIn(tmpVgpr)
-          module.add(skipGlobalStoreLabel)
+          if not isStreamKSpatialCluster(kernel):
+            module.add(self.writeInputBiasToGlobal(kernel, tPA, tPB, labelStr))
         else:
           # Init bias Srd (buffer store only; flat store uses the pre-computed 64-bit address)
           if kernel["BufferStore"]:
@@ -16828,6 +16772,11 @@ class KernelWriterAssembly(KernelWriter):
       processingComponent = Component.TileProcessingStrategy.find(self) if isPersistent(kernel) else None
       if processingComponent is not None:
         module.add(processingComponent.storeBranches(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct))
+        if isStreamKSpatialCluster(kernel) and self.states.useBias == DataDirection.WRITE \
+           and kernel["ProblemType"]["BiasSrc"] in ("A", "B"):
+          # Only the owner reaches this point, after every K-range bias partial
+          # has been folded into LDS by the same tree as the GEMM accumulators.
+          module.add(self.writeInputBiasToGlobal(kernel, tPA, tPB))
 
       # support dynamic MBSK/MB selection by checking synchronizer after bias write
       if kernel["AdaptiveGemmGSUA"] == 1:
@@ -18551,6 +18500,14 @@ class KernelWriterAssembly(KernelWriter):
     # Get all local stores
     storeModules = Module("Store")
     subGroupOffset = [0]
+    if isStreamKSpatialCluster(kernel) and kernel["ProblemType"]["Gradient"] \
+       and kernel["ProblemType"]["UseBias"] and kernel["ProblemType"]["BiasSrc"] in ("A", "B"):
+      # Input-bias K partials remain live at LDS0 until the tree owner writes
+      # bias. Epilogue vectors may be staged before that reduction finishes.
+      biasAxis = kernel["ProblemType"]["Index01" + kernel["ProblemType"]["BiasSrc"]]
+      subGroupOffset[0] = (kernel["MacroTile%u" % biasAxis]
+                           * self.states.lraTileProperties[biasAxis].maxKId
+                           * int(kernel["ProblemType"]["ComputeDataType"].numBytes()))
     if biasDataType:
       vectorDataTypes.bias(dim).ldsOffset = subGroupOffset[0]
       storeModules.add(self.addVectorLocalStore(kernel, "Bias", offsetVgpr, biasShiftOffset, biasDataType, gwvw, tmpVgpr1Res, biasDstVgpr, subGroupOffset, dim, comment="store bias"))
@@ -18621,7 +18578,7 @@ class KernelWriterAssembly(KernelWriter):
                               src=vgpr(offsetVgpr), \
                               comment="Local bias address scaled by BPE"))
 
-    if kernel["LdsOffsetBias"] != 0:
+    if kernel["LdsOffsetBias"] != 0 and not isStreamKSpatialCluster(kernel):
       module.add(VAddU32(dst=vgpr(offsetVgpr), \
                          src0=(kernel["LdsOffsetBias"]), \
                          src1=vgpr(offsetVgpr), \
@@ -18660,6 +18617,70 @@ class KernelWriterAssembly(KernelWriter):
   Wider DS load is always enabled.
   Wider global store only enables when freeElementMultiple % gwvw == 0 since each thread only stores 1, 2 elements.
   '''
+  def writeInputBiasToGlobal(self, kernel, tPA, tPB, labelStr=None):
+    """Write the completed A/B input reduction from the SumUnroll LDS layout."""
+    module = Module("Write completed input bias")
+    labelStr = labelStr or self.labels.getNameInc("Bias")
+    # Calculate max vgpr for bias write A, B
+    tP          = tPA if kernel["ProblemType"]["BiasSrc"] == "A" else tPB
+    tile01      = tP["tile01Idx"]
+    maxKId      = self.states.lraTileProperties[tile01].maxKId
+    biasMaxVgpr = kernel["VectorWidthA"] * kernel["ProblemType"]["ComputeDataType"].numRegisters() * maxKId
+    maxAlign    = max(1, (kernel["VectorWidthA"] + 1) // 2 * 2)
+    tmpVgpr     = self.vgprPool.checkOutAligned(biasMaxVgpr, maxAlign, "store tmps")
+    tmpVgprRes  = ContinuousRegister(idx=tmpVgpr, size=biasMaxVgpr)
+
+    # Skip bias store
+    skipGlobalStoreLabel = Label(self.labels.getNameInc("SkipBiasStore"), comment="")
+    wgIdx = 1 if tile01 == 0 else 0
+    #module.add(SCmpKLGU32(sgpr("WorkGroup%d"%wgIdx), 0, "WorkGroup%d != 0"%wgIdx))
+    module.add(self.getSCMPKInstruction("LGU32", "WorkGroup%d"%wgIdx, 0, comment="WorkGroup%d != 0"%wgIdx))
+    module.add(SCBranchSCC1(skipGlobalStoreLabel.getLabelName(), "Branch if true"))
+    if (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1) and kernel["_GlobalAccumulation"] == "MultipleBuffer":
+      sourceAddress = "D"
+    else:
+      sourceAddress = "Bias"
+    numRecordsStr = "SizeI" if kernel["ProblemType"]["BiasSrc"] == "A" else "SizeJ"
+    # Init bias Srd (buffer store only; flat store uses the pre-computed 64-bit address)
+    if kernel["BufferStore"]:
+      module.add(self.allocPostLoopSrdSuppressRaw("Bias", sourceAddress, labelStr, sgprLength=sgpr(numRecordsStr)))
+    if sourceAddress == "D":
+      module.add(self.undefineSgpr("AddressD"))
+    multiBiasTypeLabel = []
+    for i in kernel["ProblemType"]["BiasDataTypeList"]:
+      name = self.labels.getNameInc("Write_Bias%s"%i.toNameAbbrev())
+      multiBiasTypeLabel.append(Label(name, ""))
+    writeBiasEndLabel = Label(self.labels.getNameInc("Write_Bias_End"), "")
+    multiBiasTypeLabel.append(writeBiasEndLabel)
+    # Get gwvw
+    '''
+    gwvw is set to max(mt // kernel["NumThreads"], kernel["VectorWidthA"]) instead of kernel["VectorWidthA"] is that we don't want batch exists.
+    If VW is set to 1, MT=512, and flat work group = 256. We will have to set gwvw to 2 to store all the bias data.
+    '''
+    tile01 = tP["tile01Idx"]
+    mt     = kernel["MacroTile%u" % tile01]
+    gwvw   = min(max(mt // kernel["NumThreads"], kernel["VectorWidthA"]), tP["glvw"])
+    offsetVgpr  = self.vgprPool.checkOut(gwvw, tag="globalWriteElements_Bias_offsetVgpr")
+    with self.allocTmpSgpr(5, 2, tag="globalWriteElements_tmpSgprRes3") as tmpSgprRes:
+      if kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1:
+        module.add(self.writeBiasToGlobal(kernel["ProblemType"]["ComputeDataType"], kernel, tP, gwvw, offsetVgpr, tmpSgprRes, tmpVgprRes))
+      elif len(kernel["ProblemType"]["BiasDataTypeList"]) == 1:
+        module.add(self.writeBiasToGlobal(kernel["ProblemType"]["BiasDataTypeList"][0], kernel, tP, gwvw, offsetVgpr, tmpSgprRes, tmpVgprRes))
+      else:
+        for i, label in enumerate(multiBiasTypeLabel[1:]):
+          typeValue = kernel["ProblemType"]["BiasDataTypeList"][i].value
+          module.add(multiBiasTypeLabel[i])
+          #module.add(SCmpKLGU32(sgpr("BiasType"), typeValue, "BiasType != %u"%typeValue))
+          module.add(self.getSCMPKInstruction("LGU32", "BiasType", typeValue, comment="BiasType != %u"%typeValue))
+          module.add(SCBranchSCC1(label.getLabelName(), "Branch if true"))
+          module.add(self.writeBiasToGlobal(kernel["ProblemType"]["BiasDataTypeList"][i], kernel, tP, gwvw, offsetVgpr, tmpSgprRes, tmpVgprRes))
+          module.add(SBranch(labelName=writeBiasEndLabel.getLabelName(), comment="Branch to write bias end"))
+        module.add(writeBiasEndLabel)
+    self.vgprPool.checkIn(offsetVgpr)
+    self.vgprPool.checkIn(tmpVgpr)
+    module.add(skipGlobalStoreLabel)
+    return module
+
   def writeBiasToGlobal(self, biasDataType, kernel, tP, gwvw, offsetVgpr, tmpSgprRes, tmpVgpr1Res: ContinuousRegister):
     tile01 = tP["tile01Idx"]
     mt     = kernel["MacroTile%u" % tile01]
@@ -18677,8 +18698,9 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SBarrier(comment="wait for bias lds store."))
 
     # Recalculate bias length
-    gsuComponent = Component.GSU.find(self)
-    module.add(gsuComponent.writeBiasToGlobal(self, kernel, biasDataType, tP, tmpSgprRes, biasBpe))
+    if not isStreamKSpatialCluster(kernel):
+      gsuComponent = Component.GSU.find(self)
+      module.add(gsuComponent.writeBiasToGlobal(self, kernel, biasDataType, tP, tmpSgprRes, biasBpe))
 
     # Num records (SrdBias only valid for BufferStore=1; flat store uses pre-computed 64-bit address)
     if kernel["BufferStore"]:
