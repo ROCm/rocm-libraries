@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,7 +27,6 @@
 
 #pragma once
 
-#include <cstring>
 #include <ostream>
 
 //
@@ -112,18 +111,6 @@ public:
             {
                 // Value-initialization (`new T{}` or `new T[]{}`) of a non-class type yields zero-initialization
                 this->m_data = new T[this->m_nmemb]{};
-#ifndef NDEBUG
-                {
-                    // -------------------------------
-                    // set initial data to NaN or 0xFF
-                    // to assist in debugging
-                    // -------------------------------
-                    void* const dst = (void*)this->m_data;
-                    int const val = 0xFF;
-                    size_t const nbytes = (this->m_nmemb) * sizeof(T);
-                    static_cast<void>(std::memset(dst, val, nbytes));
-                }
-#endif
             }
         }
     }
