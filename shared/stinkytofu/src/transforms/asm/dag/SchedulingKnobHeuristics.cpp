@@ -29,7 +29,8 @@ int perCapForThrottleOf(int dsLoadCount, int wmmaCount) {
     return std::min(kStaticDefaultDsReadPerCap, ceilDivPositive(dsLoadCount, wmmaCount));
 }
 
-// Latency-budget throttle. Not combined with dsReadThrottleLatency.
+// Latency-budget throttle. propose() raises dsReadThrottleLatency to this
+// latency when it is larger.
 //
 //   dsIssueSpace   = sumWmmaLatency - unrollLoopCopies * firstDsLoadLatency
 //   basicWmmaUsage = ceil(queueDepth / perCapForThrottle)
@@ -70,17 +71,6 @@ OptimisticDsReadThrottle estimateOptimisticDsReadThrottle(int sumWmmaLatencyCycl
         out.latency = static_cast<int>(std::lround(out.cyclePerDs * static_cast<float>(depth)));
     }
     return out;
-}
-
-OptimisticDsReadThrottle estimateOptimisticDsReadThrottle(const SchedulingFeatures& features,
-                                                          const HWModel& hw) {
-    if (features.stats.degenerate()) return {};
-    const int queueDepth = std::max(1, hw.lds.readQueueDepth);
-    const int perCap = perCapForThrottleOf(features.stats.dsLoadCount, features.stats.wmmaCount);
-    return estimateOptimisticDsReadThrottle(
-        features.stats.sumWmmaLatencyCycles, features.unrollLoopCopies,
-        features.stats.firstWmmaLatencyCycles, features.stats.firstDsLoadLatencyCycles, queueDepth,
-        perCap, features.stats.dsLoadCount);
 }
 
 }  // namespace
@@ -186,13 +176,13 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     out.dsReadThrottleLatency = std::max(throttleFloor, computedThrottle);
     out.dsReadThrottleLatencySource = SchedulingKnobSource::Policy;
 
-    // Latency-budget estimate. resolveSchedulingKnobs adopts it when it is
-    // greater than dsReadThrottleLatency and the user did not set the knob.
-    out.optimisticDsReadThrottleLatency =
+    const int optimisticDsReadThrottleLatency =
         estimateOptimisticDsReadThrottle(
             features.stats.sumWmmaLatencyCycles, features.unrollLoopCopies, firstWmmaLatency,
             features.stats.firstDsLoadLatencyCycles, queueDepth, perCapForThrottle, ds)
             .latency;
+    if (optimisticDsReadThrottleLatency > out.dsReadThrottleLatency)
+        out.dsReadThrottleLatency = optimisticDsReadThrottleLatency;
 
     // Longer main-loop WMMA latency budgets get a larger Rule3 signal lead.
     out.clusterBarrierRule3SignalLeadCycles = features.stats.sumWmmaLatencyCycles > 500 ? 200 : 100;
@@ -247,16 +237,6 @@ ResolvedSchedulingKnobs resolveSchedulingKnobs(const SchedulingFeatures& feature
         out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::StaticDefault;
     }
 
-    // Diagnostic field. Stays -1 when propose() did not run. A larger estimate
-    // replaces the policy or static throttle; an explicit user value stays.
-    if (!features.stats.degenerate()) {
-        out.optimisticDsReadThrottleLatency = proposed.optimisticDsReadThrottleLatency;
-    }
-    if (out.dsReadThrottleLatencySource != SchedulingKnobSource::User &&
-        out.optimisticDsReadThrottleLatency > out.dsReadThrottleLatency) {
-        out.dsReadThrottleLatency = out.optimisticDsReadThrottleLatency;
-    }
-
     return out;
 }
 
@@ -303,30 +283,7 @@ void logResolvedSchedulingKnobs(std::ostream& os, std::string_view moduleName,
        << " dsReadPerCap=" << resolved.dsReadPerCap << "("
        << schedulingKnobSourceName(resolved.dsReadPerCapSource) << ")"
        << " rule3SignalLeadCycles=" << resolved.clusterBarrierRule3SignalLeadCycles << "("
-       << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")";
-    // optimisticDsReadThrottleLatency is this logger's heuristic recompute.
-    // policyOptimisticDsReadThrottleLatency is whatever propose() stored.
-    // A custom policy can disagree. The applied knob is dsReadThrottleLatency,
-    // which resolveSchedulingKnobs may already have raised to this estimate.
-    const OptimisticDsReadThrottle optimistic =
-        estimateOptimisticDsReadThrottle(features, hwModelForArch(features.arch));
-    const int policyOptimistic = resolved.optimisticDsReadThrottleLatency;
-    if (!optimistic.defined && features.stats.degenerate()) {
-        os << " optimisticDsReadThrottleLatency=n/a"
-           << " policyOptimisticDsReadThrottleLatency=" << policyOptimistic
-           << " optimisticThrottleMatchesPolicy=n/a";
-    } else {
-        const bool matches = policyOptimistic == optimistic.latency;
-        os << " optimisticDsReadThrottleLatency=" << optimistic.latency
-           << " policyOptimisticDsReadThrottleLatency=" << policyOptimistic
-           << " optimisticThrottleMatchesPolicy=" << (matches ? 1 : 0)
-           << " unrollLoopCopies=" << optimistic.unrollLoopCopies
-           << " dsIssueSpace=" << optimistic.dsIssueSpace
-           << " basicWmmaUsage=" << optimistic.basicWmmaUsage
-           << " throttleSpace=" << optimistic.throttleSpace
-           << " remainingDs=" << optimistic.remainingDs << " cyclePerDs=" << optimistic.cyclePerDs;
-    }
-    os << "\n";
+       << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")\n";
 }
 
 void logResolvedSchedulingKnobsIfDebug(std::string_view moduleName,
