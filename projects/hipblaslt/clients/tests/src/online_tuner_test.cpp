@@ -445,6 +445,88 @@ namespace
     }
 
     // ----------------------------------------------------------------------
+    // Heuristic queries.
+    //
+    // hipblasLtMatmulAlgoGetHeuristic hands the caller an algo and the caller
+    // dispatches it itself, for as long as it likes. A probe promoted into
+    // that answer is kept for as long as the caller keeps the algo, which for
+    // the ordinary framework pattern -- query once, dispatch forever -- is the
+    // life of the process.
+    //
+    // Whether a given caller comes back cannot be known when it first asks, so
+    // the rule is not a refusal but a deferral: the first query of a problem
+    // registers it and is answered by its own ranking, and a second query is
+    // an ordinary visit. Querying again is the evidence, and it is the caller
+    // that supplies it.
+    // ----------------------------------------------------------------------
+
+    TEST(OnlineTuner, AHeuristicQueryIsNotOfferedAProblemsFirstProbe)
+    {
+        constexpr size_t key = 0x1012;
+
+        const size_t           problem = identityOf(key);
+        const std::vector<int> ranked{141, 142, 143};
+
+        EXPECT_EQ(tuner().selectCandidate(key,
+                                          problem,
+                                          ranked,
+                                          /*capturing=*/false,
+                                          /*retained=*/true),
+                  -1)
+            << "a probe was promoted into an answer the caller keeps";
+
+        // Registered all the same, so the problem is not stuck on first sight:
+        // the next visit is an ordinary one and is offered the first probe.
+        EXPECT_EQ(tuner().selectCandidate(key, problem, ranked), 0)
+            << "the heuristic query left the problem unregistered";
+    }
+
+    // The other half of the rule, and the reason it is a deferral rather than
+    // a refusal: an application that asks the library for a kernel on every
+    // call is one the library is choosing for, and online tuning is for
+    // exactly that. Refusing every heuristic query would withdraw the feature
+    // from all of them.
+    TEST(OnlineTuner, AHeuristicQueryThatComesBackIsAnOrdinaryVisit)
+    {
+        constexpr size_t key = 0x1013;
+
+        const size_t           problem = identityOf(key);
+        const std::vector<int> ranked{151, 152, 153};
+
+        ASSERT_EQ(tuner().selectCandidate(key, problem, ranked, false, /*retained=*/true), -1);
+
+        EXPECT_EQ(tuner().selectCandidate(key, problem, ranked, false, /*retained=*/true), 0)
+            << "a caller that queries again was still treated as one that might not";
+
+        // And it runs the exploration to its end, like any other caller.
+        int calls = 0;
+        for(; calls < kCallCeiling && !tuner().resolution(key); ++calls)
+            tuner().selectCandidate(key, problem, ranked, false, /*retained=*/true);
+
+        EXPECT_NE(tuner().resolution(key), nullptr)
+            << "a caller querying the heuristic per call never explored";
+    }
+
+    // A capture is known never to come back; a heuristic query is not. The two
+    // rules are therefore not the same rule, and a capture stays refused
+    // however many times it arrives.
+    TEST(OnlineTuner, ACaptureIsRefusedHoweverOftenItComesBackUnlikeAHeuristicQuery)
+    {
+        constexpr size_t key = 0x1014;
+
+        const size_t           problem = identityOf(key);
+        const std::vector<int> ranked{161, 162, 163};
+
+        for(int visit = 0; visit < 8; ++visit)
+            ASSERT_EQ(tuner().selectCandidate(key, problem, ranked, /*capturing=*/true), -1)
+                << "a repeated capture was offered a probe on visit " << visit;
+
+        ASSERT_EQ(tuner().selectCandidate(key, problem, ranked, false, /*retained=*/true), -1);
+        EXPECT_EQ(tuner().selectCandidate(key, problem, ranked, false, /*retained=*/true), 0)
+            << "a repeated heuristic query was refused like a capture";
+    }
+
+    // ----------------------------------------------------------------------
     // Cases that need a device.
     //
     // Everything above is decided before any HIP call. These are not: a
@@ -602,6 +684,37 @@ namespace
 
         EXPECT_EQ(tuner().selectCandidate(key, problem, ranked, /*capturing=*/true), expected)
             << "a capture was denied the measured winner";
+    }
+
+    // The same half of the rule for a heuristic query, and the case that makes
+    // the deferral worth anything: a caller that asks once and keeps the
+    // answer is handed the measured winner, which is the kernel cache mode
+    // would replay, and keeps that.
+    TEST(OnlineTuner, AHeuristicQueryIsStillServedTheMeasuredWinner)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+
+        constexpr size_t key = 0x1015;
+
+        const size_t           problem = identityOf(key);
+        const std::vector<int> ranked{171, 172, 173};
+
+        for(int visit = 0; visit < kTopK * kRepeats; ++visit)
+            ASSERT_GE(sampleOneVisit(key, problem, ranked, device), 0) << "visit " << visit;
+
+        const OnlineTuner::Resolution* resolved = tuner().resolution(key);
+        ASSERT_NE(resolved, nullptr) << "exploration never ended";
+        ASSERT_GE(resolved->winner(), 0) << "nothing was measured, so there is no winner to serve";
+
+        const int expected = static_cast<int>(
+            std::find(ranked.begin(), ranked.end(), resolved->winner()) - ranked.begin());
+        ASSERT_LT(expected, static_cast<int>(ranked.size()));
+
+        EXPECT_EQ(tuner().selectCandidate(key, problem, ranked, false, /*retained=*/true), expected)
+            << "a heuristic query was denied the measured winner";
     }
 
     // The event pool is on a process-wide singleton and the device is per
