@@ -3059,6 +3059,15 @@ namespace TensileLite
                     return processor == AMDGPU::Processor::gfx942 && cuCount == MI300ACuCount;
                 }
 
+                /// True when this solution will be launched at WGMXCC=1 regardless of the
+                /// XCC baked into it, so the predicate must be evaluated with XCC=1.
+                /// On MI300A this is unconditionally true: every solution there takes the
+                /// WGMXCC=1 launch path, so isMI300A() short-circuits the whole check.
+                bool fallbackXCC(ContractionProblemGemm const& problem) const
+                {
+                    return problem.getParams().fallbackStatus() || isMI300A();
+                }
+
                 WorkgroupMappingXCCCheck()
                 {
                     auto pHardware = hip::GetCurrentDevice();
@@ -3104,7 +3113,7 @@ namespace TensileLite
                     // We overwrite the XCC to 1 to make sure this can pass.
                     // But we also have to notice we are passing the correct XCC to kernel.
                     // (i.e. Remember to do param.setWGMXCC(1) when running the kernel)
-                    size_t XCC  = (problem.getParams().fallbackStatus() || isMI300A()) ? 1 : value[0];
+                    size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return ((XCC & (XCC - 1)) == 0) && XCCG % XCC == 0;
                 }
@@ -3114,7 +3123,7 @@ namespace TensileLite
                 {
                     if(value[0] == -1)
                         return true;
-                    size_t XCC  = (problem.getParams().fallbackStatus() || isMI300A()) ? 1 : value[0];
+                    size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return debugEvalCmp(problem,
                                         stream,
