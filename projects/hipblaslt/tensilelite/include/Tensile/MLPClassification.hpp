@@ -73,7 +73,8 @@ namespace TensileLite
         struct DenseLayer
         {
             DenseLayer() = default;
-            DenseLayer(const std::vector<float>& weights, const std::vector<float>& bias);
+            TENSILELITEHOST_EXPORT DenseLayer(const std::vector<float>& weights,
+                                              const std::vector<float>& bias);
 
             std::vector<dtype> operator()(const std::vector<dtype>& F) const;
 
@@ -101,9 +102,10 @@ namespace TensileLite
         {
             MLPNet() = default;
 
-            std::vector<dtype> predict(std::vector<float> const& probkey) const;
+            TENSILELITEHOST_EXPORT std::vector<dtype>
+                                   predict(std::vector<float> const& probkey) const;
 
-            bool valid(bool verbose = false) const;
+            TENSILELITEHOST_EXPORT bool valid(bool verbose = false) const;
 
             std::string description() const
             {
@@ -117,4 +119,3 @@ namespace TensileLite
 
     } // namespace MLPClassification
 } // namespace TensileLite
-
