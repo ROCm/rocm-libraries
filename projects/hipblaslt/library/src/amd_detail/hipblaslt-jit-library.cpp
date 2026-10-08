@@ -4,7 +4,6 @@
 #include "hipblaslt-jit-library.hpp"
 #include "hipblaslt-jit-code-object.hpp"
 #include "hipblaslt-jit-fs.hpp"
-#include "hipblaslt-jit-json.hpp"
 #include "hipblaslt-jit-msgpack.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include "rocblaslt_secure_env.hpp"
@@ -323,10 +322,75 @@ namespace hipblaslt_jit
 
     std::string problemTypeKey(const TensileLite::ContractionProblemGemm& problem)
     {
-        auto fields = problemTypeFields(problem);
-        fields.emplace_back("OperationIdentifier", json::quote(problem.operationIdentifier()));
-        fields.emplace_back("GroupedGemm", json::literal(problem.groupedGemm()));
-        return json::object(fields);
+        const auto fields = problemTypeFields(problem);
+        std::string key;
+        const auto add = [&](const std::string& token) {
+            if(!key.empty())
+                key += '.';
+            key += token;
+        };
+        const auto flag = [&](const char* name, bool value) {
+            add(std::string(name) + (value ? "1" : "0"));
+        };
+        const auto number = [&](const char* name, long long value) {
+            add(std::string(name) + std::to_string(value));
+        };
+        const auto dataType = [&](const char* name, rocisa::DataType value) {
+            number(name, static_cast<int>(value));
+        };
+        add("GEMM");
+        flag("b", fields.batched);
+        flag("sb", fields.stridedBatched);
+        flag("ta", fields.transposeA);
+        flag("tb", fields.transposeB);
+        flag("ca", fields.complexConjugateA);
+        flag("cb", fields.complexConjugateB);
+        dataType("dt", fields.dataType);
+        dataType("dta", fields.dataTypeA);
+        dataType("dtb", fields.dataTypeB);
+        dataType("maca", fields.macDataTypeA);
+        dataType("macb", fields.macDataTypeB);
+        dataType("dest", fields.destDataType);
+        dataType("compute", fields.computeDataType);
+        dataType("f32", fields.f32XdlMathOp);
+        flag("hpa", fields.highPrecisionAccumulate);
+        number("bias", fields.useBias);
+        flag("e", fields.useE);
+        flag("grad", fields.gradient);
+        add(std::string("scale")
+            + (fields.scale == ProblemType::Scale::Scalar   ? "scalar"
+               : fields.scale == ProblemType::Scale::Vector ? "vector"
+                                                            : "none"));
+        flag("scd", fields.useScaleCD);
+        number("sav", fields.useScaleAlphaVec);
+        flag("amax", fields.outputAmaxD);
+        number("mxa", fields.mxBlockA);
+        number("mxb", fields.mxBlockB);
+        number("sparse", fields.sparse);
+        flag("swa", fields.swizzleTensorA);
+        flag("swb", fields.swizzleTensorB);
+        flag("gate", fields.useGateResidual);
+        if(fields.dataTypeMxsa)
+            dataType("mxsa", *fields.dataTypeMxsa);
+        if(fields.dataTypeMxsb)
+            dataType("mxsb", *fields.dataTypeMxsb);
+        if(fields.biasDataType)
+            dataType("biasdt", *fields.biasDataType);
+        if(fields.biasSrc)
+            number("biassrc", static_cast<int>(*fields.biasSrc));
+        if(fields.gateResidualDataType)
+            dataType("gatedt", *fields.gateResidualDataType);
+        if(fields.dataTypeE)
+            dataType("dte", *fields.dataTypeE);
+        if(fields.dataTypeAmaxD)
+            dataType("amaxdt", *fields.dataTypeAmaxD);
+        if(fields.activation)
+            number("act", static_cast<unsigned>(*fields.activation));
+        if(fields.activationComputeDataType)
+            dataType("actc", *fields.activationComputeDataType);
+        add(std::string("id") + filesystemLiteral(problem.operationIdentifier()));
+        flag("gg", problem.groupedGemm());
+        return key;
     }
 
     std::vector<size_t> problemSizes(const TensileLite::ContractionProblemGemm& problem)
