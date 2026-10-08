@@ -710,11 +710,11 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *  pointers. It does not take ownership of \p ell_col_ind, \p ell_val,
  *  \p coo_row_ind, \p coo_col_ind and \p coo_val: they must stay valid while
  *  \p hyb uses them, and the caller frees them after \p hyb is destroyed or
- *  the arrays are replaced. \ref rocsparse_destroy_hyb_mat and
- *  rocsparse_Xcsr2hyb() never free them. Arrays that rocSPARSE allocated for
- *  \p hyb (for example with rocsparse_Xcsr2hyb()) are released by this
- *  function when they are replaced, after a device synchronization; passed
- *  back unchanged, they stay owned by \p hyb.
+ *  the arrays are replaced. \ref rocsparse_destroy_hyb_mat never frees them,
+ *  and rocsparse_Xcsr2hyb() rejects a \p hyb that holds them. Arrays that
+ *  rocSPARSE allocated for \p hyb (for example with rocsparse_Xcsr2hyb()) are
+ *  released by this function when they are replaced, after a device
+ *  synchronization; passed back unchanged, they stay owned by \p hyb.
  *  A null array with a positive entry count is rejected. A zero count ignores
  *  a non-null array, which is not read.
  *

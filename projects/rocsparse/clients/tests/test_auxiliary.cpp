@@ -1181,9 +1181,8 @@ TEST(auxiliary_pre_checkin, HybMatCsr2hybGetInfoAndHybmv)
     EXPECT_FLOAT_EQ(hy[0], 3.0f);
     EXPECT_FLOAT_EQ(hy[1], 8.0f);
 
-    // csr2hyb on a HYB holding caller arrays allocates its own and does not
-    // free the caller's. rocsparse_destroy_hyb_mat frees only the new ones.
-    ASSERT_EQ(rocsparse_scsr2hyb(handle,
+    // csr2hyb rejects a HYB holding caller arrays and leaves it unchanged.
+    EXPECT_EQ(rocsparse_scsr2hyb(handle,
                                  m,
                                  n,
                                  descr,
@@ -1193,7 +1192,11 @@ TEST(auxiliary_pre_checkin, HybMatCsr2hybGetInfoAndHybmv)
                                  built,
                                  1,
                                  rocsparse_hyb_partition_user),
-              rocsparse_status_success);
+              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        rocsparse_scsr2hyb(
+            handle, 0, 0, descr, nullptr, nullptr, nullptr, built, 0, rocsparse_hyb_partition_user),
+        rocsparse_status_invalid_pointer);
     got_ell_col = nullptr;
     ASSERT_EQ(rocsparse_hyb_mat_get_info(built,
                                          nullptr,
@@ -1209,8 +1212,34 @@ TEST(auxiliary_pre_checkin, HybMatCsr2hybGetInfoAndHybmv)
                                          nullptr,
                                          nullptr),
               rocsparse_status_success);
-    EXPECT_NE(got_ell_col, nullptr);
-    EXPECT_NE(got_ell_col, d_ell_col);
+    EXPECT_EQ(got_ell_col, d_ell_col);
+
+    // Once the caller arrays are cleared, csr2hyb can fill the HYB again.
+    ASSERT_EQ(rocsparse_hyb_mat_set_info(built,
+                                         0,
+                                         0,
+                                         rocsparse_hyb_partition_auto,
+                                         0,
+                                         0,
+                                         nullptr,
+                                         nullptr,
+                                         0,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+    EXPECT_EQ(rocsparse_scsr2hyb(handle,
+                                 m,
+                                 n,
+                                 descr,
+                                 d_val,
+                                 d_row_ptr,
+                                 d_col_ind,
+                                 built,
+                                 1,
+                                 rocsparse_hyb_partition_user),
+              rocsparse_status_success);
 
     ASSERT_EQ(rocsparse_destroy_hyb_mat(built), rocsparse_status_success);
     rocsparse_int ell_col_after[2] = {-1, -1};
