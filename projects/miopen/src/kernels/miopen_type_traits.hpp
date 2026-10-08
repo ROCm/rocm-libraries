@@ -25,8 +25,8 @@
  *******************************************************************************/
 #pragma once
 
-#if HIP_PACKAGE_VERSION_FLAT < 7000000000ULL
 #ifdef MIOPEN_HIP_RUNTIME_COMPILE
+#if HIP_PACKAGE_VERSION_FLAT < 7000000000ULL
 
 namespace std {
 
@@ -144,9 +144,23 @@ using conditional_t = typename conditional<predicate, X, Y>::type;
 } // namespace std
 #else
 
+// HIP >= 7: runtime compilation may run where no host C++ standard library
+// is installed (e.g. ROCm Windows wheels without MSVC). Prefer the real
+// <type_traits> whenever it is reachable; otherwise fall back to MIOpen's
+// freestanding traits so runtime-compiled kernels stay self-contained.
+#if __has_include(<type_traits>)
 #include <type_traits> // std::remove_reference, std::remove_cv, is_pointer
+#else
+#if __has_include(<utility>)
+#error \
+    "inconsistent C++ standard library availability: <type_traits> is not reachable but <utility> is; provide a complete standard library (or none)"
+#endif
+#include "miopen_freestanding_type_traits.hpp"
+#endif
 
 #endif
 #else
-#include <type_traits>
+
+#include <type_traits> // std::remove_reference, std::remove_cv, is_pointer
+
 #endif
