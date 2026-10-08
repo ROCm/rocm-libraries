@@ -344,11 +344,13 @@ code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
   ID. The declared wavefront size is the one the assembler uses.
 - HIP source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
   `--rocm-path` and a `-cuid` taken from the source name. A HIP helper is its
-  own code object. The builder asks `JitLibrary`'s helper cache, keyed by
-  backend id and helper name, before compiling one. A hit reuses that code
-  object. A miss compiles it once, publishes it, and then compiles the main
-  kernel. The ROCm path is `HIP_PATH` when set, otherwise the prefix of the
-  loaded HIP runtime.
+  own code object. `JitLibrary` is the helper cache, keyed by backend id and
+  helper name. A hit reuses the code object stored in the library. A miss
+  compiles it once, stores it in the library, and then compiles the main
+  kernel. A build with no library compiles each helper and does not keep a
+  second cache. comgr's `AMD_COMGR_CACHE` stays comgr's; it cannot be stored
+  in the library. The ROCm path is `HIP_PATH` when set, otherwise the prefix
+  of the loaded HIP runtime.
 - Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` links the main kernel
   into one code object, with `-Xlinker --build-id=sha1`. The helper code
   objects and the main kernel are ready to add to `JitLibrary`.
