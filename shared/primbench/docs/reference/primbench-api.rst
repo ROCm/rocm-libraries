@@ -10,15 +10,6 @@ The core types for defining and running GPU benchmarks with Primbench include th
 
 Command-line values override any programmatic ``settings`` values passed to the ``executor`` constructor.
 
-Flags
-=====
-
-Enumeration and wrapper for combining benchmark flags.
-
-.. doxygenenum:: primbench::detail::flags::Flags
-.. doxygenstruct:: primbench::detail::flags::FlagTag
-   :members:
-
 Settings
 ========
 

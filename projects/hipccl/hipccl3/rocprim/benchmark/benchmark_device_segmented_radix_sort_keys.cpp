@@ -75,7 +75,8 @@ int main(int argc, char* argv[])
 
     primbench::settings settings;
     settings.size = bytes;
-    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
+    settings.sync = true;
+    primbench::executor executor(argc, argv, settings);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types

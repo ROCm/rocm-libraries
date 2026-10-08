@@ -13,5 +13,6 @@ using data_type = {{ data_type }};
 {% endblock %}
 
 {% block primbench_executor %}
-auto executor = primbench::executor(1, args, settings, primbench::flags::sync);
+settings.sync = true;
+auto executor = primbench::executor(1, args, settings);
 {% endblock %}

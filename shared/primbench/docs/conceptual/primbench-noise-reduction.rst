@@ -47,7 +47,7 @@ Primbench addresses this by enqueuing the start event, the kernel, and the stop 
 
 Because the spinlock holds the stream, no other work can interleave between the start event and the kernel launch.
 
-Stream blocking requires the benchmarked kernel to be asynchronous. The kernel must return control to the host before finishing on the GPU. A synchronous kernel, such as one that calls device synchronization internally, causes the spinlock to deadlock. Constructing the executor with ``primbench::flags::sync`` disables stream blocking for synchronous kernels. The stream-blocking spinlock times out after ``--stream-blocking-timeout-secs`` seconds.
+Stream blocking requires the benchmarked kernel to be asynchronous. The kernel must return control to the host before finishing on the GPU. A synchronous kernel, such as one that calls device synchronization internally, causes the spinlock to deadlock. Passing ``--sync`` disables stream blocking for synchronous kernels. The stream-blocking spinlock times out after ``--stream-blocking-timeout-secs`` seconds.
 
 GPU warming and cooling
 =======================

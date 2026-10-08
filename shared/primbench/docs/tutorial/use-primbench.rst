@@ -90,7 +90,7 @@ The kernel call is wrapped in a lambda and passed to ``state.run()``. ``state.ru
                    <<<grid, block, 0, stream>>>(d_input, d_output);
            });
 
-Benchmark settings and flags can be passed to the ``executor`` class constructor as optional parameters. The ``executor`` queues and runs the benchmarks.
+Benchmark settings can be passed to the ``executor`` class constructor as an optional parameter. The ``executor`` queues and runs the benchmarks.
 
 For more information on settings, see :doc:`Configure benchmark settings </how-to/configure-settings>`.
 

@@ -323,7 +323,7 @@ def main():
     )
     parser.add_argument(
         "--stream-blocking-timeout-secs",
-        help="Maximum stream blocking duration in seconds before timing out. Stream is blocked while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous",
+        help="Maximum stream blocking duration in seconds before timing out. Stream is blocked while queueing kernel calls. Use `--sync` if kernel is synchronous",
         default="",
         required=False,
     )

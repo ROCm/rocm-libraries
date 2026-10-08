@@ -173,7 +173,7 @@ It outputs this `results.json`:
 ```json
 {
     "context": {
-        "results_version": "4.0.0",
+        "results_version": "5.0.0",
         "general": {
             "algorithm": "copy",
             "specialization_count": 2,
@@ -221,10 +221,8 @@ It outputs this `results.json`:
             "output_batches": false,
             "spaces_per_indent": 4,
             "stream_blocking_timeout_secs": 10,
+            "sync": false,
             "skip_header": false
-        },
-        "flags": {
-            "sync": false
         }
     },
     "specializations": [
@@ -320,7 +318,8 @@ You can also pass `--help` to benchmarks to print the available options.
 | `--max-cooling-secs`                     | Maximum seconds allowed for GPU cooling before an error is thrown. (default: 60)                                                                                                   |
 | `--output-batches`                       | Output a `batches` array for each specialization, containing per-batch details.                                                                                                    |
 | `--spaces-per-indent`                    | Number of spaces per indentation level in JSON output. Set to 0 for no indentation. (default: 4)                                                                                   |
-| `--stream-blocking-timeout-secs`         | Maximum stream blocking duration in seconds before timing out. Stream is blocked while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous. (default: 10) |
+| `--stream-blocking-timeout-secs`         | Maximum stream blocking duration in seconds before timing out. Stream is blocked while queueing kernel calls. Use `--sync` if kernel is synchronous. (default: 10)                 |
+| `--sync`                                 | Kernel is synchronous, e.g. it blocks the host until it completes. Disables stream blocking.                                                                                       |
 | `--skip-header`                          | Skip printing the header to output.                                                                                                                                                |
 
 ### Adding Custom Options
@@ -433,7 +432,7 @@ unblock(stream);
 elapsed = stop - start;
 ```
 
-When benchmarking synchronous algorithms, the `primbench::flags::sync` flag must be passed to the executor to disable stream blocking, since the spinlock will otherwise deadlock after 10 seconds (`--stream-blocking-timeout-secs`).
+When benchmarking synchronous algorithms, `--sync` must be passed to the executor to disable stream blocking, since the spinlock will otherwise deadlock after 10 seconds (`--stream-blocking-timeout-secs`).
 
 ## Outputting CSV
 

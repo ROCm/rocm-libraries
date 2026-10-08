@@ -223,7 +223,8 @@ int main(int argc, char* argv[])
     settings.batch_window_size       = 3;
     settings.noise_tolerance_percent = 3;
     settings.hot                     = true;
-    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
+    settings.sync                    = true;
+    primbench::executor executor(argc, argv, settings);
 
     auto dimensions
         = executor.get<size_t>("dimensions", 1, "Number of dimensions of quasi-random values");
