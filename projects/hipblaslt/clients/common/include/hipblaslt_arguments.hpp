@@ -173,7 +173,17 @@ struct Arguments
     int8_t allclose_check;
     int8_t unit_check;
     int8_t ulp_check;
-    int8_t timing;
+    int8_t fast_check;
+    // fast_check: operand to place across a 4 GiB boundary (a, b, c, d, bias,
+    // scale_alpha_vec, workspace), and the bytes before the boundary (0 = middle)
+    char   placement[16];
+    size_t placement_offset;
+    // fast_check: launches and checks per solution; the self-test iteration whose result
+    // is corrupted on purpose (-1 = none); and whether the case needs Stream-K solutions
+    int32_t fast_check_repeat;
+    int32_t fast_check_inject;
+    int8_t  requires_streamk;
+    int8_t  timing;
 
     char transA;
     char transB;
@@ -303,6 +313,12 @@ struct Arguments
     OPER(allclose_check) SEP         \
     OPER(unit_check) SEP             \
     OPER(ulp_check) SEP              \
+    OPER(fast_check) SEP             \
+    OPER(placement) SEP              \
+    OPER(placement_offset) SEP       \
+    OPER(fast_check_repeat) SEP      \
+    OPER(fast_check_inject) SEP      \
+    OPER(requires_streamk) SEP       \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \

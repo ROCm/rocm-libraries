@@ -432,8 +432,26 @@ def _direct_builders():
             ),
         ),
         (
-            "depthwise_spatial",
+            "depthwise_tiled",
             dict(cpg=1, kpg=1, groups=32),
+            "fwd",
+            lambda pr: dc.build_direct_depthwise_tiled(
+                dc.DirectDepthwiseTiledSpec(problem=pr), arch=_ARCH
+            ),
+        ),
+        # Fewer groups than a wave; the multiples below keep it that way while
+        # changing the W positions each wave covers.
+        (
+            "depthwise_col",
+            dict(cpg=1, kpg=1, groups=32),
+            "fwd",
+            lambda pr: dc.build_direct_depthwise_col(
+                dc.DirectDepthwiseColSpec(problem=pr, block_h=4, block_w=2), arch=_ARCH
+            ),
+        ),
+        (
+            "depthwise_spatial",
+            dict(cpg=1, kpg=1, groups=3),
             "fwd",
             lambda pr: dc.build_direct_depthwise_spatial(
                 dc.DirectDepthwiseSpatialSpec(problem=pr), arch=_ARCH
@@ -494,12 +512,6 @@ def _direct_builders():
     ]
 
 
-# The spatial depthwise kernel packs every channel of an image into one
-# wavefront, so its lane layout -- and with it the emitted IR -- follows the
-# group count. It is the one direct kernel whose groups are not a kernarg.
-_GROUPS_BAKED = {"depthwise_spatial"}
-
-
 @pytest.mark.parametrize(
     "label,channels,direction,build",
     _direct_builders(),
@@ -525,8 +537,7 @@ def test_direct_conv_abi_and_shape_invariance(label, channels, direction, build)
         [(2, 14, 14), (3, 29, 37), (1, 64, 64)], (1, 2, 3)
     ):
         shape = dict(channels)
-        if label not in _GROUPS_BAKED:
-            shape["groups"] *= group_mult
+        shape["groups"] *= group_mult
         problem = DirectConvProblem(N=N, H=H, W=W, KH=3, KW=3, PAD=1, stride=1, **shape)
         kernel = build(problem)
         fingerprints.append(_op_signature(kernel))
@@ -540,6 +551,49 @@ def test_direct_conv_abi_and_shape_invariance(label, channels, direction, build)
     assert [p.name for p in kernel.params] == expected, f"{label}: kernarg order"
     signature = conv_direct_args_signature("fp16", direction=direction)
     assert _names(signature) == expected, f"{label}: launch signature"
+
+
+@pytest.mark.parametrize(
+    "stride,knobs",
+    [
+        (1, dict()),
+        (2, dict(ck=16, double_buffer=True, chiplet_swizzle=False, iglp=None)),
+        (1, dict(tile_w=48, tile_k=32, waves_m=1, atom="16x16x32")),
+    ],
+    ids=["base", "s2_db_noswizzle", "atom16"],
+)
+def test_direct_nongrouped_abi_and_shape_invariance(stride, knobs):
+    """The non-grouped kernel bakes neither the extents nor the channel counts.
+
+    Unlike the grouped variants, ``C`` and ``K`` are kernargs too, so they vary
+    here alongside the batch and the image -- including image sizes that leave
+    partial tiles and channel counts that leave a partial channel tile.
+    """
+    from kernels.common.conv_direct_grouped import DirectConvProblem
+    from kernels.common.conv_direct_nongrouped import (
+        DirectNongroupedConvSpec,
+        build_direct_conv_nongrouped,
+    )
+
+    base = dict(tile_h=8, tile_w=32, tile_k=64, ck=32, waves_m=2, waves_n=2, iglp=0)
+    fingerprints = set()
+    kernel = None
+    for N, H, W, C, K in [
+        (2, 16, 32, 64, 128),
+        (3, 29, 37, 128, 96),
+        (1, 64, 64, 640, 640),
+    ]:
+        problem = DirectConvProblem(
+            N=N, H=H, W=W, groups=1, cpg=C, kpg=K, stride=stride, dtype="bf16"
+        )
+        spec = DirectNongroupedConvSpec(problem=problem, **{**base, **knobs})
+        kernel = build_direct_conv_nongrouped(spec, arch=_ARCH)
+        fingerprints.add(_op_signature(kernel))
+
+    assert len(fingerprints) == 1, "non-grouped IR depends on the problem shape"
+    expected = [n for n, _ in conv_direct_arg_names(direction="fwd")]
+    assert [p.name for p in kernel.params] == expected
+    assert _names(conv_direct_args_signature("bf16")) == expected
 
 
 @pytest.mark.parametrize("fold_k32", [False, True])

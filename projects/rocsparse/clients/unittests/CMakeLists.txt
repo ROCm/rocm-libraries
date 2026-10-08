@@ -148,6 +148,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collectives_readfirstlane.cpp
   # Per-axis grid-size helpers in rocsparse_grid.hpp (append-only leaf)
   unit_test_internal_grid.cpp
+  # dispatch_grid_stride_x variant selection in rocsparse_grid.hpp (append-only leaf)
+  unit_test_internal_grid_dispatch.cpp
   unit_test_internal_collectives_boost.cpp
   unit_test_internal_infostructs.cpp
   #10156: distinct anchor to avoid stacked-branch merge conflicts
@@ -187,6 +189,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_util_checkmatrix.cpp
   #10149: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_conversion_bsr.cpp
+  # --- Dense conversion grid.x clamps [AISPARSE-687] ------------------------
+  # Distinct anchor (after the BSR conversion host tests) so this leaf does not
+  # conflict with the sibling grid-clamp branches. Drives the public
+  # rocsparse_dense_to_sparse and rocsparse_Xcoo2dense entry points with
+  # handle->properties.maxGridSize[0] shrunk; no compile-in TUs.
+  unit_test_internal_conversion_dense_grids.cpp
   unit_test_internal_conversion_extras.cpp
   unit_test_internal_conversion_csr2csc_buffer.cpp
   unit_test_internal_extra_geam.cpp
@@ -203,11 +211,29 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   #10158: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_level3.cpp
   unit_test_internal_level2_extras.cpp
+  # csrmv LRB / adaptive partial_scale_y forced grid.x clamp [AISPARSE-662]
+  unit_test_internal_level2_csrmv_lrb_grids.cpp
   # --- Level 2 (SpMV/gebsrmv) public C-API host tests [AISPARSE-642] --------
   # Distinct anchor (end of the level-2 group) so this leaf does not conflict
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # --- csr2ell strided-batched grid.y clamp regression [AISPARSE-683] -------
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # sibling branches appending elsewhere. Needs the defining library TU in
+  # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below.
+  unit_test_internal_conversion_csr2ell_batch.cpp
+  # --- csrmm merge path / nnz split grid.x extents [AISPARSE-671, 672] -------
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # the sibling unit-test branches above. Drives the public rocsparse_spmm entry
+  # point with handle->properties.maxGridSize[0] shrunk, so no internal
+  # translation unit has to be compiled in.
+  unit_test_internal_level3_csrmm_grids.cpp
+  # --- Conversion-directory grid clamps [AISPARSE-684/685/686] --------------
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # the sibling unit-test branches above. Drives public entry points plus
+  # rocsparse::convert_array, whose TU is already compiled in below.
+  unit_test_internal_conversion_grid_clamp.cpp
 )
 
 # Host building-block library translation units under test by the
@@ -286,6 +312,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_keys.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_pairs.cpp
   # --------------------------------------------------------------------------
+  # Added at this leaf for unit_test_internal_conversion_csr2ell_batch.cpp
+  # [AISPARSE-683]: the rocsparse_Xcsr2ell_strided_batched entry points are
+  # declared in no header and librocsparse hides them
+  # (CXX_VISIBILITY_PRESET "hidden"), so the defining TU is compiled into this
+  # binary. Build wiring only -- no library source changes.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2ell_strided_batched.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
