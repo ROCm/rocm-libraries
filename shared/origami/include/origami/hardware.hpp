@@ -240,33 +240,6 @@ class ORIGAMI_EXPORT hardware_t {
   }
 
   /**
-   * @brief Probability that another streaming (non-temporal) store reaching a partly written
-   *        128-B L2 line costs that line one more write-back, at a full tile.
-   *
-   * L2 merges the stores that build a line only while the line stays resident, and streamed
-   * lines don't stay.  Measured on gfx950 from L2 write-back counters on kernel pairs that
-   * differ only in NonTemporalD, by D element size and VectorWidthA.  0 where unmeasured, so
-   * no streaming-D kernel is rejected for it.
-   */
-  static constexpr double get_streaming_store_miss_share(architecture_t arch,
-                                                         size_t elem_bytes,
-                                                         size_t vector_width) noexcept {
-    if (arch != architecture_t::gfx950) return 0.0;
-    if (elem_bytes >= 4) return vector_width >= 4 ? 0.07 : (vector_width >= 2 ? 0.14 : 0.305);
-    return vector_width >= 8 ? 0.505
-                             : (vector_width >= 4 ? 0.165 : (vector_width >= 2 ? 0.125 : 0.09));
-  }
-
-  /**
-   * @brief Streaming-store miss share of this hardware instance.
-   * @see get_streaming_store_miss_share
-   */
-  constexpr double streaming_store_miss_share(size_t elem_bytes,
-                                              size_t vector_width) const noexcept {
-    return get_streaming_store_miss_share(arch, elem_bytes, vector_width);
-  }
-
-  /**
    * @brief gfx950-only architecture constants from optional PCI chip id.
    *
    * When @p pci_chip_id is @c std::nullopt, uses the primary (id75a0) microbenchmark row.

@@ -45,14 +45,6 @@ static const tensile_params_t& tparams(const config_t& config) {
   return config.has_tensile_params() ? config.tensile() : kDefaultTensile;
 }
 
-// Vector-ALU cost of one wavefront instruction relative to wave64 on SIMD16
-// (gfx950), the configuration this file's cycle constants were calibrated on.
-static double valu_cycle_scale(const hardware_t& hardware) {
-  return static_cast<double>(hardware.valu_cycles_per_instruction()) /
-         static_cast<double>(
-             hardware_t::get_valu_cycles_per_instruction(hardware_t::architecture_t::gfx950));
-}
-
 /* ---------------------------------------------------------------------------------------- */
 /* context_t constructor                                                                    */
 /* ---------------------------------------------------------------------------------------- */
@@ -938,10 +930,11 @@ double compute_cvt_overhead(const problem_t& problem,
   const double GR  = dsA;                                                  // Global->LDS reads
   const double LR  = dsA + dsB;                                            // total DS->VGPR
 
-  // 4) Heuristic cycle weights, scaled to MI latency (calibrated at
-  //    L_MI_bf16 == 16 to A=104, B=8, C=4).
-  // CVT per LR-sized chunk (DS->VGPR); vector-ALU work, so it scales with the SIMD width.
-  const double A = (104.0 / 16.0) * L_MI_bf16 * valu_cycle_scale(hardware);
+  // 4) Heuristic weights, scaled to MI latency (calibrated at L_MI_bf16 == 16 to
+  //    A = 26 vector-ALU instructions, B = 8 and C = 4 cycles).
+  // CVT per LR-sized chunk (DS->VGPR).
+  const double A =
+      (26.0 / 16.0) * L_MI_bf16 * static_cast<double>(hardware.valu_cycles_per_instruction());
   const double B = (8.0 / 16.0) * L_MI_bf16;    // hidden per spare MFMA slot
   const double C = (4.0 / 16.0) * L_MI_bf16;    // hidden per (LR+GR) slot
 
@@ -1042,7 +1035,7 @@ static double compute_lsu_reduction_latency(const problem_t& problem,
   const double bpe = std::max(1.0, static_cast<double>(data_type_to_bytes(problem.mi_dtype)));
 
   // Local-write cost per element (cycles), keyed on store-width x bytes-per-elem,
-  // then doubled for the write pass (Formocast shape).
+  // then doubled for the write pass.
   double lw_cycle;
   switch (static_cast<int>(svw * bpe)) {
     case 32: lw_cycle = 20.0 * 2.0; break;  // widest store splits into two
@@ -1516,57 +1509,6 @@ double compute_memory_latency(const problem_t& problem,
 /* ---------------------------------------------------------------------------------------- */
 /* Tile-related functions                                                                   */
 /* ---------------------------------------------------------------------------------------- */
-// Write-backs per 128-B line of a streaming (non-temporal) D tile, relative to the single
-// write-back a cached store gets.  Each store reaching a partly written line costs one more
-// write-back with probability streaming_store_miss_share, which grows with how full the tile
-// is (how many waves store at once).  Stores per line follow TensileLite's store layout: a
-// lane owns VectorWidthA consecutive rows, so one store's MI_M lanes span MI_M * VectorWidthA
-// rows of a column.  M-edge tiles write that span with VectorWidthA stores (one element per
-// lane), full tiles with VectorWidthA / gwvw_d.  A span that doesn't start on a line boundary
-// reaches two lines.
-static double compute_streaming_store_amplification(const problem_t& problem,
-                                                    const hardware_t& hardware,
-                                                    const config_t& config,
-                                                    double d_bytes,
-                                                    size_t tile_m,
-                                                    bool m_edge) {
-  const size_t elem_bytes = std::max<size_t>(1, static_cast<size_t>(d_bytes));
-  const size_t vwa        = static_cast<size_t>(std::max(1, config.vector_width_a));
-  const double miss_share = hardware.streaming_store_miss_share(elem_bytes, vwa);
-  if (config.cache_hints_d <= 3 || miss_share <= 0.0 || tile_m == 0) return 1.0;
-
-  const size_t line = heuristic_defaults_t::CACHE_LINE_BYTES;
-  const size_t MT_M = config.mt.m;
-  const size_t svw =
-      (config.gwvw_d > 0)
-          ? config.gwvw_d
-          : static_cast<size_t>(
-                std::ceil(heuristic_defaults_t::EPILOGUE_BYTES_PER_VECTORIZED_STORE / d_bytes));
-  const size_t stores    = m_edge ? vwa : std::max<size_t>(1, vwa / std::max<size_t>(svw, 1));
-  const size_t span_rows = std::max<size_t>(config.mi.m, 1) * vwa;
-  const size_t band =
-      std::max<size_t>(MT_M / static_cast<size_t>(std::max(tparams(config).wave_group_m, 1)), 1);
-  // Spans start at multiples of g within a line (packed D: columns are M elements apart).
-  const size_t g = std::gcd(std::gcd(problem.size.m * elem_bytes, span_rows * elem_bytes), line);
-  auto expected_lines = [&](size_t span_bytes) {
-    double sum = 0.0;
-    for (size_t o = 0; o < line; o += g)
-      sum += static_cast<double>((o + span_bytes - 1) / line + 1);
-    return sum * static_cast<double>(g) / static_cast<double>(line);
-  };
-  const double full_span_lines = expected_lines(span_rows * elem_bytes);
-  double span_lines            = 0.0;  // lines reached, summed over the tile's spans
-  for (size_t b0 = 0; b0 < MT_M && b0 < tile_m; b0 += band) {
-    const size_t rows = std::min(band, tile_m - b0);
-    span_lines += static_cast<double>(rows / span_rows) * full_span_lines;
-    if (rows % span_rows != 0) span_lines += expected_lines((rows % span_rows) * elem_bytes);
-  }
-  const double arrivals = static_cast<double>(stores) * span_lines * static_cast<double>(line) /
-                          static_cast<double>(tile_m * elem_bytes);
-  const double fill = static_cast<double>(tile_m) / static_cast<double>(MT_M);
-  return 1.0 + std::max(0.0, arrivals - 1.0) * std::min(1.0, miss_share * fill);
-}
-
 // Determine the epilogue latency of a single tile.
 double compute_epilogue_latency(const problem_t& problem,
                                 const hardware_t& hardware,
@@ -1631,9 +1573,11 @@ double compute_epilogue_latency(const problem_t& problem,
   const double reads_per_wave = acc_elems_per_thread * mi_reg_per_out;
   // ACC reads and the bounds checks below are vector-ALU instructions.  Without
   // separate accumulation registers the results are already in VGPRs.
-  const double valu_scale = valu_cycle_scale(hardware);
+  const double valu_cycles = static_cast<double>(hardware.valu_cycles_per_instruction());
   const double L_acc_transfer =
-      hardware.has_accumulation_registers() ? reads_per_wave * valu_scale : 0.0;
+      hardware.has_accumulation_registers()
+          ? reads_per_wave * heuristic_defaults_t::EPILOGUE_VALU_INSTS_PER_ACC_READ * valu_cycles
+          : 0.0;
 
   const size_t max_isa_store_elems =
       std::max(static_cast<size_t>(1),
@@ -1754,7 +1698,8 @@ double compute_epilogue_latency(const problem_t& problem,
   const size_t m_remainder = has_m_edge ? (M % MT_M) : MT_M;
   const size_t n_remainder = has_n_edge ? (N % MT_N) : MT_N;
 
-  auto compute_tile_epilogue = [&](size_t tile_m, size_t tile_n, bool scalar_path) -> tile_epilogue_plan_t {
+  auto compute_tile_epilogue =
+      [&](size_t tile_m, size_t tile_n, bool scalar_path) -> tile_epilogue_plan_t {
     tile_epilogue_plan_t tile{};
     tile.acc_read = L_acc_transfer;
     const bool edge_path = scalar_path || tile_m != MT_M || tile_n != MT_N;
@@ -1774,7 +1719,8 @@ double compute_epilogue_latency(const problem_t& problem,
       for (size_t wg_n = 0; wg_n < wave_group_n_epi; ++wg_n) {
         const auto n_range = wave_range(MT_N, wave_group_n_epi, wg_n);
         const size_t active_n = active_extent(n_range, tile_n);
-        wave_store_plan_t wave = compute_wave_store_plan(active_m, active_n, scalar_path, store_elem_bytes);
+        wave_store_plan_t wave =
+            compute_wave_store_plan(active_m, active_n, scalar_path, store_elem_bytes);
         if (wave.active_elements == 0.0) continue;
 
         tile.active_waves += 1.0;
@@ -1798,9 +1744,10 @@ double compute_epilogue_latency(const problem_t& problem,
                       total / static_cast<double>(wave_issue_parallelism));
     };
 
-    tile.bounds = edge_path ? heuristic_defaults_t::EPILOGUE_CYCLES_PER_BOUNDS_CHECK * valu_scale *
-                                  critical_path(max_wave_store_insts, tile.store.store_insts)
-                            : 0.0;
+    tile.bounds                       = edge_path
+                                            ? heuristic_defaults_t::EPILOGUE_VALU_INSTS_PER_BOUNDS_CHECK * valu_cycles *
+                            critical_path(max_wave_store_insts, tile.store.store_insts)
+                                            : 0.0;
     const double store_issue_parallel = critical_path(tile.max_wave_issue, tile.store.issue_insts);
     tile.store_issue                  = store_issue_parallel;
     const double store_memory_bytes = critical_path(max_wave_sector_bytes, tile.store.sector_bytes);
@@ -2356,11 +2303,14 @@ double compute_parallel_reduction_latency(const problem_t& problem,
   // Per-timestep latency: read + accumulate + write
   double L_read  = read_bytes_per_ts / read_bw;
   double L_write = write_bytes_per_ts / read_bw;
-  // Accumulate: each thread sequentially adds (splitting_factor-1) values.
-  // All lanes in a wavefront execute in parallel, but each WG processes
-  // its own slice serially.
-  double L_acc = static_cast<double>(splitting_factor - 1) * elements_per_ts /
-                 (active_wgs * hardware.wavefront_size()) * valu_cycle_scale(hardware);
+  // Accumulate: each lane adds splitting_factor - 1 partials into each of its VW
+  // outputs, one vector-ALU instruction apiece, and a WG's waves share the CU's SIMDs.
+  const size_t waves_per_wg =
+      math::safe_ceil_div(heuristic_defaults_t::POSTGSU_THREADS_PER_WG, hardware.wavefront_size());
+  const double waves_per_simd =
+      static_cast<double>(math::safe_ceil_div(waves_per_wg, hardware.simds_per_cu()));
+  double L_acc = static_cast<double>((splitting_factor - 1) * VW) *
+                 static_cast<double>(hardware.valu_cycles_per_instruction()) * waves_per_simd;
 
   double L_total = (L_read + L_acc + L_write) * timesteps;
 
@@ -2458,22 +2408,6 @@ double compute_total_latency(const problem_t& problem,
       }
     } else if (config.cache_hints_a || config.cache_hints_b) {
       return std::numeric_limits<double>::max();
-    }
-
-    // Streaming D writes partly assembled lines back more than once; past the break-even
-    // write amplification, the streaming kernel loses to its cached twin.
-    if (config.cache_hints_d > 3) {
-      const size_t m_remainder = M % MT_M;
-      const double m_edge_share =
-          (m_remainder != 0) ? 1.0 / static_cast<double>(math::safe_ceil_div(M, MT_M)) : 0.0;
-      const double d_bytes = data_type_to_bytes(problem.d_dtype);
-      const double amplification =
-          (1.0 - m_edge_share) * compute_streaming_store_amplification(
-                                     problem, hardware, config, d_bytes, MT_M, false) +
-          m_edge_share * compute_streaming_store_amplification(
-                             problem, hardware, config, d_bytes, m_remainder, true);
-      if (amplification > heuristic_defaults_t::STREAMING_D_MAX_WRITE_AMPLIFICATION)
-        return std::numeric_limits<double>::max();
     }
   }
 

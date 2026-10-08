@@ -2331,35 +2331,6 @@ TEST_CASE("GEMM: PGR1 wins for single-K-iter tiles", "[gemm][pgr]") {
   }
 }
 
-TEST_CASE("GEMM: streaming D is rejected where it amplifies writes past break-even",
-          "[gemm][ntd]") {
-  constexpr double rejected = std::numeric_limits<double>::max();
-  // No non-temporal A/B kernels on offer, so only the D-store hint decides.
-  auto latency = [](int gpu_arch, size_t m, int vector_width, int hint) {
-    auto hw                  = make_hardware(gpu_arch);
-    auto c                   = make_config(256, 256, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
-    c.tensile().wave_group_m = 2;
-    c.vector_width_a         = vector_width;
-    c.gwvw_d                 = static_cast<size_t>(vector_width);
-    c.cache_hints_d          = hint;
-    return origami::gemm::compute_total_latency(make_problem(m, 4096, 512), hw, c, false, false);
-  };
-
-  SECTION("a nearly full edge tile whose lines arrive in eight pieces is rejected") {
-    REQUIRE(latency(950, 255, 8, 4) == rejected);
-    REQUIRE(latency(950, 255, 8, 0) < rejected);
-  }
-
-  SECTION("full tiles and lightly amplified edge tiles keep streaming D") {
-    REQUIRE(latency(950, 256, 8, 4) < rejected);
-    REQUIRE(latency(950, 255, 1, 4) < rejected);
-  }
-
-  SECTION("architectures without measurements never reject it") {
-    REQUIRE(latency(942, 255, 8, 4) < rejected);
-  }
-}
-
 TEST_CASE("GEMM: SourceSwap changes only epilogue store traffic", "[gemm][sourceswap]") {
   for (int gpu_arch : test_architectures) {
     auto hw             = make_hardware(gpu_arch);

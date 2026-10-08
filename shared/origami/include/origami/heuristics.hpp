@@ -53,7 +53,10 @@ struct heuristic_defaults_t {
   // Empirical Constants
   static constexpr double L2_AMP_CEILING_BATCHED           = 0.9;
   static constexpr double L2_AMP_CEILING_K_SPLIT              = 0.4;
-  static constexpr double EPILOGUE_CYCLES_PER_BOUNDS_CHECK    = 5.0;
+  // Vector-ALU instructions charged per edge-store bounds check and per AccVGPR read;
+  // fractional because they absorb overlap with other work.
+  static constexpr double EPILOGUE_VALU_INSTS_PER_BOUNDS_CHECK = 1.25;
+  static constexpr double EPILOGUE_VALU_INSTS_PER_ACC_READ     = 0.25;
   static constexpr size_t EPILOGUE_BYTES_PER_VECTORIZED_STORE = 16;  // buffer_store_dwordx4
   static constexpr double EPILOGUE_NONSWAP_STORE_TRAFFIC      = 1.5;
   static constexpr size_t EPILOGUE_WORKSPACE_BYTES_PER_ELEM = 4;
@@ -61,9 +64,6 @@ struct heuristic_defaults_t {
   static constexpr double EPILOGUE_L_BARRIER                = 100.0;
   static constexpr double EPILOGUE_L_SMEM = 1900.0;  // s_load_dword(glc) cross-XCD flag poll
   static constexpr size_t POSTGSU_COMPUTE_BYTES = 4;       // workspace partials stored as f32
-  // Streaming-D write amplification at which NTD4 kernels run as fast as their NTD0 twins
-  // (gfx950 kernel pairs that differ only in NonTemporalD); above it they are rejected.
-  static constexpr double STREAMING_D_MAX_WRITE_AMPLIFICATION = 1.75;
 
   // Main Loop Efficiency
   static constexpr double MAIN_LOOP_EFFICIENCY = 1.0;
