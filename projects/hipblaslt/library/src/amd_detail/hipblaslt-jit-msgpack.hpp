@@ -14,8 +14,9 @@
 // MessagePack support and fails every call.
 namespace hipblaslt_jit::msgpack_io
 {
-    // The one-solution entry of the entry's solution local: that solution and
-    // the row whose Single library node selects it, both renumbered index.
+    // Copies the solution at local into entry bytes and renumbers its index.
+    // TensileLite's LoadLibraryData / MasterSolutionLibrary / ContractionSolution
+    // read and extend the library; they do not write these bytes.
     Status rewriteEntryIndex(const std::vector<uint8_t>& entry,
                              int64_t                     local,
                              int32_t                     index,
@@ -66,7 +67,8 @@ namespace hipblaslt_jit::msgpack_io
     // a default from a stored value.
     struct CacheKeyDocument
     {
-        std::string                        backendId, backendVersion, comgr, rocmPath;
+        std::string                        backendId, comgr, rocmPath;
+        uint32_t                           backendVersion = 0;
         std::string                        targetId, isa, libraryArch;
         int                                codeObjectVersion = 0;
         int                                schema            = 1;

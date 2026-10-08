@@ -144,15 +144,13 @@ The implementations are:
 
 - Code-object builder: `makeComgrBuilder()`; see
   [building generated sources](#building-generated-sources).
-- Loader: `makeTensileLoader()` loads the TensileLite record with
-  `loadGemmLibrary` (see
-  [loading a published solution](#loading-a-published-solution)), checks the
-  support and workspace of each solution with TensileLite's predicates, in
-  index order, and returns a process-local `TensileGemmBundle` for each
-  supported solution. The bundles of one record share its library and adapter.
-  It is in
-  `rocblaslt/src/tensile_host.cpp`, next to the GEMM problem translation that
-  the support check reuses.
+- Loader: `makeTensileLoader()` checks support with a local TensileLite load of
+  the record (see
+  [loading a published solution](#loading-a-published-solution)) and returns a
+  `TensileGemmBundle` that refers to the `ContractionSolution`. The bundle does
+  not own a library, hardware description, or adapter. Published solutions are
+  launched through `JitLibrary`. The loader is in `rocblaslt/src/tensile_host.cpp`,
+  next to the GEMM problem translation that the support check reuses.
 - Solution store: the JIT solution library, in `hipblaslt-jit-library.cpp`,
   with `hipblaslt-jit-msgpack.cpp` writing the library files and
   `hipblaslt-jit-fs.cpp` providing the directory checks, file lock and atomic
@@ -163,7 +161,8 @@ The implementations are:
 - Replay backend: `hipblaslt-jit-replay-backend.cpp` replays a list of source
   bundles without a generator. A generation returns, in list order, the
   bundles with a solution whose predicates accept the device and problem, until
-  they hold the requested count of such solutions. It skips a bundle when every
+  they hold the requested count of such solutions. The predicate check is a
+  local TensileLite load inside that function. It skips a bundle when every
   such solution's kernel is excluded; the comgr builder still builds them.
   It implements `Backend`, so `Jit` builds and loads its sources with the same
   builder and loader as any other backend. Tests reach it through
@@ -270,7 +269,7 @@ $HIPBLASLT_JIT_LIBRARY_PATH/
 └── v1/
     ├── allocator.dat                  next free solution index
     ├── lock                           publication lock for the whole root
-    └── gfx950_..._replay_replay/      one directory per device and backend
+    └── gfx950_..._replay_1/           one directory per device and backend
         ├── cache-key.msgpack
         ├── indices.msgpack            solution index to slice key
         ├── helpers/<backend>/<name>.co
@@ -301,11 +300,11 @@ reject the directory.
 | Field | Contents |
 | --- | --- |
 | `target_id`, `isa`, `library_arch`, `wavefront_size` | Full target ID with features (for example `gfx950:sramecc+:xnack-`), ISA, TensileLite library architecture and wavefront size |
-| `backend_id`, `backend_version` | Backend identifier and version. The replay backend's version is a stable literal. |
+| `backend_id`, `backend_version` | Backend identifier and integer version. The replay backend increments its version constant when a replayed solution can change. |
 | `comgr` | comgr version, and on Linux the path, size and modification time of the loaded comgr library |
 | `code_object_version` | The code-object version that the generator and the builder use (4) |
 | `rocm_path` | The ROCm path that the builder passes to comgr |
-| `compiler_environment` | `HIP_PATH`, `LLVM_PATH`, and every set `AMD_COMGR_*` variable, such as `AMD_COMGR_DRIVER_OPTIONS_APPEND` and `AMD_COMGR_HOTSWAP_*`, except those that control only comgr's cache, logging, temporary files and statistics |
+| `compiler_environment` | `HIP_PATH`, `LLVM_PATH`, and every set `AMD_COMGR_*` variable, including `AMD_COMGR_CACHE`, `AMD_COMGR_CACHE_DIR`, `AMD_COMGR_CACHE_POLICY` and `AMD_COMGR_USE_VFS`. Logging, `SAVE_TEMPS`, `SAVE_LLVM_TEMPS` and `TIME_STATISTICS` are omitted because they do not change code-object bytes |
 | `schema` | The library schema version (1). A different integer does not reject the directory. |
 
 A process uses the directory named for its device and backend. A present device
@@ -352,12 +351,15 @@ code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
   features the device has; it is then rewritten to the device's full target
   ID. The declared wavefront size is the one the assembler uses.
 - HIP source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
-  `--rocm-path` and a `-cuid` taken from the source name. A HIP helper is
-  compiled as its own code object.
-  The ROCm path is `HIP_PATH` when set, otherwise the prefix of the loaded HIP
-  runtime.
+  `--rocm-path` and a `-cuid` taken from the source name. A HIP helper is its
+  own code object. The builder asks `JitLibrary`'s helper cache, keyed by
+  backend id and helper name, before compiling one. A hit reuses that code
+  object. A miss compiles it once, publishes it, and then compiles the main
+  kernel. The ROCm path is `HIP_PATH` when set, otherwise the prefix of the
+  loaded HIP runtime.
 - Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` links the main kernel
-  into one code object, with `-Xlinker --build-id=sha1`.
+  into one code object, with `-Xlinker --build-id=sha1`. The helper code
+  objects and the main kernel are ready to add to `JitLibrary`.
 
 The generator and the builder use the same code-object version, which
 `GenerationRequest::codeObjectVersion` and `BuildRequest::codeObjectVersion`
@@ -375,12 +377,22 @@ message.
 
 ### Loading a published solution
 
-`JitLibrary` loads a published solution as a TensileLite `ContractionSolution`
-and a `SolutionAdapter`. `loadGemmLibrary` reads a solution record and requires
-local solutions 0 to N-1. `hipblaslt-jit-loader.{hpp,cpp}` does not wrap that
-library in another type. `readTensileSourceBundle` reads a source directory
-into a `SourceCodeBundle` and the kernel name. A caller that checks predicates
-loads the record with `loadGemmLibrary`.
+`JitLibrary` is a TensileLite `SolutionLibrary`. After publish, hipBLASLt
+launches that solution the same way it launches Equality and Origami solutions.
+The stored record is a `ContractionSolution` with the code object, kernel name,
+`ContractionSolution::ProblemType`, and the predicates those libraries already
+expect. `TensileGemmBundle` does not own a `MasterSolutionLibrary`, `Hardware`,
+or `SolutionAdapter`. An in-process handle for one index refers to the solution
+inside `JitLibrary`.
+
+`loadGemmLibrary` reads a solution record with TensileLite and requires local
+solutions 0 to N-1. It does not require the record to hold exactly one
+solution. A predicate check calls it as a local load inside the replay or
+HipKittens backend function. That load is not a field of a bundle type and not
+a second library type. `readTensileSourceBundle` reads a source directory into
+a `SourceCodeBundle` and the kernel name. A backend contributes one
+`SourceCodeBundle`. Publishing adds that solution to the library, which holds
+many.
 
 The record's solutions are listed best first, each with its own `Problem` row.
 Their hardware and problem predicates decide which problems each one serves,

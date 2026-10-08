@@ -40,16 +40,18 @@ namespace hipblaslt_ext::experimental::jit::replay
 
         struct Replayed
         {
-            hipblaslt_jit::SourceCodeBundle                source;
-            std::vector<uint8_t>                           record;
-            std::shared_ptr<hipblaslt_jit::TensileLibrary> library;
+            hipblaslt_jit::SourceCodeBundle source;
+            std::vector<uint8_t>            record;
         };
+
+        // Increment when a replayed solution can change.
+        constexpr uint32_t replayVersion = 1;
 
         class ReplayBackend final : public hipblaslt_jit::Backend
         {
         public:
             explicit ReplayBackend(const Options& options)
-                : m_info{"replay", "replay", ""}
+                : m_info{"replay", "replay", replayVersion}
             {
                 if(options.replay.empty())
                     throw std::invalid_argument("The replay backend has no bundle to replay");
@@ -62,16 +64,14 @@ namespace hipblaslt_ext::experimental::jit::replay
                     namespace artifacts  = hipblaslt_jit::source_bundle;
                     replayed.record = artifacts::readArtifact(
                         artifacts::artifact(directory, "library/TensileLibrary.dat"));
-                    replayed.library = hipblaslt_jit::loadGemmLibrary(replayed.record);
-                    if(!replayed.library || replayed.library->solutions.empty())
+                    // A local load confirms the record is a TensileLite library.
+                    // Predicate checks load it again inside generate.
+                    const auto library = hipblaslt_jit::loadGemmLibrary(replayed.record);
+                    if(!library || library->solutions.empty())
                         throw std::invalid_argument("The bundle " + path
                                                     + " holds no GEMM solution");
                     m_replayed.push_back(std::move(replayed));
                 }
-                // Compatibility is the code-object version and the kernarg version
-                // stored on each solution. The backend version stays this literal
-                // so a rebuilt bundle still opens the same library directory.
-                m_info.version = "replay";
             }
 
             const hipblaslt_jit::BackendInfo& info() const noexcept override
@@ -96,7 +96,8 @@ namespace hipblaslt_ext::experimental::jit::replay
                         break;
                     size_t entrySolving = 0;
                     bool   fresh        = false;
-                    for(const auto& [index, solution] : replayed.library->solutions)
+                    const auto library  = hipblaslt_jit::loadGemmLibrary(replayed.record);
+                    for(const auto& [index, solution] : library->solutions)
                     {
                         if(!request.target.hardware
                            || !(*solution->hardwarePredicate)(*request.target.hardware))
@@ -133,8 +134,9 @@ namespace hipblaslt_ext::experimental::jit::replay
                 const auto* replayed = find(source);
                 if(!replayed)
                     return {};
+                const auto               library = hipblaslt_jit::loadGemmLibrary(replayed->record);
                 std::vector<std::string> names;
-                for(const auto& [index, solution] : replayed->library->solutions)
+                for(const auto& [index, solution] : library->solutions)
                     if(std::find(names.begin(), names.end(), solution->kernelName) == names.end())
                         names.push_back(solution->kernelName);
                 return names;

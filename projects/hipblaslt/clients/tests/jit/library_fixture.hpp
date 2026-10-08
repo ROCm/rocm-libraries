@@ -24,7 +24,7 @@ namespace hipblaslt_jit_test
         key.libraryArch       = arch;
         key.wavefrontSize     = properties.warpSize;
         key.backendId         = "pregenerated";
-        key.backendVersion    = "1";
+        key.backendVersion    = 1;
         key.codeObjectVersion = hipblaslt_jit::jitCodeObjectVersion;
         key.comgr             = hipblaslt_jit::code_object::comgrIdentity();
         key.rocmPath          = hipblaslt_jit::code_object::rocmPath();
