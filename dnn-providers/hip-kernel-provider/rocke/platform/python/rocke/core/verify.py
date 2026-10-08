@@ -38,6 +38,7 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _is_flag_ptr,
     KernelDef,
     Op,
     Region,
@@ -400,8 +401,10 @@ class _Verifier:
                 )
                 return
             ptr, idx, val = op.operands
-            if not isinstance(ptr.type, PtrType) or ptr.type.space != "global":
-                self.err(f"{name}: expected a global pointer, got {ptr.type.name}", op)
+            if not _is_flag_ptr(ptr.type):
+                self.err(
+                    f"{name}: expected a global i32 pointer, got {ptr.type.name}", op
+                )
             for what, v in (("index", idx), ("value", val)):
                 if v.type.name != "i32":
                     self.err(f"{name}: {what} must be i32, got {v.type.name}", op)

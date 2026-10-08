@@ -536,6 +536,13 @@ void rocke_b_fence(rocke_ir_builder_t* b, const char* scope, const char* orderin
     (void)rocke_i_op0(b, ROCKE_OP_MEMREF_FENCE, NULL, 0, &a);
 }
 
+/* ir._is_flag_ptr: the ptr<i32,global> a cross-workgroup flag op addresses. */
+static bool rocke_i_flag_ptr_ok(const rocke_type_t* t)
+{
+    return t && t->kind == ROCKE_TYPE_PTR && t->space && !strcmp(t->space, "global") && t->pointee
+           && rocke_i_type_is(t->pointee, "i32");
+}
+
 void rocke_b_global_flag_store(rocke_ir_builder_t* b,
                                rocke_value_t* ptr,
                                rocke_value_t* idx,
@@ -556,6 +563,14 @@ void rocke_b_global_flag_store(rocke_ir_builder_t* b,
         scope = "agent";
     if(ordering == NULL)
         ordering = "release";
+    if(!rocke_i_flag_ptr_ok(ptr->type))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_store expects a global i32 pointer, got %s",
+                              ptr->type ? ptr->type->name : "?");
+        return;
+    }
     if(!rocke_i_type_is(value->type, "i32"))
     {
         (void)rocke_i_set_err(b,
@@ -600,6 +615,14 @@ void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
     }
     if(scope == NULL)
         scope = "agent";
+    if(!rocke_i_flag_ptr_ok(ptr->type))
+    {
+        (void)rocke_i_set_err(b,
+                              ROCKE_ERR_VALUE,
+                              "global_flag_wait_eq expects a global i32 pointer, got %s",
+                              ptr->type ? ptr->type->name : "?");
+        return;
+    }
     if(!rocke_i_type_is(expect->type, "i32"))
     {
         (void)rocke_i_set_err(b,

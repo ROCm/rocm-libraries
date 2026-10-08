@@ -39,6 +39,9 @@ from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
 from .codegen_policy import codegen_policy_for_kernel
 from .ir import (
+    _FENCE_ORDERINGS,
+    _FENCE_SCOPES,
+    _FLAG_STORE_ORDERINGS,
     BF16,
     F32,
     F16,
@@ -54,6 +57,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _sync_attr,
     require_streaming_arch,
     split_loc,
 )
@@ -2962,13 +2966,15 @@ class _Lowerer:
 
     def _op_memref_fence(self, op: Op) -> None:
         """Lower ``memref.fence`` to an LLVM ``fence`` at the op's scope."""
-        self._current().emit(
-            f"  fence{_llvm_syncscope(op.attrs['scope'])} {op.attrs['ordering']}"
-        )
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        ordering = _sync_attr(op, "ordering", _FENCE_ORDERINGS)
+        self._current().emit(f"  fence{_llvm_syncscope(scope)} {ordering}")
 
     def _op_memref_global_flag_store(self, op: Op) -> None:
         """Lower ``memref.global_flag_store`` to a scoped ``store atomic i32``."""
         ptr, idx, val = op.operands
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        ordering = _sync_attr(op, "ordering", _FLAG_STORE_ORDERINGS)
         gep = self._fresh("gep")
         self._current().emit(
             f"  {gep} = getelementptr inbounds i32, ptr addrspace(1) "
@@ -2976,7 +2982,7 @@ class _Lowerer:
         )
         self._current().emit(
             f"  store atomic i32 {self._operand(val)}, ptr addrspace(1) {gep}"
-            f"{_llvm_syncscope(op.attrs['scope'])} {op.attrs['ordering']}, align 4"
+            f"{_llvm_syncscope(scope)} {ordering}, align 4"
         )
 
     def _op_memref_global_flag_wait_eq(self, op: Op) -> None:
@@ -2987,6 +2993,7 @@ class _Lowerer:
         orders every later global load after the observed flag value.
         """
         ptr, idx, expect = op.operands
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
         gep = self._fresh("gep")
         cur = self._current()
         cur.emit(
@@ -3000,7 +3007,7 @@ class _Lowerer:
         hit = self._fresh("flag.hit")
         spin.emit(
             f"  {val} = load atomic i32, ptr addrspace(1) {gep}"
-            f"{_llvm_syncscope(op.attrs['scope'])} acquire, align 4"
+            f"{_llvm_syncscope(scope)} acquire, align 4"
         )
         spin.emit(f"  {hit} = icmp eq i32 {val}, {self._operand(expect)}")
         done = self._new_block("flag.done")

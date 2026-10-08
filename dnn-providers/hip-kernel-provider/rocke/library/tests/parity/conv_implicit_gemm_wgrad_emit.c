@@ -54,7 +54,7 @@
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
 
-/* Stream-K fields of configs 18-27 (Python _STREAMK_CFGS). */
+/* Stream-K fields of configs 21-29 (Python _STREAMK_CFGS). */
 static int streamk_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
     /* idx: dtype a/b, dtype d, atom edge, streamk, reduction, ctas, arch */

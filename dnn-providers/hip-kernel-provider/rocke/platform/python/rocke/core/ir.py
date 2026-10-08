@@ -143,12 +143,43 @@ def _streaming(temporal_hint: TemporalHint) -> bool:
         raise TypeError(f"temporal_hint must be a TemporalHint, got {temporal_hint!r}")
     return temporal_hint is TemporalHint.STREAMING
 
+
 # LLVM ``syncscope`` values accepted by the cross-workgroup fence / flag ops.
 # ``system`` renders as the empty (default) scope.
 _FENCE_SCOPES = ("workgroup", "agent", "system")
 # Orderings each op accepts; the verifier checks serialized IR against these.
 _FENCE_ORDERINGS = ("acquire", "release", "acq_rel", "seq_cst")
 _FLAG_STORE_ORDERINGS = ("monotonic", "release", "seq_cst")
+
+
+def _is_flag_ptr(t: "Type") -> bool:
+    """True for the ``ptr<i32,global>`` a cross-workgroup flag op addresses.
+
+    Both lowerers hard-code an i32 element (LLVM GEPs ``i32``; HIP indexes
+    the pointer's own element type), so any other pointee would make the two
+    disagree on the flag's address and width.
+    """
+    return isinstance(t, PtrType) and t.space == "global" and t.pointee.name == "i32"
+
+
+def _check_flag_ptr(op_name: str, ptr: "Value") -> None:
+    if not _is_flag_ptr(ptr.type):
+        raise ValueError(f"{op_name} expects a global i32 pointer, got {ptr.type.name}")
+
+
+def _sync_attr(op: "Op", key: str, allowed: Sequence[str]) -> str:
+    """Scope / ordering attr of a fence or flag op, checked for the lowerers.
+
+    The lowerers can run on IR that never went through :func:`verify`, so a
+    missing or unknown value is rejected here instead of being defaulted or
+    rendered into invalid IR. The C++ engine raises the same messages.
+    """
+    value = op.attrs.get(key)
+    if not isinstance(value, str):
+        raise ValueError(f"{op.name}: {key} attribute missing or not a string")
+    if value not in allowed:
+        raise ValueError(f"{op.name}: unknown {key} '{value}'")
+    return value
 
 
 # ----- target-neutral MMA metadata ---------------------------------------
@@ -1505,6 +1536,7 @@ class IRBuilder:
         Lowers to ``store atomic i32 ... syncscope(scope) ordering``. Pair
         with :meth:`global_flag_wait_eq` on the consumer side.
         """
+        _check_flag_ptr("global_flag_store", ptr)
         if value.type.name != "i32":
             raise ValueError(
                 f"global_flag_store expects an i32 value, got {value.type.name}"
@@ -1535,6 +1567,7 @@ class IRBuilder:
         data-dependent trip count in the IR; it is a leaf op so structured
         control flow stays ``scf.for`` / ``scf.if`` only.
         """
+        _check_flag_ptr("global_flag_wait_eq", ptr)
         if expect.type.name != "i32":
             raise ValueError(
                 f"global_flag_wait_eq expects an i32 value, got {expect.type.name}"

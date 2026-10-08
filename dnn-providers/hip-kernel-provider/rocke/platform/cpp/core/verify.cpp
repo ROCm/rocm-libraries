@@ -529,9 +529,11 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
             return;
         }
         const rocke_type_t* pt = op->operands[0]->type;
-        if(!pt || pt->kind != ROCKE_TYPE_PTR || !pt->space || strcmp(pt->space, "global"))
+        /* ir._is_flag_ptr: both lowerers address the flag as an i32. */
+        if(!pt || pt->kind != ROCKE_TYPE_PTR || !pt->space || strcmp(pt->space, "global")
+           || strcmp(tn(pt->pointee), "i32"))
         {
-            v_errf(v, op, "%s: expected a global pointer, got %s", name, tn(pt));
+            v_errf(v, op, "%s: expected a global i32 pointer, got %s", name, tn(pt));
         }
         const char* what[] = {"index", "value"};
         for(int i = 0; i < 2; ++i)

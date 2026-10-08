@@ -183,6 +183,30 @@ static void op_memref_global_store_typed(rocke_lower_t* L, const rocke_op_t* op)
                    (long long)align);
 }
 
+/* ir._FENCE_SCOPES / _FENCE_ORDERINGS / _FLAG_STORE_ORDERINGS. */
+static const char* const k_ll_sync_scopes[] = {"workgroup", "agent", "system", NULL};
+static const char* const k_ll_fence_orderings[]
+    = {"acquire", "release", "acq_rel", "seq_cst", NULL};
+static const char* const k_ll_flag_store_orderings[] = {"monotonic", "release", "seq_cst", NULL};
+
+/* Python ir._sync_attr: the lowerer may run on unverified IR, so a missing or
+ * unknown scope / ordering is rejected rather than defaulted or rendered into
+ * invalid IR. */
+static const char* ll_sync_attr(rocke_lower_t* L,
+                                const rocke_op_t* op,
+                                const char* key,
+                                const char* const* allowed)
+{
+    const char* s = rocke_attr_get_str(&op->attrs, key);
+    if(!s)
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "%s: %s attribute missing or not a string", op->name, key);
+    for(const char* const* a = allowed; *a; ++a)
+        if(strcmp(s, *a) == 0)
+            return s;
+    rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s: unknown %s '%s'", op->name, key, s);
+}
+
 /* Python _llvm_syncscope: "system" is LLVM's default scope (no clause). */
 static const char* ll_syncscope(rocke_lower_t* L, const char* scope)
 {
@@ -194,10 +218,9 @@ static const char* ll_syncscope(rocke_lower_t* L, const char* scope)
 /* Python _op_memref_fence. */
 static void op_memref_fence(rocke_lower_t* L, const rocke_op_t* op)
 {
-    rocke_ll_emitf(L,
-                   "  fence%s %s",
-                   ll_syncscope(L, ll_attr_str(op, "scope", "agent")),
-                   ll_attr_str(op, "ordering", "acq_rel"));
+    const char* scope = ll_sync_attr(L, op, "scope", k_ll_sync_scopes);
+    const char* ordering = ll_sync_attr(L, op, "ordering", k_ll_fence_orderings);
+    rocke_ll_emitf(L, "  fence%s %s", ll_syncscope(L, scope), ordering);
 }
 
 /* Python _op_memref_global_flag_store. */
@@ -208,6 +231,8 @@ static void op_memref_global_flag_store(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* ptr = op->operands[0];
     const rocke_value_t* idx = op->operands[1];
     const rocke_value_t* val = op->operands[2];
+    const char* scope = ll_sync_attr(L, op, "scope", k_ll_sync_scopes);
+    const char* ordering = ll_sync_attr(L, op, "ordering", k_ll_flag_store_orderings);
     const char* gep = rocke_ll_fresh(L, "gep");
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds i32, ptr addrspace(1) %s, i32 %s",
@@ -218,8 +243,8 @@ static void op_memref_global_flag_store(rocke_lower_t* L, const rocke_op_t* op)
                    "  store atomic i32 %s, ptr addrspace(1) %s%s %s, align 4",
                    rocke_ll_operand(L, val),
                    gep,
-                   ll_syncscope(L, ll_attr_str(op, "scope", "agent")),
-                   ll_attr_str(op, "ordering", "release"));
+                   ll_syncscope(L, scope),
+                   ordering);
 }
 
 /* Python _op_memref_global_flag_wait_eq: a self-contained spin loop around an
@@ -231,6 +256,7 @@ static void op_memref_global_flag_wait_eq(rocke_lower_t* L, const rocke_op_t* op
     const rocke_value_t* ptr = op->operands[0];
     const rocke_value_t* idx = op->operands[1];
     const rocke_value_t* expect = op->operands[2];
+    const char* scope = ll_sync_attr(L, op, "scope", k_ll_sync_scopes);
     const char* gep = rocke_ll_fresh(L, "gep");
     rocke_ll_block_t* cur = rocke_ll_current(L);
     rocke_ll_block_t* spin;
@@ -255,7 +281,7 @@ static void op_memref_global_flag_wait_eq(rocke_lower_t* L, const rocke_op_t* op
                          "  %s = load atomic i32, ptr addrspace(1) %s%s acquire, align 4",
                          val,
                          gep,
-                         ll_syncscope(L, ll_attr_str(op, "scope", "agent")));
+                         ll_syncscope(L, scope));
     rocke_ll_block_emitf(
         L, spin, "  %s = icmp eq i32 %s, %s", hit, val, rocke_ll_operand(L, expect));
     done = rocke_ll_new_block(L, "flag.done");

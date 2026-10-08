@@ -762,8 +762,37 @@ static rocke_status_t _op_memref_global_atomic_add(rocke_h_lowerer_t* lw, const 
     return lw->status;
 }
 
-/* Python _HIP_ATOMIC_ORDER / _HIP_FENCE_SCOPE / _HIP_MEMORY_SCOPE.  Unknown
- * spellings return NULL so the ops reject them, like Python's table lookup. */
+/* ir._FENCE_SCOPES / _FENCE_ORDERINGS / _FLAG_STORE_ORDERINGS. */
+static const char* const k_hip_sync_scopes[] = {"workgroup", "agent", "system", NULL};
+static const char* const k_hip_fence_orderings[]
+    = {"acquire", "release", "acq_rel", "seq_cst", NULL};
+static const char* const k_hip_flag_store_orderings[] = {"monotonic", "release", "seq_cst", NULL};
+
+/* Python ir._sync_attr: the lowerer may run on unverified IR, so a missing or
+ * unknown scope / ordering is rejected rather than defaulted. */
+static const char* hip_sync_attr(rocke_h_lowerer_t* lw,
+                                 const rocke_op_t* op,
+                                 const char* key,
+                                 const char* const* allowed)
+{
+    const char* s = rocke_attr_get_str(&op->attrs, key);
+    if(!s)
+    {
+        rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "%s: %s attribute missing or not a string", op->name, key);
+    }
+    for(const char* const* a = allowed; *a; ++a)
+    {
+        if(!strcmp(s, *a))
+        {
+            return s;
+        }
+    }
+    rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s: unknown %s '%s'", op->name, key, s);
+}
+
+/* Python _HIP_ATOMIC_ORDER / _HIP_FENCE_SCOPE / _HIP_MEMORY_SCOPE, applied to
+ * values hip_sync_attr already accepted. */
 static const char* hip_atomic_order(const char* o)
 {
     if(!strcmp(o, "monotonic"))
@@ -774,9 +803,7 @@ static const char* hip_atomic_order(const char* o)
         return "__ATOMIC_RELEASE";
     if(!strcmp(o, "acq_rel"))
         return "__ATOMIC_ACQ_REL";
-    if(!strcmp(o, "seq_cst"))
-        return "__ATOMIC_SEQ_CST";
-    return NULL;
+    return "__ATOMIC_SEQ_CST";
 }
 
 static const char* hip_fence_scope(const char* s)
@@ -785,9 +812,7 @@ static const char* hip_fence_scope(const char* s)
         return "workgroup";
     if(!strcmp(s, "agent"))
         return "agent";
-    if(!strcmp(s, "system"))
-        return "";
-    return NULL;
+    return "";
 }
 
 static const char* hip_memory_scope(const char* s)
@@ -796,39 +821,28 @@ static const char* hip_memory_scope(const char* s)
         return "__HIP_MEMORY_SCOPE_WORKGROUP";
     if(!strcmp(s, "agent"))
         return "__HIP_MEMORY_SCOPE_AGENT";
-    if(!strcmp(s, "system"))
-        return "__HIP_MEMORY_SCOPE_SYSTEM";
-    return NULL;
+    return "__HIP_MEMORY_SCOPE_SYSTEM";
 }
 
 /* Python _op_memref_fence */
 static rocke_status_t _op_memref_fence(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const char *ord_s, *scp_s, *ord, *scp;
+    const char *scp, *ord;
     if(!rocke_h_live(lw))
     {
         return lw->status;
     }
-    ord_s = mem_attr_str(op, "ordering", "acq_rel");
-    scp_s = mem_attr_str(op, "scope", "agent");
-    ord = hip_atomic_order(ord_s);
-    scp = hip_fence_scope(scp_s);
-    if(!ord)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.fence: unknown ordering '%s'", ord_s);
-    }
-    if(!scp)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.fence: unknown scope '%s'", scp_s);
-    }
-    rocke_h_emitf(lw, "__builtin_amdgcn_fence(%s, \"%s\");", ord, scp);
+    scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
+    ord = hip_sync_attr(lw, op, "ordering", k_hip_fence_orderings);
+    rocke_h_emitf(
+        lw, "__builtin_amdgcn_fence(%s, \"%s\");", hip_atomic_order(ord), hip_fence_scope(scp));
     return lw->status;
 }
 
 /* Python _op_memref_global_flag_store */
 static rocke_status_t _op_memref_global_flag_store(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const char *ord_s, *scp_s, *ord, *scp;
+    const char *scp, *ord;
     if(!rocke_h_live(lw))
     {
         return lw->status;
@@ -837,34 +851,22 @@ static rocke_status_t _op_memref_global_flag_store(rocke_h_lowerer_t* lw, const 
     {
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_flag_store: too few operands");
     }
-    ord_s = mem_attr_str(op, "ordering", "release");
-    scp_s = mem_attr_str(op, "scope", "agent");
-    ord = hip_atomic_order(ord_s);
-    scp = hip_memory_scope(scp_s);
-    if(!ord)
-    {
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "memref.global_flag_store: unknown ordering '%s'", ord_s);
-    }
-    if(!scp)
-    {
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "memref.global_flag_store: unknown scope '%s'", scp_s);
-    }
+    scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
+    ord = hip_sync_attr(lw, op, "ordering", k_hip_flag_store_orderings);
     rocke_h_emitf(lw,
                   "__hip_atomic_store(&%s[%s], %s, %s, %s);",
                   rocke_h_name(lw, op->operands[0]),
                   rocke_h_name(lw, op->operands[1]),
                   rocke_h_name(lw, op->operands[2]),
-                  ord,
-                  scp);
+                  hip_atomic_order(ord),
+                  hip_memory_scope(scp));
     return lw->status;
 }
 
 /* Python _op_memref_global_flag_wait_eq */
 static rocke_status_t _op_memref_global_flag_wait_eq(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const char *scp_s, *scp;
+    const char* scp;
     if(!rocke_h_live(lw))
     {
         return lw->status;
@@ -873,18 +875,12 @@ static rocke_status_t _op_memref_global_flag_wait_eq(rocke_h_lowerer_t* lw, cons
     {
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_flag_wait_eq: too few operands");
     }
-    scp_s = mem_attr_str(op, "scope", "agent");
-    scp = hip_memory_scope(scp_s);
-    if(!scp)
-    {
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "memref.global_flag_wait_eq: unknown scope '%s'", scp_s);
-    }
+    scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
     rocke_h_emitf(lw,
                   "while (__hip_atomic_load(&%s[%s], __ATOMIC_ACQUIRE, %s) != %s) {}",
                   rocke_h_name(lw, op->operands[0]),
                   rocke_h_name(lw, op->operands[1]),
-                  scp,
+                  hip_memory_scope(scp),
                   rocke_h_name(lw, op->operands[2]));
     return lw->status;
 }
