@@ -50,6 +50,9 @@ NO_BUFFER_OOB_KERNELS = {
     "NUM_KSPLIT_1": "Triton, global_store only",
     "c_ck_gemm_basic_hip_amdgcn_amd_amdhsa_gfx942": "Composable Kernel",
     "wave_bf16_gemm_256x256x64": "Wave, global_store only",
+    "wvSpltK_bf16_tn_m1": "rocBLAS wvSpltK, global_store only",
+    "wvSpltK_bf16_tn_m2": "rocBLAS wvSpltK, global_store only",
+    "wvSpltK_bf16_tn_m4": "rocBLAS wvSpltK, global_store only",
 }
 
 _SET_BUFFER_OOB = re.compile(r"^\s*\.set\s+BufferOOB\s*,\s*([^\s/]+)", re.M)
