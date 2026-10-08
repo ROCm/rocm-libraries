@@ -36,9 +36,12 @@ set_target_properties(hipblaslt-tuning-store
 )
 target_compile_features(hipblaslt-tuning-store PUBLIC cxx_std_17)
 target_compile_definitions(hipblaslt-tuning-store PRIVATE ROCM_USE_FLOAT16)
+# TensileLite's headers, not tensilelite-host itself: the store calls nothing in
+# it, and linking it would bring the solution library and HIP's device runtime.
 target_include_directories(hipblaslt-tuning-store
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:$<TARGET_PROPERTY:tensilelite-host,INTERFACE_INCLUDE_DIRECTORIES>>
     PRIVATE
         "${PROJECT_SOURCE_DIR}/library/src/amd_detail/include"
         "${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include"
@@ -47,7 +50,7 @@ target_include_directories(hipblaslt-tuning-store
 )
 target_link_libraries(hipblaslt-tuning-store
     PUBLIC
-        roc::tensilelite-host
+        $<BUILD_INTERFACE:rocisa::rocisa-cpp>
     PRIVATE
         roc::${hipblas_target}
         hip::host
@@ -55,6 +58,9 @@ target_link_libraries(hipblaslt-tuning-store
 if(HIPBLASLT_ENABLE_COVERAGE)
     target_compile_options(hipblaslt-tuning-store PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(hipblaslt-tuning-store PUBLIC -fprofile-instr-generate)
+endif()
+if(HIPBLASLT_ENABLE_ASAN OR HIPBLASLT_ENABLE_TSAN)
+    hipblaslt_target_configure_sanitizers(hipblaslt-tuning-store PUBLIC)
 endif()
 target_link_libraries(hipblaslt PRIVATE hipblaslt-tuning-store)
 
