@@ -207,6 +207,7 @@ struct settings
     bool        output_batches          = false; ///< Flag to output batch details.
     uint32_t    spaces_per_indent       = 4; ///< JSON indentation spaces.
     double stream_blocking_timeout_secs = 10.0; ///< Max duration before stream blocking times out.
+    bool   sync                         = false; ///< Synchronous kernel; disables stream blocking.
     bool   skip_header                  = false; //< Skip printing the header to output.
 
     using custom_arg_value = std::variant<std::string, bool, double, int, unsigned int, size_t>;
@@ -1330,6 +1331,7 @@ private:
         ss << ",\"output_batches\":" << s.output_batches;
         ss << ",\"spaces_per_indent\":" << s.spaces_per_indent;
         ss << ",\"stream_blocking_timeout_secs\":" << s.stream_blocking_timeout_secs;
+        ss << ",\"sync\":" << s.sync;
         ss << ",\"skip_header\":" << s.skip_header;
 
         ss << "}";
@@ -2895,7 +2897,7 @@ private:
             // could capture a timestamp well before the kernel actually begins executing.
             // block_stream() guarantees there is no time gap between recording
             // the start event and queuing the kernel on the GPU.
-            if(!m_flags.has(flags::Flags::sync))
+            if(!(m_settings.sync || m_flags.has(flags::Flags::sync)))
                 m_stream_blocker.block();
 
             // Even events record the start time.
@@ -2909,7 +2911,7 @@ private:
             PRIMBENCH_CHECK(event_record(events[i * 2 + 1], stream));
 
             // Allows the GPU to start running its queued events.
-            if(!m_flags.has(flags::Flags::sync))
+            if(!(m_settings.sync || m_flags.has(flags::Flags::sync)))
                 m_stream_blocker.unblock();
 
             // Catches kernel launch errors.
@@ -2930,7 +2932,7 @@ private:
                 PRIMBENCH_CHECK(get_last_error());
 
                 // Check for blocking kernel timeout after sync.
-                if(!m_flags.has(flags::Flags::sync))
+                if(!(m_settings.sync || m_flags.has(flags::Flags::sync)))
                     m_stream_blocker.check_timeout();
             }
         }
@@ -2941,7 +2943,7 @@ private:
         PRIMBENCH_CHECK(get_last_error());
 
         // Final blocking kernel timeout check.
-        if(!m_flags.has(flags::Flags::sync))
+        if(!(m_settings.sync || m_flags.has(flags::Flags::sync)))
             m_stream_blocker.check_timeout();
     }
 
@@ -3291,6 +3293,7 @@ public:
                                                                      "output-batches",
                                                                      "spaces-per-indent",
                                                                      "stream-blocking-timeout-secs",
+                                                                     "sync",
                                                                      "skip-header"};
 
         auto parse_value = [](const std::string& value) -> settings::custom_arg_value
@@ -3852,6 +3855,12 @@ private:
             std::cerr << "Error: --stream-blocking-timeout-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
+
+        s.sync = cli.get<bool>(
+            "sync",
+            s.sync,
+            "Kernel is synchronous, e.g. it blocks the host until it completes. Disables stream "
+            "blocking.");
 
         s.skip_header
             = cli.get<bool>("skip-header", s.skip_header, "Skip printing the header to output.");
