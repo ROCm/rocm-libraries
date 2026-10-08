@@ -179,3 +179,28 @@ def test_failed_kernels_neither_prune_nor_record(monkeypatch, tmp_path):
     assert stop.measure(ok, warmup=3, iters=10) == 2.0
     assert stop.best_ms == 2.0
     assert list(json.loads(record.read_text()).values()) == [2.0]
+
+
+def test_hopeless_needs_an_absolute_excess_too(monkeypatch):
+    """Next to a tiny best, a first launch's host-side setup alone can pass the
+    relative margin; the absolute excess keeps such a kernel on the full
+    warmup path."""
+    fast, cold = object(), object()
+    calls = _fake_timer(monkeypatch, {fast: 0.01, cold: 0.5})
+    stop = EarlyStop(5.0, after=1)
+    stop.measure(fast, warmup=3, iters=10)
+    n = len(calls)
+    assert stop.measure(cold, warmup=3, iters=10) is None
+    assert calls[n:] == [(cold, 0, 1), (cold, 0, 2)]
+    assert not stop.last_hopeless
+
+
+def test_failed_kernels_are_not_probed(monkeypatch):
+    """A kernel that failed verification keeps its FAIL row: no probe stops it
+    before ``after`` holds."""
+    fast, wrong = object(), object()
+    _fake_timer(monkeypatch, {fast: 1.0, wrong: 100.0})
+    stop = EarlyStop(5.0, after=3)
+    stop.measure(fast, warmup=3, iters=10)
+    assert stop.measure(wrong, warmup=3, iters=10, passed=False) == 100.0
+    assert stop.best_ms == 1.0

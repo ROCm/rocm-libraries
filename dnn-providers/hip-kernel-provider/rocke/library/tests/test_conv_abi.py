@@ -1320,10 +1320,20 @@ def test_aot_wgrad_dgrad_jobs_pick_the_lds_layout_and_split(monkeypatch):
             wave_size=target.wave_size,
         )
         assert job.spec_kwargs["lds_k_outer"] == i.lds_k_outer
+        assert job.spec_kwargs.get("prefetch_addr", False) == i.prefetch_addr
+    # Pinned, not just re-derived: gfx950 16-bit wgrad is K-outer throughout.
+    assert wgrad and all(j.identity.lds_k_outer for j in wgrad)
     assert {j.identity.split_k for j in wgrad if j.identity.group_merge == 1} == {1, 2}
     assert {j.identity.split_k for j in wgrad if j.identity.group_merge > 1} == {2}
 
-    for job in ks._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64):
+    dgrad = list(ks._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64))
+    # Pinned: a scalar-B binary may serve an odd channel run, so it stays
+    # M-outer; some wider ones are K-outer.
+    assert not any(
+        j.identity.lds_k_outer for j in dgrad if j.identity.vector_size_b == 1
+    )
+    assert any(j.identity.lds_k_outer for j in dgrad)
+    for job in dgrad:
         i = job.identity
         assert i.lds_k_outer == (
             i.vector_size_b > 1

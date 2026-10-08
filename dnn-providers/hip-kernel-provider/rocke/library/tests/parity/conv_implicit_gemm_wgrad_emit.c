@@ -31,7 +31,7 @@
  *  17  N8H56W56C64_K64Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250 (WMMA w32), lds_k_outer fp32 out
  *  18  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, unroll_k, split_k=4 fp32
  *  19  N8H56W56C3_K64Y3X3,  t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=2 two_stage fp16
- *  21-37  prefetch_addr=true on a base config (pfa_base below); 35-37 pair it
+ *  21-38  prefetch_addr=true on a base config (pfa_base below); 35-37 pair it
  *         with async_dma / unroll_k / WMMA and must be rejected by both engines
  */
 #include <stdio.h>
@@ -44,11 +44,11 @@
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
 
-/* prefetch_addr configs 21-37: the base config each one flips the flag on.
+/* prefetch_addr configs 21-38: the base config each one flips the flag on.
  * Must match _PFA_BASES in the Python emitter. -1 = not a prefetch_addr index. */
 static int pfa_base(int idx)
 {
-    static const int bases[] = {1, 11, 4, 13, 7, 11, 15, 19, 14, 3, 8, 16, 0, 10, 12, 18, 5};
+    static const int bases[] = {1, 11, 4, 13, 7, 11, 15, 19, 14, 3, 8, 16, 0, 10, 12, 18, 5, 4};
     if(idx < 21 || idx >= 21 + (int)(sizeof(bases) / sizeof(bases[0])))
         return -1;
     return bases[idx - 21];
@@ -70,6 +70,12 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->split_k = 2; /* split-K packed fp16 atomic on the K-outer cshuffle base */
     if(idx == 33)
         spec->pipeline = "compv3";
+    if(idx == 38)
+    {
+        /* C = K = 3 on the 128x128x64 base: both operands load scalar, so
+         * more carried offsets than accumulators */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 3, 3, 3, 3);
+    }
     return 0;
 }
 

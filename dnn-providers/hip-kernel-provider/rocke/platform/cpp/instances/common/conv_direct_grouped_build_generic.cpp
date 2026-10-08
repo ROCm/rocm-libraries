@@ -270,6 +270,10 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
     if(!rocke_direct_conv_is_valid_spec(spec, arch, reason, sizeof reason))
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "invalid DirectConvSpec for %s: %s", arch, reason);
+    /* Python raises here; stop before the geometry below divides by an
+     * unvalidated wave count. */
+    if(!rocke_ir_builder_ok(b))
+        return NULL;
 
     ctx = (dconv_gen_ctx_t*)rocke_arena_calloc(&b->arena, sizeof(*ctx));
     if(ctx == NULL)
@@ -319,11 +323,15 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
     const bool mask_k_tail = RTC ? !FOLD_K32 : (p.cpg % K_ATOM_SIZE) != 0;
 
     if(PASSES > DCONV_GEN_MAX_PASSES)
+    {
+        /* chunk_meta[] holds DCONV_GEN_MAX_PASSES entries. */
         rocke_i_set_err(b,
                         ROCKE_ERR_VALUE,
                         "build_direct_conv: %d LDS loader passes per row exceed %d",
                         PASSES,
                         DCONV_GEN_MAX_PASSES);
+        return NULL;
+    }
     ctx->LOAD_VEC = LOAD_VEC;
     ctx->PASSES = PASSES;
 

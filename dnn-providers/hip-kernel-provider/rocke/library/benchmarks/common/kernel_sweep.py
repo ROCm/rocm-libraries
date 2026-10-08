@@ -45,26 +45,30 @@ Per direction, on top of that:
 * **wgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
   {1, 2, 4, 8} (X and dW along cpg); with the default epilogue (all
   two-stage kernels) c = 1 and b in {1, 2, 4, 8}. pipeline "wavelet" is not cached (wgrad
-  builds it as mem). Only the split-K kernel is cached (``split_k`` > 1,
-  recorded as 2; the degree is a kernarg and the benchmark sweeps it at
-  launch), as atomic or two-stage (f32 scratch + Stage-2 reduce,
-  ``ws_replicas`` = 8). Plus group-merged depthwise kernels
-  (``group_merge`` in 2..64, two-stage, load widths derived by the builder),
-  served only to depthwise problems whose merged GEMM fits the tile.
+  builds it as mem). Both the non-split kernel (``split_k`` = 1) and the
+  split-K kernel (``split_k`` > 1, recorded as 2; the degree is a kernarg and
+  the benchmark sweeps it at launch) are cached, the latter as atomic or
+  two-stage (f32 scratch + Stage-2 reduce, ``ws_replicas`` = 8). Plus
+  group-merged depthwise kernels (``group_merge`` in 2..64, split-K
+  two-stage only, load widths derived by the builder), served only to
+  depthwise problems whose merged GEMM fits the tile. ``lds_k_outer`` and
+  ``prefetch_addr`` follow ``WgradConvSpec.default_lds_k_outer`` /
+  ``default_prefetch_addr`` per geometry.
 * **dgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
   {1, 2, 4, 8} (W and dX along cpg); with the default epilogue c = 1 and b in
   {1, 2, 4, 8}. stride and dilation are baked into the
   tilde decomposition, so they are capabilities: stride in {1, 2} x dilation
-  in {1, 2}; up to 64 sub-GEMMs.
+  in {1, 2}; up to 64 sub-GEMMs. ``lds_k_outer`` is on for b > 1 binaries
+  (the even channel run its predicate wants) and ``uniform_k_decode``
+  follows ``DgradConvSpec.default_uniform_k_decode``.
 
 Every direction builds the grouped kernel only: it serves groups == 1 as well
 (``CACHE_GROUPED``), so there is no separate ungrouped binary.
 
-Not swept (spec defaults): ``lds_k_outer`` (off, so wgrad ``async_dma``, which
-needs it, is never built), ``chiplet_swizzle``, ``lds_k_pad`` / ``lds_layout``,
-``waves_per_eu``, accumulator epilogues, ``cshuffle_no_alias``, the wgrad
-non-split (``split_k`` = 1) kernel, the pointwise fast path (1x1 problems run
-the general kernels) and 3-D convolution. The direct-conv cache sweeps its own
+Not swept (spec defaults): wgrad ``async_dma``, ``chiplet_swizzle``,
+``lds_k_pad`` / ``lds_layout``, ``waves_per_eu``, accumulator epilogues,
+``cshuffle_no_alias``, the pointwise fast path (1x1 problems run the general
+kernels) and 3-D convolution. The direct-conv cache sweeps its own
 grid: see :mod:`benchmarks.common.direct_kernel_sweep`.
 """
 

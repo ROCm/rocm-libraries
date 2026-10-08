@@ -899,7 +899,7 @@ def main() -> int:
             "1 = disabled, "
             ">1 = fixed degree, "
             "-1 = auto (CK formula per tile config)"
-        ).replace("%(auto)s", str(list(_SPLIT_K_AUTO))),
+        ).replace("%(auto)s", str(list(_WGRAD_SPLIT_K_DEGREES))),
     )
 
     parser.add_argument(
@@ -957,6 +957,8 @@ def main() -> int:
             "If a kernel's TFLOPS at a given split-K degree drops by at least PCT%% "
             "relative to its best split-K seen so far, skip all remaining split-K "
             "degrees for that tile/warp/pipeline/epilogue configuration. "
+            "With --run-from-cache a degree early-stopped after another was "
+            "measured prunes the rest too. "
             "Example: --split-k-prune 15 prunes when performance drops by >=15%%."
         ),
     )
@@ -2529,7 +2531,7 @@ def _run_wgrad_sweep(
         1        — disabled (normal epilogue, z-grid = 1).
         >1       — fixed degree; dW is zero-initialised before each launch,
                    kernel atomic-adds partials, result is final dW.
-        0 (auto) — sweep all degrees in _SPLIT_K_AUTO.
+        0 (auto) — sweep all degrees in _WGRAD_SPLIT_K_DEGREES.
     """
     import torch
     from kernels.common.conv_abi import conv_args_signature
@@ -2705,7 +2707,7 @@ def _run_wgrad_sweep(
     work = [(combo, problem, dtype, arch) for combo in combos]
     pending = _build_ir_parallel(work, _build_and_compile_wgrad_one, jobs)
     # Re-sort: group by config (all combo dims except split_k), then split_k descending
-    # so _SPLIT_K_AUTO order (128, 64, ..., 1) is preserved for --split-k-prune.
+    # so the descending degree order is preserved for --split-k-prune.
     pending.sort(key=lambda r: (r[0][:9], -r[2]))
     n_skipped = len(combos) - len(pending)
     n_built = len(pending)
@@ -3719,11 +3721,22 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 )
                 continue
 
-            if direction == "wgrad" and problem.cpg == problem.kpg == 1 < problem.groups:
+            if (
+                direction == "wgrad"
+                and problem.cpg == problem.kpg == 1 < problem.groups
+            ):
                 # Depthwise: the non-split kernel leaves one workgroup per
                 # group and cannot fill the device, so -- as in the JIT
                 # sweep -- only split-K kernels are offered.
                 candidates = [c for c in candidates if c[0].split_k > 1]
+                if not candidates:
+                    print(
+                        f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "
+                        f"no compatible kernel (depthwise runs split-K kernels "
+                        f"only; the cache has none for this shape)",
+                        flush=True,
+                    )
+                    continue
             if direction == "wgrad" and args.two_stage != "always":
                 # Same rule as the JIT sweep's --two-stage: by default the
                 # two-stage (scratch + reduce) kernels only run when C/groups
@@ -3962,6 +3975,9 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                             compute_dtype=case_dtype,
                         )
                         if stopped:
+                            _free_extras(rt, live_extras)
+                            for buf in (A_dev, B_dev, D_dev):
+                                rt.free(buf)
                             return 1
                         if not passed:
                             n_failed += 1

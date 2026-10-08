@@ -36,6 +36,10 @@ DEFAULT_AFTER = 100
 # and on them the warmup is most of the sweep's clock. The margin keeps a
 # cold first launch from ever stopping a kernel the full warmup would keep.
 HOPELESS_MARGIN = 4.0
+# ...and only when it is also this far past the bound in absolute terms. A
+# first launch carries host-side setup a warmed-up launch does not, which next
+# to a tiny bound could alone exceed the margin.
+HOPELESS_MIN_EXCESS_MS = 1.0
 
 
 def add_early_stop_arg(parser) -> None:
@@ -59,7 +63,8 @@ def add_early_stop_arg(parser) -> None:
         help="time the first N kernels of a sweep in full before --early-stop "
         f"starts skipping (default: {DEFAULT_AFTER}); a seeded case skips from "
         "the first kernel. A kernel whose first launch is "
-        f"{HOPELESS_MARGIN:g} x past the --early-stop bound is skipped either way",
+        f"{HOPELESS_MARGIN:g} x (and {HOPELESS_MIN_EXCESS_MS:g} ms) past the "
+        "--early-stop bound is skipped either way",
     )
     parser.add_argument(
         "--early-stop-seed",
@@ -129,8 +134,9 @@ class EarlyStop:
     more than ``factor`` times the best result so far, returns ``None`` without
     running the timed loop. The first ``after`` kernels of a sweep are measured
     in full, so the best result is established before it is used -- except a
-    kernel whose first launch is already ``HOPELESS_MARGIN`` times past that
-    bound, which no later best can rescue.
+    kernel whose first launch is already ``HOPELESS_MARGIN`` times (and
+    ``HOPELESS_MIN_EXCESS_MS``) past that bound, which no later best can
+    rescue.
     A kernel measured with ``passed=False`` (it failed verification) neither
     counts towards ``after`` nor updates the best result or the record file.
     """
@@ -185,7 +191,14 @@ class EarlyStop:
         # HOPELESS_MARGIN x factor x it can never rank. The full warmup
         # comparison waits for ``after`` kernels (or a seed), as it is the
         # one a young best could mislead.
-        probing = self.factor > 0 and self.best_ms is not None and warmup > 0
+        # A kernel that failed verification is timed in full: it is reported,
+        # never ranked, so skipping it would only drop its FAIL row.
+        probing = (
+            self.factor > 0
+            and self.best_ms is not None
+            and warmup > 0
+            and passed is not False
+        )
         engaged = probing and (
             self.seed_ms is not None or self.n_measured >= self.after
         )
@@ -193,7 +206,10 @@ class EarlyStop:
         if probing:
             bound = self.factor * self.best_ms
             probe = time_launches(fn, warmup=0, iters=1, stream=stream)
-            if probe > HOPELESS_MARGIN * bound:
+            if (
+                probe > HOPELESS_MARGIN * bound
+                and probe - bound > HOPELESS_MIN_EXCESS_MS
+            ):
                 self.last_warmup_ms = probe
                 self.last_hopeless = True
                 self.n_stopped += 1
@@ -226,9 +242,14 @@ class EarlyStop:
     def report(self, label: str) -> None:
         """Print the line for a kernel :meth:`measure` just skipped."""
         seeded = " (seed)" if self.best_ms == self.seed_ms else ""
+        if self.last_hopeless:
+            what = "first launch"
+            factor = HOPELESS_MARGIN * self.factor
+        else:
+            what, factor = "warmup", self.factor
         print(
-            f"  [early-stop] {label}: warmup {self.last_warmup_ms:.3f} ms > "
-            f"{self.factor:g} x best {self.best_ms:.3f} ms{seeded}",
+            f"  [early-stop] {label}: {what} {self.last_warmup_ms:.3f} ms > "
+            f"{factor:g} x best {self.best_ms:.3f} ms{seeded}",
             flush=True,
         )
 

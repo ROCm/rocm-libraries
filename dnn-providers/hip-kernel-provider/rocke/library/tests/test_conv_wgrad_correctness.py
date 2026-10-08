@@ -2343,8 +2343,8 @@ class TestWgradPrefetchAddrNumerics(unittest.TestCase):
 
     The flag replaces the synchronous K loop of every pipeline that shares it,
     so the cases cover each pipeline, both LDS layouts, the split-K atomic and
-    two-stage epilogues, grouped and group-merged problems. Every shape in
-    ``_SHAPES`` has a reduction that is not a multiple of tile_k, so the last
+    two-stage epilogues, grouped and group-merged problems. Most shapes in
+    ``_SHAPES`` have a reduction that is not a multiple of tile_k, so the last
     tile's out-of-range rows exercise the carried sentinel offsets too.
     """
 

@@ -1114,18 +1114,40 @@ class TestConvDgradUniformKDecode(unittest.TestCase):
         # loop, and the tail tile still relies on the buffer OOB clamp.
         self._assert_exact(K=48, tile_k=32, Hi=13)
 
-    def test_split_k_matches_plain(self):
+    def _assert_close_split_k(self, **kw):
         # The atomic epilogue's accumulation order is not deterministic, so
-        # compare within tolerance. Exercises a non-zero k_lo decode and the
-        # B (y, x) test that zeroes the tiles past gemm_k.
+        # compare within tolerance.
         import torch
 
-        ref = self._run("bf16", ukd=False, epilogue="default", split_k=2, tile_k=32)
-        got = self._run("bf16", ukd=True, epilogue="default", split_k=2, tile_k=32)
+        kw = dict(epilogue="default", split_k=2, tile_k=32, **kw)
+        ref = self._run("bf16", ukd=False, **kw)
+        got = self._run("bf16", ukd=True, **kw)
         self.assertFalse(torch.isnan(got.float()).any(), "dX contains NaN")
         delta = (ref.float() - got.float()).abs().max().item()
         scale = ref.float().abs().max().item()
         self.assertLess(delta / max(scale, 1e-6), 5e-2)
+
+    def test_split_k_matches_plain(self):
+        # Exercises a non-zero k_lo decode.
+        self._assert_close_split_k()
+
+    def test_split_k_tiles_past_gemm_k(self):
+        # gemm_k = 3*3*32 = 288 pads to 320 under split-K 2: the last slice
+        # ends in a tile past gemm_k, which the B (y, x) test must zero.
+        self._assert_close_split_k(K=32)
+
+    def test_split_k_tilde_stride2(self):
+        # 4x4 stride 2: the tilde sub-GEMMs have different tap slices, so
+        # each one's slices start at a different decode position.
+        self._assert_close_split_k(Y=4, stride=2, Hi=15)
+
+    def test_grouped_fallback_kpg_not_tile_multiple(self):
+        # K = 96 is a multiple of tile_k = 32 but kpg = 48 is not: the run-time
+        # test must key on kpg, so the grouped binary takes its plain loop.
+        self._assert_exact(groups=2, C=64, K=96, tile_k=32)
+
+    def test_grouped_split_k(self):
+        self._assert_close_split_k(groups=2, C=128, K=128)
 
     def test_matches_torch_reference(self):
         import torch

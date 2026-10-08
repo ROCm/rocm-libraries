@@ -1014,13 +1014,12 @@ class WgradConvSpec:
 
         Carrying the offsets takes the per-chunk address chain off the path
         to the loads, which is what a latency-bound K loop is waiting on. It
-        also keeps one more value live per chunk across the loop. Measured on
-        gfx950 over a grid of tiles and problems, the trade splits on the A+B
-        K-tile footprint: tiles up to ``_PREFETCH_ADDR_MAX_TILE_ELEMS`` are the
-        ones that win on latency-bound problems and gain from the flag there;
-        larger tiles are the ones that win on compute-bound problems, where
-        the address chain is already hidden behind the MFMAs and the extra
-        live state measured slower. The footprint is a property of the
+        also keeps one more value live per chunk across the loop. The trade
+        splits on the A+B K-tile footprint: tiles up to
+        ``_PREFETCH_ADDR_MAX_TILE_ELEMS`` are the ones suited to latency-bound
+        problems, where the address chain is exposed; larger tiles suit
+        compute-bound problems, where the chain is already hidden behind the
+        MFMAs and the extra live state only adds register pressure. The footprint is a property of the
         binary, so the decision needs no problem extents and holds for a
         shape-generic AOT kernel.
 

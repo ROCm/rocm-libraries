@@ -461,6 +461,8 @@ def test_dgrad_rtc_serves_any_channels_its_tiles_fit(cache, groups, cpg, kpg):
         )
         why = (
             (wk > 1 and rk)
+            # A K split's LDS reduction is per group: the spec rejects it.
+            or (wk > 1 and bg > 1)
             or knobs["k_atoms"] not in dks.dgrad_rtc_k_atoms(wk, k32)
             or knobs["m_tiles"] not in dks.DGRAD_RTC_M_TILES
             or dks.dgrad_rtc_spills(knobs, 3, 3, _ARCH)

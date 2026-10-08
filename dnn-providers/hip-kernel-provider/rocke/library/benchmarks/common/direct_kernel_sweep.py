@@ -103,6 +103,9 @@ DGRAD_BLOCK_H = (8, 16)
 DGRAD_WAVES = (
     (1, 1, False, False, False),
     (1, 4, False, False, False),
+    # A 2-way split of the 16-channel atoms: even atom counts 4 does not
+    # divide (kpg 96, 160, 224, ...) get a preloading config too.
+    (1, 2, False, False, False),
     # runtime_k_loop: one K-atom at a time -> low VGPR use, more blocks/CU.
     (1, 4, True, False, False),
     (1, 2, False, False, True),
@@ -140,6 +143,9 @@ DGRAD_RTC_M_TILES = (1, 2, 3, 4)
 DGRAD_RTC_MAX_KPG = 512
 #   The plain-weight loop (waves_k == 1) re-reads its weights every row and
 #   only wins for a few K-atoms; past that the preloading configs take over.
+#   (Odd atom counts above it -- kpg 80, 112, ... -- have no binary: no split
+#   divides them, and longer plain loops with wide block_groups overflow the
+#   backend's LDS limit.)
 DGRAD_RTC_LOOP_MAX_ATOMS = 4
 #   Share of a wave's register budget the weights and accumulators of a
 #   binary may fill (dgrad_rtc_vgprs; the budget shrinks as more waves of a

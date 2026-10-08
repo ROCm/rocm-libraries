@@ -960,12 +960,10 @@ class DgradConvSpec:
         uniform per-tile arithmetic whenever the problem allows it and keeps
         the original loop for the problems that do not, so it never needs a
         problem extent to decide and holds for a shape-generic AOT kernel.
-        Measured on gfx950 over a grid of tiles and problems, the decode loop
-        was faster than the plain loop for every tile and problem, and the
-        problems that take the fallback loop ran as fast as the plain kernel,
-        so there is no tile-dependent split as wgrad's ``prefetch_addr`` has.
-        Gated to that regime -- gfx950 wave64, not the wavelet loop -- until
-        measured elsewhere.
+        Unlike wgrad's ``prefetch_addr`` it adds no live state across the
+        loop, so the policy has no tile-dependent split: it is on for every
+        tile of the regime it was evaluated in -- gfx950 wave64, not the
+        wavelet loop -- and off elsewhere until evaluated there.
         """
         if arch != "gfx950" or wave_size != 64:
             return False

@@ -2392,6 +2392,12 @@ static rocke_value_t* wgrad_declare_ptr(rocke_ir_builder_t* b,
  * carried offsets, derives the next tile's offsets while those loads are in
  * flight, then writes LDS. The (row, col) slot decode is loop-invariant and is
  * emitted once ahead of the loop. */
+
+/* Iteration arguments of that loop: the accumulators plus one byte offset per
+ * staged A and B vector. Python has no fixed cap, so this one must cover every
+ * plan the loaders can produce. */
+#define WGRAD_PFA_MAX_ITER_ARGS (ROCKE_CONV_MAX_ACCS + 2 * ROCKE_CTL_MAX_VECS_PER_THREAD)
+
 static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
@@ -2412,20 +2418,20 @@ static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx)
 
     const int n_a = a_slots.count;
     const int n_off = a_slots.count + b_slots.count;
-    if(num_accs + n_off > ROCKE_CONV_MAX_ACCS)
+    if(num_accs + n_off > WGRAD_PFA_MAX_ITER_ARGS)
     {
         rocke_i_set_err(b,
                         ROCKE_ERR_VALUE,
                         "prefetch_addr: %d accumulators + %d offsets exceed %d iter args",
                         num_accs,
                         n_off,
-                        ROCKE_CONV_MAX_ACCS);
+                        WGRAD_PFA_MAX_ITER_ARGS);
         return;
     }
 
     /* _tile_offsets(k_lo): A offsets then B offsets. */
     rocke_value_t* k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
-    rocke_value_t* offs0[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* offs0[WGRAD_PFA_MAX_ITER_ARGS];
     ctx->k_off_capture = k_lo;
     rocke_coalesced_tile_loader_slot_offsets(b, &ctx->a_sync_loader, &a_slots, a_fn, ctx, offs0);
     rocke_coalesced_tile_loader_slot_offsets(
@@ -2433,8 +2439,8 @@ static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx)
     if(!rocke_ir_builder_ok(b))
         return;
 
-    rocke_iter_arg_t iter_args[ROCKE_CONV_MAX_ACCS];
-    char off_names[ROCKE_CONV_MAX_ACCS][24];
+    rocke_iter_arg_t iter_args[WGRAD_PFA_MAX_ITER_ARGS];
+    char off_names[WGRAD_PFA_MAX_ITER_ARGS][24];
     for(int i = 0; i < num_accs; ++i)
     {
         iter_args[i].name = ctx->acc_names[i];
@@ -2459,7 +2465,7 @@ static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx)
     if(!rocke_ir_builder_ok(b))
         return;
 
-    rocke_value_t* iter_vars[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* iter_vars[WGRAD_PFA_MAX_ITER_ARGS];
     for(int i = 0; i < for_op.num_iter_vars; ++i)
         iter_vars[i] = for_op.iter_vars[i];
 
@@ -2474,7 +2480,7 @@ static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx)
 
         /* _tile_offsets(k0 + block_k) */
         rocke_value_t* k_next = rocke_b_add(b, for_op.iv, ctx->c_block_k);
-        rocke_value_t* yields[ROCKE_CONV_MAX_ACCS];
+        rocke_value_t* yields[WGRAD_PFA_MAX_ITER_ARGS];
         ctx->k_off_capture = k_next;
         rocke_coalesced_tile_loader_slot_offsets(
             b, &ctx->a_sync_loader, &a_slots, a_fn, ctx, yields + num_accs);
