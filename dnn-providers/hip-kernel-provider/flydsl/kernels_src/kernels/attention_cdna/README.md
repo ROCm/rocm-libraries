@@ -53,6 +53,10 @@ diff against upstream plus the modifications below.
    takes a trailing `lse_on`; at 0 the LSE buffer descriptor gets no records, so
    every LSE store falls outside it and is dropped -- no branch, and no second
    object. The launchers pass 1.
+5. **Runtime causal diagonal** (both kernels). A trailing `diag_offset`: query
+   row i sees key j <= i + diag_offset, where the kernels had computed
+   `seq_len_kv - seq_len` (bottom-right). Top-left causal and right-side bands are
+   then the same objects. The launchers pass `seq_len_kv - seq_len`.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

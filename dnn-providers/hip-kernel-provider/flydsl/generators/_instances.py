@@ -92,6 +92,7 @@ _ABBREV = {
     "num_heads": "hq",
     "num_kv_heads": "hkv",
     "kv_align": "kva",
+    "any_diagonal": "anydiag",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -103,6 +104,7 @@ _NAME_OMITTED_WHEN = {
     "decode": lambda knobs: knobs["decode"] == 0,
     "hd_pair": lambda knobs: knobs["hd_pair"] == 0,
     "kv_align": lambda knobs: knobs["kv_align"] == 0,
+    "any_diagonal": lambda knobs: knobs["any_diagonal"] == 1,
     # A symbol, not a choice: the object's name already says it is a decode one.
     "merge_symbol": lambda knobs: True,
 }
@@ -417,6 +419,13 @@ SDPA_CDNA_BLOCK_M = {"dualwave": 256, "generic": 128}
 SDPA_CDNA_KV_ALIGN = 64
 PRIORITY_SDPA_CDNA_KV_ALIGNED = 110
 
+# The dual-wave causal kernel serves an arbitrary diagonal offset only when built
+# with upstream's cross_seqlen, which costs a few percent; at offset 0 -- causal
+# self-attention, the common prefill -- the plain build is exact. So its causal
+# class ships twice: `any_diagonal` 1 for every offset, and `any_diagonal` 0 for
+# offset 0 only, ranked above it. The generic kernel needs no such split.
+PRIORITY_SDPA_CDNA_DIAGONAL_ZERO = 110
+
 # The head counts and the softmax scale are kernel arguments (vendored-kernel
 # modifications 2 and 3); head_dim and dtype are still baked, and this set is one
 # of each while the remaining runtime features land.
@@ -435,25 +444,29 @@ def sdpa_cdna_instances(arch: str) -> list[Instance]:
     for dtype in SDPA_CDNA_DTYPES:
         for head_dim in SDPA_CDNA_HEAD_DIMS:
             for causal in SDPA_CAUSAL:
-                aligns = (0,)
+                variants = [(0, 1)]
                 if kernel == "generic" and not causal:
-                    aligns = (0, SDPA_CDNA_KV_ALIGN)
-                for kv_align in aligns:
+                    variants.append((SDPA_CDNA_KV_ALIGN, 1))
+                if kernel == "dualwave" and causal:
+                    variants.append((0, 0))
+                for kv_align, any_diagonal in variants:
+                    priority = PRIORITY_SPECIALIZED
+                    if kv_align:
+                        priority = PRIORITY_SDPA_CDNA_KV_ALIGNED
+                    elif not any_diagonal:
+                        priority = PRIORITY_SDPA_CDNA_DIAGONAL_ZERO
                     instances.append(
                         Instance(
                             op="sdpa_cdna",
                             dtype=dtype,
-                            priority=(
-                                PRIORITY_SDPA_CDNA_KV_ALIGNED
-                                if kv_align
-                                else PRIORITY_SPECIALIZED
-                            ),
+                            priority=priority,
                             knobs={
                                 "kernel": kernel,
                                 "head_dim": head_dim,
                                 "causal": causal,
                                 "block_m": SDPA_CDNA_BLOCK_M[kernel],
                                 "kv_align": kv_align,
+                                "any_diagonal": any_diagonal,
                             },
                         )
                     )

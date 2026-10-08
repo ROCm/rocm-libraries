@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "edc3d41e0fcbe83b8a6b63374b2590d0e0d36961286c514007f0cf4c6b61a754"
+    "inputs_sha256": "18d313f8932ac4688e8a2dee08e402b47941403df084629d96762ed32015cb98"
   },
   "instances": [
     {
@@ -21,7 +21,8 @@
         "head_dim": 128,
         "causal": 0,
         "block_m": 256,
-        "kv_align": 0
+        "kv_align": 0,
+        "any_diagonal": 1
       },
       "block": [
         512,
@@ -65,13 +66,14 @@
         {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 608},
         {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 612},
         {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 616},
-        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 620}
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 620},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 624}
       ],
       "file": "sdpa_cdna_bf16_dualwave_d128_causal0_bm256.hsaco",
       "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
-      "bytes": 23632,
-      "sha256": "ca97799f22667b071136a1b9b52bc97c279033b77c35e37b65fa0fcde415fa5e",
-      "kernarg_segment_size": 624,
+      "bytes": 23888,
+      "sha256": "fcd07681348498a00c800674da9c0827d566445602ec974cefc5e1479302241c",
+      "kernarg_segment_size": 628,
       "lds_bytes": 68096,
       "vgprs": 246,
       "llvm_options": {},
@@ -88,7 +90,8 @@
         "head_dim": 128,
         "causal": 1,
         "block_m": 256,
-        "kv_align": 0
+        "kv_align": 0,
+        "any_diagonal": 1
       },
       "block": [
         512,
@@ -132,13 +135,83 @@
         {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 608},
         {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 612},
         {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 616},
-        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 620}
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 620},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 624}
       ],
       "file": "sdpa_cdna_bf16_dualwave_d128_causal1_bm256.hsaco",
       "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
-      "bytes": 24592,
-      "sha256": "751488e93a9263106f335c85915da5644b5cdebfb51af9ffdc60a04290e79623",
-      "kernarg_segment_size": 624,
+      "bytes": 25744,
+      "sha256": "513332826ed22978fb4c84b9c9de2565ec81f0a703db7b8f8a69a410d912ffff",
+      "kernarg_segment_size": 628,
+      "lds_bytes": 68096,
+      "vgprs": 250,
+      "llvm_options": {},
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_bf16_dualwave_d128_causal1_bm256_anydiag0",
+      "op": "sdpa_cdna",
+      "dtype": "bf16",
+      "priority": 110,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "dualwave",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 256,
+        "kv_align": 0,
+        "any_diagonal": 0
+      },
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "heads_by_qblocks_by_batch",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "DebugCounts", "kind": "global_buffer", "size": 8, "offset": 240},
+        {"name": "DebugCounts.layout", "kind": "by_value", "size": 40, "offset": 248},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 288},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 296},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 336},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 344},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 384},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 392},
+        {"name": "Bias", "kind": "global_buffer", "size": 8, "offset": 432},
+        {"name": "Bias.layout", "kind": "by_value", "size": 40, "offset": 440},
+        {"name": "AlibiSlopes", "kind": "global_buffer", "size": 8, "offset": 480},
+        {"name": "AlibiSlopes.layout", "kind": "by_value", "size": 40, "offset": 488},
+        {"name": "Sink", "kind": "global_buffer", "size": 8, "offset": 528},
+        {"name": "Sink.layout", "kind": "by_value", "size": 40, "offset": 536},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 576},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 580},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 584},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 588},
+        {"name": "head_dim_runtime", "kind": "by_value", "size": 4, "offset": 592},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 596},
+        {"name": "bias_stride0", "kind": "by_value", "size": 4, "offset": 600},
+        {"name": "alibi_stride_b", "kind": "by_value", "size": 4, "offset": 604},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 608},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 612},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 616},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 620},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 624}
+      ],
+      "file": "sdpa_cdna_bf16_dualwave_d128_causal1_bm256_anydiag0.hsaco",
+      "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
+      "bytes": 24848,
+      "sha256": "fa07286350036ca2f2d68562c2ead1d4fea2bdd3b17c7ffac4cd7e9df6bba7eb",
+      "kernarg_segment_size": 628,
       "lds_bytes": 68096,
       "vgprs": 250,
       "llvm_options": {},

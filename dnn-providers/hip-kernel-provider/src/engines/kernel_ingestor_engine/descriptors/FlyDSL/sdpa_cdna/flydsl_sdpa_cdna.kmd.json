@@ -26,6 +26,10 @@
     {
       "name": "kv_align",
       "type": "int"
+    },
+    {
+      "name": "any_diagonal",
+      "type": "int"
     }
   ]
 }

@@ -232,6 +232,7 @@ def build_flash_attn_dualwave_swp_module(
         num_heads_q: fx.Int32,
         num_heads_kv: fx.Int32,
         lse_on: fx.Int32,
+        diag_offset: fx.Int32,
     ):
         ctx = DualwaveKernelContext(
             traits,
@@ -254,6 +255,7 @@ def build_flash_attn_dualwave_swp_module(
             num_heads_q=num_heads_q,
             num_heads_kv=num_heads_kv,
             lse_on=lse_on,
+            diag_offset=diag_offset,
         )
         ctx.init_types_and_constants()
         ctx.init_runtime_indices()
@@ -1103,6 +1105,7 @@ def build_flash_attn_dualwave_swp_module(
         num_heads_q: fx.Int32,
         num_heads_kv: fx.Int32,
         lse_on: fx.Int32,
+        diag_offset: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         # Make shape/mode traits visible to the JIT cache key.
@@ -1148,6 +1151,7 @@ def build_flash_attn_dualwave_swp_module(
             num_heads_q,
             num_heads_kv,
             lse_on,
+            diag_offset,
             value_attrs={
                 "rocdl.waves_per_eu": traits.WAVES_PER_EU,
                 "rocdl.flat_work_group_size": f"{traits.BLOCK_SIZE},{traits.BLOCK_SIZE}",
@@ -1353,6 +1357,7 @@ def build_flash_attn_dualwave_swp_module(
                     traits.NUM_HEADS_Q,
                     traits.NUM_HEADS_KV,
                     1,
+                    seq_len_kv - seq_len,
                 )
             return launch_flash_attn_dualwave_swp(
                 Q,
@@ -1380,6 +1385,7 @@ def build_flash_attn_dualwave_swp_module(
                 traits.NUM_HEADS_Q,
                 traits.NUM_HEADS_KV,
                 1,
+                seq_len_kv - seq_len,
                 stream=stream,
             )
 
@@ -1473,6 +1479,7 @@ def build_flash_attn_dualwave_swp_module(
                 traits.NUM_HEADS_Q,
                 traits.NUM_HEADS_KV,
                 1,
+                seq_len_kv - seq_len,
                 fx.Stream(stream),
             )
 

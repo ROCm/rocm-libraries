@@ -9,6 +9,7 @@
   "metadata": "6638c9a9-4a0d-5704-95b9-db8774e663e4",
   "knobs": [
     "block_m",
-    "kv_align"
+    "kv_align",
+    "any_diagonal"
   ]
 }

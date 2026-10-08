@@ -2530,6 +2530,7 @@ class GenericFlashAttnContext:
         stride_token_q=None,
         stride_token_kv=None,
         lse_on=None,
+        diag_offset=None,
     ):
         self.traits = traits
         self.K = K
@@ -2543,6 +2544,7 @@ class GenericFlashAttnContext:
         self.stride_token_q = stride_token_q
         self.stride_token_kv = stride_token_kv
         self.lse_on = lse_on
+        self.diag_offset = diag_offset
 
     def init_types_and_pointers(self):
         traits = self.traits
@@ -2766,7 +2768,12 @@ class GenericFlashAttnContext:
         traits = self.traits
         q_end = self.q_start + traits.BLOCK_M
         if const_expr(traits.CAUSAL):
-            self.delta_i32 = fx.Int32(self.seqlen_kv_b) - fx.Int32(self.seqlen_q_b)
+            # Query row i sees keys j <= i + delta: bottom-right unless the caller
+            # passes its own offset (modification 5).
+            if self.diag_offset is None:
+                self.delta_i32 = fx.Int32(self.seqlen_kv_b) - fx.Int32(self.seqlen_q_b)
+            else:
+                self.delta_i32 = fx.Int32(self.diag_offset)
             self.causal_end_raw_i32 = fx.Int32(q_end) + self.delta_i32
             causal_end_i32 = fx.Int32(
                 (self.causal_end_raw_i32 > fx.Int32(0)).select(
@@ -4106,6 +4113,7 @@ class DualwaveKernelContext:
         num_heads_q=None,
         num_heads_kv=None,
         lse_on=None,
+        diag_offset=None,
     ):
         if isinstance(traits_or_ctx, DualwaveKernelContext):
             self.__dict__.update(traits_or_ctx.__dict__)
@@ -4133,6 +4141,7 @@ class DualwaveKernelContext:
         self.num_heads_q = num_heads_q
         self.num_heads_kv = num_heads_kv
         self.lse_on = lse_on
+        self.diag_offset = diag_offset
 
     def init_types_and_constants(self, head_dim_runtime=None):
         if head_dim_runtime is None:
@@ -4269,7 +4278,12 @@ class DualwaveKernelContext:
             self.bt_v1i32 = None
             self.kv_head_elem_offset = None
 
-        self.delta_i32 = fx.Int32(self.seqlen_kv_i32 - fx.Int32(self.seqlen_q_v))
+        # The causal diagonal: query row i sees keys j <= i + delta. Bottom-right
+        # alignment unless the caller passes its own offset (modification 5).
+        if getattr(self, "diag_offset", None) is None:
+            self.delta_i32 = fx.Int32(self.seqlen_kv_i32 - fx.Int32(self.seqlen_q_v))
+        else:
+            self.delta_i32 = fx.Int32(self.diag_offset)
         self.q_gmem_elem_offset = (
             self.q_start * self.stride_q_n_v + self.q_head_idx * traits.HEAD_DIM
         )

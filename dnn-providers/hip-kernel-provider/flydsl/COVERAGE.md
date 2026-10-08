@@ -453,7 +453,7 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64, non-causal 128 without a bias and the generic tier up to 64, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 66 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
 | **gfx12-generic** | the same table, built from the same sources for RDNA4 | **108** | shipped; GPU suites pass on gfx1201 |
 | **Total, both families** | | **216** | |
-| SDPA forward, CDNA (§7) | per arch: kernel family × causal (2) at bf16, 32/8 heads, `head_dim` 128; on gfx942 the non-causal class also by `kv_align` | 2 on gfx950, 3 on gfx942 | shipped; GPU suites pass on both |
+| SDPA forward, CDNA (§7) | per arch: kernel family × causal (2) at bf16, `head_dim` 128; on gfx942 the non-causal class also by `kv_align`, on gfx950 the causal class by `any_diagonal` | 3 per arch | shipped; GPU suites pass on both |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime
 feature, is part of adding the feature.
@@ -469,7 +469,8 @@ vendored whole under
 [`kernels_src/kernels/attention_cdna/`](kernels_src/kernels/attention_cdna/README.md),
 whose README lists the modifications (an import path, a runtime row guard in
 the cooperative K/V loads that FlyDSL 0.3.4 cannot trace in a helper, a runtime
-softmax scale, runtime head counts and token strides, and a runtime LSE switch).
+softmax scale, runtime head counts and token strides, a runtime LSE switch, and a
+runtime causal diagonal).
 The native half is
 [`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp).
 
@@ -489,17 +490,24 @@ baked field at a time (§7.3).
 | Baked per object | Runtime kernel argument |
 |---|---|
 | dtype (`bf16`) | batch |
-| `head_dim` (128) | sequence length (one value: `Sq == Skv`) |
-| causal (bottom-right), or none | query and KV head counts (MHA, GQA, MQA) |
+| `head_dim` (128) | query and key lengths, independently |
+| causal, or none | the causal diagonal: top-left, bottom-right, a band to its right |
+| | query and KV head counts (MHA, GQA, MQA) |
 | contiguous BSHD strides | softmax scale |
 | | whether to write the LSE output |
 | gfx942 non-causal: whether the KV tail is masked (`kv_align`) | |
+| gfx950 causal: whether any diagonal is served (`any_diagonal`) | |
 
-Two objects per arch, causal and non-causal, and on gfx942 a third. The generic
-kernel can skip masking the last KV tile when the key length is a multiple of its
-64-row KV tile, which is measurably faster; so its non-causal class ships twice --
-`kv_align` 0, masked, for any length, and `kv_align` 64, unmasked, ranked above
-it and admitted by the kernel matcher only for such lengths. Each tensor is passed as FlyDSL's
+Three objects per arch. On gfx942 the generic kernel can skip masking the last KV
+tile when the key length is a multiple of its 64-row KV tile, which is measurably
+faster; so its non-causal class ships twice -- `kv_align` 0, masked, for any
+length, and `kv_align` 64, unmasked, ranked above it and admitted by the kernel
+matcher only for such lengths. On gfx950 the dual-wave causal kernel serves an
+arbitrary diagonal only when built with upstream's `cross_seqlen`, which costs a
+few percent; so its causal class ships twice too -- `any_diagonal` 1 for every
+diagonal, and `any_diagonal` 0, the plain build, ranked above it and admitted only
+at offset 0: causal self-attention, and top-left causal with fewer queries than
+keys. Each tensor is passed as FlyDSL's
 `fx.Tensor`: an 8-byte pointer followed by a 40-byte by-value layout (four i32
 extents, then the i64 strides of the three non-unit-stride dimensions);
 `gen_sdpa_cdna.py` asserts every object's argument list against its family's
@@ -513,9 +521,9 @@ One SDPA-forward node, and:
 |---|---|
 | Q, K, V, O rank 4, device operands, **not ragged**, **contiguous BSHD** (strides `(S·H·D, D, H·D, 1)` on the logical B, H, S, D axes) | The kernels address each operand by a baked token pitch; no other layout reads correctly. |
 | One dtype for all four; an object exists only for `bf16` | The graph matcher accepts `HALF` as well, and the kernel matcher then finds no object. |
-| `Sq == Skv`; `Hq % Hk == 0`; V shaped as K, O as Q | The kernels take one sequence length. |
+| `Hq % Hk == 0`; V shaped as K, O as Q | The kernels have one head dimension and do not broadcast. |
 | `head_dim` equal to an object's baked value | Checked by the kernel matcher against each candidate's metadata. |
-| No mask, or causal: top-left, bottom-right or `right_bound == 0` | With equal lengths the three are the same mask, the kernels' own. Any `left_bound` or other band declines. |
+| No mask, or `right_bound` ≥ 0 at either alignment (or the deprecated causal booleans), with no `left_bound`, and a diagonal offset `align + right_bound` of at most `Skv − Sq` | The kernels apply the reference's rule, key `j` visible from query row `i` iff `j ≤ i + offset`, with `align` 0 top-left and `Skv − Sq` bottom-right. The causal objects mask the last KV tile's padding with the same compare, which holds only while every row's diagonal stays inside the keys: so bottom-right is served at any lengths, top-left when `Sq ≤ Skv`, and a band only as far as `Skv − Sq`. A sliding window (`left_bound`) declines. |
 | Scale: `attn_scale_value` (> 0), a pass-by-value scalar tensor, or absent | Absent is `1/√head_dim`, the reference's default. The running max is over unscaled scores, which orders them correctly only for a positive scale. |
 | Key length a multiple of 64, for a `kv_align` 64 object | That object does not mask the last KV tile. |
 | Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor in packed (batch, head, query) order | The kernels write the natural-log LSE of the scaled scores as one contiguous `[B, H, Sq]`. |
@@ -536,7 +544,7 @@ against the coverage it buys. In order:
 | ~~Runtime head counts~~ | Done: trailing i32 arguments on both kernels, and the generic kernel's token pitches with them (modification 3). |
 | Full strides: BHSD, packed QKV | The head stride is still `head_dim` and the batch stride derived from the token pitch; both need arguments. |
 | ~~LSE output~~ | Done: compiled in, switched at launch (modification 4). Any stats strides are next, with the full strides. |
-| `Sq ≠ Skv`, bottom-right and top-left causal separately, windows | Upstream's kernels take `seq_len_kv` separately; the mask needs the diagonal offset. |
+| ~~`Sq ≠ Skv`, both causal alignments, right-side bands~~ | Done: the diagonal offset is a kernel argument (modification 5). Top-left with more queries than keys and wider bands need the last KV tile's padding masked apart from the diagonal; sliding windows need a left bound in the mask and the KV loop's start. |
 | `head_dim` 64 and f16 | Both kernels build them; rows in the instance table. |
 | Varlen, paged KV | Both kernels already take cumulative sequence offsets and a block table, passed unused today. |
 | Additive bias | The dual-wave kernel takes a bias operand; the generic one has none, so gfx942 needs a kernel change. |
@@ -553,7 +561,7 @@ Then the instance set is chosen by the provider's AOT selection process
 | The vendored kernels match FlyDSL but for their recorded modifications | `tools/diff_upstream.py` ([REGEN.md](REGEN.md) §5) |
 | Each arch's shard ships one object per class, one kernel family, each with its family's signature | `TestFlydslSdpaCdnaPacks`, and the shard census that runs it for gfx950 and gfx942 |
 | The accept/decline rules above, the causal and scale bindings, and candidate selection, including `kv_align` | `TestFlydslSdpaCdnaGraphAccepts`, `TestFlydslSdpaCdnaGraphDeclines`, `TestFlydslSdpaCdnaBinding`, `TestFlydslSdpaCdnaKernelMatch` |
-| Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor, MHA, MQA and an odd group size — and the LSE output, against a reference | `TestGpuFlydslSdpaCdnaDispatch`, on gfx950 and gfx942 |
+| Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor, MHA, MQA and an odd group size, cross-attention, chunked prefill, decode, rows no key reaches, a top-left band — and the LSE output, against a reference | `TestGpuFlydslSdpaCdnaDispatch`, on gfx950 and gfx942 |
 
 ### 7.5 Measured costs, and deferred performance work
 
@@ -569,6 +577,7 @@ the harness's own bias. The measurements are kept outside the repository.
 | Runtime softmax scale, gfx942 | 2–4 more registers (the scale is splatted into a VGPR pair for packed multiplies; the `kv_align` 64 object moves 4 values into AGPRs), a few more instructions; slower by a fraction of a percent, sign repeating on the long shapes | runtime, for coverage — **deferred** |
 | Runtime head counts, both kernels (and the generic kernel's token pitches) | same VGPRs; a 32-bit divide or two per workgroup and, on gfx942, runtime token pitches in the KV loads. Slower by under a percent on most shapes and up to a couple of percent on the shortest; the gfx950 causal object also pays on long shapes, so part of the cost is in how the loop is scheduled, not only the divides. Done in 64-bit arithmetic it cost more | runtime, for coverage — **deferred** |
 | LSE output, switched at runtime | 2–4 more VGPRs, no occupancy step; with LSE off, no measurable cost but on the gfx942 causal object, which is slower by a fraction of a percent on every shape | runtime, for coverage — **deferred** (gfx942 causal) |
+| Causal diagonal as an argument, and `cross_seqlen` on gfx950 | neutral on gfx942. On gfx950 the `cross_seqlen` build is a few percent slower on every causal shape; the plain build at offset 0 (`any_diagonal` 0) recovers most of it, still slower by under a percent than computing the offset in-kernel | two gfx950 causal objects; the residual cost **deferred** |
 
 **Deferred performance work** -- costs accepted for coverage, to revisit:
 
@@ -581,3 +590,5 @@ the harness's own bias. The measurements are kept outside the repository.
    common head configurations beside the runtime ones.
 3. *LSE on the gfx942 causal object.* A second, LSE-free causal object, or
    moving the LSE math under the store's own predicate.
+4. *The diagonal argument on the gfx950 offset-0 object.* It reads an offset the
+   kernel used to derive; an offset-0 build could fold it to a constant.

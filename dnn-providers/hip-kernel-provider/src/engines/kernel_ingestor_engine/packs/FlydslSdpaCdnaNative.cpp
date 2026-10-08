@@ -53,10 +53,9 @@
  * vendored under `flydsl/kernels_src/kernels/attention_cdna/` -- the dual-wave
  * software-pipelined kernel on gfx950, the generic MFMA kernel on gfx942.
  *
- * Those kernels bake more than the RDNA ones: head_dim, the causal flag, and a contiguous
- * BSHD layout; their causal mask is bottom-right and they assume equal query and key
- * lengths. Batch, sequence length, both head counts and the softmax scale are runtime
- * arguments. So the matcher accepts exactly that envelope and declines everything else,
+ * Those kernels bake more than the RDNA ones: head_dim, whether a causal mask applies, and
+ * a contiguous BSHD layout. Batch, both sequence lengths, both head counts, the softmax
+ * scale, the mask's diagonal offset and whether to write the LSE are runtime arguments. So the matcher accepts exactly that envelope and declines everything else,
  * and each object serves one (dtype, head_dim, causal) class. The
  * remaining baked fields become runtime one by one, each measured against the object
  * it replaces (flydsl/COVERAGE.md section 7).
@@ -93,6 +92,9 @@ constexpr std::string_view BLOCK_M_FIELD = "block_m";
 /// 0 for an object that serves any key length; otherwise the multiple the key length must
 /// be, because the object skips the KV tail mask.
 constexpr std::string_view KV_ALIGN_FIELD = "kv_align";
+/// 1 for an object that serves any diagonal offset; 0 for one built without the handling
+/// an offset other than 0 needs, which only an offset-0 graph may run.
+constexpr std::string_view ANY_DIAGONAL_FIELD = "any_diagonal";
 
 constexpr std::string_view DUALWAVE = "dualwave";
 constexpr std::string_view GENERIC = "generic";
@@ -103,6 +105,8 @@ constexpr std::string_view V_TOKEN = "flydsl_sdpa_cdna.v.uid";
 constexpr std::string_view O_TOKEN = "flydsl_sdpa_cdna.o.uid";
 /// 1 when the graph asks for causal masking, 0 for none.
 constexpr std::string_view CAUSAL_TOKEN = "flydsl_sdpa_cdna.causal";
+/// The causal diagonal: query row i sees keys j <= i + offset. Unused without a mask.
+constexpr std::string_view DIAG_OFFSET_TOKEN = "flydsl_sdpa_cdna.diag_offset";
 /// The uid of the softmax-statistics (LSE) output, or NO_STATS when the graph wants none.
 constexpr std::string_view STATS_TOKEN = "flydsl_sdpa_cdna.stats.uid";
 constexpr int64_t NO_STATS = -1;
@@ -119,6 +123,8 @@ constexpr int64_t DUALWAVE_BLOCK_THREADS = 512;
 constexpr int64_t GENERIC_THREADS_PER_ROW = 2;
 
 constexpr int64_t INT32_LIMIT = 2147483647LL;
+/// A bound the graph leaves open (hipDNN's sentinel for left_bound / right_bound).
+constexpr int64_t UNBOUNDED = -1;
 
 /// Where the softmax scale comes from; see ScaleSource.
 constexpr std::string_view SCALE_SOURCE_TOKEN = "flydsl_sdpa_cdna.scale_source";
@@ -197,7 +203,8 @@ struct SdpaProblem
     int64_t batch = 0;
     int64_t numHeads = 0;
     int64_t numKvHeads = 0;
-    int64_t seqLen = 0;
+    int64_t seqLenQ = 0;
+    int64_t seqLenKv = 0;
     int64_t headDim = 0;
     data_objects::DataType dataType = data_objects::DataType::UNSET;
 };
@@ -208,7 +215,8 @@ SdpaProblem problemFor(const data_objects::TensorAttributes& q,
     SdpaProblem problem;
     problem.batch = q.dims()->Get(BATCH_AXIS);
     problem.numHeads = q.dims()->Get(HEAD_AXIS);
-    problem.seqLen = q.dims()->Get(SEQ_AXIS);
+    problem.seqLenQ = q.dims()->Get(SEQ_AXIS);
+    problem.seqLenKv = k.dims()->Get(SEQ_AXIS);
     problem.headDim = q.dims()->Get(HEAD_DIM_AXIS);
     problem.numKvHeads = k.dims()->Get(HEAD_AXIS);
     problem.dataType = q.data_type();
@@ -290,26 +298,62 @@ bool isServableStats(const data_objects::TensorAttributes& stats,
            && !stats.ragged_offset_tensor_uid().has_value();
 }
 
-/// Whether the graph's mask is one the kernels apply: none, or plain causal. With equal
-/// query and key lengths top-left and bottom-right causal are the same mask, which is the
-/// kernels' (bottom-right). Bands and windows decline. nullopt for anything else.
-std::optional<bool> causalFor(const data_objects::SdpaAttributes& attributes)
+/// The mask the kernels apply: none, or j <= i + offset for query row i and key j.
+struct CdnaMask
 {
-    const bool topLeft = attributes.causal_mask();
-    const bool bottomRight = attributes.causal_mask_bottom_right();
-    if(topLeft && bottomRight)
+    bool causal = false;
+    int64_t offset = 0;
+};
+
+/**
+ * @brief The graph's mask in the kernels' terms, or nullopt for one they cannot apply.
+ *
+ * The reference (CpuFpReferenceSdpa isMasked) hides key j from query row i when
+ * j > i + align + right, with align 0 top-left and Skv - Sq bottom-right; so causal and a
+ * band to the right of the diagonal are both one offset, align + right. A left bound (a
+ * sliding window) declines. So does an offset past Skv - Sq: the causal objects mask the
+ * last KV tile's padding with the same compare, which holds only while every row's
+ * diagonal stays inside the keys -- top-left with more queries than keys, or a band.
+ */
+std::optional<CdnaMask>
+    maskFor(const data_objects::SdpaAttributes& attributes, int64_t seqLenQ, int64_t seqLenKv)
+{
+    const bool topLeftDeprecated = attributes.causal_mask();
+    const bool bottomRightDeprecated = attributes.causal_mask_bottom_right();
+    if(topLeftDeprecated && bottomRightDeprecated)
     {
         return std::nullopt;
     }
-    if(attributes.left_bound().has_value())
+    const int64_t left
+        = attributes.left_bound().has_value() ? attributes.left_bound().value() : UNBOUNDED;
+    int64_t right
+        = attributes.right_bound().has_value() ? attributes.right_bound().value() : UNBOUNDED;
+    if(left != UNBOUNDED || right < UNBOUNDED)
     {
         return std::nullopt;
     }
-    if(attributes.right_bound().has_value())
+    bool alignBottomRight = false;
+    if(topLeftDeprecated || bottomRightDeprecated)
     {
-        return attributes.right_bound().value() == 0 ? std::optional<bool>(true) : std::nullopt;
+        // The booleans mean right 0 at their corner; a right_bound the graph also sets wins.
+        right = right == UNBOUNDED ? 0 : right;
+        alignBottomRight = bottomRightDeprecated;
     }
-    return topLeft || bottomRight;
+    else
+    {
+        alignBottomRight
+            = attributes.diagonal_alignment() == data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    }
+    if(right == UNBOUNDED)
+    {
+        return CdnaMask{};
+    }
+    const int64_t offset = (alignBottomRight ? seqLenKv - seqLenQ : 0) + right;
+    if(offset > seqLenKv - seqLenQ)
+    {
+        return std::nullopt;
+    }
+    return CdnaMask{true, offset};
 }
 
 /**
@@ -339,8 +383,8 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     }
 
     const auto problem = problemFor(*q, *k);
-    if(problem.batch <= 0 || problem.numHeads <= 0 || problem.numKvHeads <= 0 || problem.seqLen <= 0
-       || problem.headDim <= 0)
+    if(problem.batch <= 0 || problem.numHeads <= 0 || problem.numKvHeads <= 0
+       || problem.seqLenQ <= 0 || problem.seqLenKv <= 0 || problem.headDim <= 0)
     {
         return std::nullopt;
     }
@@ -350,26 +394,28 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     {
         return std::nullopt;
     }
-    // Equal query and key lengths, contiguous BSHD, V shaped as K, O as Q, GQA by integer
-    // division.
-    if(k->dims()->Get(SEQ_AXIS) != problem.seqLen || problem.numHeads % problem.numKvHeads != 0)
+    // Contiguous BSHD, V shaped as K, O as Q, GQA by integer division.
+    if(problem.numHeads % problem.numKvHeads != 0)
     {
         return std::nullopt;
     }
-    if(!isContiguousBshd(*q, problem.batch, problem.numHeads, problem.seqLen, problem.headDim)
-       || !isContiguousBshd(*k, problem.batch, problem.numKvHeads, problem.seqLen, problem.headDim)
-       || !isContiguousBshd(*v, problem.batch, problem.numKvHeads, problem.seqLen, problem.headDim)
-       || !isContiguousBshd(*o, problem.batch, problem.numHeads, problem.seqLen, problem.headDim))
+    if(!isContiguousBshd(*q, problem.batch, problem.numHeads, problem.seqLenQ, problem.headDim)
+       || !isContiguousBshd(
+           *k, problem.batch, problem.numKvHeads, problem.seqLenKv, problem.headDim)
+       || !isContiguousBshd(
+           *v, problem.batch, problem.numKvHeads, problem.seqLenKv, problem.headDim)
+       || !isContiguousBshd(*o, problem.batch, problem.numHeads, problem.seqLenQ, problem.headDim))
     {
         return std::nullopt;
     }
-    if(problem.seqLen > INT32_LIMIT || problem.batch > INT32_LIMIT)
+    if(problem.seqLenQ > INT32_LIMIT || problem.seqLenKv > INT32_LIMIT
+       || problem.batch > INT32_LIMIT)
     {
         return std::nullopt;
     }
 
-    const auto causal = causalFor(attributes);
-    if(!causal.has_value())
+    const auto mask = maskFor(attributes, problem.seqLenQ, problem.seqLenKv);
+    if(!mask.has_value())
     {
         return std::nullopt;
     }
@@ -417,7 +463,7 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     {
         const auto* stats = findTensor(context, attributes.stats_tensor_uid().value());
         if(stats == nullptr
-           || !isServableStats(*stats, problem.batch, problem.numHeads, problem.seqLen))
+           || !isServableStats(*stats, problem.batch, problem.numHeads, problem.seqLenQ))
         {
             return std::nullopt;
         }
@@ -489,7 +535,8 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     bound[std::string(K_TOKEN)] = attributes.k_tensor_uid();
     bound[std::string(V_TOKEN)] = attributes.v_tensor_uid();
     bound[std::string(O_TOKEN)] = attributes.o_tensor_uid();
-    bound[std::string(CAUSAL_TOKEN)] = *causal ? 1 : 0;
+    bound[std::string(CAUSAL_TOKEN)] = mask->causal ? 1 : 0;
+    bound[std::string(DIAG_OFFSET_TOKEN)] = mask->offset;
     bound[std::string(STATS_TOKEN)] = statsUid;
     bound[std::string(SCALE_SOURCE_TOKEN)] = static_cast<int64_t>(scaleSource);
     bound[std::string(SCALE_TOKEN)] = scaleToken;
@@ -504,6 +551,7 @@ struct FlydslSdpaCdnaBinding
     int64_t v = 0;
     int64_t o = 0;
     int64_t causal = 0;
+    int64_t diagOffset = 0;
     int64_t stats = NO_STATS;
     ScaleSource scaleSource = ScaleSource::VALUE;
     int64_t scale = 0;
@@ -529,6 +577,7 @@ FlydslSdpaCdnaBinding flydslSdpaCdnaBinding(const BoundTokens& bound)
     binding.v = read(V_TOKEN);
     binding.o = read(O_TOKEN);
     binding.causal = read(CAUSAL_TOKEN);
+    binding.diagOffset = read(DIAG_OFFSET_TOKEN);
     binding.stats = read(STATS_TOKEN);
     binding.scaleSource = static_cast<ScaleSource>(read(SCALE_SOURCE_TOKEN));
     binding.scale = read(SCALE_TOKEN);
@@ -592,7 +641,7 @@ std::optional<CdnaTile> candidateTile(const KernelDefinition& kernel)
 std::optional<std::array<int64_t, 3>> candidateGrid(const SdpaProblem& problem,
                                                     const CdnaTile& tile)
 {
-    const auto queryBlocks = (problem.seqLen + tile.blockM - 1) / tile.blockM;
+    const auto queryBlocks = (problem.seqLenQ + tile.blockM - 1) / tile.blockM;
     if(tile.dualwave)
     {
         if(queryBlocks > INT32_LIMIT || problem.numHeads > INT32_LIMIT)
@@ -638,8 +687,15 @@ bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
         return false;
     }
 
+    const auto anyDiagonal = integerMetadata(kernel, ANY_DIAGONAL_FIELD);
+    const auto diagOffset = tryGetBoundInt(bound, DIAG_OFFSET_TOKEN);
+    if(!anyDiagonal.has_value() || !diagOffset.has_value()
+       || (*anyDiagonal == 0 && *diagOffset != 0))
+    {
+        return false;
+    }
     const auto kvAlign = integerMetadata(kernel, KV_ALIGN_FIELD);
-    if(!kvAlign.has_value() || *kvAlign < 0 || (*kvAlign > 0 && problem.seqLen % *kvAlign != 0))
+    if(!kvAlign.has_value() || *kvAlign < 0 || (*kvAlign > 0 && problem.seqLenKv % *kvAlign != 0))
     {
         return false;
     }
@@ -693,10 +749,10 @@ FlydslLayout4 bshdLayout(int64_t batch, int64_t sequence, int64_t heads, int64_t
  * Dual-wave (flash_attn_gfx950.py): Q, K, V, O, LSE, DebugCounts, CuSeqQ, CuSeqKv,
  * BlockTable, Bias, AlibiSlopes, Sink (each a pointer and its layout); then seq_len,
  * seq_len_kv, stride_q_n, stride_kv_n, head_dim_runtime, block_table_stride,
- * bias_stride0, alibi_stride_b (i32); sm_scale (f32); num_heads_q, num_heads_kv, lse_on
- * (i32). Generic (flash_attn_generic.py): Q, K, V, O, LSE; seq_len, seq_len_kv (i32);
- * CuSeqQ, CuSeqKv, BlockTable; block_table_stride (i32); sm_scale (f32); num_heads_q,
- * num_heads_kv, stride_q_n, stride_kv_n, lse_on (i32). A 4-byte scalar slot is the same to the
+ * bias_stride0, alibi_stride_b (i32); sm_scale (f32); num_heads_q, num_heads_kv, lse_on,
+ * diag_offset (i32). Generic (flash_attn_generic.py): Q, K, V, O, LSE; seq_len,
+ * seq_len_kv (i32); CuSeqQ, CuSeqKv, BlockTable; block_table_stride (i32); sm_scale (f32);
+ * num_heads_q, num_heads_kv, stride_q_n, stride_kv_n, lse_on, diag_offset (i32). A 4-byte scalar slot is the same to the
  * signature check whichever type it holds, so each list is written as runs of tensors
  * and scalars.
  */
@@ -732,14 +788,14 @@ std::vector<KernelArgument> signatureOf(std::initializer_list<ArgumentRun> runs)
 
 const std::vector<KernelArgument>& dualwaveSignature()
 {
-    static const std::vector<KernelArgument> s_signature = signatureOf({{12, true}, {12, false}});
+    static const std::vector<KernelArgument> s_signature = signatureOf({{12, true}, {13, false}});
     return s_signature;
 }
 
 const std::vector<KernelArgument>& genericSignature()
 {
     static const std::vector<KernelArgument> s_signature
-        = signatureOf({{5, true}, {2, false}, {3, true}, {7, false}});
+        = signatureOf({{5, true}, {2, false}, {3, true}, {8, false}});
     return s_signature;
 }
 
@@ -917,10 +973,12 @@ public:
         const int32_t lseFlag = lseOn ? 1 : 0;
 
         const auto qLayout
-            = bshdLayout(problem.batch, problem.seqLen, problem.numHeads, problem.headDim);
+            = bshdLayout(problem.batch, problem.seqLenQ, problem.numHeads, problem.headDim);
         const auto kvLayout
-            = bshdLayout(problem.batch, problem.seqLen, problem.numKvHeads, problem.headDim);
-        const auto seqLen = static_cast<int32_t>(problem.seqLen);
+            = bshdLayout(problem.batch, problem.seqLenKv, problem.numKvHeads, problem.headDim);
+        const auto seqLenQ = static_cast<int32_t>(problem.seqLenQ);
+        const auto seqLenKv = static_cast<int32_t>(problem.seqLenKv);
+        const auto diagOffset = static_cast<int32_t>(binding.diagOffset);
         const auto numHeads = static_cast<int32_t>(problem.numHeads);
         const auto numKvHeads = static_cast<int32_t>(problem.numKvHeads);
         // One token's pitch in contiguous BSHD.
@@ -960,8 +1018,8 @@ public:
                           qLayout,
                           o, // Sink
                           qLayout,
-                          seqLen,
-                          seqLen,
+                          seqLenQ,
+                          seqLenKv,
                           strideQ,
                           strideKv,
                           headDim,
@@ -971,7 +1029,8 @@ public:
                           scale,
                           numHeads,
                           numKvHeads,
-                          lseFlag);
+                          lseFlag,
+                          diagOffset);
             return;
         }
         kernel.launch(handle.getStream(),
@@ -985,8 +1044,8 @@ public:
                       qLayout,
                       lse,
                       qLayout, // read for its pointer only
-                      seqLen,
-                      seqLen,
+                      seqLenQ,
+                      seqLenKv,
                       o, // CuSeqQ
                       qLayout,
                       o, // CuSeqKv
@@ -999,7 +1058,8 @@ public:
                       numKvHeads,
                       strideQ,
                       strideKv,
-                      lseFlag);
+                      lseFlag,
+                      diagOffset);
     }
 
 private:

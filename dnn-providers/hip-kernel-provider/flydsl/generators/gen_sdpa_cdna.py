@@ -98,6 +98,7 @@ _PARAMS = {
         ("num_heads_q", "i32"),
         ("num_heads_kv", "i32"),
         ("lse_on", "i32"),
+        ("diag_offset", "i32"),
     ),
     "generic": (
         ("Q", "tensor"),
@@ -117,6 +118,7 @@ _PARAMS = {
         ("stride_q_n", "i32"),
         ("stride_kv_n", "i32"),
         ("lse_on", "i32"),
+        ("diag_offset", "i32"),
     ),
 }
 
@@ -177,6 +179,10 @@ def _build_one(instance: Instance, dump_dir: Path) -> bytes:
             dtype_str=instance.dtype,
             num_kv_heads=kv_heads,
             return_lse=True,
+            # Built to handle any diagonal -- q-blocks no key reaches, and a diagonal
+            # tile the pipeline would otherwise skip masking -- unless the object is
+            # the offset-0 one (`any_diagonal` 0), which the matcher holds to that.
+            cross_seqlen=bool(knobs["causal"]) and bool(knobs["any_diagonal"]),
         )
     else:
         from kernels.attention_cdna.flash_attn_generic import (  # noqa: PLC0415

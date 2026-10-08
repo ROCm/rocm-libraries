@@ -74,6 +74,7 @@ constexpr const char* CDNA_CAUSAL_TOKEN = "flydsl_sdpa_cdna.causal";
 constexpr const char* CDNA_SCALE_SOURCE_TOKEN = "flydsl_sdpa_cdna.scale_source";
 constexpr const char* CDNA_SCALE_TOKEN = "flydsl_sdpa_cdna.scale";
 constexpr const char* CDNA_STATS_TOKEN = "flydsl_sdpa_cdna.stats.uid";
+constexpr const char* CDNA_DIAG_OFFSET_TOKEN = "flydsl_sdpa_cdna.diag_offset";
 
 constexpr const char* CDNA_DTYPE_FIELD = "dtype";
 constexpr const char* CDNA_KERNEL_FIELD = "kernel";
@@ -81,6 +82,7 @@ constexpr const char* CDNA_HEAD_DIM_FIELD = "head_dim";
 constexpr const char* CDNA_CAUSAL_FIELD = "causal";
 constexpr const char* CDNA_BLOCK_M_FIELD = "block_m";
 constexpr const char* CDNA_KV_ALIGN_FIELD = "kv_align";
+constexpr const char* CDNA_ANY_DIAGONAL_FIELD = "any_diagonal";
 
 /// The model shape the first CDNA objects are built for.
 SdpaGraphSpec cdnaSpec()
@@ -102,7 +104,8 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
                                 int64_t causal = 0,
                                 const std::string& dtype = "bf16",
                                 int64_t blockM = 256,
-                                int64_t kvAlign = 0)
+                                int64_t kvAlign = 0,
+                                int64_t anyDiagonal = 1)
 {
     KernelDefinition kernel;
     kernel.name = "sdpa_cdna_" + dtype + "_" + family;
@@ -111,7 +114,8 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
                        {CDNA_HEAD_DIM_FIELD, headDim},
                        {CDNA_CAUSAL_FIELD, causal},
                        {CDNA_BLOCK_M_FIELD, blockM},
-                       {CDNA_KV_ALIGN_FIELD, kvAlign}};
+                       {CDNA_KV_ALIGN_FIELD, kvAlign},
+                       {CDNA_ANY_DIAGONAL_FIELD, anyDiagonal}};
     kernel.priority = 100;
     return kernel;
 }
@@ -172,6 +176,25 @@ std::vector<CdnaCase> acceptedCases()
     auto stats = cdnaSpec();
     stats.stats = SdpaStats::LSE;
     cases.push_back({"SoftmaxStats", stats});
+    auto cross = cdnaSpec();
+    cross.seqLenKv = 512;
+    cases.push_back({"UnequalSequenceLengths", cross});
+    auto chunked = cdnaSpec();
+    chunked.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    chunked.seqLenQ = 256;
+    chunked.seqLenKv = 1024;
+    cases.push_back({"TopLeftCausalWithFewerQueriesThanKeys", chunked});
+    auto crossCausal = cdnaSpec();
+    crossCausal.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    crossCausal.seqLenQ = 1024;
+    crossCausal.seqLenKv = 256;
+    cases.push_back({"BottomRightCausalWithMoreQueriesThanKeys", crossCausal});
+    auto band = cdnaSpec();
+    band.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    band.seqLenQ = 256;
+    band.seqLenKv = 1024;
+    band.rightBound = 100;
+    cases.push_back({"TopLeftBandInsideTheKeys", band});
     return cases;
 }
 
@@ -195,9 +218,15 @@ std::vector<CdnaCase> declinedCases()
     auto bhsd = cdnaSpec();
     bhsd.layout = SdpaLayout::BHSD;
     cases.push_back({"BhsdLayout", bhsd});
-    auto cross = cdnaSpec();
-    cross.seqLenKv = 512;
-    cases.push_back({"UnequalSequenceLengths", cross});
+    auto topLeftOverflow = cdnaSpec();
+    topLeftOverflow.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    topLeftOverflow.seqLenQ = 512;
+    topLeftOverflow.seqLenKv = 256;
+    cases.push_back({"TopLeftCausalWithMoreQueriesThanKeys", topLeftOverflow});
+    auto bottomRightBand = cdnaSpec();
+    bottomRightBand.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    bottomRightBand.rightBound = 8;
+    cases.push_back({"BottomRightBand", bottomRightBand});
     auto window = cdnaSpec();
     window.mask = SdpaMask::SLIDING_WINDOW;
     cases.push_back({"SlidingWindow", window});
@@ -259,6 +288,23 @@ TEST(TestFlydslSdpaCdnaBinding, BindsTheCausalFlag)
     ASSERT_TRUE(plainBound.has_value());
     EXPECT_EQ(tryGetBoundInt(*causalBound, CDNA_CAUSAL_TOKEN), 1);
     EXPECT_EQ(tryGetBoundInt(*plainBound, CDNA_CAUSAL_TOKEN), 0);
+}
+
+TEST(TestFlydslSdpaCdnaBinding, BindsTheDiagonalOffset)
+{
+    const auto offsetOf = [](SdpaMask mask, int64_t sq, int64_t skv, std::optional<int64_t> right) {
+        auto spec = cdnaSpec();
+        spec.mask = mask;
+        spec.seqLenQ = sq;
+        spec.seqLenKv = skv;
+        spec.rightBound = right;
+        const auto bound = cdnaGraphMatch(spec);
+        return bound.has_value() ? tryGetBoundInt(*bound, CDNA_DIAG_OFFSET_TOKEN) : std::nullopt;
+    };
+    EXPECT_EQ(offsetOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 1024, std::nullopt), 0);
+    EXPECT_EQ(offsetOf(SdpaMask::BOTTOM_RIGHT_CAUSAL, 256, 1024, std::nullopt), 768);
+    EXPECT_EQ(offsetOf(SdpaMask::BOTTOM_RIGHT_CAUSAL, 1024, 256, std::nullopt), -768);
+    EXPECT_EQ(offsetOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 1024, 100), 100);
 }
 
 TEST(TestFlydslSdpaCdnaBinding, BindsTheStatsTensorOrNone)
@@ -338,6 +384,26 @@ TEST(TestFlydslSdpaCdnaKernelMatch, DeclinesEachBakedFieldThatDisagrees)
     EXPECT_TRUE(declines(makeCdnaKernel("dualwave", 128, 1)));
     EXPECT_TRUE(declines(makeCdnaKernel("dualwave", 128, 0, "f16")));
     EXPECT_TRUE(declines(makeCdnaKernel("wmma")));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsTheOffsetZeroObjectOnlyAtOffsetZero)
+{
+    const auto admits = [](SdpaMask mask, int64_t sq, int64_t skv, const KernelDefinition& kernel) {
+        auto spec = cdnaSpec();
+        spec.mask = mask;
+        spec.seqLenQ = sq;
+        spec.seqLenKv = skv;
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+        return bound.has_value()
+               && matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), kernel, *bound);
+    };
+    const auto offsetZero = makeCdnaKernel("dualwave", 128, 1, "bf16", 256, 0, 0);
+    const auto anyOffset = makeCdnaKernel("dualwave", 128, 1, "bf16", 256, 0, 1);
+    EXPECT_TRUE(admits(SdpaMask::BOTTOM_RIGHT_CAUSAL, 256, 256, offsetZero));
+    EXPECT_TRUE(admits(SdpaMask::TOP_LEFT_CAUSAL, 256, 1024, offsetZero));
+    EXPECT_FALSE(admits(SdpaMask::BOTTOM_RIGHT_CAUSAL, 256, 1024, offsetZero));
+    EXPECT_TRUE(admits(SdpaMask::BOTTOM_RIGHT_CAUSAL, 256, 1024, anyOffset));
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, HoldsTheKeyLengthToTheCandidatesAlignment)
@@ -456,11 +522,12 @@ void expectCandidateMatchesReference(const MatchContext& context,
 
     const int64_t b = spec.batch;
     const int64_t s = spec.seqLenQ;
+    const int64_t skv = spec.seqLenKv;
     const int64_t h = spec.heads;
     const int64_t hk = spec.kvHeads;
     const int64_t d = spec.headDim;
     const auto qCount = static_cast<size_t>(b * s * h * d);
-    const auto kvCount = static_cast<size_t>(b * s * hk * d);
+    const auto kvCount = static_cast<size_t>(b * skv * hk * d);
     const auto q = fillValues(qCount, 1U);
     const auto k = fillValues(kvCount, 2U);
     const auto v = fillValues(kvCount, 3U);
@@ -541,18 +608,23 @@ void expectCandidateMatchesReference(const MatchContext& context,
                              ? 1.0 / std::sqrt(static_cast<double>(d))
                              : static_cast<double>(spec.scale);
     const int64_t group = h / hk;
+    // The reference's rule: query row i sees key j <= i + align + right, align 0 top-left
+    // and Skv - Sq bottom-right.
+    const int64_t offset
+        = (spec.mask == SdpaMask::BOTTOM_RIGHT_CAUSAL ? skv - s : 0) + spec.rightBound.value_or(0);
     double worst = 0.0;
     std::string where;
     double worstLse = 0.0;
     std::string whereLse;
-    std::vector<double> scores(static_cast<size_t>(s));
+    std::vector<double> scores(static_cast<size_t>(skv));
     for(int64_t bi = 0; bi < b; ++bi)
     {
         for(int64_t hi = 0; hi < h; ++hi)
         {
             for(int64_t si = 0; si < s; ++si)
             {
-                const int64_t lastKey = causal ? si : s - 1;
+                // Negative for a row no key reaches: O is 0 and the LSE -inf.
+                const int64_t lastKey = causal ? std::min(si + offset, skv - 1) : skv - 1;
                 double maxScore = -std::numeric_limits<double>::infinity();
                 for(int64_t j = 0; j <= lastKey; ++j)
                 {
@@ -560,7 +632,7 @@ void expectCandidateMatchesReference(const MatchContext& context,
                     for(int64_t e = 0; e < d; ++e)
                     {
                         dot += at(q, h, s, d, bi, hi, si, e)
-                               * at(k, hk, s, d, bi, hi / group, j, e);
+                               * at(k, hk, skv, d, bi, hi / group, j, e);
                     }
                     scores[static_cast<size_t>(j)] = dot * scale;
                     maxScore = std::max(maxScore, scores[static_cast<size_t>(j)]);
@@ -575,10 +647,16 @@ void expectCandidateMatchesReference(const MatchContext& context,
                 if(withStats)
                 {
                     // Natural log of the row's sum of exp(scaled score).
-                    const double expectedLse = maxScore + std::log(sum);
                     const auto lse
                         = static_cast<double>(stats[static_cast<size_t>((bi * h + hi) * s + si)]);
-                    const double lseError = std::abs(lse - expectedLse);
+                    // A row no key reaches has LSE -inf.
+                    const bool keyless = lastKey < 0;
+                    const bool negativeInfinity = std::isinf(lse) && lse < 0.0;
+                    double lseError = std::abs(lse - (maxScore + std::log(sum)));
+                    if(keyless)
+                    {
+                        lseError = negativeInfinity ? 0.0 : 1e30;
+                    }
                     if(!(lseError <= LSE_TOLERANCE))
                     {
                         worstLse = std::max(worstLse, std::isnan(lseError) ? 1e30 : lseError);
@@ -592,9 +670,9 @@ void expectCandidateMatchesReference(const MatchContext& context,
                     for(int64_t j = 0; j <= lastKey; ++j)
                     {
                         expected += scores[static_cast<size_t>(j)]
-                                    * at(v, hk, s, d, bi, hi / group, j, e);
+                                    * at(v, hk, skv, d, bi, hi / group, j, e);
                     }
-                    expected /= sum;
+                    expected = lastKey < 0 ? 0.0 : expected / sum;
                     const double error = std::abs(at(o, h, s, d, bi, hi, si, e) - expected);
                     if(error > worst)
                     {
@@ -728,6 +806,60 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, WritesTheLogSumExpOfACausalRaggedBatch)
     spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
     spec.stats = SdpaStats::LSE;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesCrossAttentionWithBottomRightCausal)
+{
+    // A diagonal that falls mid-tile, where the gfx950 pipeline needs cross_seqlen.
+    auto spec = cdnaSpec();
+    spec.batch = 2;
+    spec.seqLenQ = 333;
+    spec.seqLenKv = 700;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesMoreQueriesThanKeysWithRowsNoKeyReaches)
+{
+    auto spec = cdnaSpec();
+    spec.seqLenQ = 700;
+    spec.seqLenKv = 333;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesChunkedPrefillWithTopLeftCausal)
+{
+    auto spec = cdnaSpec();
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 600;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesATopLeftBand)
+{
+    auto spec = cdnaSpec();
+    spec.seqLenQ = 128;
+    spec.seqLenKv = 512;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.rightBound = 64;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesNonCausalCrossAttentionAndDecode)
+{
+    auto cross = cdnaSpec();
+    cross.seqLenQ = 300;
+    cross.seqLenKv = 100;
+    expectCdnaMatchesReference(cross, BF16_TOLERANCE);
+    auto decode = cdnaSpec();
+    decode.seqLenQ = 1;
+    decode.seqLenKv = 1000;
+    decode.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(decode, BF16_TOLERANCE);
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, LongerSequenceMatchesTheReference)

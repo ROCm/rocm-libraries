@@ -78,9 +78,9 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsOneObjectPerClassAndOneKernelFamilyPerArch)
 {
     const auto& set = loadedSet(ENGINE);
 
-    // dtype x family x head_dim x causal x kv_align is the whole instance key today: a
-    // duplicate would make the choice between two objects an accident of ids.
-    std::set<std::tuple<std::string, std::string, int64_t, int64_t, int64_t>> classes;
+    // dtype x family x head_dim x causal x kv_align x any_diagonal is the whole instance
+    // key today: a duplicate would make the choice between two objects an accident of ids.
+    std::set<std::tuple<std::string, std::string, int64_t, int64_t, int64_t, int64_t>> classes;
     std::set<std::string> families;
     size_t kernels = 0;
     for(const auto& pack : set.packs)
@@ -92,12 +92,14 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsOneObjectPerClassAndOneKernelFamilyPerArch)
             const auto* headDim = tryGetMetadataField<int64_t>(kernel.metadata, "head_dim");
             const auto* causal = tryGetMetadataField<int64_t>(kernel.metadata, "causal");
             const auto* kvAlign = tryGetMetadataField<int64_t>(kernel.metadata, "kv_align");
+            const auto* anyDiagonal = tryGetMetadataField<int64_t>(kernel.metadata, "any_diagonal");
             ASSERT_NE(dtype, nullptr) << kernel.name;
             ASSERT_NE(family, nullptr) << kernel.name;
             ASSERT_NE(headDim, nullptr) << kernel.name;
             ASSERT_NE(causal, nullptr) << kernel.name;
             ASSERT_NE(kvAlign, nullptr) << kernel.name;
-            classes.emplace(*dtype, *family, *headDim, *causal, *kvAlign);
+            ASSERT_NE(anyDiagonal, nullptr) << kernel.name;
+            classes.emplace(*dtype, *family, *headDim, *causal, *kvAlign, *anyDiagonal);
             families.insert(*family);
             ++kernels;
 
@@ -116,9 +118,10 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
 {
     const auto& set = loadedSet(ENGINE);
 
-    // Dual-wave: 12 tensors, then 8 i32, the f32 scale, the two head counts and lse_on.
-    // Generic: 5 tensors, 2 i32, 3 tensors, then 1 i32, the f32 scale, the two head
-    // counts, the two token strides and lse_on. Every scalar slot is 4 bytes.
+    // Dual-wave: 12 tensors, then 8 i32, the f32 scale, the two head counts, lse_on and
+    // diag_offset. Generic: 5 tensors, 2 i32, 3 tensors, then 1 i32, the f32 scale, the
+    // two head counts, the two token strides, lse_on and diag_offset. Every scalar slot
+    // is 4 bytes.
     using Slot = std::pair<std::string, uint32_t>;
     const auto expected = [](const std::string& family) {
         std::vector<Slot> slots;
@@ -138,14 +141,14 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
         if(family == "dualwave")
         {
             tensors(12);
-            scalars(12);
+            scalars(13);
         }
         else
         {
             tensors(5);
             scalars(2);
             tensors(3);
-            scalars(7);
+            scalars(8);
         }
         return slots;
     };

@@ -16,7 +16,8 @@
     "head_dim": 128,
     "causal": 1,
     "block_m": 256,
-    "kv_align": 0
+    "kv_align": 0,
+    "any_diagonal": 1
   },
   "priority": 100,
   "provenance": {
@@ -33,7 +34,8 @@
             "head_dim",
             "causal",
             "block_m",
-            "kv_align"
+            "kv_align",
+            "any_diagonal"
           ],
           "bindings": {},
           "vocabulary": {}
