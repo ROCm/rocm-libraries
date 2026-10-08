@@ -1346,11 +1346,11 @@ TEST_F(DAGSchedulerPassTest, IndependentWMMAFirst_ThenDsThenVALU) {
         << "DS loads should be prioritized before VALU during WMMA latency";
 }
 
-// MX128 loop body: each accumulator pack reads its own buffer (X1, X2). LDS
-// returns in order, so pack 2's MXS load chained ahead of pack 1's A load
-// would be waited out by pack 1's WMMA. The parent tier leads only within its
-// own pack.
-TEST_F(DAGSchedulerPassTest, ParentTierDsLoadOrderStaysWithinAccumulatorPack) {
+// MX128 loop body: two WMMAs on the same accumulator read their own buffers
+// (X1, X2). LDS returns in order, so the second WMMA's MXS load chained ahead
+// of the first WMMA's A load would be waited out by the first WMMA. The parent
+// tier leads only among loads with the same deadline.
+TEST_F(DAGSchedulerPassTest, ParentTierDsLoadOrderFollowsDeadline_AccumulatorReuse) {
     bb->addSuccessor(bb);
 
     StinkyInstruction* wmmaHead = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
@@ -1371,7 +1371,7 @@ TEST_F(DAGSchedulerPassTest, ParentTierDsLoadOrderStaysWithinAccumulatorPack) {
     wmmaP1->addSrcReg(StinkyRegister("v", 610, 1));
 
     createVAddInBlock(bb, arch, /*destReg=*/710, /*src0Reg=*/700, /*src1Reg=*/700);
-    // Reuse wmmaP1's accumulator destination: this is the next pack.
+    // Reuse wmmaP1's accumulator destination.
     StinkyInstruction* wmmaP2 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/400);
     ASSERT_NE(wmmaP2, nullptr);
     wmmaP2->addSrcReg(StinkyRegister("v", 710, 1));
@@ -1381,12 +1381,53 @@ TEST_F(DAGSchedulerPassTest, ParentTierDsLoadOrderStaysWithinAccumulatorPack) {
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
 
     EXPECT_LT(positionOf(*bb, mxsP1), positionOf(*bb, aP1))
-        << "the parent tier still leads within its pack";
+        << "the parent tier still leads within its deadline";
     EXPECT_LT(positionOf(*bb, aP1), positionOf(*bb, mxsP2))
-        << "a later pack's MXS load must not issue ahead of an earlier pack's "
+        << "a later WMMA's MXS load must not issue ahead of an earlier WMMA's "
            "outstanding A/B load";
     EXPECT_LT(positionOf(*bb, mxsP2), positionOf(*bb, aP2));
     EXPECT_LT(positionOf(*bb, wmmaP1), positionOf(*bb, wmmaP2));
+}
+
+// Same loads, but the two WMMAs write disjoint accumulators, as the B tiles of
+// one k-step do when each carries its own MXSB load (MT64x192, MT32x256). The
+// second MXS load is still a parent-tier load, yet its deadline is the second
+// WMMA, so it must not lead the first WMMA's A load.
+TEST_F(DAGSchedulerPassTest, ParentTierDsLoadOrderFollowsDeadline_DisjointAccumulators) {
+    bb->addSuccessor(bb);
+
+    StinkyInstruction* wmmaHead = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmmaHead, nullptr);
+
+    StinkyInstruction* mxsP1 = createMovableDsLoad(/*destReg=*/600, /*addrReg=*/80,
+                                                   /*ldsToken=*/0);
+    StinkyInstruction* mxsP2 = createMovableDsLoad(/*destReg=*/700, /*addrReg=*/81,
+                                                   /*ldsToken=*/0);
+    StinkyInstruction* aP1 = createMovableDsLoad(/*destReg=*/200, /*addrReg=*/82,
+                                                 /*ldsToken=*/0);
+    StinkyInstruction* aP2 = createMovableDsLoad(/*destReg=*/400, /*addrReg=*/83,
+                                                 /*ldsToken=*/0);
+
+    createVAddInBlock(bb, arch, /*destReg=*/610, /*src0Reg=*/600, /*src1Reg=*/600);
+    StinkyInstruction* wmmaP1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmmaP1, nullptr);
+    wmmaP1->addSrcReg(StinkyRegister("v", 610, 1));
+
+    createVAddInBlock(bb, arch, /*destReg=*/710, /*src0Reg=*/700, /*src1Reg=*/700);
+    StinkyInstruction* wmmaP2 = createWmmaScaleF8(/*destStart=*/300, /*src0Start=*/400);
+    ASSERT_NE(wmmaP2, nullptr);
+    wmmaP2->addSrcReg(StinkyRegister("v", 710, 1));
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithMxUnit1Scheduling();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, mxsP1), positionOf(*bb, aP1))
+        << "the parent tier still leads within its deadline";
+    EXPECT_LT(positionOf(*bb, aP1), positionOf(*bb, mxsP2))
+        << "a parent-tier load for a later WMMA must wait for the earlier WMMA's "
+           "A/B load even when the accumulators are disjoint";
+    EXPECT_LT(positionOf(*bb, mxsP2), positionOf(*bb, aP2));
 }
 
 // ---------------------------------------------------------------------------

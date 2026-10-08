@@ -82,13 +82,10 @@ struct DAGNode {
     unsigned inDegree;
     unsigned id;
     // Pre-computed pick order for ds_reads. Lower = pick first.
-    // Assigned by the pre-scan in scheduleRegionWithMovableSideEffects:
-    // parent-VALU input families first, then remaining loads, each tier using
-    // DsReadOrder + WMMA-affinity.
+    // Assigned by the pre-scan in scheduleRegionWithMovableSideEffects from
+    // DsReadOrder + WMMA-affinity. Under mxUnit1Scheduling loads go by deadline
+    // (earliest in-region matrix consumer), parent-VALU inputs first.
     unsigned dsReadPriority = UINT_MAX;
-    // Accumulator pack containing this matrix op. A new pack starts when a
-    // matrix destination overlaps one already written in the current pack.
-    unsigned wmmaPack = UINT_MAX;
     // True when this VALU/transcendental has a direct matrix DAG successor.
     // CDNA5ReadyQueue routes these to wmmaParentValuQueue (Phase B unlock).
     // Set by the pre-scan in scheduleRegionWithMovableSideEffects.

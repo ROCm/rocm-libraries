@@ -426,7 +426,7 @@ static void scheduleRegionWithMovableSideEffects(
     if (readyQueue.clusterBarrierEnabled())
         applyClusterBarrierSccRule(dagNodes, instToId, dagGraph, cumCycles[regionSize]);
 
-    // The parent-family DS tier and pack-by-pack dsReadPriority are the
+    // The parent-VALU DS tier and deadline-ordered dsReadPriority are the
     // mxUnit==1 (MX128) schedule. MX16/MX32 keep affinity / DsReadOrder only.
     const bool mxUnit1Scheduling =
         readyQueue.getPassContext().getPassFeatureConfig().dagFeatures.mxUnit1Scheduling;
@@ -444,48 +444,10 @@ static void scheduleRegionWithMovableSideEffects(
         }
     }
 
-    // Group matrix ops into accumulator packs. Tensile emits one pack as a run
-    // over disjoint C destinations, then starts the next pack by reusing C+0.
-    // dsReadPriority orders DS inputs pack by pack.
-    unsigned wmmaPack = 0;
-    std::vector<StinkyRegister> packDests;
-    int priorMatrixDest = -1;
-    for (unsigned i = 0; i < regionSize; ++i) {
-        StinkyInstruction& inst = *dagNodes[i].inst;
-        if (!isMatrixInstruction(inst)) continue;
-
-        bool startsNextPack = false;
-        int matrixDest = -1;
-        for (const StinkyRegister& dst : inst.getDestRegs()) {
-            if (!dst.isRegister() || isPseudoReg(dst)) continue;
-            if (matrixDest < 0) matrixDest = static_cast<int>(dst.reg.idx);
-            for (const StinkyRegister& prior : packDests) {
-                if (dst.isOverlap(prior)) {
-                    startsNextPack = true;
-                    break;
-                }
-            }
-            if (startsNextPack) break;
-        }
-        // A region can begin halfway through a pack, so its next pack may wrap
-        // from C+56 to C+0 without overlapping a destination seen in-region.
-        if (matrixDest >= 0 && priorMatrixDest >= 0 && matrixDest < priorMatrixDest)
-            startsNextPack = true;
-        if (startsNextPack) {
-            ++wmmaPack;
-            packDests.clear();
-        }
-        dagNodes[i].wmmaPack = wmmaPack;
-        priorMatrixDest = matrixDest;
-        for (const StinkyRegister& dst : inst.getDestRegs())
-            if (dst.isRegister() && !isPseudoReg(dst)) packDests.push_back(dst);
-    }
-
     // Pre-scan: assign dsReadPriority. Lower = pick first.
-    // If any feedsWmma (wmmaParentValuQueue) node touches an input family
-    // (A / B / MXSA / MXSB), every ds_load of those families is issued first
-    // within its accumulator pack so splat v_perm can start without waiting
-    // dscnt 0. Remaining loads keep the
+    // A ds_load read by a feedsWmma (wmmaParentValuQueue) VALU is issued first
+    // among loads with the same deadline so splat v_perm can start without
+    // waiting dscnt 0. Remaining loads keep the
     // existing DsReadOrder (default A→B→MXSA→MXSB). Within each tier the same
     // affinity / srcReg sort as before is reused — that is what yields
     // MXSA→A→B→MXSB vs MXSA→MXSB→A→B vs A→MXSA→B→MXSB from the parent set.
@@ -511,24 +473,6 @@ static void scheduleRegionWithMovableSideEffects(
             } else {
                 if (!srcs.empty()) addVgprIdxs(srcs[0], kindVgprs[kDsA]);
                 if (srcs.size() >= 2) addVgprIdxs(srcs[1], kindVgprs[kDsB]);
-            }
-        }
-
-        // Parent-family DS boost is the mxUnit==1 (MX128) schedule. MX16/MX32
-        // keep affinity / DsReadOrder only, so parentKindMask stays 0.
-        unsigned parentKindMask = 0;
-        if (mxUnit1Scheduling) {
-            for (unsigned i = 0; i < regionSize; ++i) {
-                if (!dagNodes[i].feedsWmma) continue;
-                // WMMA itself can be IF_VALU with a matrix successor (C-chain).
-                // Only splat/pack VALUs should boost ds_load families.
-                if (isMatrixInstruction(*dagNodes[i].inst)) continue;
-                const StinkyInstruction& inst = *dagNodes[i].inst;
-                for (unsigned k = 0; k < kDsNumKinds; ++k) {
-                    if (instVgprsOverlap(inst, /*useDest=*/false, kindVgprs[k]) ||
-                        instVgprsOverlap(inst, /*useDest=*/true, kindVgprs[k]))
-                        parentKindMask |= (1u << k);
-                }
             }
         }
 
@@ -635,51 +579,22 @@ static void scheduleRegionWithMovableSideEffects(
 
             const int destKind = dsKindOf(*dagNodes[i].inst);
             const int kind = destKind >= 0 ? destKind : inferredKind;
-            const bool feedsParentKind = parentKindMask && kind >= 0 &&
-                                         (parentKindMask & (1u << static_cast<unsigned>(kind)));
             const unsigned kindRank = kind >= 0 ? static_cast<unsigned>(kind) : kDsNumKinds;
             DsInfo info{i, affinity, srcReg, kindRank, earliestRegionMatrixConsumer(i)};
-            if (feedsParentKind || userIsParentValu)
+            if (userIsParentValu)
                 parentFed.push_back(info);
             else
                 rest.push_back(info);
         }
 
-        auto assignPriorities = [&](std::vector<DsInfo>& dsReads, unsigned& pri, bool parentTier) {
-            if (dsReads.empty()) return;
-
-            if (parentTier) {
-                // Parent-VALU inputs: A → B → MXSA → MXSB, then affinity / program order.
-                std::sort(dsReads.begin(), dsReads.end(), [](const DsInfo& a, const DsInfo& b) {
-                    if (a.kindRank != b.kindRank) return a.kindRank < b.kindRank;
-                    if (a.affinity != b.affinity) return a.affinity < b.affinity;
-                    return a.idx < b.idx;
-                });
-                for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
-                return;
-            }
-
-            // Sort by affinity, then by DAG id.
-            std::sort(dsReads.begin(), dsReads.end(), [](const DsInfo& a, const DsInfo& b) {
-                return a.affinity != b.affinity ? a.affinity < b.affinity : a.idx < b.idx;
-            });
-
-            if (dsOrder == DsReadOrder::ProgramOrder) {
-                // mxUnit==1 shares one counter with the parent tier. Otherwise
-                // priority is the DAG id, as before 3dd555..HEAD.
-                if (!mxUnit1Scheduling) {
-                    for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = d.idx;
-                } else {
-                    for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
-                }
-                return;
-            }
-
+        // The look-ahead spans every non-parent load in the region, so the
+        // direction does not depend on how the loads are later grouped.
+        auto mixedGroupAscending = [&](const std::vector<DsInfo>& dsReads) {
             // For AscendingCache: find first single-operand affinity group,
             // then zigzag backward through mixed groups.
             // For Ascending: all groups use ascending order.
             std::map<unsigned, std::set<unsigned>> groupSrcRegs;
-            for (auto& d : dsReads) groupSrcRegs[d.affinity].insert(d.srcReg);
+            for (const DsInfo& d : dsReads) groupSrcRegs[d.affinity].insert(d.srcReg);
 
             // Determine sort direction for mixed groups via look-ahead.
             // Both Ascending and AscendingCache use look-ahead to find the
@@ -712,6 +627,39 @@ static void scheduleRegionWithMovableSideEffects(
                 }
                 // Ascending without anchor: groupAsc empty → default ascending.
             }
+            return groupAsc;
+        };
+
+        auto assignPriorities = [&](std::vector<DsInfo>& dsReads, unsigned& pri, bool parentTier,
+                                    const std::map<unsigned, bool>& groupAsc) {
+            if (dsReads.empty()) return;
+
+            if (parentTier) {
+                // Parent-VALU inputs: A → B → MXSA → MXSB, then affinity / program order.
+                std::sort(dsReads.begin(), dsReads.end(), [](const DsInfo& a, const DsInfo& b) {
+                    if (a.kindRank != b.kindRank) return a.kindRank < b.kindRank;
+                    if (a.affinity != b.affinity) return a.affinity < b.affinity;
+                    return a.idx < b.idx;
+                });
+                for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
+                return;
+            }
+
+            // Sort by affinity, then by DAG id.
+            std::sort(dsReads.begin(), dsReads.end(), [](const DsInfo& a, const DsInfo& b) {
+                return a.affinity != b.affinity ? a.affinity < b.affinity : a.idx < b.idx;
+            });
+
+            if (dsOrder == DsReadOrder::ProgramOrder) {
+                // mxUnit==1 shares one counter with the parent tier. Otherwise
+                // priority is the DAG id, as before 3dd555..HEAD.
+                if (!mxUnit1Scheduling) {
+                    for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = d.idx;
+                } else {
+                    for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
+                }
+                return;
+            }
 
             // Assign priority. Within each group, sort by DAG id
             // (ascending or descending per groupAsc).
@@ -719,7 +667,8 @@ static void scheduleRegionWithMovableSideEffects(
             std::vector<DsInfo*> group;
             auto flushGroup = [&]() {
                 if (group.empty()) return;
-                bool asc = groupAsc.contains(prevAff) ? groupAsc[prevAff] : true;
+                const auto it = groupAsc.find(prevAff);
+                const bool asc = it == groupAsc.end() || it->second;
                 if (!asc) {
                     // Reverse operand type order but keep DAG id order within
                     // each type. Sort by (srcReg descending, idx ascending).
@@ -741,30 +690,28 @@ static void scheduleRegionWithMovableSideEffects(
         };
 
         unsigned pri = 0;
+        const std::map<unsigned, bool> restGroupAsc = mixedGroupAscending(rest);
         if (mxUnit1Scheduling) {
-            // Accumulator packs read separate buffers (X1, X2, ...). LDS returns in
-            // order, so a later pack's load issued ahead of this pack's remaining
-            // loads would be waited out by this pack's consumers. Order packs first;
-            // the parent tier still leads within each pack. Loads with no in-region
-            // matrix consumer (next-trip preloads) go last.
-            std::map<unsigned, std::pair<std::vector<DsInfo>, std::vector<DsInfo>>> byPack;
-            auto packOf = [&](const DsInfo& d) {
-                return d.consumer == UINT_MAX ? UINT_MAX : dagNodes[d.consumer].wmmaPack;
-            };
-            for (const DsInfo& d : parentFed) byPack[packOf(d)].first.push_back(d);
-            for (const DsInfo& d : rest) byPack[packOf(d)].second.push_back(d);
-            for (auto& [pack, tiers] : byPack) {
-                assignPriorities(tiers.first, pri, /*parentTier=*/true);
-                assignPriorities(tiers.second, pri, /*parentTier=*/false);
+            // LDS returns in order, so issuing by deadline (earliest in-region
+            // matrix consumer) keeps a later consumer's load from being waited
+            // out by an earlier one. Loads with no in-region consumer (next-trip
+            // preloads) have no deadline and go last. Within one deadline the
+            // parent tier leads: those loads still need the splat VALU.
+            std::map<unsigned, std::pair<std::vector<DsInfo>, std::vector<DsInfo>>> byDeadline;
+            for (const DsInfo& d : parentFed) byDeadline[d.consumer].first.push_back(d);
+            for (const DsInfo& d : rest) byDeadline[d.consumer].second.push_back(d);
+            for (auto& [deadline, tiers] : byDeadline) {
+                assignPriorities(tiers.first, pri, /*parentTier=*/true, restGroupAsc);
+                assignPriorities(tiers.second, pri, /*parentTier=*/false, restGroupAsc);
             }
         } else {
-            assignPriorities(parentFed, pri, /*parentTier=*/true);
-            assignPriorities(rest, pri, /*parentTier=*/false);
+            assignPriorities(parentFed, pri, /*parentTier=*/true, restGroupAsc);
+            assignPriorities(rest, pri, /*parentTier=*/false, restGroupAsc);
         }
 
         PASS_DEBUG({
-            std::cerr << "[DAG schedule] dsReadPriority parentKindMask=" << parentKindMask
-                      << " parentFed=" << parentFed.size() << " rest=" << rest.size() << "\n";
+            std::cerr << "[DAG schedule] dsReadPriority parentFed=" << parentFed.size()
+                      << " rest=" << rest.size() << "\n";
             for (unsigned i = 0; i < regionSize; ++i) {
                 if (!isDSRead(*dagNodes[i].inst) && !dagNodes[i].feedsWmma) continue;
                 std::cerr << "  dagId=" << i << " pri=" << dagNodes[i].dsReadPriority
