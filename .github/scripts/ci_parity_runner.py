@@ -203,6 +203,21 @@ def stream_merged_output(proc: subprocess.Popen, index: int, timeout_seconds: in
     return lines, returncode, timed_out
 
 
+def rocjitsu_command(
+    rocjitsu: str,
+    config: str,
+    daemon: bool,
+    extra_args: list[str],
+) -> list[str]:
+    """rocJITsu argv up to and including the '--' that starts the test command."""
+    command = [rocjitsu]
+    if daemon:
+        command.append("--daemon")
+    command.extend(extra_args)
+    command.extend(["--config", config, "--"])
+    return command
+
+
 def run_binary(
     rocjitsu: str,
     config: str,
@@ -213,11 +228,10 @@ def run_binary(
     daemon: bool,
     index: int = 1,
     total: int = 1,
+    extra_args: list[str] | None = None,
 ) -> dict:
-    command = [rocjitsu]
-    if daemon:
-        command.append("--daemon")
-    command.extend(["--config", config, "--", binary])
+    command = rocjitsu_command(rocjitsu, config, daemon, extra_args or [])
+    command.append(binary)
     if gtest_filter:
         command.append(f"--gtest_filter={gtest_filter}")
     name = Path(binary).name
@@ -311,6 +325,7 @@ def run_labeled_ctest(
     env: dict,
     daemon: bool,
     out_dir: Path,
+    extra_args: list[str] | None = None,
 ) -> dict:
     """Run `ctest -L <label> -V` with rocJITsu in front of each test command.
 
@@ -333,12 +348,16 @@ def run_labeled_ctest(
     # "Could not find executable".
     work = (out_dir / "ctest-quick").resolve()
     work.mkdir(parents=True, exist_ok=True)
-    launcher_parts = [shlex.quote(str(Path(rocjitsu).resolve()))]
-    if daemon:
-        launcher_parts.append("--daemon")
-    launcher_parts.extend(
-        ["--config", shlex.quote(str(Path(config).resolve())), "--", '"$@"']
-    )
+    launcher_parts = [
+        shlex.quote(part)
+        for part in rocjitsu_command(
+            str(Path(rocjitsu).resolve()),
+            str(Path(config).resolve()),
+            daemon,
+            extra_args or [],
+        )
+    ]
+    launcher_parts.append('"$@"')
     launcher = (work / "rocjitsu-launch").resolve()
     launcher.write_text(
         "#!/bin/bash\nset -euo pipefail\nexec " + " ".join(launcher_parts) + "\n",
@@ -451,6 +470,12 @@ def main() -> int:
     )
     parser.add_argument("--rocm-version", default="")
     parser.add_argument("--runner-label", default="")
+    parser.add_argument(
+        "--rocjitsu-arg",
+        action="append",
+        default=[],
+        help="Extra rocJITsu option, inserted before --config. Repeat for more than one.",
+    )
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
@@ -474,6 +499,7 @@ def main() -> int:
             env,
             args.daemon,
             out.parent,
+            args.rocjitsu_arg,
         )
         cases.extend(result["cases"])
         binaries.extend(result["binaries"])
@@ -496,6 +522,7 @@ def main() -> int:
                 args.daemon,
                 index=index,
                 total=total,
+                extra_args=args.rocjitsu_arg,
             )
             cases.extend(result["cases"])
             log_lines.extend(result["log_lines"])

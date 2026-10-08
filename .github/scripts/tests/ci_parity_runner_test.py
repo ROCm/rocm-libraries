@@ -199,11 +199,15 @@ class QuickLabelTest(unittest.TestCase):
                     {**os.environ, "GTEST_FILTER": ""},
                     False,
                     Path("parity"),
+                    extra_args=["--cpu-thread-budget=1"],
                 )
             finally:
                 os.chdir(previous)
             log = "\n".join(result["log_lines"])
             launcher = root / "parity" / "ctest-quick" / "rocjitsu-launch"
+            script = launcher.read_text(encoding="utf-8")
+            self.assertIn("--cpu-thread-budget=1", script)
+            self.assertLess(script.index("--cpu-thread-budget=1"), script.index("--config"))
             self.assertIn(str(launcher), log)
             self.assertNotIn("Could not find executable", log)
             self.assertIn("Start 1: test_hiprand_api", log)

@@ -32,6 +32,10 @@ on:
         description: "Pinned gfx94X-dcgpu nightly used for runtime and tests."
         type: string
         default: "10.2.0a20260928"
+      rocjitsu_arg:
+        description: "Optional extra rocJITsu flag, for example --cpu-thread-budget=1. Empty uses the config default."
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -118,6 +122,7 @@ jobs:
     env:
       ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
       GTEST_FILTER: ${{ github.event.inputs.gtest_filter || '' }}
+      ROCJITSU_ARG: ${{ github.event.inputs.rocjitsu_arg || '' }}
       CTEST_LABEL: "^quick$"
       BUILD_RUNS_ON: ${{ needs.gate.outputs.build_runs_on }}
       # develop on 2026-10-01, after the VM dispatch-overhead fix
@@ -190,6 +195,9 @@ jobs:
             --runner-label "$BUILD_RUNS_ON"
             --out parity/emu.json
           )
+          if [ -n "$ROCJITSU_ARG" ]; then
+            common+=(--rocjitsu-arg "$ROCJITSU_ARG")
+          fi
           if [ -n "$GTEST_FILTER" ]; then
             "${common[@]}" \
               --binary "$ROCM_ROOT/bin/test_hiprand_api" \
