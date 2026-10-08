@@ -19,8 +19,8 @@ dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_g
     (`git log -1 --format=%ci -- projects/hipdnn dnn-providers` against the binaries' times).
     A `hipdnn_corpus_gen` older than the checkout reads the current `corpus_gen/operations/`
     with `no declaration for operation` or `metadata error` lines.
-- **Building.** From the checkout root (relative paths in this skill are from there), with the `hip-kernel-provider` preset (hipDNN plus the
-  provider in one build):
+- **Building.** From the checkout root (relative paths in this skill are from there), with
+  the `hip-kernel-provider` preset (hipDNN plus the provider in one build):
   ```bash
   cmake --preset hip-kernel-provider -B <build> -G Ninja -DGPU_TARGETS=<arch> \
     -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
@@ -30,23 +30,36 @@ dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_g
   The ingestor packs rocKE kernels, so it needs `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`. If
   configure stops with `comgr loaded '<library>' instead of the requested '<stub>'`, add
   `-DHIPKERNELPROVIDER_ROCKE_COMGR_LIB=<library>`. Build everything (`ALL` stages the
-  descriptors); `-k 0` lets the tools finish when a test binary fails to link. The build
-  provides `hipdnn_corpus_gen`, `hipdnn_bench`, `hipdnn_uhd_features`, `hipdnn_list_engines`,
-  `hipdnn_validate_descriptors` and the engine plugins under
-  `<build>/lib/hipdnn_plugins/engines/`.
+  descriptors). Some test binaries can fail to link (`hipdnn_gpu_ref_tests`,
+  `hipdnn_golden_data_tests`, `hipdnn_integration_tests*`), so the build may exit non-zero;
+  `-k 0` builds everything else. The build is usable when it has `bin/hipdnn_corpus_gen`,
+  `bin/hipdnn_bench`, `bin/hipdnn_uhd_features`, `bin/hipdnn_list_engines`,
+  `bin/hipdnn_validate_descriptors`, the provider plugin under
+  `<build>/lib/hipdnn_plugins/engines/` and a non-empty `arch_content/` beside it.
+- **Kernel files.** An engine that loads kernel files at run time looks for them at the
+  install path, so from a build tree point it at the build's copy, for every step that runs
+  the engine (collection, validation, `hipdnn_bench`): for AITER's `ASM_SDPA_ENGINE`,
+  `HIPDNN_AITER_ASM_DIR=<build>/hip_kernel_provider/asm_kernels`. The provider's integration
+  tests set the same variables (`dnn-providers/hip-kernel-provider/src/integration_tests/CMakeLists.txt`).
+  Missed, every graph fails at collection with `failed to load kernel module`, although the
+  shape set (which only asks whether the engine applies) succeeded.
 - **uhd_gen** needs LightGBM, pandas and pyarrow. Run it from the checkout with
   `PYTHONPATH=<checkout>/projects/hipdnn/tools`, or install it into your own environment with
   `pip install -e projects/hipdnn/tools/uhd_gen`. Pass
   `--feature-evaluator <build>/bin/hipdnn_uhd_features` wherever `uhd_gen` takes it.
 - **Containers.** When the tools run in a container, run it as yourself, so the store stays
-  yours to reorganise, with the GPU's devices and both groups that own them:
+  yours to reorganise, with the GPU's devices and the host's numeric ids of both groups that
+  own them (a group name resolves inside the image, where its id can differ):
   ```bash
   docker run --rm --user $(id -u):$(id -g) --device=/dev/kfd --device=/dev/dri \
-    --group-add video --group-add render -v <checkout>:<checkout> -w <checkout> <image> ...
+    --group-add $(getent group video | cut -d: -f3) \
+    --group-add $(getent group render | cut -d: -f3) \
+    -v <checkout>:<checkout> -w <checkout> <image> ...
   ```
-  (`--group-add` takes the GID when the image has no `render` group: `getent group render`.)
-  Check `rocminfo` inside the container lists the gfx agent before running any tool: without
-  the render group the GPU is invisible, and every engine appears to serve nothing.
+  On a machine whose GPUs are shared out (a scheduler grants you some), pass the granted set
+  in (`-e ROCR_VISIBLE_DEVICES`), since the container sees every device. Check `rocminfo`
+  inside the container lists the gfx agent before running any tool: without the render
+  group the GPU is invisible, and every engine appears to serve nothing.
 - After any CMake reconfigure of the hip-kernel-provider build, rebuild its descriptor
   staging targets before trusting an engine result: a reconfigure empties
   `lib/hipdnn_plugins/engines/arch_content/`, and every engine then declines every graph.
@@ -81,7 +94,7 @@ One directory the user names (default `~/uhd-work`), laid out so a key is its pa
 | What | Where |
 |---|---|
 | shape sets (corpora) | `corpora/<engine>/<device>/<set>/<operation>/{graphs/, manifest.json, manifest.csv}` and `<set>/eval_slice.json` |
-| raw collections | `collections/<engine>/<device>/<revision>/<date>/<collection>/` (one `uhd_gen generate --collect-only` output each) |
+| raw collections | `collections/<engine>/<device>/<revision>/<date>/<set>-<time>/` (one `uhd_gen generate --collect-only` output each; `<date>` and `<time>` are the UTC `collected_at` in its `collection_manifest.json`, e.g. `2026-10-08/set-0001-20261008T002600Z`) |
 | datasets | `datasets/<engine>/<device>/<revision>/<role>[/under-<L2 id>]/` (`dataset.parquet`, `dataset_manifest.json`) |
 | models | `models/<model>/` (one `uhd_gen generate` output each) |
 | archived sets | `archive/` (a set moved here counts for nothing) |
@@ -121,7 +134,7 @@ segment is the selector revision with `/` as `-`.
 1. **What is stored**: list `datasets/`; each `dataset_manifest.json` lists every
    contribution with its date, devices, purpose and origin. A model's
    `models/<model>/generation/generation_manifest.json` names the dataset and contributions it
-   trained on, and its `training_problem_keys` / `eval_problem_keys`.
+   trained on, and under `models[i]` its `training_problem_keys` / `eval_problem_keys`.
 2. **Measure more**: [generate.md](generate.md) makes a set, collects it and adds each collection.
 3. **Add a collection**:
    `python -m uhd_gen.dataset add --into <dataset dir> --collection <collection dir>...

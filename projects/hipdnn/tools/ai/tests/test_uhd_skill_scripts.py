@@ -149,6 +149,16 @@ def test_the_cli_slices_every_operation_once_and_resolves_graph_files(slicing, t
     sample = json.loads((tmp_path / "sample.json").read_text())["graphs"]
     assert len(sample) == 2 and all(Path(g["path"]).is_file() for g in sample)
 
+    clean = {"models": [{"training_problem_keys": [["not-held-out", "gpu"]]}]}
+    (tmp_path / "clean.json").write_text(json.dumps(clean))
+    assert run("sample", written, "--trained", tmp_path / "clean.json",
+               "--out", tmp_path / "s2.json").returncode == 0
+    leaked = {"models": [{"training_problem_keys": [[document["benchmarks"][0], "gpu"]]}]}
+    (tmp_path / "leaked.json").write_text(json.dumps(leaked))
+    refused = run("sample", written, "--trained", tmp_path / "leaked.json",
+                  "--out", tmp_path / "s3.json")
+    assert refused.returncode != 0 and "training graphs" in refused.stderr
+
     exported = [{"benchmark": b, "tflops": 1.0} for b in document["benchmarks"]]
     exported.append({"benchmark": "trained-on", "tflops": 1.0})
     (tmp_path / "exported.json").write_text(json.dumps(exported))
@@ -233,6 +243,14 @@ def test_a_stale_selector_revision_fails(decide):
 def test_a_candidate_answering_in_another_metric_fails(decide):
     report = _decide_l1(decide, _document(_rows(metric="time")))
     assert not report["passed"] and not report["gates"]["metric"]["passed"]
+
+
+def test_an_answer_that_names_no_metric_fails(decide):
+    rows = _rows()
+    rows[0]["candidate"]["metric"] = None
+    gate = _decide_l1(decide, _document(rows))["gates"]["metric"]
+    assert not gate["passed"] and "named no metric" in gate["problems"][0]
+    assert gate["answered"] == ["tflops"]
 
 
 def test_a_less_accurate_candidate_fails_the_default_tolerance(decide):

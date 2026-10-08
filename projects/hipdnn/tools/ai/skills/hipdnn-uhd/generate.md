@@ -32,8 +32,9 @@ Take from the user; never guess silently:
   step 0. More than one: ask which.
 - **device**: the local GPU ([data.md](data.md), "The device"); with several products present,
   ask which one.
-- **tier**: `smoke` (200 graphs), `standard` (2000) or `exhaustive` (5000) per operation.
-  `smoke` first on any new engine or branch.
+- **tier**: `smoke` (200 graphs), `standard` (2000) or `exhaustive` (5000) **per operation**:
+  "200 shapes" for an engine serving `sdpa_fwd` and `sdpa_bwd` is 400 graphs. Say so in the
+  report. `smoke` first on any new engine or branch.
 - **build** and **store** directories (store default `~/uhd-work`).
 
 ## What the engine is
@@ -41,9 +42,10 @@ Take from the user; never guess silently:
 Read it from the checkout:
 
 - **Descriptor engine**: a shipped `*.ued.json` whose `name` is the engine. Shipped UEDs are
-  under a provider's `src/engines/*/descriptors/`; those under `tests`, `fixtures` and
-  `descriptor-packaging/examples/` are not built into the plugin. Its role maps name the roles it binds: `sort_kernel_catalog` (L2,
-  ranks its kernel catalog) and/or `predict_engine` (L1, predicts its own selection). Its
+  under a provider's `src/engines/*/descriptors/`; those under `tests`, `test_descriptors`,
+  `fixtures` and `descriptor-packaging/examples/` are not built into the plugin. Its role
+  maps name the roles it binds: `sort_kernel_catalog` (L2, ranks its kernel catalog) and/or
+  `predict_engine` (L1, predicts its own selection). Its
   per-arch root is the directory under `<plugin dir>/arch_content/hip-kernel-provider/` that
   holds both its installed UED and `kpack/`
   (`find <plugin dir>/arch_content -name kpack -type d`). The role map's key is the gfx arch or
@@ -61,7 +63,8 @@ Read it from the checkout:
   - a descriptor engine: the gfx keys of its UED role maps; a `default` key names no arch,
     so with only `default` the archs are its KDP `targets`;
   - an opaque engine: the archs it declares a UHD id for (every arch, when its ids are bound
-    under `default`), **and** that the operation's plan builder accepts (its `isApplicable`
+    under `default`; none, when it declares no id -- such an engine cannot be trained),
+    **and** that the operation's plan builder accepts (its `isApplicable`
     check). Both must hold: AITER declares gfx942 and gfx950, but its backward builder
     accepts gfx942 only, so `sdpa_bwd` has no model on gfx950.
 - **Operation**: the corpus_gen operation (`projects/hipdnn/tools/corpus_gen/operations/`)
@@ -107,9 +110,11 @@ Read it from the checkout:
 4. **Evaluation slice** (not for a closed shape set):
    `python3 $UHD/scripts/eval_slice.py choose <set>/*/manifest.json`, every
    operation of the set in one slice.
-5. **Collect, per role, L2 first** (one GPU run each; `--output-dir` must not exist):
+5. **Collect, per role, L2 first** (one GPU run each; `--output-dir` must not exist), with
+   the engine's kernel-file variables set ([data.md](data.md), "Kernel files"). One collection
+   covers every operation of the set (`--graphs` takes each `<set>/<op>`):
    ```bash
-   python3 -m uhd_gen generate --graphs <set>/<op> --collect-only \
+   python3 -m uhd_gen generate --graphs <set>/<op> ... --collect-only \
      --engine <engine> --engine-id <signed decimal id> --role <role> \
      --bench <build>/bin/hipdnn_bench --plugin-dir <abs plugin dir> \
      --descriptor-tree <tree> --output-dir <stage dir> [--shard K/N]
@@ -126,8 +131,11 @@ Read it from the checkout:
    `HIPDNN_CACHE_DIR` set to a new empty directory, so no benchmark winner record decides the
    kernel in the L2's place. Several GPUs of the device: one `--shard K/N` each, one
    collection each.
-   Then move each collection to `collections/<engine>/<device>/<revision>/<date>/<id>/`, the
-   revision read from its `collection_manifest.json`.
+   Then move each collection to `collections/<engine>/<device>/<revision>/<date>/<set>-<time>/`
+   ([data.md](data.md)), the revision and `collected_at` read from its
+   `collection_manifest.json`. The engine reports one selector revision for all its operations.
+   The directory's name becomes the contribution id in the dataset, which `--contribution`
+   selects by.
 6. **Store**: `python -m uhd_gen.dataset add --into <store>/datasets/<engine>/<device>/<revision>/<role>[/under-<L2 id>]
    --collection <collections> --corpus-id <set>`.
 7. **Train** (CPU):
@@ -143,8 +151,11 @@ Read it from the checkout:
    `eval_slice.py holdout` writes their union. A closed shape set: `--recall` instead of
    `--eval-benchmarks`. One model per metric the role binds (`--metric` repeatable). Train the
    L2, then collect and train the L1 under it (step 5).
-8. **Report** and hand off: each model directory is listed under `models` in
-   `<output dir>/generation_manifest.json`, with `eval_report.json` inside it;
+8. **Report** and hand off: each model directory is `models[i].model_dir` in
+   `<output dir>/generation_manifest.json` (the directory holding `heuristic.uhd.json`, the
+   payload and `eval_report.json`), beside that model's `training_problem_keys` and
+   `eval_problem_keys`; the install line `uhd_gen` prints names a temporary path, so use the
+   manifest's;
    [evaluate.md](evaluate.md) reads it, then [validate.md](validate.md).
 
 ## Decision rules
@@ -156,8 +167,11 @@ Read it from the checkout:
   replace it. Archive a key's sets ([data.md](data.md)) to start afresh.
 - **Revision.** Collections of different selector revisions go to different datasets; a model
   trains from one.
-- **Tier.** Move from `smoke` to `standard` only after a smoke round trains, scores and
-  validates cleanly.
+- **Tier.** A smoke round proves the pipeline, not the model: it passes when every graph is
+  collected, the model trains and is scored held out, and Stage V's identity, available,
+  metric and selector-revision gates pass. Its accuracy gate is reported, and a smoke model is
+  expected to lose to a shipped model trained on far more graphs. Move to `standard` after a
+  clean smoke round; only a model that also passes the accuracy gate is installed.
 - Nothing here changes the checkout: models are written under the store, and installing one
   is done in [validate.md](validate.md), with the user's go-ahead.
 
@@ -178,6 +192,7 @@ was scored (`eval_benchmarks`, `holdout` or `recall`).
 | a tool fails to start, `lib...so: cannot open shared object file` | the build was configured at another path: use a build configured at this checkout's path ([data.md](data.md)) |
 | corpus_gen refuses a pack-coverage engine | pass `--kdp-root` |
 | `--output-dir must not exist` | each run writes a new directory |
+| every graph fails collection with `failed to load kernel module` (after a shape set that succeeded) | the engine's kernel files are not where it looks: set its kernel-file variables ([data.md](data.md)) |
 | `N of M graph(s) failed collection` | read `failed_graphs` in `generation_manifest.json`: one kernel, or the device |
 | generate: no training data | the dataset holds no `training` rows at that revision/role |
 | an opaque model installs but the engine never reads it | trained without the declared `--uhd-id` |

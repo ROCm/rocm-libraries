@@ -19,11 +19,12 @@ supplies the installed-model evidence; this page makes the quality judgement exp
 
 ## Workflow
 
-1. The model directory: listed under `models` in its run's `generation_manifest.json`. That
-   manifest also says how it was scored -- `eval_benchmarks` (fixed slice ids), `holdout`
-   (`uhd_gen`'s seeded problem split, where no slice existed) or `recall` (a closed shape set)
-   -- and records `training_problem_keys` and `eval_problem_keys`. The two must be disjoint
-   for anything but recall.
+1. The model directory: `models[i].model_dir` in its run's `generation_manifest.json`. That
+   manifest also says how it was scored (`evaluation`): `eval_set` (the slice ids passed as
+   `--eval-benchmarks`, recorded in `eval_benchmarks`), `holdout` (`uhd_gen`'s seeded problem
+   split, where no slice existed) or `recall` (a closed shape set). `models[i]` records
+   `training_problem_keys` and `eval_problem_keys`; the two must be disjoint for anything
+   but recall.
 2. `eval_report.json`, in this order:
    1. `holdout_integrity.status`: `held_out`, `unknown` or `COMPROMISED`;
    2. `warnings[]`, verbatim;
@@ -36,7 +37,11 @@ supplies the installed-model evidence; this page makes the quality judgement exp
       absolute relative error, signed bias, RMSE in the metric's unit) and
       `metrics.immediate_selection` (regret against the best measured engine, when several
       engines were measured on the same problems);
-   6. `split` (seed, eval fraction, problem counts), `metric`, `target`, `objective`.
+   6. `split` (seed, eval fraction, problem counts), `metric`, `target`, `objective`. A model
+      scored on its slice (`eval_set`) shows `split.method: full_corpus`, `eval_fraction: 1.0`
+      and `train_problems: 0`, with the warning `Full supplied corpus evaluated; training
+      overlap is reported separately.`: the scored rows are the slice alone, and
+      `holdout_integrity: held_out` is the evidence that none was trained on.
 3. **Score on other rows**, with the tools of the hipDNN `build` the model was trained with:
    ```bash
    python -m uhd_gen.dataset export --from <dataset dir> --out rows.json \
@@ -52,7 +57,11 @@ supplies the installed-model evidence; this page makes the quality judgement exp
 4. **The previous model** (§11.4 MUST 4, which `uhd_gen evaluate` does not compute): the
    model the branch ships for the same engine, arch, role and metric, scored on the same
    rows (`--model-dir` on the shipped model's directory in the checkout, or
-   `--additional-model-dir`).
+   `--additional-model-dir`). An opaque engine's shipped model carries no training manifest,
+   and `uhd_gen evaluate` refuses it (`binding must be a JSON object`); its comparison is
+   Stage V's paired accuracy ([validate.md](validate.md)), which asks both models on the
+   same graphs. Whether the shipped model trained on the slice graphs is not recorded with
+   it: say the comparison may favour it.
 
 ## Decision rules
 
@@ -75,8 +84,9 @@ Decide one of **promotable**, **hold**, **retrain** or **grow**, and say which r
   to `strict` → recall is a tautology of small candidate sets; rely on regret.
 - `slice.exhaustive: false` (the normal case) → regret is against the best **measured**
   kernel, a lower bound; state it as optimistic.
-- Calibrated scores (L1): bias, not spread, skews cross-engine selection -- check
-  `CALIBRATED SCORE IS BIASED`. Reference points, not thresholds (§11.4): mean relative
+- Calibrated scores (L1): bias, not spread, skews cross-engine selection. Read
+  `metrics.calibration.signed_relative_bias` directly: `CALIBRATED SCORE IS BIASED` is raised
+  only from the candidates a model picks, so it never fires for an engine measured alone. Reference points, not thresholds (§11.4): mean relative
   absolute error under 15%, |signed bias| under 5%; for rankers, p95 top-1 regret under 10%.
 
 **Promotable** = holdout `held_out`, no `DOES NOT BEAT STATIC ORDER`, any regime regression

@@ -160,11 +160,19 @@ def decide(
     # RFC 0019 §11.4: an answer names its metric, and one in another metric is not
     # converted -- it is the wrong answer. A candidate that answers in a metric other than
     # the one its engine declares its id for has been bound where no request will use it.
+    # An answer that names no metric cannot show it is in the declared one, so it fails too.
     metric = document.get("metric") or "tflops"
-    wrong = sorted({str((r.get("candidate") or {}).get("metric")) for r in available
-                    if (r.get("candidate") or {}).get("metric") not in (None, metric)})
-    gates["metric"] = {"passed": not wrong, "declared": metric, "answered": wrong,
-                       "problems": [f"candidate answered in {wrong}, not {metric}"] if wrong else []}
+    answered = sorted({str((r.get("candidate") or {}).get("metric")) for r in available})
+    wrong = [m for m in answered if m not in ("None", metric)]
+    unnamed = sum((r.get("candidate") or {}).get("metric") is None for r in available)
+    metric_problems = []
+    if wrong:
+        metric_problems.append(f"candidate answered in {wrong}, not {metric}")
+    if unnamed:
+        metric_problems.append(f"{unnamed} candidate answer(s) named no metric")
+    gates["metric"] = {"passed": not metric_problems, "declared": metric,
+                       "answered": [m for m in answered if m != "None"],
+                       "problems": metric_problems}
 
     revisions = sorted({(r.get("candidate") or {}).get("selector_revision")
                         for r in available} - {None})

@@ -11,11 +11,16 @@ scripts (`$UHD/scripts/`, [SKILL.md](SKILL.md)): `candidate_tree.py`, `validate_
 
 ```bash
 python3 $UHD/scripts/eval_slice.py sample <each training set's eval_slice.json> \
-  --count 200 --out sample.json
+  --count 200 --trained <the model's run>/generation_manifest.json --out sample.json
 ```
-draws 200 graphs spread evenly over the slices' regimes. Every one must be absent from the
-model's `training_problem_keys` (its `generation_manifest.json`); check before measuring. A
-closed shape set has no slice: its whole set is the graph list, and the verdict is recall.
+draws up to 200 graphs spread evenly over the slices' regimes, and refuses if any is among
+the model's `training_problem_keys`. A slice is a tenth of its set, so a smoke set (200
+graphs per operation) gives every slice graph, about 20 per operation. A closed shape set has
+no slice: its whole set is the graph list, and the verdict is recall.
+
+`<model dir>` below is the model's `models[i].model_dir` (the directory holding
+`heuristic.uhd.json`). Every run that executes the engine needs its kernel-file variables
+([data.md](data.md), "Kernel files").
 
 ## Stage V: engine predictor (L1)
 
@@ -38,7 +43,7 @@ python3 $UHD/scripts/decide.py l1 --rows rows.json --candidate-dir <model dir> -
   order, the L2 its rows were measured under and then the candidate. The candidate's truth is
   measured under that tree, the shipped model's under the build's own.
 - Gates: `identity` (the engine could only have read the candidate), `available` (it predicts
-  for every graph it executes; `--min-available` relaxes it), `metric` (it answers in its
+  for every graph it executes; `--min-available` relaxes it), `metric` (every answer names its
   declared metric), `selector_revision` (the engine reports the revision the model was trained
   against), `accuracy` (candidate median |error| ≤ shipped × 1.05, `--max-regression`
   changes it). Both models' accuracy is always reported. If the branch ships no model of the

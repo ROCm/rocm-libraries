@@ -102,8 +102,9 @@ Read it from the checkout (`Grep`/`Glob`/`Read`):
   one engine's folder, or `kpack/` is not at the per-arch root), not the kernels.
 - A kernel that fails on one GPU only is the device; the same kernel id + knob tuple failing
   on two GPUs is the kernel.
-- Move from `smoke` to `standard` only after a smoke round admits graphs, trains, scores and
-  validates cleanly.
+- A smoke round passes when graphs are admitted and collected, the model trains and is
+  scored held out, and Stage V's identity, available, metric and selector-revision gates
+  pass ([generate.md](generate.md), "Tier"). Then move to `standard`.
 
 ## Report
 

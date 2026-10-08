@@ -54,6 +54,7 @@ The split holds out problems, not rows, by a seeded SHA-256 of the problem key.
 | `REGIME REGRESSION AGAINST STATIC ORDER` | §11.4 MUST 3: at least one regime is worse than static order | hold or retrain for that regime |
 | `HELD-OUT SLICE COMPROMISED` | evaluated problems are among the recorded training problems | retrain on the train slice |
 | `NO HELD-OUT SLICE` | `--eval-fraction 1.0` scored the training problems | re-evaluate with the recorded fraction |
+| `Full supplied corpus evaluated; training overlap is reported separately.` | an engine predictor scored on every row it was given: the normal shape when those rows are the slice (`evaluation: eval_set`) | none when `holdout_integrity` is `held_out`; otherwise the rows were not held out |
 | `DEGRADED PROBLEM GROUPING` | problems identified by `benchmark` alone | re-collect with device identity |
 | `PARTIAL DEVICE IDENTITY` | some rows carry no device | treat oracle as possibly cross-device |
 | `NO MEASUREMENT NOISE` | no `stddevMs` column; tie-aware recall uses the relative tolerance only | note it |

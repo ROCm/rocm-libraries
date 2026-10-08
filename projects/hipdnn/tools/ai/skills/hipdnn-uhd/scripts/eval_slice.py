@@ -10,7 +10,9 @@ set alone. Every model trained from the set holds those graphs out
 (`uhd_gen generate --eval-benchmarks`), and every one is scored on the same graphs.
 
 `sample` draws validation graphs from one or more slices, spread evenly over their regimes:
-one from each regime in turn before any regime gives a second.
+one from each regime in turn before any regime gives a second. With `--trained` (a model
+run's generation_manifest.json) it refuses a slice graph the model trained on: scoring it
+would be recall, not validation.
 
 `holdout` writes the union of several slices as the JSON list `--eval-benchmarks` reads.
 
@@ -22,6 +24,7 @@ Standard library only.
     eval_slice.py choose <set>/<operation>/manifest.json ... [--fraction 0.1] [--seed 0]
     eval_slice.py holdout <set>/eval_slice.json ... --out eval_benchmarks.json
     eval_slice.py sample <set>/eval_slice.json ... --count 200 --out sample.json
+        [--trained <run>/generation_manifest.json]
     eval_slice.py rows exported.json <set>/eval_slice.json ... --out slice_rows.json
 """
 
@@ -124,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
     draw.add_argument("--count", type=int, default=200)
     draw.add_argument("--seed", type=int, default=0)
     draw.add_argument("--out", type=Path, required=True)
+    draw.add_argument("--trained", type=Path,
+                      help="a model run's generation_manifest.json: refuse graphs it trained on")
     keep = sub.add_parser("rows", help="the exported rows of the slices' graphs")
     keep.add_argument("exported", type=Path)
     keep.add_argument("slices", type=Path, nargs="+")
@@ -165,6 +170,15 @@ def main(argv: list[str] | None = None) -> int:
                             encoding="utf-8")
         print(json.dumps({"out": str(args.out), "held_out": len(graphs)}))
         return 0
+    if args.trained:
+        manifest = json.loads(args.trained.read_text(encoding="utf-8"))
+        trained = {str(key[0]) for model in manifest.get("models") or []
+                   for key in model.get("training_problem_keys") or []}
+        overlap = sorted(g["benchmark"] for g in graphs if g["benchmark"] in trained)
+        if overlap:
+            raise SystemExit(f"{len(overlap)} slice graph(s) are among the model's training "
+                             f"graphs (e.g. {overlap[0]}): it was not trained with these slices "
+                             "held out")
     drawn = sample_evenly(graphs, args.count, args.seed)
     args.out.write_text(json.dumps({"schema": SCHEMA, "seed": args.seed, "graphs": drawn},
                                    indent=1) + "\n", encoding="utf-8")

@@ -58,6 +58,7 @@ there too, it is the kernel.
 | `--output-dir must not exist; generation never overwrites a previous run` | write each run to a new directory |
 | `generate requires a true problem holdout: 0 < --eval-fraction < 1` | pass a fraction in range, `--eval-benchmarks`, or `--recall` for a closed shape set |
 | corpus_gen refuses a pack-coverage engine | pass `--kdp-root` |
+| every graph fails collection with `failed to load kernel module from /opt/rocm/...` | the engine runs from a build tree and looks for its kernel files at the install path: set its kernel-file variables ([data.md](data.md), "Kernel files") |
 | a Python traceback from `uhd_gen` | a tool bug; report it with the command and the checkout's SHA |
 
 ## Harmless noise
