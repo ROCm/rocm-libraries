@@ -2148,13 +2148,15 @@ def _build_attention_dense_single_buffer(
                 # qb-MAJOR decode: wi = qb*(Hq*B) + hq*B + bt. Putting qb (the
                 # triangular causal-cost index) in the MSB spreads cheap+expensive
                 # query blocks across each CTA under grid-stride. Optional interleave
-                # flips on ODD `rem` (= qb0*Hq + hq, so it alternates per-hq within a
-                # qb0 row, NOT per qb0) to further balance the causal tail.
+                # reverses qb for ODD hq to further balance the causal tail. Keying on
+                # hq (not rem = qb0*Hq + hq) keeps the map a bijection: each hq's qb
+                # range is either identity or reversed. For even Hq the two agree;
+                # for odd Hq rem parity aliases two qb0 onto one qb and skips another.
                 rem, bt_v = _divmod(wi, "batch")
                 qb0, hq_v = _divmod(rem, "num_query_heads")
                 hkv_v = _div(hq_v, "gqa")
                 if spec.interleave and causal:
-                    odd = b.cmp_eq(b.mod(rem, b.const_i32(2)), b.const_i32(1))
+                    odd = b.cmp_eq(b.mod(hq_v, b.const_i32(2)), b.const_i32(1))
                     qb_v = b.select(odd, b.sub(nqb_m1_p, qb0), qb0)
                 else:
                     qb_v = qb0

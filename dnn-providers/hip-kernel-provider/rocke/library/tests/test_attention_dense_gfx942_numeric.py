@@ -618,6 +618,8 @@ def test_one_sliding_window_binary_serves_every_shape_and_head_config():
 #   W=672  > 2*NP, W % NP = 64, odd B (non-pow2 batch magic)
 #   W=384  MHA (gqa=1), W % NP = 80
 #   W=608  == 2*NP exactly -- the tail-free control
+#   W=120  odd Hq, even NQB=4: an interleave flip keyed on rem = qb0*Hq + hq
+#          (instead of hq) maps qb0 {0,1,2,3} -> {0,2,2,0}, skipping tiles
 # Non-pow2 GQA 5 and 7 put a real magic on the gqa divide.
 _PERSIST_CONFIGS = (
     (1, 256, 40, 8),
@@ -625,6 +627,7 @@ _PERSIST_CONFIGS = (
     (3, 2048, 28, 4),
     (2, 1536, 32, 32),
     (19, 512, 16, 4),
+    (2, 1024, 15, 5),
 )
 
 # (dtype, persist_decode, interleave, sliding_window). Both decode orders pinned
