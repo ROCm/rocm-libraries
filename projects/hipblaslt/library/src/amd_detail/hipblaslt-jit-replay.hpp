@@ -23,12 +23,13 @@ namespace hipblaslt_ext::experimental::jit::replay
         std::vector<std::string> replay;
     };
 
-    // The replay backend as a Jit backend; throws when a bundle cannot be read.
+    // The replay Jit; throws when a bundle cannot be read.
     std::shared_ptr<const hipblaslt_jit::Backend> makeBackend(const Options& options);
 
     // Returns NOT_SUPPORTED from getJitAlgo for problems no replayed solution
     // solves.
-    HIPBLASLT_EXPORT hipblasStatus_t createBackend(const Options& options,
-                                                   Backend&       backend,
-                                                   Diagnostics&   diagnostics);
+    HIPBLASLT_EXPORT hipblasStatus_t
+        createBackend(const Options&                              options,
+                      std::shared_ptr<const hipblaslt_jit::Jit>& jit,
+                      Diagnostics&                                diagnostics);
 }

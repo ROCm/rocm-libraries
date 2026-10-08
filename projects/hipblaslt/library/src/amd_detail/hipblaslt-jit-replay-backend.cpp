@@ -169,13 +169,15 @@ namespace hipblaslt_ext::experimental::jit::replay
     }
 
     hipblasStatus_t
-        createBackend(const Options& options, Backend& backend, Diagnostics& diagnostics)
+        createBackend(const Options&                              options,
+                      std::shared_ptr<const hipblaslt_jit::Jit>& jit,
+                      Diagnostics&                                diagnostics)
     {
-        backend     = {};
+        jit         = {};
         diagnostics = {"replay", ""};
         try
         {
-            backend = Backend::create(hipblaslt_jit::makeJit(makeBackend(options)));
+            jit = hipblaslt_jit::makeJit(makeBackend(options));
             return HIPBLAS_STATUS_SUCCESS;
         }
         catch(const std::bad_alloc&)

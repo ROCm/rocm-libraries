@@ -43,11 +43,11 @@ The internal entry points, in `library/src/amd_detail/hipblaslt-jit.hpp`,
 generate through `Jit`, publish into the JIT solution library, and return an
 algorithm for the existing C and C++ GEMM execution APIs:
 
-- A backend factory, such as `jit::replay::createBackend`, returns a `Backend`
-  handle that owns a `Jit` configured with that backend.
+- A backend factory, such as `jit::replay::createBackend`, returns the `Jit`
+  configured with that backend.
 - `jit::makeGemmRequest` captures existing GEMM descriptors and host scalars.
 - `jit::getJitAlgo` looks the solution up in the JIT solution library, publishes
-  it when it is absent, and returns an owned `Solution` for the first index.
+  it when it is absent, and returns the `CompiledSolution` for the first index.
   A hit does not generate.
 - `jit::getGemmAlgo` adapts the solution to the library index that
   `hipblasLtMatmul` and `Gemm` accept.

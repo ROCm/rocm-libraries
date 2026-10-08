@@ -251,7 +251,7 @@ namespace hipblaslt_jit_test
         hipblasLtHandle_t                              handle{};
         hipblasLtMatmulDesc_t                          desc{};
         hipStream_t                                    stream{};
-        hipblaslt_ext::experimental::jit::Backend      backend{};
+        std::shared_ptr<const hipblaslt_jit::Jit> backend;
 
         explicit ReplayFixture(const std::filesystem::path& root)
         {

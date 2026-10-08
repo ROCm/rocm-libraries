@@ -13,15 +13,15 @@ namespace hipblaslt_jit
     // are missing or do not match this build.
     std::shared_ptr<const Jit> makeHipKittensJit()
     {
-        hipblaslt_ext::experimental::jit::Backend     backend;
-        hipblaslt_ext::experimental::jit::Diagnostics diagnostics;
+        std::shared_ptr<const Jit>                        jit;
+        hipblaslt_ext::experimental::jit::Diagnostics     diagnostics;
         const auto status = hipblaslt_ext::experimental::jit::hipkittens::createBackend(
-            {}, backend, diagnostics);
+            {}, jit, diagnostics);
         if(status != HIPBLAS_STATUS_SUCCESS)
         {
             std::cerr << "hipblaslt warning: " << diagnostics.message << std::endl;
             return nullptr;
         }
-        return backend.get();
+        return jit;
     }
 }

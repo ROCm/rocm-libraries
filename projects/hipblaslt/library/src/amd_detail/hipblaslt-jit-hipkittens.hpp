@@ -5,8 +5,14 @@
 #include "hipblaslt-jit-code-object.hpp"
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
+
+namespace hipblaslt_jit
+{
+    class Jit;
+}
 
 // Not installed. A backend that compiles HipKittens kernel templates with comgr,
 // in process. Each kernel variant serves a narrow set of problems; others are
@@ -23,9 +29,10 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
 
     // Reads and verifies the headers. When they are missing or do not match
     // their manifest, fails with "JIT backend HipKittens not available: ...".
-    HIPBLASLT_EXPORT hipblasStatus_t createBackend(const Options& options,
-                                                   Backend&       backend,
-                                                   Diagnostics&   diagnostics);
+    HIPBLASLT_EXPORT hipblasStatus_t
+        createBackend(const Options&                              options,
+                      std::shared_ptr<const hipblaslt_jit::Jit>& jit,
+                      Diagnostics&                                diagnostics);
 
     namespace detail
     {

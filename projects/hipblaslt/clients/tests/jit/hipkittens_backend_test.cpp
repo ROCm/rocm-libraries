@@ -90,7 +90,7 @@ namespace
                      int                      rows,
                      int                      cols,
                      int                      k,
-                     jit::Request&            request,
+                     std::shared_ptr<const jit::detail::GemmRequest>& request,
                      jit::Diagnostics&        diagnostics)
     {
         Device                  A(size_t(k) * rows * 2), B(size_t(k) * cols * 2);
@@ -124,29 +124,26 @@ namespace
     void captureSkipsCompile(hipblasLtHandle_t handle, hipblasLtMatmulDesc_t desc)
     {
         jit::Diagnostics diagnostics;
-        jit::Request     request;
-        jit::Backend     backend;
+        std::shared_ptr<const jit::detail::GemmRequest> request;
+        std::shared_ptr<const hipblaslt_jit::Jit>       backend;
         BLAS(hk::createBackend({}, backend, diagnostics));
         makeProblem(handle, desc, M, N, K, request, diagnostics);
-        const auto operation = request.get();
-        const auto gemm      = dynamic_cast<const jit::detail::GemmRequest*>(operation.get());
         {
             INFO(("request is not a GEMM"));
-            REQUIRE((gemm != nullptr));
+            REQUIRE((request != nullptr));
         }
-        auto problem = gemm->problem;
+        auto problem = request->problem;
 
         int         device = -1;
         hipStream_t stream{};
         HIP(hipGetDevice(&device));
         HIP(hipStreamCreate(&stream));
         problem.stream = stream;
-        auto capturing = jit::Request::create(
-            std::make_shared<jit::detail::GemmRequest>(problem));
+        auto capturing = std::make_shared<jit::detail::GemmRequest>(problem);
         Device marker(4);
         HIP(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
         HIP(hipMemsetAsync(marker.pointer, 0, 4, stream));
-        jit::Solution  skipped;
+        std::shared_ptr<const jit::detail::CompiledSolution> skipped;
         const auto     started = std::chrono::steady_clock::now();
         const auto     status
             = jit::getJitAlgo(device, capturing, backend, 64 << 20, skipped, diagnostics);
@@ -179,29 +176,26 @@ namespace
                                  int                   published)
     {
         jit::Diagnostics diagnostics;
-        jit::Request     request;
-        jit::Backend     backend;
+        std::shared_ptr<const jit::detail::GemmRequest> request;
+        std::shared_ptr<const hipblaslt_jit::Jit>       backend;
         BLAS(hk::createBackend({}, backend, diagnostics));
         makeProblem(handle, desc, M, N, K, request, diagnostics);
-        const auto operation = request.get();
-        const auto gemm      = dynamic_cast<const jit::detail::GemmRequest*>(operation.get());
         {
             INFO(("request is not a GEMM"));
-            REQUIRE((gemm != nullptr));
+            REQUIRE((request != nullptr));
         }
-        auto problem = gemm->problem;
+        auto problem = request->problem;
 
         int         device = -1;
         hipStream_t stream{};
         HIP(hipGetDevice(&device));
         HIP(hipStreamCreate(&stream));
         problem.stream = stream;
-        auto capturing = jit::Request::create(
-            std::make_shared<jit::detail::GemmRequest>(problem));
+        auto capturing = std::make_shared<jit::detail::GemmRequest>(problem);
         Device marker(4);
         HIP(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
         HIP(hipMemsetAsync(marker.pointer, 0, 4, stream));
-        jit::Solution  found;
+        std::shared_ptr<const jit::detail::CompiledSolution> found;
         const auto     started = std::chrono::steady_clock::now();
         const auto     status
             = jit::getJitAlgo(device, capturing, backend, 64 << 20, found, diagnostics);
@@ -252,9 +246,9 @@ namespace
         BLAS(hipblasLtMatrixLayoutCreate(&lc, HIP_R_16BF, M, N, M));
         BLAS(hipblasLtMatrixLayoutCreate(&ld, HIP_R_16BF, M, N, M));
 
-        jit::Request  request;
-        jit::Solution solution;
-        jit::Backend  backend;
+        std::shared_ptr<const jit::detail::GemmRequest>      request;
+        std::shared_ptr<const jit::detail::CompiledSolution> solution;
+        std::shared_ptr<const hipblaslt_jit::Jit>            backend;
         BLAS(hk::createBackend({}, backend, diagnostics));
         BLAS(jit::makeGemmRequest(handle,
                                   desc,
@@ -307,8 +301,8 @@ namespace
         }
         std::cout << "PASS BF16 TN 256x256x128\n";
 
-        jit::Request  small;
-        jit::Solution unsupported;
+        std::shared_ptr<const jit::detail::GemmRequest>      small;
+        std::shared_ptr<const jit::detail::CompiledSolution> unsupported;
         makeProblem(handle, desc, 128, N, K, small, diagnostics);
         {
             INFO(("M=128 was accepted"));

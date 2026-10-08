@@ -314,9 +314,11 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
     }
 
     hipblasStatus_t
-        createBackend(const Options& options, Backend& backend, Diagnostics& diagnostics)
+        createBackend(const Options&                              options,
+                      std::shared_ptr<const hipblaslt_jit::Jit>& jit,
+                      Diagnostics&                                diagnostics)
     {
-        backend     = {};
+        jit         = {};
         diagnostics = {"HipKittens", ""};
         try
         {
@@ -326,8 +328,8 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                 diagnostics.message = status.message;
                 return HIPBLAS_STATUS_INVALID_VALUE;
             }
-            backend = Backend::create(hipblaslt_jit::makeJit(
-                std::make_shared<const HipKittensBackend>(std::move(headers))));
+            jit = hipblaslt_jit::makeJit(
+                std::make_shared<const HipKittensBackend>(std::move(headers)));
             return HIPBLAS_STATUS_SUCCESS;
         }
         catch(const std::bad_alloc&)
