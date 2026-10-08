@@ -7,7 +7,7 @@ rocBLAS documentation is available at
 
 ### Changed
 
-* `trsm`, `trsm_batched`, and `trsm_strided_batched` now print the required and available workspace sizes when they return `rocblas_status_memory_error` because a fixed-size handle workspace is too small. Previously this failure looked identical to running out of device memory.
+* `trsm`, `trsm_batched`, and `trsm_strided_batched` print the required and available workspace sizes when they return `rocblas_status_memory_error` because a fixed-size handle workspace is too small and the new `ROCBLAS_VERBOSE_ERROR` environment variable is set. Previously this failure looked identical to running out of device memory.
 
 ### Removed
 
