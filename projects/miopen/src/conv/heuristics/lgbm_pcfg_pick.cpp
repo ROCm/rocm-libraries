@@ -216,10 +216,7 @@ bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx
 // retrained on current-hipconv data before it can be trusted. Gated here, rather
 // than by dropping the section from lgbm_pcfg.bin, so re-enabling is a one-line
 // revert once a retrained model ships.
-bool HeldOutOfPicker(const std::string& solver_name)
-{
-    return solver_name == "ConvHipConv";
-}
+bool HeldOutOfPicker(const std::string& solver_name) { return solver_name == "ConvHipConv"; }
 
 } // namespace
 
