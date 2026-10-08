@@ -18,7 +18,7 @@ the perf harness for the optimization phases.
 IT MEASURES THE SHIPPED KERNEL
 ------------------------------
 The spec under test is **resolved through the dispatch factory**
-(``dispatch.attention.gfx942.dense_spec_for_request``), not hand-built from CLI
+(the ``gfx942_dense`` candidate via ``dispatch.attention.attention_tuning_spec``), not hand-built from CLI
 defaults. That is the difference between a gate and a decoration: the tuning that
 ships (per-config ``waves_per_eu``, the 304-CTA persistent grid and its auto-on
 rule, the ragged path) lives in dispatch, so a hardcoded CLI default here would
@@ -278,7 +278,7 @@ def _configs(mode: str, Hq: int, Hkv: int, D: int):
                 cfgs.append(("swa", "gqa_swa", f"S={S} {tag}", S, 1, Hq, Hkv, True, W))
     if mode == "persistent":
         # The causal cohort with the persistent grid FORCED on (main() pins
-        # dense_persistent="on" unless the user said otherwise). Under "all" the
+        # the persistent knob on unless the user said otherwise). Under "all" the
         # same shapes already run persistent via dispatch's auto rule; this mode
         # exists so the grid can be measured deliberately, incl. the small-work
         # shapes auto would leave on the default grid.
@@ -481,7 +481,7 @@ def main() -> int:
         f"warmup={args.warmup} iters={args.iterations}"
     )
     print(
-        "spec source: dispatch.attention.gfx942.dense_spec_for_request"
+        "spec source: dispatch.attention.attention_tuning_spec(spec_id=gfx942_dense)"
         + (
             f"  (+ explicit overrides: {overrides})"
             if overrides
