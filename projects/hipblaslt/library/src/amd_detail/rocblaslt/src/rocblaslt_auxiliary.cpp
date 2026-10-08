@@ -3758,6 +3758,7 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     counters.tuned         = 0;
     counters.skipped       = 0;
     counters.attempts      = 0;
+    counters.unrecorded    = 0;
 
     tuningInjectFailureForTest(0);
     static_cast<void>(tuningLastLaunchedIndexForTest());
@@ -3893,6 +3894,8 @@ extern "C" HIPBLASLT_EXPORT int hipblaslt_tuning_last_launch_for_test()
 //       lines are bounded per shape, so they cannot show a retry.
 //   10 tuned shapes
 //       Distinct shapes this process tuned, as the summary line counts them.
+//   11 unrecorded
+//       Winners measured but not written, because recording threw.
 //
 // Fills up to count values in that order and returns how many there are, so a
 // test expecting a different list notices instead of misreading it. New values
@@ -3913,7 +3916,8 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_stats_for_test(uint64_t* val
                             c.tuned.load(),
                             c.skipped.load(),
                             c.attempts.load(),
-                            tunedShapes};
+                            tunedShapes,
+                            c.unrecorded.load()};
 
     constexpr size_t known = sizeof(all) / sizeof(all[0]);
     for(size_t i = 0; values && i < count && i < known; i++)

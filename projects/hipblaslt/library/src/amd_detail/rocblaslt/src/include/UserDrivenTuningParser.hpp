@@ -159,12 +159,21 @@ namespace TensileLite
         // Searches that got as far as tuning-start, whatever their outcome.
         std::atomic<uint64_t> attempts{0};
 
+        // Winners a mode measured but could not record, because recording
+        // threw. Counted rather than reported per shape: recording fails for
+        // reasons that do not go away between shapes, and the count is what
+        // separates one unlucky write from a cache that can never fill. The
+        // ordinary I/O failures are not here -- they do not throw, and the
+        // winner's own line names them with the path.
+        std::atomic<uint64_t> unrecorded{0};
+
         std::string summary() const
         {
             return "loaded=" + std::to_string(entriesLoaded.load()) + " hits="
                    + std::to_string(hits.load()) + " misses=" + std::to_string(misses.load())
                    + " invalidated=" + std::to_string(invalidated.load()) + " tuned="
-                   + std::to_string(tuned.load()) + " skipped=" + std::to_string(skipped.load());
+                   + std::to_string(tuned.load()) + " skipped=" + std::to_string(skipped.load())
+                   + " unrecorded=" + std::to_string(unrecorded.load());
         }
     };
 
