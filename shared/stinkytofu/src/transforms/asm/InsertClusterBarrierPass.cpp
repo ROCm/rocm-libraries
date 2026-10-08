@@ -23,9 +23,11 @@
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <random>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -428,6 +430,33 @@ bool isTextblockContaining(IRBase* ir, const char* marker) {
     auto* directive = dyn_cast<AsmDirective>(ir);
     return directive != nullptr && directive->kind == AsmDirectiveKind::TEXTBLOCK &&
            directive->value.find(marker) != std::string::npos;
+}
+
+/// Tensile numbers each copy of one unrolled loop in a text block,
+/// ``Unrolled Loop <n>/<count> - Begin``. ``n == 1`` is the first copy. A
+/// larger ``n`` is a later copy of that same loop: the copies run one after
+/// another inside one ``LoopBegin``, so the first copy's cluster handshake
+/// already covers the iteration. Returns 0 for anything else, including the
+/// ``Unrolled Loop(s) - Begin`` banner and ``Unrolled Loop - End``.
+int unrollLoopCopyBeginIndex(IRBase* ir) {
+    if (!isTextblockContaining(ir, "Unrolled Loop ")) return 0;
+    const std::string& text = cast<AsmDirective>(ir)->value;
+    constexpr std::string_view kMarker = "Unrolled Loop ";
+    const auto marker = text.find(kMarker);
+    if (marker == std::string::npos) return 0;
+    size_t pos = marker + kMarker.size();
+    if (pos >= text.size() || !std::isdigit(static_cast<unsigned char>(text[pos]))) return 0;
+    int index = 0;
+    while (pos < text.size() && std::isdigit(static_cast<unsigned char>(text[pos]))) {
+        index = index * 10 + (text[pos] - '0');
+        if (index > 100000) return 0;
+        ++pos;
+    }
+    if (pos >= text.size() || text[pos] != '/') return 0;
+    ++pos;
+    if (pos >= text.size() || !std::isdigit(static_cast<unsigned char>(text[pos]))) return 0;
+    if (text.find(" - Begin", pos) == std::string::npos) return 0;
+    return index;
 }
 
 bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
@@ -1613,7 +1642,18 @@ class InsertClusterBarrierPassImpl : public Pass {
 
             {
                 auto segBegin = bb.begin();
+                // 0 means the body has no "Unrolled Loop n/count" marker, which is
+                // how a single loop and the unit tests are written. Those still
+                // get a handshake at every trigger.
+                int unrollCopyIndex = 0;
                 for (auto it = bb.begin(); it != bb.end(); ++it) {
+                    // The end banner sits after that copy's loads. Clearing here
+                    // keeps a following tail loop, or the next chain's prologue,
+                    // from being treated as a later copy.
+                    if (isTextblockContaining(it.getNodePtr(), "Unrolled Loop - End"))
+                        unrollCopyIndex = 0;
+                    if (const int copyBegin = unrollLoopCopyBeginIndex(it.getNodePtr()))
+                        unrollCopyIndex = copyBegin;
                     auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
                     if (inst == nullptr) continue;
                     if (isSegmentBoundary(*inst)) {
@@ -1633,12 +1673,19 @@ class InsertClusterBarrierPassImpl : public Pass {
                     // at, and the run-up's own load is Rule 2's business.
                     if (findEnclosingLoopHead(trigger) == nullptr) continue;
 
-                    // Emit the cluster wait above the drains the wait-cnt pass
-                    // already anchored on this workgroup signal.
-                    IRBase* waitAnchor = hoistAboveLeadingWaitCnts(trigger);
-                    auto* hoistedInst = dyn_cast<StinkyInstruction>(waitAnchor);
-                    triggers.push_back({trigger, segBegin, waitAnchor,
-                                        (hoistedInst != nullptr) ? hoistedInst : trigger});
+                    // Copies 2..N of one unrolled loop fall through from copy 1
+                    // inside the same LoopBegin. The handshake belongs on the first
+                    // copy only; a later "Unrolled Loop 1/..." is a new chain.
+                    // The producer drain below is not a cluster barrier, so a later
+                    // copy still records one.
+                    if (unrollCopyIndex <= 1) {
+                        // Emit the cluster wait above the drains the wait-cnt pass
+                        // already anchored on this workgroup signal.
+                        IRBase* waitAnchor = hoistAboveLeadingWaitCnts(trigger);
+                        auto* hoistedInst = dyn_cast<StinkyInstruction>(waitAnchor);
+                        triggers.push_back({trigger, segBegin, waitAnchor,
+                                            (hoistedInst != nullptr) ? hoistedInst : trigger});
+                    }
 
                     // Record the instruction right after this cooperative
                     // tensor_load group so a producer-side tensor drain can be
