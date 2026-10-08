@@ -335,6 +335,13 @@ class TestPackDiscriminatorsCheck:
         with pytest.raises(ConfigError, match="discriminator"):
             _check_pack_discriminators(config)
 
+    def test_multi_pack_with_no_discriminator_is_a_sharded_catalog(self):
+        from codegen.config_loader import _check_pack_discriminators
+
+        config = make_minimal_config(packs=[make_pack(name="a"), make_pack(name="b")])
+        _check_pack_discriminators(config)
+        assert config.is_multi_pack and not config.has_operation_matchers
+
     def test_single_pack_with_discriminator_rejected(self):
         from codegen.config_loader import _check_pack_discriminators
 

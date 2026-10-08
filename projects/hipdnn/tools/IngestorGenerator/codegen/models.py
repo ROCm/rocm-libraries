@@ -369,6 +369,14 @@ class IngestorConfig:
         return len(self.packs) > 1
 
     @property
+    def has_operation_matchers(self) -> bool:
+        """Each pack narrows the engine's graph_match with its own operation-scoped
+        matcher, named by its ``discriminator``. A multi-pack engine whose packs
+        declare none is one catalog sharded across KDP files: every pack is
+        admitted by the engine's graph_match alone, like a single pack."""
+        return self.is_multi_pack and any(p.discriminator for p in self.packs)
+
+    @property
     def descriptor_dir(self) -> str:
         """Where this bundle's descriptor files go, relative to the output dir:
         ``direct_load`` under the authored set in ``test_descriptors/``,
@@ -438,7 +446,7 @@ class IngestorConfig:
 
     def operation_match_symbol(self, pack: PackSpec) -> str:
         """Per-pack operation-scoped matcher symbol, meaningful only when
-        ``is_multi_pack``; a single-pack engine emits none."""
+        ``has_operation_matchers``; any other engine emits none."""
         return f"{self.native_symbol_namespace}.{pack.discriminator}_match"
 
     @property

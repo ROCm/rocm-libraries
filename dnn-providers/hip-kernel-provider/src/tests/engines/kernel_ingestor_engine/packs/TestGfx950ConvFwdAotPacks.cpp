@@ -70,8 +70,9 @@ constexpr const char* ARCH_WILDCARD = "*";
 // clang-format off
 
 // "gfx950"
-constexpr std::array<const char*, 1> ARCH0_PACK_NAMES = {
-    "hipkernel:gfx950_conv_fwd_aot",
+constexpr std::array<const char*, 2> ARCH0_PACK_NAMES = {
+    "hipkernel:gfx950_conv_fwd_aot_bf16",
+    "hipkernel:gfx950_conv_fwd_aot_fp16",
 };
 constexpr std::array<const char*, 24> ARCH0_KERNEL_NAMES = {
     "gfx950_conv_fwd_aot_bf16_320d13d55f49b010e8762b78fb1a5580775c5c0d",
@@ -246,9 +247,10 @@ TEST_F(TestGfx950ConvFwdAotPacks, RanksThroughItsRegisteredScoreSymbol)
     EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("hipkernel.gfx950_conv_fwd_aot.score"));
 }
 
-/// UMD policy, this engine's shape: a SINGLE-pack engine carries no graph-scoped
-/// criterion -- its own graph_match admits the node type and validates shape. Mirrors
-/// TestConvFwdPack.cpp's HasAGraphMatchAndOneKernelMatcher.
+/// UMD policy, this engine's shape: a SINGLE-pack engine, or one catalog sharded across
+/// packs that declare no discriminator, carries no graph-scoped criterion -- its own
+/// graph_match admits the node type and validates shape. Mirrors TestConvFwdPack.cpp's
+/// HasAGraphMatchAndOneKernelMatcher.
 TEST_F(TestGfx950ConvFwdAotPacks, CarriesNoGraphScopedMatcher)
 {
     EXPECT_FALSE(_set->engine.graphMatchNativeSymbol.empty());
