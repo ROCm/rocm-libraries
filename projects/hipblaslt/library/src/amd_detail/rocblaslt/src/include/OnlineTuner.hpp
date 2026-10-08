@@ -26,6 +26,11 @@ namespace TensileLite
     class ContractionSolution;
 }
 
+// What a resolved problem has stopped holding is not something it can be asked,
+// so the test that guards releaseExploration() reaches in. Declared here and
+// defined only by that test; nothing in the library names it.
+struct OnlineTunerTestAccess;
+
 namespace rocblaslt
 {
     /**
@@ -297,8 +302,8 @@ namespace rocblaslt
      *
      * Returns the record this call installed, or null when it installed
      * nothing -- because this caller is not the problem that was measured,
-     * because another caller got there first, because there was nothing to
-     * offer, or because the pool is full. Whoever records the winner outside
+     * because another caller got there first, or because there was nothing to
+     * offer. Whoever records the winner outside
      * this process has to know which caller's key was taken, and this is the
      * only answer that is not a race: the check above is a hint taken without
      * the lock, so two callers can both reach here and only one of them leaves
@@ -550,6 +555,7 @@ namespace rocblaslt
         int  visitBudget(const ProblemState& state) const;
         float score(const std::vector<float>& samples) const;
         void  resolve(size_t problemKey, ProblemState& state);
+        void  releaseExploration(ProblemState& state);
         void  publishResolution(size_t problemKey, const ProblemState& state);
         bool  acquireEvents(hipEvent_t& start, hipEvent_t& stop, int& device);
         void  recycleEvents(hipEvent_t start, hipEvent_t stop, int device);
@@ -580,18 +586,31 @@ namespace rocblaslt
         //
         // A power of two so the index is a mask, and far larger than the number
         // of distinct problems a process is expected to see; overshooting only
-        // costs the table's own footprint, while a collision costs one problem
-        // the locked path it used to take anyway.
+        // costs the table's own footprint, 32KiB.
+        //
+        // KNOWN BOUNDARY. This is the one limit the fast path has. Past roughly
+        // this many live resolved keys, keys start landing in occupied slots
+        // and the later one evicts the earlier, which costs the evicted problem
+        // the fast path for good -- publishing happens once, at the moment a
+        // problem resolves, and nothing republishes it. The degradation is
+        // gradual and proportional, each evicted problem falling back to the
+        // locked path it took while it was still being explored, and nothing it
+        // is told is wrong; resolution() answers on the key, so a slot holding
+        // someone else's entry reads as absent. The pools below are
+        // deliberately NOT capped at this number: capping them turned the same
+        // boundary into a cliff, where the 4097th problem to resolve and every
+        // one after it was refused a published entry outright.
         static constexpr size_t c_resolutionSlots = 4096;
 
         std::vector<std::unique_ptr<Resolution>> m_resolutionPool;
         std::atomic<const Resolution*>           m_resolutions[c_resolutionSlots] = {};
 
-        // Kept alive for the same reason and bounded by the same slot count:
-        // at most one per resolved problem, taken from the first caller to
-        // offer one. The solutions themselves are owned by the library, which
-        // outlives the tuner, so what this holds is a reference count and not
-        // the kernel.
+        // Kept alive for the same reason: at most one per resolved problem,
+        // taken from the first caller to offer one. The solutions themselves
+        // are owned by the library, which outlives the tuner, so what this
+        // holds is a reference count and not the kernel.
         std::vector<std::unique_ptr<PinnedWinner>> m_winnerPool;
+
+        friend struct ::OnlineTunerTestAccess;
     };
 } // namespace rocblaslt

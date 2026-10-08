@@ -411,6 +411,7 @@ namespace rocblaslt
         {
             state.m_resolved = true;
             publishResolution(problemKey, state);
+            releaseExploration(state);
         }
         else
             state.m_pending.reserve(static_cast<size_t>(inFlightCap(state)));
@@ -532,6 +533,36 @@ namespace rocblaslt
                 << "\n";
             std::cerr << msg.str();
         }
+
+        releaseExploration(state);
+    }
+
+    /**
+     * @brief Give back the heap a problem needed only while it was exploring.
+     *
+     * The samples and the in-flight record exist to pick a winner, and once one
+     * is picked nothing reads them again: every path that would is behind a
+     * m_resolved test, and resolve() runs once. What is left is the problem's
+     * answer -- its winner, its score, and the candidate list -- which stays,
+     * because an empty candidate list is how selectCandidateImpl() recognises a
+     * problem it has never seen and would re-register a resolved one.
+     *
+     * Worth doing because m_problems never erases, by design: pinWinner() looks
+     * the registering problem back up to decide whose key a row may be written
+     * under, and a reader of a published Resolution takes no lock and so cannot
+     * be waited for. A process that explores a lot of shapes therefore keeps
+     * every ProblemState it ever made, and clear() alone would keep their
+     * buffers too -- it is defined to leave capacity alone. Swapping against an
+     * empty vector is what actually hands the pages back.
+     *
+     * For the default depth that is the larger part of a retired problem: the
+     * sample arrays and a pending record reserved at the in-flight cap come to
+     * a few hundred bytes against a hundred or so for what remains.
+     */
+    void OnlineTuner::releaseExploration(ProblemState& state)
+    {
+        std::vector<std::vector<float>>().swap(state.m_samples);
+        std::vector<PendingMeasurement>().swap(state.m_pending);
     }
 
     /**
@@ -545,14 +576,22 @@ namespace rocblaslt
      *
      * Entries are kept alive for the life of the tuner rather than recycled,
      * because a reader holding one takes no lock and so cannot be waited for.
-     * Once the pool is full, resolved problems keep working and simply keep
-     * taking the locked path.
+     *
+     * The pool is unbounded for that reason and not by oversight. It used to
+     * stop at c_resolutionSlots, on the reasoning that a full table can hold no
+     * more -- but the table is direct-mapped, so a slot is not spent, it is
+     * shared. Refusing to publish past the 4096th resolution meant every
+     * problem resolved after that kept a null resolution() for ever and so took
+     * the full locked path on every dispatch, including problems whose slot was
+     * free. One Resolution is a key, an int, a float and two atomics; the
+     * m_problems entry the same problem already has, and never gives back,
+     * costs more. See c_resolutionSlots for the boundary that remains.
+     *
+     * Growth moves the unique_ptrs, not the objects, so a pointer already
+     * published stays good.
      */
     void OnlineTuner::publishResolution(size_t problemKey, const ProblemState& state)
     {
-        if(m_resolutionPool.size() >= c_resolutionSlots)
-            return;
-
         auto entry        = std::make_unique<Resolution>();
         entry->m_key      = problemKey;
         entry->m_winner   = state.m_winner;
@@ -583,8 +622,12 @@ namespace rocblaslt
 
         std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
 
-        if(resolved.m_pinned.load(std::memory_order_relaxed)
-           || m_winnerPool.size() >= c_resolutionSlots)
+        // Unbounded for the same reason as the resolution pool, and it has to
+        // move with it: a problem refused a winner object here keeps a null
+        // pinned(), which is what sends resolvedOnlineTuningAnswer() and
+        // promoteResolvedOnlineTuningWinner() back down the full path. Capping
+        // one and not the other would have left the cliff in place.
+        if(resolved.m_pinned.load(std::memory_order_relaxed))
             return nullptr;
 
         // The record describes the problem that was measured, and that problem

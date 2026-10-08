@@ -23,6 +23,35 @@
 
 using rocblaslt::OnlineTuner;
 
+/**
+ * Declared by OnlineTuner.hpp and defined only here.
+ *
+ * What a resolved problem has stopped holding is not something it answers, and
+ * every other case in this file goes through the public surface. This is the
+ * exception, it only reads, and it exists because the alternative way to see a
+ * few hundred bytes a problem gave back is to measure the heap.
+ */
+struct OnlineTunerTestAccess
+{
+    // Heap the tuner still holds for a problem's exploration.
+    static size_t exploringBytes(const OnlineTuner& tuner, size_t problemKey)
+    {
+        const auto found = tuner.m_problems.find(problemKey);
+        if(found == tuner.m_problems.end())
+            return 0;
+
+        const OnlineTuner::ProblemState& state = found->second;
+
+        size_t bytes = state.m_samples.capacity() * sizeof(std::vector<float>)
+                       + state.m_pending.capacity() * sizeof(OnlineTuner::PendingMeasurement);
+
+        for(const std::vector<float>& samples : state.m_samples)
+            bytes += samples.capacity() * sizeof(float);
+
+        return bytes;
+    }
+};
+
 namespace
 {
     // What this test's own onlineTunerConfig() hands the singleton. The library
@@ -633,6 +662,73 @@ namespace
 
         // Still owed its first candidate.
         EXPECT_EQ(tuner().selectCandidate(key, registering, ranked), 0);
+    }
+
+    // The samples and the in-flight record are what exploring costs, and a
+    // problem map that never erases is what makes holding them afterwards add
+    // up.
+    TEST(OnlineTuner, AResolvedProblemGivesBackItsExplorationStorage)
+    {
+        constexpr size_t key = 0x101A;
+
+        const std::vector<int> ranked{211, 212, 213};
+
+        ASSERT_EQ(tuner().selectCandidate(key, identityOf(key), ranked), 0);
+        ASSERT_GT(OnlineTunerTestAccess::exploringBytes(tuner(), key), 0u)
+            << "an exploring problem was holding nothing to measure into";
+
+        ASSERT_GT(exploreToResolution(key, identityOf(key), ranked), 0) << "never resolved";
+
+        EXPECT_EQ(OnlineTunerTestAccess::exploringBytes(tuner(), key), 0u)
+            << "a resolved problem is still holding its exploration storage";
+
+        // The other way a problem resolves: born with nothing to compare, so
+        // the arrays are dead before it has answered once.
+        constexpr size_t single = 0x101B;
+
+        ASSERT_EQ(tuner().selectCandidate(single, identityOf(single), {221}), -1);
+        ASSERT_NE(tuner().resolution(single), nullptr);
+
+        EXPECT_EQ(OnlineTunerTestAccess::exploringBytes(tuner(), single), 0u)
+            << "a problem born resolved is holding exploration storage it never used";
+    }
+
+    // Last of the host-only cases, because filling the table evicts every key
+    // above it.
+    //
+    // Publishing used to stop once as many problems had resolved as the table
+    // has slots. The table is direct-mapped, so a slot is shared and not spent:
+    // the effect was that the problem after that, and every one after it, kept
+    // a null resolution() for the life of the process and so took the full
+    // locked path on every dispatch -- however free the slot it would have
+    // landed in.
+    TEST(OnlineTuner, AProblemResolvedAfterTheTableIsFullStillPublishes)
+    {
+        // Clear of every other key in the file, and aligned so the loop below
+        // covers each slot exactly once.
+        constexpr size_t base = 0x40000;
+        static_assert(base % kResolutionSlots == 0, "the fill would not cover the table");
+
+        for(size_t slot = 0; slot < kResolutionSlots; ++slot)
+        {
+            const size_t key = base + slot;
+            ASSERT_EQ(tuner().selectCandidate(key, identityOf(key), {301}), -1) << slot;
+        }
+
+        ASSERT_NE(tuner().resolution(base), nullptr) << "the table never filled";
+
+        constexpr size_t late = base + kResolutionSlots + 7;
+
+        ASSERT_EQ(tuner().selectCandidate(late, identityOf(late), {302}), -1);
+
+        EXPECT_NE(tuner().resolution(late), nullptr)
+            << "a problem that resolved past the slot count was refused a published entry";
+
+        // And the boundary that does remain, which is the point of publishing
+        // past the count rather than a cost of it: the late key took the slot
+        // of the one it collides with, and that one is left to the locked path
+        // rather than answered with somebody else's winner.
+        EXPECT_EQ(tuner().resolution(base + 7), nullptr) << "a collision answered on the slot";
     }
 
     // ----------------------------------------------------------------------
