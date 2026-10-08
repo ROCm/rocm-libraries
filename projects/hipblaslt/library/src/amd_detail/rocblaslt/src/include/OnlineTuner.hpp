@@ -240,6 +240,29 @@ namespace rocblaslt
             return m_enabled;
         }
 
+        /**
+     * @brief Re-read the configuration and forget everything learned under
+     * the old one. Tests only, like TuningModeSingleton::reloadForTest.
+     *
+     * The configuration is read once, in the constructor of a
+     * process-lifetime singleton, and that constructor runs on the process's
+     * first dispatch -- long before a test that sets the tuning variables in
+     * its own setup can have set them. Without this a single-process test
+     * suite can only ever observe online tuning as whatever the first
+     * dispatch of the binary happened to configure, which is off.
+     *
+     * Drops the published resolutions along with the problems. They are
+     * normally kept for the life of the process precisely so that a reader
+     * following a published pointer without a lock can never be handed a
+     * dangling one, so this must only be called with no other thread inside
+     * the library.
+     *
+     * The event pool is deliberately left alone. A pooled pair belongs to a
+     * device and to the HIP runtime, not to a configuration, and destroying
+     * events is what the destructor already declines to do.
+     */
+        void reloadForTest();
+
         int topK() const
         {
             return m_topK;
@@ -531,6 +554,10 @@ namespace rocblaslt
 
         OnlineTuner();
         ~OnlineTuner();
+
+        /// Read onlineTunerConfig() into the member flags. Constructor-shaped
+        /// work, named so reloadForTest cannot drift from it.
+        void applyConfig();
 
         int  selectCandidateImpl(size_t                  problemKey,
                                  size_t                  problem,

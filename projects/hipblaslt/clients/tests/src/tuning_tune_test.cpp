@@ -1,14 +1,16 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Tune mode tests.
+// Tune mode tests, and online mode's own writing behaviour.
 //
 // Everything here drives the public API with HIPBLASLT_TUNING_MODE and
 // HIPBLASLT_TUNING_CACHE_PATH, and asserts on the library's own counters and on
 // the rows it writes rather than on log text. Replay of existing files, in
 // cache mode and through HIPBLASLT_TUNING_OVERRIDE_FILE, is tested in
 // tuning_cache_test.cpp, and the file format and store without a device in
-// tuning_store_test.cpp.
+// tuning_store_test.cpp. The online tuner's own arithmetic is tested without a
+// device in online_tuner_test.cpp; what is here is the half of online that only
+// a real dispatch reaches -- which problems it explores, and what it records.
 //
 // The mode switch is latched on first use and the loaded-path set lives for the
 // process, so each test starts by calling hipblaslt_tuning_reset_for_test().
@@ -28,6 +30,7 @@
 #include <iostream>
 #include <map>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <streambuf>
 #include <string>
@@ -1923,5 +1926,399 @@ namespace
         enterMode("cache", m_path);
         EXPECT_TRUE(extensionHeuristicHits(1024, 512, 1024, -1, true))
             << "the scaling type was keyed although nothing is scaled";
+    }
+
+    // ----------------------------------------------------------------------
+    // Online mode.
+    // ----------------------------------------------------------------------
+
+    constexpr int64_t kOnlineM     = 1024;
+    constexpr int64_t kOnlineN     = 512;
+    constexpr int64_t kOnlineK     = 1024;
+    constexpr int32_t kOnlineBatch = 2;
+
+    constexpr size_t kOnlineWorkspace = 32u * 1024u * 1024u;
+
+    // Candidates online rotates through, and the repeats it takes of each.
+    // Exploration ends after 3 * K + 1 visits, so these decide how many
+    // dispatches a case needs to reach a winner.
+    constexpr int kOnlineTopK    = 5;
+    constexpr int kOnlineRepeats = 3;
+    constexpr int kOnlineVisits  = 3 * kOnlineTopK * kOnlineRepeats;
+
+    /**
+     * One fp16 NN batched problem, dispatched repeatedly with no algo.
+     *
+     * No algo is the only shape of call online tuning sees: it is where the
+     * library picks the kernel afresh on every dispatch, so it is where a probe
+     * candidate can be offered and the launch that follows timed.
+     *
+     * Handle, buffers and descriptors are built once and reused. Exploration
+     * takes tens of visits, and a handle per visit would be most of the case's
+     * runtime.
+     *
+     * pointerArray puts all four layouts in HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+     * and passes device arrays of per-batch pointers instead of a base and a
+     * stride. That is the problem class the tuning cache will not key.
+     */
+    class OnlineProblem
+    {
+    public:
+        explicit OnlineProblem(bool pointerArray)
+            : m_pointerArray(pointerArray)
+        {
+        }
+
+        ~OnlineProblem()
+        {
+            if(m_pref)
+                hipblasLtMatmulPreferenceDestroy(m_pref);
+            if(m_desc)
+                hipblasLtMatmulDescDestroy(m_desc);
+            for(hipblasLtMatrixLayout_t layout : {m_layoutA, m_layoutB, m_layoutC, m_layoutD})
+                if(layout)
+                    hipblasLtMatrixLayoutDestroy(layout);
+            for(void* p : {m_ws, m_a, m_b, m_c, m_d, m_pa, m_pb, m_pc, m_pd})
+                static_cast<void>(hipFree(p));
+            if(m_handle)
+                hipblasLtDestroy(m_handle);
+        }
+
+        OnlineProblem(const OnlineProblem&)            = delete;
+        OnlineProblem& operator=(const OnlineProblem&) = delete;
+
+        bool create()
+        {
+            if(hipblasLtCreate(&m_handle) != HIPBLAS_STATUS_SUCCESS)
+                return false;
+
+            const size_t elementsA = static_cast<size_t>(kOnlineM * kOnlineK);
+            const size_t elementsB = static_cast<size_t>(kOnlineK * kOnlineN);
+            const size_t elementsC = static_cast<size_t>(kOnlineM * kOnlineN);
+
+            if(!allocate(&m_a, elementsA) || !allocate(&m_b, elementsB)
+               || !allocate(&m_c, elementsC) || !allocate(&m_d, elementsC)
+               || hipMalloc(&m_ws, kOnlineWorkspace) != hipSuccess)
+                return false;
+
+            if(m_pointerArray
+               && (!pointers(&m_pa, m_a, elementsA) || !pointers(&m_pb, m_b, elementsB)
+                   || !pointers(&m_pc, m_c, elementsC) || !pointers(&m_pd, m_d, elementsC)))
+                return false;
+
+            if(hipblasLtMatrixLayoutCreate(&m_layoutA, HIP_R_16F, kOnlineM, kOnlineK, kOnlineM)
+                   != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatrixLayoutCreate(&m_layoutB, HIP_R_16F, kOnlineK, kOnlineN, kOnlineK)
+                      != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatrixLayoutCreate(&m_layoutC, HIP_R_16F, kOnlineM, kOnlineN, kOnlineM)
+                      != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatrixLayoutCreate(&m_layoutD, HIP_R_16F, kOnlineM, kOnlineN, kOnlineM)
+                      != HIPBLAS_STATUS_SUCCESS)
+                return false;
+
+            const int64_t strides[] = {
+                kOnlineM * kOnlineK, kOnlineK * kOnlineN, kOnlineM * kOnlineN, kOnlineM * kOnlineN};
+            hipblasLtMatrixLayout_t layouts[] = {m_layoutA, m_layoutB, m_layoutC, m_layoutD};
+
+            const int32_t batchMode = 1; // HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+
+            for(size_t i = 0; i < 4; i++)
+            {
+                if(hipblasLtMatrixLayoutSetAttribute(layouts[i],
+                                                     HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,
+                                                     &kOnlineBatch,
+                                                     sizeof(kOnlineBatch))
+                   != HIPBLAS_STATUS_SUCCESS)
+                    return false;
+
+                if(m_pointerArray)
+                {
+                    if(hipblasLtMatrixLayoutSetAttribute(layouts[i],
+                                                         HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE,
+                                                         &batchMode,
+                                                         sizeof(batchMode))
+                       != HIPBLAS_STATUS_SUCCESS)
+                        return false;
+                }
+                else if(hipblasLtMatrixLayoutSetAttribute(
+                            layouts[i],
+                            HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                            &strides[i],
+                            sizeof(strides[i]))
+                        != HIPBLAS_STATUS_SUCCESS)
+                    return false;
+            }
+
+            if(hipblasLtMatmulDescCreate(&m_desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                   != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatmulPreferenceCreate(&m_pref) != HIPBLAS_STATUS_SUCCESS)
+                return false;
+
+            const uint64_t maxWs = kOnlineWorkspace;
+            return hipblasLtMatmulPreferenceSetAttribute(
+                       m_pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &maxWs, sizeof(maxWs))
+                   == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        /** One matmul with no algo, reporting the solution the library launched. */
+        bool dispatch(int* launched)
+        {
+            const float alpha = 1.0f;
+            const float beta  = 0.0f;
+
+            if(hipblasLtMatmul(m_handle,
+                               m_desc,
+                               &alpha,
+                               operandA(),
+                               m_layoutA,
+                               operandB(),
+                               m_layoutB,
+                               &beta,
+                               operandC(),
+                               m_layoutC,
+                               operandD(),
+                               m_layoutD,
+                               nullptr,
+                               m_ws,
+                               kOnlineWorkspace,
+                               nullptr)
+               != HIPBLAS_STATUS_SUCCESS)
+                return false;
+
+            if(hipDeviceSynchronize() != hipSuccess)
+                return false;
+
+            if(launched)
+                *launched = hipblaslt_tuning_last_launch_for_test();
+            return true;
+        }
+
+        /** Distinct solution indices the heuristic offers, with no tuning in play. */
+        size_t distinctCandidates(int want)
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> results(want);
+            int                                           returned = 0;
+            if(hipblasLtMatmulAlgoGetHeuristic(m_handle,
+                                               m_desc,
+                                               m_layoutA,
+                                               m_layoutB,
+                                               m_layoutC,
+                                               m_layoutD,
+                                               m_pref,
+                                               want,
+                                               results.data(),
+                                               &returned)
+               != HIPBLAS_STATUS_SUCCESS)
+                return 0;
+
+            std::set<int> indices;
+            for(int i = 0; i < returned; i++)
+                indices.insert(hipblaslt_ext::getIndexFromAlgo(results[i].algo));
+            return indices.size();
+        }
+
+    private:
+        static bool allocate(void** out, size_t elements)
+        {
+            const size_t bytes = elements * kOnlineBatch * sizeof(uint16_t);
+            return hipMalloc(out, bytes) == hipSuccess && hipMemset(*out, 0, bytes) == hipSuccess;
+        }
+
+        /** A device array of the per-batch base pointers of one operand. */
+        static bool pointers(void** out, void* base, size_t elementsPerBatch)
+        {
+            std::vector<void*> hostSide(kOnlineBatch);
+            for(int32_t b = 0; b < kOnlineBatch; b++)
+                hostSide[b] = static_cast<char*>(base)
+                              + static_cast<size_t>(b) * elementsPerBatch * sizeof(uint16_t);
+
+            return hipMalloc(out, hostSide.size() * sizeof(void*)) == hipSuccess
+                   && hipMemcpy(*out,
+                                hostSide.data(),
+                                hostSide.size() * sizeof(void*),
+                                hipMemcpyHostToDevice)
+                          == hipSuccess;
+        }
+
+        void* operandA() const
+        {
+            return m_pointerArray ? m_pa : m_a;
+        }
+        void* operandB() const
+        {
+            return m_pointerArray ? m_pb : m_b;
+        }
+        void* operandC() const
+        {
+            return m_pointerArray ? m_pc : m_c;
+        }
+        void* operandD() const
+        {
+            return m_pointerArray ? m_pd : m_d;
+        }
+
+        bool                        m_pointerArray = false;
+        hipblasLtHandle_t           m_handle       = nullptr;
+        hipblasLtMatmulDesc_t       m_desc         = nullptr;
+        hipblasLtMatmulPreference_t m_pref         = nullptr;
+        hipblasLtMatrixLayout_t     m_layoutA      = nullptr;
+        hipblasLtMatrixLayout_t     m_layoutB      = nullptr;
+        hipblasLtMatrixLayout_t     m_layoutC      = nullptr;
+        hipblasLtMatrixLayout_t     m_layoutD      = nullptr;
+        void*                       m_a            = nullptr;
+        void*                       m_b            = nullptr;
+        void*                       m_c            = nullptr;
+        void*                       m_d            = nullptr;
+        void*                       m_pa           = nullptr;
+        void*                       m_pb           = nullptr;
+        void*                       m_pc           = nullptr;
+        void*                       m_pd           = nullptr;
+        void*                       m_ws           = nullptr;
+    };
+
+    class TuningOnline_pre_checkin : public ::testing::Test
+    {
+    protected:
+        void SetUp() override
+        {
+            static const char* const names[] = {"HIPBLASLT_TUNING_MODE",
+                                                "HIPBLASLT_TUNING_CACHE_PATH",
+                                                "HIPBLASLT_TUNING_OVERRIDE_FILE",
+                                                "HIPBLASLT_TUNING_MAX_CANDIDATES",
+                                                "HIPBLASLT_TUNING_COLD_ITERS",
+                                                "HIPBLASLT_TUNING_HOT_ITERS"};
+            for(const char* name : names)
+            {
+                const char* value = getenv(name);
+                m_savedEnv.emplace_back(name,
+                                        value ? std::optional<std::string>(value) : std::nullopt);
+            }
+
+            if(!gpuAvailable())
+                GTEST_SKIP() << "No GPU available";
+
+            for(const char* name : names)
+                unsetenv(name);
+            hipblaslt_tuning_reset_for_test();
+
+            m_path = tempCachePath(::testing::UnitTest::GetInstance()->current_test_info()->name());
+            std::remove(m_path.c_str());
+        }
+
+        void TearDown() override
+        {
+            std::remove(m_path.c_str());
+            for(const auto& [name, value] : m_savedEnv)
+            {
+                if(value)
+                    setenv(name.c_str(), value->c_str(), 1);
+                else
+                    unsetenv(name.c_str());
+            }
+            hipblaslt_tuning_reset_for_test();
+        }
+
+        /**
+         * Online mode on a path, with the search depth and repeat count pinned
+         * so a case knows how many visits exploration takes.
+         */
+        void enterOnline(const std::string& path)
+        {
+            setenv("HIPBLASLT_TUNING_MODE", "online", 1);
+            setenv("HIPBLASLT_TUNING_CACHE_PATH", path.c_str(), 1);
+            setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", std::to_string(kOnlineTopK).c_str(), 1);
+            setenv("HIPBLASLT_TUNING_HOT_ITERS", std::to_string(kOnlineRepeats).c_str(), 1);
+            setenv("HIPBLASLT_TUNING_COLD_ITERS", "0", 1);
+            hipblaslt_tuning_reset_for_test();
+        }
+
+        /**
+         * Dispatch until exploration must have finished, reporting how many
+         * distinct kernels were launched along the way.
+         *
+         * That count is what says whether the problem was explored at all: a
+         * problem online leaves alone launches whatever default selection ranks
+         * first, every time, while an explored one is handed a different
+         * candidate on each probing visit.
+         */
+        size_t runToResolution(OnlineProblem& problem)
+        {
+            std::set<int> launchedIndices;
+            for(int visit = 0; visit < kOnlineVisits; visit++)
+            {
+                int launched = -1;
+                if(!problem.dispatch(&launched))
+                {
+                    ADD_FAILURE() << "dispatch " << visit << " failed";
+                    break;
+                }
+
+                // Without this the count below could be one because nothing was
+                // reported rather than because nothing varied, and a case
+                // asserting that online left a problem alone would pass for the
+                // wrong reason.
+                if(launched < 0)
+                {
+                    ADD_FAILURE() << "dispatch " << visit << " reported no launched solution";
+                    break;
+                }
+
+                launchedIndices.insert(launched);
+            }
+            return launchedIndices.size();
+        }
+
+        std::string                                                     m_path;
+        std::vector<std::pair<std::string, std::optional<std::string>>> m_savedEnv;
+    };
+
+    // The control for the case below, and the reason it is not vacuous: the
+    // same harness, the same shape, the same visit count, on a problem the
+    // tuning cache can key. Online rotates through the ranked prefix and leaves
+    // a row behind.
+    TEST_F(TuningOnline_pre_checkin, AnOrdinaryBatchedProblemIsExploredAndRecorded)
+    {
+        OnlineProblem problem(/*pointerArray=*/false);
+        ASSERT_TRUE(problem.create());
+
+        if(problem.distinctCandidates(kOnlineTopK) < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        enterOnline(m_path);
+
+        EXPECT_GT(runToResolution(problem), 1u)
+            << "online launched one kernel throughout, so it never probed";
+
+        EXPECT_EQ(valueRowCount(m_path), 1u) << "online recorded no winner";
+        EXPECT_EQ(counters().tuned, 1u);
+    }
+
+    // The defect this case exists for: online used to decide whether to explore
+    // on its own switch alone, while the cache decided whether a shape is
+    // keyable on a predicate online never consulted. Pointer-array batch mode
+    // is the class where the two disagreed -- grouped GEMM is excluded in
+    // practice because it dispatches through an entry point online does not
+    // hook, but a pointer-array batch runs the ordinary single-GEMM path. So
+    // online explored it, reordered its kernels and appended rows that cache
+    // mode's own keyed test would then refuse to look up: dead weight in a file
+    // shared with tune, bought with a reordering nobody asked for.
+    TEST_F(TuningOnline_pre_checkin, APointerArrayBatchProblemIsNeverExplored)
+    {
+        OnlineProblem problem(/*pointerArray=*/true);
+        ASSERT_TRUE(problem.create());
+
+        // Below two, default selection has nothing to rotate and the case could
+        // not fail however the guard behaved.
+        if(problem.distinctCandidates(kOnlineTopK) < 2)
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        enterOnline(m_path);
+
+        EXPECT_EQ(runToResolution(problem), 1u)
+            << "online probed a problem the tuning cache cannot key, so it reordered kernels for a "
+               "shape no later run can replay";
+
+        EXPECT_EQ(valueRowCount(m_path), 0u) << "online wrote a row cache mode will never look up";
+        EXPECT_EQ(counters().tuned, 0u);
     }
 } // namespace

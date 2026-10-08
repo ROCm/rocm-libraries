@@ -52,7 +52,7 @@ namespace rocblaslt
     // stack already owns are the only ones there are; see onlineTunerConfig().
     // Read once, like the tuning mode itself, so a knob set after the first
     // lookup has no effect.
-    OnlineTuner::OnlineTuner()
+    void OnlineTuner::applyConfig()
     {
         const OnlineTunerConfig config = onlineTunerConfig();
 
@@ -64,6 +64,27 @@ namespace rocblaslt
         // One candidate is nothing to choose between, so a depth below two is
         // the feature switched off however the mode is set.
         m_enabled = config.enabled && m_topK >= 2;
+    }
+
+    OnlineTuner::OnlineTuner()
+    {
+        applyConfig();
+    }
+
+    void OnlineTuner::reloadForTest()
+    {
+        std::unique_lock<std::shared_timed_mutex> lock(m_mutex);
+
+        // Slots first, so nothing can be reached through the table once the
+        // pool it points into is gone.
+        for(std::atomic<const Resolution*>& slot : m_resolutions)
+            slot.store(nullptr, std::memory_order_release);
+
+        m_problems.clear();
+        m_resolutionPool.clear();
+        m_winnerPool.clear();
+
+        applyConfig();
     }
 
     // The pooled events are deliberately not destroyed. This is a function-local

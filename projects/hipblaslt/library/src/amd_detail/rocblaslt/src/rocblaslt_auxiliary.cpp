@@ -41,6 +41,7 @@
 #include <cstring>
 #endif
 
+#include "OnlineTuner.hpp"
 #include "UserDrivenTuningParser.hpp"
 #include "definitions.h"
 #include "handle.h"
@@ -3111,6 +3112,11 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     TensileLite::TuningModeSingleton::getInstance().reloadForTest();
     TensileLite::OverrideMap::getMap().resetForTest();
     OverrideSingleton::getInstance().reloadForTest();
+
+    // After the mode singleton, which is where the tuner reads whether it is on
+    // and how deep it searches.
+    rocblaslt::OnlineTuner::getInstance().reloadForTest();
+
     TensileLite::resetTuningDiagnosticsForTest();
 
     auto& counters         = TensileLite::TuningCounters::instance();
