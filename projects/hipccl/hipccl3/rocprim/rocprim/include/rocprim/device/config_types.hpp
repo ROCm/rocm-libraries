@@ -646,8 +646,11 @@ private:
         }
         else
         {
-            // 3. Neither matches: build everything.
-            f(t);
+            // 3. Neither matches: it should only build unknown fallback case.
+            if constexpr(t == target{})
+            {
+                f(t);
+            }
         }
     }
 
