@@ -37,8 +37,10 @@ namespace hipblaslt_jit
     using GemmMaster = TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>;
 
     // The variables of a NAME=VALUE environment that can change comgr output:
-    // HIP_PATH, LLVM_PATH and every AMD_COMGR_* variable except the logging,
-    // cache and temporary-file controls.
+    // HIP_PATH, LLVM_PATH and every AMD_COMGR_* variable, including
+    // AMD_COMGR_CACHE, AMD_COMGR_CACHE_DIR, AMD_COMGR_CACHE_POLICY and
+    // AMD_COMGR_USE_VFS. Logging, SAVE_TEMPS, SAVE_LLVM_TEMPS and
+    // TIME_STATISTICS are omitted; they do not change code-object bytes.
     std::map<std::string, std::string> compilerEnvironment(const char* const* environment);
 
     // Everything that can change a generated code object. Each key has its own
@@ -47,7 +49,8 @@ namespace hipblaslt_jit
     {
         std::string                        targetId, isa, libraryArch;
         int                                wavefrontSize = 0;
-        std::string                        backendId, backendVersion;
+        std::string                        backendId;
+        uint32_t                           backendVersion = 0;
         int                                codeObjectVersion = jitCodeObjectVersion;
         std::string                        comgr; // code_object::comgrIdentity()
         std::string                        rocmPath; // code_object::rocmPath()
@@ -186,11 +189,12 @@ namespace hipblaslt_jit
                       const std::vector<std::string>&           excludeKernels,
                       std::vector<int32_t>&                     indices);
 
-        // Returns one index per supported solution, in order. A solution already
-        // published for the same kernel and sizes keeps its index. solutions are
-        // code-object artifacts plus the TensileLite record JitLibrary writes.
-        // The problem's ContractionSolution::ProblemType is what problemTypeKey
-        // stores.
+        // Returns one index per supported solution, in order. A backend contributes
+        // one SourceCodeBundle; publishing adds that solution to this library.
+        // A solution already published for the same kernel and sizes keeps its
+        // index. solutions are code-object artifacts plus the TensileLite record
+        // this library extends. The problem's ContractionSolution::ProblemType
+        // is what problemTypeKey stores.
         Status publish(const CacheKey&                           key,
                        int                                       device,
                        const TensileLite::ContractionProblemGemm& problem,
@@ -204,6 +208,9 @@ namespace hipblaslt_jit
         // when the index is newer than this process has seen. Empty, with why
         // set, otherwise.
         View resolve(int device, int32_t index, Status& why);
+        // The helper cache for key's backend id. Empty, with why set, when this
+        // library cannot be used. ComgrBuilder asks it before compiling a helper.
+        std::shared_ptr<HelperCache> helperCache(const CacheKey& key, int device, Status& why);
         std::shared_ptr<TensileLite::ContractionSolution> solutionByIndex(
             int device, const TensileLite::Hardware& hardware, int32_t index, Status& why);
 

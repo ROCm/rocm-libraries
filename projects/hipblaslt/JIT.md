@@ -72,12 +72,15 @@ code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
   features the device has; it is then rewritten to the device's full target
   ID. Assembly units that declare different wavefront sizes are rejected.
 - HIP source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
-  `--rocm-path` and a content-derived `-cuid`, so HIP objects link together.
+  `--rocm-path` and a content-derived `-cuid`. A HIP helper is its own code
+  object. The builder asks `JitLibrary`'s helper cache, keyed by backend id
+  and helper name, before compiling one. A hit reuses that code object. A miss
+  compiles it once, publishes it, and then compiles the main kernel.
   The ROCm path is `HIP_PATH` when set, otherwise the prefix of the loaded HIP
   runtime.
-- Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` joins the assembly
-  and HIP relocatables into one code object per solution, with
-  `-Xlinker --build-id=sha1`.
+- Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` links the main kernel
+  into one code object, with `-Xlinker --build-id=sha1`. The helper code
+  objects and the main kernel are ready to add to `JitLibrary`.
 
 The generator and the builder use the same code-object version, which
 `BuildRequest::codeObjectVersion` carries (4 by default). The output is a
@@ -103,17 +106,26 @@ kernel, problem type and sizes. A row matches the solution's problem type and
 its exact sizes. A solution whose code-object version or kernarg version this
 build cannot run is skipped; the rest of the library still loads. Publishing
 replaces files atomically, in an order that never leaves a reference to a
-missing file. `readTensileSourceBundle` reads a source directory into a
-`SourceCodeBundle` and the kernel name. A caller that checks predicates loads
-the TensileLite entry with `loadGemmLibrary`. The tests publish and load the
-JIT solution library instead of that directory.
+missing file. A backend contributes one `SourceCodeBundle`. Publishing adds
+that solution to the library, which holds many. `readTensileSourceBundle`
+reads a source directory into a `SourceCodeBundle` and the kernel name. The
+tests publish and load the JIT solution library.
 
 ### Loading a published solution
 
-`JitLibrary` loads a published solution as a TensileLite `ContractionSolution`
-and a `SolutionAdapter`. `loadGemmLibrary` reads a solution record and requires
-local solutions 0 to N-1. `hipblaslt-jit-loader.{hpp,cpp}` does not wrap that
-library in another type.
+`JitLibrary` is a TensileLite `SolutionLibrary`. After publish, hipBLASLt
+launches that solution the same way it launches Equality and Origami solutions.
+The stored record is a `ContractionSolution` with the code object, kernel name,
+`ContractionSolution::ProblemType`, and the predicates those libraries already
+expect. `TensileGemmBundle` does not own a `MasterSolutionLibrary`, `Hardware`,
+or `SolutionAdapter`. An in-process handle for one index refers to the solution
+inside `JitLibrary`.
+
+`loadGemmLibrary` reads a solution record with TensileLite and requires local
+solutions 0 to N-1. It does not require the record to hold exactly one
+solution. A predicate check calls it as a local load inside the backend
+function that needs it. That load is not a field of a bundle type and not a
+second library type.
 
 The record's solutions are listed best first, each with its own `Problem` row.
 Their hardware and problem predicates decide which problems each one serves,

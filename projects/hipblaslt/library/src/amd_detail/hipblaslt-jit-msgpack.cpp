@@ -476,7 +476,7 @@ namespace hipblaslt_jit::msgpack_io
             string(packer, "backend_id");
             string(packer, document.backendId);
             string(packer, "backend_version");
-            string(packer, document.backendVersion);
+            packer.pack(document.backendVersion);
             string(packer, "code_object_version");
             packer.pack(document.codeObjectVersion);
             string(packer, "comgr");
@@ -513,8 +513,12 @@ namespace hipblaslt_jit::msgpack_io
             if(root.type != msgpack::type::MAP)
                 malformed("The cache key is not a map");
             bool ignored = false;
-            document.backendId      = optionalString(root, "backend_id", document.hasBackendId);
-            document.backendVersion = optionalString(root, "backend_version", document.hasBackendVersion);
+            document.backendId = optionalString(root, "backend_id", document.hasBackendId);
+            const int version   = optionalInt(root, "backend_version", document.hasBackendVersion, 0);
+            if(document.hasBackendVersion && version >= 0)
+                document.backendVersion = static_cast<uint32_t>(version);
+            else
+                document.hasBackendVersion = false;
             document.codeObjectVersion
                 = optionalInt(root, "code_object_version", ignored, document.codeObjectVersion);
             document.comgr       = optionalString(root, "comgr", ignored);
