@@ -105,9 +105,20 @@ SHAPE_KNOBS = {"N", "head_dim"}
 # have it search a space where all but one point fails to match.
 #
 # Per op: `N` is RMSNorm's row width; `head_dim` and `causal` are what an SDPA
-# graph asks for. The remaining knobs -- block_threads, block_m, block_n -- are
-# launch geometry the tuner may legitimately vary.
-GRAPH_DETERMINED_FIELDS = {"N", "dtype", "head_dim", "causal", "merge_symbol"}
+# graph asks for, and on CDNA so are the baked head counts (`num_heads`,
+# `num_kv_heads`) and the kernel family, which the target arch fixes. The
+# remaining knobs -- block_threads, block_m, block_n -- are launch geometry the
+# tuner may legitimately vary.
+GRAPH_DETERMINED_FIELDS = {
+    "N",
+    "dtype",
+    "head_dim",
+    "causal",
+    "merge_symbol",
+    "kernel",
+    "num_heads",
+    "num_kv_heads",
+}
 
 # uuid5 from a name, so ids are stable across regenerations and adding a
 # thirteenth instance cannot disturb the twelve already shipped. The namespace

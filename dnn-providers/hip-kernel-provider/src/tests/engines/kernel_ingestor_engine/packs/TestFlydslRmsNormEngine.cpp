@@ -157,7 +157,13 @@ KernelDefinition makeFlydslKernel(const std::string& dtype,
 /// arches loads every arch's shard, so a kernel staged for another device is passed over.
 bool findStagedKernel(const std::string& dtype, int64_t bakedN, KernelDefinition& out)
 {
-    const auto& set = loadedSet(FLYDSL_RMSNORM.engineName);
+    // A build for CDNA targets only stages no RMSNorm set at all.
+    const auto* staged = findLoadedSet(FLYDSL_RMSNORM.engineName);
+    if(staged == nullptr)
+    {
+        return false;
+    }
+    const auto& set = *staged;
     const auto device = packedArchDeviceProperties().gcnArchName;
     for(const auto& pack : set.packs)
     {
@@ -1045,6 +1051,10 @@ std::optional<int64_t> bakedWidthOf(const KernelDefinition& definition)
 TEST(TestGpuFlydslRmsNormWinnerShard, ARecordedOrderDisplacesTheScoreOrder)
 {
     SKIP_IF_NO_DEVICES();
+    if(findLoadedSet(FLYDSL_RMSNORM.engineName) == nullptr)
+    {
+        GTEST_SKIP() << "this build staged no RMSNorm objects";
+    }
 
     // TEST scope, not BINARY: main() already installed a binary-wide root, and every
     // case in this process would otherwise share one shard -- including the second case
@@ -1094,6 +1104,10 @@ TEST(TestGpuFlydslRmsNormWinnerShard, ARecordedOrderDisplacesTheScoreOrder)
 TEST(TestGpuFlydslRmsNormWinnerShard, TheShardIsScopedToThisEngineAndOutlivesTheManager)
 {
     SKIP_IF_NO_DEVICES();
+    if(findLoadedSet(FLYDSL_RMSNORM.engineName) == nullptr)
+    {
+        GTEST_SKIP() << "this build staged no RMSNorm objects";
+    }
 
     const hipdnn_test_sdk::utilities::ScopedTestCacheDir cache(
         "flydsl-winners", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST);

@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "id": "de16edfb-9073-5e5e-b499-3cb7938149de",
+  "name": "flydsl sdpa_cdna kernels (gfx950)",
+  "arch": [
+    "gfx950"
+  ],
+  "matchers": [
+    "bbb84163-9913-5baf-90a5-fd2cef93d80b"
+  ],
+  "engine": "5aa60dad-c58c-5300-b1fd-296e557736ee",
+  "dispatch": "55f5afea-308e-5f76-8f9f-92f190e724ba",
+  "kernelDescriptors": [
+    "1c48abbb-66a7-5370-95d5-9c8a12f86905",
+    "1b57de2b-c3ce-5048-b674-c40727081966"
+  ]
+}

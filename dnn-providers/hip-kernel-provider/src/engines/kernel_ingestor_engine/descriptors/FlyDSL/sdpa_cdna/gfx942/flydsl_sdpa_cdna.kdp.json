@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "id": "3b9a442a-672f-5109-a383-5f4ff9c19947",
+  "name": "flydsl sdpa_cdna kernels (gfx942)",
+  "arch": [
+    "gfx942"
+  ],
+  "matchers": [
+    "bbb84163-9913-5baf-90a5-fd2cef93d80b"
+  ],
+  "engine": "5aa60dad-c58c-5300-b1fd-296e557736ee",
+  "dispatch": "55f5afea-308e-5f76-8f9f-92f190e724ba",
+  "kernelDescriptors": [
+    "eccc4a16-737a-5eb0-b35c-5d2e18c5577e",
+    "cfe60e6f-35b3-5105-b463-e99ae26df4e3"
+  ]
+}

@@ -41,6 +41,7 @@ FLYDSL_DIR = Path(__file__).resolve().parent.parent
 OP_KERNEL_DIRS = {
     "rmsnorm": ("norm",),
     "sdpa_rdna": ("attention_rdna",),
+    "sdpa_cdna": ("attention_cdna",),
 }
 # Shared by every op: the package root, the kernel helpers every op imports, and
 # the generator machinery -- every module under generators/ but the per-op
@@ -105,7 +106,7 @@ def inputs_digest(op: str, arch: str, flydsl_dir: Path = FLYDSL_DIR) -> str:
         relative = path.relative_to(flydsl_dir).as_posix()
         digest.update(relative.encode("utf-8") + b"\0")
         digest.update(path.read_bytes().replace(b"\r\n", b"\n") + b"\0")
-    rows = [instance.to_record() for instance in instances_for(op)]
+    rows = [instance.to_record() for instance in instances_for(op, arch)]
     digest.update(json.dumps(rows, sort_keys=True).encode("utf-8") + b"\0")
     family = families.table().get(arch) if families.is_generic(arch) else None
     digest.update(json.dumps(family, sort_keys=True).encode("utf-8"))

@@ -88,6 +88,9 @@ _ABBREV = {
     "head_dim_max": "dmax",
     "decode": "decode",
     "hd_pair": "pair",
+    "kernel": "",
+    "num_heads": "hq",
+    "num_kv_heads": "hkv",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -392,10 +395,73 @@ def _assert_unique(instances: list[Instance]) -> None:
         seen[instance.name] = instance
 
 
-OPS = {"rmsnorm": rmsnorm_instances, "sdpa_rdna": sdpa_instances}
+# --- SDPA forward, CDNA ---------------------------------------------------------
+
+# FlyDSL's own CDNA kernels (kernels_src/kernels/attention_cdna/), one per arch:
+# gfx950 takes the dual-wave software-pipelined kernel, gfx942 the generic one.
+# Unlike every table above, which tables an op for all of its targets, this one
+# differs by target, so it takes the arch.
+SDPA_CDNA_KERNEL = {"gfx950": "dualwave", "gfx942": "generic"}
+# Query rows per workgroup: the dual-wave kernel's is fixed; the generic kernel's
+# launcher picks 128 or 256 by problem size, and only 128 is built here.
+SDPA_CDNA_BLOCK_M = {"dualwave": 256, "generic": 128}
+
+# Upstream bakes the head counts and the softmax scale (1/sqrt(head_dim)) into
+# each object, so until those are runtime arguments every model shape needs its
+# own objects. This first set is one model shape, to bring the CDNA engine up
+# end to end; it is not a coverage claim.
+SDPA_CDNA_HEADS = ((32, 8),)
+SDPA_CDNA_HEAD_DIMS = (128,)
+SDPA_CDNA_DTYPES = ("bf16",)
 
 
-def instances_for(op: str) -> list[Instance]:
+def sdpa_cdna_instances(arch: str) -> list[Instance]:
+    """The CDNA SDPA-forward instance table for one target."""
+    if arch not in SDPA_CDNA_KERNEL:
+        raise KeyError(
+            f"no CDNA SDPA kernel for {arch!r}; known: {', '.join(sorted(SDPA_CDNA_KERNEL))}"
+        )
+    kernel = SDPA_CDNA_KERNEL[arch]
+    instances: list[Instance] = []
+    for dtype in SDPA_CDNA_DTYPES:
+        for num_heads, num_kv_heads in SDPA_CDNA_HEADS:
+            for head_dim in SDPA_CDNA_HEAD_DIMS:
+                for causal in SDPA_CAUSAL:
+                    instances.append(
+                        Instance(
+                            op="sdpa_cdna",
+                            dtype=dtype,
+                            priority=PRIORITY_SPECIALIZED,
+                            knobs={
+                                "kernel": kernel,
+                                "num_heads": num_heads,
+                                "num_kv_heads": num_kv_heads,
+                                "head_dim": head_dim,
+                                "causal": causal,
+                                "block_m": SDPA_CDNA_BLOCK_M[kernel],
+                            },
+                        )
+                    )
+    _assert_unique(instances)
+    return instances
+
+
+OPS = {
+    "rmsnorm": rmsnorm_instances,
+    "sdpa_rdna": sdpa_instances,
+    "sdpa_cdna": sdpa_cdna_instances,
+}
+# Ops whose table differs by target and so takes the arch.
+_PER_TARGET_OPS = {"sdpa_cdna"}
+
+
+def instances_for(op: str, arch: str | None = None) -> list[Instance]:
     if op not in OPS:
         raise KeyError(f"unknown op {op!r}; known: {', '.join(sorted(OPS))}")
+    if op in _PER_TARGET_OPS:
+        if arch is None:
+            raise ValueError(
+                f"op {op!r} tables its instances per target; pass the arch"
+            )
+        return OPS[op](arch)
     return OPS[op]()

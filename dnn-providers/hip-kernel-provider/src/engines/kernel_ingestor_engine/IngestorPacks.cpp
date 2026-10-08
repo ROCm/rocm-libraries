@@ -22,6 +22,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:FlydslSdpaRdna",
          &registerFlydslSdpaRdnaSymbols,
          &resetFlydslSdpaRdnaModuleCache},
+        {"hipkernel:FlydslSdpaCdna",
+         &registerFlydslSdpaCdnaSymbols,
+         &resetFlydslSdpaCdnaModuleCache},
 #endif
         {"hipkernel:Gfx950AttentionDense",
          &registerGfx950AttentionDenseSymbols,

@@ -716,7 +716,13 @@ DeviceProperties packedArchDeviceProperties()
 std::optional<KernelDefinition> findStagedKernel(
     const std::string& dtype, int64_t headDim, int64_t causal, int64_t hasBias, int64_t decode = 0)
 {
-    const auto& set = loadedSet(FLYDSL_SDPA_RDNA.engineName);
+    // A build for CDNA targets only stages no RDNA set at all.
+    const auto* staged = findLoadedSet(FLYDSL_SDPA_RDNA.engineName);
+    if(staged == nullptr)
+    {
+        return std::nullopt;
+    }
+    const auto& set = *staged;
     // A build for several arches loads every arch's shard: pass over another device's.
     const auto device = packedArchDeviceProperties().gcnArchName;
     std::optional<KernelDefinition> best;

@@ -9,7 +9,7 @@
     "aiter_kernels_commit": "8253efc4059516f492df597b80ce5311e9fda8bd",
     "rocm_version": "7.13.0",
     "generic_target_shim": "chipset=gfx1100",
-    "inputs_sha256": "18ecae5c00858a01ef77c25587c0615b22c0cb1d53130ec6aaa900777bb99bb4"
+    "inputs_sha256": "d841f6065c828c4493a079bb2fd1813acb4325408701c6e3a867056602408e53"
   },
   "instances": [
     {

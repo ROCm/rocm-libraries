@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "id": "6638c9a9-4a0d-5704-95b9-db8774e663e4",
+  "name": "flydsl sdpa_cdna variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "kernel",
+      "type": "string"
+    },
+    {
+      "name": "num_heads",
+      "type": "int"
+    },
+    {
+      "name": "num_kv_heads",
+      "type": "int"
+    },
+    {
+      "name": "head_dim",
+      "type": "int"
+    },
+    {
+      "name": "causal",
+      "type": "int"
+    },
+    {
+      "name": "block_m",
+      "type": "int"
+    }
+  ]
+}

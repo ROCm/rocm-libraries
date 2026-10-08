@@ -266,22 +266,39 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # remaining host suites build graphs in-process instead of reading loadedSet(), so
     # censusing one would stay green against an empty shard -- the exact miss the census
     # exists to catch. Every case below opens by reading the staged set.
-    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+    # Each op's census reads only the shards that op ships objects for
+    # (HIPKERNELPROVIDER_FLYDSL_ARCHS_<op>): the RDNA and CDNA attention engines share no
+    # architecture, and a suite addressing a shard its op is absent from would fail.
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_rmsnorm)
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests
             PACK_NAME product
-            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS}
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_rmsnorm}
             SUITES TestFlydslRmsNormPacks
             EXPECTED_CASES
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsBothTiersForBothDtypes
                 EveryKernelDeclaresTheEightSlotSignature
         )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna}
+            SUITES TestFlydslSdpaCdnaPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsOneObjectPerClassAndOneKernelFamilyPerArch
+                EveryKernelDeclaresItsFamilysSignature
+        )
+    endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna)
         # A second suite over the same shard: one EXPECTED_CASES list pins one suite.
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests
             PACK_NAME product
-            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS}
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna}
             SUITES TestFlydslSdpaRdnaPacks
             EXPECTED_CASES
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher

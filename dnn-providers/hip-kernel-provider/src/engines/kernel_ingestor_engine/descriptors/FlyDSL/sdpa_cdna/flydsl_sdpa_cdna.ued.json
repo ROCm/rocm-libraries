@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "5aa60dad-c58c-5300-b1fd-296e557736ee",
+  "name": "hipkernel:flydsl_sdpa_cdna",
+  "graph_match": {
+    "native": "hipkernel.flydsl_sdpa_cdna.graph_match"
+  },
+  "heuristic": "9a0b0973-0c1c-57e4-bdd5-4fb6f2c5d25e",
+  "metadata": "6638c9a9-4a0d-5704-95b9-db8774e663e4",
+  "knobs": [
+    "block_m"
+  ]
+}

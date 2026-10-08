@@ -51,11 +51,14 @@ file(READ "${_flydsl_families_json}" _flydsl_families)
 file(GLOB _flydsl_arch_dirs LIST_DIRECTORIES true RELATIVE "${FLYDSL_CONTENT_DIR}"
      CONFIGURE_DEPENDS "${FLYDSL_CONTENT_DIR}/*/gfx*")
 set(FLYDSL_AVAILABLE_ARCHS "")
+set(_flydsl_ops "")
 foreach(_entry IN LISTS _flydsl_arch_dirs)
     if(NOT IS_DIRECTORY "${FLYDSL_CONTENT_DIR}/${_entry}")
         continue()
     endif()
     get_filename_component(_target "${_entry}" NAME)
+    get_filename_component(_op "${_entry}" DIRECTORY)
+    list(APPEND _flydsl_ops "${_op}")
     if(_target MATCHES "-generic$")
         string(JSON _members ERROR_VARIABLE _flydsl_json_error
                GET "${_flydsl_families}" "${_target}" members)
@@ -71,13 +74,16 @@ foreach(_entry IN LISTS _flydsl_arch_dirs)
             string(JSON _member GET "${_flydsl_families}" "${_target}" members ${_index})
             list(APPEND FLYDSL_AVAILABLE_ARCHS "${_member}")
             list(APPEND "_flydsl_dirs_for_${_member}" "${_target}")
+            list(APPEND "_flydsl_op_archs_${_op}" "${_member}")
         endforeach()
     else()
         list(APPEND FLYDSL_AVAILABLE_ARCHS "${_target}")
         list(APPEND "_flydsl_dirs_for_${_target}" "${_target}")
+        list(APPEND "_flydsl_op_archs_${_op}" "${_target}")
     endif()
 endforeach()
 list(REMOVE_DUPLICATES FLYDSL_AVAILABLE_ARCHS)
+list(REMOVE_DUPLICATES _flydsl_ops)
 
 set(_flydsl_archs "${FLYDSL_AVAILABLE_ARCHS}")
 if(GPU_TARGETS)
@@ -112,6 +118,19 @@ set(HIPKERNELPROVIDER_FLYDSL_ACTIVE TRUE CACHE INTERNAL
     "The product pack ships FlyDSL kernels for at least one requested architecture")
 set(HIPKERNELPROVIDER_FLYDSL_ARCHS "${_flydsl_archs}" CACHE INTERNAL
     "Architectures the product pack ships FlyDSL kernels for")
+# Per op, since ops differ in the architectures they ship for (the RDNA and CDNA
+# attention engines share none): a suite over one op's objects reads only the
+# shards that carry them. Empty for an op with nothing for the requested targets.
+foreach(_op IN LISTS _flydsl_ops)
+    set(_flydsl_op_shipped "")
+    foreach(_arch IN LISTS _flydsl_archs)
+        if("${_arch}" IN_LIST "_flydsl_op_archs_${_op}")
+            list(APPEND _flydsl_op_shipped "${_arch}")
+        endif()
+    endforeach()
+    set("HIPKERNELPROVIDER_FLYDSL_ARCHS_${_op}" "${_flydsl_op_shipped}" CACHE INTERNAL
+        "Architectures the product pack ships FlyDSL ${_op} kernels for")
+endforeach()
 
 # ============================================================================
 # Descriptors agree with the objects, before the pack reads either
