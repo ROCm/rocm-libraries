@@ -242,6 +242,30 @@ protected:
         return hipdnn_data_sdk::utilities::engineNameToId(CONV_ENGINE_NAME);
     }
 
+    /// The block_size @p engine ranks first for a pointwise-add graph. The knob default
+    /// follows the top-ranked kernel, so it exposes the choice without executing anything.
+    int64_t rankedFirstBlockSize(int64_t engine)
+    {
+        auto graph = buildPointwiseAddGraph();
+        EXPECT_EQ(graph->build_operation_graph(_handle).code, ErrorCode::OK);
+
+        std::vector<Knob> knobs;
+        EXPECT_EQ(graph->get_knobs_for_engine(engine, knobs).code, ErrorCode::OK);
+
+        const auto blockSizeKnob = std::find_if(knobs.begin(), knobs.end(), [](const Knob& knob) {
+            return knob.knobId() == BLOCK_SIZE_KNOB;
+        });
+        EXPECT_NE(blockSizeKnob, knobs.end());
+        if(blockSizeKnob == knobs.end())
+        {
+            return -1;
+        }
+
+        const auto* defaultValue = std::get_if<int64_t>(&blockSizeKnob->defaultValue());
+        EXPECT_NE(defaultValue, nullptr);
+        return defaultValue == nullptr ? -1 : *defaultValue;
+    }
+
     /// Pins @p pinnedEngineId before plan creation and compiles with default knobs.
     void buildAndCompile(Graph& graph, int64_t pinnedEngineId)
     {
@@ -620,6 +644,23 @@ TEST_F(IntegrationGpuKernelIngestor, ResolvesAConvGraphToTheConvEngineAndNotTheP
 
     EXPECT_TRUE(offers(pointwiseEngines, engineId()));
     EXPECT_FALSE(offers(pointwiseEngines, convEngineId()));
+}
+
+// hipkernel:PointwiseModel is embedded_source, which only the unit binary can serve.
+
+/// Asserts on provenance (RFC 0019 §12 trace): for the shipped engines, declared-order
+/// fallback picks the same kernel as the native scorer, so the outcome can't tell them apart.
+TEST_F(IntegrationGpuKernelIngestor, TheShippedEngineRanksByItsOwnScorerNotByFallback)
+{
+    const ScopedPluginLogCapture capture(this);
+    auto& recorder = capture.recorder();
+
+    (void)rankedFirstBlockSize(engineId());
+
+    EXPECT_TRUE(recorder.hasLogContaining("decided_by=native"))
+        << "the shipped engine's UHD did not decide this ranking";
+    EXPECT_FALSE(recorder.hasLogContaining("decided_by=declared_order"))
+        << "the shipped engine degraded to declared order without failing any test";
 }
 
 INSTANTIATE_TEST_SUITE_P(,
