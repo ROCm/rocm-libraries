@@ -85,7 +85,7 @@ def filter_algorithms(available_algos: List[str], pattern: str) -> List[str]:
 def run_tuning(
     algorithms: List[str],
     size: int | None = None,
-    output_dir: str | None = None,
+    output_dir: Path | None = None,
     exclude_default_config: bool | None = None,
     max_fevals: int | None = None,
     strategy: str | None = None,
@@ -93,14 +93,17 @@ def run_tuning(
     arch_name: str | None = None,
     seed: int | None = None,
 ) -> None:
+
+    if not output_dir:
+        output_dir = Path(f"{BASE_DIR}/output")
+
     """Run tuning for specified algorithms."""
-    current_dir = Path(__file__).parent
-    tuning_dir = current_dir / "tuner"
+    tuning_dir = f"{BASE_DIR}/tuner"
 
     with working_directory(tuning_dir):
         for algo in algorithms:
             print(f"\nRunning tuning for {algo}...")
-            tuning_file = tuning_dir / f"tuning_{algo}.py"
+            tuning_file = Path(f"{tuning_dir}/tuning_{algo}.py")
 
             if not tuning_file.exists():
                 print(f"Error: Tuning file not found for {algo}")
@@ -114,6 +117,7 @@ def run_tuning(
                 continue
 
             print(f"Working directory: {Path.cwd()}")
+            print(f"Output directory: {output_dir.absolute()}")
             try:
                 if hasattr(tuning_module, "Tuner"):
                     args: TunerArgs = tuning_module.Tuner._get_default_args()
@@ -187,12 +191,19 @@ def main():
         print(f"  - {algo}")
 
     output_dir = Path(args.output_dir)
+
+    if not output_dir.is_absolute():
+        output_dir = output_dir.absolute()
+    else:
+        # gets rid of any ../
+        output_dir = output_dir.resolve()
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     run_tuning(
         matched_algos,
         args.size,
-        args.output_dir,
+        output_dir,
         args.exclude_default_config,
         args.max_fevals,
         args.strategy,

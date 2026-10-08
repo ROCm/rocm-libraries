@@ -32,7 +32,7 @@ class Parser:
     def get_parser(
         default_bytes: Optional[int] = None,
         default_max_feval: int = 100,
-        default_output_dir: str = "../output",
+        default_output_dir: str = f"{BASE_DIR}/output",
         default_strategy: str = "dual_annealing",
     ):
         parser = argparse.ArgumentParser()
