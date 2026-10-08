@@ -130,7 +130,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
 
         // Reads the headers the build staged, after checking that the directory's
         // manifest is this build's and each file matches it.
-        Status readHeaders(const Options& options, std::vector<hipblaslt_jit::BuildUnit>& headers)
+        Status readHeaders(const Options& options, std::vector<hipblaslt_jit::Artifact>& headers)
         {
             headers.clear();
             const auto      candidates = headerCandidates(options);
@@ -158,7 +158,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                     return unavailable(path.u8string() + " is missing");
                 if(!hipblaslt_jit::source_bundle::pathStaysInside(root, real))
                     return unavailable(path.u8string() + " leaves " + found->u8string());
-                hipblaslt_jit::BuildUnit file;
+                hipblaslt_jit::Artifact file;
                 // Templates include the files relative to include/.
                 file.name = header.path.lexically_relative("include").generic_string();
                 if(!hipblaslt_jit::files::readFile(real, fileLimit, file.bytes).ok()
@@ -239,7 +239,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
         class HipKittensBackend final : public hipblaslt_jit::Backend
         {
         public:
-            explicit HipKittensBackend(std::vector<hipblaslt_jit::BuildUnit> headers)
+            explicit HipKittensBackend(std::vector<hipblaslt_jit::Artifact> headers)
                 : m_headers(std::move(headers))
                 , m_info{"hipkittens", "HipKittens", {}}
             {
@@ -253,8 +253,8 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                 return m_info;
             }
 
-            Status generate(const hipblaslt_jit::GenerationRequest&        request,
-                            std::vector<hipblaslt_jit::GeneratedSolution>& solutions) const override
+            Status generate(const hipblaslt_jit::GenerationRequest&       request,
+                            std::vector<hipblaslt_jit::SourceCodeBundle>& solutions) const override
             {
                 solutions.clear();
                 std::vector<const detail::Variant*> found;
@@ -266,21 +266,43 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                     if(solutions.size() >= request.count
                        || std::find(skip.begin(), skip.end(), variant->kernelName) != skip.end())
                         continue;
-                    hipblaslt_jit::GeneratedSolution solution;
-                    solution.entry       = variant->entry;
-                    solution.kernelNames = {variant->kernelName};
-                    solution.hipFlags    = variant->hipFlags;
-                    hipblaslt_jit::BuildUnit unit = variant->source;
-                    unit.kind                     = hipblaslt_jit::BuildUnit::Kind::Hip;
-                    unit.includes                 = m_headers;
-                    solution.units.push_back(std::move(unit));
-                    solutions.push_back(std::move(solution));
+                    hipblaslt_jit::SourceCodeBundle bundle;
+                    bundle.mainKernel = variant->source;
+                    bundle.mainKernel.kind = hipblaslt_jit::Artifact::Kind::Hip;
+                    bundle.includes       = m_headers;
+                    bundle.hipFlags       = variant->hipFlags;
+                    solutions.push_back(std::move(bundle));
                 }
                 return {};
             }
 
+            std::vector<std::string>
+                kernelNames(const hipblaslt_jit::SourceCodeBundle& source) const override
+            {
+                const auto* variant = match(source);
+                return variant ? std::vector<std::string>{variant->kernelName}
+                               : std::vector<std::string>{};
+            }
+
+            std::vector<uint8_t>
+                solutionRecord(const hipblaslt_jit::SourceCodeBundle& source) const override
+            {
+                const auto* variant = match(source);
+                return variant ? variant->entry : std::vector<uint8_t>{};
+            }
+
         private:
-            std::vector<hipblaslt_jit::BuildUnit> m_headers;
+            const detail::Variant* match(const hipblaslt_jit::SourceCodeBundle& source) const
+            {
+                for(const auto& variant : detail::resources().variants)
+                    if(source.mainKernel.name == variant.source.name
+                       && source.mainKernel.bytes == variant.source.bytes
+                       && source.hipFlags == variant.hipFlags)
+                        return &variant;
+                return nullptr;
+            }
+
+            std::vector<hipblaslt_jit::Artifact> m_headers;
             hipblaslt_jit::BackendInfo              m_info;
         };
     }
@@ -292,7 +314,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
         diagnostics = {"HipKittens", ""};
         try
         {
-            std::vector<hipblaslt_jit::BuildUnit> headers;
+            std::vector<hipblaslt_jit::Artifact> headers;
             if(auto status = readHeaders(options, headers); !status.ok())
             {
                 diagnostics.message = status.message;

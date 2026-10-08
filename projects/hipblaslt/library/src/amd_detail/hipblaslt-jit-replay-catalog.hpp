@@ -324,15 +324,17 @@ namespace hipblaslt_jit::committed
         std::string solutionName;
     };
 
-    // A described solution set: its entry, the assembly units, and the K values
-    // at which the JIT solution library should hold each solution.
+    // A described solution set: its source, the TensileLite record JitLibrary
+    // stores, and the K values at which the library should hold each solution.
     struct Prepared
     {
-        std::string                         arch;
-        std::string                         name;
-        std::string                         compilerTarget;
-        hipblaslt_jit::GeneratedSolution    solution;
-        std::vector<Publication>            publications;
+        std::string                     arch;
+        std::string                     name;
+        std::string                     compilerTarget;
+        hipblaslt_jit::SourceCodeBundle source;
+        std::vector<uint8_t>            record;
+        std::vector<std::string>        kernelNames;
+        std::vector<Publication>        publications;
     };
 
     inline Prepared prepare(const fs::path&    sources,
@@ -341,7 +343,7 @@ namespace hipblaslt_jit::committed
                             const std::string& name)
     {
         std::map<std::string, Assembly> assembly;
-        std::vector<hipblaslt_jit::BuildUnit> units;
+        std::vector<hipblaslt_jit::Artifact> units;
         for(const auto& file : fs::directory_iterator(sources / "sources"))
         {
             if(file.path().extension() != ".s")
@@ -352,9 +354,8 @@ namespace hipblaslt_jit::committed
                 fail(file.path().filename().u8string() + " is not " + target + " assembly");
             assembly.emplace(kernel.kernel, kernel);
             units.push_back({file.path().filename().u8string(),
-                             std::vector<uint8_t>(text.begin(), text.end()),
-                             hipblaslt_jit::BuildUnit::Kind::Assembly,
-                             {}});
+                             hipblaslt_jit::Artifact::Kind::Assembly,
+                             std::vector<uint8_t>(text.begin(), text.end())});
         }
         std::sort(units.begin(), units.end(), [](const auto& a, const auto& b) {
             return a.name < b.name;
@@ -370,18 +371,18 @@ namespace hipblaslt_jit::committed
             kernels.push_back(found->second);
         }
 
+        if(units.size() != 1)
+            fail("A source bundle has one main kernel in " + sources.u8string());
         Prepared prepared;
-        prepared.arch            = target;
-        prepared.name            = name;
-        prepared.compilerTarget  = kernels.front().target;
-        prepared.solution.entry  = libraryEntry(bundle, kernels);
+        prepared.arch              = target;
+        prepared.name              = name;
+        prepared.compilerTarget    = kernels.front().target;
+        prepared.record            = libraryEntry(bundle, kernels);
+        prepared.source.mainKernel = std::move(units.front());
         for(const auto& kernel : kernels)
-            if(std::find(prepared.solution.kernelNames.begin(),
-                         prepared.solution.kernelNames.end(),
-                         kernel.kernel)
-               == prepared.solution.kernelNames.end())
-                prepared.solution.kernelNames.push_back(kernel.kernel);
-        prepared.solution.units = std::move(units);
+            if(std::find(prepared.kernelNames.begin(), prepared.kernelNames.end(), kernel.kernel)
+               == prepared.kernelNames.end())
+                prepared.kernelNames.push_back(kernel.kernel);
         for(size_t i = 0; i < bundle.solutions.size(); ++i)
         {
             Publication publication;
@@ -447,17 +448,21 @@ namespace hipblaslt_jit::committed
             fs::create_directories(bundle / "sources");
             const auto entry = bundle / "library" / "TensileLibrary.dat";
             std::ofstream out(entry, std::ios::binary);
-            if(!out.write(reinterpret_cast<const char*>(item.solution.entry.data()),
-                          static_cast<std::streamsize>(item.solution.entry.size())))
+            if(!out.write(reinterpret_cast<const char*>(item.record.data()),
+                          static_cast<std::streamsize>(item.record.size())))
                 fail("Cannot write " + entry.u8string());
-            for(const auto& unit : item.solution.units)
-            {
-                const auto    path = bundle / "sources" / fs::u8path(unit.name);
+            const auto writeArtifact = [&](const hipblaslt_jit::Artifact& artifact) {
+                const auto    path = bundle / "sources" / fs::u8path(artifact.name);
                 std::ofstream source(path, std::ios::binary);
-                if(!source.write(reinterpret_cast<const char*>(unit.bytes.data()),
-                                 static_cast<std::streamsize>(unit.bytes.size())))
+                if(!source.write(reinterpret_cast<const char*>(artifact.bytes.data()),
+                                 static_cast<std::streamsize>(artifact.bytes.size())))
                     fail("Cannot write " + path.u8string());
-            }
+            };
+            writeArtifact(item.source.mainKernel);
+            for(const auto& helper : item.source.helpers)
+                writeArtifact(helper);
+            for(const auto& include : item.source.includes)
+                writeArtifact(include);
         }
     }
 

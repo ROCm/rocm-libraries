@@ -533,7 +533,7 @@ namespace
                 << "                variant.kernelName = " << cxxString(variant.kernel) << ";\n"
                 << "                variant.source.name = " << cxxString(std::string(variant.name) + ".hip")
                 << ";\n"
-                << "                variant.source.kind = hipblaslt_jit::BuildUnit::Kind::Hip;\n"
+                << "                variant.source.kind = hipblaslt_jit::Artifact::Kind::Hip;\n"
                 << "                variant.source.bytes.assign(source, source + sizeof(source));\n"
                 << "                variant.entry.assign(entry" << i << ", entry" << i
                 << " + sizeof(entry" << i << "));\n"

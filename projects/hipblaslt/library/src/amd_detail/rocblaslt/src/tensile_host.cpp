@@ -5983,15 +5983,19 @@ namespace hipblaslt_jit
                                                Diagnostics&       diagnostics) const
     {
         workspace     = 0;
-        auto solution = tensile->library->solutions.at(index);
+        auto solution = library->solutions.at(index);
         if(!scaleLayoutMatches(*solution, request.problem))
         {
             diagnostics.message = "TensileLite solution has a different physical MX scale layout";
             return HIPBLAS_STATUS_NOT_SUPPORTED;
         }
-        auto        problem  = ConstructTensileProblem(request.problem);
-        const auto& hardware = tensile->hardware;
-        bool        hardwareFailed = false;
+        if(!hardware)
+        {
+            diagnostics.message = "TensileLite hardware is required";
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+        auto problem           = ConstructTensileProblem(request.problem);
+        bool hardwareFailed    = false;
         if(!gemmSolutionPredicates(
                *solution, problem, *hardware, limit, workspace, hardwareFailed))
         {
@@ -6016,20 +6020,33 @@ namespace hipblaslt_jit
 
     namespace
     {
+        void checkHip(hipError_t status, const char* operation)
+        {
+            if(status != hipSuccess)
+                throw std::runtime_error(std::string(operation) + ": " + hipGetErrorString(status));
+        }
+
         class TensileLoader final : public SolutionLoader
         {
         public:
-            Status support(const BuiltSolution&    built,
-                           const GemmRequest& request,
-                           const DeviceTarget&     target,
-                           size_t                  workspaceLimit,
-                           std::vector<int>&       indices) const override
+            Status support(const CompiledCode& code,
+                           const GemmRequest&  request,
+                           const DeviceTarget& target,
+                           size_t              workspaceLimit,
+                           std::vector<int>&   indices) const override
             {
                 indices.clear();
+                if(code.record.empty())
+                    return {Status::Code::Failed,
+                            Stage::Support,
+                            "A built solution has no TensileLite record"};
+                if(!target.hardware)
+                    return {Status::Code::Failed, Stage::Support, "TensileLite hardware is required"};
                 TensileGemmBundle bundle;
-                bundle.tensile = parseTensileBundle(built, target.hardware);
+                bundle.library  = loadGemmLibrary(code.record);
+                bundle.hardware = target.hardware;
                 std::string reason;
-                for(const auto& entry : bundle.tensile->library->solutions)
+                for(const auto& entry : bundle.library->solutions)
                 {
                     bundle.index                             = entry.first;
                     size_t                         workspace = 0;
@@ -6048,7 +6065,7 @@ namespace hipblaslt_jit
                 return {};
             }
 
-            Status load(const BuiltSolution& built,
+            Status load(const CompiledCode& code,
                         const GemmRequest&,
                         const DeviceTarget& target,
                         size_t,
@@ -6056,14 +6073,26 @@ namespace hipblaslt_jit
                         std::vector<std::shared_ptr<const KernelBundle>>& out) const override
             {
                 out.clear();
-                auto tensile = parseTensileBundle(built, target.hardware);
-                loadTensileBundle(*tensile, built);
-                const std::shared_ptr<const TensileBundle> shared = std::move(tensile);
+                if(code.codeObject.bytes.empty()
+                   || code.codeObject.kind != Artifact::Kind::CodeObject)
+                    throw std::runtime_error("A built solution has no code object");
+                auto library = loadGemmLibrary(code.record);
+                auto adapter = std::make_shared<TensileLite::hip::SolutionAdapter>(false, "jit-gemm");
+                checkHip(adapter->loadCodeObjectBytes(code.codeObject.bytes),
+                         "Load generated code object");
+                std::vector<std::string> kernels;
+                for(const auto& [index, solution] : library->solutions)
+                    if(std::find(kernels.begin(), kernels.end(), solution->kernelName) == kernels.end())
+                        kernels.push_back(solution->kernelName);
+                for(const auto& kernel : kernels)
+                    checkHip(adapter->initKernel(kernel), "Resolve generated kernel symbol");
                 for(const auto index : indices)
                 {
                     auto bundle     = std::make_shared<TensileGemmBundle>();
-                    bundle->tensile = shared;
-                    bundle->index   = index;
+                    bundle->library = library;
+                    bundle->hardware = target.hardware;
+                    bundle->adapter  = adapter;
+                    bundle->index    = index;
                     out.push_back(std::move(bundle));
                 }
                 return {};

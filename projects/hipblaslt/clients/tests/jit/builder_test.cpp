@@ -20,58 +20,56 @@ namespace
 
     const char* const kernelName = "hipblaslt_jit_builder_test_scale";
 
-    void build(hj::GeneratedSolution& solution,
-               const std::string&     targetId,
-               const fs::path&        scratch,
-               hj::BuiltSolution&     built)
+    void build(hj::SourceCodeBundle&           source,
+               const std::string&              targetId,
+               const fs::path&                 scratch,
+               const std::vector<std::string>& kernelNames,
+               hj::CompiledCode&               built)
     {
-        const hj::BuildRequest request{targetId, hj::jitCodeObjectVersion, scratch};
-        const auto             status = hj::makeComgrBuilder()->build(solution, request, built);
+        hj::BuildRequest request{targetId, hj::jitCodeObjectVersion, scratch, kernelNames};
+        const auto       status = hj::makeComgrBuilder()->build(source, request, built);
         {
             INFO(("The build for " + targetId + " failed: " + status.message));
             REQUIRE((status.ok()));
         }
     }
 
-    void buildKernel(const std::string&   targetId,
-                     const hj::BuildUnit& kernel,
-                     const fs::path&      scratch)
+    void buildKernel(const std::string&  targetId,
+                     const hj::Artifact& kernel,
+                     const fs::path&     scratch)
     {
-        hj::GeneratedSolution solution;
-        solution.kernelNames = {kernelName};
-        solution.units       = {kernel};
-        hj::BuiltSolution built;
-        build(solution, targetId, scratch, built);
+        hj::SourceCodeBundle source;
+        source.mainKernel = kernel;
+        hj::CompiledCode built;
+        build(source, targetId, scratch, {kernelName}, built);
         std::cout << "PASS comgr built the HIP kernel for " << targetId << '\n';
     }
 
-    void buildAssembly(const fs::path&        file,
-                       const hj::BuildUnit&   kernel,
-                       const fs::path&        scratch,
-                       const std::string&     kernelNameFromSource,
-                       const std::string&     targetId)
+    void buildAssembly(const fs::path&    file,
+                       const fs::path&    scratch,
+                       const std::string& kernelNameFromSource,
+                       const std::string& targetId)
     {
-        const auto text = hipblaslt_jit_test::readFile(file);
-        hj::GeneratedSolution solution;
-        solution.kernelNames = {kernelNameFromSource, kernelName};
-        solution.units.push_back({file.filename().u8string(),
-                                  std::vector<uint8_t>(text.begin(), text.end()),
-                                  hj::BuildUnit::Kind::Assembly,
-                                  {}});
-        solution.units.push_back(kernel);
-        hj::BuiltSolution built;
-        build(solution, targetId, scratch, built);
-        std::cout << "PASS comgr built " << file.filename().u8string() << " and the HIP kernel for "
-                  << targetId << '\n';
+        const auto           text = hipblaslt_jit_test::readFile(file);
+        hj::SourceCodeBundle source;
+        source.mainKernel = {file.filename().u8string(),
+                             hj::Artifact::Kind::Assembly,
+                             std::vector<uint8_t>(text.begin(), text.end())};
+        hj::CompiledCode built;
+        build(source, targetId, scratch, {kernelNameFromSource}, built);
+        std::cout << "PASS comgr built " << file.filename().u8string() << " for " << targetId
+                  << '\n';
 
-        solution.kernelNames.push_back("hipblaslt_jit_builder_test_missing");
-        const hj::BuildRequest request{targetId, hj::jitCodeObjectVersion, scratch};
-        const auto             missing = hj::makeComgrBuilder()->build(solution, request, built);
+        hj::BuildRequest request{targetId,
+                                 hj::jitCodeObjectVersion,
+                                 scratch,
+                                 {kernelNameFromSource, "hipblaslt_jit_builder_test_missing"}};
+        const auto       missing = hj::makeComgrBuilder()->build(source, request, built);
         {
             INFO(("The build accepted a kernel name the code object does not define"));
             REQUIRE((!missing.ok() && missing.stage == hj::Stage::Build
-                && missing.message.find("hipblaslt_jit_builder_test_missing")
-                       != std::string::npos));
+                     && missing.message.find("hipblaslt_jit_builder_test_missing")
+                            != std::string::npos));
         }
     }
 }
@@ -82,10 +80,9 @@ TEST_CASE("comgr builds the HIP kernel and every committed assembly file", "[jit
     const auto scratch = fs::u8path(HIPBLASLT_JIT_SCRATCH);
     fs::remove_all(scratch);
     fs::create_directories(scratch);
-    const hj::BuildUnit kernel{"builder_test_kernel.hip",
-                               std::vector<uint8_t>(source.begin(), source.end()),
-                               hj::BuildUnit::Kind::Hip,
-                               {}};
+    const hj::Artifact kernel{"builder_test_kernel.hip",
+                              hj::Artifact::Kind::Hip,
+                              std::vector<uint8_t>(source.begin(), source.end())};
 
     std::map<std::string, std::vector<std::pair<fs::path, std::string>>> byTarget;
     for(const auto& arch : fs::directory_iterator(fs::u8path(HIPBLASLT_JIT_DATA)))
@@ -112,7 +109,7 @@ TEST_CASE("comgr builds the HIP kernel and every committed assembly file", "[jit
         buildKernel(targetId, kernel, scratch);
         for(const auto& [file, kernelFromSource] : files)
         {
-            buildAssembly(file, kernel, scratch, kernelFromSource, targetId);
+            buildAssembly(file, scratch, kernelFromSource, targetId);
             ++built;
         }
     }

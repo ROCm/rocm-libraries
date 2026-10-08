@@ -124,9 +124,6 @@ TEST_CASE("the loader reads the JIT solution library", "[jit-gpu]")
         REQUIRE((status.ok() && transposed.empty()));
     }
 
-    hj::BuiltSolution damaged;
-    damaged.generated            = pair->solution;
-    damaged.generated.entry      = skipIndexOne(std::move(damaged.generated.entry));
-    hipblaslt_jit_test::reject([&] { hj::parseTensileBundle(damaged, hardware); },
+    hipblaslt_jit_test::reject([&] { hj::loadGemmLibrary(skipIndexOne(pair->record)); },
                                "The loader accepted solutions 0 and 2");
 }

@@ -115,20 +115,20 @@ interface, so that each implementation can be replaced and tested on its own.
 
 | Stage | Interface | Contract |
 | --- | --- | --- |
-| Generate | `Backend::generate(GenerationRequest, std::vector<GeneratedSolution>&)` | Returns entries holding up to `GenerationRequest::count` solutions, best first, and builds and loads nothing. Each `GeneratedSolution` holds a TensileLite library entry for one processor with one or more solutions, the names of their main kernels, and the source units to build. `NotSupported` means the request is outside the backend's domain. |
-| Build | `CodeObjectBuilder::build(GeneratedSolution, BuildRequest, BuiltSolution&)` | Builds an entry's units into one code object. `GeneratedSolution` has no code-object field; only `BuiltSolution` adds the code object. |
-| Support | `SolutionLoader::support` | Evaluates the predicates and workspace of the entry's solutions for the request, returns the local indices of those that support it, best first, and loads no code. |
-| Publish | `SolutionStore::publish` | Stores the supported solutions of built entries and returns one library index per solution, in order. `SolutionStore::lookup` returns the indices of stored solutions for exactly a request. |
+| Generate | `Backend::generate(GenerationRequest, std::vector<SourceCodeBundle>&)` | Returns up to `GenerationRequest::count` source bundles, best first, and builds and loads nothing. A `SourceCodeBundle` is the main kernel, HIP helpers and headers that become one solution. It is not a TensileLite library entry. `NotSupported` means the request is outside the backend's domain. |
+| Build | `CodeObjectBuilder::build(SourceCodeBundle, BuildRequest, CompiledCode&)` | Compiles the main kernel with comgr into one code-object `Artifact`, and each HIP helper into its own code object. |
+| Support | `SolutionLoader::support` | Evaluates the predicates and workspace of the record's solutions for the request, returns the local indices of those that support it, best first, and loads no code. |
+| Publish | `SolutionStore::publish` | Stores the supported code objects and returns one library index per solution, in order. `JitLibrary` writes the TensileLite solution record. `SolutionStore::lookup` returns the indices of stored solutions for exactly a request. |
 | Load | `SolutionLoader::load` | Loads the code objects once and returns a process-local executable `KernelBundle` for each supported solution. |
 
 `Jit::generate` is the only code that sequences these stages. It asks the
 backend for at most the requested count of solutions in a private scratch
 directory, forwarding the workspace limit and the kernels the caller already
-has. It then builds each entry and checks the support of its solutions until
-the count of supported solutions is reached. With a store it publishes the
+has. It then builds each source bundle and checks the support of its solutions
+until the count of supported solutions is reached. With a store it publishes the
 supported solutions, and loads them only when publishing fails; without a
-store it loads them. A failure in one entry's build, support or load skips
-that entry and keeps the rest.
+store it loads them. A failure in one bundle's build, support or load skips
+that bundle and keeps the rest.
 
 Each failure is recorded with its stage (configure, generate, build, support,
 load or publish) in `Jit::Outcome::failures`, in the order it happened.
@@ -144,11 +144,13 @@ The implementations are:
 
 - Code-object builder: `makeComgrBuilder()`; see
   [building generated sources](#building-generated-sources).
-- Loader: `makeTensileLoader()` reads the entry with the TensileLite loader (see
-  [loading a built solution](#loading-a-built-solution)), checks the support
-  and workspace of each solution with TensileLite's predicates, in index order,
-  and returns a process-local `TensileGemmBundle` for each supported solution.
-  The bundles of one entry share its library and adapter. It is in
+- Loader: `makeTensileLoader()` loads the TensileLite record with
+  `loadGemmLibrary` (see
+  [loading a published solution](#loading-a-published-solution)), checks the
+  support and workspace of each solution with TensileLite's predicates, in
+  index order, and returns a process-local `TensileGemmBundle` for each
+  supported solution. The bundles of one record share its library and adapter.
+  It is in
   `rocblaslt/src/tensile_host.cpp`, next to the GEMM problem translation that
   the support check reuses.
 - Solution store: the JIT solution library, in `hipblaslt-jit-library.cpp`,
@@ -163,7 +165,7 @@ The implementations are:
   bundles with a solution whose predicates accept the device and problem, until
   they hold the requested count of such solutions. It skips a bundle when every
   such solution's kernel is excluded; the comgr builder still builds them.
-  It implements `Backend`, so `Jit` builds and loads its entries with the same
+  It implements `Backend`, so `Jit` builds and loads its sources with the same
   builder and loader as any other backend. Tests reach it through
   `jit::replay::createBackend` in `hipblaslt-jit-replay.hpp`, and every JIT
   build compiles it.
@@ -345,18 +347,17 @@ link or bundle. `makeComgrBuilder()` returns the `CodeObjectBuilder` that builds
 code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
 `hipblaslt-jit-code-object.cpp`). It uses three comgr actions:
 
-- Assembly: `AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE`. A unit's
+- Assembly: `AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE`. The main kernel's
   `.amdgcn_target` directive must name the device's processor and only
   features the device has; it is then rewritten to the device's full target
-  ID. Assembly units that declare different wavefront sizes are rejected.
+  ID. The declared wavefront size is the one the assembler uses.
 - HIP source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
-  `--rocm-path` and a `-cuid` taken from the source name, so HIP objects link
-  together.
+  `--rocm-path` and a `-cuid` taken from the source name. A HIP helper is
+  compiled as its own code object.
   The ROCm path is `HIP_PATH` when set, otherwise the prefix of the loaded HIP
   runtime.
-- Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` joins the assembly
-  and HIP relocatables into one code object per solution, with
-  `-Xlinker --build-id=sha1`.
+- Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` links the main kernel
+  into one code object, with `-Xlinker --build-id=sha1`.
 
 The generator and the builder use the same code-object version, which
 `GenerationRequest::codeObjectVersion` and `BuildRequest::codeObjectVersion`
@@ -367,46 +368,38 @@ objects. A generator needs no offload bundler.
 
 After linking, the builder reads the code object's metadata and checks that its
 instruction set architecture (ISA) is the device's and that it defines every
-main kernel of the entry's solutions. Its message
+kernel named by the build request. Its message
 carries the first error line of the comgr log, and the builder appends the full
 log to `comgr.log` in `BuildRequest::scratch` and names that file in the
 message.
 
-### Loading a built solution
+### Loading a published solution
 
-`hipblaslt-jit-loader.{hpp,cpp}` turns a built TensileLite entry into a loaded
-library of its solutions:
+`JitLibrary` loads a published solution as a TensileLite `ContractionSolution`
+and a `SolutionAdapter`. `loadGemmLibrary` reads a solution record and requires
+local solutions 0 to N-1. `hipblaslt-jit-loader.{hpp,cpp}` does not wrap that
+library in another type. `readTensileSourceBundle` reads a source directory
+into a `SourceCodeBundle` and the kernel name. A caller that checks predicates
+loads the record with `loadGemmLibrary`.
 
-- `readTensileSourceBundle` reads a source bundle into a `TensileSource`: a
-  `GeneratedSolution` (the library entry, the main kernel names of its
-  solutions, each `sources/*.s` as an assembly unit, and each HIP source with
-  the bundle's headers as a HIP unit) and the TensileLite library parsed from
-  that entry. `loadGemmLibrary` is that parse. A caller that needs the library
-  keeps the one `readTensileSourceBundle` returned.
-- `parseTensileBundle` reads a built solution's entry into a TensileLite
-  `MasterSolutionLibrary` for the device's hardware. It requires local
-  solutions 0 to N-1, each naming one of the built kernels and every built
-  kernel named by one of them, and loads no code.
-- `loadTensileBundle` loads the built code object into a new
-  `SolutionAdapter` and resolves every main kernel.
-
-The entry's solutions are listed best first, each with its own `Problem` row.
+The record's solutions are listed best first, each with its own `Problem` row.
 Their hardware and problem predicates decide which problems each one serves,
 so `findBestSolution` on the loaded library selects the first solution that
 serves a problem, and nothing for a problem none of them was generated for.
 
 ### Source bundle format
 
-A source bundle is a generated library entry stored as a directory.
+A source bundle is one kernel's sources stored as a directory.
 `source_bundle::readSourceBundle`, in `hipblaslt-jit-source-bundle.hpp`, reads
-one by directory convention and requires at least one kernel source:
+the sources into a `SourceCodeBundle` and requires one main kernel.
+`readTensileSourceBundle` also reads the library entry for the kernel name.
 
 | Path | Contents |
 | --- | --- |
-| `library/TensileLibrary.dat` | The library entry, stored as uncompressed MsgPack |
-| `sources/*.s` | Kernel assembly |
-| `sources/*.hip`, `sources/*.cpp` | HIP kernel sources |
-| Other files in `sources/` | Headers that the HIP sources include |
+| `library/TensileLibrary.dat` | The TensileLite solution record, uncompressed MsgPack. Not part of `SourceCodeBundle` |
+| `sources/*.s` | The assembly main kernel, at most one |
+| `sources/*.hip`, `sources/*.cpp` | The HIP main kernel when there is no assembly, otherwise HIP helpers |
+| Other files in `sources/` | Headers |
 | `manifest.json` | A JavaScript Object Notation (JSON) provenance record that hipBLASLt does not read |
 
 Artifact paths must be relative and stay inside the bundle, including through

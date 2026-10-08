@@ -30,8 +30,8 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
     namespace detail
     {
         // One installed header: its path in the header directory, its size and
-        // the SHA-256 the runtime checks. The bytes the compiler includes are a
-        // BuildUnit, read from that path.
+        // the SHA-256 the runtime checks. The bytes the compiler includes are an
+        // Artifact, read from that path.
         struct HeaderFile
         {
             std::filesystem::path path;
@@ -50,7 +50,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             std::string                        name;
             hipblaslt_jit::code_object::Target isa;
             std::string                        kernelName;
-            hipblaslt_jit::BuildUnit           source; // HIP
+            hipblaslt_jit::Artifact            source; // HIP main kernel
             std::vector<uint8_t>               entry; // the one-solution library skeleton
             std::vector<std::string>           hipFlags;
             KernelResources                    resources;
