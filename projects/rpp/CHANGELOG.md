@@ -12,6 +12,10 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
 ### Changed
 
 - Audio augmentations are now always enabled; the `RPP_AUDIO_SUPPORT` CMake option has been removed
+- rocFFT is now loaded at runtime with `dlopen` instead of being linked, so it is no longer a build
+  dependency of RPP and is packaged as a soft dependency (`Recommends`/`Suggests`). The HIP
+  spectrogram returns `RPP_ERROR_NOT_IMPLEMENTED` when `librocfft.so.0` cannot be loaded; all other
+  functions are unaffected
 
 
 ## (Unreleased) RPP 3.2.0

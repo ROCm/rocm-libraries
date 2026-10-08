@@ -22,8 +22,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <rocfft/rocfft.h>
-
 #include "hip_tensor_executors.hpp"
 
 /* Spectrogram kernel working overview

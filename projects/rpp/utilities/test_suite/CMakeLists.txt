@@ -318,6 +318,17 @@ set_tests_properties(
     rpp_qa_tests_tensor_misc_hip_test_type_1
     PROPERTIES LABELS "rpp_rocm_stack_only")
 
+# HIP test set 5 - rocFFT ABI guard
+# HIP/CMakeLists.txt creates this target only when the rocFFT headers and the RPP source tree
+# are both available; see the comment there. The assertions are compile-time, so building it is
+# the actual check - running it just reports which rocFFT the comparison was made against.
+if(TARGET rocfft_abi_guard)
+    add_test(NAME rpp_rocfft_abi_guard COMMAND rocfft_abi_guard)
+    set_tests_properties(rpp_rocfft_abi_guard PROPERTIES LABELS "rpp_rocm_stack_only")
+else()
+    message("-- ${Yellow}Warning: Skipping RPP-ctest 'HIP test set 5 - rpp_rocfft_abi_guard' since the rocFFT headers and/or the RPP source tree are not available!${ColourReset}")
+endif()
+
 # Apply test category labels for ctest filtering (quick, standard, comprehensive, full)
 if(RPP_ENABLE_CTEST_CATEGORIES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
     apply_ctest_category_labels("${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")

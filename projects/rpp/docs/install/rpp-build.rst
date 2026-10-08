@@ -129,6 +129,13 @@ The available CMake options are:
 Audio augmentations are always enabled. They use an in-house FFT implementation on the
 CPU backend and rocFFT on the GPU (HIP) backend.
 
+rocFFT is a runtime dependency only. The HIP spectrogram loads ``librocfft.so.0`` with
+``dlopen`` on first use, so the rocFFT headers and import library are not required to build
+or install RPP, and rocFFT is packaged as a soft dependency (``Recommends`` on Debian,
+``Suggests`` on RPM). If it cannot be loaded, the HIP spectrogram returns
+``RPP_ERROR_NOT_IMPLEMENTED`` and prints a one-time diagnostic; every other RPP function is
+unaffected.
+
 .. _verify-install:
 
 Verify the installation

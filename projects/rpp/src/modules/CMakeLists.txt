@@ -60,7 +60,10 @@ endif()
 
 if( "${BACKEND}" STREQUAL "HIP")
     # Add HIP kernels
-    set(MOD_HIP_CPP "handle_hip.cpp")
+    #
+    # rocfft_dlopen/rocfft_runtime.cpp holds the rocFFT binding used by the spectrogram kernel.
+    # It compiles in both the dlopen and the linked configuration.
+    set(MOD_HIP_CPP "handle_hip.cpp" "rocfft_dlopen/rocfft_runtime.cpp")
     file(GLOB MOD_HIP_CPP_TENSOR_KERNELS "tensor/hip/kernel/*.cpp" )
     file(GLOB MOD_HOST_CPP_TENSOR_KERNELS "tensor/cpu/kernel/*.cpp" )
     list(APPEND Rpp_Source ${CPPFILES} ${MOD_HIP_CPP} ${MOD_HIP_ERRORS_CPP} ${MOD_HIP_CPP_TENSOR_KERNELS} ${MOD_HOST_CPP_TENSOR_KERNELS})
@@ -107,7 +110,11 @@ if( "${BACKEND}" STREQUAL "HIP")
         ${RPP_SOURCE_DIR}/src/include/common/hip
     )
     target_link_libraries(${PROJECT_NAME} PRIVATE hip::device)
-    # spectrogram.cpp includes <rocfft/rocfft.h>; link the imported target so its include
-    # directory propagates to this OBJECT library even when rocFFT lives outside ${ROCM_PATH}/include.
-    target_include_directories(${PROJECT_NAME} PRIVATE ${ROCFFT_INCLUDE_DIRS})
+
+    # rocfft_runtime.hpp declares the rocFFT entry points the spectrogram kernel calls; its
+    # directory is on the include path so the three consumers can include it unqualified.
+    target_include_directories(${PROJECT_NAME}
+    PRIVATE
+        ${RPP_SOURCE_DIR}/src/modules/rocfft_dlopen
+    )
 endif()

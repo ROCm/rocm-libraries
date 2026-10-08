@@ -129,9 +129,10 @@ RppStatus hip_exec_resample_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32
 
 // -------------------- spectrogram --------------------
 
-#include <rocfft/rocfft.h>
+#include "rocfft_runtime.hpp"
 namespace rpp {
-// Helper function to get or create cached rocFFT plan (keyed by nfft + batchCount)
+// Helper function to get or create cached rocFFT plan (keyed by nfft + batchCount).
+// Returns RPP_ERROR_NOT_IMPLEMENTED when rocFFT could not be loaded at runtime.
 RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan* plan,
                           rocfft_plan_description* desc);
 }  // namespace rpp

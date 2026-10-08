@@ -202,7 +202,10 @@ RPP supports various 2D image, 3D image (voxel), and audio augmentations and pri
 
 > [!NOTE]
 > Audio augmentations use an in-house FFT implementation on the CPU (HOST) backend and rocFFT on the
-> GPU (HIP) backend.
+> GPU (HIP) backend. rocFFT is loaded at runtime rather than linked, so it is not needed to build or
+> install RPP; it is required only to run the HIP spectrogram, which reports
+> `RPP_ERROR_NOT_IMPLEMENTED` if `librocfft.so.0` cannot be loaded. Every other RPP function works
+> with rocFFT absent.
 
 </details>
 

@@ -26,15 +26,16 @@ SOFTWARE.
 #include <unistd.h>
 #endif
 
-#include <rocfft/rocfft.h>
-
 #include <cstdint>
+#include <iostream>
 #include <map>
+#include <mutex>
 #include <thread>
 
 #include "device_name.hpp"
 #include "errors.hpp"
 #include "handle.hpp"
+#include "rocfft_runtime.hpp"
 
 namespace rpp {
 
@@ -98,6 +99,10 @@ struct HandleImpl {
     Rpp32u numThreads = 0;
     RppBackend backend = RppBackend::RPP_HIP_BACKEND;
     InitHandle* initHandle = nullptr;
+
+    // Whether rocfft_setup() succeeded for this handle. False when librocfft could not be
+    // resolved at runtime, in which case no rocFFT entry point may be called.
+    bool rocfft_initialized = false;
 
     // rocFFT plan cache: key = (nfft << 32 | batchCount), value = (plan, description)
     std::map<int64_t, std::pair<rocfft_plan, rocfft_plan_description>> rocfft_plan_cache;
@@ -188,17 +193,25 @@ Handle::Handle(size_t batchSize, rppAcceleratorQueue_t stream) : impl(new Handle
 
     this->SetAllocator(nullptr, nullptr, nullptr);
 
-    // Initialize rocFFT library once per handle (before PreInitializeBuffer to avoid leaks on
-    // failure). rocFFT increments its global usage count before some setup failures, so balance
-    // it with rocfft_cleanup() before throwing to keep a later handle from skipping init.
-    if (rocfft_setup() != rocfft_status_success) {
-        rocfft_cleanup();
-        RPP_THROW("rocFFT library initialization failed");
+    // rocFFT backs the spectrogram kernel only, and is resolved at runtime rather than linked
+    // (see rocfft_dlopen/rocfft_runtime.hpp). It is therefore an optional component: a missing or
+    // unusable librocfft must not stop a handle being created for the rest of RPP. Audio work
+    // that needs it reports the failure instead, via get_rocfft_plan() below.
+    if (rocfft_dlopen::initialize()) {
+        // rocFFT increments its global usage count before some setup failures, so balance it
+        // with rocfft_cleanup() to keep a later handle from skipping init.
+        if (rocfft_setup() != rocfft_status_success)
+            rocfft_cleanup();
+        else
+            impl->rocfft_initialized = true;
     }
     try {
         impl->PreInitializeBuffer();
     } catch (...) {
-        rocfft_cleanup();
+        if (impl->rocfft_initialized) {
+            rocfft_cleanup();
+            impl->rocfft_initialized = false;
+        }
         throw;
     }
 }
@@ -222,16 +235,21 @@ void Handle::SetStream(rppAcceleratorQueue_t streamID) const {
 void Handle::rpp_destroy_object_gpu() {
     this->rpp_destroy_object_host();
 
-    // Destroy all cached rocFFT plans
-    for (auto& cache_entry : this->impl->rocfft_plan_cache) {
-        rocfft_plan_destroy(cache_entry.second.first);
-        rocfft_plan_description_destroy(cache_entry.second.second);
-    }
-    this->impl->rocfft_plan_cache.clear();
+    // Only touch rocFFT if it was resolved and set up for this handle; otherwise its entry
+    // points are unbound and the plan cache is necessarily empty.
+    if (this->impl->rocfft_initialized) {
+        // Destroy all cached rocFFT plans
+        for (auto& cache_entry : this->impl->rocfft_plan_cache) {
+            rocfft_plan_destroy(cache_entry.second.first);
+            rocfft_plan_description_destroy(cache_entry.second.second);
+        }
+        this->impl->rocfft_plan_cache.clear();
 
-    // Cleanup rocFFT library once per handle (best-effort, don't throw to allow destruction to
-    // proceed)
-    rocfft_cleanup();
+        // Cleanup rocFFT library once per handle (best-effort, don't throw to allow destruction
+        // to proceed)
+        rocfft_cleanup();
+        this->impl->rocfft_initialized = false;
+    }
 
     auto status = hipFree(this->GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
     if (status != hipSuccess) RPP_THROW_HIP_STATUS(status, "hipFree failed for scratchBufferHip");
@@ -333,6 +351,20 @@ RppStatus Handle::EnsureAudioScratchBuffer(size_t requiredFloats) {
 // Cache key combines nfft and batchCount to handle different workload sizes
 RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan* plan,
                           rocfft_plan_description* desc) {
+    // rocFFT is resolved at runtime (see rocfft_dlopen/rocfft_runtime.hpp) and is the only FFT
+    // implementation on the HIP path - there is no fallback to fall back to. Fail the call
+    // rather than return a plan that cannot be executed, and say once why.
+    if (!handle.impl->rocfft_initialized) {
+        static std::once_flag reported;
+        std::call_once(reported, []() {
+            std::cerr << "RPP: GPU audio FFT is unavailable because rocFFT could not be "
+                      << "initialized (" << rocfft_dlopen::error_message() << "). Install the "
+                      << "rocFFT runtime package to enable the HIP spectrogram kernel."
+                      << std::endl;
+        });
+        return RPP_ERROR_NOT_IMPLEMENTED;
+    }
+
     auto& cache = handle.impl->rocfft_plan_cache;
 
     // Create composite key: upper 32 bits = nfft, lower 32 bits = batchCount

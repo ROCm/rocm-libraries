@@ -279,9 +279,9 @@ if("${BACKEND}" STREQUAL "HIP")
     set (HIP_PLATFORM amd CACHE STRING "HIP platform")
     find_package(HIP QUIET)
     if(HIP_FOUND)
-        # rocFFT is required for audio support on HIP backend
-        find_package(ROCFFT REQUIRED)
-        message("-- ${White}${PROJECT_NAME} -- Using rocFFT - Path:" ${ROCFFT_INCLUDE_DIR}${ColourReset})
+        # rocFFT is deliberately not looked for: the HIP spectrogram kernel resolves librocfft at
+        # runtime via dlopen (see src/modules/rocfft_dlopen/), so RPP needs neither its headers nor
+        # its import library to build, and rocFFT stays out of RPP's build graph.
 
         message("-- ${White}${PROJECT_NAME} -- Using HIP - Path:" ${HIP_PATH} "\tVersion:" ${HIP_VERSION} "\tCompiler:" ${HIP_COMPILER}${ColourReset})
         # TBD: Set external flag to notify GPU_SUPPORT and HIP backend availability - Compatible with rocAL and MIVisionX
@@ -366,10 +366,12 @@ if(USING_THE_ROCK)
     set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
 endif()
 
-# Link rocFFT for HIP backend
+# rocFFT backs the HIP spectrogram kernel and is dlopen-ed at runtime, so nothing links it here.
 if("${BACKEND}" STREQUAL "HIP")
-    target_link_libraries(${PROJECT_NAME} PRIVATE rocfft::rocfft)
-    message("-- ${Green}${PROJECT_NAME} linked with rocFFT library (HIP)${ColourReset}")
+    # dlopen/dlsym live in libdl on glibc older than 2.34 and in libc after it;
+    # CMAKE_DL_LIBS resolves to whichever applies.
+    target_link_libraries(${PROJECT_NAME} PRIVATE $<$<PLATFORM_ID:Linux>:${CMAKE_DL_LIBS}>)
+    message("-- ${Green}${PROJECT_NAME} will load rocFFT at runtime (HIP, dlopen)${ColourReset}")
 endif()
 message("-- ${Green}${PROJECT_NAME} set to build with audio support${ColourReset}")
 
@@ -514,10 +516,12 @@ endif()
 set(RPP_DEBIAN_PACKAGE_LIST  "hip-runtime-amd, openmp-extras-runtime")
 set(RPP_RPM_PACKAGE_LIST     "hip-runtime-amd, openmp-extras-runtime")
 
-# rocFFT is required for HIP backend (audio uses rocFFT for spectrogram)
+# rocFFT backs the HIP spectrogram kernel, but is dlopen-ed rather than linked, so RPP installs
+# and runs without it: every RPP function except the HIP spectrogram works with rocFFT absent.
+# It is therefore recommended/suggested rather than required.
 if("${BACKEND}" STREQUAL "HIP")
-    set(RPP_DEBIAN_PACKAGE_LIST  "${RPP_DEBIAN_PACKAGE_LIST}, rocfft")
-    set(RPP_RPM_PACKAGE_LIST     "${RPP_RPM_PACKAGE_LIST}, rocfft")
+    set(RPP_DEBIAN_SOFT_PACKAGE_LIST "rocfft")
+    set(RPP_RPM_SOFT_PACKAGE_LIST    "rocfft")
 endif()
 set(RPP_DEBIAN_DEV_PACKAGE_LIST  "hip-dev, openmp-extras-dev, half")
 set(RPP_RPM_DEV_PACKAGE_LIST     "hip-devel, openmp-extras-devel, half")
@@ -563,6 +567,9 @@ set(CPACK_RPM_PACKAGE_AUTOREQPROV   "no")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS "rocm-core, ${RPP_DEBIAN_PACKAGE_LIST}")
+if(RPP_DEBIAN_SOFT_PACKAGE_LIST)
+    set(CPACK_DEBIAN_RUNTIME_PACKAGE_RECOMMENDS "${RPP_DEBIAN_SOFT_PACKAGE_LIST}")
+endif()
 set(CPACK_DEBIAN_DEV_PACKAGE_NAME "${PROJECT_NAME}-dev")
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "rocm-core, ${PROJECT_NAME}, ${RPP_DEBIAN_DEV_PACKAGE_LIST}")
 set(CPACK_DEBIAN_TEST_PACKAGE_NAME "${PROJECT_NAME}-test")
@@ -575,6 +582,9 @@ set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "rocm-core-asan" )
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 set(CPACK_RPM_RUNTIME_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_RPM_RUNTIME_PACKAGE_REQUIRES "rocm-core, ${RPP_RPM_PACKAGE_LIST}")
+if(RPP_RPM_SOFT_PACKAGE_LIST)
+    set(CPACK_RPM_RUNTIME_PACKAGE_SUGGESTS "${RPP_RPM_SOFT_PACKAGE_LIST}")
+endif()
 set(CPACK_RPM_DEV_PACKAGE_NAME "${PROJECT_NAME}-devel")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES "rocm-core, ${PROJECT_NAME}, ${RPP_RPM_DEV_PACKAGE_LIST}")
 set(CPACK_RPM_TEST_PACKAGE_NAME "${PROJECT_NAME}-test")
