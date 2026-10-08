@@ -25,10 +25,9 @@ TEST_CASE("pre-generated kernels publish into the JIT solution library", "[jit-g
         REQUIRE((hipGetDevice(&device) == hipSuccess
             && hipGetDeviceProperties(&properties, device) == hipSuccess));
     }
-    const std::string target(properties.gcnArchName);
-    const auto        arch    = target.substr(0, target.find(':'));
-    const auto        libraryRoot = fs::u8path(HIPBLASLT_JIT_LIBRARY);
-    const auto        scratch = fs::u8path(HIPBLASLT_JIT_SCRATCH);
+    const auto target      = hipblaslt_jit_test::deviceTarget(properties);
+    const auto libraryRoot = fs::u8path(HIPBLASLT_JIT_LIBRARY);
+    const auto scratch     = fs::u8path(HIPBLASLT_JIT_SCRATCH);
     fs::remove_all(libraryRoot);
     fs::remove_all(scratch);
     fs::create_directories(scratch);
@@ -39,24 +38,26 @@ TEST_CASE("pre-generated kernels publish into the JIT solution library", "[jit-g
     int            published = 0;
     for(const auto& item : prepared)
     {
-        if(item.arch != arch)
+        if(item.arch != target.processorName())
             continue;
-        hj::CompiledCode built;
-        hj::BuildRequest request{target, hj::jitCodeObjectVersion, scratch, item.kernelNames};
-        const auto       builtStatus = hj::makeComgrBuilder()->build(item.source, request, built);
+        auto source   = item.source;
+        source.target = target;
+        hj::Artifact executable;
+        auto builtStatus = hj::makeComgrBuilder()->build(source, hj::BuildKind::Executable, executable);
+        hj::keepBuildLog(builtStatus, scratch);
         {
-            INFO(("The build for " + target + " failed: " + builtStatus.message));
+            INFO(("The build for " + target.targetId() + " failed: " + builtStatus.message));
             REQUIRE((builtStatus.ok()));
         }
-        built.record = item.record;
         for(const auto& publication : item.publications)
         {
-            std::vector<int32_t>  indices;
-            hj::SupportedSolutions solutions{{built, std::vector<int>{publication.local}}};
-            const auto            status = library.publish(key,
+            std::vector<int32_t> indices;
+            const auto           status = library.publish(key,
                                                 device,
                                                 hipblaslt_jit_test::fp16Gemm(false, publication.k),
-                                                solutions,
+                                                executable,
+                                                item.record,
+                                                {publication.local},
                                                 indices);
             {
                 INFO((item.name + " K=" + std::to_string(publication.k) + ": " + status.message));

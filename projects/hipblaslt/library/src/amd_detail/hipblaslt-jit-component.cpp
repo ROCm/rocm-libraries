@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-component.hpp"
+#include "hipblaslt-jit-heuristic.hpp"
 #include "hipblaslt-jit-library.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -22,7 +23,7 @@ namespace hipblaslt_jit
     std::shared_ptr<const Jit> makeJit(std::shared_ptr<const Backend> backend)
     {
         const auto info  = backend->info();
-        auto       store = makeLibraryStore(JitLibrary::process(), info, jitCodeObjectVersion);
+        auto       store = makeLibraryStore(processLibrary(), info, jitCodeObjectVersion);
         return std::make_shared<const Jit>(Jit::Components{
             std::move(backend), makeComgrBuilder(), makeTensileLoader(), std::move(store)});
     }
@@ -178,19 +179,25 @@ namespace hipblaslt_jit
         }
         outcome.summary = std::move(status.message);
 
-        BuildRequest build{target.targetId, generation.codeObjectVersion, scratch->path()};
-        const auto   libraryKey
+        const auto libraryKey
             = c.backend ? CacheKey::make(target, c.backend->info(), generation.codeObjectVersion)
                         : CacheKey{};
-        SupportedSolutions supported;
-        size_t             solutions = 0;
+        // An executable, its TensileLite record, and the local indices of the
+        // record's solutions that support the request, best first.
+        struct Supported
+        {
+            Artifact             executable;
+            std::vector<uint8_t> record;
+            std::vector<int>     indices;
+        };
+        std::vector<Supported> supported;
+        size_t                 solutions = 0;
         for(const auto& source : generated)
         {
             if(solutions == count)
                 break;
-            SourceCodeBundle      mainOnly = source;
-            std::vector<Artifact> helperObjects;
-            mainOnly.helpers.clear();
+            SourceCodeBundle linked = source;
+            linked.helpers.clear();
             Status helperStatus;
             for(const auto& helper : source.helpers)
             {
@@ -202,27 +209,21 @@ namespace hipblaslt_jit
                     break;
                 }
                 Artifact stored;
-                helperStatus = JitLibrary::process().acquireHelper(
+                helperStatus = processLibrary().acquireHelper(
                     libraryKey, target.device, helper.name, [&](Artifact& out) {
                         SourceCodeBundle one;
-                        one.mainKernel = helper;
-                        one.includes   = source.includes;
-                        one.hipFlags   = source.hipFlags;
-                        CompiledCode compiled;
-                        BuildRequest oneBuild{
-                            target.targetId, generation.codeObjectVersion, scratch->path()};
-                        oneBuild.relocatable = true;
-                        const auto built     = c.builder->build(one, oneBuild, compiled);
-                        if(!built.ok())
-                            return built;
-                        out      = std::move(compiled.codeObject);
-                        out.name = helper.name;
-                        out.kind = Artifact::Kind::CodeObject;
-                        return Status{};
+                        one.mainKernel        = helper;
+                        one.includes          = source.includes;
+                        one.hipFlags          = source.hipFlags;
+                        one.target            = source.target;
+                        one.codeObjectVersion = source.codeObjectVersion;
+                        auto built = c.builder->build(one, BuildKind::Relocatable, out);
+                        keepBuildLog(built, scratch->path());
+                        return built;
                     }, stored);
                 if(!helperStatus.ok())
                     break;
-                helperObjects.push_back(std::move(stored));
+                linked.helpers.push_back(std::move(stored));
             }
             if(!helperStatus.ok())
             {
@@ -235,71 +236,75 @@ namespace hipblaslt_jit
                 }
                 continue;
             }
-            build.kernelNames = c.backend->kernelNames(source);
-            build.linkInputs  = std::move(helperObjects);
-            CompiledCode code;
-            status = guarded([&] { return c.builder->build(mainOnly, build, code); });
+            Supported built;
+            status = guarded([&] {
+                return c.builder->build(linked, BuildKind::Executable, built.executable);
+            });
+            keepBuildLog(status, scratch->path());
             if(!status.ok())
             {
                 record(Stage::Build, std::move(status));
                 continue;
             }
-            code.record = c.backend->solutionRecord(source);
-            std::vector<int> indices;
-            status = guarded([&] {
-                return c.loader->support(code, request, target, workspaceLimit, indices);
+            built.record = c.backend->solutionRecord(source);
+            status       = guarded([&] {
+                return c.loader->support(
+                    built.record, request, target, workspaceLimit, built.indices);
             });
-            if(status.ok() && indices.empty())
+            if(status.ok() && built.indices.empty())
                 status = {Status::Code::Failed, Stage::Support, "Loader supported no solution"};
             if(!status.ok())
             {
                 record(Stage::Support, std::move(status));
                 continue;
             }
-            indices.resize(std::min(indices.size(), count - solutions));
-            solutions += indices.size();
-            supported.emplace_back(std::move(code), std::move(indices));
+            built.indices.resize(std::min(built.indices.size(), count - solutions));
+            solutions += built.indices.size();
+            supported.push_back(std::move(built));
         }
 
-        bool load = true;
-        if(c.store && !supported.empty())
+        for(const auto& entry : supported)
         {
-            std::vector<int32_t> indices;
-            status = guarded([&] { return c.store->publish(request, target, supported, indices); });
-            if(status.ok() && indices.size() != solutions)
-                status = {Status::Code::Failed,
-                          Stage::Publish,
-                          "Solution store returned " + std::to_string(indices.size())
-                              + " indices for " + std::to_string(solutions) + " solutions"};
-            if(status.ok())
+            if(c.store)
             {
-                outcome.indices = std::move(indices);
-                load            = false;
-            }
-            else
-                record(Stage::Publish, std::move(status));
-        }
-        if(load)
-        {
-            for(const auto& entry : supported)
-            {
-                const auto& code    = entry.first;
-                const auto& indices = entry.second;
-                std::vector<std::shared_ptr<const KernelBundle>> bundles;
+                std::vector<int32_t> indices;
                 status = guarded([&] {
-                    return c.loader->load(code, request, target, workspaceLimit, indices, bundles);
+                    return c.store->publish(
+                        request, target, entry.executable, entry.record, entry.indices, indices);
                 });
-                if(status.ok()
-                   && (bundles.size() != indices.size()
-                       || std::find(bundles.begin(), bundles.end(), nullptr) != bundles.end()))
+                if(status.ok() && indices.size() != entry.indices.size())
                     status = {Status::Code::Failed,
-                              Stage::Load,
-                              "Loader did not return a bundle for each solution"};
+                              Stage::Publish,
+                              "Solution store returned " + std::to_string(indices.size())
+                                  + " indices for " + std::to_string(entry.indices.size())
+                                  + " solutions"};
                 if(status.ok())
-                    outcome.bundles.insert(outcome.bundles.end(), bundles.begin(), bundles.end());
-                else
-                    record(Stage::Load, std::move(status));
+                {
+                    outcome.indices.insert(outcome.indices.end(), indices.begin(), indices.end());
+                    continue;
+                }
+                record(Stage::Publish, std::move(status));
             }
+            std::vector<std::shared_ptr<const KernelBundle>> bundles;
+            status = guarded([&] {
+                return c.loader->load(entry.executable,
+                                      entry.record,
+                                      request,
+                                      target,
+                                      workspaceLimit,
+                                      entry.indices,
+                                      bundles);
+            });
+            if(status.ok()
+               && (bundles.size() != entry.indices.size()
+                   || std::find(bundles.begin(), bundles.end(), nullptr) != bundles.end()))
+                status = {Status::Code::Failed,
+                          Stage::Load,
+                          "Loader did not return a bundle for each solution"};
+            if(status.ok())
+                outcome.bundles.insert(outcome.bundles.end(), bundles.begin(), bundles.end());
+            else
+                record(Stage::Load, std::move(status));
         }
 
         if(!outcome.failures.empty())

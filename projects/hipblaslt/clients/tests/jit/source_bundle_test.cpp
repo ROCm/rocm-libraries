@@ -109,6 +109,12 @@ TEST_CASE("the source bundle reader accepts only a contained directory", "[jit-c
         REQUIRE((std::string(sources.mainKernel.bytes.begin(), sources.mainKernel.bytes.end())
                  == "// a.s\n"));
     }
+    {
+        INFO(("The reader set a build input that the directory does not hold"));
+        REQUIRE((sources.target.processor == hipblaslt_jit::Processor::gfx000
+                 && sources.codeObjectVersion == hipblaslt_jit::jitCodeObjectVersion
+                 && sources.kernelNames.empty()));
+    }
     writeFile(bundle / "sources/b.s", "// b.s\n");
     reject([&] { a::readSourceBundle(bundle); });
     fs::remove(bundle / "sources/b.s");

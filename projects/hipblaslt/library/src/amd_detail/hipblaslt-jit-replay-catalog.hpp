@@ -46,7 +46,7 @@ namespace hipblaslt_jit::committed
     struct Assembly
     {
         std::string kernel;
-        std::string target; // the .amdgcn_target ID, e.g. "gfx950"
+        Target      target; // the .amdgcn_target ID, e.g. gfx950
         int         kernArgsVersion           = -1;
         int         persistentLoopArgsVersion = 0; // written for DataParallel kernels only
     };
@@ -61,20 +61,23 @@ namespace hipblaslt_jit::committed
             return true;
         };
         Assembly           result;
+        std::string        targetId;
         std::istringstream lines(text);
         for(std::string line, rest; std::getline(lines, line);)
         {
             if(after(line, ".amdhsa_kernel ", rest) && result.kernel.empty())
                 result.kernel = rest;
             else if(after(line, ".amdgcn_target \"amdgcn-amd-amdhsa--", rest))
-                result.target = rest.substr(0, rest.find('"'));
+                targetId = rest.substr(0, rest.find('"'));
             else if(after(line, "    KernArgsVersion: ", rest))
                 result.kernArgsVersion = std::stoi(rest);
             else if(after(line, "    PersistentLoopArgsVersion: ", rest))
                 result.persistentLoopArgsVersion = std::stoi(rest);
         }
-        if(result.kernel.empty() || result.target.empty() || result.kernArgsVersion < 0)
-            fail("The assembly names no kernel, target or KernArgsVersion");
+        const auto target = Target::fromTargetId(targetId);
+        if(result.kernel.empty() || !target || result.kernArgsVersion < 0)
+            fail("The assembly names no kernel, known target or KernArgsVersion");
+        result.target = *target;
         return result;
     }
 
@@ -277,7 +280,7 @@ namespace hipblaslt_jit::committed
             {"DirectToLdsA", false}, {"DirectToLdsB", false}, {"NumLoadsCoalescedA", 1},
             {"NumLoadsCoalescedB", 1}, {"VectorWidthA", 1}, {"VectorWidthB", 1},
             {"LocalSplitU", 1}, {"WaveGroup", Array{1, 1}}};
-        const auto processor = kernel.target.substr(0, kernel.target.find(':'));
+        const auto processor = kernel.target.processorName();
         const Map  solution{
             {"name", kernel.kernel + s.nameSuffix}, {"kernelName", kernel.kernel}, {"index", index},
             {"debugKernel", false},
@@ -319,9 +322,9 @@ namespace hipblaslt_jit::committed
     inline std::vector<uint8_t> helperEntry(const std::string& kernel, const std::string& isa)
     {
         Assembly assembly;
-        assembly.kernel          = kernel;
-        assembly.target          = isa;
-        assembly.kernArgsVersion = 2;
+        assembly.kernel           = kernel;
+        assembly.target.processor = TensileLite::AMDGPU::toProcessor(isa);
+        assembly.kernArgsVersion  = 2;
         Bundle   bundle;
         bundle.solutions.push_back(Solution{});
         return libraryEntry(bundle, {assembly});
@@ -336,16 +339,15 @@ namespace hipblaslt_jit::committed
         std::string solutionName;
     };
 
-    // A described solution set: its source, the TensileLite record JitLibrary
+    // A described solution set: its source, naming the kernels the executable
+    // must define but not the device target, the TensileLite record JitLibrary
     // stores, and the K values at which the library should hold each solution.
     struct Prepared
     {
         std::string                     arch;
         std::string                     name;
-        std::string                     compilerTarget;
         hipblaslt_jit::SourceCodeBundle source;
         std::vector<uint8_t>            record;
-        std::vector<std::string>        kernelNames;
         std::vector<Publication>        publications;
     };
 
@@ -362,7 +364,7 @@ namespace hipblaslt_jit::committed
                 continue;
             const auto text   = readFile(file.path());
             const auto kernel = readAssembly(text);
-            if(kernel.target.substr(0, kernel.target.find(':')) != target)
+            if(kernel.target.processorName() != target)
                 fail(file.path().filename().u8string() + " is not " + target + " assembly");
             assembly.emplace(kernel.kernel, kernel);
             units.push_back({file.path().filename().u8string(),
@@ -388,13 +390,13 @@ namespace hipblaslt_jit::committed
         Prepared prepared;
         prepared.arch              = target;
         prepared.name              = name;
-        prepared.compilerTarget    = kernels.front().target;
         prepared.record            = libraryEntry(bundle, kernels);
         prepared.source.mainKernel = std::move(units.front());
+        auto& kernelNames          = prepared.source.kernelNames;
         for(const auto& kernel : kernels)
-            if(std::find(prepared.kernelNames.begin(), prepared.kernelNames.end(), kernel.kernel)
-               == prepared.kernelNames.end())
-                prepared.kernelNames.push_back(kernel.kernel);
+            if(std::find(kernelNames.begin(), kernelNames.end(), kernel.kernel)
+               == kernelNames.end())
+                kernelNames.push_back(kernel.kernel);
         for(size_t i = 0; i < bundle.solutions.size(); ++i)
         {
             Publication publication;

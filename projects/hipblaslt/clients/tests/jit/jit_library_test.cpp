@@ -108,16 +108,13 @@ namespace
         return {std::vector<uint8_t>(buffer.data(), buffer.data() + buffer.size()), kernel};
     }
 
-    // The code object built, with its solution 0 supporting the request.
-    std::pair<hj::CompiledCode, std::vector<int>> built(const Entry& entry)
+    // A stand-in for the executable built for entry. Its solution 0 supports the request.
+    hj::Artifact executable(const Entry& entry)
     {
-        hj::CompiledCode  result;
-        result.record = entry.bytes;
         const std::string object = "code object of " + entry.kernel;
-        result.codeObject        = {entry.kernel,
-                             hj::Artifact::Kind::CodeObject,
-                             std::vector<uint8_t>(object.begin(), object.end())};
-        return {std::move(result), {0}};
+        return {entry.kernel,
+                hj::Artifact::Kind::Executable,
+                std::vector<uint8_t>(object.begin(), object.end())};
     }
 
     // The lazy master and mapping the library writes for an ISA.
@@ -303,11 +300,14 @@ namespace
                                  const ContractionProblemGemm& problem,
                                  const std::vector<Entry>&     entries)
     {
-        hj::SupportedSolutions solutions;
-        for(const auto& entry : entries)
-            solutions.push_back(built(entry));
         std::vector<int32_t> indices;
-        ok(library.publish(key, 0, problem, solutions, indices), "publish");
+        for(const auto& entry : entries)
+        {
+            std::vector<int32_t> published;
+            ok(library.publish(key, 0, problem, executable(entry), entry.bytes, {0}, published),
+               "publish");
+            indices.insert(indices.end(), published.begin(), published.end());
+        }
         {
             INFO(("Publish returned " + text(indices)));
             REQUIRE((indices.size() == entries.size()));
@@ -315,20 +315,25 @@ namespace
         return indices;
     }
 
+    fs::path builtUnder(const fs::path& root)
+    {
+        return hj::JitLibrary(root).buildDirectory();
+    }
+
     // gfx90a, gfx942 and gfx950, and the committed plain bundles, are wave64.
     // The target id is the device processor with the sramecc+/xnack- feature spelling.
     hj::CacheKey testKey(const Context& ctx, uint32_t backendVersion = 1)
     {
         hj::CacheKey key;
-        key.targetId       = ctx.arch + ":sramecc+:xnack-";
-        key.isa            = ctx.arch;
-        key.libraryArch    = ctx.arch;
-        key.wavefrontSize  = 64;
-        key.backendId      = "test";
-        key.backendVersion = backendVersion;
-        key.comgr          = "3.0:/opt/rocm/lib/libamd_comgr.so:1:2";
-        key.rocmPath       = "/opt/rocm";
-        key.environment    = {{"LLVM_PATH", "/opt/rocm/llvm"}};
+        key.target.processor = ctx.hardware.processor;
+        key.target.sramecc   = hj::TargetFeature::On;
+        key.target.xnack     = hj::TargetFeature::Off;
+        key.wavefrontSize    = 64;
+        key.backendId        = "test";
+        key.backendVersion   = backendVersion;
+        key.comgr            = "3.0:/opt/rocm/lib/libamd_comgr.so:1:2";
+        key.rocmPath         = "/opt/rocm";
+        key.environment      = {{"LLVM_PATH", "/opt/rocm/llvm"}};
         return key;
     }
 
@@ -342,12 +347,12 @@ namespace
                 && name.find("_wf64_") != std::string::npos && name.find("=3a") != std::string::npos
                 && name.find('/') == std::string::npos));
         }
-        // An ISA different from the device, so this field still changes the key.
-        const auto otherIsa = ctx.arch == "gfx942" ? "gfx950" : "gfx942";
+        // A processor different from the device, so this field still changes the key.
+        const auto otherProcessor
+            = ctx.arch == "gfx942" ? hj::Processor::gfx950 : hj::Processor::gfx942;
         const std::vector<std::function<void(hj::CacheKey&)>> identity{
-            [&](auto& k) { k.targetId = ctx.arch + ":sramecc-:xnack-"; },
-            [&](auto& k) { k.isa = otherIsa; },
-            [](auto& k) { k.libraryArch += "v1"; },
+            [](auto& k) { k.target.sramecc = hj::TargetFeature::Off; },
+            [&](auto& k) { k.target.processor = otherProcessor; },
             [](auto& k) { k.wavefrontSize = 32; },
             [](auto& k) { k.backendId = "other"; },
             [](auto& k) { k.backendVersion = 2; },
@@ -364,6 +369,16 @@ namespace
             change(changed);
             INFO(("A device or backend field did not change the directory"));
             REQUIRE((changed.directoryName() != name));
+        }
+        // Only a gfx1250 A0 part loads its own library architecture.
+        auto b0                = key;
+        b0.target.processor    = hj::Processor::gfx1250;
+        auto a0                = b0;
+        a0.target.asicRevision = 0;
+        {
+            INFO(("The library architecture did not change the directory"));
+            REQUIRE((a0.target.libraryArch() == "gfx1250v0"
+                     && a0.directoryName() != b0.directoryName()));
         }
         for(const auto& change : toolchain)
         {
@@ -479,8 +494,8 @@ namespace
             ok(attempt(root), "private root");
             {
                 INFO(("Library directories are not private"));
-                REQUIRE((mode(root / "v1") == 0700
-                    && mode(root / "v1" / testKey(ctx).directoryName()) == 0700));
+                REQUIRE((mode(root / "v1") == 0700 && mode(builtUnder(root)) == 0700
+                    && mode(builtUnder(root) / testKey(ctx).directoryName()) == 0700));
             }
         }
         const auto missing = base / "missing" / "nested";
@@ -501,7 +516,7 @@ namespace
             REQUIRE((!attempt(base / "file").ok()));
         }
 
-        const auto shared = base / "mode-700" / "v1" / testKey(ctx).directoryName();
+        const auto shared = builtUnder(base / "mode-700") / testKey(ctx).directoryName();
         {
             INFO(("chmod failed"));
             REQUIRE((::chmod(shared.c_str(), 0770) == 0));
@@ -513,10 +528,10 @@ namespace
         {
             INFO(("chmod failed"));
             REQUIRE((::chmod(shared.c_str(), 0700) == 0
-                && ::chmod((base / "mode-700" / "v1").c_str(), 0707) == 0));
+                && ::chmod(builtUnder(base / "mode-700").c_str(), 0707) == 0));
         }
         {
-            INFO(("An other-writable schema directory was accepted"));
+            INFO(("An other-writable build directory was accepted"));
             REQUIRE((!attempt(base / "mode-700").ok()));
         }
         std::cout << "PASS group- and other-writable, linked and non-directory roots are rejected; "
@@ -556,10 +571,10 @@ namespace
                 && !fs::exists(directory / lazyMaster(ctx.arch))));
         }
         std::set<std::string> names;
-        for(const auto& entry : fs::directory_iterator(root / "v1"))
+        for(const auto& entry : fs::directory_iterator(builtUnder(root)))
             names.insert(entry.path().filename().string());
         {
-            INFO(("Unexpected schema directory contents"));
+            INFO(("Unexpected build directory contents"));
             REQUIRE((names == std::set<std::string>{"allocator.dat", "lock", key.directoryName()}));
         }
         {
@@ -572,17 +587,20 @@ namespace
                "cache key");
             INFO(("cache-key.msgpack does not hold the key"));
             REQUIRE((document.backendId == key.backendId && document.backendVersion == key.backendVersion
-                && document.isa == key.isa && document.targetId == key.targetId
-                && document.libraryArch == key.libraryArch && document.wavefrontSize == key.wavefrontSize
+                && document.isa == key.target.processorName()
+                && document.targetId == key.target.targetId()
+                && document.libraryArch == key.target.libraryArch()
+                && document.wavefrontSize == key.wavefrontSize
                 && document.comgr == key.comgr && document.rocmPath == key.rocmPath
                 && document.codeObjectVersion == key.codeObjectVersion));
         }
         {
             INFO(("The code object was not stored unchanged"));
-            REQUIRE((read(slice / (prefix + ".co")) == built(ctx.entry).first.codeObject.bytes));
+            REQUIRE((read(slice / (prefix + ".co")) == executable(ctx.entry).bytes));
         }
         int64_t next = 0;
-        ok(hj::msgpack_io::readAllocator(read(root / "v1" / "allocator.dat"), next), "allocator");
+        ok(hj::msgpack_io::readAllocator(read(builtUnder(root) / "allocator.dat"), next),
+           "allocator");
         {
             INFO(("The allocator did not advance"));
             REQUIRE((next == base + 1));
@@ -793,7 +811,7 @@ namespace
             }
             {
                 auto changed = testKey(ctx, 1);
-                changed.targetId = ctx.arch + ":sramecc-:xnack-";
+                changed.target.sramecc = hj::TargetFeature::Off;
                 INFO(("A different target reused an entry"));
                 REQUIRE((ctx.find(library, changed, gemm(256)).empty()));
             }
@@ -816,7 +834,13 @@ namespace
                 REQUIRE((!status.ok() && indices.empty() && status.stage == hj::Stage::Lookup
                     && status.message.find("cache key") != std::string::npos));
             }
-            status = library.publish(testKey(ctx, 1), 0, gemm(256), {built(ctx.entry)}, indices);
+            status = library.publish(testKey(ctx, 1),
+                                     0,
+                                     gemm(256),
+                                     executable(ctx.entry),
+                                     ctx.entry.bytes,
+                                     {0},
+                                     indices);
             {
                 INFO(("Publishing into a tampered directory was accepted"));
                 REQUIRE((!status.ok() && status.stage == hj::Stage::Publish));
@@ -844,7 +868,8 @@ namespace
         const auto           directory = library.directory(key);
         std::vector<uint8_t> bytes;
         ok(hj::msgpack_io::writeAllocator(INT32_MAX, bytes), "allocator");
-        ok(hj::files::writeAtomically(directory / "staging", root / "v1" / "allocator.dat", bytes),
+        ok(hj::files::writeAtomically(
+               directory / "staging", builtUnder(root) / "allocator.dat", bytes),
            "allocator");
         {
             INFO(("The last reserved index was not allocated"));
@@ -852,7 +877,8 @@ namespace
                 publish(library, key, gemm(264), {ctx.entry}) == std::vector<int32_t>{INT32_MAX}));
         }
         std::vector<int32_t> indices;
-        const auto status = library.publish(key, 0, gemm(272), {built(ctx.entry)}, indices);
+        const auto status = library.publish(
+            key, 0, gemm(272), executable(ctx.entry), ctx.entry.bytes, {0}, indices);
         {
             INFO(("An exhausted range allocated an index: " + status.message));
             REQUIRE((!status.ok() && status.message.find("exhausted") != std::string::npos));
@@ -864,11 +890,14 @@ namespace
         }
 
         ok(hj::msgpack_io::writeAllocator(base - 1, bytes), "allocator");
-        ok(hj::files::writeAtomically(directory / "staging", root / "v1" / "allocator.dat", bytes),
+        ok(hj::files::writeAtomically(
+               directory / "staging", builtUnder(root) / "allocator.dat", bytes),
            "allocator");
         {
             INFO(("An allocator below the reserved range was used"));
-            REQUIRE((!library.publish(key, 0, gemm(272), {built(ctx.entry)}, indices).ok()));
+            const auto below = library.publish(
+                key, 0, gemm(272), executable(ctx.entry), ctx.entry.bytes, {0}, indices);
+            REQUIRE((!below.ok()));
         }
 
         const auto prefix = hj::entryPrefix(
@@ -1079,7 +1108,8 @@ namespace
                 INFO(("A fused all-to-all lookup was not rejected: " + status.message));
                 REQUIRE((rejected(status, hj::Stage::Lookup) && indices.empty()));
             }
-            status = library.publish(key, 0, fused, {built(ctx.entry)}, indices);
+            status = library.publish(
+                key, 0, fused, executable(ctx.entry), ctx.entry.bytes, {0}, indices);
             {
                 INFO(("A fused all-to-all publication was not rejected: " + status.message));
                 REQUIRE((rejected(status, hj::Stage::Publish) && indices.empty()));
@@ -1204,8 +1234,8 @@ namespace
                             library.solutionByIndex(0, ctx.hardware, found[0], why) != nullptr));
                     }
                 }
-                if(fs::exists(root / "v1" / key.directoryName() / lazyMaster(ctx.arch)))
-                    consistent(root / "v1" / key.directoryName(), ctx.hardware, ctx.arch);
+                if(fs::exists(builtUnder(root) / key.directoryName() / lazyMaster(ctx.arch)))
+                    consistent(builtUnder(root) / key.directoryName(), ctx.hardware, ctx.arch);
             }
             {
                 INFO(("The reader never saw every shared entry"));
@@ -1268,7 +1298,7 @@ namespace
             INFO(("Writers got different indices for one entry"));
             REQUIRE((indices.size() == 1));
         }
-        const auto directory = root / "v1" / key.directoryName();
+        const auto directory = builtUnder(root) / key.directoryName();
         const auto master    = stock(directory / "slices" / hj::sliceKey(gemm(256)), ctx.arch);
         std::set<int32_t> mapped;
         for(const auto& [index, prefix] : master->libraryMapping)
@@ -1278,7 +1308,8 @@ namespace
             REQUIRE((mapped == all));
         }
         int64_t next = 0;
-        ok(hj::msgpack_io::readAllocator(read(root / "v1" / "allocator.dat"), next), "allocator");
+        ok(hj::msgpack_io::readAllocator(read(builtUnder(root) / "allocator.dat"), next),
+           "allocator");
         {
             INFO(("Deduplicated entries consumed indices"));
             REQUIRE((next == base + static_cast<int64_t>(all.size()) && *all.rbegin() == next - 1));
