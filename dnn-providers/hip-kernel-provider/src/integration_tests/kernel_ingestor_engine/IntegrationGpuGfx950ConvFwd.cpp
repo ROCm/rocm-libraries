@@ -6,10 +6,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <optional>
+#include <random>
 #include <string>
+#include <system_error>
 #include <tuple>
 #include <unordered_set>
 #include <utility>
@@ -18,7 +22,9 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
@@ -35,6 +41,7 @@
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
+#include <nlohmann/json.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
 
@@ -911,56 +918,101 @@ TEST_P(IntegrationGpuGfx950ConvFwdServing, EveryServingKernelMatchesCpuReference
 }
 #endif
 
+#if defined(HKP_TEST_GFX950_CONV_FWD_AOT) || defined(HKP_TEST_GFX950_CONV_FWD_AOT_SEED)
+
+// ---- The AOT-instance engines' graphs ----
+//
+// hipkernel:Gfx950ConvFwdAot ships every AOT instance of rocKE's sweep that the packaged
+// launch runs, each built once against rocKE's probe problem and matched to a graph by
+// capability. hipkernel:Gfx950ConvFwdAotSeed runs the same native code over a small seed
+// of them, 8 implicit-GEMM and 4 direct depthwise instances per dtype
+// (test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed). Both run the graphs
+// below, in both dtypes.
+
+namespace
+{
+
+/// One graph and how many instances of each family serve it in each catalog, as
+/// gfx950_conv_fwd_aot_serves in convolution_forward.py counts them over
+/// gfx950_conv_fwd_aot_seed.instances.json and gfx950_conv_fwd_aot.instances.json, the
+/// same in both dtypes. The engines' native matcher is checked against those counts, and
+/// test_make_conv_aot_config.py recomputes this table from the two lists: keep one row
+/// per line.
+struct AotGraph
+{
+    std::string name;
+    ConvProblem problem;
+    size_t seedDirect;
+    size_t seedImplicit;
+    size_t direct;
+    size_t implicit;
+};
+
+// Direct instances serve only guarded depthwise graphs with their compiled filter, stride
+// and padding; batch, image and group count are kernel arguments. In the seed: std 3x3/1
+// and 5x5/2, spatial (fewer than 64 groups) 3x3/1 and 7x7/2.
+// clang-format off
+const std::vector<AotGraph>& aotGraphs()
+{
+    static const std::vector<AotGraph> s_graphs{
+        {"Smoke", {}, 0, 8, 0, 16828},
+        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 8, 0, 16828},
+        // An instance is built against a 3x3 probe, so it is never the pointwise GEMM.
+        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 8, 0, 16828},
+        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 0, 8, 0, 16828},
+        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 8, 0, 16828},
+        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 8, 0, 16828},
+        // Three channels per group: only instances 1 wide along C/groups and K/groups.
+        {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 1826},
+        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 2, 1, 9, 1826},
+        {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 2, 1, 9, 1826},
+        // 64 groups and more: std only.
+        {"DepthwiseG96", {3, 96, 96, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 1, 1, 6, 1826},
+        {"DepthwiseG256N1", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 256}, 1, 1, 6, 1826},
+        {"DepthwiseG64Strided5x5", {2, 64, 64, 17, 17, 5, 5, 2, 2, 2, 2, 1, 1, 64}, 1, 1, 6, 1826},
+        {"DepthwiseG48Strided5x5", {1, 48, 48, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1, 48}, 1, 1, 9, 1826},
+        {"DepthwiseG12Strided7x7", {2, 12, 12, 21, 15, 7, 7, 2, 2, 3, 3, 1, 1, 12}, 1, 1, 9, 1826},
+        {"DepthwiseG40Strided7x7", {3, 40, 40, 16, 30, 7, 7, 2, 2, 3, 3, 1, 1, 40}, 1, 1, 9, 1826},
+        // Outside the direct guard: implicit GEMM alone.
+        {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 0, 1, 0, 1826},
+        // C = 12 admits load widths up to 4 and K = 20 store widths up to 4.
+        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 3, 0, 7779},
+        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 8, 0, 16828},
+        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 8, 0, 16828},
+    };
+    return s_graphs;
+}
+// clang-format on
+
+/// aotGraphs() in both dtypes, with the seed's serving counts or the full catalog's.
+std::vector<Variant> aotVariants(bool fullCatalog)
+{
+    std::vector<std::tuple<std::string, ConvProblem, size_t, size_t>> problems;
+    for(const auto& graph : aotGraphs())
+    {
+        problems.emplace_back(graph.name,
+                              graph.problem,
+                              fullCatalog ? graph.direct : graph.seedDirect,
+                              fullCatalog ? graph.implicit : graph.seedImplicit);
+    }
+    return withBothDtypes(problems);
+}
+
+} // namespace
+
+#endif
+
 #ifdef HKP_TEST_GFX950_CONV_FWD_AOT_SEED
 
 // ---- hipkernel:Gfx950ConvFwdAotSeed: every serving AOT instance, pinned ----
 //
-// The test-only seed engine runs hipkernel:Gfx950ConvFwdAot's native code over a small
-// catalog (test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed): 8 implicit-GEMM
-// and 4 direct depthwise instances per dtype, each built once against rocKE's probe
-// problem and matched to a graph by capability. Small enough that every instance serving
-// a graph is pinned and checked against the reference. Every variant states how many
-// instances of each family serve it, computed by gfx950_conv_fwd_aot_serves in
-// convolution_forward.py over gfx950_conv_fwd_aot_seed.instances.json, so the native
-// matcher is checked against the Python one.
+// The seed is small enough that every instance serving a graph is pinned and checked
+// against the reference, which the full catalog's thousands per graph do not afford.
 
 namespace
 {
 
 constexpr const char* AOT_SEED_ENGINE_NAME = "hipkernel:Gfx950ConvFwdAotSeed";
-
-std::vector<Variant> aotSeedVariants()
-{
-    // Direct instances serve only guarded depthwise graphs with their compiled filter,
-    // stride and padding: std 3x3/1 and 5x5/2, spatial (fewer than 64 groups) 3x3/1 and
-    // 7x7/2. Batch, image and group count are kernel arguments.
-    return withBothDtypes({
-        {"Smoke", {}, 0, 8},
-        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 8},
-        // An instance is built against a 3x3 probe, so it is never the pointwise GEMM.
-        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 8},
-        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 0, 8},
-        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 8},
-        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 8},
-        // Only the 1/1/1-wide instance divides three channels per group.
-        {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1},
-        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 2, 1},
-        {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 2, 1},
-        // 64 groups and more: std only.
-        {"DepthwiseG96", {3, 96, 96, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 1, 1},
-        {"DepthwiseG256N1", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 256}, 1, 1},
-        {"DepthwiseG64Strided5x5", {2, 64, 64, 17, 17, 5, 5, 2, 2, 2, 2, 1, 1, 64}, 1, 1},
-        {"DepthwiseG48Strided5x5", {1, 48, 48, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1, 48}, 1, 1},
-        {"DepthwiseG12Strided7x7", {2, 12, 12, 21, 15, 7, 7, 2, 2, 3, 3, 1, 1, 12}, 1, 1},
-        {"DepthwiseG40Strided7x7", {3, 40, 40, 16, 30, 7, 7, 2, 2, 3, 3, 1, 1, 40}, 1, 1},
-        // Outside the direct guard: implicit GEMM alone.
-        {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 0, 1},
-        // C = 12 admits load widths up to 4 and K = 20 store widths up to 4.
-        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 3},
-        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 8},
-        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 8},
-    });
-}
 
 } // namespace
 
@@ -1034,6 +1086,297 @@ TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, KernelFamilyKnobSelectsEachFamilysIns
 
 #endif // HKP_TEST_GFX950_CONV_FWD_AOT_SEED
 
+#ifdef HKP_TEST_GFX950_CONV_FWD_AOT
+
+// ---- hipkernel:Gfx950ConvFwdAot: the shipped catalog ----
+//
+// At full size most graphs are served by every implicit-GEMM instance of their dtype, so
+// pinning each one is out of reach; the seed suite above does that. Each graph here runs
+// (a) an unbenchmarked plan, which also checks the serving count of each family,
+// (b) a fixed sample of serving instances, each pinned: the best few by score, then more
+// drawn by a seeded shuffle of the whole dtype shard, and (c) a benchmarked plan under
+// HIPDNN_INGESTOR_CANDIDATE_LIMIT.
+
+namespace
+{
+
+constexpr const char* AOT_ENGINE_NAME = "hipkernel:Gfx950ConvFwdAot";
+constexpr size_t TOP_BY_SCORE = 4;
+constexpr size_t SHUFFLED_SAMPLES = 8;
+constexpr size_t BENCHMARK_LIMIT = 64;
+
+/// The kernel the last plan build served from a benchmarked record, or empty.
+std::string servedKernel(const LogRecorderBase& recorder)
+{
+    const std::string marker = "' served kernel ";
+    std::string served;
+    for(const auto& log : recorder.getRecordedLogs())
+    {
+        const auto at = log.message.find(marker);
+        if(at == std::string::npos)
+        {
+            continue;
+        }
+        const auto begin = at + marker.size();
+        served = log.message.substr(begin, log.message.find(' ', begin) - begin);
+    }
+    return served;
+}
+
+/// Every kernel of the shipped gfx950 shard for @p dtype, as winner-record entries, read
+/// from the product tree main() loads (HIPDNN_DESCRIPTOR_RUNTIME_DIR). Empty when it is
+/// not there. Read once per dtype: the shard holds every instance of the dtype.
+const std::vector<ingestor::RankedEntry>& shippedShard(DataType dtype)
+{
+    static std::map<DataType, std::vector<ingestor::RankedEntry>> s_shards;
+    auto& entries = s_shards[dtype];
+    if(!entries.empty())
+    {
+        return entries;
+    }
+    const std::filesystem::path root
+        = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
+    const std::string name = std::string("gfx950_conv_fwd_aot_")
+                             + (dtype == DataType::HALF ? "fp16" : "bf16") + ".kdp.json";
+    std::error_code error;
+    if(root.empty() || !std::filesystem::is_directory(root, error))
+    {
+        return entries;
+    }
+    for(const auto& file : std::filesystem::recursive_directory_iterator(root, error))
+    {
+        const auto& path = file.path();
+        if(path.filename() != name)
+        {
+            continue;
+        }
+        std::ifstream stream(path);
+        const auto document = nlohmann::json::parse(stream);
+        const auto packId
+            = hipdnn_flatbuffers_sdk::utilities::parseUuid(document.at("id").get<std::string>());
+        const auto dispatchId = hipdnn_flatbuffers_sdk::utilities::parseUuid(
+            document.at("dispatch").get<std::string>());
+        for(const auto& kernel : document.at("kernelDescriptors"))
+        {
+            entries.push_back(
+                {hipdnn_flatbuffers_sdk::utilities::parseUuid(kernel.at("id").get<std::string>()),
+                 packId,
+                 dispatchId,
+                 1.0});
+        }
+        break;
+    }
+    return entries;
+}
+
+/// FNV-1a, so each graph draws its own fixed sample on every platform.
+uint32_t sampleSeed(const std::string& name)
+{
+    uint32_t hash = 2166136261U;
+    for(const char character : name)
+    {
+        hash = (hash ^ static_cast<uint8_t>(character)) * 16777619U;
+    }
+    return hash;
+}
+
+} // namespace
+
+class IntegrationGpuGfx950ConvFwdAot : public IntegrationGpuGfx950ConvFwd
+{
+protected:
+    const char* engineName() const override
+    {
+        return AOT_ENGINE_NAME;
+    }
+
+    /// Builds the parameter's graph with @p knobs on a fresh handle, checks that the last
+    /// persisted record of @p recordSize entries served @p kernel (any kernel when empty)
+    /// out of @p candidates, and checks that kernel against the reference. Returns it.
+    std::string serveFromRecord(const std::vector<KnobSetting>& knobs,
+                                const std::string& kernel,
+                                size_t recordSize,
+                                size_t candidates,
+                                unsigned int seed)
+    {
+        const auto& variant = GetParam();
+        recreateHandle();
+        if(HasFatalFailure())
+        {
+            return {};
+        }
+        const ScopedPluginLogCapture capture(this);
+        auto& recorder = capture.recorder();
+        auto graph = buildConvGraph(variant.dtype, variant.problem);
+        buildAndCompile(*graph, knobs);
+        if(HasFatalFailure())
+        {
+            return {};
+        }
+        const auto served = servedKernel(recorder);
+        if(!kernel.empty())
+        {
+            EXPECT_EQ(served, kernel) << recorder.getRecordedLogsAsString();
+        }
+        EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from a benchmarked record of "
+                                              + std::to_string(recordSize) + " entry(s) for "
+                                              + candidateCount(candidates)))
+            << recorder.getRecordedLogsAsString();
+        EXPECT_FALSE(recorder.hasLogContaining("will benchmark"));
+        executeAndVerifyStorage(*graph, variant.dtype, seed);
+        return served;
+    }
+
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _candidateLimit{
+        hipdnn_plugin_sdk::INGESTOR_CANDIDATE_LIMIT_ENV_NAME, ""};
+};
+
+// (a), and the serving count of each family at full size.
+TEST_P(IntegrationGpuGfx950ConvFwdAot, UnbenchmarkedPlanServesFromTheWholeCatalog)
+{
+    const auto& variant = GetParam();
+    const ScopedPluginLogCapture capture(this);
+    auto& recorder = capture.recorder();
+    const auto catalog = variant.directArms + variant.implicitArms;
+
+    auto graph = buildConvGraph(variant.dtype, variant.problem);
+    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {disableBenchmarkingKnob()}));
+    EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(catalog) + " ("
+                                          + std::to_string(catalog) + " before knob filtering)"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(selectedKernel(recorder).empty()) << recorder.getRecordedLogsAsString();
+    ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 53));
+    graph.reset();
+
+    for(const auto& [family, count] : {std::pair{IMPLICIT_GEMM_FAMILY, variant.implicitArms},
+                                       std::pair{DIRECT_DEPTHWISE_FAMILY, variant.directArms}})
+    {
+        if(count == 0)
+        {
+            continue;
+        }
+        recorder.clearLogs();
+        auto forced = buildConvGraph(variant.dtype, variant.problem);
+        ASSERT_NO_FATAL_FAILURE(
+            buildAndCompile(*forced, {kernelFamilyKnob(family), disableBenchmarkingKnob()}));
+        EXPECT_TRUE(recorder.hasLogContaining("at rank 0 from " + candidateCount(count) + " ("
+                                              + std::to_string(catalog)
+                                              + " before knob filtering)"))
+            << "family " << family << ": " << recorder.getRecordedLogsAsString();
+    }
+}
+
+// (b): the best TOP_BY_SCORE instances by score, then SHUFFLED_SAMPLES drawn from every
+// serving instance, each served alone from a record and checked against the reference.
+TEST_P(IntegrationGpuGfx950ConvFwdAot, SampledServingInstancesMatchCpuReference)
+{
+    const auto& variant = GetParam();
+    const auto catalog = variant.directArms + variant.implicitArms;
+    const std::vector<KnobSetting> knobs{enableBenchmarkingKnob()};
+    std::vector<std::string> pinned;
+
+    // Benchmarking under a limit of TOP_BY_SCORE measures exactly the best-ranked ones.
+    _candidateLimit.setValue(std::to_string(TOP_BY_SCORE));
+    {
+        const ScopedPluginLogCapture capture(this);
+        auto& recorder = capture.recorder();
+        auto graph = buildConvGraph(variant.dtype, variant.problem);
+        ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, knobs));
+        EXPECT_TRUE(recorder.hasLogContaining("will benchmark " + candidateCount(TOP_BY_SCORE)
+                                              + " (" + std::to_string(catalog)
+                                              + " before knob filtering)"))
+            << recorder.getRecordedLogsAsString();
+        ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 59));
+    }
+    const auto measured = lastPersistedRecord();
+    ASSERT_TRUE(measured) << "Benchmarking did not persist its measured ranking";
+    const auto& [key, top] = *measured;
+    ASSERT_EQ(top.size(), TOP_BY_SCORE);
+    for(size_t arm = 0; arm < top.size(); ++arm)
+    {
+        auto record = top;
+        std::rotate(record.begin(),
+                    record.begin() + static_cast<std::ptrdiff_t>(arm),
+                    record.begin() + static_cast<std::ptrdiff_t>(arm) + 1);
+        ASSERT_NO_FATAL_FAILURE(appendPersistedRecord(key, record));
+        const auto kernel = ingestor::toString(record.front().kernelId);
+        ASSERT_NO_FATAL_FAILURE(serveFromRecord(
+            knobs, kernel, TOP_BY_SCORE, TOP_BY_SCORE, 61 + static_cast<unsigned int>(arm)));
+        pinned.push_back(kernel);
+    }
+
+    // A record ordering the whole dtype shard covers every candidate, so it serves the
+    // first instance in its order that serves the graph: in a seeded shuffle, a random
+    // serving instance. Instances already served move to the back.
+    _candidateLimit.setValue("");
+    auto shard = shippedShard(variant.dtype);
+    ASSERT_GE(shard.size(), catalog) << "the shipped gfx950 shard for this dtype was not found";
+    ASSERT_EQ(shard.front().packId, top.front().packId);
+    ASSERT_EQ(shard.front().dispatchId, top.front().dispatchId);
+    std::mt19937 rng(sampleSeed(variant.name));
+    for(size_t i = shard.size() - 1; i > 0; --i)
+    {
+        std::swap(shard[i], shard[rng() % (i + 1)]);
+    }
+    const auto samples = std::min(SHUFFLED_SAMPLES, catalog - std::min(catalog, TOP_BY_SCORE));
+    for(size_t sample = 0; sample < samples; ++sample)
+    {
+        std::stable_partition(shard.begin(), shard.end(), [&](const auto& entry) {
+            return std::find(pinned.begin(), pinned.end(), ingestor::toString(entry.kernelId))
+                   == pinned.end();
+        });
+        ASSERT_NO_FATAL_FAILURE(appendPersistedRecord(key, shard));
+        std::string served;
+        ASSERT_NO_FATAL_FAILURE(
+            served = serveFromRecord(
+                knobs, "", shard.size(), catalog, 67 + static_cast<unsigned int>(sample)));
+        ASSERT_FALSE(served.empty());
+        EXPECT_EQ(std::find(pinned.begin(), pinned.end(), served), pinned.end()) << served;
+        pinned.push_back(served);
+    }
+}
+
+// (c): benchmarking under HIPDNN_INGESTOR_CANDIDATE_LIMIT measures only the best-ranked
+// candidates, and its record serves the next build of the graph.
+TEST_P(IntegrationGpuGfx950ConvFwdAot, CappedBenchmarkMatchesCpuReference)
+{
+    const auto& variant = GetParam();
+    const ScopedPluginLogCapture capture(this);
+    auto& recorder = capture.recorder();
+    const auto catalog = variant.directArms + variant.implicitArms;
+    const auto capped = std::min(BENCHMARK_LIMIT, catalog);
+    _candidateLimit.setValue(std::to_string(BENCHMARK_LIMIT));
+
+    auto graph = buildConvGraph(variant.dtype, variant.problem);
+    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {enableBenchmarkingKnob()}));
+    EXPECT_TRUE(recorder.hasLogContaining("will benchmark " + candidateCount(capped) + " ("
+                                          + std::to_string(catalog) + " before knob filtering)"))
+        << recorder.getRecordedLogsAsString();
+    ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 71));
+    graph.reset();
+
+    const auto ranking = persistedRanking();
+    ASSERT_TRUE(ranking) << "Benchmarking did not persist its measured candidate ranking";
+    ASSERT_EQ(ranking->size(), capped);
+    const std::string winner = ingestor::toString(ranking->front().kernelId);
+    EXPECT_TRUE(recorder.hasLogContaining("benchmarking selected kernel " + winner))
+        << recorder.getRecordedLogsAsString();
+
+    recorder.clearLogs();
+    auto recreated = buildConvGraph(variant.dtype, variant.problem);
+    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*recreated, {enableBenchmarkingKnob()}));
+    const auto count = std::to_string(capped);
+    EXPECT_TRUE(recorder.hasLogContaining("served kernel " + winner + " at rank 0"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining("from a benchmarked record of " + count + " entry(s) for "
+                                          + count + " candidate(s)"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining("will benchmark"));
+    ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*recreated, variant.dtype, 73));
+}
+
+#endif // HKP_TEST_GFX950_CONV_FWD_AOT
+
 #ifdef HKP_TEST_GFX950_CONV_FWD
 INSTANTIATE_TEST_SUITE_P(Correctness,
                          IntegrationGpuGfx950ConvFwd,
@@ -1070,10 +1413,17 @@ INSTANTIATE_TEST_SUITE_P(Autotuning,
                          });
 #endif // HKP_TEST_GFX950_CONV_FWD
 
+#ifdef HKP_TEST_GFX950_CONV_FWD_AOT
+INSTANTIATE_TEST_SUITE_P(AotCatalog,
+                         IntegrationGpuGfx950ConvFwdAot,
+                         ::testing::ValuesIn(aotVariants(true)),
+                         [](const auto& info) { return info.param.name; });
+#endif
+
 #ifdef HKP_TEST_GFX950_CONV_FWD_AOT_SEED
 INSTANTIATE_TEST_SUITE_P(AotSeedInstances,
                          IntegrationGpuGfx950ConvFwdAotSeed,
-                         ::testing::ValuesIn(aotSeedVariants()),
+                         ::testing::ValuesIn(aotVariants(false)),
                          [](const auto& info) { return info.param.name; });
 #endif
 
