@@ -296,6 +296,10 @@ const char* rocke_h_hip_scalar(const char* ir_scalar_name)
     {
         return "int8_t";
     }
+    if(strcmp(ir_scalar_name, "u8") == 0)
+    {
+        return "uint8_t";
+    }
     if(strcmp(ir_scalar_name, "i16") == 0)
     {
         return "int16_t";

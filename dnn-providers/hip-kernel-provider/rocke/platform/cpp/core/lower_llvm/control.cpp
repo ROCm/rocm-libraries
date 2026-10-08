@@ -22,6 +22,7 @@
  * rocke_ll_need, rocke_ll_fresh, rocke_ll_vector_binop, rocke_ll_fail, ...) lives in
  * BUCKET 0; this file only calls them through the internal header.
  */
+#include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
 
 #include <stdio.h>
@@ -340,37 +341,9 @@ static void _op_vector_cmp(rocke_lower_t* L, const rocke_op_t* op)
     {
         pred = "lt";
     }
-    const char* llvm_pred;
-    if(strcmp(pred, "lt") == 0)
-    {
-        llvm_pred = "slt";
-    }
-    else if(strcmp(pred, "le") == 0)
-    {
-        llvm_pred = "sle";
-    }
-    else if(strcmp(pred, "gt") == 0)
-    {
-        llvm_pred = "sgt";
-    }
-    else if(strcmp(pred, "ge") == 0)
-    {
-        llvm_pred = "sge";
-    }
-    else if(strcmp(pred, "eq") == 0)
-    {
-        llvm_pred = "eq";
-    }
-    else if(strcmp(pred, "ne") == 0)
-    {
-        llvm_pred = "ne";
-    }
-    else
-    {
-        rocke_ll_fail(L, ROCKE_ERR_KEY, "vector.cmp: unknown pred %s", pred);
-    }
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
+    const char* llvm_pred = rocke_ll_icmp_predicate(L, "vector.cmp", pred, a->type);
     rocke_ll_emitf(L,
                    "  %s = icmp %s %s %s, %s",
                    res->name,
@@ -388,6 +361,7 @@ static void _op_vector_smax(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
+    rocke_i_refuse_unsigned_operands(op, NULL);
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     const rocke_type_t* vec_ty = a->type;
@@ -423,6 +397,7 @@ static void _op_vector_smin(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
+    rocke_i_refuse_unsigned_operands(op, NULL);
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     int count = (res->type && res->type->kind == ROCKE_TYPE_VECTOR) ? res->type->count : 0;
@@ -469,6 +444,7 @@ static void _op_vector_sext(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
+    rocke_i_refuse_unsigned_operands(op, NULL);
     const rocke_value_t* v = op->operands[0];
     rocke_ll_emitf(L,
                    "  %s = sext %s %s to %s",

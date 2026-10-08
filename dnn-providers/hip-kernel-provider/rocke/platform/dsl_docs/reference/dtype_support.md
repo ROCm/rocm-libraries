@@ -137,8 +137,29 @@ storage and unpack explicitly`); a kernel keeps the words in `i32` storage and
 unpacks them explicitly. Both lowerings still refuse an `i4` value that reaches
 them (`no LLVM mapping for type i4`, `no HIP mapping for type i4`).
 
+**Unsigned integers.** `u8` and `u4` name unsigned data, so integer matrix
+instructions with a per-operand signedness flag can be selected for it. `u8`
+renders as LLVM `i8` (LLVM integers carry no sign) and HIP `uint8_t`, and takes
+one byte in LDS, like `i8`. `u8` is an arithmetic type: every op whose result
+depends on signedness emits its unsigned form for it -- `udiv` / `urem` for
+`div` / `mod`, `icmp ult` / `ule` / `ugt` / `uge` for the ordered compares, and
+no `nsw` flag on `add` / `sub` / `mul`, since unsigned values wrap. `zext` and
+`lshr` widen and shift it; `umax` / `umin` (`llvm.umax` / `llvm.umin`),
+`uitofp_f32` and the saturating `cvt_f32_to_u8_sat` (round to nearest even,
+then clamp to [0, 255] in f32 before `fptoui`; a NaN gives 0) are its own ops.
+The ops that are signed by definition -- `smax`, `smin`, `sext` and their
+vector forms -- refuse a `u8` operand (`smax treats its operands as signed, but
+u8 is unsigned -- use umax`). Native `u16`/`u32` types remain absent.
+A single `u8` can be loaded from and stored to global memory and stored to
+LDS. The vector memory builders refuse `u8`: the global pair, and the LDS pair
+`smem_load_vN` / `smem_store_vN`, which admit one shared element list (so an
+LDS load of `u8`, which `smem_load_vN` also serves for one element, is refused
+too). `u4`, like `i4`, is packed-only: the IR builder of both engines refuses
+its values with the same text, and both lowerings refuse a `u4` value that
+reaches them.
+
 **Types that are entirely absent from the vocabulary:** unsigned
-`u8/u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
+`u16/u32/u64`, and a distinct `bool` (predicates reuse `i1`). No engine
 references them.
 
 TF32 source anchors: [Python type and builders](../../python/rocke/core/ir.py),
@@ -245,7 +266,7 @@ Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 | `i8` | 3 | 2 | 2 | 2 | 1 | 2 | **67%** | [P] |
 | `i64` | 3 | — | — | 1 | 1 | — | **56%** | [P] |
 | `i16` | 3 | — | — | 2 | 1 | — | **67%** | [P] |
-| `u8` | 0 | 0 | 0 | 0 | 0 | — | **0%** | [M] |
+| `u8` | 1 | 0 | 0 | 0 | 0 | -- | **7%** | [M] |
 | `u16/u32/u64` | 0 | 0 | 0 | 0 | 0 | — | **0%** | [M] |
 | **Compute mode (not a storage type)** | | | | | | | | |
 | `bf16-mode` (reduced-precision compute over `f32`) | 0 | 3 | 2 | 3 | 0 | 1 | **50%** | [P][M] |
@@ -349,9 +370,11 @@ mode. The missing selector and precision contract are described in §2.5.
   (guarded), so vector-width predicate init must be open-coded.
 - **`i64` C4=1** — 8-byte LDS works and addressing is fine, but there is no
   `global_store_vN` and no zero-vec. It is an addressing type with no matrix atom.
-- **`u8` — 0 at every layer.** `UINT8` appears in the hipDNN enum
+- **`u8` C1=1, 0 elsewhere.** The row records the snapshot before `u8` gained its
+  unsigned arithmetic, compares and conversions, described in section 1; it still has no
+  vector memory helpers. `UINT8` appears in the hipDNN enum
   (`GpuReferenceValidationFactory.cpp:31`), but only in a reference-validation
-  switch; no rocKE surface accepts it. Note that the silicon is not the
+  switch. Note that the silicon is not the
   constraint: the RDNA/GFX12 WMMA integer atom is `IU8`, whose per-operand
   signedness selects make it an *unsigned* int8 matmul as well as a signed one
   (§4A).

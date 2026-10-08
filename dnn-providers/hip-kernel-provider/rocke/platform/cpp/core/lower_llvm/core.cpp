@@ -621,7 +621,8 @@ const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
     {
         if(strcmp(n, "i1") == 0)
             return "i1";
-        if(strcmp(n, "i8") == 0)
+        /* LLVM integers carry no sign; signedness lives in the operations. */
+        if(strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0)
             return "i8";
         if(strcmp(n, "i16") == 0)
             return "i16";
@@ -994,6 +995,34 @@ void rocke_ll_vector_binop(rocke_lower_t* L, const rocke_op_t* op, const char* l
                    rocke_ll_operand(L, b));
 }
 
+const char* rocke_ll_icmp_predicate(rocke_lower_t* L,
+                                    const char* op_name,
+                                    const char* pred,
+                                    const rocke_type_t* t)
+{
+    static const struct
+    {
+        const char* pred;
+        const char* signed_form;
+        const char* unsigned_form;
+    } k_icmp[] = {
+        {"lt", "slt", "ult"},
+        {"le", "sle", "ule"},
+        {"gt", "sgt", "ugt"},
+        {"ge", "sge", "uge"},
+        {"eq", "eq", "eq"},
+        {"ne", "ne", "ne"},
+    };
+    for(const auto& row : k_icmp)
+    {
+        if(strcmp(pred, row.pred) == 0)
+        {
+            return rocke_type_is_unsigned(t) ? row.unsigned_form : row.signed_form;
+        }
+    }
+    rocke_ll_fail(L, ROCKE_ERR_KEY, "%s: unknown pred %s", op_name, pred);
+}
+
 /* ====================================================================== */
 /* smem pre-pass (Python _collect_smem / _smem_global_name)               */
 /* ====================================================================== */
@@ -1234,7 +1263,8 @@ static int ll_smem_seg_size(const rocke_type_t* stype)
         return 0;
     const char* n = stype->elem->name;
     int eb;
-    if(strcmp(n, "i8") == 0 || strcmp(n, "fp8e4m3") == 0 || strcmp(n, "bf8e5m2") == 0)
+    if(strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0 || strcmp(n, "fp8e4m3") == 0
+       || strcmp(n, "bf8e5m2") == 0)
         eb = 1;
     else if(strcmp(n, "f16") == 0 || strcmp(n, "bf16") == 0)
         eb = 2;
@@ -1259,7 +1289,8 @@ static int ll_smem_align(const rocke_type_t* stype)
     const char* n = stype->elem->name;
     if(strcmp(n, "f64") == 0)
         return 8;
-    if(strcmp(n, "i8") == 0 || strcmp(n, "fp8e4m3") == 0 || strcmp(n, "bf8e5m2") == 0)
+    if(strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0 || strcmp(n, "fp8e4m3") == 0
+       || strcmp(n, "bf8e5m2") == 0)
         return 16;
     return 4;
 }

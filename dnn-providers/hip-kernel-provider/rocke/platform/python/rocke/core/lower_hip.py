@@ -31,6 +31,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _refuse_unsigned_operands,
     _sync_attr,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
@@ -43,6 +44,7 @@ from .ir import (
 _HIP_TYPE = {
     "i1": "bool",
     "i8": "int8_t",
+    "u8": "uint8_t",
     "i16": "int16_t",
     "i32": "int",
     "tf32": "int",
@@ -76,6 +78,7 @@ def _hip_scalar_type(type_name: str) -> str:
 _HIP_UNSIGNED_INT_TYPE = {
     "i1": "bool",
     "i8": "uint8_t",
+    "u8": "uint8_t",
     "i16": "uint16_t",
     "i32": "uint32_t",
     "i64": "uint64_t",
@@ -490,19 +493,31 @@ class _Lowerer:
             f"{_type_to_hip(op.result.type)} {_name(op.result)} = {_name(a)} | {_name(b)};"
         )
 
-    def _op_arith_smax(self, op: Op) -> None:
+    def _select_by_compare(self, op: Op, compare: str) -> None:
+        """The maximum (``>``) or minimum (``<``) of the two operands, as a C
+        ternary."""
         a, b = op.operands
         self._emit(
             f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
-            f"({_name(a)} > {_name(b)} ? {_name(a)} : {_name(b)});"
+            f"({_name(a)} {compare} {_name(b)} ? {_name(a)} : {_name(b)});"
         )
 
+    # smax / smin are signed, so they refuse a u8 operand; umax / umin take u8.
+    # uint8_t operands promote to int, so C's own comparison and the ternary
+    # are the unsigned maximum / minimum.
+    def _op_arith_smax(self, op: Op) -> None:
+        _refuse_unsigned_operands(op, "arith.umax")
+        self._select_by_compare(op, ">")
+
     def _op_arith_smin(self, op: Op) -> None:
-        a, b = op.operands
-        self._emit(
-            f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
-            f"({_name(a)} < {_name(b)} ? {_name(a)} : {_name(b)});"
-        )
+        _refuse_unsigned_operands(op, "arith.umin")
+        self._select_by_compare(op, "<")
+
+    def _op_arith_umax(self, op: Op) -> None:
+        self._select_by_compare(op, ">")
+
+    def _op_arith_umin(self, op: Op) -> None:
+        self._select_by_compare(op, "<")
 
     def _op_arith_zext(self, op: Op) -> None:
         (v,) = op.operands
@@ -518,6 +533,7 @@ class _Lowerer:
         )
 
     def _op_arith_sext(self, op: Op) -> None:
+        _refuse_unsigned_operands(op, "arith.zext")
         (v,) = op.operands
         self._emit(
             f"{_type_to_hip(op.result.type)} {_name(op.result)} = ({_type_to_hip(op.result.type)}){_name(v)};"
@@ -1614,6 +1630,11 @@ class _Lowerer:
         (v,) = op.operands
         self._emit(f"float {_name(op.result)} = (float){_name(v)};")
 
+    def _op_arith_uitofp_f32(self, op: Op) -> None:
+        # u8 -> f32: a uint8_t converts exactly.
+        (v,) = op.operands
+        self._emit(f"float {_name(op.result)} = (float){_name(v)};")
+
     def _op_arith_cvt_fp8_to_f32(self, op: Op) -> None:
         # AMDGPU's per-byte fp8e4m3 -> f32 builtin.
         (v,) = op.operands
@@ -1787,6 +1808,18 @@ class _Lowerer:
         self._emit(
             f"int8_t {_name(op.result)} = (int8_t)({as_i32} < -128 ? -128 : "
             f"({as_i32} > 127 ? 127 : {as_i32}));"
+        )
+
+    def _op_arith_cvt_f32_to_u8_sat(self, op: Op) -> None:
+        # Saturating f32 -> u8, round-to-nearest-even. The clamp into
+        # [0, 255] happens in f32 so the conversion is always in range, and
+        # fmaxf turns a NaN into 0, as the LLVM lowering's maxnum does.
+        (v,) = op.operands
+        rounded = f"{_name(op.result)}_r"
+        self._emit(f"float {rounded} = rintf({_name(v)});")
+        self._emit(
+            f"uint8_t {_name(op.result)} = "
+            f"(uint8_t)fminf(fmaxf({rounded}, 0.0f), 255.0f);"
         )
 
     def _op_arith_rint_f32(self, op: Op) -> None:

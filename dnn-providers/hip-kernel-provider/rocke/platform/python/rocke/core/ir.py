@@ -46,6 +46,8 @@ class Type:
 
 I1 = Type("i1")
 I4 = Type("i4")
+U4 = Type("u4")
+U8 = Type("u8")
 I8 = Type("i8")
 I16 = Type("i16")
 I32 = Type("i32")
@@ -73,6 +75,8 @@ def dtype_to_ir_type(dtype: str) -> Type:
     types = {
         "i1": I1,
         "i4": I4,
+        "u4": U4,
+        "u8": U8,
         "i8": I8,
         "i16": I16,
         "i32": I32,
@@ -248,6 +252,30 @@ _FENCE_SCOPES = ("workgroup", "agent", "system")
 _FENCE_ORDERINGS = ("acquire", "release", "acq_rel", "seq_cst")
 _FLAG_STORE_ORDERINGS = ("monotonic", "release", "seq_cst")
 
+# Element types an LDS vector access (``smem_load_vN`` and ``smem_store_vN``)
+# admits, in the order its refusal lists them. One list for both directions
+# keeps the pair symmetric: whatever one stores as a vector can be loaded back.
+_SMEM_VECTOR_ELEMENTS = (
+    "f16",
+    "bf16",
+    "i16",
+    "f32",
+    "i32",
+    "tf32",
+    "f64",
+    "fp8e4m3",
+    "bf8e5m2",
+    "i8",
+)
+
+
+def _require_smem_vector_element(access: str, elem_name: str) -> None:
+    """Refuse an LDS vector ``access`` of an element outside ``_SMEM_VECTOR_ELEMENTS``."""
+    if elem_name not in _SMEM_VECTOR_ELEMENTS:
+        raise ValueError(
+            f"{access} supports {' / '.join(_SMEM_VECTOR_ELEMENTS)}, got {elem_name}"
+        )
+
 
 def _is_flag_ptr(t: "Type") -> bool:
     """True for the ``ptr<i32,global>`` a cross-workgroup flag op addresses.
@@ -264,12 +292,12 @@ def _check_flag_ptr(op_name: str, ptr: "Value") -> None:
         raise ValueError(f"{op_name} expects a global i32 pointer, got {ptr.type.name}")
 
 
-# I4 is packed-only: its values only ever live packed in 32-bit words, so no IR
-# value, scalar or vector, and no LDS tile has that element type. IRBuilder
-# enforces it for every op result and kernel parameter through
+# I4 and U4 are packed-only: their values only ever live packed in 32-bit
+# words, so no IR value, scalar or vector, and no LDS tile has either element
+# type. IRBuilder enforces it for every op result and kernel parameter through
 # _refuse_packed_only_value, the one home of that rule; the lowerers' type
 # tables have no entry for a packed-only type.
-_PACKED_ONLY_SCALARS = ("i4",)
+_PACKED_ONLY_SCALARS = ("i4", "u4")
 
 
 def _refuse_packed_only_value(op_name: str, t: "Type") -> None:
@@ -283,6 +311,45 @@ def _refuse_packed_only_value(op_name: str, t: "Type") -> None:
             "no scalar or vector form -- keep them in i32 storage and unpack "
             "explicitly"
         )
+
+
+# U8 and U4 hold unsigned integers. LLVM integers carry no sign, so u8 renders
+# as i8 and every op whose result depends on signedness asks _is_unsigned which
+# form to emit: unsigned division, remainder and ordered compares, zero rather
+# than sign extension, and no signed-overflow flag on add / sub / mul. Ops that
+# are signed by definition (smax, smin, sext and their vector forms) refuse an
+# unsigned operand through _refuse_unsigned when they are built, and again
+# through _refuse_unsigned_operands when they are lowered. U4 is packed-only
+# (above), so only U8 values ever reach an op.
+_UNSIGNED_SCALARS = ("u4", "u8")
+
+
+def _is_unsigned(t: "Type") -> bool:
+    """True when ``t``, or the element of a vector ``t``, is an unsigned integer."""
+    elem = t.elem if isinstance(t, VectorType) else t
+    return elem.name in _UNSIGNED_SCALARS
+
+
+def _refuse_unsigned(op_name: str, t: "Type", instead: Optional[str] = None) -> None:
+    """Refuse an unsigned operand of type ``t`` to ``op_name``, an op that treats
+    its operands as signed; ``instead`` names the unsigned op to use, if any."""
+    if _is_unsigned(t):
+        elem = t.elem if isinstance(t, VectorType) else t
+        message = (
+            f"{op_name} treats its operands as signed, but {elem.name} is unsigned"
+        )
+        if instead is not None:
+            message += f" -- use {instead}"
+        raise TypeError(message)
+
+
+def _refuse_unsigned_operands(op: "Op", instead: Optional[str] = None) -> None:
+    """_refuse_unsigned for every operand of ``op``, a signed op, under the op's
+    dotted name. IRBuilder refuses such an op when it is built; the lowerings
+    call this for IR that did not come through it (hand-assembled or
+    deserialized), so no signed op lowers on unsigned data."""
+    for operand in op.operands:
+        _refuse_unsigned(op.name, operand.type, instead)
 
 
 def _sync_attr(op: "Op", key: str, allowed: Sequence[str]) -> str:
@@ -1159,15 +1226,41 @@ class IRBuilder:
         return self._op("arith.not", [a], [a.type], result_name_hint="not").result
 
     def smax(self, a: Value, b: Value) -> Value:
+        """Signed maximum; an unsigned operand is refused (use :meth:`umax`)."""
+        _refuse_unsigned("smax", a.type, "umax")
+        _refuse_unsigned("smax", b.type, "umax")
         return self._op("arith.smax", [a, b], [a.type], result_name_hint="smax").result
 
     def smin(self, a: Value, b: Value) -> Value:
+        """Signed minimum; an unsigned operand is refused (use :meth:`umin`)."""
+        _refuse_unsigned("smin", a.type, "umin")
+        _refuse_unsigned("smin", b.type, "umin")
         return self._op("arith.smin", [a, b], [a.type], result_name_hint="smin").result
+
+    def _require_unsigned_pair(self, op_name: str, a: Value, b: Value) -> None:
+        scalar = not isinstance(a.type, VectorType)
+        if not (scalar and _is_unsigned(a.type) and a.type == b.type):
+            raise ValueError(
+                f"{op_name} expects two operands of one unsigned integer type, "
+                f"got {a.type.name} and {b.type.name}"
+            )
+
+    def umax(self, a: Value, b: Value) -> Value:
+        """Unsigned maximum of two u8 values. Lowers to ``llvm.umax``."""
+        self._require_unsigned_pair("umax", a, b)
+        return self._op("arith.umax", [a, b], [a.type], result_name_hint="umax").result
+
+    def umin(self, a: Value, b: Value) -> Value:
+        """Unsigned minimum of two u8 values. Lowers to ``llvm.umin``."""
+        self._require_unsigned_pair("umin", a, b)
+        return self._op("arith.umin", [a, b], [a.type], result_name_hint="umin").result
 
     def zext(self, v: Value, target: Type) -> Value:
         return self._op("arith.zext", [v], [target], result_name_hint="zx").result
 
     def sext(self, v: Value, target: Type) -> Value:
+        """Sign-extend; an unsigned source is refused (use :meth:`zext`)."""
+        _refuse_unsigned("sext", v.type, "zext")
         return self._op("arith.sext", [v], [target], result_name_hint="sx").result
 
     def trunc(self, v: Value, target: Type) -> Value:
@@ -1277,6 +1370,14 @@ class IRBuilder:
         if v.type.name != "i32":
             raise ValueError(f"sitofp_f32 expects i32 input, got {v.type.name}")
         return self._op("arith.sitofp_f32", [v], [F32], result_name_hint="sitof").result
+
+    def uitofp_f32(self, v: Value) -> Value:
+        """Unsigned-integer to f32 conversion (LLVM uitofp) of a u8 value. Exact."""
+        if isinstance(v.type, VectorType) or not _is_unsigned(v.type):
+            raise ValueError(
+                f"uitofp_f32 expects an unsigned integer input, got {v.type.name}"
+            )
+        return self._op("arith.uitofp_f32", [v], [F32], result_name_hint="uitof").result
 
     # f32 <-> f64 has its own opcode per direction rather than riding on
     # cast_to_f32 / cast_f32_to: those two are the f16/bf16 <-> f32 hub and
@@ -1559,6 +1660,18 @@ class IRBuilder:
             raise ValueError(f"cvt_f32_to_i8_sat expects f32 input, got {v.type.name}")
         return self._op(
             "arith.cvt_f32_to_i8_sat", [v], [I8], result_name_hint="qi8"
+        ).result
+
+    def cvt_f32_to_u8_sat(self, v: Value) -> Value:
+        """Round + saturate one f32 element to u8 (round-to-nearest-even).
+
+        ``(uint8_t) min(255, max(0, rintf(v)))``; a NaN gives 0. The unsigned
+        twin of :meth:`cvt_f32_to_i8_sat`.
+        """
+        if v.type.name != "f32":
+            raise ValueError(f"cvt_f32_to_u8_sat expects f32 input, got {v.type.name}")
+        return self._op(
+            "arith.cvt_f32_to_u8_sat", [v], [U8], result_name_hint="qu8"
         ).result
 
     def clamp_f32(self, v: Value, lo: Value, hi: Value) -> Value:
@@ -2146,8 +2259,12 @@ class IRBuilder:
         ).result
 
     def vector_binary(self, op_name: str, a: Value, b: Value) -> Value:
+        """Lane-wise ``vector.<op_name>`` of two matching vectors. The signed ops
+        (``smax``, ``smin``) refuse an unsigned element type."""
         if not isinstance(a.type, VectorType) or a.type != b.type:
             raise ValueError("vector_binary expects matching vector operands")
+        if op_name in ("smax", "smin"):
+            _refuse_unsigned(f"vector_{op_name}", a.type)
         return self._op(
             f"vector.{op_name}", [a, b], [a.type], result_name_hint=f"v{op_name}"
         ).result
@@ -2268,6 +2385,7 @@ class IRBuilder:
         (``v_pk_max_i16`` etc.) can consume it."""
         if not isinstance(v.type, VectorType):
             raise ValueError("vector_sext expects vector input")
+        _refuse_unsigned("vector_sext", v.type)
         return self._op(
             "vector.sext",
             [v],
@@ -2300,9 +2418,10 @@ class IRBuilder:
     ) -> None:
         """Vectorised LDS store of N consecutive values.
 
-        Supports scalar stores (`n=1`) plus vector stores for the element types
-        accepted by :meth:`smem_load_vN`. For 8-bit element types, ``n=16`` maps
-        to a 16-byte LDS transaction, which is the native-int WMMA staging shape.
+        Supports scalar stores (`n=1`) of any element type, plus vector stores
+        of the element types :meth:`smem_load_vN` accepts (the shared
+        ``_SMEM_VECTOR_ELEMENTS``). For 8-bit element types, ``n=16`` maps to a
+        16-byte LDS transaction, which is the native-int WMMA staging shape.
         """
         if n == 1:
             # Single-element store; route through the scalar `tile.smem_store`.
@@ -2315,6 +2434,7 @@ class IRBuilder:
         if not isinstance(value.type, VectorType):
             raise ValueError("smem_store_vN expects vector value for n > 1")
         elem_name = value.type.elem.name
+        _require_smem_vector_element("smem_store_vN", elem_name)
         if elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
             allowed_n = (2, 4, 8, 16)
             elem_bytes = 1
@@ -2366,22 +2486,7 @@ class IRBuilder:
         or three words), using element alignment. The target and alignment
         determine instruction selection.
         """
-        if dtype.name not in (
-            "f16",
-            "bf16",
-            "i16",
-            "f32",
-            "i32",
-            "tf32",
-            "f64",
-            "fp8e4m3",
-            "bf8e5m2",
-            "i8",
-        ):
-            raise ValueError(
-                "smem_load_vN supports f16 / bf16 / i16 / f32 / i32 / tf32 / f64 / "
-                f"fp8e4m3 / bf8e5m2 / i8, got {dtype.name}"
-            )
+        _require_smem_vector_element("smem_load_vN", dtype.name)
         if dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
             allowed_n = (1, 2, 4, 8, 12, 16)
         elif dtype.name in ("f16", "bf16", "i16"):
@@ -5452,6 +5557,10 @@ PURE_OP_NAMES = {
     "arith.cvt_f32_to_f64",
     "arith.cvt_f64_to_f32",
     "arith.cvt_fp8_to_f32",
+    "arith.umax",
+    "arith.umin",
+    "arith.uitofp_f32",
+    "arith.cvt_f32_to_u8_sat",
     "math.exp2",
     "math.exp2_fast",
     "math.log2",

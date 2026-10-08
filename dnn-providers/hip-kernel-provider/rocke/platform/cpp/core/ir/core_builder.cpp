@@ -654,13 +654,37 @@ void rocke_i_refuse_packed_only_value(const char* op_name, const rocke_type_t* t
     {
         return;
     }
-    if(elem->scalar == ROCKE_SCALAR_I4)
+    if(elem->scalar == ROCKE_SCALAR_I4 || elem->scalar == ROCKE_SCALAR_U4)
     {
         throw ckc::TypeError(
             ckc::format_error("%s: %s values travel packed in 32-bit words and have no scalar or "
                               "vector form -- keep them in i32 storage and unpack explicitly",
                               op_name,
                               elem->name));
+    }
+}
+
+void rocke_i_refuse_unsigned(const char* op_name, const rocke_type_t* t, const char* instead)
+{
+    if(!rocke_type_is_unsigned(t))
+    {
+        return;
+    }
+    const rocke_type_t* elem = rocke_i_elem_of(t);
+    std::string message = ckc::format_error(
+        "%s treats its operands as signed, but %s is unsigned", op_name, elem->name);
+    if(instead != NULL)
+    {
+        message += std::string(" -- use ") + instead;
+    }
+    throw ckc::TypeError(message);
+}
+
+void rocke_i_refuse_unsigned_operands(const rocke_op_t* op, const char* instead)
+{
+    for(int i = 0; i < op->num_operands; ++i)
+    {
+        rocke_i_refuse_unsigned(rocke_opcode_name(op->opcode), op->operands[i]->type, instead);
     }
 }
 

@@ -48,6 +48,11 @@
 ROCKE_SCALAR_SINGLETON(rocke_i1, ROCKE_SCALAR_I1, "i1")
 /* Logical only, like fp4e2m1: no LLVM rendering; its values travel packed. */
 ROCKE_SCALAR_SINGLETON(rocke_i4, ROCKE_SCALAR_I4, "i4")
+/* Unsigned data. u8 renders as LLVM i8 (LLVM integers carry no sign), so every op
+ * whose result depends on signedness asks rocke_type_is_unsigned which form to
+ * emit; u4, like i4, is logical only and travels packed. */
+ROCKE_SCALAR_SINGLETON(rocke_u4, ROCKE_SCALAR_U4, "u4")
+ROCKE_SCALAR_SINGLETON(rocke_u8, ROCKE_SCALAR_U8, "u8")
 ROCKE_SCALAR_SINGLETON(rocke_i8, ROCKE_SCALAR_I8, "i8")
 ROCKE_SCALAR_SINGLETON(rocke_i16, ROCKE_SCALAR_I16, "i16")
 ROCKE_SCALAR_SINGLETON(rocke_i32, ROCKE_SCALAR_I32, "i32")
@@ -76,6 +81,10 @@ const rocke_type_t* rocke_scalar_by_name(const char* name)
         return rocke_i1();
     if(strcmp(name, "i4") == 0)
         return rocke_i4();
+    if(strcmp(name, "u4") == 0)
+        return rocke_u4();
+    if(strcmp(name, "u8") == 0)
+        return rocke_u8();
     if(strcmp(name, "i8") == 0)
         return rocke_i8();
     if(strcmp(name, "i16") == 0)
@@ -253,6 +262,14 @@ bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b)
     if(!a->name || !b->name)
         return false;
     return strcmp(a->name, b->name) == 0;
+}
+
+/* Python core/ir.py::_is_unsigned. */
+bool rocke_type_is_unsigned(const rocke_type_t* t)
+{
+    const rocke_type_t* elem = (t != NULL && t->kind == ROCKE_TYPE_VECTOR) ? t->elem : t;
+    return elem != NULL && elem->kind == ROCKE_TYPE_SCALAR
+           && (elem->scalar == ROCKE_SCALAR_U8 || elem->scalar == ROCKE_SCALAR_U4);
 }
 
 /* ============================== ATTR MAP ================================ */
@@ -712,7 +729,13 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
 
     /* arith.* f32 <-> f64 conversions */
     "arith.cvt_f32_to_f64",
-    "arith.cvt_f64_to_f32"};
+    "arith.cvt_f64_to_f32",
+
+    /* arith.* unsigned (u8) ops */
+    "arith.umax",
+    "arith.umin",
+    "arith.uitofp_f32",
+    "arith.cvt_f32_to_u8_sat"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -985,7 +1008,13 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
 
     /* arith.* f32 <-> f64 conversions */
     /* arith.cvt_f32_to_f64       */ true,
-    /* arith.cvt_f64_to_f32       */ true};
+    /* arith.cvt_f64_to_f32       */ true,
+
+    /* arith.* unsigned (u8) ops */
+    /* arith.umax                 */ true,
+    /* arith.umin                 */ true,
+    /* arith.uitofp_f32           */ true,
+    /* arith.cvt_f32_to_u8_sat    */ true};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {
