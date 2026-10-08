@@ -84,8 +84,18 @@ differs, adding `vec_a/b/c` (the width in elements, 0 meaning native) and
 recorded in `feature_spec.json`, so `evaluate.py`, `predict.py` and the
 `Predictor` class rebuild the matching engine with no extra flag.
 
-Use the base `gemm_universal` engine when the data is native-width only -- the
-six extra features would be constant and carry nothing.
+On native-width-only data the three raw features (`vec_a/b/c`) are constant at
+0, but the three fractions are **not**: `vec_frac_*` is the kernel's native
+width over the problem's widest legal width, and a native kernel's own width
+varies with its tile, warps, warp tile, epilogue and architecture. The default
+epilogue stores one C element however well aligned N is, so `vec_frac_c` is
+`1/cap` against cshuffle's full width -- 0.125 vs 1.0 for bf16 on an N that is
+a multiple of 8, 0.25 vs 1.0 for fp32 -- for the same problem, with every raw
+width 0. (On a misaligned N both rise, since the denominator `gcd(N, cap)`
+shrinks; see the note on fractions above 1 below.) So the wider engine still
+carries signal on native-only data; prefer the base engine there because it is
+cheaper and already has shipped models, not because the extra features are
+empty.
 
 **Where the columns come from.** Only `data_pipeline.py` populates `vec_a/b/c`
 from measurement data,
@@ -94,13 +104,37 @@ emitted by `codegen_common.gemm_vector_size_suffix` on the dispatcher-bridge
 sweep path. The Step 1-2 route above (`generate_benchmark_data.py` →
 `convert_json_to_parquet.py`) and `convert_csv_to_parquet.py` do **not** carry
 them, and the CMake-built `benchmark_gemm_universal_*` executables do not emit
-fixed-width names at all. The producing driver is
+fixed-width names at all. The driver that produces fixed-width kernels is
 `tile_engine/ops/gemm/gemm_full_benchmark.py`, whose `VectorFallback` pass adds
-the fixed-width kernels. On data without the columns the engine raises rather than silently encoding
-every kernel as native -- check with
-`(df[["vec_a","vec_b","vec_c"]] != 0).any().any()` before training -- `False`
-means every kernel is native, the widths were never swept, and the base engine
-is the right choice.
+them.
+
+**There is no in-tree path from that driver to a trainable parquet today.**
+`gemm_full_benchmark.py` writes a CSV; `data_pipeline.py` reads a parquet or a
+`Shape N:`-prefixed streaming log, and on a CSV it parses zero rows, writes an
+empty parquet and exits 0. `convert_csv_to_parquet.py` is not the way round
+either -- it *succeeds* on that CSV but writes a non-canonical parquet
+(`op_type="gemm"`, uppercase `M/N/K`, `tflops` rather than `measured_tflops`,
+none of the nine geometry columns), which `build_training_dataset` then filters
+to zero rows even for the base engine.
+
+The parquet for a `gemm_universal_vec` model is currently built out of tree,
+mapping the driver's CSV onto `CANONICAL_COLUMNS` directly rather than
+re-parsing kernel names. Closing that gap is tracked separately; the pieces are
+present -- `data_pipeline.parse_kernel_name` already parses the driver's
+`gemm_bf16_rcr_..._vec4_4_8` names, including the widths -- only the CSV ingest
+branch is missing.
+
+On data without the columns the engine raises rather than silently encoding
+every kernel as native. Check before training with
+
+```python
+{"vec_a", "vec_b", "vec_c"}.issubset(df.columns)
+```
+
+and, if present, `(df[["vec_a","vec_b","vec_c"]] != 0).any().any()` -- `False`
+means every kernel is native and the widths were never swept. The membership
+test comes first because the bare `.any()` raises `KeyError` in exactly the
+case it is meant to diagnose.
 
 Native must be written as `0`, not as null. A null width means nothing parsed
 the kernel name, so the engine raises and names the offending column rather
@@ -342,11 +376,23 @@ Adding support for a new operation (e.g., `gemm_streamk`, `grouped_conv`):
 3. **Generate data**: run benchmarks across diverse shapes
 4. **Train**: `python3 train.py --operation gemm_streamk --dtype fp8 --data_dir data/ --out_dir models/`
 
-The training, evaluation and prediction infrastructure is op-agnostic: a new op
-needs a feature engine plus one entry each in `FEATURE_ENGINES` and
-`OPERATION_ENGINES` (`feature_engine.py`). Surrogate search needs more than a
-subclass when the op's parameter space is problem-dependent -- see the
-`gemm_universal_vec` note above.
+A new op needs a feature engine plus **five** hand-maintained entries, none of
+which is derived from the others. Missing any one fails, each at a different
+point and with a different error:
+
+| Add to | In | Symptom if missing |
+|---|---|---|
+| `FEATURE_ENGINES` | `feature_engine.py` | `ValueError: unknown feature engine` |
+| `OPERATION_ENGINES` | `feature_engine.py` | falls back to the GEMM engine |
+| `--operation` `choices` | `train.py` | argparse rejects the name |
+| `TARGET_COLUMNS` | `train.py` | `KeyError` on the op name |
+| `compute_group_keys` + `compute_tflops_efficiency` | `train.py` | `ValueError: Unknown operation type` |
+
+Only a *variant* of an existing op avoids the last three, by mapping to its
+base in `ENGINE_VARIANTS` -- that is how `gemm_universal_vec` reuses
+`gemm_universal`'s data, grouping and target column. Surrogate search needs
+more than a subclass when the op's parameter space is problem-dependent -- see
+the `gemm_universal_vec` note above.
 
 ## Tests
 

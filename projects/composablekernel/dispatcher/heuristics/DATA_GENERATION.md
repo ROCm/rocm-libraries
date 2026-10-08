@@ -327,7 +327,14 @@ To generate benchmark data for a new operation (e.g., `gemm_streamk`):
        -o data/gemm_streamk_fp8_gfx950.parquet --arch gfx950
    ```
 
-4. **Train**:
+4. **Register the op** in all five hand-maintained places -- `FEATURE_ENGINES`
+   and `OPERATION_ENGINES` in `feature_engine.py`, and `--operation`'s
+   `choices`, `TARGET_COLUMNS`, `compute_group_keys` and
+   `compute_tflops_efficiency` in `train.py`. None is derived from the others,
+   and each fails differently; see the table in `README.md` under "Extending to
+   New Ops". The training step below fails on the first one you miss.
+
+5. **Train**:
    ```bash
    python3 train.py --operation gemm_streamk --dtype fp8 --arch gfx950 \
        --data_dir data/ --out_dir models/gemm_streamk_fp8_gfx950
