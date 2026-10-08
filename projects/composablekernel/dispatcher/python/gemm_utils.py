@@ -1251,6 +1251,16 @@ def _use_ocp_fp8():
 # int32, everything else stores in its own dtype.
 _OUTPUT_DTYPE = {"fp8": "fp16", "bf8": "fp16", "int8": "int32"}
 
+# A/B dtypes whose host buffers are plain numpy arrays (no bit-level encoding).
+_NATIVE_NP = {
+    "fp16": np.float16,
+    "fp32": np.float32,
+    "int8": np.int8,
+}
+# C host buffer dtypes. int32 is an accumulator/output type only (int8 GEMMs),
+# so it is kept out of the A/B allow-list above.
+_C_NP = {**_NATIVE_NP, "int32": np.int32, "bf16": np.uint16}
+
 
 def _output_dtype(dtype: str) -> str:
     return _OUTPUT_DTYPE.get(dtype, dtype)
@@ -1392,14 +1402,50 @@ class GpuGemmRunner:
         B_lay = B if lb == "r" else B.T
         C_shape = (M, N) if lc == "r" else (N, M)
 
-        A_h = _encode_operand(A_lay, dtype, self._use_ocp)
-        B_h = _encode_operand(B_lay, dtype, self._use_ocp)
-        out_dtype, c_np = _c_numpy_dtype(dtype)
-        C_h = np.zeros(C_shape, dtype=c_np)
+        # Build A/B host buffers in the kernel's element dtype. The encode
+        # helpers (bf16/fp8/bf8) already force a contiguous float32 source, so an
+        # outer ascontiguousarray would only add a redundant copy; the native
+        # numpy dtypes (fp16/fp32/int8) still need it.
+        if dtype == "bf16":
+            A_h = _fp32_to_bf16_u16(A_lay)
+            B_h = _fp32_to_bf16_u16(B_lay)
+        elif dtype == "fp8":
+            A_h = _fp32_to_fp8_u8(A_lay, use_ocp=self._use_ocp)
+            B_h = _fp32_to_fp8_u8(B_lay, use_ocp=self._use_ocp)
+        elif dtype == "bf8":
+            A_h = _fp32_to_bf8_u8(A_lay, use_ocp=self._use_ocp)
+            B_h = _fp32_to_bf8_u8(B_lay, use_ocp=self._use_ocp)
+        elif dtype in _NATIVE_NP:
+            A_h = np.ascontiguousarray(A_lay, dtype=_NATIVE_NP[dtype])
+            B_h = np.ascontiguousarray(B_lay, dtype=_NATIVE_NP[dtype])
+        else:
+            # A silent fp16 fallback would hand the kernel buffers of the wrong
+            # element size (e.g. fp32 kernels would read fp16 data).
+            raise ValueError(
+                f"unsupported A/B dtype {dtype!r} in kernel {self._kernel_name!r}; "
+                "add it to _NATIVE_NP or an encode branch"
+            )
+
+        # The C buffer's element size must equal sizeof(CDataType): fp8/bf8
+        # accumulate into fp16, int8 into int32, otherwise the input dtype.
+        out_dtype = _output_dtype(dtype)
+        if out_dtype not in _C_NP:
+            # A silent fp16 fallback would size the host C buffer wrong for an
+            # unrecognized dtype (sizeof(CDataType) mismatch -> corrupt results
+            # across the C ABI). Fail loudly so a new dtype is added here.
+            raise ValueError(
+                f"unsupported C dtype {out_dtype!r} (from input dtype {dtype!r}); "
+                "add it to _C_NP so the host buffer matches sizeof(CDataType)"
+            )
+        C_h = np.zeros(C_shape, dtype=_C_NP[out_dtype])
 
         status, time_ms = self.lib.run(A_h, B_h, C_h, M, N, K)
 
-        C_dec = _decode_c(C_h, out_dtype)
+        # Decode the output back to a comparable numeric array.
+        if out_dtype == "bf16":
+            C_dec = _bf16_u16_to_fp32(C_h)
+        else:  # fp16 / fp32 / int32 are already directly comparable
+            C_dec = C_h
         C_out = C_dec if lc == "r" else C_dec.T
 
         tflops = (problem.flops / (time_ms * 1e-3)) / 1e12 if time_ms > 0 else 0.0
@@ -2525,10 +2571,6 @@ def _codegen_common():
     return codegen_common
 
 
-def _gfx1250_reject_reason_fn():
-    return _codegen_common().gfx1250_pipeline_reject_reason
-
-
 def _gfx1250_pipeline_supported(
     pipeline: str,
     scheduler: str,
@@ -2554,7 +2596,7 @@ def _gfx1250_pipeline_supported(
     8-bit warp_tile_k rule; an empty dtype skips it."""
     if pipeline not in ("comp_async", "comp_tdm", "comp_tdm_v2") and epilogue != "tdm":
         return True
-    reason = _gfx1250_reject_reason_fn()(
+    reason = _codegen_common().gfx1250_pipeline_reject_reason(
         arch,
         pipeline,
         epilogue,

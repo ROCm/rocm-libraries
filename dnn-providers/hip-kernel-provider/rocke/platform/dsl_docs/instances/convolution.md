@@ -4,6 +4,7 @@ This page covers:
 
 - `library/kernels/common/conv_implicit_gemm.py`
 - `library/kernels/common/conv_direct_grouped.py`
+- `library/kernels/common/conv_direct_nongrouped.py`
 - `library/kernels/common/img2col.py`
 - `instances/common/pooling.py`
 
@@ -21,6 +22,9 @@ Implicit GEMM:
 
 Direct grouped:
   Specialized streaming kernels for grouped small-channel cases (16c, 4c)
+
+Direct non-grouped (groups == 1):
+  LDS-staged, halo-inclusive input tile shared by all KH*KW taps
 ```
 
 ## Implicit-GEMM Convolution
@@ -478,7 +482,10 @@ Note this layout is different from `ConvProblem`:
 
 - `H`/`W` are input spatial; `Ho`/`Wo` are derived output spatial;
 - `KH`/`KW` not `R`/`S`;
-- single `PAD` and `stride` ints (no separate `pH`/`pW`/`sH`/`sW`/`dH`/`dW`); dilation is implicitly 1.
+- single `PAD` and `stride` ints (no separate `pH`/`pW`/`sH`/`sW`);
+- dilation is `dil_h`/`dil_w` (default 1; `Ho`/`Wo` use the dilated extent
+  `(KH-1)*dil_h + 1`). Only the non-grouped forward kernel computes a dilated
+  convolution; every other variant rejects one (`dilation_reason`).
 
 ### 16c Kernel
 
@@ -643,6 +650,125 @@ Streams the input rows through the same runtime `scf_for_iter` as
 Parity gate: configs 10 (stride=1, groups=3) and 11 (stride=2, groups=3) in
 `tests/instances/parity/conv_direct_grouped_emit.{c,py}`.
 
+### Depthwise Tiled Kernel (`DirectDepthwiseTiledSpec`)
+
+`DirectDepthwiseTiledSpec` / `build_direct_depthwise_tiled`. Output-stationary
+depthwise forward for any group count and filters up to 31x31.
+
+```python
+@dataclass(frozen=True)
+class DirectDepthwiseTiledSpec:
+    problem: DirectConvProblem
+    name: str = "direct_depthwise_tiled"
+    block_w: int = 8        # output columns per block
+    block_h: int = 4        # output rows per block
+    block_waves: int = 1    # waves per block (64 channels each)
+    unroll_rows: bool = False
+    wave_size: int = 64
+```
+
+The row-streaming `DirectDepthwiseSpec` holds all `KH x KW` weights and `KH`
+accumulator slots per column and unrolls `KH` rows per loop iteration: its
+registers and loop body grow with `KH^2 * KW`, so past 11x11 it spills heavily
+(a 31x31 case was observed with ~5000 spilled VGPRs) and compiles slowly. This
+kernel is linear in the filter width:
+
+- a block owns a `block_h x block_w` output tile; the grid also splits the
+  output rows: `(ceil(Wo/block_w), ceil(C/block_ch), N * ceil(Ho/block_h))`;
+- a runtime loop walks the filter rows `r`, holding one weight row (the next
+  one prefetched) and the input rows `ho*stride - PAD + r` of the tile;
+- with stride 1, iteration `r+1` reads the rows of iteration `r` shifted by
+  one, so `block_h - 1` rows are carried and one row is loaded per iteration;
+  stride `s` splits the filter rows into `s` phases with a window each;
+- `unroll_rows` unrolls the (baked) filter-row loop so the scheduler overlaps
+  rows; the validator caps the unrolled body at `_DW_TILED_UNROLL_MAX_FMAS`.
+
+Outputs are indexed directly, so it is not tied to "same" padding. Constraints
+(`is_valid_depthwise_tiled_spec` / `rocke_direct_depthwise_tiled_is_valid_spec`):
+`cpg == kpg == 1`, `KH, KW <= 32`, `stride <= KH`, no dilation, `Ho, Wo >= 1`,
+and `live_regs = block_h*block_w + block_h*n_cols + 2*KW <= 256`
+(`n_cols = (block_w-1)*stride + KW`). The register budget and the unroll cap
+bound the compile cost of both rolled and unrolled configurations.
+
+The sweeps skip a row-streaming config that would spill
+(`depthwise_stream_register_reason`) and leave its shape to this kernel.
+
+Parity gate: configs 57-62 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`.
+
+## Direct Non-grouped Convolution
+
+Source: `library/kernels/common/conv_direct_nongrouped.py`. Full write-up (every
+optimization, rejected levers, gates):
+`library/kernels/common/README_conv_direct_nongrouped.md`.
+
+The `groups == 1` counterpart of the grouped direct kernels, which draw all
+their parallelism from `groups` and degenerate to one wave per output row when
+there is a single group. It shares `DirectConvProblem` and the AOT direct-conv
+kernarg block `conv_direct_arg_names(direction="fwd")` (launch values from
+`ConvArgs.from_problem(problem)`). Batch, extents, `C` (`p_total_c`), `K`
+(`p_total_k`) and the strides are runtime; the filter, stride, `PAD`, dtype and
+tile are baked. Unlike the grouped kernels it does not bake the channel counts.
+
+```python
+@dataclass(frozen=True)
+class DirectNongroupedConvSpec:
+    problem: DirectConvProblem      # groups must be 1
+    tile_h: int = 16; tile_w: int = 32; tile_k: int = 128; ck: int = 16
+    waves_m: int = 2; waves_n: int = 4
+    atom: str = "32x32x16"          # 32x32x16 | 32x32x8 | 16x16x32 | 16x16x16
+    lds_pad: int = 8
+    chiplet_swizzle: bool = True; swizzle_wgm: int = 8
+    double_buffer: bool = False
+    iglp: int | None = None; waves_per_eu: int | None = None
+```
+
+Algorithm:
+
+```text
+for each channel chunk (runtime scf.for, accumulators + next-chunk loads carried):
+    barrier; publish prefetched X (halo-inclusive, [pos][c + lds_pad]) and
+             W (pre-swizzled to MFMA fragment order) into LDS; barrier
+    issue global loads for chunk i+1          (software prefetch)
+    for k_atom, s:  read X fragments by *input* row  ((ROWS_W-1)*stride + KH of them)
+        for r:      read W fragments for tap (r, s)
+                    mfma into acc[m_tile][row][col_block] from X row  row*stride + r
+epilogue: each 4-channel accumulator quad -> one dwordx2 buffer store
+```
+
+Structural properties:
+
+- activation fragments shared across the `KH` taps of a filter column;
+- staging predication folded into the base offset before the loop (out-of-range
+  buffer loads return zero), so the loop body has no compare/select;
+- weights stored in fragment order, so the LDS store and read are both linear
+  in `lane`; activation channel stride padded by `lds_pad` for conflict-free
+  `ds_read_b128`;
+- two barriers per chunk (one with `double_buffer`), `iglp_opt` leading the loop
+  body when set;
+- each LDS array carries a scratch tail for staging slots past the tile end;
+- `validate()` caps accumulators at 256 registers per lane (larger tiles hang
+  the backend scheduler rather than failing);
+- the runtime channel-loop trip count is clamped to `max(C/ck, 1)` (a no-op
+  after `validate()`): without the clamp LLVM keeps a zero-trip guard and
+  schedules the prefetch loads late in the body.
+
+Grid: `spec.grid() = (n_w_tiles * n_h_tiles * N * n_k_tiles, 1, 1)`; the kernel
+derives the tile counts from its kernargs and decodes the block id through
+`chiplet_aware_super_tile_dynamic` with the channel tile fast-varying.
+Candidates: `nongrouped_specs(problem, arch)`;
+`tile_w_candidates(Wo, atom_tile)` prefers widths that divide `Wo` exactly, and
+the 16-wide atoms exist for widths that are not a multiple of 32. The AOT cache
+(`benchmarks/common/direct_kernel_sweep.py`, variant `direct_nongrouped`) builds
+the shape-independent `nongrouped_knobs(arch, dtype)` grid for 3x3 stride 1/2
+and offers a problem only the widths `tile_w_candidates` would pick for it.
+
+C++ engine twin: `rocke_build_direct_conv_nongrouped` in
+`cpp/instances/common/conv_direct_nongrouped.cpp`; byte-identity gated by
+`library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 33+)
+(`tools/check_byte_identity.py --only conv_direct_grouped`), Python IR golden
+`conv_direct_nongrouped/*` in `tests/instances/rocke_ir_parity_harness.py`, binding
+`rocke_engine.conv_direct_nongrouped_*` / `rocke.core.backend.lower_conv_direct_nongrouped`.
+
 ## Img2Col
 
 Source: `library/kernels/common/img2col.py`.
@@ -721,5 +847,7 @@ Grid: `ceil_div(total_output_elements, block_size)`.
 - Async loader writes lane-contiguous LDS but consumer assumes padded / swizzled physical layout.
 - K-packed MFMA fold packs S/C channels in the wrong order (close but not bit-correct).
 - Direct conv circular accumulator slot is not reset after store.
+- Staging loop sized in whole thread-passes without a scratch tail: the last pass writes past the LDS array into the neighbouring allocation (first output row correct, later rows wrong).
+- C++ port folds two emitting builder calls into one argument list: C++ argument evaluation order is unspecified, so `arith.constant`s reorder and byte-identity breaks.
 - Output descriptor uses NHWC instead of NHWK stride order.
 - Benchmark compares implicit-GEMM graph mode to direct per-launch mode without labeling launch overhead.
