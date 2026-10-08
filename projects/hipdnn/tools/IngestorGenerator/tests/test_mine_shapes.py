@@ -590,188 +590,6 @@ class TestGradientSpellingsAreBothExcluded:
         assert len(json.loads(out.read_text())) == 1
 
 
-class TestShapeDirectory:
-    """`--shape-dir` reads whatever a publisher handed over.
-
-    This is the coverage the retired Python corpus assembler's own suite held: that
-    directory was the model pool's only source, and with the assembler deleted the
-    behaviour is pinned here, where the reader now lives.
-
-    A directory is a POINTER, not a format: the three tabular forms and hipDNN graph
-    JSON are all read from one flag, because a publisher who mixes them is the ordinary
-    case and a tree that mines as zero rows is indistinguishable from one nobody pointed
-    at.
-    """
-
-    def _mine(self, tmp_path: Path, *extra, arch="gfx942") -> tuple[int, str, list]:
-        out = tmp_path / "shapes.json"
-        result = subprocess.run(
-            [sys.executable, str(_MINE), "--shape-dir", str(tmp_path / "pub"),
-             "--arch", arch, "--out", str(out), *extra],
-            capture_output=True, text=True,
-        )
-        shapes = json.loads(out.read_text()) if out.exists() else []
-        return result.returncode, result.stdout + result.stderr, shapes
-
-    @pytest.fixture
-    def published(self, tmp_path) -> Path:
-        directory = tmp_path / "pub"
-        directory.mkdir()
-        return directory
-
-    def test_reads_csv_json_and_key_value_lines_from_one_flag(self, published, tmp_path):
-        (published / "a.csv").write_text(
-            "batch,num_query_heads,num_kv_heads,seqlen_q,seqlen_k,head_size,dtype\n"
-            "1,32,8,4096,4096,128,bf16\n"
-        )
-        (published / "b.json").write_text(json.dumps(
-            [{"b": 2, "hq": 16, "hkv": 16, "sq": 512, "skv": 512, "d": 64,
-              "data_type": "fp16"}]))
-        (published / "c.txt").write_text(
-            "# a hand-maintained list\n"
-            "batch=4 heads=8 seqlen_q=1 seqlen_kv=2048 head_dim=128 dtype=bf16\n"
-            "\n")
-        rc, log, shapes = self._mine(tmp_path)
-        assert rc == 0, log
-        assert sorted(s["batch"] for s in shapes) == [1, 2, 4]
-        assert all(s["_provenance"]["source"] == "shape_dir" for s in shapes)
-
-    def test_a_row_missing_a_required_field_is_not_a_shape_row(self, published, tmp_path):
-        """A publisher's tree holds README tables and index files too. Those are skipped,
-        not mined as shapes with invented dimensions."""
-        (published / "index.json").write_text(json.dumps(
-            [{"model": "Llama-3-8B", "notes": "see ticket"}]))
-        (published / "real.csv").write_text(
-            "batch,heads_q,seqlen_q,seqlen_kv,head_dim\n1,32,4096,4096,128\n")
-        rc, log, shapes = self._mine(tmp_path)
-        assert rc == 0, log
-        assert len(shapes) == 1
-
-    def test_a_graph_document_is_left_to_the_graph_reader(self, published, tmp_path):
-        """`from_shape_dir` begins with `from_graph_corpus`, so a graph in the tree is
-        mined ONCE -- as a graph. Reading it a second time as a record would double the
-        weight of whichever regime it lands in."""
-        (published / "g.json").write_text(json.dumps({
-            "tensors": [
-                {"uid": 1, "name": "q", "dims": [1, 32, 4096, 128], "data_type": "bf16"},
-                {"uid": 2, "name": "k", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
-                {"uid": 3, "name": "v", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
-            ],
-            "nodes": [{"type": "SdpaAttributes", "attributes": {
-                "q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3}}],
-        }))
-        rc, log, shapes = self._mine(tmp_path)
-        assert rc == 0, log
-        assert [s["_provenance"]["source"] for s in shapes] == ["graphs"]
-
-    def test_a_row_naming_another_arch_is_dropped_but_an_unnamed_one_is_kept(
-            self, published, tmp_path):
-        """Most publishers record a shape, not a target. Refusing the rows that name no
-        arch would mine nothing from the common case."""
-        (published / "a.csv").write_text(
-            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,arch\n"
-            "1,32,4096,4096,128,gfx942\n"
-            "2,32,512,512,128,gfx950\n"
-            "4,32,128,128,128,\n")
-        rc, log, shapes = self._mine(tmp_path)
-        assert rc == 0, log
-        assert sorted(s["batch"] for s in shapes) == [1, 4]
-        assert "named another arch" in log
-
-    def test_an_unknown_mask_spelling_is_refused_rather_than_guessed(
-            self, published, tmp_path):
-        """`bottom_right` is a genuinely different mask from top-left causal. Mapping it
-        here would put a differently-masked problem in the corpus under the row's name."""
-        (published / "a.csv").write_text(
-            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask\n"
-            "1,32,4096,4096,128,bottom_right\n")
-        rc, log, _ = self._mine(tmp_path)
-        assert rc != 0
-        assert "unknown mask spelling" in log
-
-    def test_a_boolean_causal_column_is_read_as_a_mask(self, published, tmp_path):
-        (published / "a.csv").write_text(
-            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,is_causal\n"
-            "1,32,4096,4096,128,true\n"
-            "2,32,4096,4096,128,false\n")
-        rc, log, shapes = self._mine(tmp_path)
-        assert rc == 0, log
-        assert sorted(s["mask_type"] for s in shapes) == [0, 1]
-
-
-class TestQueryCsv:
-    """`--out-query-csv` is the handoff to `hipdnn_corpus_gen --model-shapes`.
-
-    It is a NARROWING -- the mined record is the union of what four sources carry, and
-    the CSV is what one operation declaration can express -- so what it drops is counted
-    and named. A model pool that silently shrinks is indistinguishable from a miner
-    nobody pointed at anything.
-    """
-
-    def _mine(self, tmp_path: Path, rows: str) -> tuple[int, str, list[str]]:
-        published = tmp_path / "pub"
-        published.mkdir()
-        (published / "a.csv").write_text(rows)
-        query = tmp_path / "model-shapes.csv"
-        result = subprocess.run(
-            [sys.executable, str(_MINE), "--shape-dir", str(published),
-             "--arch", "gfx942", "--out-query-csv", str(query)],
-            capture_output=True, text=True,
-        )
-        lines = query.read_text().splitlines() if query.exists() else []
-        return result.returncode, result.stdout + result.stderr, lines
-
-    def test_writes_the_q_columns_the_corpus_tool_reads(self, tmp_path):
-        rc, log, lines = self._mine(
-            tmp_path,
-            "batch,heads_q,heads_kv,seqlen_q,seqlen_kv,head_dim,dtype,mask\n"
-            "1,32,8,4096,4096,128,bf16,causal\n")
-        assert rc == 0, log
-        assert lines[0] == ("name,op,q.batch,q.heads,q.heads_kv,q.seqlen_q,"
-                            "q.seqlen_k,q.head_dim,q.is_causal,q.alignment,q.generate_stats,"
-                            "q.dtype")
-        assert lines[1].split(",")[1:] == [
-            "sdpa_fwd", "1", "32", "8", "4096", "4096", "128", "true",
-            "top_left", "false", "bf16"]
-
-    def test_alignment_is_always_top_left(self, tmp_path):
-        """No source here can say bottom-right -- `MASK_TYPE` deliberately carries no
-        spelling for it -- but the column is written anyway, because the declaration's
-        argument resolution is strict about a parameter it reads being present."""
-        rc, log, lines = self._mine(
-            tmp_path, "batch,heads_q,seqlen_q,seqlen_kv,head_dim\n1,32,4096,4096,128\n")
-        assert rc == 0, log
-        assert lines[1].split(",")[-3] == "top_left"
-
-    def test_generate_stats_is_always_false(self, tmp_path):
-        """Every source records inference forwards; none says a shape also ran as a training
-        forward, so the column is written as false rather than left for the tool to refuse."""
-        rc, log, lines = self._mine(
-            tmp_path, "batch,heads_q,seqlen_q,seqlen_kv,head_dim\n1,32,4096,4096,128\n")
-        assert rc == 0, log
-        assert lines[1].split(",")[-2] == "false"
-
-    def test_a_windowed_shape_is_dropped_by_name_and_counted(self, tmp_path):
-        """`sdpa_fwd` declares no window parameter, so a swin shape cannot be written --
-        but it is reported, not discarded in silence."""
-        rc, log, lines = self._mine(
-            tmp_path,
-            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask\n"
-            "1,32,4096,4096,128,swin\n"
-            "2,32,4096,4096,128,causal\n")
-        assert rc == 0, log
-        assert len(lines) == 2
-        assert "dropped     1" in log and "windowed mask" in log
-
-    def test_dropping_every_shape_fails_rather_than_writing_an_empty_pool(self, tmp_path):
-        rc, log, lines = self._mine(
-            tmp_path,
-            "batch,heads_q,seqlen_q,seqlen_kv,head_dim,mask\n1,32,4096,4096,128,swin\n")
-        assert rc != 0
-        assert len(lines) == 1
-        assert "the model pool would be empty" in log
-
-
 class TestEveryRequestSemanticSurvivesMining:
     """A field dropped during mining sends the dispatcher a request the caller did not
     make; a field dropped from the corpus IDENTITY merges two requests into one variant,
@@ -929,6 +747,78 @@ class TestEveryRequestSemanticSurvivesMining:
         assert "1 duplicate shape(s) merged" in output
         suites = {p["suite"] for p in shapes[0]["_provenance_occurrences"]}
         assert suites == {"suite_a", "suite_b"}, "a merged duplicate lost its vote"
+
+
+def _emitted(variant: str, seqlens: list[int], hq: int, hkv: int, **over) -> dict:
+    """One record as the dense prefill benchmarks' `--emit-shapes` writes it: the
+    rocKE trace schema plus an explicit `causal`, and `varlen`/`seqlens` for a packed
+    ragged batch. Synthetic, so the tests do not follow the benchmarks' shape lists."""
+    record = {
+        "model": "benchmark_dense_prefill_live",
+        "variant": variant,
+        "label": variant,
+        "num_seqs": len(seqlens),
+        "max_seqlen_q": max(seqlens),
+        "max_seqlen_k": max(seqlens),
+        "num_query_heads": hq,
+        "num_kv_heads": hkv,
+        "head_size": 128,
+        "q_dtype": "bf16",
+        "causal": True,
+        "window_size": [-1, 0],
+        "has_sinks": False,
+    }
+    record.update(over)
+    return record
+
+
+class TestAnEmittedBenchmarkShapeListIsMinable:
+    """The dense prefill benchmarks write their shape lists with `--emit-shapes` in
+    the trace schema this miner reads. A whole emitted list, mined through the CLI,
+    keeps the full, windowed and packed rows apart from the causal ones."""
+
+    def _mine(self, tmp_path: Path, *records: dict):
+        tree = tmp_path / "bench"
+        tree.mkdir()
+        (tree / "dense_prefill_live_shapes.json").write_text(
+            "".join(json.dumps(r) + "\n" for r in records)
+        )
+        out = tmp_path / "shapes.json"
+        mined = subprocess.run(
+            [sys.executable, str(_MINE), "--rocke-bench", str(tree), "--out", str(out)],
+            capture_output=True,
+            text=True,
+        )
+        assert mined.returncode == 0, mined.stdout + mined.stderr
+        return mined.stdout, json.loads(out.read_text())
+
+    def test_full_and_windowed_rows_stay_distinct_and_repeats_merge(self, tmp_path):
+        output, shapes = self._mine(
+            tmp_path,
+            _emitted("causal/mha", [1024], 8, 8),
+            _emitted("causal/gqa", [1024], 8, 2),
+            _emitted("full/mha", [1024], 8, 8, causal=False, window_size=[-1, -1]),
+            _emitted("swa/w512", [1024], 8, 8, window_size=[511, 0]),
+            # The persistent mode re-measures a causal shape on another grid.
+            _emitted("persistent/mha", [1024], 8, 8),
+        )
+        assert len(shapes) == 4, output
+        assert "1 duplicate shape(s) merged" in output
+        by_mask = sorted((s["mask_type"], s["sliding_window"]) for s in shapes)
+        assert by_mask == [(0, 0), (1, 0), (1, 0), (2, 512)], by_mask
+        full = next(s for s in shapes if s["mask_type"] == 0)
+        assert (full["nhead_q"], full["nhead_k"]) == (8, 8)
+
+    def test_packed_varlen_rows_are_skipped_and_counted(self, tmp_path):
+        output, shapes = self._mine(
+            tmp_path,
+            _emitted("dense/s512", [512], 8, 8),
+            _emitted("dense/s2048", [2048], 8, 8),
+            _emitted("varlen/4seq", [512, 1024, 300, 2048], 8, 8, varlen=True),
+        )
+        assert sorted(s["seqlen_q"] for s in shapes) == [512, 2048], output
+        assert all(s["batch"] == 1 for s in shapes)
+        assert "1 rocKE varlen record(s) skipped" in output
 
 
 class TestShapeDirectory:
@@ -1236,75 +1126,3 @@ class TestQueryCsv:
         record = dict(zip(header.split(","), row.split(",")))
         assert record["q.is_causal"] == "true"
         assert record["q.alignment"] == "bottom_right"
-
-
-def _emitted(variant: str, seqlens: list[int], hq: int, hkv: int, **over) -> dict:
-    """One record as the dense prefill benchmarks' `--emit-shapes` writes it: the
-    rocKE trace schema plus an explicit `causal`, and `varlen`/`seqlens` for a packed
-    ragged batch. Synthetic, so the tests do not follow the benchmarks' shape lists."""
-    record = {
-        "model": "benchmark_dense_prefill_live",
-        "variant": variant,
-        "label": variant,
-        "num_seqs": len(seqlens),
-        "max_seqlen_q": max(seqlens),
-        "max_seqlen_k": max(seqlens),
-        "num_query_heads": hq,
-        "num_kv_heads": hkv,
-        "head_size": 128,
-        "q_dtype": "bf16",
-        "causal": True,
-        "window_size": [-1, 0],
-        "has_sinks": False,
-    }
-    record.update(over)
-    return record
-
-
-class TestAnEmittedBenchmarkShapeListIsMinable:
-    """The dense prefill benchmarks write their shape lists with `--emit-shapes` in
-    the trace schema this miner reads. A whole emitted list, mined through the CLI,
-    keeps the full, windowed and packed rows apart from the causal ones."""
-
-    def _mine(self, tmp_path: Path, *records: dict):
-        tree = tmp_path / "bench"
-        tree.mkdir()
-        (tree / "dense_prefill_live_shapes.json").write_text(
-            "".join(json.dumps(r) + "\n" for r in records)
-        )
-        out = tmp_path / "shapes.json"
-        mined = subprocess.run(
-            [sys.executable, str(_MINE), "--rocke-bench", str(tree), "--out", str(out)],
-            capture_output=True,
-            text=True,
-        )
-        assert mined.returncode == 0, mined.stdout + mined.stderr
-        return mined.stdout, json.loads(out.read_text())
-
-    def test_full_and_windowed_rows_stay_distinct_and_repeats_merge(self, tmp_path):
-        output, shapes = self._mine(
-            tmp_path,
-            _emitted("causal/mha", [1024], 8, 8),
-            _emitted("causal/gqa", [1024], 8, 2),
-            _emitted("full/mha", [1024], 8, 8, causal=False, window_size=[-1, -1]),
-            _emitted("swa/w512", [1024], 8, 8, window_size=[511, 0]),
-            # The persistent mode re-measures a causal shape on another grid.
-            _emitted("persistent/mha", [1024], 8, 8),
-        )
-        assert len(shapes) == 4, output
-        assert "1 duplicate shape(s) merged" in output
-        by_mask = sorted((s["mask_type"], s["sliding_window"]) for s in shapes)
-        assert by_mask == [(0, 0), (1, 0), (1, 0), (2, 512)], by_mask
-        full = next(s for s in shapes if s["mask_type"] == 0)
-        assert (full["nhead_q"], full["nhead_k"]) == (8, 8)
-
-    def test_packed_varlen_rows_are_skipped_and_counted(self, tmp_path):
-        output, shapes = self._mine(
-            tmp_path,
-            _emitted("dense/s512", [512], 8, 8),
-            _emitted("dense/s2048", [2048], 8, 8),
-            _emitted("varlen/4seq", [512, 1024, 300, 2048], 8, 8, varlen=True),
-        )
-        assert sorted(s["seqlen_q"] for s in shapes) == [512, 2048], output
-        assert all(s["batch"] == 1 for s in shapes)
-        assert "1 rocKE varlen record(s) skipped" in output
