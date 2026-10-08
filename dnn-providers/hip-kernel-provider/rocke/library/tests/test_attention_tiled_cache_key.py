@@ -13,10 +13,12 @@ selector the spec builder consults. Two failure directions:
     so every batch count or seqlen compiles its own copy.
 
 Layers:
-  * Invariant sweep: across every selector threshold, an equal key implies an
-    equal spec (plus builder route and compile backend).
+  * Invariant sweep: across every selector threshold, two problems share a key
+    exactly when they build the same spec, builder route and compile backend.
   * Targeted pairs: shapes that resolve to different selector outputs get
-    different keys.
+    different keys; shapes that resolve to the same outputs share a key and
+    lower to byte-identical IR.
+  * Launch geometry: the grid caches still separate batch counts.
   * ``_binary_search_iters`` mirrors every spec class's ``binary_search_iters``.
 
 No GPU required.
@@ -153,11 +155,15 @@ def _sweep(arch):
 
 @pytest.mark.parametrize("arch", ARCHES)
 @pytest.mark.parametrize("path", ("2d", "3d"))
-def test_equal_key_implies_equal_build(pin_arch, arch, path):
-    """No two problems may share a key while building different kernels.
+def test_key_matches_build_identity(pin_arch, arch, path):
+    """Key equality and build equality must coincide across the sweep.
 
-    This is the guard for the next selector: one added to the spec builder but
-    not to the key fails here as soon as the sweep straddles its threshold.
+    Equal key, different build: under-keying. This is the guard for the next
+    selector; one added to the spec builder but not to the key fails here as
+    soon as the sweep straddles its threshold.
+
+    Equal build, different key: over-keying. A raw shape field, or a selector
+    the arch's builder never reads, compiles duplicate binaries.
     """
     pin_arch(arch)
     if path == "2d":
@@ -168,6 +174,7 @@ def test_equal_key_implies_equal_build(pin_arch, arch, path):
         key_fn, built_fn = au._tiled_3d_cache_key, _built_3d
 
     first = {}
+    key_of_build = {}
     checked = 0
     for problem in _sweep(arch):
         if not supported(problem)[0]:
@@ -194,6 +201,14 @@ def test_equal_key_implies_equal_build(pin_arch, arch, path):
             pytest.fail(
                 f"{arch} {path}: one key, two kernels\n  {other}\n  {problem}\n"
                 f"  differing: {diff}"
+            )
+        build_id = repr(sorted((name, repr(value)) for name, value in built.items()))
+        other_key, other = key_of_build.setdefault(build_id, (key, problem))
+        if other_key != key:
+            diff = [(i, a, b) for i, (a, b) in enumerate(zip(other_key, key)) if a != b]
+            pytest.fail(
+                f"{arch} {path}: one kernel, two keys\n  {other}\n  {problem}\n"
+                f"  differing key entries (index, a, b): {diff}"
             )
     assert checked > 0
 
@@ -226,6 +241,8 @@ def test_search_bucket_edge_splits_2d_key(pin_arch, arch):
     a = P(total_q=3 * 1024, num_seqs=3, **base)
     b = P(total_q=4 * 1024, num_seqs=4, **base)
     _assert_split(au._tiled_cache_key, _built_2d, a, b, "binary_search_iters")
+    # The trip count is a literal in the IR, so the binaries really differ.
+    assert _lower_2d(a, arch, "llvm22") != _lower_2d(b, arch, "llvm22")
 
 
 @pytest.mark.parametrize("arch", ("gfx942", "gfx950"))
@@ -282,6 +299,159 @@ def test_single_batch_interleave_splits_key(pin_arch):
     a = P(total_q=257, num_seqs=1, **base)
     b = P(total_q=514, num_seqs=2, **base)
     _assert_split(au._tiled_cache_key, _built_2d, a, b, "use_softmax_mfma_interleave")
+
+
+# ---------------------------------------------------------------------------
+# Same selector outputs -> same key and byte-identical IR
+# ---------------------------------------------------------------------------
+
+
+def _lower_2d(problem, arch, flavor):
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    _, build, _ = au._tiled_2d_impl(arch)
+    spec = au._tiled_spec_from_problem(problem)
+    route = au._gfx942_4warp_route(problem)
+    kernel = route.builder(spec, arch=arch) if route else build(spec, arch=arch)
+    return _lower_kernel_to_llvm_python(kernel, arch=arch, llvm_flavor=flavor)
+
+
+def _lower_3d(problem, arch, flavor):
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    _, reduce_spec_cls, build_seg, build_red, _ = au._tiled_3d_impl(arch)
+    seg = build_seg(au._tiled_3d_spec_from_problem(problem), arch=arch)
+    red = build_red(
+        reduce_spec_cls(
+            head_size=problem.head_size,
+            num_query_heads=problem.num_query_heads,
+            num_kv_heads=problem.num_kv_heads,
+            dtype=problem.dtype,
+            num_segments=au._num_segments(problem),
+            waves_per_eu=au._select_3d_waves_per_eu(problem),
+        ),
+        arch=arch,
+    )
+    return tuple(
+        _lower_kernel_to_llvm_python(k, arch=arch, llvm_flavor=flavor)
+        for k in (seg, red)
+    )
+
+
+_D64_GQA8 = dict(
+    num_query_heads=64, num_kv_heads=8, head_size=64, block_size=32, dtype="bf16"
+)
+_D128_DECODE = dict(
+    num_query_heads=32,
+    num_kv_heads=8,
+    head_size=128,
+    block_size=16,
+    max_seqlen_q=1,
+    max_seqlen_k=8192,
+    dtype="bf16",
+)
+
+# (id, arch, path, problem_a, problem_b). Each pair resolves to the same
+# selector outputs, so the pair must share one binary.
+_SHARED_PAIRS = [
+    *(
+        (
+            f"{arch}-2d-ns4-vs-ns7",
+            arch,
+            "2d",
+            P(
+                total_q=4 * 1024,
+                num_seqs=4,
+                max_seqlen_q=1024,
+                max_seqlen_k=1024,
+                use_fp8=arch == "gfx1250",
+                **_D64_GQA8,
+            ),
+            P(
+                total_q=7 * 1024,
+                num_seqs=7,
+                max_seqlen_q=1024,
+                max_seqlen_k=1024,
+                use_fp8=arch == "gfx1250",
+                **_D64_GQA8,
+            ),
+        )
+        for arch in ARCHES
+    ),
+    # Inside one max_seqlen_q band of the gfx950 combo cohort (512 < q <= 768).
+    (
+        "gfx950-2d-q600-vs-q700",
+        "gfx950",
+        "2d",
+        P(total_q=1200, num_seqs=2, max_seqlen_q=600, max_seqlen_k=600, **_D64_GQA8),
+        P(total_q=1400, num_seqs=2, max_seqlen_q=700, max_seqlen_k=700, **_D64_GQA8),
+    ),
+    *(
+        (
+            f"{arch}-3d-ns4-vs-ns7",
+            arch,
+            "3d",
+            P(total_q=4, num_seqs=4, **_D128_DECODE),
+            P(total_q=7, num_seqs=7, **_D128_DECODE),
+        )
+        for arch in ("gfx942", "gfx950")
+    ),
+    # gfx1250 3D floors the search at 32 iterations, so ns 3 and 4 share a
+    # binary even though they sit in different log2 buckets.
+    (
+        "gfx1250-3d-ns3-vs-ns4",
+        "gfx1250",
+        "3d",
+        P(total_q=3, num_seqs=3, max_seqlen_q=1, max_seqlen_k=8192, **_D64_GQA8),
+        P(total_q=4, num_seqs=4, max_seqlen_q=1, max_seqlen_k=8192, **_D64_GQA8),
+    ),
+]
+
+
+@pytest.mark.parametrize("flavor", ("llvm20", "llvm22"))
+@pytest.mark.parametrize(
+    "arch,path,a,b", [p[1:] for p in _SHARED_PAIRS], ids=[p[0] for p in _SHARED_PAIRS]
+)
+def test_same_outputs_share_key_and_ir(pin_arch, arch, path, a, b, flavor):
+    pin_arch(arch)
+    key_fn, lower = (
+        (au._tiled_cache_key, _lower_2d)
+        if path == "2d"
+        else (au._tiled_3d_cache_key, _lower_3d)
+    )
+    assert a.num_seqs != b.num_seqs or a.max_seqlen_q != b.max_seqlen_q
+    assert key_fn(a) == key_fn(b)
+    assert lower(a, arch, flavor) == lower(b, arch, flavor)
+
+
+# ---------------------------------------------------------------------------
+# Launch geometry still separates batch counts
+# ---------------------------------------------------------------------------
+
+
+def test_shape_key_carries_batch_and_token_counts():
+    base = dict(max_seqlen_q=100, max_seqlen_k=100, **_D64_GQA8)
+    a = P(total_q=400, num_seqs=4, **base)
+    b = P(total_q=400, num_seqs=7, **base)
+    c = P(total_q=700, num_seqs=7, **base)
+    key = ("k",)
+    assert au._shape_key(key, a) != au._shape_key(key, b)
+    assert au._shape_key(key, b) != au._shape_key(key, c)
+
+
+def test_launch_meta_separates_num_seqs_under_one_key(pin_arch):
+    # Same binary (one cache key) and same total_q, but the grid adds one
+    # padding q-block per sequence, so the launch geometry must differ.
+    pin_arch("gfx950")
+    base = dict(total_q=400, max_seqlen_q=100, max_seqlen_k=100, **_D64_GQA8)
+    a = P(num_seqs=4, **base)
+    b = P(num_seqs=7, **base)
+    key = au._tiled_cache_key(a)
+    assert key == au._tiled_cache_key(b)
+    au._2D_LAUNCH_META.clear()
+    grid_a = au._get_2d_launch_meta(a, key).grid
+    grid_b = au._get_2d_launch_meta(b, key).grid
+    assert grid_b[1] - grid_a[1] == b.num_seqs - a.num_seqs
 
 
 # ---------------------------------------------------------------------------

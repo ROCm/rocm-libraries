@@ -1466,15 +1466,14 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     missing from the key lets two shapes that build different kernels share
     one cache slot. ``num_seqs`` reaches IR only through
     ``_binary_search_iters``. Launch values that scale with the shape (the
-    grid) are keyed separately in ``_get_2d_launch_meta``. When adding a
+    grid) are keyed separately through ``_shape_key``. When adding a
     selector to ``_tiled_spec_from_problem``, add its resolved output here;
     ``test_attention_tiled_cache_key.py`` sweeps the selector thresholds and
-    fails if two problems share a key but build different specs.
+    fails wherever key equality and built-spec equality disagree.
     """
     return (
         "tiled",
         _resolve_attention_arch(),
-        problem.num_seqs,
         _binary_search_iters(problem),
         problem.num_query_heads,
         problem.num_kv_heads,
@@ -3220,11 +3219,10 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
 
     Same contract as ``_tiled_cache_key``: static fields plus resolved selector
     outputs, no raw dynamic shape field. Grid and workspace values that scale
-    with the shape are keyed separately in ``_get_3d_pipeline``.
+    with the shape are keyed separately through ``_shape_key``.
     """
     base = (
         "tiled3d",
-        problem.num_seqs,
         problem.num_query_heads,
         problem.num_kv_heads,
         problem.head_size,
@@ -3445,6 +3443,9 @@ def _run_3d_tiled(
         graph_key = (
             cache_key,
             int(problem.total_q),
+            # The captured launch bakes in the num_seqs kernarg and the segment
+            # grid, and cache_key no longer separates batch counts.
+            int(problem.num_seqs),
             int(stream),
             id(q),
             id(k),
@@ -4025,6 +4026,21 @@ def attention_3d_workspace_nbytes(
     )
 
 
+def _shape_key(cache_key: Tuple, problem: UnifiedAttentionProblem) -> Tuple:
+    """Extend a binary cache key with the shape values the launch derives from.
+
+    The tiled binaries are shared across batch counts and token counts, but the
+    grids (``total_q // block_q + num_seqs``), the 3D reduce grid and the 3D
+    workspace are not. Everything cached per launch geometry keys on this.
+    """
+    return cache_key + (
+        "total_q",
+        int(problem.total_q),
+        "num_seqs",
+        int(problem.num_seqs),
+    )
+
+
 def _get_3d_pipeline(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
@@ -4032,7 +4048,9 @@ def _get_3d_pipeline(
     *,
     tuning_spec=None,
 ) -> _Attention3DPrepared:
-    prepared_key = cache_key + ("total_q", int(problem.total_q))
+    # The prepared pipeline owns both launch grids and the workspace, so it is
+    # per shape; the HSACO pair under cache_key is shared.
+    prepared_key = _shape_key(cache_key, problem)
     if prepared_key in _3D_PIPELINES:
         return _3D_PIPELINES[prepared_key]
     if cache_key not in _ATTN_3D_TILED_CACHE:
@@ -4319,7 +4337,7 @@ def _get_2d_launch_meta(
     *,
     tuning_spec=None,
 ) -> _Attention2DLaunchMeta:
-    meta_key = cache_key + ("total_q", int(problem.total_q))
+    meta_key = _shape_key(cache_key, problem)
     if meta_key in _2D_LAUNCH_META:
         return _2D_LAUNCH_META[meta_key]
     arch = _resolve_attention_arch()
