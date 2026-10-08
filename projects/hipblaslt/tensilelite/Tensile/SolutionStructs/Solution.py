@@ -6208,7 +6208,7 @@ class Solution(collections.abc.Mapping):
       if state["_ScheduleIterAlg"] != 3:
         state["DtlPlusLdsBuf"] = 0
       # PAP records the DTL LDS bank as a single LdsOffsetA_Blk bit in
-      # SkPrefetchPrimed, which cannot name a third buffer.
+      # PersistentPrefetchState, which cannot name a third buffer.
       if state.get("PrefetchAcrossPersistent", 0):
         state["DtlPlusLdsBuf"] = 0
       # restrict feature combinations
