@@ -319,11 +319,15 @@ class TestWarmStartTraining:
 
         assert warm_rmse <= base_rmse * 1.1
 
-    def test_warm_start_from_nonexistent_dir(self):
+    def test_warm_start_from_nonexistent_dir(self, tmp_path):
+        # Construct the absence instead of naming a path assumed to be absent.
+        # A hardcoded "/nonexistent/..." is a statement about the HOST: this one
+        # has a readable /nonexistent whose children stat as EACCES, so the call
+        # raised PermissionError and the test failed without the code moving.
+        missing = tmp_path / "model" / "dir"
+        assert not missing.exists()
         with pytest.raises(FileNotFoundError):
-            check_feature_compatibility(
-                Path("/nonexistent/model/dir"), GemmUniversalFeatureEngine()
-            )
+            check_feature_compatibility(missing, GemmUniversalFeatureEngine())
 
 
 class TestEngineVariants:

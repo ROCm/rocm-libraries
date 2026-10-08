@@ -799,7 +799,25 @@ class TestInputValidation:
         )
 
     @pytest.mark.parametrize(
-        "arch", ["unknown", "nan", "", "GFX950", "gfx", "gfx8", "gfx9zzz", "gfx12345"]
+        "arch",
+        [
+            "unknown",
+            "nan",
+            "",
+            "GFX950",
+            "gfx",
+            "gfx8",
+            "gfx9zzz",
+            "gfx12345",
+            # Newly rejected by the per-family widths; the looser
+            # ^gfx\d{2,4}[a-z]?$ accepted all of these.
+            "gfx1399",
+            "gfx1500",
+            "gfx9999",
+            "gfx950a",
+            "gfx90",
+            "gfx99",
+        ],
     )
     def test_an_unrecognised_arch_raises(self, arch):
         """data_pipeline defaults arch to "unknown" and backfills unpopulated
@@ -867,14 +885,48 @@ class TestKeyPrecedence:
 
     P = dict(m=1792, n=1536, k=7168)
 
+    #: Extents that CHANGE the legal widths. gcd(64, 8) == gcd(7168, 8) == 8, so
+    #: poisoning with 64 -- as the first version of this test did -- leaves every
+    #: fraction identical and the inversion it exists to catch survives. 4 halves
+    #: them: gcd(4, 8) == 4.
+    POISON = {"m": 4, "n": 4, "k": 4}
+
+    def test_the_poison_actually_moves_the_result(self):
+        """Guard the guard: if these extents stop changing the fractions, the
+        test below goes vacuous without failing."""
+        fe = GemmUniversalVecFeatureEngine()
+        k = _kernel((0, 0, 0), **DISCRIMINATING)
+        honest = fe.extract(_problem(**self.P), k)[-3:]
+        moved = fe.extract(_problem(**self.POISON), k)[-3:]
+        assert list(honest) != list(moved)
+
     def test_the_problems_extents_win(self):
         """m/n/k describe the PROBLEM. A kernel dict carrying them is a merge
         artefact, not a kernel property."""
         fe = GemmUniversalVecFeatureEngine()
         k = _kernel((0, 0, 0), **DISCRIMINATING)
         honest = fe.extract(_problem(**self.P), k)
-        poisoned = fe.extract(_problem(**self.P), {**k, "m": 64, "n": 64, "k": 64})
+        poisoned = fe.extract(_problem(**self.P), {**k, **self.POISON})
         np.testing.assert_allclose(honest, poisoned)
+
+    def test_the_problems_layout_and_dtype_win(self):
+        """layout and dtype are problem-side too, and nothing gave them a
+        CONFLICTING kernel value -- so inverting _required survived."""
+        fe = GemmUniversalVecFeatureEngine()
+        k = _kernel((0, 0, 0), **DISCRIMINATING)
+        honest = fe.extract(_problem(**self.P), k)
+        poisoned = fe.extract(
+            _problem(**self.P), {**k, "layout": "crr", "dtype": "fp8"}
+        )
+        np.testing.assert_allclose(honest, poisoned)
+
+    def test_that_poison_would_otherwise_move_the_result(self):
+        """Guard the guard for the layout/dtype case."""
+        fe = GemmUniversalVecFeatureEngine()
+        k = _kernel((0, 0, 0), **DISCRIMINATING)
+        a = fe.extract(_problem(**self.P), k)[-3:]
+        b = fe.extract(_problem(**self.P, layout="crr", dtype="fp8"), k)[-3:]
+        assert list(a) != list(b)
 
     def test_the_kernels_epilogue_wins(self):
         """epilogue describes the KERNEL, like the geometry beside it."""
