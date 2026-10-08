@@ -74,19 +74,27 @@ namespace hipblaslt_jit
     // suffix (scalar or vector UseScaleAB, MX block and type) and the epilogue
     // flags that change the kernel family. Sizes stay inside the slice.
     std::string sliceKey(const TensileLite::ContractionProblemGemm& problem);
-    // Filesystem-safe literal of the kernel, the problem type and the sizes.
-    // The same identity always names the same entry, so a second publish reuses
-    // that entry's index.
-    std::string entryPrefix(const std::string&         problemTypeKey,
-                            const std::string&         kernelName,
-                            const std::vector<size_t>& sizes);
+    // Filesystem-safe literal of the kernels an entry's solutions name, the
+    // problem type and the sizes. The same identity always names the same
+    // entry, so a second publish reuses that entry and its solutions' indices.
+    std::string entryPrefix(const std::string&              problemTypeKey,
+                            const std::vector<std::string>& kernelNames,
+                            const std::vector<size_t>&      sizes);
+
+    // A copy of solution. ContractionSolution has no copy constructor, so the
+    // copy goes through TensileLite's MessagePack writer and reader, the
+    // encoding a library entry stores. Throws std::runtime_error when that
+    // fails, and in a build without MessagePack support.
+    std::shared_ptr<TensileLite::ContractionSolution>
+        copySolution(const std::shared_ptr<TensileLite::ContractionSolution>& solution);
 
     // A persistent library of generated solutions and of the helpers those
-    // solutions are linked with. Each is a TensileLite solution library: a lazy
-    // master, its index mapping, and one entry and code object per solution.
-    // The solution library's code object is the fully linked executable. The
-    // helper library stores the helper relocatable that link consumed, keyed by
-    // backend id and helper name. A query opens one solution slice only.
+    // solutions are linked with. The solutions form TensileLite lazy libraries,
+    // one per slice: a master whose rows match exact sizes, its index mapping,
+    // and one entry and code object per published executable. An entry holds
+    // every solution published with its executable, and that executable is its
+    // code object. Helpers are Relocatable files keyed by helper kernel name.
+    // A query opens one solution slice only.
     // Library files are MessagePack, including cache-key.msgpack. Each hipBLASLt
     // build reads and writes only <root>/v<schema>/<git revision>/, so a library
     // never serves kernels another build published. A build without a git
@@ -191,18 +199,19 @@ namespace hipblaslt_jit
                       std::vector<int32_t>&                     indices);
 
         // Returns one index per solution, in order. A backend contributes one
-        // SourceCodeBundle; publishing adds the Executable built from it, with
-        // the solutions at the local indices of its TensileLite record, to this
-        // library. A solution already published for the same kernel and sizes
-        // keeps its index. The problem's ContractionSolution::ProblemType is
-        // what problemTypeKey stores.
-        Status publish(const CacheKey&                           key,
-                       int                                       device,
-                       const TensileLite::ContractionProblemGemm& problem,
-                       const Artifact&                           executable,
-                       const std::vector<uint8_t>&               record,
-                       const std::vector<int>&                   solutions,
-                       std::vector<int32_t>&                     indices);
+        // SourceCodeBundle; publishing adds the Executable built from it as one
+        // entry holding solutions, the ones that support problem, each under
+        // its own index. Solutions with the same name share an index, and a
+        // solution already published for the same kernels and sizes keeps its
+        // index. The problem's ContractionSolution::ProblemType is what
+        // problemTypeKey stores.
+        Status publish(
+            const CacheKey&                                                       key,
+            int                                                                   device,
+            const TensileLite::ContractionProblemGemm&                            problem,
+            const Artifact&                                                       executable,
+            const std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
+            std::vector<int32_t>&                                                 indices);
 
         // The library that maps index on device, and the adapter that loads its
         // code objects from the key directory. An index is looked for in every
@@ -211,16 +220,18 @@ namespace hipblaslt_jit
         // when the index is newer than this process has seen. Empty, with why
         // set, otherwise.
         View resolve(int device, int32_t index, Status& why);
-        // The helper Relocatable stored for key's backend and helperName. A hit
-        // returns the object from this library's helper library and does not
-        // call compile. A miss calls compile once and publishes the Relocatable
-        // it returns through the same TensileLite library path as a solution.
-        // Fails, without calling compile, when this library cannot be used.
-        Status acquireHelper(const CacheKey&                            key,
-                             int                                        device,
-                             const std::string&                         helperName,
-                             const std::function<Status(Artifact&)>&    compile,
-                             Artifact&                                  out);
+        // The helper Relocatable stored under key for kernelName, the symbol of
+        // the helper kernel it defines; a source file name, such as a
+        // TensileLite Kernels.cpp, can differ per solution. A hit returns the
+        // stored object and does not call compile. A miss calls compile once,
+        // requires a Relocatable that defines kernelName, stores it under the
+        // publish lock and returns it. Fails, without calling compile, when this
+        // library cannot be used.
+        Status acquireHelper(const CacheKey&                         key,
+                             int                                     device,
+                             const std::string&                      kernelName,
+                             const std::function<Status(Artifact&)>& compile,
+                             Artifact&                               out);
         std::shared_ptr<TensileLite::ContractionSolution> solutionByIndex(
             int device, const TensileLite::Hardware& hardware, int32_t index, Status& why);
 
