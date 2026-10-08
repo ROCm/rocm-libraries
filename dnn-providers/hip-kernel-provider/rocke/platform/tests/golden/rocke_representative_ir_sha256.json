@@ -1429,7 +1429,7 @@
           "gfx1250": 4,
           "gfx90a": 5,
           "gfx942": 36,
-          "gfx950": 109
+          "gfx950": 112
         },
         "expected_failures": 4,
         "families": {
@@ -1453,7 +1453,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 172
+        "ok_cases": 175
       }
     },
     "llvm22": {
@@ -2885,7 +2885,7 @@
           "gfx1250": 4,
           "gfx90a": 5,
           "gfx942": 36,
-          "gfx950": 109
+          "gfx950": 112
         },
         "expected_failures": 4,
         "families": {
@@ -2909,7 +2909,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 172
+        "ok_cases": 175
       }
     },
     "llvm23": {
@@ -4356,7 +4356,7 @@
           "gfx1250": 8,
           "gfx90a": 5,
           "gfx942": 36,
-          "gfx950": 109
+          "gfx950": 112
         },
         "expected_failures": 0,
         "families": {
@@ -4380,7 +4380,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 176
+        "ok_cases": 179
       }
     }
   },
