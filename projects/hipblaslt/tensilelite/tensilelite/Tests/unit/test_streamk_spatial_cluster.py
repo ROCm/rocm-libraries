@@ -16,7 +16,7 @@ _SPATIAL_SHAPES = [(2, 1), (4, 1), (8, 1), (2, 2), (2, 4), (4, 2),
                    (2, 8), (4, 4), (8, 2)]
 
 
-def test_abi2_is_derived_from_cluster_geometry_and_custom_descriptors_are_rejected():
+def test_abi2_is_derived_from_cluster_geometry_and_validates_custom_descriptors():
     state = normalize_execution_policy({"TileProcessingStrategy": "StreamK",
                                         "ClusterDim": [2, 1]})
     assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == 2
@@ -24,7 +24,9 @@ def test_abi2_is_derived_from_cluster_geometry_and_custom_descriptors_are_reject
     with pytest.raises(ValueError, match="requires StreamK/StaticGrid"):
         normalize_execution_policy({"TileProcessingStrategy": "StreamK",
                                     "InternalSupportParams": {"PersistentLoopArgsVersion": 2}}, regenerate=False)
-    with pytest.raises(ValueError, match="Custom kernels"):
+    validateCustomPersistentArgs(state)
+    state["CustomKernelName"] = "missing_descriptor"
+    with pytest.raises(ValueError, match="argument descriptor"):
         validateCustomPersistentArgs(state)
     for strategy, version in (("DataParallel", 1), ("StreamK", 0)):
         assert normalize_execution_policy({"TileProcessingStrategy": strategy})["InternalSupportParams"]["PersistentLoopArgsVersion"] == version

@@ -320,27 +320,47 @@ _HEADER_SEMANTIC_ORDER = {
 }
 
 def validateCustomPersistentArgs(kernelConfig):
-    """Require an argument descriptor for DataParallel argument layout version 1."""
+    """Validate the scheduling payload of a versioned persistent descriptor."""
     version = kernelConfig.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)
     if type(version) is not int or version not in (0, 1, 2):
         raise ValueError("Unsupported PersistentLoopArgsVersion")
-    if version == 2:
-        raise ValueError("Custom kernels do not yet support clustered StreamK argument layout version 2")
     outer_version = kernelConfig.get("InternalSupportParams", {}).get("KernArgsVersion", 3)
     if type(outer_version) is not int or outer_version not in (0, 1, 2, 3):
         raise ValueError("Unsupported KernArgsVersion")
-    if version == 1 and outer_version != 3:
-        raise ValueError("PersistentLoopArgsVersion=1 requires KernArgsVersion=3")
+    if version in (1, 2) and outer_version != 3:
+        raise ValueError(f"PersistentLoopArgsVersion={version} requires KernArgsVersion=3")
     descriptor = kernelConfig.get("CustomKernel")
     if not isinstance(descriptor, dict) or not descriptor.get("name"):
-        if version == 1 and kernelConfig.get("CustomKernelName"):
-            raise ValueError("DataParallel argument layout version 1 requires a custom-kernel argument descriptor")
+        if version in (1, 2) and kernelConfig.get("CustomKernelName"):
+            raise ValueError(f"Persistent argument layout version {version} requires a custom-kernel argument descriptor")
         return
     args = descriptor.get("args", [])
     persistentGridArgIndices = [i for i, arg in enumerate(args) if arg.get("semantic") == "PersistentGrid"]
     if version == 0:
         if persistentGridArgIndices:
             raise ValueError("PersistentGrid requires PersistentLoopArgsVersion=1")
+        return
+    if version == 2:
+        expected = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
+                    "SKItersPerWG", "SKGrid", "SKTilesAndSplit"]
+        forbidden = {"PersistentGrid", "TotalIters", "AddressSynchronizer", "Synchronizer", "GSUSync"}
+        scheduling = [(i, arg) for i, arg in enumerate(args)
+                      if arg.get("semantic") in set(expected) | forbidden]
+        if ([arg.get("semantic") for _, arg in scheduling] != expected
+                or any(arg.get("type") != "uint32" or arg.get("padding", 0)
+                       for _, arg in scheduling)
+                or any(right[0] != left[0] + 1
+                       for left, right in zip(scheduling, scheduling[1:]))):
+            raise ValueError("StreamK version-2 scheduling arguments must be six adjacent uint32 values")
+        for semantic in ("AddressWorkspace", "AddressFlags"):
+            pointers = [arg for arg in args if arg.get("semantic") == semantic]
+            if (len(pointers) != 1 or pointers[0].get("type") != "address"
+                    or pointers[0].get("padding", 0)):
+                raise ValueError(f"StreamK version-2 requires one {semantic} pointer")
+        # An omitted workspace declaration is derived from the authoritative
+        # problem compute type by Solution._assignCustomKernelParameters.
+        if descriptor.get("workspaceType", "None") not in ("None", "StreamKWithReduction"):
+            raise ValueError("StreamK version-2 requires tree partial workspace")
         return
     legacy = {"MagicNumberItersPerTile", "MagicShiftItersPerTile", "TotalIters",
               "SKItersPerWG", "SKGrid", "SKTilesAndSplit", "AddressWorkspace", "AddressFlags",
@@ -431,7 +451,7 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
 
     # DataParallel assigns whole tiles to persistent workgroups. Ordinary GEMM
     # uses strategy None and reaches the tile-grid branches below.
-    if isPersistentDataParallel(kernelConfig) or isp.get("PersistentLoopArgsVersion", 0) == 1:
+    if isPersistentDataParallel(kernelConfig) or isp.get("PersistentLoopArgsVersion", 0) in (1, 2):
         grid = ["PersistentGrid", "One", "One"]
     elif isPersistent(kernelConfig):
         # sk.grid already counts every batch's tiles, so the launch must not
