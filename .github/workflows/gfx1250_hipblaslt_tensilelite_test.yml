@@ -4,14 +4,24 @@
 # hipBLASLt + TensileLite tests on a gfx1250 runner, run against a prebuilt ROCm
 # artifact inside a container.
 #
-# On-demand only: workflow_dispatch. A developer supplies the run-id of the PR's
-# gfx1250-strict "TheRock Multi-Arch CI" build and picks which suites to run. There is
-# no per-PR auto-trigger — the gfx1250 runners are scarce, so runs are manual.
+# Per-PR: runs when a PR's "TheRock Multi-Arch CI" run completes, if the PR is by a
+# ROCm org member, touches hipBLASLt/TensileLite, and the build produced a
+# gfx1250-strict blas artifact. Otherwise it skips. Both triggers install with the
+# TheRock commit that built the artifact (the build's therock_manifest.json).
+# On-demand: workflow_dispatch with the run-id of a gfx1250-strict build, no gating.
+#
+# Both triggers dedup by PR (by build if it maps to no PR): a newer run supersedes.
+# workflow_run/dispatch runs attach to develop, not the PR, so the result is posted to
+# the PR head as a commit status, from GitHub-hosted jobs so the token that can write
+# it never reaches the self-hosted runner.
 
 name: gfx1250 HW hipBLASLt + TensileLite Tests
-run-name: ${{ github.ref_name }} @ ${{ github.sha }}
+run-name: ${{ github.event_name == 'workflow_run' && format('PR build {0} @ {1}', github.event.workflow_run.id, github.event.workflow_run.head_sha) || format('{0} @ {1}', github.ref_name, github.sha) }}
 
 on:
+  workflow_run:
+    workflows: ["TheRock Multi-Arch CI"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       build_run_id:
@@ -43,14 +53,122 @@ permissions:
   contents: read
   actions: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+env:
+  STATUS_CONTEXT: "gfx1250-strict HW / hipBLASLt + TensileLite"
 
 jobs:
+  resolve:
+    name: Resolve PR build
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      statuses: write
+    outputs:
+      run: ${{ steps.r.outputs.run }}
+      build_run_id: ${{ steps.r.outputs.build_run_id }}
+      build_repo: ${{ steps.r.outputs.build_repo }}
+      head_sha: ${{ steps.r.outputs.head_sha }}
+      dedup_key: ${{ steps.r.outputs.dedup_key }}
+      therock_ref: ${{ steps.r.outputs.therock_ref }}
+    steps:
+      - id: r
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          RUN_ID: ${{ github.event.workflow_run.id || inputs.build_run_id }}
+          BUILD_REPO: ${{ github.event_name == 'workflow_run' && github.repository || inputs.build_repo || github.repository }}
+          PR_FROM_EVENT: ${{ github.event.workflow_run.pull_requests[0].number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          [ -n "$RUN_ID" ] || { echo "::error::No build run-id: provide the PR's gfx1250-strict build_run_id"; exit 1; }
+          skip() { echo "::notice::Skipping: $*"; echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          # The build's artifacts, in the bucket TheRock's s3_buckets.py picks for it.
+          if [ "$BUILD_REPO" = "ROCm/TheRock" ]; then
+            ARTIFACTS="https://therock-ci-artifacts.s3.amazonaws.com/${RUN_ID}-linux"
+          else
+            ARTIFACTS="https://therock-ci-artifacts-external.s3.amazonaws.com/${BUILD_REPO/\//-}/${RUN_ID}-linux"
+          fi
+          go() {
+            # Install with the TheRock commit that built the artifact (the PR branch's
+            # pin), from the build's own manifest.
+            REF="$(curl -sf "$ARTIFACTS/manifests/therock_manifest.json" | jq -r '.the_rock_commit // empty' || true)"
+            [[ "$REF" =~ ^[0-9a-f]{40}$ ]] \
+              || { echo "::error::build $RUN_ID has no TheRock manifest; cannot tell which TheRock built it"; exit 1; }
+            pending
+            { echo "run=true"; echo "build_run_id=$RUN_ID"; echo "build_repo=$BUILD_REPO"; echo "dedup_key=$1"; echo "therock_ref=$REF"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          # Map the build to its open PR, for both triggers. Fork PRs leave
+          # workflow_run.pull_requests empty, so look the PR up by the build's head SHA.
+          HEAD_SHA=""; PR="$PR_FROM_EVENT"
+          if [ "$BUILD_REPO" = "$REPO" ]; then
+            HEAD_SHA="$(gh api "repos/$REPO/actions/runs/$RUN_ID" --jq .head_sha)"
+            [ -n "$PR" ] || PR="$(gh pr list --repo "$REPO" --state open --search "$HEAD_SHA" --json number --jq '.[0].number // empty')"
+          fi
+          PR_JSON=""
+          [ -z "$PR" ] || PR_JSON="$(gh pr view "$PR" --repo "$REPO" --json headRefOid,labels)"
+          IS_HEAD=false
+          [ -n "$PR_JSON" ] && [ "$(jq -r .headRefOid <<<"$PR_JSON")" = "$HEAD_SHA" ] && IS_HEAD=true
+
+          # One dedup key for both triggers: the PR when the build maps to one, else
+          # the build. A newer run for the same PR (push or dispatch) supersedes.
+          KEY="build-$RUN_ID"; [ -n "$PR" ] && KEY="pr-$PR"
+
+          pending() {
+            # Only the PR's current head carries the status; older commits don't show.
+            [ "$IS_HEAD" = true ] || return 0
+            gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" -f state=pending -f context="$STATUS_CONTEXT" \
+              -f description="Queued for the gfx1250 runner" -f target_url="$RUN_URL" >/dev/null
+            echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          }
+
+          # A manual dispatch is a deliberate request: no gating.
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            go "$KEY"
+          fi
+
+          [ -n "$PR" ] || skip "no open PR for $HEAD_SHA"
+          [ "$IS_HEAD" = true ] || skip "PR #$PR has moved past $HEAD_SHA"
+
+          # Org members only, including their forks. pr-org-label.yml sets these labels
+          # from org membership; non-members never get them.
+          jq -e '[.labels[].name] | any(. == "organization: ROCm" or . == "organization: streamhpc")' <<<"$PR_JSON" >/dev/null \
+            || skip "PR #$PR author is not a ROCm org member"
+
+          gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' \
+            | grep -qE '^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator|rocroller))/' \
+            || skip "PR #$PR does not touch hipBLASLt or TensileLite"
+
+          # Needs the build's gfx1250-strict blas shard, whether it came from its own
+          # gfx1250-strict stage or from gfx125X-dcgpu once TheRock folds strict into
+          # that family. Stages upload artifacts only on success. PR builds without
+          # strict skip rather than fail.
+          curl -sf "https://therock-ci-artifacts-external.s3.amazonaws.com/?list-type=2&prefix=${REPO/\//-}/${RUN_ID}-linux/blas_lib_gfx1250-strict" \
+            | grep -q "<Key>" || skip "build $RUN_ID has no gfx1250-strict blas artifact"
+
+          # A re-run of the same build (same commit) must not restart a queued, running or
+          # passed test. A failed one may be retried.
+          # shellcheck disable=SC2016  # $c is a jq variable
+          PREV="$(gh api "repos/$REPO/commits/$HEAD_SHA/status" \
+            --jq --arg c "$STATUS_CONTEXT" '.statuses[] | select(.context == $c) | .state')"
+          case "$PREV" in pending|success) skip "PR #$PR @ $HEAD_SHA already $PREV" ;; esac
+
+          go "$KEY"
+
   gfx1250-tests:
     name: gfx1250 hipBLASLt + TensileLite
-    if: ${{ inputs.run_hipblaslt || inputs.run_tensilelite }}
+    needs: resolve
+    if: needs.resolve.outputs.run == 'true' && (github.event_name == 'workflow_run' || inputs.run_hipblaslt || inputs.run_tensilelite)
+    # Job-level so skipped resolves never cancel a running test.
+    concurrency:
+      group: ${{ github.workflow }}-${{ needs.resolve.outputs.dedup_key }}
+      cancel-in-progress: true
     runs-on: blas-rocm-mi455-sandbox
     timeout-minutes: 360
     # Test container: no ROCm baked in, so the fetched artifact's libraries load
@@ -82,41 +200,30 @@ jobs:
       LD_LIBRARY_PATH: ${{ github.workspace }}/rocm/lib:${{ github.workspace }}/rocm/lib/llvm/lib:${{ github.workspace }}/rocm/lib/rocm_sysdeps/lib
       # Run both suites as gfx1250-strict, against the gfx1250-strict artifact.
       HSA_DISABLE_GFX12_STRICT: "0"
-      # awk filter for both suites' logs: drops the device banner lines and blanks
-      # client CSV columns that carry hardware data, are derived from the CU count,
-      # or are timing. Use: awk -F, -v OFS=, "$HW_SCRUB"
+      # awk filter for all test and build logs: drops the device banner lines, redacts
+      # product names and amd.com hostnames, and blanks client CSV columns that carry hardware
+      # data, are derived from the CU count or clocks, or are timing.
+      # Use: awk -F, -v OFS=, "$HW_SCRUB"
       HW_SCRUB: |
         /Query[[:space:]]+device|Device[[:space:]]+ID[[:space:]]+[0-9]|PCI[[:space:]]+Chip[[:space:]]+ID|GB[[:space:]]+memory|SCLK|MCLK|compute[[:space:]]+capability|maxGridDimX|sharedMemPerBlock|maxThreadsPerBlock|warpSize/ { next }
+        { gsub(/[Mm][Ii][0-9][0-9][0-9][A-Za-z]*|[A-Za-z0-9.-]+[.]amd[.]com/, "<redacted>") }
         /^run,problem-progress,/ {
-          n = split("num-cus tiles-per-cu total-gran cu-gran wave-gran temp-edge clock-sys clock-soc clock-mem fan-rpm hardware-samples time-us gflops gbps-bandwidth enqueue-time", s, " ")
+          n = split("num-cus tiles-per-cu total-gran cu-gran wave-gran temp-edge clock-sys clock-soc clock-mem fan-rpm hardware-samples gfx-frequency(maximum) time-us gflops gflops-per-cu fastest-gflops peak-gflops efficiency gbps-bandwidth enqueue-time rocprof-counters", s, " ")
           for (k in fe) delete fe[k]
           for (i = 1; i <= NF; i++) for (j = 1; j <= n; j++) if ($i == s[j]) fe[NF - i] = 1
           hdr = 1
         }
         hdr && /^[0-9]+,[0-9]+\/[0-9]+,/ { for (k in fe) $(NF - k) = "" }
         { print; fflush() }
-      # Activates the env-gated xfail for known-failing configs in configMarks
-      # (companion tensilelite PR). Inert against artifacts that predate it.
-      GFX1250_HW_XFAIL: "1"
       GTEST_PRINT_TIME: "0"
       PIP_BREAK_SYSTEM_PACKAGES: "1"
 
     steps:
-      - name: Checkout rocm-libraries
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github
-          sparse-checkout-cone-mode: true
-
-      - name: Load CI environment (resolves the pinned TheRock ref)
-        id: ci-env
-        uses: ./.github/actions/ci-env
-
       - name: Checkout TheRock (artifact install tooling)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: ${{ steps.ci-env.outputs.therock-ref }}
+          ref: ${{ needs.resolve.outputs.therock_ref }}
           path: TheRock
           sparse-checkout: |
             build_tools
@@ -136,8 +243,8 @@ jobs:
       - name: Fetch prebuilt gfx1250 ROCm artifact
         id: fetch
         env:
-          BUILD_RUN_ID: ${{ inputs.build_run_id }}
-          BUILD_REPO: ${{ inputs.build_repo || 'ROCm/rocm-libraries' }}
+          BUILD_RUN_ID: ${{ needs.resolve.outputs.build_run_id }}
+          BUILD_REPO: ${{ needs.resolve.outputs.build_repo }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           if [ -z "$BUILD_RUN_ID" ]; then
@@ -179,7 +286,7 @@ jobs:
 
       - name: Run hipBLASLt tests
         timeout-minutes: 120
-        if: ${{ steps.fetch.outputs.artifact_ready == 'true' && inputs.run_hipblaslt }}
+        if: ${{ steps.fetch.outputs.artifact_ready == 'true' && (github.event_name == 'workflow_run' || inputs.run_hipblaslt) }}
         env:
           GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
           # StreamKMultiStream.ConcurrentStreamsDoNotDeadlock fails without it.
@@ -215,7 +322,7 @@ jobs:
 
       - name: Run TensileLite common tests
         timeout-minutes: 240
-        if: ${{ always() && steps.fetch.outputs.artifact_ready == 'true' && inputs.run_tensilelite }}
+        if: ${{ always() && steps.fetch.outputs.artifact_ready == 'true' && (github.event_name == 'workflow_run' || inputs.run_tensilelite) }}
         env:
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
         run: |
@@ -262,3 +369,27 @@ jobs:
             test_results/
             tensilelite_test_results/
           if-no-files-found: warn
+
+  report:
+    name: Post PR status
+    needs: [resolve, gfx1250-tests]
+    # Superseded runs are cancelled; the newer run posts its own status.
+    if: always() && needs.resolve.outputs.head_sha != '' && needs.gfx1250-tests.result != 'cancelled'
+    runs-on: ubuntu-24.04
+    permissions:
+      statuses: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          RESULT: ${{ needs.gfx1250-tests.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          case "$RESULT" in
+            success) STATE=success; DESC="hipBLASLt + TensileLite passed" ;;
+            failure) STATE=failure; DESC="Tests failed" ;;
+            *)       STATE=error;   DESC="Tests did not run ($RESULT)" ;;
+          esac
+          gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" -f state="$STATE" -f context="$STATUS_CONTEXT" \
+            -f description="$DESC" -f target_url="$RUN_URL" >/dev/null
