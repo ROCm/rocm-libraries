@@ -2531,6 +2531,33 @@ def is_valid_spec(spec: "DirectConvSpec", arch: str = "gfx950") -> Tuple[bool, s
         a_dtype=ab_dtype, b_dtype=ab_dtype, c_dtype="fp32", m=16, n=16, k=32
     ):
         return False, f"fold_k32 requires mfma_f32_16x16x32_{ab_dtype} on {arch}"
+
+    # LDS budget: the A/B staging ring (the chunk loader's lds_total_fp16
+    # halves, ×2 when double_buffer gives B its own buffer instead of
+    # aliasing A) plus the waves_k>1 cross-wave reduction scratch. Mirrors
+    # build_direct_conv's own sizing exactly -- this validator must reject
+    # anything that formula would overflow, or an over-budget spec reaches
+    # comgr and fails codegen instead of is_valid_spec.
+    _load_vec = 8 if spec.fold_k32 else 4
+    _n_vecs = p.cpg // _load_vec
+    _lds_w = (spec.block_q - 1) * p.stride + p.KW
+    _threads = spec.threads_per_block
+    _num_chunks = _lds_w * spec.block_groups * _n_vecs
+    _passes = (_num_chunks + _threads - 1) // _threads
+    _lds_total_fp16 = _passes * _threads * _load_vec
+    _ab_bytes = _lds_total_fp16 * 2 * (2 if spec.double_buffer else 1)
+    _red_bytes = (
+        (spec.waves_q * spec.waves_k) * spec.wave_size * 4 * 4
+        if spec.waves_k > 1
+        else 0
+    )
+    _total_lds = _ab_bytes + _red_bytes
+    if not target.fits_lds(_total_lds):
+        return False, (
+            f"LDS budget {_total_lds} bytes "
+            f"(A/B={'x2 ' if spec.double_buffer else ''}{_lds_total_fp16 * 2}, "
+            f"red={_red_bytes}) > {target.lds_capacity_bytes} cap on {arch}"
+        )
     return True, "ok"
 
 

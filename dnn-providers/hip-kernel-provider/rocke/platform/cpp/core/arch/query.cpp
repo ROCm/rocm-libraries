@@ -472,6 +472,16 @@ int rocke_arch_max_vector_load_dwords(const rocke_arch_target_t* t, const char* 
     return t->memory.buffer_load_max_dwords;
 }
 
+int rocke_arch_async_lds_max_dwords(const rocke_arch_target_t* t)
+{
+    /* Python: ArchTarget.async_lds_max_dwords. Every buffer_load_lds emitter
+     * must clamp to this -- the backend does not diagnose an over-wide one,
+     * it aborts the whole process. */
+    if(!t)
+        return 0;
+    return t->memory.async_lds_max_dwords;
+}
+
 int rocke_arch_max_threads_per_block(const rocke_arch_target_t* t)
 {
     if(!t)

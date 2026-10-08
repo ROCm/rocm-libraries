@@ -891,18 +891,29 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
      * block's threads. The wavelet loaders pick their own width. */
     if(s->async_dma)
     {
+        /* max_dwords is the arch's own buffer_load_lds width cap: CDNA3 moves
+         * only a dword per lane, the b96/b128 forms arrived with CDNA4. An
+         * over-wide one is not a compile error -- the backend aborts the
+         * process -- so this gate and the builder's must agree. */
         const int cpg = rocke_conv_problem_cpg(&s->problem);
+        const int max_dwords = rocke_archtarget_async_lds_max_dwords(target);
         rocke_async_tile_loader_t al;
+        if(max_dwords < 1)
+        {
+            ROCKE_CONVVS_REJECT("async_dma: %s has no DRAM->LDS DMA instruction", arch);
+        }
         if(rocke_async_tile_loader_from_tile(
-               s->tile_m, s->tile_k, block_size, s->wave_size, 4, cpg, &al)
+               s->tile_m, s->tile_k, block_size, s->wave_size, max_dwords, cpg, &al)
                != ROCKE_OK
            || rocke_async_tile_loader_from_tile(
-                  s->tile_n, s->tile_k, block_size, s->wave_size, 4, cpg, &al)
+                  s->tile_n, s->tile_k, block_size, s->wave_size, max_dwords, cpg, &al)
                   != ROCKE_OK)
         {
-            ROCKE_CONVVS_REJECT(
-                "async_dma: no usable chunk width for the A/B tiles with block_size %d",
-                block_size);
+            ROCKE_CONVVS_REJECT("async_dma: no usable chunk width for the A/B tiles with "
+                                "block_size %d and at most %d dword(s) per lane on %s",
+                                block_size,
+                                max_dwords,
+                                arch);
         }
     }
     else if(!(s->pipeline && strcmp(s->pipeline, "wavelet") == 0))
