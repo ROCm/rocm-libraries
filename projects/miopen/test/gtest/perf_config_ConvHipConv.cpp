@@ -30,7 +30,7 @@ TEST(GPU_PerfConfig_ConvHipConv_FP16, VersionStamp)
     constexpr auto type   = miopenHalf;
     constexpr auto layout = miopenTensorNHWC;
     // clang-format off
-    const auto test_case = TestCase{{type, layout, {4, 64, 8, 1}}, {type, layout, {64, 4, 3, 3}}, type, {{1, 1}, {1, 1}, {1, 1}, 16}};
+    const auto test_case = TestCase{{type, layout, {7, 64, 8, 8}}, {type, layout, {128, 64, 3, 3}}, type, {{1, 1}, {1, 1}, {1, 1}}};
     // clang-format on
     const auto problem = test_case.GetProblemDescription(miopen::conv::Direction::Forward);
 
@@ -41,22 +41,36 @@ TEST(GPU_PerfConfig_ConvHipConv_FP16, VersionStamp)
     const auto solver = miopen::solver::conv::ConvHipConv{};
     ASSERT_TRUE(solver.IsApplicable(ctx, problem));
 
-    const auto record = solver.GetDefaultPerformanceConfig(ctx, problem).descriptor;
-    const auto colon  = record.find(':');
-    ASSERT_NE(colon, std::string::npos) << record;
-    EXPECT_NE(record.substr(0, colon), "unknown");
-    const auto body = record.substr(colon + 1);
-
-    const auto loads = [&](const std::string& stored) {
+    // The index a stored record selects, or -1 if it is rejected.
+    const auto load = [&](const std::string& stored) {
         Config config;
         config.Deserialize(stored);
-        return solver.IsValidPerformanceConfig(ctx, problem, config);
+        return solver.IsValidPerformanceConfig(ctx, problem, config) ? config.index : -1;
     };
-    EXPECT_TRUE(loads(record));
-    EXPECT_FALSE(loads("v999.999:" + body));
-    EXPECT_FALSE(loads(record.substr(0, colon) + "0:" + body));
-    EXPECT_FALSE(loads("unknown:" + body));
-    EXPECT_FALSE(loads(body));
+
+    // IsValidPerformanceConfig sets config.descriptor from config.index.
+    int configs = 0;
+    for(;; ++configs)
+    {
+        Config config;
+        config.index = configs;
+        if(!solver.IsValidPerformanceConfig(ctx, problem, config))
+            break;
+        const auto record = config.ToString();
+        const auto colon  = record.find(':');
+        ASSERT_NE(colon, std::string::npos) << record;
+        const auto version = record.substr(0, colon);
+        EXPECT_NE(version, "unknown");
+        const auto body = record.substr(colon + 1);
+
+        EXPECT_EQ(load(record), configs) << record;
+        EXPECT_EQ(load("v999.999:" + body), -1) << record;
+        EXPECT_EQ(load(version + "0:" + body), -1) << record;
+        EXPECT_EQ(load("unknown:" + body), -1) << record;
+        EXPECT_EQ(load(body), -1) << record;
+    }
+    // Config 0 alone would not catch a record resolving to the default config.
+    EXPECT_GE(configs, 2);
 }
 
 #endif // MIOPEN_USE_HIPCONV
