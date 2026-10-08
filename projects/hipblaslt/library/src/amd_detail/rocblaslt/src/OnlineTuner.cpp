@@ -121,6 +121,12 @@ namespace rocblaslt
         // left lying around for the next arrival to claim.
         state.m_offered = -1;
 
+        // Selection has visited, so the run of dispatches it had not seen ends
+        // here. Only an unbroken run of them says the library has stopped
+        // being asked; the dispatches of an ordinary exploration are each
+        // preceded by one of these and must not accumulate into a give-up.
+        state.m_dispatchesSinceSelection.store(0, std::memory_order_relaxed);
+
         if(state.m_candidates.empty())
         {
             // No candidate list yet, so this problem is still inside its cold
@@ -220,17 +226,39 @@ namespace rocblaslt
             std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
 
             auto iter = m_problems.find(problemKey);
-            if(iter == m_problems.end() || iter->second.m_pending.empty())
+            if(iter == m_problems.end())
+                return;
+
+            ProblemState& state = iter->second;
+
+            // This hook is the only one every dispatch of the problem reaches,
+            // so it is where a problem selection has stopped visiting can be
+            // seen at all. See ProblemState::m_dispatchesSinceSelection.
+            const int unseen
+                = state.m_dispatchesSinceSelection.fetch_add(1, std::memory_order_relaxed) + 1;
+
+            const bool exhausted = !state.m_resolved && unseen > visitBudget(state);
+
+            if(state.m_pending.empty() && !exhausted)
                 return;
         }
 
         std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
 
         auto iter = m_problems.find(problemKey);
-        if(iter == m_problems.end() || iter->second.m_pending.empty())
+        if(iter == m_problems.end() || iter->second.m_resolved)
             return;
 
         ProblemState& state = iter->second;
+
+        // Re-read under the write lock, which is where it can be acted on. The
+        // drain below still runs: samples already paid for are not thrown away
+        // for the sake of giving up, exactly as the selection half does it.
+        if(state.m_dispatchesSinceSelection.load(std::memory_order_relaxed) > visitBudget(state))
+            state.m_gaveUp = true;
+
+        if(state.m_pending.empty() && !state.m_gaveUp)
+            return;
 
         size_t outstanding = 0;
 
@@ -445,7 +473,14 @@ namespace rocblaslt
 
     int OnlineTuner::visitBudget(const ProblemState& state) const
     {
-        return static_cast<int>(state.m_candidates.size()) * m_repeats * c_visitBudgetFactor;
+        // Before registration there is no candidate list to size the budget
+        // from, and the configured depth is what that list is going to be. A
+        // budget of zero here would end a problem on the first visit of its
+        // cold phase.
+        const int candidates
+            = state.m_candidates.empty() ? m_topK : static_cast<int>(state.m_candidates.size());
+
+        return candidates * m_repeats * c_visitBudgetFactor;
     }
 
     // GPU timing noise is one-sided: contention, clock excursions and cache
@@ -492,6 +527,7 @@ namespace rocblaslt
             std::ostringstream msg = traceLine("winner", problemKey);
             msg << " cand=" << winnerIndex << " sol=" << winner << " us=" << winnerScore
                 << " samples=" << samples << " calls=" << state.m_calls
+                << " unseen=" << state.m_dispatchesSinceSelection.load(std::memory_order_relaxed)
                 << " declined=" << state.m_declined << " gaveup=" << (state.m_gaveUp ? 1 : 0)
                 << "\n";
             std::cerr << msg.str();

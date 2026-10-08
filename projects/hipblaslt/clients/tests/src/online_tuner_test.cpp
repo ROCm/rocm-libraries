@@ -527,6 +527,115 @@ namespace
     }
 
     // ----------------------------------------------------------------------
+    // Problems the library stops being asked about.
+    //
+    // Exploration advances at the selection hook, and a caller holding an algo
+    // it fetched once never reaches it. Such a problem would otherwise sit one
+    // visit short of its budget for ever: never resolving, never publishing,
+    // and so costing every dispatch of that shape the two locked lookups a
+    // published resolution answers without a lock.
+    // ----------------------------------------------------------------------
+
+    TEST(OnlineTuner, AProblemSelectionStopsVisitingGivesUpAndPublishes)
+    {
+        constexpr size_t key = 0x1016;
+
+        const size_t           problem = identityOf(key);
+        const std::vector<int> ranked{181, 182, 183};
+
+        // One selection visit, which is what a heuristic query nobody repeats
+        // leaves behind.
+        ASSERT_EQ(tuner().selectCandidate(key, problem, ranked, false, /*retained=*/true), -1);
+        ASSERT_EQ(tuner().resolution(key), nullptr);
+
+        // Dispatches of the algo that query returned. None of them comes back
+        // through selection.
+        int dispatches = 0;
+        for(; dispatches < kCallCeiling && !tuner().resolution(key); ++dispatches)
+            tuner().harvestPending(key);
+
+        const OnlineTuner::Resolution* resolved = tuner().resolution(key);
+        ASSERT_NE(resolved, nullptr) << "a problem nothing can measure never gave up";
+        EXPECT_EQ(resolved->winner(), -1) << "nothing was measured, so there is no winner";
+
+        // Bounded by the same visit budget the selection half uses, which is
+        // candidates * repeats * a slack factor -- a few dozen here.
+        EXPECT_GT(dispatches, kTopK * kRepeats);
+        EXPECT_LT(dispatches, 512) << "the budget did not bound it";
+
+        // And the point of publishing: both entry points answer from the table
+        // now, without taking anything.
+        EXPECT_EQ(tuner().selectCandidate(key, problem, ranked), -1);
+
+        hipEvent_t start = nullptr;
+        hipEvent_t stop  = nullptr;
+        EXPECT_FALSE(tuner().beginMeasurement(key, ranked[0], start, stop));
+    }
+
+    // The other side of the same counter. Every call of an ordinary
+    // exploration reaches the measurement hook too, so counting those against
+    // the budget would halve how long a problem has to finish -- which is the
+    // margin GPU-bound shapes already need all of. A selection visit is what
+    // resets the run.
+    TEST(OnlineTuner, DispatchesBetweenSelectionVisitsDoNotShortenAnExploration)
+    {
+        constexpr size_t selectionOnlyKey = 0x1017;
+        constexpr size_t dispatchingKey   = 0x1018;
+
+        const std::vector<int> ranked{191, 192, 193};
+
+        const int selectionOnly
+            = exploreToResolution(selectionOnlyKey, identityOf(selectionOnlyKey), ranked);
+        ASSERT_GT(selectionOnly, 0) << "exploration never ended";
+
+        int withDispatches = 0;
+        for(; withDispatches < kCallCeiling && !tuner().resolution(dispatchingKey);)
+        {
+            ++withDispatches;
+            tuner().selectCandidate(dispatchingKey, identityOf(dispatchingKey), ranked);
+            tuner().harvestPending(dispatchingKey);
+        }
+
+        ASSERT_NE(tuner().resolution(dispatchingKey), nullptr) << "exploration never ended";
+        EXPECT_EQ(withDispatches, selectionOnly)
+            << "the dispatches of an ordinary exploration shortened its own budget";
+    }
+
+    // A merged sibling spends none of the exploration's budget at the
+    // selection hook, and its dispatches must spend none of it at the
+    // measurement hook either. A sibling dispatching often enough would
+    // otherwise end the exploration early on however many samples had been
+    // taken by then -- which is the whole reason the sibling is exempt in the
+    // first place. Selection having visited at all is what says the library is
+    // still being asked about this shape.
+    TEST(OnlineTuner, AMergedSiblingsDispatchesDoNotEndTheExploration)
+    {
+        constexpr size_t key = 0x1019;
+
+        const size_t registering = identityOf(key, 0);
+        const size_t merged      = identityOf(key, 1);
+
+        const std::vector<int> ranked{201, 202, 203};
+
+        ASSERT_EQ(tuner().selectCandidate(key, registering, ranked), 0);
+
+        // Comfortably past the visit budget, which is candidates * repeats * a
+        // slack factor and so cannot be more than a few dozen here.
+        for(int visit = 0; visit < 512; ++visit)
+        {
+            ASSERT_EQ(tuner().selectCandidate(key, merged, ranked), -1)
+                << "a merged sibling was handed a probe candidate on visit " << visit;
+            tuner().harvestPending(key);
+        }
+
+        EXPECT_EQ(tuner().resolution(key), nullptr)
+            << "a merged sibling's dispatches ran the exploration out of its budget";
+
+        // Still owed its first candidate.
+        EXPECT_EQ(tuner().selectCandidate(key, registering, ranked), 0);
+    }
+
+    // ----------------------------------------------------------------------
     // Cases that need a device.
     //
     // Everything above is decided before any HIP call. These are not: a

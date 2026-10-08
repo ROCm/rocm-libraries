@@ -469,6 +469,35 @@ namespace rocblaslt
         // claims it, so a sample is only taken for a dispatch selection asked
         // for, on the visit it asked.
         //
+        // m_dispatchesSinceSelection is how a problem the library is never
+        // asked about again still comes to an end.
+        //
+        // m_calls only moves where selection visits, and selection is only
+        // reached while the library is the one choosing the kernel. A caller
+        // dispatching an algo it fetched once goes straight past it -- so such
+        // a problem sits one visit short of its budget for the life of the
+        // process: m_gaveUp never becomes true, nextCandidate() keeps naming a
+        // candidate nothing will ever issue, and neither resolve condition
+        // fires. Nothing is wrong with the answers it gives, but resolution()
+        // returns null for ever, and that is what the two entry points check
+        // before taking the lock. Every one of those dispatches therefore pays
+        // two shared acquisitions and two map lookups to be told there is
+        // nothing to do, for a shape that can never be tuned.
+        //
+        // Counted at the measurement hook, which is the one every dispatch
+        // reaches, and reset wherever selection visits -- so it measures the
+        // run of dispatches selection has not seen, not the work an ordinary
+        // exploration does. An exploration's own dispatches are each preceded
+        // by a selection visit and never advance it. Past the same visit
+        // budget the selection half uses, the problem gives up, publishes a
+        // winner-less resolution and both entry points short-circuit without a
+        // lock, which is what the design already does for every other terminal
+        // state.
+        //
+        // Atomic because the measurement hook advances it under the shared
+        // lock; the exclusive lock excludes that, so the reset needs nothing
+        // further.
+        //
         // Deliberately not a second identity check at the measurement hook:
         // that hook holds the same Tensile problem with a different
         // workspaceSize, the caller's own allocation rather than the ceiling
@@ -492,6 +521,7 @@ namespace rocblaslt
             float                           m_winnerUs  = 0.0f;
             bool                            m_gaveUp    = false;
             bool                            m_resolved  = false;
+            std::atomic<int>                m_dispatchesSinceSelection{0};
         };
 
         OnlineTuner();
