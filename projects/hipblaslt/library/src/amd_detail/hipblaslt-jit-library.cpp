@@ -872,7 +872,7 @@ namespace hipblaslt_jit
             // entry's code object.
             struct Candidate
             {
-                const CodeObject*    object = nullptr;
+                const BuildUnit*     object = nullptr;
                 std::vector<uint8_t> entry;
                 std::string          kernel;
                 std::vector<std::pair<std::string, const std::vector<uint8_t>*>> helpers;
@@ -896,8 +896,8 @@ namespace hipblaslt_jit
                         return failed(Stage::Publish, "A built solution names no kernel");
                     candidate.kernel = std::move(fields.kernelName);
                     for(const auto& helper : supported.first.helpers)
-                        if(!helper.first.empty() && !helper.second.bytes.empty())
-                            candidate.helpers.emplace_back(helper.first, &helper.second.bytes);
+                        if(!helper.name.empty() && !helper.bytes.empty())
+                            candidate.helpers.emplace_back(helper.name, &helper.bytes);
                     candidates.push_back(std::move(candidate));
                 }
             }

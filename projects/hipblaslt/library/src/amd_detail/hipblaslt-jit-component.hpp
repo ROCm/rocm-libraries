@@ -98,18 +98,14 @@ namespace hipblaslt_jit
         std::filesystem::path scratch; // receives comgr.log after a failure, or empty
     };
 
-    struct CodeObject
-    {
-        std::vector<uint8_t> bytes;
-    };
-
     struct BuiltSolution
     {
         GeneratedSolution generated;
-        CodeObject        object;
-        // Helper name and its code object. The library stores one copy per
-        // backend id and name; entries record the name only.
-        std::vector<std::pair<std::string, CodeObject>> helpers;
+        // The linked code object. Kind is unused; the bytes are already built.
+        BuildUnit object;
+        // One built helper each. The library stores one copy per backend id and
+        // name; entries record the name only.
+        std::vector<BuildUnit> helpers;
     };
 
     class CodeObjectBuilder

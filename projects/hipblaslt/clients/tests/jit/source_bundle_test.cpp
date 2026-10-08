@@ -15,11 +15,21 @@ void reject(const std::function<void()>& f)
 {
     hipblaslt_jit_test::reject(f, "Malformed artifact was accepted");
 }
-std::vector<std::string> names(const std::vector<a::SourceFile>& files)
+std::vector<std::string> names(const std::vector<hipblaslt_jit::BuildUnit>& files)
 {
     std::vector<std::string> result;
     for(const auto& file : files)
         result.push_back(file.name);
+    return result;
+}
+
+std::vector<hipblaslt_jit::BuildUnit> ofKind(const std::vector<hipblaslt_jit::BuildUnit>& units,
+                                             hipblaslt_jit::BuildUnit::Kind               kind)
+{
+    std::vector<hipblaslt_jit::BuildUnit> result;
+    for(const auto& unit : units)
+        if(unit.kind == kind)
+            result.push_back(unit);
     return result;
 }
 
@@ -66,33 +76,37 @@ TEST_CASE("the source bundle reader accepts only a contained directory", "[jit-c
     writeFile(bundle / "library/TensileLibrary.dat", payload);
     for(const auto* name : {"b.s", "a.s", "scale.hip", "add.cpp", "kernel.h", "types.h"})
         writeFile(bundle / "sources" / name, std::string("// ") + name + "\n");
-    const auto sources = a::readSourceBundle(bundle);
+    const auto sources  = a::readSourceBundle(bundle);
+    const auto assembly = ofKind(sources.units, hipblaslt_jit::BuildUnit::Kind::Assembly);
+    const auto hip      = ofKind(sources.units, hipblaslt_jit::BuildUnit::Kind::Hip);
     {
         INFO(("Source bundle library changed"));
         REQUIRE((std::string(sources.library.begin(), sources.library.end()) == payload));
     }
     {
         INFO(("Assembly is not every sources/*.s by name"));
-        REQUIRE((names(sources.assembly) == std::vector<std::string>({"a.s", "b.s"})));
+        REQUIRE((names(assembly) == std::vector<std::string>({"a.s", "b.s"})));
     }
     {
         INFO(("HIP sources are not every sources/*.hip and *.cpp by name"));
-        REQUIRE((names(sources.hip) == std::vector<std::string>({"add.cpp", "scale.hip"})));
+        REQUIRE((names(hip) == std::vector<std::string>({"add.cpp", "scale.hip"})));
     }
     {
-        INFO(("Headers are not the other sources/ files by name"));
-        REQUIRE((names(sources.headers) == std::vector<std::string>({"kernel.h", "types.h"})));
+        INFO(("Headers are not includes of each HIP unit"));
+        REQUIRE((!hip.empty()
+                 && names(hip[0].includes) == std::vector<std::string>({"kernel.h", "types.h"})
+                 && names(hip[1].includes) == std::vector<std::string>({"kernel.h", "types.h"})));
     }
     {
         INFO(("Source bytes changed"));
-        REQUIRE((std::string(sources.assembly[0].bytes.begin(), sources.assembly[0].bytes.end())
-            == "// a.s\n"));
+        REQUIRE((std::string(assembly[0].bytes.begin(), assembly[0].bytes.end()) == "// a.s\n"));
     }
     fs::rename(bundle / "sources/a.s", root / "a.s");
     fs::rename(bundle / "sources/b.s", root / "b.s");
     {
         INFO(("A bundle of HIP sources was rejected"));
-        REQUIRE((a::readSourceBundle(bundle).assembly.empty()));
+        REQUIRE((ofKind(a::readSourceBundle(bundle).units, hipblaslt_jit::BuildUnit::Kind::Assembly)
+                     .empty()));
     }
     fs::rename(root / "a.s", bundle / "sources/a.s");
     fs::rename(root / "b.s", bundle / "sources/b.s");
@@ -100,7 +114,8 @@ TEST_CASE("the source bundle reader accepts only a contained directory", "[jit-c
     fs::remove(bundle / "sources/add.cpp");
     {
         INFO(("A bundle of assembly was rejected"));
-        REQUIRE((a::readSourceBundle(bundle).hip.empty()));
+        REQUIRE((ofKind(a::readSourceBundle(bundle).units, hipblaslt_jit::BuildUnit::Kind::Hip)
+                     .empty()));
     }
     auto damage = [&](const std::function<void()>& change, const std::function<void()>& undo) {
         change();

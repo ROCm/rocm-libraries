@@ -158,8 +158,9 @@ namespace hipblaslt_jit
                                        solution,
                                        "Built code object does not define kernel " + name,
                                        linked.log);
-                built.generated = solution;
-                built.object.bytes.assign(linked.bytes.begin(), linked.bytes.end());
+                built.generated    = solution;
+                built.object.bytes = std::move(linked.bytes);
+                built.object.role  = BuildUnit::Role::Main;
                 for(const auto& helper : helpers)
                 {
                     if(helper.name.empty())
@@ -178,10 +179,11 @@ namespace hipblaslt_jit
                                        "Helper " + helper.name + " is not a code object for "
                                            + target.isaName(),
                                        helperObject.log + helperMeta.log);
-                    built.helpers.push_back(
-                        {helper.name,
-                         CodeObject{std::vector<uint8_t>(helperObject.bytes.begin(),
-                                                         helperObject.bytes.end())}});
+                    BuildUnit builtHelper;
+                    builtHelper.name  = helper.name;
+                    builtHelper.bytes = std::move(helperObject.bytes);
+                    builtHelper.role  = BuildUnit::Role::Helper;
+                    built.helpers.push_back(std::move(builtHelper));
                 }
                 return {};
             }
