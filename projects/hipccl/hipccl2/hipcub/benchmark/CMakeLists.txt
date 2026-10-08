@@ -50,9 +50,10 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
   # both derive their CMake target name from that filename - so nesting both in
   # one configure failed with "add_executable cannot create target ... because
   # another target with the same name already exists". Prefix the *target* name
-  # here; OUTPUT_NAME below keeps the produced binary's filename unchanged,
-  # which matters because the benchmark runner (.gitlab/run_benchmarks.py)
-  # selects binaries with a filename regex.
+  # here; OUTPUT_NAME below names the binary benchmark_hipcub_<name>, unique
+  # across components in a shared bin/. The benchmark runner
+  # (.gitlab/run_benchmarks.py) selects binaries with a filename regex whose
+  # default, ^benchmark, still matches.
   #
   # rocPRIM's copy is deliberately left untouched: there BENCHMARK_TARGET also
   # doubles as a source path ("${BENCHMARK_TARGET}.parallel.cpp.in") and as a
@@ -91,38 +92,20 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
   endif()
 
   # NOTE(hipccl2): ${PROJECT_BINARY_DIR}, not ${CMAKE_BINARY_DIR}. rocPRIM
-  # writes its benchmarks to a "benchmark" directory too, and OUTPUT_NAME
-  # above restores the un-prefixed filename, so one shared directory would let
-  # the two projects' identically-named binaries silently overwrite each other
-  # in a nested build. PROJECT_BINARY_DIR equals CMAKE_BINARY_DIR for a
+  # writes its benchmarks to a "benchmark" directory too, so each project gets
+  # its own in a nested build. PROJECT_BINARY_DIR equals CMAKE_BINARY_DIR for a
   # top-level project, so standalone builds land in the same place as before
   # while nested builds get <build>/hipcub/benchmark. This also matches the
   # DLL copy destination below, which already used PROJECT_BINARY_DIR - when
   # nested those two previously diverged, leaving Windows benchmarks unable to
   # find their DLLs.
+  string(REGEX REPLACE "^benchmark_" "benchmark_hipcub_" BENCHMARK_OUTPUT_NAME "${BENCHMARK_NAME}")
   set_target_properties(${BENCHMARK_TARGET}
     PROPERTIES
-    OUTPUT_NAME "${BENCHMARK_NAME}"
+    OUTPUT_NAME "${BENCHMARK_OUTPUT_NAME}"
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/benchmark"
   )
-  # NOTE(hipccl2): install to <bindir>/<project>, not <bindir>. hipCUB and rocPRIM
-  # ship benchmarks with identical filenames (OUTPUT_NAME above keeps hipCUB's
-  # unprefixed), so a shared bin/ lets one silently overwrite the other.
-  # rocm_install(TARGETS) has no DESTINATION option and sets an RPATH of
-  # $ORIGIN/../lib, wrong one level deeper - hence plain install() with an
-  # explicit RPATH, as for generate_resource_spec.
-  # Under ENABLE_ASAN_PACKAGING (not on Windows) the directory is
-  # <bindir>/asan/<project>, as rocm_install would have used.
-  set_property(TARGET ${BENCHMARK_TARGET} APPEND PROPERTY INSTALL_RPATH "$ORIGIN/../../lib")
-  set(_hipccl_bench_bindir "${CMAKE_INSTALL_BINDIR}")
-  if(ENABLE_ASAN_PACKAGING AND NOT WIN32)
-    string(APPEND _hipccl_bench_bindir "/asan")
-  endif()
-  install(
-    TARGETS ${BENCHMARK_TARGET}
-    RUNTIME DESTINATION "${_hipccl_bench_bindir}/${PROJECT_NAME}"
-    COMPONENT benchmarks
-  )
+  rocm_install(TARGETS ${BENCHMARK_TARGET} COMPONENT benchmarks)
 
   if(WIN32 AND NOT DEFINED DLLS_COPIED)
     set(DLLS_COPIED "YES")
