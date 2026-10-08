@@ -128,43 +128,47 @@ TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NHWCUsesStride1Solver)
     EXPECT_FALSE(miopen::solver::conv::GemmWrwUniversal{}.IsApplicable(context, problem));
 }
 
-// Small-batch 2D NHWC wgrad excludes the GEMM family on gfx942; a larger batch stays applicable.
+// Small-batch 2D NHWC wgrad excludes the GEMM family on gfx942. Uses mocked devices so the
+// result is deterministic on any host GPU.
 TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, Gfx942SmallBatchNhwcExcluded)
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
 
-    auto context         = miopen::ExecutionContext{&get_handle()};
-    const bool is_gfx942 = context.GetStream().GetDeviceName() == "gfx942";
+    auto gfx942   = MockHandle{DevDescription{"gfx942", 304, 64}, true};
+    auto other    = MockHandle{DevDescription{"gfx90a", 104, 64}, true};
+    auto ctx942   = miopen::ExecutionContext{&gfx942};
+    auto ctxother = miopen::ExecutionContext{&other};
 
     // hw=8 -> 1x1-filter path (GemmWrw1x1_stride1); hw=1 -> point-output path (GemmWrwUniversal).
-    const auto make_problem = [](std::size_t n, std::size_t hw) {
-        const auto test_case = TestCase{
-            {n, 8, hw, hw}, {8, 8, 1, 1}, {0, 0}, {1, 1}, {1, 1}, miopenFloat, miopenTensorNHWC};
-        return test_case.GetProblemDescription(miopen::conv::Direction::BackwardWeights);
+    const auto make = [](miopen::ExecutionContext& ctx, std::size_t n, int stride, std::size_t hw) {
+        auto p = TestCase{{n, 8, hw, hw},
+                          {8, 8, 1, 1},
+                          {0, 0},
+                          {stride, stride},
+                          {1, 1},
+                          miopenFloat,
+                          miopenTensorNHWC}
+                     .GetProblemDescription(miopen::conv::Direction::BackwardWeights);
+        p.SetupFloats(ctx);
+        p.SetupComputeType(ctx);
+        return p;
     };
-    const auto setup = [&](const miopen::conv::ProblemDescription& p) {
-        p.SetupFloats(context);
-        p.SetupComputeType(context);
-    };
-
-    const auto stride1_small   = make_problem(2, 8); // within the 1..3 exclusion
-    const auto stride1_large   = make_problem(4, 8); // above the exclusion
-    const auto universal_small = make_problem(2, 1);
-    const auto universal_large = make_problem(4, 1);
-    setup(stride1_small);
-    setup(stride1_large);
-    setup(universal_small);
-    setup(universal_large);
+    const auto s1_small_942 = make(ctx942, 2, 1, 8);   // 1x1 stride-1, within the 1..3 exclusion
+    const auto s1_small_oth = make(ctxother, 2, 1, 8); // same shape, other arch
+    const auto s1_large_942 = make(ctx942, 4, 1, 8);   // above the exclusion
+    const auto s2_small_942 = make(ctx942, 2, 2, 8);   // 1x1 stride-2 downsample: NOT excluded
+    const auto po_small_942 = make(ctx942, 2, 1, 1);   // point-output: handled by GemmWrwUniversal
 
     const auto stride1   = miopen::solver::conv::GemmWrw1x1_stride1{};
     const auto universal = miopen::solver::conv::GemmWrwUniversal{};
 
-    // Small batch: the whole GEMM wgrad family is excluded on gfx942; applicable on other archs.
-    EXPECT_EQ(stride1.IsApplicable(context, stride1_small), !is_gfx942);
-    EXPECT_EQ(universal.IsApplicable(context, universal_small), !is_gfx942);
-    // Larger batch: applicable everywhere.
-    EXPECT_TRUE(stride1.IsApplicable(context, stride1_large));
-    EXPECT_TRUE(universal.IsApplicable(context, universal_large));
+    // Excluded on gfx942; both GemmWrw1x1_stride1 and GemmWrwUniversal honour the gate.
+    EXPECT_FALSE(stride1.IsApplicable(ctx942, s1_small_942));
+    EXPECT_FALSE(universal.IsApplicable(ctx942, po_small_942));
+    // Not excluded: other arch, larger batch, and the 1x1 stride-2 downsample.
+    EXPECT_TRUE(stride1.IsApplicable(ctxother, s1_small_oth));
+    EXPECT_TRUE(stride1.IsApplicable(ctx942, s1_large_942));
+    EXPECT_TRUE(universal.IsApplicable(ctx942, s2_small_942));
 }
 
 TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NDHWCUsesStride1Solver)

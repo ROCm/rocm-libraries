@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <miopen/algorithm.hpp>
 #include <miopen/env.hpp>
 #include <miopen/solver/gemm_common.hpp>
 
@@ -79,9 +80,13 @@ bool IsSmallBatchNhwcBackwardExcluded(const std::string& device_name,
        !problem.IsLayoutNHWC() || conv.GetSpatialDimension() != 2 || conv.group_count != 1 ||
        device_name != "gfx942" || problem.GetBatchSize() >= small_batch_cutoff)
         return false;
-    // Validated regime: 1x1 filter only.
+    // Validated regime: 1x1 filter, unit stride, zero pad only. GemmBwdRest / GemmWrwUniversal
+    // also match other strides (e.g. the 1x1 stride-2 downsample), which is out of scope here.
     const auto& wei = problem.GetWeights().GetLengths(); // [K, C, fy, fx]
     if(wei[2] != 1 || wei[3] != 1)
+        return false;
+    if(!miopen::all_of(conv.GetConvStrides(), [](auto v) { return v == 1; }) ||
+       !miopen::all_of(conv.GetConvPads(), [](auto v) { return v == 0; }))
         return false;
     // Bound the exclusion to the size range where a fast implicit-GEMM alternative exists. Below
     // the 32-bit byte-offset addressing limit the ASM solver is applicable and competitive; above
