@@ -40,60 +40,28 @@ SCHEDULER_MAP = {"intrawave": 0, "interwave": 1}
 EPILOGUE_MAP = {"default": 0, "cshuffle": 1}
 
 
-#: Keys an engine may hold in ``_hw`` that ``__init__`` does not accept because
-#: they are computed from the others. Registered explicitly so that a constant
-#: accidentally missing from the constructor is an error rather than a silent
-#: drop -- see FeatureEngine.hardware_config.
+#: ``_hw`` keys computed from other constants, which ``__init__`` does not take.
 _DERIVED_HW = frozenset({"total_simds"})
 
 
 class FeatureEngine(ABC):
     """Abstract base for per-op feature extraction."""
 
-    #: Encoding generation for this engine's feature VALUES.
-    #:
-    #: feature_names pins the schema, but not what the numbers mean. When
-    #: GemmUniversalVecFeatureEngine stopped treating "native" as the problem's
-    #: widest legal width, every vec_frac_* value moved under an unchanged name
-    #: list -- so warm-starting a new model from an old one would have mixed two
-    #: encodings into one booster with nothing to detect it. Engines that have
-    #: never been re-encoded stay at 0.
+    #: Bumped when a feature's values change meaning under an unchanged name.
     ENCODING_VERSION = 0
 
     @property
     def hardware_config(self) -> dict:
-        """The hardware constants this engine was constructed with.
+        """The constructor's hardware constants, as keyword arguments.
 
-        ENCODING_VERSION pins what the feature FORMULAS mean; this pins what
-        they were evaluated against. Several features divide by one of these --
-        lds_usage_ratio by lds_capacity, cu_utilisation by num_cus -- so an
-        engine rebuilt with different constants emits different values under
-        unchanged names, which is the same undetectable mismatch and is not
-        covered by the version.
-
-        Recorded in feature_spec.json and passed back when the engine is
-        rebuilt, so a model always scores against the constants it was fitted
-        with. An absent key means the model predates this, and those models were
-        trained with the constructor defaults -- which is exactly what an empty
-        dict rebuilds, so they stay correct without a version bump.
-
-        Filtered to what ``__init__`` actually accepts, derived from the
-        signature rather than a hand-listed set: ``_hw`` also holds values
-        computed from the others (``total_simds`` is ``num_cus *
-        simds_per_cu``), and feeding those back raises TypeError. A hardcoded
-        list would need editing every time a constant is added, and forgetting
-        is silent -- the engine rebuilds with a default for whatever was
-        dropped, which is the defect this property exists to close.
+        Raises ``TypeError`` if they cannot be resolved from the ``__init__``
+        signature, or if ``_hw`` holds a key that is neither accepted nor in
+        ``_DERIVED_HW``.
         """
         import inspect
 
         params = inspect.signature(type(self).__init__).parameters
         if any(p.kind in (p.VAR_KEYWORD, p.VAR_POSITIONAL) for p in params.values()):
-            # Fails OPEN otherwise: **kwargs resolves `accepted` to {"kwargs"},
-            # every constant is filtered out, and the property returns {} --
-            # which build_feature_spec records and _engine_for_spec cannot tell
-            # apart from a legacy model, so the engine silently rebuilds on
-            # defaults. That is the exact desync this property exists to stop.
             raise TypeError(
                 f"{type(self).__name__}.__init__ takes *args/**kwargs, so its "
                 "hardware constants cannot be resolved from the signature. "
@@ -669,16 +637,7 @@ class GemmUniversalFeatureEngine(FeatureEngine):
         return [_lds_constraint, _warp_constraint]
 
 
-#: Engine class name -> (module, attribute) for every engine that can be
-#: recorded in feature_spec.json. train.py writes from this table and
-#: predict.py rebuilds from it, so an engine the trainer can record is by
-#: construction one the predictor can reconstruct -- resolving them separately
-#: is how newly-trained grouped_conv models briefly became unloadable.
-#:
-#: It lives here, beside the abstract FeatureEngine, rather than in train.py:
-#: Predictor must reach it on every load, and importing train.py would pull
-#: scikit-learn and the whole training stack onto the inference path.
-#: The values are strings so this module does not import the engines itself.
+#: Engines a feature_spec.json may name: class name -> (module, attribute).
 FEATURE_ENGINES = {
     "GemmUniversalFeatureEngine": ("feature_engine", "GemmUniversalFeatureEngine"),
     "GemmUniversalVecFeatureEngine": (
@@ -694,10 +653,6 @@ FEATURE_ENGINES = {
 #: Operation -> engine class name.
 OPERATION_ENGINES = {
     "gemm_universal": "GemmUniversalFeatureEngine",
-    # Same op as gemm_universal, with six extra features for the fixed A/B/C
-    # vector widths. A separate operation string rather than a flag so the
-    # choice is recorded in feature_spec.json and Predictor can rebuild the
-    # matching engine without the caller having to remember.
     "gemm_universal_vec": "GemmUniversalVecFeatureEngine",
     "grouped_conv": "GroupedConvFeatureEngine",
 }

@@ -50,8 +50,6 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional, Set
 
-# The LDS capacity below is generated from the real arch specs rather than
-# restated here. Hop matches the sibling modules that reach into codegen.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "codegen"))
 
 from arch_specs_generated import LDS_TOTAL_CAPACITY_BY_ARCH  # noqa: E402
@@ -81,12 +79,6 @@ HW_PROFILES = {
         "hw_max_clock_mhz": 2400,
         "hw_max_waves_per_cu": 32,
         "hw_wavefront_size": 64,
-        # Taken from the generated arch table, not restated. This said 64 KB
-        # where gfx950 has 160 KB -- every other value here matched a real
-        # sweep, and this one is the one the feature engine divides by, so
-        # lds_usage_ratio saturated at 1.0 on ~91% of a gfx950 sweep's rows
-        # against ~1% at the true value. Sourcing it means the producers and
-        # the arch specs cannot disagree again.
         "hw_lds_capacity": LDS_TOTAL_CAPACITY_BY_ARCH["gfx950"],
         "hw_l1_cache_kb": 32,
         "hw_l2_cache_kb": 4096,
@@ -119,25 +111,9 @@ HW_PROFILES = {
         "hw_l3_cache_kb": 131072,
         "hw_num_xcd": 1,
     },
-    "gfx1250": {  # 320 KB of LDS -- twice gfx950, four times gfx942/gfx90a.
-        # Present because an unknown arch emits no hw_ columns, which leaves
-        # the engine on its 64 KB default: one fifth of this part's LDS, the
-        # exact defect the gfx950 correction above removes.
-        #
-        # ONLY measured or table-sourced values. num_cus, simds_per_cu,
-        # max_clock_mhz and wavefront_size were read from rocminfo's GPU agent
-        # on a gfx1250 node; lds_capacity comes from the generated arch table.
-        # Note num_cus is 256: a parser that takes rocminfo's FIRST agent reads
-        # the host CPU's "Compute Unit" instead, which is how a value of 128
-        # was once written here. num_cus is not a passthrough -- it divides
-        # cu_utilization and scales total_simds -- so that error reaches the
-        # features and the recorded feature_spec.json.
-        #
-        # shader_engines, max_waves_per_cu, the three cache sizes and num_xcd
-        # are deliberately ABSENT rather than guessed: absent keys produce no
-        # column, so the engine applies its own defaults, which claim nothing
-        # about this part. Add them when they can be measured. rocminfo
-        # reports all but num_xcd, which needs the arch spec.
+    "gfx1250": {
+        # Measured values only; other constants are omitted, so the engine
+        # uses its defaults for them.
         "hw_num_cus": 256,
         "hw_simds_per_cu": 4,
         "hw_max_clock_mhz": 2400,
@@ -328,17 +304,6 @@ def convert_csv_to_parquet(
     print(f"  Parsed {len(kernel_configs)} unique kernels")
     print()
 
-    # Get hardware profile. An unknown arch emits NO hw_ columns rather than
-    # borrowing another part's, so build_hw_kwargs finds nothing and the
-    # feature engine applies its own defaults -- the same omit-rather-than-
-    # guess the rocminfo route takes.
-    #
-    # This used to substitute gfx950's profile, which was survivable only while
-    # every value in it equalled the engine default. Correcting hw_lds_capacity
-    # to gfx950's real 160 KB made the substitution actively wrong for any
-    # other part: gfx1250 is not a key here and has 320 KB, so it would have
-    # been stamped with half its LDS and that value written into
-    # feature_spec.json, where it governs inference.
     hw_profile = HW_PROFILES.get(arch, {})
     if not hw_profile:
         print(

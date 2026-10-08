@@ -22,11 +22,6 @@ from typing import Optional
 
 import pandas as pd
 
-# LDS capacity is generated from the real arch specs and is not something
-# rocminfo reports, so it has to come from the table rather than the probe.
-# The sys.path hop matches feature_engine_vec.py, dispatcher_integration.py and
-# ml_heuristic_sweep.py, which reach into sibling dispatcher directories the
-# same way.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "codegen"))
 
 from arch_specs_generated import LDS_TOTAL_CAPACITY_BY_ARCH  # noqa: E402
@@ -63,12 +58,7 @@ CANONICAL_COLUMNS = [
     "pad_n",
     "pad_k",
     "persistent",
-    # Fixed A/B/C global vector widths, in elements; 0 means native, i.e. the
-    # width the kernel uses when it fixes none -- a property of the KERNEL (tile,
-    # waves, warp tile, epilogue, arch) via codegen_common.gemm_native_vector_sizes,
-    # NOT the widest width the problem allows. Parsed from the kernel name's optional
-    # _vecA_B_C suffix. Only GemmUniversalVecFeatureEngine consumes them; the
-    # base engine ignores them, so adding these does not change its schema.
+    # Parsed from the kernel name's _vecA_B_C suffix.
     "vec_a",
     "vec_b",
     "vec_c",
@@ -84,40 +74,15 @@ def parse_kernel_name(name: str) -> dict:
       _{padM}_{padN}_{padK}_{persistent}_{tileM}x{tileN}x{tileK}
       _{warpM}x{warpN}x{warpK}_{warpTileM}x{warpTileN}x{warpTileK}
       [_vec{A}_{B}_{C}]
-
-    The ``_universal`` segment is optional because two producers emit the same
-    field order under different prefixes: the tile-engine benchmark binaries use
-    ``gemm_universal_``, while the dispatcher bridge (``GemmKernelConfig.name``)
-    uses ``gemm_``. Only the bridge emits the ``_vec`` suffix, so requiring the
-    longer prefix made the width columns unreachable from any in-tree producer.
-
-    The optional ``_vec`` suffix carries fixed A/B/C global vector widths. It is
-    absent for native-width kernels, which is why ``vec_a/b/c`` come back as 0
-    rather than missing: 0 means "native", i.e. the width the kernel uses when it
-    fixes none. That is a property of the KERNEL (tile, waves, warp tile,
-    epilogue, arch) -- see codegen_common.gemm_native_vector_sizes -- and is NOT
-    in general the widest width the problem allows. Kernels differing only in these widths are otherwise identical in
-    the canonical schema, so without them a model sees their performance
-    difference as noise.
     """
     result = {}
     try:
-        # Strip the optional suffix before the positional split, but do not
-        # record it until the name is known to be a gemm_universal kernel --
-        # an unparseable name must still return {}, not a dict of vec defaults.
-        #
-        # Not $-anchored: the emitters append the variant suffix AFTER the
-        # vector one (unified_gemm_codegen.py adds _preshuffle / _permuteN /
-        # _multid / _streamk), so anchoring would read every fixed-width
-        # variant kernel as native -- a wrong value, not a missing one.
+        # Not end-anchored: variant suffixes may follow it.
         vec_match = re.search(r"_vec(\d+)_(\d+)_(\d+)(?=_|$)", name)
         if vec_match:
             vec = tuple(int(g) for g in vec_match.groups())
             name = name[: vec_match.start()] + name[vec_match.end() :]
         elif re.search(r"_vec\d", name):
-            # A _vec token that does not parse means the grammar has moved.
-            # Returning native here would record a narrowed kernel as the
-            # default one, which is a different kernel, not missing data.
             return result
         else:
             vec = (0, 0, 0)
@@ -296,21 +261,7 @@ def parse_streaming_log(
 
 
 def check_capture_hw_arch(hw: dict, arch: str) -> None:
-    """Refuse a profile that describes a different part than ``--arch``.
-
-    ``--capture_hw`` reads THIS node; the rows are labelled ``--arch``. Those
-    differ in the normal gfx1250 workflow, where the log is produced on a bare
-    node and converted on a login node of another architecture -- and the
-    mismatch used to be harmless only because the profile carried nothing the
-    engine would not have defaulted to anyway. It now carries ``lds_capacity``,
-    so converting a gfx1250 log on a gfx950 host would stamp half that part's
-    LDS onto every row and write it into ``feature_spec.json``, where it
-    governs inference.
-
-    Factored out of ``main`` so it can be tested: the check was unreachable
-    inside argument parsing, and the test written for it asserted two string
-    literals were unequal and passed with the guard deleted.
-    """
+    """Raise if the profile's gfx target differs from ``arch``; pass if it has none."""
     local = re.search(r"(gfx[0-9a-f]+)", str(hw.get("gfx_name", "")))
     if not local:
         return
@@ -394,20 +345,7 @@ def get_hardware_profile() -> dict:
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
-    # rocminfo does not report LDS capacity, so it comes from the generated
-    # arch table. Without it the feature engine falls back to its 64 KB
-    # constructor default, and lds_usage_ratio -- which divides by the capacity
-    # -- saturates at 1.0 on the great majority of rows for any part with more
-    # than 64 KB. gfx950 has 160 KB, so that was ~91% of a gfx950 sweep.
-    # rocminfo's Name is a full target triple, not a bare target --
-    # "amdgcn-amd-amdhsa--gfx90a:sramecc+:xnack-" -- so the gfx token has to be
-    # pulled out before normalising. Passing the triple straight to
-    # normalize_gfx_arch strips the feature suffix and leaves
-    # "amdgcn-amd-amdhsa--gfx90a", which matches no table entry and silently
-    # restores the 64 KB default: the defect this is here to fix.
-    # The regex subsumes normalize_gfx_arch here: it cannot capture a colon,
-    # so the token it returns is already bare. Calling the helper as well reads
-    # as load-bearing and is not -- removing it changes nothing.
+    # rocminfo reports no LDS capacity: look it up by the gfx token in Name.
     match = re.search(r"(gfx[0-9a-f]+)", str(profile.get("gfx_name", "")))
     if match:
         gfx = match.group(1)
@@ -453,15 +391,7 @@ def build_training_dataset(
 
 
 def main(argv=None):
-    """CLI entry point.
-
-    A function rather than a bare ``__main__`` block so the wiring can be
-    tested. check_capture_hw_arch was factored out for exactly that
-    reason, and its only caller then sat in here where no test could
-    reach it -- deleting the call left the whole suite green. Testing a
-    guard without testing that it is invoked is the same defect, one
-    line further down.
-    """
+    """Command-line entry point."""
     import argparse
     import time
 
@@ -500,14 +430,6 @@ def main(argv=None):
 
     if args.capture_hw:
         hw = get_hardware_profile()
-        # The profile describes THIS node; the rows are labelled --arch. Those
-        # differ in the normal gfx1250 workflow, where the log is produced on a
-        # bare node and converted on a login node of another architecture --
-        # and the mismatch used to be harmless only because the profile carried
-        # nothing the engine would not have defaulted to anyway. Now it carries
-        # lds_capacity, so converting a gfx1250 log on a gfx950 host would
-        # stamp half that part's LDS onto every row and write it into
-        # feature_spec.json.
         check_capture_hw_arch(hw, args.arch)
         print(f"  Hardware profile: {hw}")
         for k, v in hw.items():

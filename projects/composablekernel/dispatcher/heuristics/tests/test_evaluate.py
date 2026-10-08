@@ -2,18 +2,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""
-Tests for evaluate.py.
-
-Covers: shape family classification, K-depth regime classification,
-and an end-to-end run of evaluate_model.
-
-The evaluate_model test is deliberately routed through the public entry point
-rather than through compute_tflops_efficiency directly. The defect it guards
-was in the CALLER -- evaluate.py passed the pred_col value where the operation
-is expected -- so a test of the helper in isolation passes while evaluate.py
-raises ValueError on every invocation. Only exercising the caller catches it.
-"""
+"""Tests for evaluate.py."""
 
 import sys
 from pathlib import Path
@@ -60,8 +49,6 @@ class TestClassifyKRegime:
 
 
 class _StubModel:
-    """Returns the prediction column planted in the frame, in row order."""
-
     def __init__(self, preds):
         self._preds = np.asarray(preds, dtype=float)
         self.last_X = None
@@ -73,11 +60,6 @@ class _StubModel:
 
 
 class _StubPredictor:
-    """Stands in for Predictor, so it must offer the whole interface
-    evaluate_model uses -- including the feature remap. A stub missing a method
-    the real object has turns a production call into an AttributeError that only
-    shows up outside the tests."""
-
     def __init__(
         self, preds, log_targets=(), feature_indices=None, feature_engine=None
     ):
@@ -101,8 +83,6 @@ class _StubPredictor:
 
 
 class _StubFeatureEngine:
-    """evaluate_model only needs one row of features per input row."""
-
     def __init__(self, width=1):
         self._width = width
 
@@ -111,11 +91,6 @@ class _StubFeatureEngine:
 
 
 def _frame():
-    """Two shapes, two candidate kernels each.
-
-    Shape A: the model ranks the oracle first  -> efficiency 1.0
-    Shape B: the model ranks the oracle second -> efficiency 0.25
-    """
     return pd.DataFrame(
         {
             "m": [128, 128, 256, 256],
@@ -130,30 +105,18 @@ def _frame():
 
 class TestEvaluateModel:
     def test_runs_end_to_end(self):
-        """Regression: evaluate.py used to raise ValueError on every call.
-
-        compute_tflops_efficiency takes (df, operation, pred_col) and evaluate.py
-        passed "pred_tflops" positionally as `operation`, which falls through to
-        the unknown-operation branch. Both call sites were affected, so the
-        failure was total rather than partial -- the tool could not run at all.
-        """
         df = _frame()
-        # predictions rank the oracle first on shape A, second on shape B
         preds = [100.0, 50.0, 25.0, 100.0]
         res = evaluate_model(_StubPredictor(preds), df, _StubFeatureEngine())
 
         gm = res["global_metrics"]
         assert gm["num_shapes"] == 2
         assert gm["num_valid_rows"] == 4
-        # shape A efficiency 1.0, shape B efficiency 25/100
         assert gm["efficiency_mean"] == pytest.approx(0.625)
         assert gm["ndcg_at_1"] == pytest.approx(0.5)
         assert len(res["per_shape_efficiency"]) == 2
 
     def test_slice_metrics_populated(self):
-        """The second call site lives in _slice_efficiency, reached only through
-        the per-slice groupbys. Assert those produced numbers rather than the
-        empty {"count": 0} that a silent failure would leave behind."""
         res = evaluate_model(
             _StubPredictor([100.0, 50.0, 25.0, 100.0]), _frame(), _StubFeatureEngine()
         )
@@ -165,16 +128,9 @@ class TestEvaluateModel:
 
 
 class TestLogTransform:
-    """log1p(tflops) is the default training target, so the expm1 branch in
-    evaluate_model is the production path. Covering only the pass-through
-    branch leaves the one that actually runs untested."""
-
-    #: _frame()'s measured_tflops, in row order.
     MEASURED = [100.0, 50.0, 100.0, 25.0]
 
     def test_log_space_predictions_are_inverted(self):
-        """A perfect predictor in log space must score as a perfect predictor:
-        r2 == 1 and efficiency == 1 only if expm1 was applied."""
         res = evaluate_model(
             _StubPredictor(np.log1p(self.MEASURED), log_targets=("tflops",)),
             _frame(),
@@ -185,8 +141,6 @@ class TestLogTransform:
         assert gm["efficiency_mean"] == pytest.approx(1.0)
 
     def test_without_the_inverse_transform_the_fit_collapses(self):
-        """The same log-space values down the non-log path must NOT look like a
-        good fit -- otherwise the test above would pass with the branch removed."""
         res = evaluate_model(
             _StubPredictor(np.log1p(self.MEASURED)),  # log_targets=() by default
             _frame(),
@@ -196,10 +150,6 @@ class TestLogTransform:
 
 
 class TestFeatureRemapIsApplied:
-    """evaluate_model takes the ENGINE from the predictor so a wider-schema model
-    evaluates; that only works if it also applies the predictor's column remap.
-    Extracting features and handing them straight to the booster skips it."""
-
     def test_the_model_receives_the_remapped_columns(self):
         pred = _StubPredictor(
             [100.0, 50.0, 25.0, 100.0],

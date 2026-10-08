@@ -178,10 +178,6 @@ class TestPredictorEdgeCases:
 
 
 class TestEngineForSpec:
-    """A vec-trained model must load without the caller naming the engine;
-    otherwise Predictor raises on the six feature names the base engine cannot
-    supply, and evaluate/predict/ml_heuristic_sweep can never read it."""
-
     def test_vec_spec_rebuilds_the_vec_engine(self):
         from predict import _engine_for_spec
 
@@ -189,25 +185,17 @@ class TestEngineForSpec:
         assert type(fe).__name__ == "GemmUniversalVecFeatureEngine"
 
     def test_absent_key_falls_back_to_the_base_engine(self):
-        """Model directories written before the key existed must still load."""
         from predict import _engine_for_spec
 
         assert type(_engine_for_spec({})).__name__ == "GemmUniversalFeatureEngine"
 
     def test_unknown_name_raises_rather_than_guessing(self):
-        """Falling back to the base engine for a name we do not recognise
-        extracts the wrong features whenever the spec omits feature_names, which
-        is the only other thing that would catch the mismatch."""
         from predict import _engine_for_spec
 
         with pytest.raises(ValueError, match="SomeFutureEngine"):
             _engine_for_spec({"feature_engine": "SomeFutureEngine"})
 
     def test_absent_key_resolves_from_op_type(self):
-        """Every shipped model dir predates the feature_engine key but carries
-        op_type. Defaulting straight to the GEMM engine hands a grouped_conv
-        model an engine that cannot supply its features, and the error then
-        blames the engine rather than the missing key."""
         from predict import _engine_for_spec
 
         cases = {
@@ -219,7 +207,6 @@ class TestEngineForSpec:
             assert type(_engine_for_spec({"op_type": op})).__name__ == expected, op
 
     def test_absent_key_and_unknown_op_type_falls_back(self):
-        """Neither key present: the base engine is the only sane default."""
         from predict import _engine_for_spec
 
         assert type(_engine_for_spec({})).__name__ == "GemmUniversalFeatureEngine"
@@ -230,9 +217,6 @@ class TestEngineForSpec:
 
 
 class TestPredictorEngineWiring:
-    """_engine_for_spec in isolation does not prove Predictor calls it. Replacing
-    the call with a hardcoded base engine previously left the suite green."""
-
     @staticmethod
     def _model_dir(tmp_path, engine_name, feature_names):
         import lightgbm as lgb
@@ -248,8 +232,6 @@ class TestPredictorEngineWiring:
         spec = {
             "feature_engine": engine_name,
             "feature_names": feature_names,
-            # Written from the engine, as build_feature_spec does: Predictor
-            # rejects a spec whose encoding version disagrees.
             "feature_encoding_version": feature_engine_class(
                 engine_name
             ).ENCODING_VERSION,
@@ -279,11 +261,6 @@ class TestPredictorEngineWiring:
 
 
 class TestFeatureRemap:
-    """Predictor remaps engine output onto the model's recorded feature_names so
-    a model trained with a narrower or differently-ordered schema still loads.
-    Every other test writes the engine's full list in order, which leaves
-    _feature_indices None and the whole branch unexercised."""
-
     @staticmethod
     def _dir(tmp_path, feature_names, n_model_features):
         import lightgbm as lgb
@@ -333,10 +310,6 @@ class TestFeatureRemap:
 
 
 class TestEncodingVersionAtInference:
-    """Warm start is not the only place two encodings meet. Inference is the
-    production path: a stale vec model would rank a pool under the superseded
-    encoding and the wrong kernel would be built and benchmarked."""
-
     @staticmethod
     def _dir(tmp_path, engine_name, version):
         import lightgbm as lgb
@@ -361,8 +334,6 @@ class TestEncodingVersionAtInference:
         assert Predictor(d) is not None
 
     def test_a_vec_model_with_no_version_is_refused(self, tmp_path):
-        """Every vec model written before versioning used the superseded
-        native-width encoding."""
         from predict import Predictor
 
         d = self._dir(tmp_path, "GemmUniversalVecFeatureEngine", None)
@@ -377,15 +348,12 @@ class TestEncodingVersionAtInference:
             Predictor(d)
 
     def test_a_version_less_base_model_still_loads(self, tmp_path):
-        """The shipped models carry no version; the base engine is version 0,
-        so they must keep working."""
         from predict import Predictor
 
         d = self._dir(tmp_path, "GemmUniversalFeatureEngine", None)
         assert Predictor(d) is not None
 
     def test_every_shipped_model_still_loads(self):
-        """The real artifacts, not a fixture."""
         from pathlib import Path
 
         from predict import Predictor

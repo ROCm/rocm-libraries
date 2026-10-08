@@ -64,116 +64,21 @@ python3 train.py \
 
 #### Data that varies the fixed vector widths
 
-The GEMM bridge can emit kernels with fixed A/B/C global vector widths, carried
-in the kernel name as a `_vecA_B_C` suffix. The base feature engine has no
-feature for them, so two kernels differing only in those widths are
-indistinguishable to it and their performance difference becomes label noise.
-
-If your sweep varies the widths, train with the wider engine:
+For kernels with fixed A/B/C global vector widths, train with the engine in
+`feature_engine_vec.py`, which adds six features:
 
 ```bash
 python3 train.py \
     --data_dir data/ \
-    --out_dir models/gemm_universal_bf16_gfx950 \
+    --out_dir models/gemm_universal_vec_bf16_gfx950 \
     --operation gemm_universal_vec --dtype bf16 --arch gfx950
 ```
 
-`gemm_universal_vec` reads the same `gemm_universal` data; only the engine
-differs, adding `vec_a/b/c` (the width in elements, 0 meaning native) and
-`vec_frac_a/b/c` (the width actually used, over the widest the problem allows). The choice is
-recorded in `feature_spec.json`, so `evaluate.py`, `predict.py` and the
-`Predictor` class rebuild the matching engine with no extra flag.
-
-On native-width-only data the three raw features (`vec_a/b/c`) are constant at
-0, but the three fractions are **not**: `vec_frac_*` is the kernel's native
-width over the problem's widest legal width, and a native kernel's own width
-varies with its tile, warps, warp tile, epilogue and architecture. The default
-epilogue stores one C element however well aligned N is, so `vec_frac_c` is
-`1/cap` against cshuffle's full width -- 0.125 vs 1.0 for bf16 on an N that is
-a multiple of 8, 0.25 vs 1.0 for fp32 -- for the same problem, with every raw
-width 0. (On a misaligned N both rise, since the denominator `gcd(N, cap)`
-shrinks; see the note on fractions above 1 below.) So the wider engine still
-carries signal on native-only data; prefer the base engine there because it is
-cheaper and already has shipped models, not because the extra features are
-empty.
-
-**Where the columns come from.** Only `data_pipeline.py` populates `vec_a/b/c`
-from measurement data,
-by parsing the `_vecA_B_C` suffix off the kernel name; the suffix itself is
-emitted by `codegen_common.gemm_vector_size_suffix` on the dispatcher-bridge
-sweep path. The Step 1-2 route above (`generate_benchmark_data.py` →
-`convert_json_to_parquet.py`) and `convert_csv_to_parquet.py` do **not** carry
-them, and the CMake-built `benchmark_gemm_universal_*` executables do not emit
-fixed-width names at all. The driver that produces fixed-width kernels is
-`tile_engine/ops/gemm/gemm_full_benchmark.py`, whose `VectorFallback` pass adds
-them.
-
-**There is no in-tree path from that driver to a trainable parquet today.**
-`gemm_full_benchmark.py` writes a CSV; `data_pipeline.py` reads a parquet or a
-`Shape N:`-prefixed streaming log, and on a CSV it parses zero rows, writes an
-empty parquet and exits 0. `convert_csv_to_parquet.py` is not the way round
-either -- it *succeeds* on that CSV but writes a non-canonical parquet
-(`op_type="gemm"`, uppercase `M/N/K`, `tflops` rather than `measured_tflops`,
-none of the nine geometry columns), which `build_training_dataset` then filters
-to zero rows even for the base engine.
-
-The parquet for a `gemm_universal_vec` model is currently built out of tree,
-mapping the driver's CSV onto `CANONICAL_COLUMNS` directly rather than
-re-parsing kernel names. Closing that gap is tracked separately; the pieces are
-present -- `data_pipeline.parse_kernel_name` already parses the driver's
-`gemm_bf16_rcr_..._vec4_4_8` names, including the widths -- only the CSV ingest
-branch is missing.
-
-On data without the columns the engine raises rather than silently encoding
-every kernel as native. Check before training with
-
-```python
-{"vec_a", "vec_b", "vec_c"}.issubset(df.columns)
-```
-
-and, if present, `(df[["vec_a","vec_b","vec_c"]] != 0).any().any()` -- `False`
-means every kernel is native and the widths were never swept. The membership
-test comes first because the bare `.any()` raises `KeyError` in exactly the
-case it is meant to diagnose.
-
-Native must be written as `0`, not as null. A null width means nothing parsed
-the kernel name, so the engine raises and names the offending column rather
-than guessing. (It aborts the call, not just that row.)
-
-**What `0` resolves to.** A native width is a property of the *kernel* -- tile
-shape, warps per block, warp tile, epilogue and architecture -- obtained from
-`codegen_common.gemm_native_vector_sizes`. It is **not** the widest width the
-problem allows: with a row-major C the default epilogue stores one element at a
-time however well aligned N is, so a native kernel there has
-`vec_frac_c = 1/legal`, not `1.0`. Rows therefore need `arch`, `epilogue` and the nine `tile_m/n/k`,
-`warp_m/n/k` (warps per block) and `warp_tile_m/n/k` columns, all non-null.
-`arch` is validated against the known gfx families rather than defaulted: the
-wavefront size it selects changes the native widths, so an absent or
-unrecognised value would otherwise be silently wrong.
-
-> **Retrain any existing `gemm_universal_vec` model.** An earlier revision of
-> this engine substituted the problem's legal width for native, recording
-> `vec_frac_c = 1.0` on every native kernel. The feature *names and count are
-> unchanged*, so neither `check_feature_compatibility` nor `Predictor` can see
-> the schema difference -- so the engine declares an `ENCODING_VERSION`,
-> `build_feature_spec` records it as `feature_encoding_version`, and
-> `check_feature_compatibility` refuses a warm start across a bump. A spec with
-> no version predates this and counts as version 0. No in-tree model is
-> affected; the engine and the correction land together.
-
-**Not supported by `search.py`.** `SurrogateSearch` generates candidates from the
-base engine's parameter space, which has no width axes -- and a legal width is a
-function of the problem, so it could not have one that `validate_config` can
-check. Use this engine for training and for ranking a candidate pool you already
-have; surrogate search stays on the base engine.
-
-**No warm start across the boundary.** The schemas differ (72 vs 78), so
-`--warm_start` cannot carry a `gemm_universal` model into a
-`gemm_universal_vec` run or the reverse. Train fresh.
-
-**Python-side only for now.** The C++ deployment path in `ml_heuristic.hpp` pins
-`NUM_FEATURES = 72` and extracts the base list by hand, so a model trained with
-`gemm_universal_vec` cannot be consumed there until that extractor is extended.
+It reads `gemm_universal` data. Rows need non-null `vec_a/b/c`, `arch`,
+`epilogue` and the nine tile, warps-per-block and warp-tile columns. Only
+`data_pipeline.py` fills `vec_a/b/c`; no in-tree tool converts
+`gemm_full_benchmark.py`'s CSV into such a parquet. `search.py` and the C++
+path (`ml_heuristic.hpp`) support only the base engine.
 
 ### 3. Evaluate
 
@@ -249,7 +154,7 @@ Three models are trained per (op, dtype, arch):
 | `convert_json_to_parquet.py` | Convert benchmark JSON to parquet training format, fix `_mem` pad flags |
 | `data_pipeline.py` | Parse raw benchmark logs into canonical parquet datasets |
 | `feature_engine.py` | 72-feature extraction: problem, kernel, interaction, hardware profile |
-| `feature_engine_vec.py` | The above plus six features for the fixed A/B/C vector widths (raw and problem-relative), 78 in total. Select with `--operation gemm_universal_vec`; see the training section above |
+| `feature_engine_vec.py` | Adds six fixed-vector-width features (78 total) |
 | `train.py` | Multi-target LGBMRegressor training with GroupKFold CV, IHEM, warm-start |
 | `predict.py` | Predictor class: predict TFLOPS/latency/bandwidth, rank kernels |
 | `evaluate.py` | Full evaluation: global metrics, per-shape/layout/pipeline slices |
@@ -260,10 +165,6 @@ Three models are trained per (op, dtype, arch):
 | `plan.md` | Full design plan with architecture, milestones, and rationale |
 
 ## Features Used (72 total)
-
-`GemmUniversalFeatureEngine().get_feature_names()` is authoritative -- the
-per-group headings below are a guide to what the groups contain, not a tally.
-`ml_heuristic.hpp` pins the same 72 for the C++ path, in the same order.
 
 ### Problem features (13)
 `M, N, K, split_k, log2(M), log2(N), log2(K), log2(MNK),
@@ -287,27 +188,8 @@ has_padding_when_needed_m, has_padding_when_needed_n, has_padding_when_needed_k,
 missing_required_padding_m, missing_required_padding_n,
 missing_required_padding_k, missing_any_required_padding`
 
-These encode how the kernel's tile sits against the problem and whether the
-padding needed to make it legal is actually enabled.
-
-They test **all three dimensions globally**, which the launch rule does not:
-that rule checks one dimension per tensor, whichever is contiguous for that
-tensor's layout, so `rcr`/`rrr` never check M and `crr` never checks K. The two
-therefore disagree, and `missing_any_required_padding` is **not** uniformly 0 on
-measured data -- a kernel flagged here can have launched perfectly well. On a
-gfx950 sweep about 0.3% of rows are flagged, every one of them an `rrr` row
-flagged on M or a `crr` row flagged on K -- exactly the dimensions those layouts
-never check.
-
-The feature still carries little signal, but for a different reason than
-"always 0": a kernel that needed padding on a dimension that *is* checked, and
-lacked it, was rejected at launch and produced no measurement at all. So the
-flagged rows are the layout-mismatch residue, not examples of failure.
-
-Reconciling the two would change these features' values under unchanged names
-and so needs an `ENCODING_VERSION` bump. See `gemm_tile_divides_problem` in
-`dispatcher/codegen/codegen_common.py` for the rule a candidate pool has to
-apply itself.
+These test all three dimensions, unlike `gemm_tile_divides_problem`, so
+`missing_any_required_padding` can be 1 for a kernel that launches.
 
 ### Hardware profile features (12)
 `hw_num_cus, hw_simds_per_cu, hw_total_simds, hw_shader_engines,
@@ -390,27 +272,15 @@ Adding support for a new operation (e.g., `gemm_streamk`, `grouped_conv`):
 3. **Generate data**: run benchmarks across diverse shapes
 4. **Train**: `python3 train.py --operation gemm_streamk --dtype fp8 --data_dir data/ --out_dir models/`
 
-A new op needs a feature engine plus **five** hand-maintained entries, none of
-which is derived from the others. Missing any one fails, each at a different
-point and with a different error:
-
-| Add to | In | Symptom if missing |
-|---|---|---|
-| `FEATURE_ENGINES` | `feature_engine.py` | `ValueError: unknown feature engine` |
-| `OPERATION_ENGINES` | `feature_engine.py` | falls back to the GEMM engine |
-| `--operation` `choices` | `train.py` | argparse rejects the name |
-| `TARGET_COLUMNS` | `train.py` | `KeyError` on the op name |
-| `compute_group_keys` + `compute_tflops_efficiency` | `train.py` | `ValueError: Unknown operation type` |
-
-Only a *variant* of an existing op avoids the last three, by mapping to its
-base in `ENGINE_VARIANTS` -- that is how `gemm_universal_vec` reuses
-`gemm_universal`'s data, grouping and target column. Surrogate search needs
-more than a subclass when the op's parameter space is problem-dependent -- see
-the `gemm_universal_vec` note above.
+A new op needs a feature engine and an entry in each of `FEATURE_ENGINES` and
+`OPERATION_ENGINES` (`feature_engine.py`), and `--operation`'s `choices`,
+`TARGET_COLUMNS`, `compute_group_keys` and `compute_tflops_efficiency`
+(`train.py`). A variant of an existing op, like `gemm_universal_vec`, replaces
+the last three with an `ENGINE_VARIANTS` entry.
 
 ## Tests
 
-Run `python3 -m pytest tests/ -q` for the current count. Covering:
+Tests cover all modules:
 
 ```bash
 python3 -m pytest tests/ -v
@@ -493,22 +363,9 @@ Each contains:
 - `cv_metrics_tflops.json` - Cross-validation metrics
 - `feature_importances_tflops.json` - Feature importance rankings
 
-`feature_spec.json` carries three keys that govern how the engine is rebuilt at
-inference, each closing a mismatch the others cannot see:
-
-- `feature_engine` - the engine class. `op_type` alone is ambiguous, since
-  `gemm_universal` and `gemm_universal_vec` read the same data through
-  different engines.
-- `feature_encoding_version` - bumped when a feature's MEANING changes while
-  its name does not.
-- `hardware` - the constants the engine was built with. Several features divide
-  by one of these (`lds_usage_ratio` by `lds_capacity`, `cu_utilization` by
-  `num_cus`), so an engine rebuilt with different constants emits different
-  values under identical names and an unchanged version.
-
-All three are absent from models written before they existed. An absent
-`hardware` key rebuilds the constructor defaults, which is what those models
-were scored against, so they keep working unchanged.
+`feature_spec.json` also records `feature_engine` (the engine class),
+`feature_encoding_version` (its `ENCODING_VERSION`) and `hardware` (its
+hardware constants).
 
 Models are automatically decompressed on first use.
 
@@ -569,9 +426,7 @@ Problem Config → Feature Engineering (97 features) → LightGBM Model → Pred
 
 ### Feature Engineering (`feature_engine_grouped_conv.py`)
 
-**97 engineered features**, in four groups. The list below describes what each
-group contains; `GroupedConvFeatureEngine().get_feature_names()` is
-authoritative for the names and the count:
+**97 engineered features** in four groups:
 - **Problem features**: raw params (N,C,K,G,Hi,Wi,Y,X,strides,pads), derived (Ho,Wo), log-scale transforms, arithmetic intensity, aspect ratios, channel/group metrics
 - **Kernel features**: block size, GEMM tiles (M,N), pipeline type, num warps, tile volume, LDS usage
 - **Interaction features**: tile efficiency (M,N,K), block-tile ratios, CU utilization, problem-tile comparisons, output tile counts
@@ -815,8 +670,7 @@ A new model passes quality validation if:
 #### Different Predictions on Same Model
 
 **Unlikely** - If the same model file produces different predictions, check:
-- Feature engine version: compare `len(GroupedConvFeatureEngine().get_feature_names())` against
-  `len(feature_spec.json["feature_names"])` -- the spec is what the booster expects
+- Feature names: the engine must supply every name in `feature_spec.json`
 - Problem encoding (verify problem_to_dict matches)
 - Predictor initialization (check log transform handling)
 

@@ -320,10 +320,6 @@ class TestWarmStartTraining:
         assert warm_rmse <= base_rmse * 1.1
 
     def test_warm_start_from_nonexistent_dir(self, tmp_path):
-        # Construct the absence instead of naming a path assumed to be absent.
-        # A hardcoded "/nonexistent/..." is a statement about the HOST: this one
-        # has a readable /nonexistent whose children stat as EACCES, so the call
-        # raised PermissionError and the test failed without the code moving.
         missing = tmp_path / "model" / "dir"
         assert not missing.exists()
         with pytest.raises(FileNotFoundError):
@@ -331,11 +327,6 @@ class TestWarmStartTraining:
 
 
 class TestEngineVariants:
-    """gemm_universal_vec is gemm_universal DATA read through a wider engine.
-    Only the engine lookup may branch on the variant; everything data-side must
-    normalise, or the variant filters to an empty dataset and KeyErrors on
-    TARGET_COLUMNS."""
-
     def test_base_operation_maps_the_variant(self):
         from train import base_operation
 
@@ -373,9 +364,6 @@ class TestEngineVariants:
         )
 
     def test_group_keys_normalise_the_variant(self):
-        """The normalisation lives INSIDE compute_group_keys, so asserting
-        base_operation() in isolation does not reach it. Without it the variant
-        falls through to ValueError and the variant cannot be trained at all."""
         from train import compute_group_keys
 
         df = self._frame()
@@ -385,7 +373,6 @@ class TestEngineVariants:
         )
 
     def test_efficiency_normalises_the_variant(self):
-        """Same normalisation, second call site."""
         from train import compute_tflops_efficiency
 
         df = self._frame()
@@ -395,8 +382,6 @@ class TestEngineVariants:
         )
 
     def test_parser_accepts_the_variant_and_rejects_junk(self):
-        """Build the real parser rather than grepping the source: a literal can
-        sit in the help text while the choices list rejects the value."""
         import train
 
         argv = [
@@ -424,11 +409,6 @@ class TestEngineVariants:
 
 
 class TestFeatureSpecRecordsTheEngine:
-    """The read side (predict._engine_for_spec) is only useful if the write side
-    records the engine. Dropping the key leaves older specs loadable, so nothing
-    else in the suite notices -- the failure surfaces later, as a vec model
-    loaded with the base engine."""
-
     @staticmethod
     def _spec(operation):
         from train import build_feature_spec, get_feature_engine
@@ -440,9 +420,6 @@ class TestFeatureSpecRecordsTheEngine:
 
     @pytest.mark.parametrize("operation", ["gemm_universal", "gemm_universal_vec"])
     def test_round_trip_through_predict(self, tmp_path, operation):
-        """Build the spec the way train.py does, serialise it, and load it the
-        way Predictor does. Constructing the dict in the test instead would pass
-        even with the key removed from train.py."""
         import json
 
         from predict import _engine_for_spec
@@ -453,23 +430,17 @@ class TestFeatureSpecRecordsTheEngine:
         assert type(_engine_for_spec(json.loads(path.read_text()))) is type(fe)
 
     def test_the_spec_records_the_two_engines_distinctly(self):
-        """Guards the whole point: a spec hardcoded to the base engine would
-        still round-trip for gemm_universal."""
         assert (
             self._spec("gemm_universal")[1]["feature_engine"]
             != self._spec("gemm_universal_vec")[1]["feature_engine"]
         )
 
     def test_the_spec_feature_names_match_the_engine(self):
-        """A spec that names one engine while carrying another's feature list
-        makes Predictor raise on load, so pin them together."""
         for operation in ("gemm_universal", "gemm_universal_vec"):
             fe, spec = self._spec(operation)
             assert spec["feature_names"] == fe.get_feature_names(), operation
 
     def test_the_two_operations_give_different_engines(self):
-        """Guards the whole point: if both resolved to the base engine the
-        round-trip above would still pass."""
         from train import get_feature_engine
 
         assert type(get_feature_engine("gemm_universal")) is not type(
@@ -478,15 +449,6 @@ class TestFeatureSpecRecordsTheEngine:
 
 
 class TestVariantReachesTheRunners:
-    """The three call sites that actually run a training job -- run_cv,
-    train_final_model and the build_training_dataset call in main() -- each
-    normalise the variant through base_operation(). Asserting
-    TARGET_COLUMNS[base_operation(...)] in a test re-applies the helper itself,
-    so it pins the helper and not the caller: deleting the normalisation inside
-    run_cv left the whole suite green. That is the same caller-vs-helper gap the
-    evaluate.py arity fix in this branch was written to close.
-    """
-
     @staticmethod
     def _frame(n=24):
         rs = np.random.RandomState(0)
@@ -501,8 +463,6 @@ class TestVariantReachesTheRunners:
         )
 
     class _Engine:
-        """Minimal engine: run_cv only needs these three methods."""
-
         def get_feature_names(self):
             return ["m", "n", "k"]
 
@@ -513,7 +473,6 @@ class TestVariantReachesTheRunners:
             return df[["m", "n", "k"]].to_numpy(dtype=float)
 
     def test_run_cv_accepts_the_variant(self):
-        """Without the normalisation this raises KeyError on TARGET_COLUMNS."""
         from train import run_cv
 
         out = run_cv(
@@ -539,8 +498,6 @@ class TestVariantReachesTheRunners:
         assert out is not None
 
     def test_the_dataset_is_loaded_under_the_base_operation(self):
-        """main() must ask build_training_dataset for gemm_universal data; the
-        variant is an engine choice, not a different op_type in the parquet."""
         import train
 
         seen = {}
@@ -567,10 +524,6 @@ class TestVariantReachesTheRunners:
 
 
 class TestEncodingVersion:
-    """feature_names pins the schema but not what the values MEAN. Warm start is
-    where two encodings would be mixed into one booster, with the names matching
-    throughout -- so the version must be enforced there, not merely recorded."""
-
     @staticmethod
     def _spec_dir(tmp_path, engine, **override):
         import json
@@ -598,9 +551,6 @@ class TestEncodingVersion:
         [("gemm_universal", 0), ("gemm_universal_vec", 1), ("grouped_conv", 0)],
     )
     def test_the_spec_records_the_engines_version(self, operation, expected):
-        """Parametrized over engines of DIFFERENT versions: testing only the vec
-        engine let the literal `"feature_encoding_version": 1` this commit
-        removed be put back without failing anything."""
         from train import build_feature_spec, get_feature_engine
 
         fe = get_feature_engine(operation)
@@ -612,7 +562,6 @@ class TestEncodingVersion:
 
     @pytest.mark.parametrize("arch", ["gfx950", "gfx942", "gfx1250"])
     def test_the_spec_records_the_arch(self, arch):
-        """_resolve_arch reads this key; nothing pinned the producer."""
         from train import build_feature_spec, get_feature_engine
 
         spec = build_feature_spec(
@@ -634,8 +583,6 @@ class TestEncodingVersion:
         check_feature_compatibility(self._spec_dir(tmp_path, fe), fe)
 
     def test_a_spec_with_no_version_is_refused(self, tmp_path):
-        """Every model written before versioning. Its vec_frac_* values came
-        from the superseded encoding, under identical feature names."""
         from feature_engine_vec import GemmUniversalVecFeatureEngine
         from train import check_feature_compatibility
 
@@ -654,8 +601,6 @@ class TestEncodingVersion:
             check_feature_compatibility(d, fe)
 
     def test_the_base_engine_still_warm_starts_from_a_version_less_spec(self, tmp_path):
-        """The six shipped models carry no version and must keep working: the
-        base engine has never been re-encoded, so it is version 0."""
         import json
 
         from feature_engine import GemmUniversalFeatureEngine
@@ -674,32 +619,10 @@ class TestEncodingVersion:
 
 
 class TestHardwareConstantsRoundTrip:
-    """The engine divides several features by a hardware constant, so a model
-    scored against different constants emits different values under unchanged
-    names. ENCODING_VERSION cannot see it -- the formulas are identical, only
-    their inputs move -- so the constants are recorded and passed back.
-
-    Both halves are needed. Reading lds_capacity from the data without
-    recording it is strictly worse than not reading it: training then uses
-    160 KB and inference rebuilds at the 64 KB default, which desynchronises
-    hw_lds_capacity and lds_usage_ratio on every row. Before, both were
-    consistently wrong; that at least ranked correctly."""
-
-    #: A real gfx950 profile, except for lds_capacity which is the whole point.
-    #: Deliberately NOT a mix of parts: an earlier revision paired gfx950's LDS
-    #: with gfx942's CU count, which no machine has.
-    #:
-    #: Only lds_capacity differs from the constructor default on gfx950, so it
-    #: alone carries test_the_constants_actually_move_the_features -- stated
-    #: because adding a second non-default value here would quietly change what
-    #: that test is testing.
+    #: gfx950 constants; only lds_capacity differs from DEFAULTS.
     HW = {"lds_capacity": 163840, "num_cus": 256, "num_xcd": 8}
 
-    #: The constructor defaults, written out. The no-ENCODING_VERSION-bump
-    #: argument is that a spec with no `hardware` key rebuilds exactly what it
-    #: was scored with, and that rests on these not moving. Comparing an engine
-    #: to another default-built engine cannot see a default change -- both
-    #: follow it -- so the values are pinned literally.
+    #: GemmUniversalFeatureEngine constructor defaults.
     DEFAULTS = {
         "num_cus": 256,
         "lds_capacity": 65536,
@@ -747,12 +670,6 @@ class TestHardwareConstantsRoundTrip:
         return pd.DataFrame([row]), GemmUniversalFeatureEngine
 
     def test_training_refuses_an_arch_the_data_contradicts(self):
-        """feature_spec.json's arch came straight from the flag and was never
-        checked against the rows, while the whole inference side treats it as
-        authoritative -- _resolve_arch cross-checks callers against it and
-        rejects them. --arch does not filter the data either, so a spec could
-        claim gfx1250 over gfx950 rows and pass every other guard: names,
-        count, encoding version and hardware constants all match."""
         from train import check_arch_matches_data
 
         df, _ = self._frame(**self.HW)
@@ -761,12 +678,6 @@ class TestHardwareConstantsRoundTrip:
             check_arch_matches_data(df, "gfx1250")
 
     def test_main_actually_invokes_the_arch_check(self):
-        """The guard had a test; the line calling it did not.
-
-        Deleting `check_arch_matches_data(df, args.arch)` from main left the
-        suite green -- the identical defect this series already hit with
-        check_capture_hw_arch, repeated one function over. A guard nothing
-        invokes is a comment."""
         import train
 
         df, _ = self._frame(**self.HW)
@@ -798,12 +709,9 @@ class TestHardwareConstantsRoundTrip:
         df, _ = self._frame(**self.HW)
         df["arch"] = "gfx950"
         assert check_arch_matches_data(df, "gfx950") is None
-        # The suffixed spelling names the same part.
         assert check_arch_matches_data(df, "gfx950:xnack-") is None
 
     def test_training_refuses_a_mixed_arch_dataset(self):
-        """--arch cannot describe two parts at once, and build_training_dataset
-        never filters on it."""
         from train import check_arch_matches_data
 
         df, _ = self._frame(**self.HW)
@@ -813,7 +721,6 @@ class TestHardwareConstantsRoundTrip:
             check_arch_matches_data(mixed, "gfx950")
 
     def test_training_tolerates_data_without_an_arch_column(self):
-        """Older parquet carries no arch column; nothing to contradict."""
         from train import check_arch_matches_data
 
         df, _ = self._frame(**self.HW)
@@ -821,14 +728,6 @@ class TestHardwareConstantsRoundTrip:
         assert check_arch_matches_data(df, "gfx1250") is None
 
     def test_warm_start_rejects_a_changed_constant(self, tmp_path):
-        """The guard this class exists for -- and the one this change opened.
-
-        Before the constants were read from the data, training always used the
-        defaults, so warm-starting from an older model was consistent. Reading
-        them made it inconsistent: a legacy spec carries no `hardware` key and
-        was scored at 65536, while a run on gfx950 data now builds at 163840.
-        The names, the count and the encoding version all match, so nothing
-        else can see it."""
         import json
 
         from feature_engine import GemmUniversalFeatureEngine
@@ -852,12 +751,6 @@ class TestHardwareConstantsRoundTrip:
             )
 
     def test_warm_start_reads_the_recorded_constants(self, tmp_path):
-        """The RECORDED key must be what is compared, not just the fallback.
-
-        Covering only the absent-key case leaves the read itself untested: a
-        guard that ignores spec["hardware"] entirely and always compares the
-        defaults still rejects the case above, and still accepts a genuine
-        mismatch between two models that both recorded their constants."""
         import json
 
         from feature_engine import GemmUniversalFeatureEngine
@@ -875,19 +768,14 @@ class TestHardwareConstantsRoundTrip:
         assert spec["hardware"]["lds_capacity"] == 163840
         (tmp_path / "feature_spec.json").write_text(json.dumps(spec))
 
-        # Engine at the default; the spec says 163840. Must be rejected.
         with pytest.raises(ValueError, match="Hardware constant mismatch"):
             check_feature_compatibility(tmp_path, GemmUniversalFeatureEngine())
 
-        # Same constants on both sides: accepted.
         check_feature_compatibility(
             tmp_path, GemmUniversalFeatureEngine(lds_capacity=163840)
         )
 
     def test_warm_start_accepts_matching_constants(self, tmp_path):
-        """The absent key must compare against the constructor DEFAULTS, not
-        against {} -- comparing against {} would reject every legacy warm
-        start, which is as wrong as accepting every one."""
         import json
 
         from feature_engine import GemmUniversalFeatureEngine
@@ -907,27 +795,15 @@ class TestHardwareConstantsRoundTrip:
         check_feature_compatibility(tmp_path, GemmUniversalFeatureEngine())
 
     def test_build_hw_kwargs_keys_on_the_engine_actually_built(self, monkeypatch):
-        """build_hw_kwargs must resolve OPERATION_ENGINES[operation], not
-        base_operation(operation). The two agree only because the vec engine
-        inherits __init__, so no fixture built from the real engines can tell
-        them apart -- a variant engine with a constant of its own is registered
-        here to make the difference observable."""
         import feature_engine as fe_mod
         from feature_engine import GemmUniversalFeatureEngine
         from train import build_hw_kwargs
 
         class VariantEngine(GemmUniversalFeatureEngine):
-            # Constants declared explicitly, not behind **kwargs: hardware_config
-            # rejects a VAR_KEYWORD signature, so a **kwargs fixture here would
-            # model an engine the rest of the system refuses to serve.
             def __init__(self, invented_constant: int = 1, lds_capacity: int = 65536):
                 super().__init__(lds_capacity=lds_capacity)
                 self._hw["invented_constant"] = invented_constant
 
-        # The fake MUST dispatch on the name. Returning VariantEngine
-        # unconditionally makes both lookups resolve to the same class, so the
-        # test passes with base_operation restored -- which is exactly how the
-        # first version of it failed to catch anything.
         real = fe_mod.feature_engine_class
         monkeypatch.setattr(
             fe_mod,
@@ -944,18 +820,6 @@ class TestHardwareConstantsRoundTrip:
 
     @pytest.mark.parametrize("op", ["gemm_universal", "gemm_universal_vec"])
     def test_every_constructor_constant_is_read(self, op):
-        """Set equality against the signature, not a few named keys.
-
-        The promise build_hw_kwargs makes is that forgetting a constant becomes
-        impossible. Asserting only on lds_capacity and num_xcd -- as this did --
-        leaves the other nine droppable: deleting eight from the derived set
-        left the whole suite green. Each of the eleven moves at least one
-        feature, so a dropped one is a silently wrong model.
-
-        Parametrized over the variant because build_hw_kwargs must key on the
-        engine actually constructed. Both resolve to the same __init__ today;
-        the assertion is against each op's own engine, so it keeps holding when
-        they diverge."""
         import inspect
 
         from feature_engine import OPERATION_ENGINES, feature_engine_class
@@ -968,12 +832,6 @@ class TestHardwareConstantsRoundTrip:
         assert set(build_hw_kwargs(df, op)) == expected
 
     def test_every_constant_is_read_from_the_data_not_defaulted(self):
-        """Each value is carried from the frame, not substituted.
-
-        Asserting against HW instead -- as this did -- cannot fail for the two
-        of its three entries that equal the constructor default: hardcoding
-        `out["num_xcd"] = 8` left the suite green. Doubling every default makes
-        all eleven differ from what a default would supply."""
         from train import build_hw_kwargs
 
         off_default = {k: v * 2 for k, v in self.DEFAULTS.items()}
@@ -982,8 +840,6 @@ class TestHardwareConstantsRoundTrip:
         assert got == off_default
 
     def test_the_value_is_an_int(self):
-        """It is written into feature_spec.json and compared on warm start, so
-        a numpy float would record 163840.0 and compare by coincidence."""
         from train import build_hw_kwargs
 
         df, _ = self._frame(**self.HW)
@@ -991,33 +847,20 @@ class TestHardwareConstantsRoundTrip:
         assert type(value) is int
 
     def test_an_all_nan_column_falls_back_to_the_default(self):
-        """Present but empty is not a disagreement: the constant is omitted and
-        the engine applies its own default, rather than raising."""
         from train import build_hw_kwargs
 
         df, _ = self._frame(**self.HW)
         df["hw_lds_capacity"] = np.nan
         assert "lds_capacity" not in build_hw_kwargs(df, "gemm_universal")
 
-    #: constant -> the features COMPUTED from it, beyond its own `hw_` passthrough.
-    #:
-    #: Only three of the eleven have one; the other eight are reported and
-    #: never used. That matters because "the constant changes some feature" is
-    #: trivially true for all eleven via the passthrough, so a test asserting
-    #: only that cannot see a derived feature stop using its constant --
-    #: hardcoding num_cus inside cu_utilization left such a test green.
+    #: constant -> features computed from it besides its hw_ passthrough.
     DERIVED_USES = {
         "lds_capacity": ["lds_usage_ratio"],
         "num_cus": ["cu_utilization", "hw_total_simds"],
         "simds_per_cu": ["hw_total_simds"],
     }
 
-    #: Keys `extract` reads from the PROBLEM dict. split_k belongs here:
-    #: omitting it routed the value into `kernel`, where extract never looks,
-    #: so it silently fell back to its default of 1. Invisible while the
-    #: fixture used split_k=1, and it would have masked a real divergence
-    #: between the two paths in a helper whose entire purpose is to compare
-    #: them. test_the_two_paths_agree pins it.
+    #: Keys extract() reads from the problem dict.
     _PROBLEM_KEYS = ("m", "n", "k", "layout", "dtype", "split_k")
 
     def _features(self, engine, df, path):
@@ -1029,10 +872,6 @@ class TestHardwareConstantsRoundTrip:
         return engine.extract(problem, kernel)
 
     def test_the_two_paths_agree(self):
-        """extract and extract_batch are independent implementations, and this
-        class compares them, so the helper must not route a key to the dict the
-        scalar path does not read. A non-default split_k makes the misroute
-        visible -- it reported 1 against the batch path's 4."""
         from feature_engine import GemmUniversalFeatureEngine
 
         df, _ = self._frame(**self.HW)
@@ -1046,10 +885,6 @@ class TestHardwareConstantsRoundTrip:
     @pytest.mark.parametrize("path", ["extract", "extract_batch"])
     @pytest.mark.parametrize("constant", sorted(DEFAULTS))
     def test_each_constant_reaches_its_passthrough_feature(self, constant, path):
-        """Pins that the constant arrives in the engine and is reported.
-
-        This is the weak half, named accordingly: every constant has an
-        `hw_<name>` passthrough, so it says nothing about derived uses."""
         from feature_engine import GemmUniversalFeatureEngine
 
         df, _ = self._frame(**self.HW)
@@ -1066,18 +901,6 @@ class TestHardwareConstantsRoundTrip:
     @pytest.mark.parametrize("path", ["extract", "extract_batch"])
     @pytest.mark.parametrize("constant", sorted(DEFAULTS))
     def test_each_derived_feature_still_uses_its_constant(self, constant, path):
-        """The sharp half. Replacing `self._hw["num_cus"]` with the literal 256
-        inside cu_utilization is invisible to any whole-vector comparison,
-        because hw_num_cus moves regardless.
-
-        Both paths: extract and extract_batch are independent hand-written
-        implementations, and each holds its own copy of these expressions.
-
-        Parametrized over ALL eleven constants, not just the three with a
-        derived use today. The six unverified gfx1250 values are defended as
-        safe on the grounds that nothing is computed from them -- covering only
-        DERIVED_USES' own keys would let a future derived use of one of them
-        appear with no test, quietly making those guesses load-bearing."""
         from feature_engine import GemmUniversalFeatureEngine
 
         df, _ = self._frame(**self.HW)
@@ -1093,16 +916,6 @@ class TestHardwareConstantsRoundTrip:
             for j in range(len(names))
             if base[..., j] != pytest.approx(moved[..., j])
         }
-        # NOTE: the measured set is ROW-dependent. feature_engine overrides
-        # lds_cap to a hardcoded 32768 for compv4 pipelines, so on such a row
-        # lds_usage_ratio stops responding to lds_capacity and this assertion
-        # would fail. The fixture pins compv3 deliberately; parametrising it
-        # over pipelines needs this expectation made conditional first.
-        #
-        # Set EQUALITY, not containment. Checking only the listed features
-        # cannot see a NEW derived use appear, so a feature later computed from
-        # one of these constants would ship with no test. This way the table
-        # has to be updated before such a change can land.
         expected = {f"hw_{constant}"} | set(self.DERIVED_USES.get(constant, []))
         assert changed == expected, (
             f"the features computed from {constant} on the {path} path have "
@@ -1111,10 +924,6 @@ class TestHardwareConstantsRoundTrip:
         )
 
     def test_the_constructor_defaults_have_not_moved(self):
-        """The no-bump argument rests on these. A legacy spec rebuilds bare, so
-        if a default changes, every model trained before that silently rescores
-        against a different constant -- and comparing two default-built engines
-        cannot detect it, because both move together."""
         from feature_engine import GemmUniversalFeatureEngine
 
         assert GemmUniversalFeatureEngine().hardware_config == self.DEFAULTS
@@ -1133,8 +942,6 @@ class TestHardwareConstantsRoundTrip:
         )
 
     def test_the_constants_actually_move_the_features(self):
-        """Guard the guard. If the engine ignored these, the round-trip above
-        would hold for a spec that recorded nothing."""
         df, Engine = self._frame(**self.HW)
         a = Engine(**self.HW).extract_batch(df)
         b = Engine().extract_batch(df)
@@ -1144,9 +951,6 @@ class TestHardwareConstantsRoundTrip:
         )
 
     def test_a_spec_without_the_key_rebuilds_the_defaults(self):
-        """Models written before this existed were trained with the
-        constructor defaults, so an absent key must reproduce them exactly --
-        that is what makes this safe without an ENCODING_VERSION bump."""
         from predict import _engine_for_spec
 
         df, Engine = self._frame(**self.HW)
@@ -1167,9 +971,6 @@ class TestHardwareConstantsRoundTrip:
         ],
     )
     def test_derived_values_are_not_fed_back(self, engine_name):
-        """_hw also holds values computed from the others; passing those to the
-        constructor raises TypeError. Checked on every engine, since each keeps
-        its own _hw and only one was covered."""
         from feature_engine import feature_engine_class
 
         cls = feature_engine_class(engine_name)
@@ -1178,10 +979,6 @@ class TestHardwareConstantsRoundTrip:
         assert "total_simds" not in fe.hardware_config
 
     def test_an_engine_hiding_constants_behind_kwargs_raises(self):
-        """hardware_config must not fail open. With **kwargs the signature
-        filter resolves to nothing, the property returns {}, and that is
-        indistinguishable from a legacy model -- so the engine would rebuild on
-        defaults, which is the desync the property exists to prevent."""
         from feature_engine import GemmUniversalFeatureEngine
 
         class Hidden(GemmUniversalFeatureEngine):
@@ -1192,9 +989,6 @@ class TestHardwareConstantsRoundTrip:
             Hidden().hardware_config
 
     def test_an_unregistered_stored_constant_raises(self):
-        """A constant in _hw that __init__ does not accept is either derived --
-        and must be declared in _DERIVED_HW -- or a bug. Dropping it silently
-        rebuilds the engine on a default for that constant."""
         from feature_engine import GemmUniversalFeatureEngine
 
         fe = GemmUniversalFeatureEngine()
@@ -1203,17 +997,6 @@ class TestHardwareConstantsRoundTrip:
             fe.hardware_config
 
     def test_every_shipped_model_can_still_be_scored(self):
-        """The six shipped models are the real regression surface and no test
-        touched them through this path. All six predate the hardware key, so
-        all six take the absent branch, and four resolve to GroupedConv.
-
-        The invariant is SUBSET, not equality: three of the grouped_conv models
-        record 83 feature names against the current engine's 97, and that is
-        supported on purpose -- Predictor.select_features remaps the spec's
-        names onto the engine's output. Asserting equality instead, as a first
-        version of this test did, fails on a design the code implements
-        deliberately. What must hold is that the engine can supply every name
-        the booster was trained on, and that the remap yields that width."""
         import json
 
         import numpy as np
@@ -1237,17 +1020,10 @@ class TestHardwareConstantsRoundTrip:
                 Predictor(str(d)).select_features(np.zeros((1, len(names)))).shape[1]
             )
             assert width == len(spec["feature_names"]), d.name
-        # len(models), not a literal: the intent is "no model directory was
-        # silently skipped for a missing spec". A fixed 6 would fail on the
-        # first new model this ticket ships -- a tripwire aimed at its own
-        # deliverable.
         assert checked == len(models), f"skipped {len(models) - checked} model(s)"
         assert len(models) >= 6
 
     def test_a_disagreeing_hardware_column_raises(self):
-        """Row 0 was the sole authority. A NaN there dropped the constant and
-        restored the default; a data_dir mixing architectures applied row 0 to
-        every row, and build_training_dataset never filters on arch."""
         from train import build_hw_kwargs
 
         df, _ = self._frame(**self.HW)
@@ -1265,9 +1041,6 @@ class TestHardwareConstantsRoundTrip:
         assert build_hw_kwargs(mixed, "gemm_universal")["lds_capacity"] == 163840
 
     def test_a_non_numeric_constant_names_its_column(self):
-        """get_hardware_profile keeps the raw string when int() fails, so a
-        placeholder can reach this. It used to raise a bare ValueError that
-        named no column."""
         from train import build_hw_kwargs
 
         df, _ = self._frame(**self.HW)
@@ -1277,8 +1050,6 @@ class TestHardwareConstantsRoundTrip:
             build_hw_kwargs(df, "gemm_universal")
 
     def test_a_mixed_type_column_reports_rather_than_crashing(self):
-        """sorted() on str and int raises TypeError, which used to mask the
-        distinct-values message this branch exists to emit."""
         from train import build_hw_kwargs
 
         df, _ = self._frame(**self.HW)
@@ -1289,8 +1060,6 @@ class TestHardwareConstantsRoundTrip:
 
     @pytest.mark.parametrize("bad", [0, -1])
     def test_a_non_positive_constant_raises(self, bad):
-        """These are divisors guarded by max(x, 1), so a non-positive value is
-        clamped and inflates the feature under a plausible-looking name."""
         from train import build_hw_kwargs
 
         df, _ = self._frame(**self.HW)

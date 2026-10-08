@@ -36,10 +36,6 @@ from typing import Optional
 from data_pipeline import parse_kernel_name
 from predict import Predictor
 
-# codegen_common owns arch normalisation for the whole dispatcher tree and
-# imports stdlib only. The sys.path hop matches feature_engine_vec.py and
-# ml_heuristic_sweep.py, which reach into sibling dispatcher directories the
-# same way.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "codegen"))
 
 from codegen_common import normalize_gfx_arch  # noqa: E402
@@ -53,15 +49,7 @@ LAYOUT_TO_DISPATCHER = {
 }
 
 
-#: A/B dtype -> C operand dtype.
-#:
-#: Does not cover bf8 or int8, which codegen's CommonTypeMappings.get_output_dtype
-#: maps to fp16 and int32; those fall through to the input dtype here, so a
-#: kernel would be scored under one C dtype and built under another. Left as-is
-#: deliberately: delegating to codegen means importing across the heuristics ->
-#: codegen boundary, which this module has no path set up for, and the gap is
-#: pre-existing and unrelated to vector widths. Fix it with that import in its
-#: own change.
+#: A/B dtype -> C operand dtype. bf8 and int8 fall through to the input dtype.
 DTYPE_TO_C_DTYPE = {
     "fp8": "fp16",
     "fp16": "fp16",
@@ -112,13 +100,7 @@ def kernel_config_to_feature_dict(kernel_name: str) -> dict:
 
 
 def _fixed_widths(feat: dict) -> tuple:
-    """The three fixed widths as ints, 0 meaning native.
-
-    Coerced rather than tested for truthiness: the string "0" and a NaN are both
-    truthy, so `feat.get(k) or 0` reported a NATIVE kernel as fixed-width and
-    named widths it does not have. The feature engine accepts string widths, so
-    the two modules must agree on the input class.
-    """
+    """The three fixed widths as ints; null or empty means 0 (native)."""
     out = []
     for key in ("vec_a", "vec_b", "vec_c"):
         value = feat.get(key)
@@ -130,19 +112,11 @@ def _fixed_widths(feat: dict) -> tuple:
 
 
 def _reject_fixed_widths(feat: dict, target: str) -> None:
-    """Refuse to convert a kernel whose global vector widths are fixed.
+    """Raise if the kernel fixes any global vector width.
 
-    Neither MLKernelSpec nor the dispatcher KernelConfig dict built here carries
-    them, so converting would describe a NATIVE-width kernel while keeping the
-    fixed-width kernel's name: what gets built is not what was ranked, and the
-    name gives no hint. Silently selecting a different kernel is worse than
-    refusing. Carrying them end to end means adding vector_size_a/b/c to
-    MLKernelSpec and to the config dict together -- GemmKernelConfig already has
-    the fields.
-
-    Reachable: create_ml_heuristic and create_ranked_heuristic both take a
-    caller-supplied kernel_pool of these dicts, and kernel_config_to_feature_dict
-    populates vec_a/b/c for any name carrying the suffix.
+    Neither MLKernelSpec nor the dispatcher KernelConfig dict carries fixed
+    widths, so the converted kernel would be native-width under the fixed-width
+    kernel's name.
     """
     widths = _fixed_widths(feat)
     if any(widths):
@@ -158,16 +132,6 @@ def _reject_fixed_widths(feat: dict, target: str) -> None:
 def feature_dict_to_dispatcher_config(
     feat: dict, dtype: str = "fp8", arch: str = "gfx950"
 ) -> dict:
-    # NOTE: arch still defaults to a literal here, unlike the two factories.
-    # These build the config a kernel is COMPILED from, so a forgotten argument
-    # targets gfx950 silently -- but changing the default is a breaking change
-    # for every existing caller and belongs in its own commit.
-    """Convert a feature-engine kernel dict to dispatcher KernelConfig fields.
-
-    Handles the naming inversion:
-        feature engine warp_m   -> KernelConfig wave_m  (warps per block)
-        feature engine warp_tile_m -> KernelConfig warp_m (elements per warp)
-    """
     _reject_fixed_widths(feat, "the dispatcher KernelConfig dict")
     layout = feat.get("layout", "rcr")
     la, lb, lc = LAYOUT_TO_DISPATCHER.get(layout, ("row", "col", "row"))
@@ -201,22 +165,7 @@ def feature_dict_to_dispatcher_config(
 
 
 def feature_dict_to_ml_spec(feat: dict, predicted_tflops: float = 0.0) -> MLKernelSpec:
-    """Convert a feature-engine kernel dict + prediction to an MLKernelSpec.
-
-    Rejects a kernel with fixed vector widths. MLKernelSpec has no field to
-    carry them, so converting one would return a NATIVE-width spec bearing the
-    fixed-width kernel's name: the kernel that then gets built is not the kernel
-    that was ranked, and nothing downstream can tell, because the name still
-    says ``_vec4_4_8``. Silently selecting a different kernel is worse than
-    refusing, so refuse until the widths can be carried end to end (that means
-    adding ``vector_size_a/b/c`` to MLKernelSpec and to
-    :func:`feature_dict_to_dispatcher_config` in one change --
-    ``GemmKernelConfig`` already has the fields).
-
-    This is reachable: ``create_ml_heuristic`` takes a caller-supplied
-    ``kernel_pool`` of these dicts, and ``kernel_config_to_feature_dict``
-    populates ``vec_a/b/c`` for any name carrying the suffix.
-    """
+    """Convert a feature-engine kernel dict + prediction to an MLKernelSpec."""
     _reject_fixed_widths(feat, "MLKernelSpec")
     return MLKernelSpec(
         kernel_name=feat.get("kernel_name", "unknown"),
@@ -256,59 +205,20 @@ def load_kernel_pool_from_binaries(bin_dir: str | Path) -> list[dict]:
     return configs
 
 
-#: Keys that describe the PROBLEM ALONE. A kernel_pool entry carrying one of
-#: these silently wins the merge in rank_kernels -- a pool pinned at
-#: m=n=k=9999 would rank every query against 9999 -- so they are rejected
-#: rather than quietly honoured.
-#:
-#: dtype and layout are deliberately NOT here: they are genuine kernel
-#: properties as well, parsed out of the kernel name, so every ordinary pool
-#: carries them. arch is checked separately, against the model's.
+#: Problem-only keys; rank_kernels merges each kernel_pool entry over the problem.
 _PROBLEM_KEYS = ("m", "n", "k", "split_k")
 
 
 def _same_arch(a, b) -> bool:
-    """Do two spellings name the same part?
-
-    Compared after stripping the feature suffix. ``rocminfo`` and
-    ``hipDeviceProp_t::gcnArchName`` report ``gfx950:sramecc+:xnack-``, which
-    _check_arch accepts, so comparing raw strings rejects a legitimate caller
-    for naming the same architecture the model did.
-
-    Stripping is delegated to ``codegen_common.normalize_gfx_arch``, whose own
-    docstring requires it: "everything under ``dispatcher/`` must call this
-    rather than open-coding ``split(\\":\\")``". This module had its own copy,
-    which is precisely how the model-side and codegen-side notions of "same
-    arch" would drift the next time a suffix form is added.
-    """
+    """Whether two targets match once feature suffixes are stripped."""
     return normalize_gfx_arch(str(a)) == normalize_gfx_arch(str(b))
 
 
 def _resolve_arch(predictor, arch: Optional[str], kernel_pool: list) -> Optional[str]:
-    """The architecture to extract features for, cross-checked three ways.
+    """The arch to extract features for: ``arch``, else the model's, else None.
 
-    A vec-trained model encodes native vector widths for the arch it was fitted
-    on, so extracting under a different one feeds it a distribution it never
-    saw -- silently, because the feature names and count do not change. The
-    model records its arch in feature_spec.json, so disagreement is detectable:
-    say so rather than rank under one part and build for another.
-
-    ``arch=None`` means "unspecified", and the model's own arch is used. That is
-    why the factories no longer default it to a literal: a default string is
-    indistinguishable from a deliberate choice, so loading a gfx1250 model
-    without naming an arch raised a disagreement against a gfx950 nobody asked
-    for.
-
-    Returns ``None`` when neither supplies one, and the caller then omits the
-    key: the BASE engine ignores arch entirely, so raising here would break
-    every base-engine caller to serve the vec engine. A vec engine that needs it
-    raises by name from its own required-column check.
-
-    The pool is checked too, on the problem-ONLY keys (see ``_PROBLEM_KEYS``;
-    ``dtype`` and ``layout`` are excluded because every ordinary pool carries
-    them). ``rank_kernels`` merges ``{**problem, **kc}`` with the KERNEL
-    winning, so a pool pinned at m=n=k=9999 would rank every shape against 9999.
-    Rows of a canonical frame, the obvious thing to pass, carry them all.
+    Raises if ``arch`` disagrees with the model's recorded arch, or if a
+    ``kernel_pool`` entry carries a problem-only key or a conflicting arch.
     """
     spec_arch = predictor.spec.get("arch") if hasattr(predictor, "spec") else None
     if spec_arch and arch and not _same_arch(spec_arch, arch):
@@ -410,10 +320,6 @@ def create_ml_heuristic(
             "split_k": 1,
         }
         if resolved_arch is not None:
-            # GemmUniversalVecFeatureEngine needs it -- a kernel's native vector
-            # widths depend on the wavefront size, which the gfx family selects.
-            # The base engine ignores it. Omitted rather than set to None so a
-            # vec engine fails by name rather than on a null column.
             problem["arch"] = resolved_arch
 
         ranked = predictor.rank_kernels(problem, kernel_pool)
@@ -469,10 +375,6 @@ def create_ranked_heuristic(
             "split_k": 1,
         }
         if resolved_arch is not None:
-            # GemmUniversalVecFeatureEngine needs it -- a kernel's native vector
-            # widths depend on the wavefront size, which the gfx family selects.
-            # The base engine ignores it. Omitted rather than set to None so a
-            # vec engine fails by name rather than on a null column.
             problem["arch"] = resolved_arch
 
         ranked = predictor.rank_kernels(problem, kernel_pool)

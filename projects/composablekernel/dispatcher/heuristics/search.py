@@ -58,13 +58,8 @@ class SurrogateSearch:
         seed: int = 42,
     ):
         self._predictor = predictor
-        # Taken from the predictor rather than built bare. get_constraints
-        # filters candidates on self._hw["lds_capacity"], so a bare engine
-        # rejects configs at the 64 KB default while the predictor scores the
-        # survivors at whatever its model recorded -- the filter and the scorer
-        # would disagree about the same hardware. `is not None` rather than
-        # `or`: an engine is not meaningfully falsy, and `or` would silently
-        # substitute the predictor's for one a caller passed deliberately.
+        # Default to the predictor's engine, so constraints use the model's
+        # hardware constants.
         if feature_engine is not None:
             self._fe = feature_engine
         else:

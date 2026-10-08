@@ -38,9 +38,6 @@ from sklearn.model_selection import GroupKFold
 
 from data_pipeline import build_training_dataset
 
-# data_pipeline already puts dispatcher/codegen on sys.path, so this costs no
-# second hop. normalize_gfx_arch is the single source of truth for comparing
-# gfx targets across the dispatcher tree.
 from codegen_common import normalize_gfx_arch  # noqa: E402
 
 
@@ -88,21 +85,11 @@ MAX_ESTIMATORS = 5000
 WARM_START_N_ESTIMATORS = 500
 
 
-#: Operations that train on another operation's data but use a different
-#: feature engine. Only get_feature_engine should branch on the variant name;
-#: everything data-side -- dataset filtering, group keys, target columns,
-#: efficiency grouping -- normalises through base_operation() so there is one
-#: place to add the next variant rather than a branch per call site.
 ENGINE_VARIANTS = {"gemm_universal_vec": "gemm_universal"}
 
 
 def base_operation(operation: str) -> str:
-    """The operation whose DATA this operation trains on.
-
-    ``gemm_universal_vec`` is ``gemm_universal`` data read through a wider
-    feature engine, so its rows carry ``op_type == "gemm_universal"`` and it
-    groups by ``(m, n, k)`` exactly like the base operation.
-    """
+    """The operation whose data ``operation`` trains on."""
     return ENGINE_VARIANTS.get(operation, operation)
 
 
@@ -158,11 +145,6 @@ def check_feature_compatibility(
             parts.append("  Feature order changed (names match but order differs).")
         raise ValueError("\n".join(parts))
 
-    # feature_names pins the schema but not the MEANING of the values. An
-    # engine bumps ENCODING_VERSION when it re-encodes an existing feature;
-    # warm-start is precisely where two encodings would be mixed into one
-    # booster, and the names would match throughout. A spec with no key predates
-    # versioning, which is version 0.
     prev_version = prev_spec.get("feature_encoding_version", 0)
     curr_version = getattr(feature_engine, "ENCODING_VERSION", 0)
     if prev_version != curr_version:
@@ -174,17 +156,6 @@ def check_feature_compatibility(
             "rather than warm-starting."
         )
 
-    # Same failure one level down: the version pins what the feature FORMULAS
-    # mean, these pin what they were evaluated against. Several features divide
-    # by one of them, so mixing two sets into one booster is undetectable from
-    # names, count and version alike.
-    #
-    # An absent key is compared against the CONSTRUCTOR DEFAULTS, not against
-    # {}: a spec predating this was rebuilt bare at inference, so the defaults
-    # are what it effectively scored with. Comparing against {} instead would
-    # accept every legacy warm start, which is the hole this closes -- before
-    # lds_capacity was read from the data, training always used the default, so
-    # a legacy warm start was consistent; now it is not.
     prev_hw = prev_spec.get("hardware")
     if prev_hw is None:
         prev_hw = type(feature_engine)().hardware_config
@@ -244,23 +215,7 @@ def load_warm_start_model(prev_model_dir: Path, target: str) -> str | None:
 
 
 def check_arch_matches_data(df: pd.DataFrame, arch: str) -> None:
-    """Refuse an ``--arch`` that the rows contradict.
-
-    ``feature_spec.json["arch"]`` is written straight from the flag, and the
-    whole inference side then treats it as authoritative -- ``_resolve_arch``
-    cross-checks a caller against it three ways and raises on disagreement.
-    The write side validated nothing, and ``--arch`` does not filter the data
-    (``build_training_dataset`` keys on op_type and dtype only), so
-    ``--arch gfx1250`` over gfx950 parquet produced a spec claiming gfx1250
-    while the vec engine had computed wave-64 native widths from the rows.
-
-    That spec passes every other guard -- names, count, encoding version and
-    hardware constants all match -- and is then used to reject a legitimate
-    caller. A wrong answer delivered with full confidence by the machinery
-    built to prevent wrong answers.
-
-    Both producers write an ``arch`` column on every row, so the check is free.
-    """
+    """Raise if the ``arch`` column holds a target other than ``arch``."""
     if "arch" not in df.columns or df.empty:
         return
     found = {normalize_gfx_arch(str(a)) for a in pd.unique(df["arch"].dropna())}
@@ -278,36 +233,16 @@ def check_arch_matches_data(df: pd.DataFrame, arch: str) -> None:
 
 
 def build_hw_kwargs(df: pd.DataFrame, operation: str) -> dict:
-    """Hardware constants read from the dataset, keyed as engine kwargs.
+    """Engine keyword arguments from the frame's ``hw_<param>`` columns.
 
-    The column name is the parameter name with an ``hw_`` prefix, and the set of
-    parameters is taken from the engine's own constructor signature rather than
-    from a hand-written list of columns.
-
-    That is the point of the function. The hand-written version omitted
-    ``lds_capacity`` and ``num_xcd`` for as long as it existed, and
-    ``lds_capacity`` is the only constant whose real value differs from its
-    default -- 160 KB on gfx950 against a 64 KB default. So the engine divided
-    ``lds_usage_ratio`` by the wrong capacity and it saturated at 1.0 on ~91% of
-    a gfx950 sweep's rows, against ~1% at the true capacity, while
-    ``hw_lds_capacity`` sat at a constant carrying the wrong number. Every
-    other constant happened to equal its default, which is exactly why the
-    omission produced no symptom for anyone to notice.
-
-    Values absent from the frame are left out, so the engine applies its own
-    default rather than one restated here -- two sources for the same default
-    is how they drift.
+    Covers every ``__init__`` parameter of the engine ``operation`` constructs.
+    Absent or all-null columns are omitted. A column holding more than one
+    value, a non-integer or a non-positive value raises.
     """
     import inspect
 
     from feature_engine import OPERATION_ENGINES, feature_engine_class
 
-    # Keyed on the operation as given, NOT through base_operation. That helper
-    # answers "whose DATA does this train on"; the engine actually constructed
-    # is OPERATION_ENGINES[operation], and for gemm_universal_vec those are
-    # different classes. They agree today only because the vec engine inherits
-    # __init__ -- the day it declares a constant of its own, the base class's
-    # signature would silently fail to read it from the data.
     name = OPERATION_ENGINES.get(operation)
     if name is None:
         return {}
@@ -321,12 +256,6 @@ def build_hw_kwargs(df: pd.DataFrame, operation: str) -> dict:
         col = f"hw_{p}"
         if col not in df.columns:
             continue
-        # The whole column, not row 0. A NaN first row would drop the constant
-        # and silently restore the default, and a data_dir mixing architectures
-        # would apply row 0's value to every row -- build_training_dataset
-        # filters on op_type and dtype only, never on arch. Both used to be
-        # transient; now the value is written into feature_spec.json and
-        # governs inference, so disagreement has to be loud.
         values = pd.unique(df[col].dropna())
         if len(values) == 0:
             continue
@@ -363,33 +292,11 @@ def build_feature_spec(
     log_targets_used: list,
     params: dict,
 ) -> dict:
-    """The contents of feature_spec.json.
-
-    Factored out of the training pipeline so the write side can be tested
-    without running a training job -- a test that constructs the dict itself
-    would pass even if this function stopped recording the engine.
-    """
+    """The contents of feature_spec.json."""
     return {
         "op_type": operation,
-        # Bumped when the MEANING of a feature changes while its name does not.
-        # check_feature_compatibility and Predictor both compare feature_names
-        # only, so a silent re-encoding is otherwise undetectable: when
-        # GemmUniversalVecFeatureEngine stopped treating "native" as the
-        # problem's widest legal width, every vec_frac_* value moved under an
-        # unchanged schema. A spec with no version predates that.
         "feature_encoding_version": getattr(fe, "ENCODING_VERSION", 0),
-        # The engine class, so Predictor can rebuild the matching one. op_type
-        # alone is not enough: gemm_universal and gemm_universal_vec read the
-        # same data through different engines, and loading a vec-trained model
-        # with the base engine raises on the missing feature names.
         "feature_engine": type(fe).__name__,
-        # The hardware constants the engine was built with. main() reads these
-        # from the dataset, so an engine rebuilt bare at inference divides by
-        # different numbers -- lds_usage_ratio by lds_capacity, cu_utilisation
-        # by num_cus -- and emits different values under unchanged names. The
-        # encoding version cannot see that: the formulas are identical, only
-        # their inputs moved. An absent key predates this and rebuilds with the
-        # constructor defaults, which is what those models were trained with.
         "hardware": fe.hardware_config,
         "dtype": dtype,
         "arch": arch,
@@ -725,11 +632,7 @@ def train_final_model(
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    """The CLI parser, factored out so tests can assert what it accepts.
-
-    Grepping the source for an option value is not equivalent: a literal can
-    sit in a help string while the choices list rejects it.
-    """
+    """The command-line parser."""
     parser = argparse.ArgumentParser(
         description="Train CK Tile kernel performance models (GEMM, Grouped Conv, FMHA)"
     )
@@ -807,8 +710,6 @@ def main():
     df = build_training_dataset(
         args.data_dir, op_type=base_operation(operation), dtype=args.dtype
     )
-    # Before any work: a mislabelled dataset makes everything after it wrong,
-    # and the label is what inference trusts.
     check_arch_matches_data(df, args.arch)
     print(f"  Total rows: {len(df)}")
 

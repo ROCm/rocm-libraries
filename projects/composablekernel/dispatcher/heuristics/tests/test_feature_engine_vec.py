@@ -1,22 +1,4 @@
-#!/usr/bin/env python3
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier: MIT
-
-"""
-Tests for GemmUniversalVecFeatureEngine.
-
-The base class keeps `extract` and `extract_batch` as two independent
-implementations, and the subclass makes that worse because the base
-`extract_batch` sizes its output from the OVERRIDDEN get_feature_names. So the
-parity tests here are the point of the file, and they are parametrized over the
-input classes that actually differ -- NaN, empty string, None -- not just clean
-integers. A parity test over clean integers proves only that two clean-integer
-paths agree, which is not where either path was wrong.
-
-`extract(problem, kernel)` is always called with two DISTINCT dicts, because
-that is how `predict._predict_single` calls it. Passing one merged dict hides
-which argument each value is actually read from.
-"""
+"""Tests for GemmUniversalVecFeatureEngine."""
 
 import sys
 from pathlib import Path
@@ -34,15 +16,10 @@ from feature_engine_vec import (  # noqa: E402
     GemmUniversalVecFeatureEngine,
 )
 
-#: The four layouts the engine accepts -- the same four the base engine's
-#: LAYOUT_MAP and data_pipeline.parse_kernel_name know. The column-major-C forms
-#: are rejected (see TestLayoutValidation); gemm_tile_divides_problem covers
-#: them on the codegen side, where they ARE resolvable.
 LAYOUTS = ("rcr", "rrr", "crr", "ccr")
 
 
 def _problem(m=512, n=512, k=512, layout="rcr", dtype="bf16", upper=False):
-    """Problem-side keys only -- no vector widths."""
     keys = ("M", "N", "K") if upper else ("m", "n", "k")
     return {
         "op_type": "gemm_universal",
@@ -56,14 +33,7 @@ def _problem(m=512, n=512, k=512, layout="rcr", dtype="bf16", upper=False):
     }
 
 
-#: A geometry whose native widths DISCRIMINATE the things that can go wrong.
-#:
-#: The default fixture geometry saturates: for bf16/gfx950 it returns (8, 8, *)
-#: for every layout, and returns the SAME triple if `waves` and `warp_tile` are
-#: transposed, or if the arch changes -- so it cannot detect the module's own
-#: documented hazards. This one resolves to (1, 1, 1) on gfx950/default, and
-#: gives (8, 8, 1) under a waves<->warp_tile swap and (4, 4, 1) on a wave-32
-#: arch, so each error is visible by value.
+#: Geometry whose native widths differ by arch, layout and epilogue.
 DISCRIMINATING = {
     "tile_m": 32,
     "tile_n": 32,
@@ -78,7 +48,6 @@ DISCRIMINATING = {
 
 
 def _kernel(vec=(0, 0, 0), **over):
-    """Kernel-side keys only -- the vector widths live here."""
     return {
         "tile_m": 128,
         "tile_n": 128,
@@ -104,7 +73,6 @@ def _kernel(vec=(0, 0, 0), **over):
 
 
 def _row(**kw):
-    """One merged problem+kernel row. Kernel-side keys may be overridden."""
     pk = ("m", "n", "k", "layout", "dtype")
     kernel_over = {k: v for k, v in kw.items() if k not in (*pk, "vec", "arch")}
     row = {
@@ -120,12 +88,10 @@ def _row(**kw):
 
 
 def _frame(**kw):
-    """One-row DataFrame equivalent of _problem + _kernel merged."""
     return pd.DataFrame([_row(**kw)])
 
 
 def _legal(m, n, k, layout="rcr", dtype="bf16"):
-    """The problem's widest legal A/B/C widths -- the fraction's denominator."""
     from codegen_common import gemm_problem_vector_sizes
     from feature_engine_vec import _out_dtype
 
@@ -138,10 +104,6 @@ class TestSchema:
         ext = GemmUniversalVecFeatureEngine().get_feature_names()
         assert len(ext) == base + 6
         assert ext[-6:] == [
-            # Written out, not compared to VEC_FEATURES: the constant is what is
-            # under test. feature_spec.json and Predictor.select_features remap
-            # on these NAMES, so a reordered constant mislabels the positionally
-            # produced values.
             "vec_a",
             "vec_b",
             "vec_c",
@@ -151,8 +113,6 @@ class TestSchema:
         ]
 
     def test_base_engine_is_untouched(self):
-        """train.py's warm-start requires an exact schema match, so a base that
-        grew would silently invalidate every model already trained on it."""
         names = GemmUniversalFeatureEngine().get_feature_names()
         assert not any(f in names for f in VEC_FEATURES)
 
@@ -161,22 +121,11 @@ class TestSchema:
         assert fe.extract(_problem(), _kernel()).shape == (len(fe.get_feature_names()),)
 
     def test_extract_batch_width_matches_the_name_list(self):
-        """The hazard: the base extract_batch sizes from the overridden
-        get_feature_names, so a naive append double-counts the new columns."""
         fe = GemmUniversalVecFeatureEngine()
         assert fe.extract_batch(_frame()).shape == (1, len(fe.get_feature_names()))
 
 
 class TestParity:
-    """extract and extract_batch are independent implementations. Compare them
-    on the input classes where they previously disagreed, not only clean ints.
-
-    The extents are chosen so the three operands have DIFFERENT legal widths --
-    gcd(1792, 8) = 8, gcd(300, 8) = 4, gcd(20226, 8) = 2. With the earlier
-    all-multiples-of-8 extents every dim gave 8, so reading an operand off the
-    wrong dimension produced an identical feature vector and parity proved
-    nothing about the layout mapping."""
-
     @pytest.mark.parametrize("layout", LAYOUTS)
     @pytest.mark.parametrize(
         "vec", [(0, 0, 0), (8, 8, 8), (4, 4, 8), (1, 1, 1), (2, 8, 8)]
@@ -197,7 +146,6 @@ class TestParity:
         ids=["int", "str", "float", "int8", "str8"],
     )
     def test_width_coercion_agrees(self, stored):
-        """String and float spellings of a real width must agree across paths."""
         fe = GemmUniversalVecFeatureEngine()
         kn = {**_kernel(), "vec_a": stored}
         df = _frame()
@@ -210,9 +158,6 @@ class TestParity:
         "stored", [float("nan"), "", None], ids=["nan", "empty-string", "none"]
     )
     def test_both_paths_reject_a_null_width(self, stored):
-        """Null is NOT native. data_pipeline writes 0 for a native kernel and
-        backfills unpopulated canonical columns with None, so a null width means
-        the kernel name was never parsed. Both paths must say so."""
         fe = GemmUniversalVecFeatureEngine()
         with pytest.raises(ValueError, match="native"):
             fe.extract(_problem(), {**_kernel(), "vec_a": stored})
@@ -240,16 +185,12 @@ class TestParity:
 
 
 class TestArgumentSplit:
-    """predict._predict_single passes disjoint problem/kernel dicts. Merging
-    them in a test hides which argument a value is read from."""
-
     def test_widths_come_from_the_kernel_dict(self):
         fe = GemmUniversalVecFeatureEngine()
         v = fe.extract(_problem(), _kernel((4, 4, 8)))[-6:]
         assert list(v[:3]) == [4.0, 4.0, 8.0]
 
     def test_widths_in_the_problem_dict_are_ignored(self):
-        """Reading widths from `problem` instead of `kernel` must be visible."""
         fe = GemmUniversalVecFeatureEngine()
         p = {**_problem(), "vec_a": 1, "vec_b": 1, "vec_c": 1}
         v = fe.extract(p, _kernel((4, 4, 8)))[-6:]
@@ -259,13 +200,10 @@ class TestArgumentSplit:
 
     def test_extents_come_from_the_problem_dict(self):
         fe = GemmUniversalVecFeatureEngine()
-        # k=4 caps the rcr A/B legal width at 4, so vec 4 is a perfect fit
         v = fe.extract(_problem(k=4), _kernel((4, 4, 8)))[-6:]
         assert v[3] == pytest.approx(1.0)
 
     def test_uppercase_extents_are_accepted(self):
-        """The base engine reads problem.get("m", problem.get("M", 0)); not
-        matching it gave correct base features and vec features from m=n=k=1."""
         fe = GemmUniversalVecFeatureEngine()
         v = fe.extract(_problem(k=4, upper=True), _kernel((4, 4, 8)))[-6:]
         assert v[3] == pytest.approx(1.0), "uppercase M/N/K must resolve like lowercase"
@@ -279,9 +217,6 @@ class TestArgumentSplit:
 
 class TestVectorFeatures:
     def test_native_resolves_to_the_kernels_own_width(self):
-        """vec == 0 is the KERNEL's native width -- not a literal 0, and not the
-        problem's widest legal width. The fixture uses the default epilogue, so
-        A and B reach the problem's legal width but C stores one element."""
         fe = GemmUniversalVecFeatureEngine()
         v = fe.extract(_problem(), _kernel((0, 0, 0)))[-6:]
         assert list(v[:3]) == [0.0, 0.0, 0.0]
@@ -289,8 +224,6 @@ class TestVectorFeatures:
         assert v[5] < 1.0, "default-epilogue C is narrower than the legal width"
 
     def test_fraction_is_problem_relative(self):
-        """The same kernel is well matched to one problem and wasteful on
-        another -- the reason the raw width alone is insufficient."""
         fe = GemmUniversalVecFeatureEngine()
         kn = _kernel((4, 4, 8))
         tight = fe.extract(_problem(k=4), kn)[-6:]  # rcr A/B contiguous in k
@@ -300,9 +233,6 @@ class TestVectorFeatures:
         assert loose[3] == pytest.approx(0.5)  # 4 of 8 legal
 
     def test_fraction_exceeds_one_when_width_is_illegal(self):
-        """A width wider than the problem allows is rejected by the kernel, so
-        it should not reach training data -- left unclamped so that if it does,
-        it is visible rather than indistinguishable from an exact fit."""
         fe = GemmUniversalVecFeatureEngine()
         v = fe.extract(_problem(k=4), _kernel((8, 8, 8)))[-6:]
         assert v[3] == pytest.approx(2.0)
@@ -312,10 +242,6 @@ class TestVectorFeatures:
 
 
 class TestBatchValidation:
-    """A NaN extent casts to INT64_MIN and gcd(INT64_MIN, cap) == cap, which
-    reaches the model as a confident wrong number rather than as missing data.
-    Fail loudly instead."""
-
     @pytest.mark.parametrize("col", ["m", "n", "k", "layout", "dtype"])
     def test_nan_in_a_required_column_raises(self, col):
         fe = GemmUniversalVecFeatureEngine()
@@ -326,9 +252,6 @@ class TestBatchValidation:
 
     @pytest.mark.parametrize("col", ["m", "n", "k", "layout", "dtype"])
     def test_missing_required_column_raises(self, col):
-        """Match the guard's own message: pandas raises a bare KeyError from the
-        BASE extract_batch before this guard is reached, so an unmatched
-        pytest.raises(KeyError) passes with the guard deleted."""
         fe = GemmUniversalVecFeatureEngine()
         with pytest.raises(KeyError, match="required to compute vector-width"):
             fe.extract_batch(_frame().drop(columns=[col]))
@@ -341,8 +264,6 @@ class TestBatchValidation:
             fe.extract_batch(df)
 
     def test_unknown_dtype_raises(self):
-        """codegen raises KeyError on an unknown dtype; defaulting to a
-        plausible width would silently fabricate legal widths."""
         fe = GemmUniversalVecFeatureEngine()
         df = _frame()
         df["dtype"] = "float128"
@@ -358,10 +279,6 @@ class TestBatchValidation:
 
 
 class TestWidthEncoding:
-    """Parity alone cannot catch a self-consistent wrong encoding: mapping a
-    width to the wrong number agrees across both paths while inverting the
-    feature. Assert values, not just agreement."""
-
     def test_zero_resolves_to_the_kernels_native_width(self):
         fe = GemmUniversalVecFeatureEngine()
         v = fe.extract(_problem(), _kernel((0, 0, 0)))[-6:]
@@ -369,11 +286,6 @@ class TestWidthEncoding:
         np.testing.assert_allclose(v[3:5], [1.0, 1.0])
 
     def test_default_epilogue_native_c_is_one_element_not_the_legal_width(self):
-        """THE case that motivated resolving native widths from the kernel.
-        For row-major C the default epilogue stores one element at a time
-        (DefaultGemm2DEpilogue::GetVectorSizeC) no matter how well aligned N is.
-        Substituting the problem's legal width recorded vec_frac_c = 1.0 and
-        told the model a single-element store was a full-width one."""
         fe = GemmUniversalVecFeatureEngine()
         p = _problem(m=1792, n=1536, k=7168)  # gcd(1536, 8) == 8
         cs = fe.extract(p, {**_kernel((0, 0, 0)), "epilogue": "cshuffle"})[-1]
@@ -382,7 +294,6 @@ class TestWidthEncoding:
         assert de == pytest.approx(0.125), "default epilogue stores 1 of 8"
 
     def test_the_epilogue_changes_only_the_c_fraction(self):
-        """A and B are loads; the epilogue governs the C store alone."""
         fe = GemmUniversalVecFeatureEngine()
         p = _problem(m=1792, n=1536, k=7168)
         cs = fe.extract(p, {**_kernel((0, 0, 0)), "epilogue": "cshuffle"})[-6:]
@@ -391,7 +302,6 @@ class TestWidthEncoding:
         assert cs[5] != de[5]
 
     def test_a_fixed_width_ignores_the_epilogue(self):
-        """Only the native case consults the kernel geometry."""
         fe = GemmUniversalVecFeatureEngine()
         p = _problem(m=1792, n=1536, k=7168)
         cs = fe.extract(p, {**_kernel((4, 4, 4)), "epilogue": "cshuffle"})[-6:]
@@ -399,7 +309,6 @@ class TestWidthEncoding:
         np.testing.assert_allclose(cs, de)
 
     def test_explicit_widths_are_not_collapsed(self):
-        """Guards the other direction: a real width must not read as native."""
         fe = GemmUniversalVecFeatureEngine()
         v = fe.extract(_problem(k=512), _kernel((1, 1, 1)))[-6:]
         assert list(v[:3]) == [1.0, 1.0, 1.0]
@@ -412,41 +321,24 @@ class TestWidthEncoding:
             _width(-4)
 
     def test_absent_key_raises_on_the_scalar_path(self):
-        """extract_batch raises on an absent column; the scalar path must agree.
-        It is production inference (predict._predict_single), and search.py
-        generates candidates from a parameter space with no width axes -- so a
-        native default would score every candidate as native and return a
-        confident ranking instead of an error."""
         fe = GemmUniversalVecFeatureEngine()
         kn = {k: v for k, v in _kernel().items() if k != "vec_a"}
         with pytest.raises(KeyError, match="absent from both"):
             fe.extract(_problem(), kn)
 
     def test_c_width_uses_the_output_dtype_not_the_input(self):
-        """fp8 accumulates out to fp16, so C holds 8 elements per 16 bytes where
-        A and B hold 16. Using the input dtype for all three reports a kernel at
-        the widest legal C width as being at half of it."""
         fe = GemmUniversalVecFeatureEngine()
-        # rcr contiguous dims are (k, k, n). K=16 makes the A/B cap visible:
-        # gcd(16, 16) = 16 under the fp8 cap but gcd(16, 8) = 8 under the fp16
-        # (output) cap, so an operand wired to the wrong caps array changes the
-        # answer. N=1536 gives C gcd(1536, 8) = 8 against gcd(1536, 16) = 16.
         p = _problem(m=1792, n=1536, k=16, dtype="fp8")
         scalar = fe.extract(p, _kernel((16, 16, 8)))[-6:]
         batch = fe.extract_batch(
             _frame(m=1792, n=1536, k=16, dtype="fp8", vec=(16, 16, 8))
         )[0][-6:]
         np.testing.assert_allclose(scalar, batch)
-        # A and B take the INPUT dtype's cap, so 16 is the widest legal.
         assert scalar[3] == pytest.approx(1.0), "vec_a=16 is the widest legal fp8 A"
         assert scalar[4] == pytest.approx(1.0), "vec_b=16 is the widest legal fp8 B"
-        # C takes the OUTPUT dtype's cap: 8, not 16.
         assert scalar[5] == pytest.approx(1.0), "vec_c=8 is the widest legal fp8 C"
 
     def test_b_operand_does_not_use_the_c_cap(self):
-        """Pins the A/B side of the split: at K=16 the A/B cap (16) and the C
-        cap (8) give different legal widths, so an operand reading the wrong
-        caps array is visible by value."""
         fe = GemmUniversalVecFeatureEngine()
         v = fe.extract(_problem(m=1792, n=1536, k=16, dtype="fp8"), _kernel((8, 8, 8)))
         assert v[-3] == pytest.approx(0.5), "vec_a=8 is half the legal 16"
@@ -454,18 +346,12 @@ class TestWidthEncoding:
         assert v[-1] == pytest.approx(1.0), "vec_c=8 is all of the legal 8"
 
     def test_bf16_c_width_is_unchanged(self):
-        """bf16 accumulates out to bf16, so the output-dtype fix must be a no-op
-        there -- otherwise it would silently move every existing bf16 feature."""
         from feature_engine_vec import _out_dtype
 
         assert _out_dtype("bf16") == "bf16"
 
 
 class TestRequiredVectorColumns:
-    """A dataset with no vec columns is not one this engine can be used on.
-    Defaulting them to native made the engine a silent no-op on any parquet
-    whose converter does not parse the _vec suffix."""
-
     @pytest.mark.parametrize("col", ["vec_a", "vec_b", "vec_c"])
     def test_missing_vec_column_raises(self, col):
         fe = GemmUniversalVecFeatureEngine()
@@ -474,11 +360,6 @@ class TestRequiredVectorColumns:
 
 
 class TestLayoutValidation:
-    """extract and extract_batch must agree on which layouts exist. The scalar
-    path is production inference (predict._predict_single), and
-    gemm_contiguous_dims indexes the string positionally without validating, so
-    an unknown layout silently yields fabricated contiguous dims."""
-
     def test_scalar_rejects_unknown_layout(self):
         fe = GemmUniversalVecFeatureEngine()
         with pytest.raises(ValueError, match="layout"):
@@ -509,30 +390,8 @@ class TestExtentValidation:
             fe.extract_batch(_frame(k=0))
 
 
-#: Every scalar key the vec engine resolves across the (problem, kernel) pair:
-#: (moves_probe, desync_probe, dict the BASE engine reads the key from).
-#:
-#: Two probes, because the two guards pull in opposite directions:
-#:
-#: * `moves_probe` must differ from the FIXTURE value, or the key's value never
-#:   changes the vector and test_the_alternate_value_actually_moves_the_vector
-#:   is decorative.
-#: * `desync_probe` must differ from the BASE READER'S DEFAULT, or spelling it
-#:   on the dict the base half does not read gives the same vector as spelling
-#:   it correctly, and the asymmetry below is invisible.
-#:
-#: They coincide for `layout` (fixture rcr, base default rcr) and `dtype`
-#: (fixture bf16, base default fp8). They cannot coincide for `epilogue`: the
-#: fixture is `default`, the base default is `cshuffle`, and EPILOGUE_MAP has
-#: only those two, so one probe cannot differ from both.
-#:
-#: `dtype` is why this is written down. The probe was `fp8` -- exactly the base
-#: reader's default -- so the desync was unmeasurable, and that got recorded in
-#: a docstring as a property of the CODE rather than of the probe. `fp32`
-#: differs from the bf16 fixture (4 bytes vs 2) and from the fp8 default (vs 1).
-#:
-#: `arch` has no base reader, hence the `None` desync probe: it is the one key
-#: that is genuinely either-side, and so the one key with no desync to measure.
+#: key -> (probe unlike the fixture, probe unlike the base engine's default,
+#: dict the base engine reads the key from).
 SCALAR_KEYS = {
     "layout": ("ccr", "ccr", "problem"),
     "dtype": ("fp32", "fp32", "problem"),
@@ -542,15 +401,6 @@ SCALAR_KEYS = {
 
 
 class TestScalarKeysAreResolvedNotDefaulted:
-    """Every one of these replaced a hardcoded default, and each default was a
-    plausible-looking value that silently computed a full feature vector for a
-    problem that never said it was rcr / fp8 / gfx950 / cshuffle.
-
-    `layout` and `dtype` were covered; `arch` and `epilogue` were not, and
-    restoring THEIR defaults left all 417 tests green. `arch` picks the
-    wavefront size, so on a wave-32 part the defaulted value yields confident,
-    wrong native widths -- the exact failure this engine exists to prevent."""
-
     @pytest.mark.parametrize("key", sorted(SCALAR_KEYS))
     def test_absent_from_both_dicts_raises(self, key):
         fe = GemmUniversalVecFeatureEngine()
@@ -561,16 +411,6 @@ class TestScalarKeysAreResolvedNotDefaulted:
 
     @pytest.mark.parametrize("key", sorted(SCALAR_KEYS))
     def test_the_alternate_value_actually_moves_the_vector(self, key):
-        """Each probe must be a value the engine distinguishes from the
-        fixture's. It does not guard the other tests in this class -- none of
-        them consumes a probe -- it guards SCALAR_KEYS itself, so a probe that
-        drifts onto the fixture value fails here rather than silently weakening
-        the desync tests that do consume it.
-
-        DISCRIMINATING is required for `arch`: under the default geometry the
-        wave-64 and wave-32 native widths both clamp to the bf16 cap of 8, so
-        the wavefront size drops out entirely and gfx950 and gfx1250 produce
-        the same vector for every choice of M/N/K."""
         fe = GemmUniversalVecFeatureEngine()
         value = SCALAR_KEYS[key][0]
         baseline = fe.extract(_problem(), _kernel(**DISCRIMINATING))
@@ -589,35 +429,10 @@ class TestScalarKeysAreResolvedNotDefaulted:
 
 
 class TestTheBaseHalfReadsOneDictOnly:
-    """The vec half resolves these keys from EITHER dict; the base half does
-    not. `GemmUniversalFeatureEngine.extract` reads `dtype` and `layout` from
-    the problem only and `epilogue` from the kernel only, each with its own
-    hardcoded default, and never reads `arch` at all.
-
-    So for `layout`, `dtype` and `epilogue` the value must be spelled on the
-    dict the BASE half reads, or the six vec features move while the matching
-    base feature stays on its default -- one vector describing two kernels.
-    The asymmetry is inherited; the two-dict lookup is what makes the wrong
-    spelling reachable. Filed rather than fixed: unifying it changes what the
-    base engine encodes, which is an ENCODING_VERSION bump and its own change.
-
-    Pinned rather than merely described, so that unifying one half without the
-    other fails loudly. An earlier revision of this docstring claimed a desync
-    test was impossible for `dtype`; it is possible, and the claim was really
-    about the probe then in SCALAR_KEYS (`fp8`, which is the base reader's own
-    default) rather than about the code.
-
-    Scoped to `extract`. `extract_batch` sees one flat frame, so "which dict"
-    is meaningless there -- and its defaults differ anyway: a null epilogue
-    batches as `default` (`.fillna(0)`) where the scalar path defaults to
-    `cshuffle`. That divergence is pre-existing and out of scope here."""
-
     @pytest.mark.parametrize(
         "key", [k for k, (_, d, _) in SCALAR_KEYS.items() if d is not None]
     )
     def test_the_wrong_side_desynchronises_the_two_halves(self, key):
-        """Spelling the value on the dict the base half does NOT read leaves
-        the base feature defaulted while the vec features move."""
         fe = GemmUniversalVecFeatureEngine()
         _, probe, base_side = SCALAR_KEYS[key]
 
@@ -635,9 +450,6 @@ class TestTheBaseHalfReadsOneDictOnly:
         )
 
     def test_arch_is_genuinely_either_side(self):
-        """`arch` is the one key with no base-engine reader, so both spellings
-        must give the same vector. Asserting the width instead -- as the
-        original test did -- passes with the kernel-side search deleted."""
         fe = GemmUniversalVecFeatureEngine()
         on_problem = fe.extract(
             {**_problem(), "arch": "gfx1250"}, _kernel(**DISCRIMINATING)
@@ -650,10 +462,6 @@ class TestTheBaseHalfReadsOneDictOnly:
 
 
 class TestLayoutSetTracksTheBaseEngine:
-    """_LAYOUTS is narrowed to the four the rest of the package supports, and
-    the reason is a cross-module invariant: widening it alone pairs a correct C
-    width taken from M with a base `layout` feature LAYOUT_MAP encodes as rcr."""
-
     def test_matches_the_base_engines_layout_map(self):
         from feature_engine import LAYOUT_MAP
         from feature_engine_vec import _LAYOUTS
@@ -676,11 +484,6 @@ class TestLayoutSetTracksTheBaseEngine:
 
 
 class TestBaseBlockIsUnperturbed:
-    """The _N_BASE slice assumes the base fills its columns by non-negative
-    literal index. A base refactored to negative indexing (result[:, -12:] = hw)
-    would write hardware features into the vec columns, and parity -- which
-    compares subclass to subclass -- would not notice."""
-
     def test_the_first_n_base_columns_equal_the_base_engines_output(self):
         df = _frame(m=1792, n=300, k=20226)
         base = GemmUniversalFeatureEngine().extract_batch(df)
@@ -701,15 +504,9 @@ class TestBaseBlockIsUnperturbed:
 
 
 class TestNativeWidthsAreKernelDerived:
-    """The four properties the native path depends on, each pinned on a geometry
-    that can actually tell right from wrong. The default fixture saturates at
-    (8, 8, *) and is identical under a waves<->warp_tile swap or an arch change,
-    so every one of these survived mutation against it."""
-
     P = dict(m=1792, n=1536, k=7168, layout="rcr", dtype="bf16")
 
     def _native(self, **over):
-        """Resolve through codegen directly, as the oracle."""
         from codegen_common import gemm_native_vector_sizes
 
         g = {**DISCRIMINATING, **over}
@@ -726,8 +523,6 @@ class TestNativeWidthsAreKernelDerived:
         )
 
     def test_the_geometry_actually_discriminates(self):
-        """Guard the guard: if this ever stops holding, the tests below go
-        vacuous without failing."""
         from codegen_common import gemm_native_vector_sizes as nat
 
         g = DISCRIMINATING
@@ -761,9 +556,6 @@ class TestNativeWidthsAreKernelDerived:
         assert right != wave32, "fixture no longer detects an arch change"
 
     def test_waves_and_warp_tile_are_not_transposed(self):
-        """The module's own comment calls this the hazard: the engine's warp_m
-        is warps-per-block (codegen's `waves`) and warp_tile_m is codegen's
-        `warp_tile`. A swap yields a native width for a different kernel."""
         fe = GemmUniversalVecFeatureEngine()
         legal = _legal(**self.P)
         got = fe.extract(_problem(**self.P), _kernel((0, 0, 0), **DISCRIMINATING))[-3:]
@@ -772,9 +564,6 @@ class TestNativeWidthsAreKernelDerived:
 
     @pytest.mark.parametrize("dtype", ["bf16", "fp16", "fp8", "int8"])
     def test_native_c_uses_the_output_dtype(self, dtype):
-        """The native path must apply the same A/B-vs-C dtype split as the fixed
-        path. Every other native test is bf16, where _out_dtype is the identity,
-        so passing the input dtype through survived there."""
         from feature_engine_vec import _out_dtype
 
         fe = GemmUniversalVecFeatureEngine()
@@ -790,8 +579,6 @@ class TestNativeWidthsAreKernelDerived:
 
     @pytest.mark.parametrize("arch", ["gfx950", "gfx942", "gfx1250"])
     def test_the_rows_arch_selects_the_wavefront_size(self, arch):
-        """Native widths go through block_size, which depends on the wavefront
-        size, which the gfx family selects. Nothing varied arch before."""
         fe = GemmUniversalVecFeatureEngine()
         got = fe.extract(
             _problem(**self.P) | {"arch": arch},
@@ -801,7 +588,6 @@ class TestNativeWidthsAreKernelDerived:
         np.testing.assert_allclose(got, exp)
 
     def test_a_wave32_arch_differs_from_a_wave64_one(self):
-        """Pins that the parametrize above is not vacuous."""
         fe = GemmUniversalVecFeatureEngine()
         k = _kernel((0, 0, 0), **DISCRIMINATING)
         a = fe.extract(_problem(**self.P) | {"arch": "gfx950"}, k)[-3:]
@@ -810,11 +596,6 @@ class TestNativeWidthsAreKernelDerived:
 
 
 class TestHeterogeneousBatch:
-    """extract_batch resolves native widths once per distinct geometry and
-    scatters them back by factorize codes. Every existing batch test used a
-    frame of identical kernels, so broadcasting row 0 to every row -- or
-    reversing the scatter -- produced the same answer and survived."""
-
     def _mixed(self):
         rows = [
             _row(m=1792, n=1536, k=7168, epilogue="default"),
@@ -840,8 +621,6 @@ class TestHeterogeneousBatch:
             )
 
     def test_the_rows_are_not_all_the_same(self):
-        """Guard the guard: a frame of identical rows would make the parity
-        assertion above pass under a broadcast bug."""
         fe = GemmUniversalVecFeatureEngine()
         df, _ = self._mixed()
         fracs = {tuple(r) for r in fe.extract_batch(df)[:, -3:]}
@@ -851,13 +630,6 @@ class TestHeterogeneousBatch:
 
 
 class TestRequiredColumns:
-    """Each load-bearing column, individually.
-
-    The list is written out rather than taken from ``_REQUIRED``: parametrizing
-    over the constant under test means deleting a name from it silently deletes
-    its test case instead of failing one. Verified by mutation -- dropping
-    "epilogue" from _REQUIRED left the self-referential version green."""
-
     EXPECTED = (
         "m",
         "n",
@@ -891,10 +663,6 @@ class TestRequiredColumns:
 
 
 class TestInputValidation:
-    """arch and epilogue became load-bearing; neither is validated by codegen."""
-
-    #: Real targets, including the two-digits-plus-letter shape (gfx90a is
-    #: MI210) that a three-digit pattern would wrongly reject.
     REAL_ARCHES = (
         "gfx908",
         "gfx90a",
@@ -909,7 +677,6 @@ class TestInputValidation:
 
     @pytest.mark.parametrize("arch", REAL_ARCHES)
     def test_every_supported_arch_is_accepted(self, arch):
-        """Validation must not reject a part this repo builds for."""
         fe = GemmUniversalVecFeatureEngine()
         assert (
             fe.extract(_problem() | {"arch": arch}, _kernel((0, 0, 0))).shape[0] == 78
@@ -926,8 +693,6 @@ class TestInputValidation:
             "gfx8",
             "gfx9zzz",
             "gfx12345",
-            # Newly rejected by the per-family widths; the looser
-            # ^gfx\d{2,4}[a-z]?$ accepted all of these.
             "gfx1399",
             "gfx1500",
             "gfx9999",
@@ -937,18 +702,12 @@ class TestInputValidation:
         ],
     )
     def test_an_unrecognised_arch_raises(self, arch):
-        """data_pipeline defaults arch to "unknown" and backfills unpopulated
-        columns with None. normalize_gfx_arch only strips suffixes, and the
-        wavefront size is chosen by startswith("gfx9"), so an unknown value
-        silently yields wave-32 widths on a wave-64 part."""
         fe = GemmUniversalVecFeatureEngine()
         with pytest.raises(ValueError, match="architecture"):
             fe.extract(_problem() | {"arch": arch}, _kernel((0, 0, 0)))
 
     @pytest.mark.parametrize("epi", ["cshufle", "comp_tdm", "", "gemm"])
     def test_an_unmodelled_epilogue_raises(self, epi):
-        """Anything _vector_geometry does not name falls into its cshuffle
-        branch and reports a wider C store than the kernel performs."""
         fe = GemmUniversalVecFeatureEngine()
         with pytest.raises(ValueError, match="epilogue"):
             fe.extract(_problem(), _kernel((0, 0, 0), epilogue=epi))
@@ -960,16 +719,10 @@ class TestInputValidation:
 
 
 class TestGeometryPrecedence:
-    """Geometry describes the kernel, so the kernel dict wins."""
-
-    #: Knobs that DO move the native width at the DISCRIMINATING geometry.
-    #: tile_m and warp_tile_n do not -- an earlier version used those, so
-    #: inverting _geom_value to problem-first survived the whole suite.
+    #: Knobs that change the native width at DISCRIMINATING.
     MOVING = {"warp_m": 999, "tile_k": 4}
 
     def test_the_chosen_knobs_actually_move_the_result(self):
-        """Guard the guard: if these stop mattering the test below goes vacuous
-        without failing."""
         fe = GemmUniversalVecFeatureEngine()
         p = _problem(m=1792, n=1536, k=7168)
         base = fe.extract(p, _kernel((0, 0, 0), **DISCRIMINATING))[-3:]
@@ -987,8 +740,6 @@ class TestGeometryPrecedence:
         )
 
     def test_a_missing_geometry_knob_raises_rather_than_defaulting(self):
-        """A guessed tile yields a native width for a kernel that was never
-        built, and the caller would never know."""
         fe = GemmUniversalVecFeatureEngine()
         k = {kk: v for kk, v in _kernel((0, 0, 0)).items() if kk != "warp_tile_n"}
         with pytest.raises(KeyError, match="warp_tile_n"):
@@ -996,21 +747,12 @@ class TestGeometryPrecedence:
 
 
 class TestKeyPrecedence:
-    """Which dict wins, for each class of key. Nothing pinned these: the kernel
-    fixture carries no m/n/k, so inverting _extent's search order survived, and
-    no test gave the problem a conflicting epilogue."""
-
     P = dict(m=1792, n=1536, k=7168)
 
-    #: Extents that CHANGE the legal widths. gcd(64, 8) == gcd(7168, 8) == 8, so
-    #: poisoning with 64 -- as the first version of this test did -- leaves every
-    #: fraction identical and the inversion it exists to catch survives. 4 halves
-    #: them: gcd(4, 8) == 4.
+    #: Extents whose legal widths differ from the fixture's.
     POISON = {"m": 4, "n": 4, "k": 4}
 
     def test_the_poison_actually_moves_the_result(self):
-        """Guard the guard: if these extents stop changing the fractions, the
-        test below goes vacuous without failing."""
         fe = GemmUniversalVecFeatureEngine()
         k = _kernel((0, 0, 0), **DISCRIMINATING)
         honest = fe.extract(_problem(**self.P), k)[-3:]
@@ -1018,8 +760,6 @@ class TestKeyPrecedence:
         assert list(honest) != list(moved)
 
     def test_the_problems_extents_win(self):
-        """m/n/k describe the PROBLEM. A kernel dict carrying them is a merge
-        artefact, not a kernel property."""
         fe = GemmUniversalVecFeatureEngine()
         k = _kernel((0, 0, 0), **DISCRIMINATING)
         honest = fe.extract(_problem(**self.P), k)
@@ -1027,8 +767,6 @@ class TestKeyPrecedence:
         np.testing.assert_allclose(honest, poisoned)
 
     def test_the_problems_layout_and_dtype_win(self):
-        """layout and dtype are problem-side too, and nothing gave them a
-        CONFLICTING kernel value -- so inverting _required survived."""
         fe = GemmUniversalVecFeatureEngine()
         k = _kernel((0, 0, 0), **DISCRIMINATING)
         honest = fe.extract(_problem(**self.P), k)
@@ -1038,7 +776,6 @@ class TestKeyPrecedence:
         np.testing.assert_allclose(honest, poisoned)
 
     def test_that_poison_would_otherwise_move_the_result(self):
-        """Guard the guard for the layout/dtype case."""
         fe = GemmUniversalVecFeatureEngine()
         k = _kernel((0, 0, 0), **DISCRIMINATING)
         a = fe.extract(_problem(**self.P), k)[-3:]
@@ -1046,7 +783,6 @@ class TestKeyPrecedence:
         assert list(a) != list(b)
 
     def test_the_kernels_epilogue_wins(self):
-        """epilogue describes the KERNEL, like the geometry beside it."""
         fe = GemmUniversalVecFeatureEngine()
         k = _kernel((0, 0, 0), **DISCRIMINATING, epilogue="cshuffle")
         honest = fe.extract(_problem(**self.P), k)
@@ -1054,15 +790,6 @@ class TestKeyPrecedence:
         np.testing.assert_allclose(honest, poisoned)
 
     def test_a_kernel_side_arch_is_reached_when_the_problem_omits_it(self):
-        """predict._predict_single hands two dicts; the vec half searches both.
-
-        Asserts the value is USED, not merely that a vector came back: the
-        original form of this test checked `shape[0] == 78`, which holds for
-        whatever the lookup returns, so deleting the kernel-side search or
-        restoring a hardcoded default left it green.
-
-        `arch` only -- it is the one key with no base-engine reader, so the two
-        halves cannot disagree about it. See TestTheBaseHalfReadsOneDictOnly."""
         fe = GemmUniversalVecFeatureEngine()
         problem = {k: v for k, v in _problem(**self.P).items() if k != "arch"}
         kernel = _kernel((0, 0, 0), **DISCRIMINATING)

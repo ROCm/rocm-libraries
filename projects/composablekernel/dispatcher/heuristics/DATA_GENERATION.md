@@ -237,16 +237,8 @@ Every parquet file follows this schema:
 | `epilogue` | str | `cshuffle`, `default`, `tdm` |
 | `pad_m`, `pad_n`, `pad_k` | bool | Padding flags |
 | `persistent` | bool | Persistent kernel flag |
-| `vec_a` | int | Fixed A global vector width in elements; 0 = native (the kernel's own width, from its geometry and epilogue -- not the widest legal) |
-| `vec_b` | int | Fixed B global vector width in elements; 0 = native (as above) |
-| `vec_c` | int | Fixed C global vector width in elements; 0 = native (as above) |
+| `vec_a/b/c` | int | Fixed A/B/C global vector width, in elements; 0 if none |
 | `run_id` | str | Unique collection run identifier |
-
-`GemmUniversalVecFeatureEngine` additionally requires `arch`, `epilogue` and the
-nine `tile_m/n/k`, `warp_m/n/k`, `warp_tile_m/n/k` columns to be present and
-non-null: it resolves a native width from the kernel's geometry, and an absent
-or unrecognised `arch` would otherwise select the wrong wavefront size silently.
-
 
 ## Shape Selection Guidelines
 
@@ -327,12 +319,7 @@ To generate benchmark data for a new operation (e.g., `gemm_streamk`):
        -o data/gemm_streamk_fp8_gfx950.parquet --arch gfx950
    ```
 
-4. **Register the op** in all five hand-maintained places -- `FEATURE_ENGINES`
-   and `OPERATION_ENGINES` in `feature_engine.py`, and `--operation`'s
-   `choices`, `TARGET_COLUMNS`, `compute_group_keys` and
-   `compute_tflops_efficiency` in `train.py`. None is derived from the others,
-   and each fails differently; see the table in `README.md` under "Extending to
-   New Ops". The training step below fails on the first one you miss.
+4. **Register the op**; see "Extending to New Ops" in `README.md`.
 
 5. **Train**:
    ```bash

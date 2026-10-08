@@ -34,28 +34,8 @@ import pandas as pd
 def _engine_for_spec(spec: dict):
     """Rebuild the feature engine a model was trained with.
 
-    ``feature_spec.json`` records the engine class name. A value that is present
-    but unrecognised RAISES: guessing would silently extract the wrong features
-    for any spec that omits ``feature_names``, which is the only other thing
-    that would catch the mismatch.
-
-    When the key is ABSENT -- every model directory written before it existed --
-    fall back on ``op_type``, which those specs do carry. Defaulting straight to
-    the GEMM engine would hand a grouped_conv model an engine that cannot supply
-    its features, and the resulting error blames the engine rather than the
-    missing key.
-
-    Names resolve through ``feature_engine.feature_engine_class``, which reads
-    the same table ``train.get_feature_engine`` builds from.
-
-    The engine is rebuilt with the hardware constants the spec recorded, not
-    bare. ``train.main`` reads those from the dataset, and several features
-    divide by one of them -- ``lds_usage_ratio`` by ``lds_capacity``,
-    ``cu_utilisation`` by ``num_cus`` -- so a bare rebuild scores against
-    different numbers under identical feature names. ``feature_encoding_version``
-    cannot catch it: the formulas are unchanged, only their inputs. An absent
-    ``hardware`` key predates this, and those models were trained with the
-    constructor defaults, which ``**{}`` reproduces exactly.
+    Uses the spec's ``feature_engine``, falling back on ``op_type`` when it is
+    absent, and passes the recorded ``hardware`` constants to the constructor.
     """
     from feature_engine import OPERATION_ENGINES, feature_engine_class
 
@@ -100,12 +80,6 @@ class Predictor:
         else:
             self._feature_engine = _engine_for_spec(self._spec)
 
-        # The encoding version guards what feature_names cannot: the MEANING of
-        # a value under an unchanged name. Enforced here as well as on warm
-        # start, because inference is the production path -- a stale vec model
-        # would rank a pool under the superseded encoding and the wrong kernel
-        # would be built and benchmarked. An absent key means "written before
-        # versioning", which is version 0.
         spec_version = self._spec.get("feature_encoding_version", 0)
         engine_version = getattr(self._feature_engine, "ENCODING_VERSION", 0)
         if self._spec and spec_version != engine_version:
@@ -139,12 +113,7 @@ class Predictor:
                 )
 
     def select_features(self, X: np.ndarray) -> np.ndarray:
-        """Subset/reorder engine output to match the loaded model's spec.
-
-        Public because evaluate.py extracts features itself and must apply the
-        same remap; taking the engine from the predictor fixes only half of a
-        schema mismatch.
-        """
+        """Subset/reorder engine output to match the loaded model's spec."""
         if self._feature_indices is None:
             return X
         return X[:, self._feature_indices]
@@ -154,22 +123,12 @@ class Predictor:
 
     @property
     def spec(self):
-        """The loaded feature_spec.json, or {} when the model has none.
-
-        Exposed so callers can cross-check what the model was trained for --
-        notably `arch`, which a vec engine's native vector widths depend on and
-        which nothing else compares.
-        """
+        """The loaded feature_spec.json, or {} when the model has none."""
         return self._spec
 
     @property
     def feature_engine(self):
-        """The engine this predictor extracts with.
-
-        Exposed so callers that need to extract features themselves (evaluate.py)
-        use the same engine the model was trained with, instead of hardcoding one
-        and failing on any model trained with a wider schema.
-        """
+        """The engine this predictor extracts with."""
         return self._feature_engine
 
     def _load_model(self, target: str) -> Optional[lgb.Booster]:

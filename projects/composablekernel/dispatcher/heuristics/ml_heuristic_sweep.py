@@ -470,12 +470,7 @@ def generate_problem_shapes(num_shapes: int = 1024) -> List[Tuple[int, int, int]
 
 
 def spec_to_feature_dict(spec: KernelSpec, dtype: str, layout: str, arch: str) -> dict:
-    """Convert KernelSpec to feature dict for ML predictor.
-
-    ``arch`` is required: the vector-width engine resolves a kernel's native
-    widths from its geometry, and the wavefront size those depend on comes from
-    the gfx family.
-    """
+    """Convert KernelSpec to feature dict for ML predictor."""
     return {
         "kernel_name": spec.name,
         "tile_m": spec.tile_m,
@@ -496,10 +491,7 @@ def spec_to_feature_dict(spec: KernelSpec, dtype: str, layout: str, arch: str) -
         "persistent": False,
         "dtype": dtype,
         "layout": layout,
-        # KERNEL_POOL carries no fixed-width kernels, so every candidate is
-        # native. Stated rather than omitted: GemmUniversalVecFeatureEngine
-        # requires these keys, and without them a vec-trained model cannot be
-        # used for a sweep at all.
+        # KERNEL_POOL has no fixed-width kernels.
         "arch": arch,
         "vec_a": 0,
         "vec_b": 0,

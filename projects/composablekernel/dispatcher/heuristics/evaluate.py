@@ -27,10 +27,7 @@ from predict import Predictor
 from train import compute_tflops_efficiency
 
 
-#: This module evaluates universal-GEMM models only -- it groups shapes by
-#: (m, n, k) throughout, including in the per-slice helpers. The operation is a
-#: required positional of compute_tflops_efficiency, which selects both the
-#: grouping columns and the measured-TFLOPS column, so it cannot be defaulted.
+#: The only operation this module evaluates.
 _OPERATION = "gemm_universal"
 
 
@@ -81,10 +78,7 @@ def evaluate_model(
     df : pd.DataFrame
         Benchmark data in canonical schema.
     feature_engine : GemmUniversalFeatureEngine, optional
-        Ignored; retained for callers written against the old signature. The
-        engine is taken from ``predictor`` so that it cannot disagree with the
-        column remap, which is built from the predictor's own engine -- passing
-        a different one silently indexes a differently-shaped array.
+        Ignored; the predictor's engine is used.
 
     Returns
     -------
@@ -99,10 +93,6 @@ def evaluate_model(
     if model is None:
         raise FileNotFoundError("No TFLOPS model found")
 
-    # Subset/reorder to the columns the booster was trained on. Taking the
-    # engine from the predictor (above) only solves half the mismatch: a model
-    # whose feature_spec names a subset, or a different order, still needs the
-    # remap that Predictor builds at load time.
     X = predictor.select_features(X)
 
     # Predict and apply inverse log transform if model was trained in log-space
@@ -235,9 +225,6 @@ def main():
     df = build_training_dataset(args.data_dir, op_type=args.op, dtype=args.dtype)
     print(f"  {len(df)} rows, {df.groupby(['m', 'n', 'k']).ngroups} shapes")
 
-    # Let the predictor pick the engine from the model's feature_spec.json, so a
-    # model trained with a wider schema evaluates instead of raising on the
-    # feature names its engine cannot supply.
     predictor = Predictor(args.model_dir)
     fe = predictor.feature_engine
 

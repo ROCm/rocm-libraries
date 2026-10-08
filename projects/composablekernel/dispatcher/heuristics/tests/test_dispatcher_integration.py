@@ -177,21 +177,12 @@ class TestMLKernelSpec:
 
 
 class TestFixedWidthKernelsAreRejected:
-    """MLKernelSpec has no field for the fixed global vector widths, so a
-    fixed-width kernel must not be converted: the spec would describe a
-    NATIVE-width kernel while carrying the fixed-width kernel's name, and the
-    kernel built would not be the kernel ranked. Reachable via the public
-    kernel_pool parameter of create_ml_heuristic."""
-
     @staticmethod
     def _fixed(vec=(4, 4, 8)):
         feat = kernel_config_to_feature_dict(SAMPLE_KERNEL_NAME)
         feat.update(zip(("vec_a", "vec_b", "vec_c"), vec))
         return feat
 
-    #: Both converters build a spec that cannot carry the widths, so both must
-    #: refuse. Covering only one let the sibling's guard be deleted silently --
-    #: the half commit 9ca4b52 claims to have fixed.
     CONVERTERS = (
         lambda feat: feature_dict_to_ml_spec(feat, 1.0),
         lambda feat: feature_dict_to_dispatcher_config(feat),
@@ -216,35 +207,27 @@ class TestFixedWidthKernelsAreRejected:
         ids=["int", "float", "str", "strfloat", "nan", "none", "empty"],
     )
     def test_every_spelling_of_native_still_converts(self, native, convert):
-        """The defect this guard was rewritten for: "0" and NaN are TRUTHY, so a
-        truthiness test reported a NATIVE kernel as fixed-width and named widths
-        it does not have. Every fixture used ints, so reverting survived."""
         feat = self._fixed((0, 0, 0))
         feat.update(vec_a=native, vec_b=native, vec_c=native)
         assert convert(feat) is not None
 
     def test_the_message_names_the_kernel_and_the_widths(self):
-        """A pool-level failure is useless without knowing which entry caused
-        it, since the caller supplies the pool."""
         with pytest.raises(ValueError) as e:
             feature_dict_to_ml_spec(self._fixed((4, 4, 8)), 1.0)
         assert SAMPLE_KERNEL_NAME in str(e.value)
         assert "4, 4, 8" in str(e.value)
 
     def test_native_widths_still_convert(self):
-        """0 means native, which MLKernelSpec represents correctly."""
         feat = self._fixed((0, 0, 0))
         assert feature_dict_to_ml_spec(feat, 1.0).kernel_name == SAMPLE_KERNEL_NAME
 
     def test_absent_width_keys_still_convert(self):
-        """Pools built by hand need not carry the keys at all."""
         feat = kernel_config_to_feature_dict(SAMPLE_KERNEL_NAME)
         for k in ("vec_a", "vec_b", "vec_c"):
             feat.pop(k, None)
         assert feature_dict_to_ml_spec(feat, 1.0).tile_m == 128
 
     def test_none_valued_width_keys_still_convert(self):
-        """data_pipeline backfills unpopulated canonical columns with None."""
         feat = kernel_config_to_feature_dict(SAMPLE_KERNEL_NAME)
         feat.update(vec_a=None, vec_b=None, vec_c=None)
         assert feature_dict_to_ml_spec(feat, 1.0).tile_m == 128
@@ -336,15 +319,6 @@ class TestCreateMLHeuristic:
 
 
 class TestArchCrossCheck:
-    """A vec-trained model encodes native vector widths for the arch it was
-    fitted on, and the feature names and count do not change with arch -- so
-    extracting under a different one scores the pool against a distribution the
-    model never saw, silently. feature_spec.json records the arch, so say so.
-
-    Both factories are exercised: an earlier revision wired the check into one
-    of them and left the other referencing an unbound name, which no test caught
-    because the closure is only evaluated when it is called."""
-
     KN = (
         "gemm_universal_bf16_rcr_compv3_default_intrawave_False_False_False_True"
         "_128x128x128_2x2x1_32x32x16"
@@ -377,8 +351,6 @@ class TestArchCrossCheck:
         "factory", [create_ml_heuristic, create_ranked_heuristic], ids=["ml", "ranked"]
     )
     def test_an_agreeing_arch_is_accepted_and_the_closure_runs(self, tmp_path, factory):
-        """Calls the closure: a factory that only binds the name at definition
-        time would raise NameError here, not at construction."""
         h = factory(self._model(tmp_path), arch="gfx950", kernel_pool=self._pool())
         assert h(1024, 1024, 1024) is not None
 
@@ -393,10 +365,6 @@ class TestArchCrossCheck:
         "factory", [create_ml_heuristic, create_ranked_heuristic], ids=["ml", "ranked"]
     )
     def test_a_pool_entry_cannot_shadow_the_arch(self, tmp_path, factory):
-        """rank_kernels merges {**problem, **kc} with the KERNEL winning, so a
-        pool dict carrying arch would otherwise override the argument with no
-        message -- and rows of a canonical frame, the obvious thing to pass, do
-        carry it."""
         with pytest.raises(ValueError, match="kernel_pool entries carry arch"):
             factory(
                 self._model(tmp_path),
@@ -409,17 +377,10 @@ class TestArchCrossCheck:
     )
     @pytest.mark.parametrize("model_arch", ["gfx950", "gfx942", "gfx1250"])
     def test_a_model_loads_without_naming_an_arch(self, tmp_path, factory, model_arch):
-        """Omitting arch must use the MODEL's, for every arch -- not just the
-        one that happened to be the old default. A literal default is
-        indistinguishable from a deliberate choice, so a gfx1250 model raised a
-        disagreement against a gfx950 nobody asked for."""
         h = factory(self._model(tmp_path, arch=model_arch), kernel_pool=self._pool())
         assert h(1024, 1024, 1024) is not None
 
     def test_neither_source_supplying_an_arch_yields_none(self, tmp_path):
-        """The BASE engine ignores arch, so raising here would break every
-        base-engine caller to serve the vec engine. The key is then omitted and
-        a vec engine fails by name from its own required-column check."""
         import lightgbm as lgb
         from dispatcher_integration import _resolve_arch
         from predict import Predictor
@@ -436,8 +397,6 @@ class TestArchCrossCheck:
 
     @pytest.mark.parametrize("key", ["m", "n", "k", "split_k"])
     def test_a_pool_entry_cannot_pin_a_problem_key(self, tmp_path, key):
-        """rank_kernels merges {**problem, **kernel} kernel-first, so a pool
-        carrying m/n/k would rank every query against the pool's values."""
         with pytest.raises(ValueError, match="problem keys"):
             create_ml_heuristic(
                 self._model(tmp_path), kernel_pool=self._pool(**{key: 9999})
@@ -445,8 +404,6 @@ class TestArchCrossCheck:
 
     @pytest.mark.parametrize("key", ["dtype", "layout"])
     def test_a_pool_entry_may_carry_a_kernel_property(self, tmp_path, key):
-        """dtype and layout are parsed out of the kernel name, so every
-        ordinary pool has them; rejecting those would reject every pool."""
         h = create_ml_heuristic(
             self._model(tmp_path),
             kernel_pool=self._pool(**{key: "bf16" if key == "dtype" else "rcr"}),
@@ -457,9 +414,6 @@ class TestArchCrossCheck:
         "spelling", ["gfx950:xnack-", "gfx950:sramecc+:xnack-", "gfx950"]
     )
     def test_a_feature_suffix_still_names_the_same_part(self, tmp_path, spelling):
-        """rocminfo and hipDeviceProp_t::gcnArchName report the suffixed form,
-        and _check_arch accepts it, so comparing raw strings would reject a
-        caller for naming exactly the architecture the model recorded."""
         from dispatcher_integration import _resolve_arch
         from predict import Predictor
 
@@ -474,7 +428,6 @@ class TestArchCrossCheck:
         assert _resolve_arch(p, "gfx950", self._pool(arch="gfx950:xnack-")) == "gfx950"
 
     def test_a_genuinely_different_part_still_raises(self, tmp_path):
-        """Guard the guard: normalising must not swallow a real disagreement."""
         from dispatcher_integration import _resolve_arch
         from predict import Predictor
 
@@ -483,7 +436,6 @@ class TestArchCrossCheck:
             _resolve_arch(p, "gfx1250:xnack-", self._pool())
 
     def test_a_pool_entry_matching_the_resolved_arch_is_fine(self, tmp_path):
-        """The guard must reject only CONFLICTING entries."""
         from dispatcher_integration import _resolve_arch
         from predict import Predictor
 
@@ -497,9 +449,6 @@ class TestArchCrossCheck:
     def test_the_resolved_arch_reaches_the_predictor(
         self, tmp_path, factory, model_arch, monkeypatch
     ):
-        """_resolve_arch's RESULT must be what the closure sends. Asserting on
-        the helper alone proved the fallback and not the caller it exists to
-        serve: putting `"arch": arch` back in the closure survived."""
         from predict import Predictor
 
         seen = {}
@@ -522,7 +471,6 @@ class TestArchCrossCheck:
         assert _resolve_arch(p, None, self._pool()) == "gfx1250"
 
     def test_a_spec_without_an_arch_falls_back_to_the_caller(self, tmp_path):
-        """Models written before arch was recorded must stay usable."""
         import lightgbm as lgb
         from dispatcher_integration import _resolve_arch
         from predict import Predictor

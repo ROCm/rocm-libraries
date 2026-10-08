@@ -58,16 +58,7 @@ def _base_key(cfg):
 
 
 def _tile_fits(cfg, dims):
-    """Mirrors the kernel's check: an unpadded contiguous extent must be a tile multiple.
-
-    Delegates to :func:`codegen_common.gemm_tile_divides_problem` so the rule has
-    one definition. ``k_batch`` is 1 here because this pairing path does not
-    split K; a split-K caller must pass its own value.
-    """
-    # Every argument named: the signature takes three same-typed extents, three
-    # same-typed tiles and three same-typed booleans in a row, and this project
-    # has already paid for one positional transposition in a name of that shape
-    # (persistent is the LAST of the four kernel-name booleans, not the first).
+    """Mirrors the kernel's check: an unpadded contiguous extent must be a tile multiple."""
     return gemm_tile_divides_problem(
         m=dims["m"],
         n=dims["n"],
