@@ -7798,6 +7798,12 @@ namespace TensileLite
             in.maxGrid = StreamK::Dynamic::maxGrid(*pAMDGPU, sizeMapping.CUOccupancy);
             // One part per CU, within that grid.
             in.splitCUs = std::min(static_cast<size_t>(pAMDGPU->computeUnitCount), in.maxGrid);
+            // Size the split for the CU-count hint, as origami's num_cus does for
+            // the static grid, so no part waits for a second round. The grid stays
+            // device-wide: the queues balance whole tiles.
+            const int cuHint = problem.getParams().smCountTarget();
+            if(cuHint > 0)
+                in.splitCUs = std::min(in.splitCUs, static_cast<size_t>(cuHint));
             if(!handwritten)
             {
                 in.overrideTiles = pAMDGPU->skTiles;
