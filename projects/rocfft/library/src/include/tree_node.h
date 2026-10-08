@@ -876,11 +876,9 @@ public:
     {
         return outputLength.empty() ? length : outputLength;
     }
-    // Which length vector outStride is ordered against.  For most nodes
-    // outStride can be used together with length.  Nodes that reorder or
-    // resize their output pair it with outputLength instead.  Everything that
-    // combines a length with outStride - padding, buffer sizing, index range -
-    // has to agree on this, so prefer LengthForOutStride() below.
+    // True if outStride is indexed in outputLength order rather than length
+    // order (e.g. fused SBRC transposes, embedded r2c/c2r).  Anything pairing
+    // a length vector with outStride should go through LengthForOutStride().
     virtual bool OutputLengthMatchesOutStride() const
     {
         return false;
