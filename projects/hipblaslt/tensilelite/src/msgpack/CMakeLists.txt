@@ -4,4 +4,5 @@
 target_sources(tensilelite-host
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/MessagePack.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Writing.cpp"
 )
