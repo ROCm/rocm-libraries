@@ -62,40 +62,10 @@ from ..KernelWriterModules import hasSequentialValuC, accToArchMapper, getAccToA
 from math import ceil, log2, gcd
 
 
-import os as _os
-
-
-def _plsinStoreGate(name: str, default: bool = False) -> bool:
-    """Read a PLSIN store optimization gate from the environment.
-
-    The proven AITER-style store optimizations (B: address hoist, C: permlane16)
-    are enabled by default on the PLSIN1 fused-full-tile path.  Each can still be
-    turned OFF independently via its env var (set to 0/false/off) for A/B
-    benchmarking and bisection; setting both off reproduces the pre-optimization
-    codegen byte-for-byte.
-
-    Truthy = any value other than {"", "0", "false", "False", "off", "OFF"}.
-    """
-    v = _os.environ.get(name)
-    if v is None:
-        return default
-    return v not in ("", "0", "false", "False", "off", "OFF")
-
-
-# --- AITER-style PLSIN1 BF16 store optimizations (see plsin1_direct_store plan) ---
-# Component B: hoist the redundant per-store `v_add addrDVgpr + lane_group*8` so the
-#   lane-adjusted dwordx4 base is computed once per (addr,N-group) and reused via the
-#   MUBUF immediate offsets 0/64/128/192.  Pure reorder of address arithmetic; the
-#   store data path is unchanged.
-PLSIN_STORE_HOIST_ADDR = _plsinStoreGate("PLSIN_STORE_HOIST_ADDR", default=True)
-# Component C: replace `ds_bpermute x4 + s_waitcnt + v_permlane32_swap x2` with the
-#   AITER two-`v_permlane16_swap` shuffle for every eligible gfx950 paired dwordx4
-#   store (PLSIN and normal post-loop, full and partial tiles).  Orphan/scalar
-#   stores use a separate, already LDS-free path.  Changes the cross-lane assembly
-#   AND the per-lane store row address; correctness must be proven on hardware.
-PLSIN_STORE_PERMLANE16 = _plsinStoreGate("PLSIN_STORE_PERMLANE16", default=True)
-
-
+# AITER-style store optimization: replace `ds_bpermute x4 + s_waitcnt +
+# v_permlane32_swap x2` with a two-`v_permlane16_swap` shuffle on eligible gfx950
+# paired dwordx4 stores. This changes the cross-lane assembly AND the per-lane store
+# row address. Orphan/scalar stores use a separate, already LDS-free path.
 def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
     """Whether this store emission uses the AITER ``v_permlane16_swap`` shuffle.
 
@@ -110,8 +80,6 @@ def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
     ``weaveGroups is not None`` is the same predicate that selects the woven
     paired-store emitter.
     """
-    if not PLSIN_STORE_PERMLANE16:
-        return False
     # gfx950 + MI16 is not specific enough on its own: MX-fp8 subtile kernels
     # match it too and would be taken off develop's ds_bpermute path.
     if not isMxf4SubtilePath(kernel):
@@ -123,18 +91,6 @@ def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
     if kernel.get("MacroTile0") == 320 and kernel.get("MacroTile1") == 256:
         return weaveGroups is not None
     return True
-
-
-# Component A: when Bias/ScaleAlphaVec are proven identity at runtime (null pointers),
-#   take a direct ACC->bf16 path that skips the bias/SAV LDS reads and packed FMAs.
-PLSIN_STORE_DIRECT_EPILOGUE = _plsinStoreGate("PLSIN_STORE_DIRECT_EPILOGUE")
-# DPP-fold convert-interleave: on the permlane16 fold path, split the coalesced store
-#   into Phase1(converts) / convert-gap / Phase2(assembly + coalesced stores) so the
-#   un-folded woven store's convert-into-MFMA-shadow interleave (LogicalScheduler
-#   _interleaveStoreConvertIntoGapMfmas) ALSO applies to the fold.  OFF -> the fold is
-#   emitted monolithically, byte-identical to before.  ds_bpermute tiles always emit
-#   monolithically (the bpermute consumes the converts in place, no separable gap).
-PLSIN_FOLD_CVT_INTERLEAVE = _plsinStoreGate("PLSIN_FOLD_CVT_INTERLEAVE", default=True)
 
 
 def _scmpGtU32(writer, src, imm, comment=""):
@@ -299,7 +255,7 @@ class GlobalWriteBatchWriter:
     # names its own row through soffset. See _subtileStoreSoffset.
     self._subtileAbsRowAddr = parentWriter.states.subtileAbsRowAddr
     self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
-    # Component B (PLSIN_STORE_HOIST_ADDR): the lane-adjusted dwordx4 base
+    # Hoisted store address: the lane-adjusted dwordx4 base
     # (addrDVgpr + lane_group*8) is identical for every paired store that shares
     # the same addrDVgpr and N-group (the M-subtile stride is carried by the MUBUF
     # immediate offset 0/64/128/192, not by addrDVgpr).  The key lives on the writer
@@ -1990,7 +1946,7 @@ class GlobalWriteBatchWriter:
       if self._permlane16Active and self.parentWriter.states.subtileHoistedPermAddr:
         module.addComment1("permlane16 row-byte delta already hoisted out of the batch preamble")
       elif self._permlane16Active:
-        # Component C: the AITER two-`v_permlane16_swap` shuffle needs no ds_bpermute,
+        # The AITER two-`v_permlane16_swap` shuffle needs no ds_bpermute,
         # so the partner-lane address is dead.  Repurpose the vPermAddr slot to hold
         # the per-lane-group row-byte delta that compensates the permlane16 lane
         # reordering.  With permlane16 swap(0<->2),(1<->3), destination lane-group
@@ -4478,7 +4434,7 @@ class GlobalWriteBatchWriter:
     useAlign8 = (self.parentWriter.states.storeAlign8 and not interior
                  and not self._fusedFullTileNoGuards())
 
-    # Component C: the AITER shuffle assembles the eight rows with two
+    # The AITER shuffle assembles the eight rows with two
     # v_permlane16_swap instructions in Phase2 and needs no LDS round-trip.
     # The align8 mask is computed from output geometry and applied after the
     # shuffle, so guarded partial paired stores use the same mask machinery.
@@ -4492,7 +4448,7 @@ class GlobalWriteBatchWriter:
     #   1. Compute the adjusted D store address (VALU).
     #   2. Compute the exec mask for partial M/N blocks (SALU) — suppresses OOB lanes
     #      at tile boundaries without adding latency to the critical path.
-    # Component B (PLSIN_STORE_HOIST_ADDR): vAddrScratch = (scaled addrDVgpr) +
+    # Hoisted store address: vAddrScratch = (scaled addrDVgpr) +
     # lane_group*8 is identical for every paired store that shares this addrDVgpr and
     # N-group -- the per-M-subtile-pair stride is carried by the MUBUF immediate offset
     # (0/64/128/192) in Phase2, not by addrDVgpr.  So compute it once and reuse.
@@ -4503,12 +4459,12 @@ class GlobalWriteBatchWriter:
     # path a runtime scalar/fallback branch may skip the producer, so we keep the
     # original per-store recompute there.  Recompute whenever the addrDVgpr register
     # or the N-group changes.
-    # Component C: under permlane16 the row-byte delta is (lane_group&1)*12 rows,
+    # Under permlane16 the row-byte delta is (lane_group&1)*12 rows,
     # precomputed into the (otherwise-dead) vPermAddr slot; otherwise it is the
     # standard lane_group*8 in vLGDelta.
     vRowDelta = vPermAddr if self._permlane16Active else vLGDelta
     deltaStr = "(lane_group&1)*12rows" if self._permlane16Active else "lane_group*8"
-    hoistAddr = PLSIN_STORE_HOIST_ADDR and self._fusedFullTileNoGuards()
+    hoistAddr = self._fusedFullTileNoGuards()
     # optSingleColVgpr materializes addrDVgpr once for the whole store and
     # optSrdIncForRow advances rows/N groups through SrdD, so the base is invariant
     # across N groups too and blockIdxN drops out of the key.  Without both, an N
@@ -4585,7 +4541,7 @@ class GlobalWriteBatchWriter:
     useAlign8 = (self.parentWriter.states.storeAlign8 and not interior
                  and not self._fusedFullTileNoGuards())
 
-    # Component C (PLSIN_STORE_PERMLANE16): AITER two-permlane16 shuffle in place of
+    # AITER two-permlane16 shuffle in place of
     # the LDS round-trip.  No ds_bpermute was issued in Phase1, so there is no lgkmcnt
     # to drain; two v_permlane16_swap assemble the eight rows directly.
     if getattr(self, "_permlane16Active", False):
@@ -4846,7 +4802,7 @@ class GlobalWriteBatchWriter:
     """
     module = Module("16bitSubtileScalarStore")
     isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
-    # Component B: an orphan/scalar store changes the addressing context; drop any
+    # An orphan/scalar store changes the addressing context; drop any
     # hoisted paired-store base so the next paired store recomputes vAddrScratch.
     self.parentWriter.states.subtileHoistedAddrArm = -1
     self.parentWriter.states.subtileHoistedAddrDVgpr = -1
