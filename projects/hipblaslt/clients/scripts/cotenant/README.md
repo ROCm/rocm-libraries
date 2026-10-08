@@ -98,8 +98,11 @@ skip-slow screening, and fixed or adaptive timing, then stops before validation
 and cleanup. Skipping a solution also stops its cotenant. Startup and shutdown
 are outside the GEMM timing interval.
 
-The in-process kernel checks a device-resident stop flag once per wave after
+The in-process kernel checks a host-pinned stop flag once per wave after
 every 256 sleeps. After measurement, a one-thread kernel on the GEMM stream
-sets that flag. Shutdown waits for the next check, outside GEMM timing.
+sets that flag. Shutdown waits for the next check, outside GEMM timing. If that
+kernel cannot be launched or does not run within 30 seconds, the host sets the
+flag directly. If the cotenant still does not stop, the benchmark prints an
+error and exits with status 1 rather than continue under unintended contention.
 The standalone kernel sleeps until its process is killed. Both share the
 same kernel source and LDS reservation logic.

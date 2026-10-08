@@ -23,7 +23,7 @@ namespace hipblaslt_cotenant
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
-#include <exception>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -57,6 +57,19 @@ namespace hipblaslt_cotenant
         std::vfprintf(stderr, fmt, args);
 #endif
         va_end(args);
+    }
+
+    // A cotenant that cannot be stopped keeps its CUs, so later measurements would
+    // silently run under contention. Exit without running destructors, which could
+    // block on the wedged device.
+    [[noreturn]] inline void die(const char* msg)
+    {
+        log("cotenant: %s\n", msg);
+#ifdef HIPBLASLT_COTENANT_USE_OSTREAM
+        hipblaslt_cout.flush();
+        hipblaslt_cerr.flush();
+#endif
+        std::_Exit(1);
     }
 
     template <bool Stoppable>
@@ -164,36 +177,77 @@ namespace hipblaslt_cotenant
         }
     }
 
+    // Runs a cotenant kernel on its own stream for the object's lifetime. The
+    // constructor syncs the GEMM stream and waits for residency, so startup stays
+    // outside any timing that begins after construction. The stop kernel is queued
+    // on the GEMM stream, so shutdown follows the measured work.
     class Scoped
     {
+        static constexpr double kStopTimeoutSeconds = 30;
+
         hipStream_t stream_      = nullptr;
         hipStream_t gemm_stream_ = nullptr;
         int*        control_     = nullptr;
-        int*        stop_        = nullptr;
+        int*        stop_host_   = nullptr;
+        int*        stop_dev_    = nullptr;
+
+        // Returns true once the cotenant stream drains; false on timeout or error.
+        bool wait_stopped() noexcept
+        {
+            const auto start = std::chrono::steady_clock::now();
+            for(;;)
+            {
+                const auto status = hipStreamQuery(stream_);
+                if(status == hipSuccess)
+                    return true;
+                if(status != hipErrorNotReady)
+                {
+                    log("cotenant: stop failed: %s\n", hipGetErrorString(status));
+                    return false;
+                }
+                if(std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count()
+                   >= kStopTimeoutSeconds)
+                    return false;
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
+            }
+        }
 
         void stop() noexcept
         {
-            if(stop_)
-            {
-                signal_stop<<<1, 1, 0, gemm_stream_>>>(stop_);
-                const auto status = hipGetLastError();
-                if(status != hipSuccess)
-                {
-                    log("cotenant: stop launch failed: %s\n", hipGetErrorString(status));
-                    std::terminate();
-                }
-            }
+            bool stopped = true;
             if(stream_)
             {
-                const auto status = hipStreamSynchronize(stream_);
-                if(status != hipSuccess)
-                    log("cotenant: stop failed: %s\n", hipGetErrorString(status));
-                (void)hipStreamDestroy(stream_);
+                // Order the stop after the GEMM stream's work; clear stale errors first.
+                bool queued = false;
+                if(stop_dev_)
+                {
+                    (void)hipGetLastError();
+                    signal_stop<<<1, 1, 0, gemm_stream_>>>(stop_dev_);
+                    const auto status = hipGetLastError();
+                    queued            = status == hipSuccess;
+                    if(!queued)
+                        log("cotenant: stop launch failed: %s\n", hipGetErrorString(status));
+                }
+                // The flag is host-visible, so write it directly if the GEMM stream
+                // cannot deliver the stop.
+                if(!queued && stop_host_)
+                    __atomic_store_n(stop_host_, 1, __ATOMIC_RELEASE);
+                stopped = wait_stopped();
+                if(!stopped && queued && stop_host_)
+                {
+                    log("cotenant: stop kernel did not run in time; stopping from the host\n");
+                    __atomic_store_n(stop_host_, 1, __ATOMIC_RELEASE);
+                    stopped = wait_stopped();
+                }
             }
-            if(stop_)
-                (void)hipFree(stop_);
+            if(!stopped)
+                die("the cotenant did not stop; the device is in an unknown state");
+            if(stream_)
+                (void)hipStreamDestroy(stream_);
             if(control_)
                 (void)hipHostFree(control_);
+            if(stop_host_)
+                (void)hipHostFree(stop_host_);
         }
 
     public:
@@ -209,16 +263,20 @@ namespace hipblaslt_cotenant
                 check(hipHostMalloc(reinterpret_cast<void**>(&control_),
                                     sizeof(int),
                                     hipHostMallocMapped | hipHostMallocCoherent));
-                *control_           = 0;
+                check(hipHostMalloc(reinterpret_cast<void**>(&stop_host_),
+                                    sizeof(int),
+                                    hipHostMallocMapped | hipHostMallocCoherent));
+                *control_   = 0;
+                *stop_host_ = 0;
                 int* device_control = nullptr;
                 check(hipHostGetDevicePointer(
                     reinterpret_cast<void**>(&device_control), control_, 0));
-                check(hipMalloc(reinterpret_cast<void**>(&stop_), sizeof(int)));
-                check(hipMemsetAsync(stop_, 0, sizeof(int), stream_));
+                check(hipHostGetDevicePointer(
+                    reinterpret_cast<void**>(&stop_dev_), stop_host_, 0));
                 // Log only the first scope; the configuration is process-wide.
                 static bool logged  = false;
                 const bool  verbose = !logged;
-                launch<true>(n_cus, max_occupancy, stream_, device_control, stop_, verbose);
+                launch<true>(n_cus, max_occupancy, stream_, device_control, stop_dev_, verbose);
                 wait_ready(control_, n_cus, 30, verbose);
                 logged = true;
             }
