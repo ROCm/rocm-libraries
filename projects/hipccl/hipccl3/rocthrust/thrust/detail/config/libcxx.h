@@ -48,7 +48,9 @@
 #endif
 
 // If the '::cuda::std' namespace from 'libcudacxx' or 'libhipcxx' is available.
-#if THRUST_HAS_INCLUDE(<cuda/std/version>) \
+// Not for HIP: there '<cuda/std/version>' may be NVIDIA's libcu++, which is not HIP-aware.
+// libhipcxx is found through its '<hip/std/version>' alias below.
+#if !defined(__HIP__) && THRUST_HAS_INCLUDE(<cuda/std/version>) \
 	&& (USE_LIBCUDACXX || USE_LIBHIPCXX)
 #  include <cuda/std/version>
 // If version matches and '_CUDA_VSTD' is available.
@@ -69,7 +71,7 @@
 #elif THRUST_HAS_INCLUDE(<hip/std/version>) && USE_LIBHIPCXX
 #  include <hip/std/version>
 // If version matches and '_CUDA_VSTD' is available.
-#  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MINOR \
+#  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
     && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR \
     && defined(_CUDA_VSTD)
 #    define _THRUST_LIBCXX_INCLUDE(LIB)   <hip/LIB>
@@ -98,4 +100,11 @@
     {
 #  define _THRUST_STD_NAMESPACE_END }
 #  define _THRUST_USE_ROCPRIM (THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CPP)
+#endif
+
+// NVIDIA's <nv/target> shares its include guard with rocThrust's HIP version
+// (thrust/system/hip/detail/nv/target.h), but it is not HIP-aware: NV_IF_TARGET
+// would always select the host branch, even in device code.
+#if defined(__HIP__) && defined(_NV_COMPILER_NVCC) && !defined(__NVCC__)
+#  error "rocThrust: NVIDIA's <nv/target> (libcu++/CCCL, e.g. /usr/include/nv/target) was included in a HIP compilation. It is not HIP-aware and breaks rocThrust's host/device dispatch. Do not include NVIDIA's <cuda/...> or <nv/...> headers in HIP code."
 #endif
