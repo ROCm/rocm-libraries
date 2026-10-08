@@ -38,13 +38,21 @@ void testing_hyb2csr_bad_arg(const Arguments& arg)
 
     // Create HYB structure
     rocsparse_local_hyb_mat local_hyb;
-    rocsparse_hyb_mat       ptr  = local_hyb;
-    test_hyb*               dhyb = reinterpret_cast<test_hyb*>(ptr);
 
-    dhyb->m       = safe_size;
-    dhyb->n       = safe_size;
-    dhyb->ell_nnz = safe_size;
-    dhyb->coo_nnz = safe_size;
+    // Arrays are never dereferenced; rocSPARSE does not free arrays it did not allocate.
+    CHECK_ROCSPARSE_ERROR(rocsparse_hyb_mat_set_info(local_hyb,
+                                                     safe_size,
+                                                     safe_size,
+                                                     rocsparse_hyb_partition_auto,
+                                                     safe_size,
+                                                     1,
+                                                     (rocsparse_int*)0x4,
+                                                     (T*)0x4,
+                                                     safe_size,
+                                                     (rocsparse_int*)0x4,
+                                                     (rocsparse_int*)0x4,
+                                                     (T*)0x4,
+                                                     get_datatype<T>()));
 
     rocsparse_handle          handle      = local_handle;
     const rocsparse_mat_descr descr       = local_descr;
@@ -169,10 +177,9 @@ void testing_hyb2csr(const Arguments& arg)
                                                                       dbuffer);
 
         // Initialize pseudo HYB matrix
-        rocsparse_hyb_mat ptr  = hyb;
-        test_hyb*         dhyb = reinterpret_cast<test_hyb*>(ptr);
+        const rocsparse_hyb_fields dhyb(hyb);
 
-        double gbyte_count = hyb2csr_gbyte_count<T>(M, nnz, dhyb->ell_nnz, dhyb->coo_nnz);
+        double gbyte_count = hyb2csr_gbyte_count<T>(M, nnz, dhyb.ell_nnz, dhyb.coo_nnz);
 
         double gpu_gbyte = get_gpu_gbyte(gpu_time_used, gbyte_count);
 

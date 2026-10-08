@@ -41,17 +41,20 @@ void testing_hybmv_bad_arg(const Arguments& arg)
     rocsparse_local_mat_descr local_descr;
     rocsparse_local_hyb_mat   local_hyb;
 
-    rocsparse_hyb_mat ptr  = local_hyb;
-    test_hyb*         thyb = reinterpret_cast<test_hyb*>(ptr);
-    thyb->m                = safe_size;
-    thyb->n                = safe_size;
-    thyb->ell_nnz          = safe_size;
-    thyb->coo_nnz          = safe_size;
-    thyb->ell_col_ind      = (rocsparse_int*)0x4;
-    thyb->ell_val          = (T*)0x4;
-    thyb->coo_row_ind      = (rocsparse_int*)0x4;
-    thyb->coo_col_ind      = (rocsparse_int*)0x4;
-    thyb->coo_val          = (T*)0x4;
+    // Arrays are never dereferenced; rocSPARSE does not free arrays it did not allocate.
+    CHECK_ROCSPARSE_ERROR(rocsparse_hyb_mat_set_info(local_hyb,
+                                                     safe_size,
+                                                     safe_size,
+                                                     rocsparse_hyb_partition_auto,
+                                                     safe_size,
+                                                     1,
+                                                     (rocsparse_int*)0x4,
+                                                     (T*)0x4,
+                                                     safe_size,
+                                                     (rocsparse_int*)0x4,
+                                                     (rocsparse_int*)0x4,
+                                                     (T*)0x4,
+                                                     get_datatype<T>()));
 
     rocsparse_handle          handle            = local_handle;
     rocsparse_operation       trans             = rocsparse_operation_none;
@@ -80,18 +83,7 @@ void testing_hybmv_bad_arg(const Arguments& arg)
     EXPECT_ROCSPARSE_STATUS(rocsparse_hybmv<T>(PARAMS), rocsparse_status_requires_sorted_storage);
     CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_storage_mode(descr, rocsparse_storage_mode_sorted));
 
-    // Check negative m and n
-    thyb->m = -1;
-    thyb->n = safe_size;
-    EXPECT_ROCSPARSE_STATUS(rocsparse_hybmv<T>(PARAMS), rocsparse_status_invalid_size);
-
-    thyb->m = safe_size;
-    thyb->n = -1;
-    EXPECT_ROCSPARSE_STATUS(rocsparse_hybmv<T>(PARAMS), rocsparse_status_invalid_size);
-
 #undef PARAMS
-
-    memset(reinterpret_cast<test_hyb*>(ptr), 0, sizeof(test_hyb));
 }
 
 template <typename T>
@@ -154,12 +146,11 @@ void testing_hybmv(const Arguments& arg)
 
         {
             // CPU hybmv
-            rocsparse_hyb_mat ptr  = hyb;
-            test_hyb*         dhyb = reinterpret_cast<test_hyb*>(ptr);
+            const rocsparse_hyb_fields dhyb(hyb);
 
-            rocsparse_int ell_width = dhyb->ell_width;
-            rocsparse_int ell_nnz   = dhyb->ell_nnz;
-            rocsparse_int coo_nnz   = dhyb->coo_nnz;
+            rocsparse_int ell_width = dhyb.ell_width;
+            rocsparse_int ell_nnz   = dhyb.ell_nnz;
+            rocsparse_int coo_nnz   = dhyb.coo_nnz;
 
             host_ell_matrix<T> hA_ell;
             host_coo_matrix<T> hA_coo;
@@ -167,19 +158,16 @@ void testing_hybmv(const Arguments& arg)
             if(ell_nnz > 0)
             {
                 hA_ell.define(M, N, ell_width, base);
-                hA_ell.ind.template transfer_from<memory_mode::device>(
-                    (const rocsparse_int*)dhyb->ell_col_ind);
-                hA_ell.val.template transfer_from<memory_mode::device>((const T*)dhyb->ell_val);
+                hA_ell.ind.template transfer_from<memory_mode::device>(dhyb.ell_col_ind);
+                hA_ell.val.template transfer_from<memory_mode::device>((const T*)dhyb.ell_val);
             }
 
             if(coo_nnz > 0)
             {
                 hA_coo.define(M, N, coo_nnz, base);
-                hA_coo.row_ind.template transfer_from<memory_mode::device>(
-                    (const rocsparse_int*)dhyb->coo_row_ind);
-                hA_coo.col_ind.template transfer_from<memory_mode::device>(
-                    (const rocsparse_int*)dhyb->coo_col_ind);
-                hA_coo.val.template transfer_from<memory_mode::device>((const T*)dhyb->coo_val);
+                hA_coo.row_ind.template transfer_from<memory_mode::device>(dhyb.coo_row_ind);
+                hA_coo.col_ind.template transfer_from<memory_mode::device>(dhyb.coo_col_ind);
+                hA_coo.val.template transfer_from<memory_mode::device>((const T*)dhyb.coo_val);
             }
 
             host_dense_matrix<T> hy_copy(hy);
@@ -229,9 +217,7 @@ void testing_hybmv(const Arguments& arg)
         if(part == rocsparse_hyb_partition_user)
         {
             {
-                rocsparse_hyb_mat ptr  = hyb;
-                test_hyb*         dhyb = reinterpret_cast<test_hyb*>(ptr);
-                user_ell_width         = dhyb->ell_width;
+                user_ell_width = rocsparse_hyb_fields(hyb).ell_width;
             }
 
             display_timing_info(display_key_t::M,
