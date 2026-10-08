@@ -63,7 +63,13 @@ struct PackStridesKernel
     // packs independently. Lanes past the case count exit immediately.
     static constexpr index_t kBlockSize = 64;
 
-    CK_TILE_DEVICE void operator()(const uint64_t* strides, int n, uint32_t* out) const
+    // Only the device pass odr-uses this: kentry()'s body is `Kernel{}(args...)`
+    // just under __HIP_DEVICE_COMPILE__, so the host pass sees a member that is
+    // never called, and the enclosing anonymous namespace turns that into a
+    // -Wunused-member-function error. Marked as DecodeLayoutProbe is in
+    // test/ck_tile/fmha/test_fmha_bwd_tdm_layout.cpp.
+    [[maybe_unused]] CK_TILE_DEVICE void
+    operator()(const uint64_t* strides, int n, uint32_t* out) const
     {
         const int i = blockIdx.x * blockDim.x + threadIdx.x;
         if(i >= n)
