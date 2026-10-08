@@ -220,3 +220,92 @@ def test_make_conv_aot_config_accepts_the_written_instances(tmp_path):
     assert sorted(s["instance_id"] for s in shapes) == sorted(
         tool.stable_hash(i) for i in kept
     )
+
+
+# ---- Direct depthwise identities ----
+
+
+@pytest.fixture(scope="module")
+def direct_fp16():
+    return tool.direct_identities("fp16", 1)
+
+
+def test_direct_identities_are_every_forward_direct_identity_the_launch_runs(
+    direct_fp16,
+):
+    import make_conv_aot_config
+
+    packaged, grid_count = direct_fp16
+    algorithms = sorted({i["algorithm"] for i in packaged})
+    assert algorithms == sorted(make_conv_aot_config.DIRECT_ALGORITHMS)
+    # The direct grid holds other forward algorithms, which have no packaged launch.
+    assert grid_count > len(packaged)
+    for identity in packaged:
+        assert identity["dtype_a"] == "fp16"
+        assert identity["direction"] == "direct_fwd"
+        spec, why = make_conv_aot_config.instance_spec(identity)
+        assert spec is not None and spec.is_direct, why
+    assert len({tool.stable_hash(i) for i in packaged}) == len(packaged)
+
+
+def test_direct_identities_round_trip_through_the_compact_form(direct_fp16):
+    from benchmarks.common.kernel_cache import KernelIdentity
+
+    for identity in direct_fp16[0]:
+        compact = tool.compact_identity(identity)
+        assert KernelIdentity.from_dict(compact).to_dict() == identity
+
+
+def _fake_main(tmp_path, monkeypatch, implicit, direct):
+    """Run main() over a synthetic grid and direct list; returns the written list."""
+    monkeypatch.setattr(
+        tool,
+        "grid_identities",
+        lambda dtype, jobs: [
+            dict(i, dtype_a=dtype, dtype_b=dtype, dtype_d=dtype) for i in implicit
+        ],
+    )
+    monkeypatch.setattr(tool, "read_spill_list", lambda path, candidates: set())
+    monkeypatch.setattr(
+        tool,
+        "direct_identities",
+        lambda dtype, jobs: (
+            [dict(i, dtype_a=dtype, dtype_b=dtype, dtype_d=dtype) for i in direct],
+            len(direct),
+        ),
+    )
+    out = tmp_path / "instances.json"
+    argv = ["--rocke-root", str(_ROCKE), "--output", str(out), "--jobs", "1"]
+    assert tool.main(argv) == 0
+    return json.loads(out.read_text())
+
+
+def test_main_orders_by_dtype_then_family_then_hash(
+    tmp_path, monkeypatch, synthetic_grid, direct_fp16
+):
+    implicit = synthetic_grid[:12]
+    direct = direct_fp16[0][:5]
+    written = _fake_main(tmp_path, monkeypatch, implicit, direct)
+
+    kept = [i for i in implicit if not tool.knob_rule_rejection(i)]
+    assert len(written) == 2 * (len(kept) + len(direct))
+    keys = [
+        (e["dtype_a"], e["algorithm"] != "implicit_gemm", tool.stable_hash(e))
+        for e in written
+    ]
+    assert keys == sorted(keys)
+    assert [k[0] for k in keys] == ["bf16"] * (len(keys) // 2) + ["fp16"] * (
+        len(keys) // 2
+    )
+    assert sum(1 for k in keys if k[1]) == 2 * len(direct)
+
+
+def test_main_writes_the_same_list_twice(
+    tmp_path, monkeypatch, synthetic_grid, direct_fp16
+):
+    implicit, direct = synthetic_grid[:20], direct_fp16[0][:3]
+    first = _fake_main(tmp_path, monkeypatch, implicit, direct)
+    second = _fake_main(
+        tmp_path, monkeypatch, list(reversed(implicit)), list(reversed(direct))
+    )
+    assert first == second
