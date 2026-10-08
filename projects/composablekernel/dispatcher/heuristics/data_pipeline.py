@@ -52,6 +52,13 @@ CANONICAL_COLUMNS = [
     "pad_n",
     "pad_k",
     "persistent",
+    # Fixed A/B/C global vector widths, in elements; 0 means native (the widest
+    # legal width for the problem). Parsed from the kernel name's optional
+    # _vecA_B_C suffix. Only GemmUniversalVecFeatureEngine consumes them; the
+    # base engine ignores them, so adding these does not change its schema.
+    "vec_a",
+    "vec_b",
+    "vec_c",
     "run_id",
 ]
 
@@ -60,19 +67,53 @@ def parse_kernel_name(name: str) -> dict:
     """Extract kernel config fields from a gemm_universal kernel name.
 
     Name format:
-      gemm_universal_{dtype}_{layout}_{pipeline}_{epilogue}_{scheduler}
+      gemm[_universal]_{dtype}_{layout}_{pipeline}_{epilogue}_{scheduler}
       _{padM}_{padN}_{padK}_{persistent}_{tileM}x{tileN}x{tileK}
       _{warpM}x{warpN}x{warpK}_{warpTileM}x{warpTileN}x{warpTileK}
+      [_vec{A}_{B}_{C}]
+
+    The ``_universal`` segment is optional because two producers emit the same
+    field order under different prefixes: the tile-engine benchmark binaries use
+    ``gemm_universal_``, while the dispatcher bridge (``GemmKernelConfig.name``)
+    uses ``gemm_``. Only the bridge emits the ``_vec`` suffix, so requiring the
+    longer prefix made the width columns unreachable from any in-tree producer.
+
+    The optional ``_vec`` suffix carries fixed A/B/C global vector widths. It is
+    absent for native-width kernels, which is why ``vec_a/b/c`` come back as 0
+    rather than missing: 0 means "native", i.e. the widest legal width for the
+    problem. Kernels differing only in these widths are otherwise identical in
+    the canonical schema, so without them a model sees their performance
+    difference as noise.
     """
     result = {}
     try:
+        # Strip the optional suffix before the positional split, but do not
+        # record it until the name is known to be a gemm_universal kernel --
+        # an unparseable name must still return {}, not a dict of vec defaults.
+        #
+        # Not $-anchored: the emitters append the variant suffix AFTER the
+        # vector one (unified_gemm_codegen.py adds _preshuffle / _permuteN /
+        # _multid / _streamk), so anchoring would read every fixed-width
+        # variant kernel as native -- a wrong value, not a missing one.
+        vec_match = re.search(r"_vec(\d+)_(\d+)_(\d+)(?=_|$)", name)
+        if vec_match:
+            vec = tuple(int(g) for g in vec_match.groups())
+            name = name[: vec_match.start()] + name[vec_match.end() :]
+        elif re.search(r"_vec\d", name):
+            # A _vec token that does not parse means the grammar has moved.
+            # Returning native here would record a narrowed kernel as the
+            # default one, which is a different kernel, not missing data.
+            return result
+        else:
+            vec = (0, 0, 0)
         prefix_match = re.match(
-            r"gemm_universal_(\w+?)_((?:rcr|rrr|crr|ccr))_(.*)", name
+            r"gemm(?:_universal)?_(\w+?)_((?:rcr|rrr|crr|ccr))_(.*)", name
         )
         if not prefix_match:
             return result
         result["dtype"] = prefix_match.group(1)
         result["layout"] = prefix_match.group(2)
+        result["vec_a"], result["vec_b"], result["vec_c"] = vec
         remainder = prefix_match.group(3)
 
         parts = remainder.split("_")

@@ -12,6 +12,7 @@ incremental training (feature compat, lineage, quality).
 
 import json
 import sys
+from unittest import mock
 from pathlib import Path
 
 import numpy as np
@@ -323,6 +324,242 @@ class TestWarmStartTraining:
             check_feature_compatibility(
                 Path("/nonexistent/model/dir"), GemmUniversalFeatureEngine()
             )
+
+
+class TestEngineVariants:
+    """gemm_universal_vec is gemm_universal DATA read through a wider engine.
+    Only the engine lookup may branch on the variant; everything data-side must
+    normalise, or the variant filters to an empty dataset and KeyErrors on
+    TARGET_COLUMNS."""
+
+    def test_base_operation_maps_the_variant(self):
+        from train import base_operation
+
+        assert base_operation("gemm_universal_vec") == "gemm_universal"
+
+    def test_base_operation_is_identity_for_real_operations(self):
+        from train import base_operation
+
+        for op in ("gemm_universal", "grouped_conv", "fmha"):
+            assert base_operation(op) == op
+
+    def test_factory_returns_the_wider_engine(self):
+        from train import get_feature_engine
+
+        base = get_feature_engine("gemm_universal")
+        vec = get_feature_engine("gemm_universal_vec")
+        assert type(vec).__name__ == "GemmUniversalVecFeatureEngine"
+        assert len(vec.get_feature_names()) == len(base.get_feature_names()) + 6
+
+    def test_target_columns_resolve_for_the_variant(self):
+        from train import TARGET_COLUMNS, base_operation
+
+        assert "tflops" in TARGET_COLUMNS[base_operation("gemm_universal_vec")]
+
+    @staticmethod
+    def _frame():
+        return pd.DataFrame(
+            {
+                "m": [128, 128, 256],
+                "n": [256, 256, 512],
+                "k": [512, 512, 1024],
+                "measured_tflops": [10.0, 5.0, 8.0],
+                "pred_tflops": [9.0, 6.0, 7.0],
+            }
+        )
+
+    def test_group_keys_normalise_the_variant(self):
+        """The normalisation lives INSIDE compute_group_keys, so asserting
+        base_operation() in isolation does not reach it. Without it the variant
+        falls through to ValueError and the variant cannot be trained at all."""
+        from train import compute_group_keys
+
+        df = self._frame()
+        np.testing.assert_array_equal(
+            compute_group_keys(df, "gemm_universal_vec"),
+            compute_group_keys(df, "gemm_universal"),
+        )
+
+    def test_efficiency_normalises_the_variant(self):
+        """Same normalisation, second call site."""
+        from train import compute_tflops_efficiency
+
+        df = self._frame()
+        pd.testing.assert_frame_equal(
+            compute_tflops_efficiency(df, "gemm_universal_vec", "pred_tflops"),
+            compute_tflops_efficiency(df, "gemm_universal", "pred_tflops"),
+        )
+
+    def test_parser_accepts_the_variant_and_rejects_junk(self):
+        """Build the real parser rather than grepping the source: a literal can
+        sit in the help text while the choices list rejects the value."""
+        import train
+
+        argv = [
+            "--data_dir",
+            "d",
+            "--out_dir",
+            "o",
+            "--operation",
+            "gemm_universal_vec",
+        ]
+        with mock.patch.object(sys, "argv", ["train.py", *argv]):
+            parser = train.build_arg_parser()
+            assert parser.parse_args(argv).operation == "gemm_universal_vec"
+            with pytest.raises(SystemExit):
+                parser.parse_args(
+                    [
+                        "--data_dir",
+                        "d",
+                        "--out_dir",
+                        "o",
+                        "--operation",
+                        "definitely_not_an_operation",
+                    ]
+                )
+
+
+class TestFeatureSpecRecordsTheEngine:
+    """The read side (predict._engine_for_spec) is only useful if the write side
+    records the engine. Dropping the key leaves older specs loadable, so nothing
+    else in the suite notices -- the failure surfaces later, as a vec model
+    loaded with the base engine."""
+
+    @staticmethod
+    def _spec(operation):
+        from train import build_feature_spec, get_feature_engine
+
+        fe = get_feature_engine(operation)
+        return fe, build_feature_spec(
+            operation, fe, "bf16", "gfx950", ["tflops"], ["tflops"], {}
+        )
+
+    @pytest.mark.parametrize("operation", ["gemm_universal", "gemm_universal_vec"])
+    def test_round_trip_through_predict(self, tmp_path, operation):
+        """Build the spec the way train.py does, serialise it, and load it the
+        way Predictor does. Constructing the dict in the test instead would pass
+        even with the key removed from train.py."""
+        import json
+
+        from predict import _engine_for_spec
+
+        fe, spec = self._spec(operation)
+        path = tmp_path / "feature_spec.json"
+        path.write_text(json.dumps(spec))
+        assert type(_engine_for_spec(json.loads(path.read_text()))) is type(fe)
+
+    def test_the_spec_records_the_two_engines_distinctly(self):
+        """Guards the whole point: a spec hardcoded to the base engine would
+        still round-trip for gemm_universal."""
+        assert (
+            self._spec("gemm_universal")[1]["feature_engine"]
+            != self._spec("gemm_universal_vec")[1]["feature_engine"]
+        )
+
+    def test_the_spec_feature_names_match_the_engine(self):
+        """A spec that names one engine while carrying another's feature list
+        makes Predictor raise on load, so pin them together."""
+        for operation in ("gemm_universal", "gemm_universal_vec"):
+            fe, spec = self._spec(operation)
+            assert spec["feature_names"] == fe.get_feature_names(), operation
+
+    def test_the_two_operations_give_different_engines(self):
+        """Guards the whole point: if both resolved to the base engine the
+        round-trip above would still pass."""
+        from train import get_feature_engine
+
+        assert type(get_feature_engine("gemm_universal")) is not type(
+            get_feature_engine("gemm_universal_vec")
+        )
+
+
+class TestVariantReachesTheRunners:
+    """The three call sites that actually run a training job -- run_cv,
+    train_final_model and the build_training_dataset call in main() -- each
+    normalise the variant through base_operation(). Asserting
+    TARGET_COLUMNS[base_operation(...)] in a test re-applies the helper itself,
+    so it pins the helper and not the caller: deleting the normalisation inside
+    run_cv left the whole suite green. That is the same caller-vs-helper gap the
+    evaluate.py arity fix in this branch was written to close.
+    """
+
+    @staticmethod
+    def _frame(n=24):
+        rs = np.random.RandomState(0)
+        return pd.DataFrame(
+            {
+                "m": rs.choice([128, 256, 512], n),
+                "n": rs.choice([256, 512], n),
+                "k": rs.choice([512, 1024], n),
+                "measured_tflops": rs.uniform(1.0, 100.0, n),
+                "is_valid": True,
+            }
+        )
+
+    class _Engine:
+        """Minimal engine: run_cv only needs these three methods."""
+
+        def get_feature_names(self):
+            return ["m", "n", "k"]
+
+        def get_categorical_features(self):
+            return []
+
+        def extract_batch(self, df):
+            return df[["m", "n", "k"]].to_numpy(dtype=float)
+
+    def test_run_cv_accepts_the_variant(self):
+        """Without the normalisation this raises KeyError on TARGET_COLUMNS."""
+        from train import run_cv
+
+        out = run_cv(
+            self._frame(),
+            self._Engine(),
+            target="tflops",
+            params={"n_estimators": 2, "verbose": -1},
+            operation="gemm_universal_vec",
+            n_splits=2,
+        )
+        assert out is not None
+
+    def test_train_final_model_accepts_the_variant(self):
+        from train import train_final_model
+
+        out = train_final_model(
+            self._frame(),
+            self._Engine(),
+            target="tflops",
+            params={"n_estimators": 2, "verbose": -1},
+            operation="gemm_universal_vec",
+        )
+        assert out is not None
+
+    def test_the_dataset_is_loaded_under_the_base_operation(self):
+        """main() must ask build_training_dataset for gemm_universal data; the
+        variant is an engine choice, not a different op_type in the parquet."""
+        import train
+
+        seen = {}
+
+        def fake(data_dir, op_type=None, dtype=None, **kw):
+            seen["op_type"] = op_type
+            raise SystemExit  # stop before training; we only need the kwarg
+
+        with mock.patch.object(train, "build_training_dataset", fake):
+            argv = [
+                "train.py",
+                "--data_dir",
+                "d",
+                "--out_dir",
+                "o",
+                "--operation",
+                "gemm_universal_vec",
+                "--targets",
+                "tflops",
+            ]
+            with mock.patch.object(sys, "argv", argv), pytest.raises(SystemExit):
+                train.main()
+        assert seen["op_type"] == "gemm_universal"
 
 
 if __name__ == "__main__":

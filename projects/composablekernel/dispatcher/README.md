@@ -536,7 +536,7 @@ pip install -r requirements-ml.txt  # ~500 MB (LightGBM, pandas, pyarrow, scikit
 
 **Documentation:** See [heuristics/README.md](heuristics/README.md) for:
 - Training and evaluating models
-- Feature engineering (72 features)
+- Feature engineering (72 features; 78 with `--operation gemm_universal_vec`)
 - Using pre-trained models
 - Python API reference
 

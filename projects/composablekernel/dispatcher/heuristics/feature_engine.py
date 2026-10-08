@@ -599,3 +599,53 @@ class GemmUniversalFeatureEngine(FeatureEngine):
             return (wm * wn * wk) in [2, 4, 8]
 
         return [_lds_constraint, _warp_constraint]
+
+
+#: Engine class name -> (module, attribute) for every engine that can be
+#: recorded in feature_spec.json. train.py writes from this table and
+#: predict.py rebuilds from it, so an engine the trainer can record is by
+#: construction one the predictor can reconstruct -- resolving them separately
+#: is how newly-trained grouped_conv models briefly became unloadable.
+#:
+#: It lives here, beside the abstract FeatureEngine, rather than in train.py:
+#: Predictor must reach it on every load, and importing train.py would pull
+#: scikit-learn and the whole training stack onto the inference path.
+#: The values are strings so this module does not import the engines itself.
+FEATURE_ENGINES = {
+    "GemmUniversalFeatureEngine": ("feature_engine", "GemmUniversalFeatureEngine"),
+    "GemmUniversalVecFeatureEngine": (
+        "feature_engine_vec",
+        "GemmUniversalVecFeatureEngine",
+    ),
+    "GroupedConvFeatureEngine": (
+        "feature_engine_grouped_conv",
+        "GroupedConvFeatureEngine",
+    ),
+}
+
+#: Operation -> engine class name.
+OPERATION_ENGINES = {
+    "gemm_universal": "GemmUniversalFeatureEngine",
+    # Same op as gemm_universal, with six extra features for the fixed A/B/C
+    # vector widths. A separate operation string rather than a flag so the
+    # choice is recorded in feature_spec.json and Predictor can rebuild the
+    # matching engine without the caller having to remember.
+    "gemm_universal_vec": "GemmUniversalVecFeatureEngine",
+    "grouped_conv": "GroupedConvFeatureEngine",
+}
+
+
+def feature_engine_class(name: str):
+    """Import and return a feature engine class by its class name."""
+    import importlib
+
+    try:
+        module, attr = FEATURE_ENGINES[name]
+    except KeyError:
+        raise ValueError(
+            f"unknown feature engine {name!r}; known engines are "
+            f"{sorted(FEATURE_ENGINES)}. A model recording a name absent from "
+            "this table was trained with code that is not present here; update "
+            "this checkout, or pass the engine explicitly."
+        ) from None
+    return getattr(importlib.import_module(module), attr)

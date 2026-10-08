@@ -175,6 +175,53 @@ class TestMLKernelSpec:
 # ---------------------------------------------------------------------------
 
 
+class TestFixedWidthKernelsAreRejected:
+    """MLKernelSpec has no field for the fixed global vector widths, so a
+    fixed-width kernel must not be converted: the spec would describe a
+    NATIVE-width kernel while carrying the fixed-width kernel's name, and the
+    kernel built would not be the kernel ranked. Reachable via the public
+    kernel_pool parameter of create_ml_heuristic."""
+
+    @staticmethod
+    def _fixed(vec=(4, 4, 8)):
+        feat = kernel_config_to_feature_dict(SAMPLE_KERNEL_NAME)
+        feat.update(zip(("vec_a", "vec_b", "vec_c"), vec))
+        return feat
+
+    @pytest.mark.parametrize(
+        "vec", [(4, 4, 8), (8, 0, 0), (0, 2, 0), (0, 0, 1)], ids=str
+    )
+    def test_any_fixed_width_raises(self, vec):
+        with pytest.raises(ValueError, match="cannot represent"):
+            feature_dict_to_ml_spec(self._fixed(vec), 1.0)
+
+    def test_the_message_names_the_kernel_and_the_widths(self):
+        """A pool-level failure is useless without knowing which entry caused
+        it, since the caller supplies the pool."""
+        with pytest.raises(ValueError) as e:
+            feature_dict_to_ml_spec(self._fixed((4, 4, 8)), 1.0)
+        assert SAMPLE_KERNEL_NAME in str(e.value)
+        assert "4, 4, 8" in str(e.value)
+
+    def test_native_widths_still_convert(self):
+        """0 means native, which MLKernelSpec represents correctly."""
+        feat = self._fixed((0, 0, 0))
+        assert feature_dict_to_ml_spec(feat, 1.0).kernel_name == SAMPLE_KERNEL_NAME
+
+    def test_absent_width_keys_still_convert(self):
+        """Pools built by hand need not carry the keys at all."""
+        feat = kernel_config_to_feature_dict(SAMPLE_KERNEL_NAME)
+        for k in ("vec_a", "vec_b", "vec_c"):
+            feat.pop(k, None)
+        assert feature_dict_to_ml_spec(feat, 1.0).tile_m == 128
+
+    def test_none_valued_width_keys_still_convert(self):
+        """data_pipeline backfills unpopulated canonical columns with None."""
+        feat = kernel_config_to_feature_dict(SAMPLE_KERNEL_NAME)
+        feat.update(vec_a=None, vec_b=None, vec_c=None)
+        assert feature_dict_to_ml_spec(feat, 1.0).tile_m == 128
+
+
 class TestLoadKernelPool:
     def test_loads_from_real_bin_dir(self):
         bin_dir = Path("/workspace/ck_tile/bin")

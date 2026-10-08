@@ -22,6 +22,7 @@ Usage:
 """
 
 import gzip
+import inspect
 import json
 from pathlib import Path
 from typing import Optional
@@ -30,7 +31,39 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from feature_engine import GemmUniversalFeatureEngine
+
+def _engine_for_spec(spec: dict):
+    """Rebuild the feature engine a model was trained with.
+
+    ``feature_spec.json`` records the engine class name. A value that is present
+    but unrecognised RAISES: guessing would silently extract the wrong features
+    for any spec that omits ``feature_names``, which is the only other thing
+    that would catch the mismatch.
+
+    When the key is ABSENT -- every model directory written before it existed --
+    fall back on ``op_type``, which those specs do carry. Defaulting straight to
+    the GEMM engine would hand a grouped_conv model an engine that cannot supply
+    its features, and the resulting error blames the engine rather than the
+    missing key.
+
+    Names resolve through ``feature_engine.feature_engine_class``, which reads
+    the same table ``train.get_feature_engine`` builds from.
+    """
+    from feature_engine import OPERATION_ENGINES, feature_engine_class
+
+    name = spec.get("feature_engine")
+    if name is None:
+        op = spec.get("op_type")
+        name = OPERATION_ENGINES.get(op, "GemmUniversalFeatureEngine")
+    cls = feature_engine_class(name)
+    # Pass the architecture the model was trained for where the engine accepts
+    # one. GemmUniversalVecFeatureEngine resolves a kernel's native vector
+    # widths, which are arch-dependent, and inference rows do not carry an arch
+    # column -- so without this it would silently fall back to its default.
+    arch = spec.get("arch")
+    if arch and "arch" in inspect.signature(cls.__init__).parameters:
+        return cls(arch=arch)
+    return cls()
 
 
 class Predictor:
@@ -65,7 +98,7 @@ class Predictor:
         if feature_engine is not None:
             self._feature_engine = feature_engine
         else:
-            self._feature_engine = GemmUniversalFeatureEngine()
+            self._feature_engine = _engine_for_spec(self._spec)
 
         # Build a column index map so models trained with an older (smaller)
         # feature set still work with a feature engine that has since been
@@ -88,11 +121,29 @@ class Predictor:
                     [idx_map[n] for n in spec_names], dtype=np.intp
                 )
 
-    def _select_features(self, X: np.ndarray) -> np.ndarray:
-        """Subset/reorder engine output to match the loaded model's spec."""
+    def select_features(self, X: np.ndarray) -> np.ndarray:
+        """Subset/reorder engine output to match the loaded model's spec.
+
+        Public because evaluate.py extracts features itself and must apply the
+        same remap; taking the engine from the predictor fixes only half of a
+        schema mismatch.
+        """
         if self._feature_indices is None:
             return X
         return X[:, self._feature_indices]
+
+    #: Retained for callers written against the private name.
+    _select_features = select_features
+
+    @property
+    def feature_engine(self):
+        """The engine this predictor extracts with.
+
+        Exposed so callers that need to extract features themselves (evaluate.py)
+        use the same engine the model was trained with, instead of hardcoding one
+        and failing on any model trained with a wider schema.
+        """
+        return self._feature_engine
 
     def _load_model(self, target: str) -> Optional[lgb.Booster]:
         """Lazy-load a model for the given target.

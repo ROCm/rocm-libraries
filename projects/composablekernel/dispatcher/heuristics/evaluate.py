@@ -28,8 +28,8 @@ from train import compute_tflops_efficiency
 
 
 #: This module evaluates universal-GEMM models only -- it groups shapes by
-#: (m, n, k) and builds a GemmUniversalFeatureEngine in main(). The operation is
-#: a required positional of compute_tflops_efficiency, which selects both the
+#: (m, n, k) throughout, including in the per-slice helpers. The operation is a
+#: required positional of compute_tflops_efficiency, which selects both the
 #: grouping columns and the measured-TFLOPS column, so it cannot be defaulted.
 _OPERATION = "gemm_universal"
 
@@ -70,7 +70,7 @@ def classify_k_regime(k: int) -> str:
 def evaluate_model(
     predictor: Predictor,
     df: pd.DataFrame,
-    feature_engine: GemmUniversalFeatureEngine,
+    feature_engine: GemmUniversalFeatureEngine = None,
 ) -> dict:
     """Run full evaluation on a dataset. Returns a metrics dictionary.
 
@@ -80,8 +80,11 @@ def evaluate_model(
         Trained predictor with at least a TFLOPS model loaded.
     df : pd.DataFrame
         Benchmark data in canonical schema.
-    feature_engine : GemmUniversalFeatureEngine
-        Feature engine matching the trained model.
+    feature_engine : GemmUniversalFeatureEngine, optional
+        Ignored; retained for callers written against the old signature. The
+        engine is taken from ``predictor`` so that it cannot disagree with the
+        column remap, which is built from the predictor's own engine -- passing
+        a different one silently indexes a differently-shaped array.
 
     Returns
     -------
@@ -91,10 +94,16 @@ def evaluate_model(
     valid = df[df["is_valid"].fillna(False) & (df["measured_tflops"] > 0)].copy()
     valid = valid.reset_index(drop=True)
 
-    X = feature_engine.extract_batch(valid)
+    X = predictor.feature_engine.extract_batch(valid)
     model = predictor._load_model("tflops")
     if model is None:
         raise FileNotFoundError("No TFLOPS model found")
+
+    # Subset/reorder to the columns the booster was trained on. Taking the
+    # engine from the predictor (above) only solves half the mismatch: a model
+    # whose feature_spec names a subset, or a different order, still needs the
+    # remap that Predictor builds at load time.
+    X = predictor.select_features(X)
 
     # Predict and apply inverse log transform if model was trained in log-space
     raw_pred = model.predict(X)
@@ -226,8 +235,11 @@ def main():
     df = build_training_dataset(args.data_dir, op_type=args.op, dtype=args.dtype)
     print(f"  {len(df)} rows, {df.groupby(['m', 'n', 'k']).ngroups} shapes")
 
-    fe = GemmUniversalFeatureEngine()
-    predictor = Predictor(args.model_dir, feature_engine=fe)
+    # Let the predictor pick the engine from the model's feature_spec.json, so a
+    # model trained with a wider schema evaluates instead of raising on the
+    # feature names its engine cannot supply.
+    predictor = Predictor(args.model_dir)
+    fe = predictor.feature_engine
 
     print("Evaluating...")
     results = evaluate_model(predictor, df, fe)

@@ -57,10 +57,85 @@ python3 data_pipeline.py ck_tile_testrun_2.log \
 python3 train.py \
     --data_dir data/ \
     --out_dir models/gemm_universal_fp8_gfx950 \
-    --op gemm_universal --dtype fp8 --arch gfx950
+    --operation gemm_universal --dtype fp8 --arch gfx950
 ```
 
 **Note**: Trained models are automatically compressed to `.lgbm.gz` format to save space (~67% reduction). The Python tools automatically decompress them on first use and cache the decompressed version. For warm-start training, decompression happens automatically.
+
+#### Data that varies the fixed vector widths
+
+The GEMM bridge can emit kernels with fixed A/B/C global vector widths, carried
+in the kernel name as a `_vecA_B_C` suffix. The base feature engine has no
+feature for them, so two kernels differing only in those widths are
+indistinguishable to it and their performance difference becomes label noise.
+
+If your sweep varies the widths, train with the wider engine:
+
+```bash
+python3 train.py \
+    --data_dir data/ \
+    --out_dir models/gemm_universal_bf16_gfx950 \
+    --operation gemm_universal_vec --dtype bf16 --arch gfx950
+```
+
+`gemm_universal_vec` reads the same `gemm_universal` data; only the engine
+differs, adding `vec_a/b/c` (the width in elements, 0 meaning native) and
+`vec_frac_a/b/c` (that width over the widest the problem allows). The choice is
+recorded in `feature_spec.json`, so `evaluate.py`, `predict.py` and the
+`Predictor` class rebuild the matching engine with no extra flag.
+
+Use the base `gemm_universal` engine when the data is native-width only -- the
+six extra features would be constant and carry nothing.
+
+**Where the columns come from.** Only `data_pipeline.py` populates `vec_a/b/c`
+from measurement data,
+by parsing the `_vecA_B_C` suffix off the kernel name; the suffix itself is
+emitted by `codegen_common.gemm_vector_size_suffix` on the dispatcher-bridge
+sweep path. The Step 1-2 route above (`generate_benchmark_data.py` →
+`convert_json_to_parquet.py`) and `convert_csv_to_parquet.py` do **not** carry
+them, and the CMake-built `benchmark_gemm_universal_*` executables do not emit
+fixed-width names at all. The producing driver is
+`tile_engine/ops/gemm/gemm_full_benchmark.py`, whose `VectorFallback` pass adds
+the fixed-width kernels. On data without the columns the engine raises rather than silently encoding
+every kernel as native -- check with
+`(df[["vec_a","vec_b","vec_c"]] != 0).any().any()` before training -- `False`
+means every kernel is native, the widths were never swept, and the base engine
+is the right choice.
+
+Native must be written as `0`, not as null. A null width means nothing parsed
+the kernel name, so the engine raises and names the offending column rather
+than guessing. (It aborts the call, not just that row.)
+
+**What `0` resolves to.** A native width is a property of the *kernel* — tile
+shape, warps per block, warp tile, epilogue and architecture — obtained from
+`codegen_common.gemm_native_vector_sizes`. It is **not** the widest width the
+problem allows: with a row-major C the default epilogue stores one element at a
+time however well aligned N is, so a native kernel there has
+`vec_frac_c = 1/legal`, not `1.0`. Rows therefore need `epilogue` and the nine
+tile/wave/warp-tile columns; `arch` is taken from the row if present and
+otherwise from the engine (`GemmUniversalVecFeatureEngine(arch=...)`, which
+`Predictor` sets from `feature_spec.json`).
+
+> **Models trained before this correction are not comparable.** An earlier
+> revision substituted the problem's legal width for native, recording
+> `vec_frac_c = 1.0` on every native kernel. The feature *names and count are
+> unchanged*, so nothing detects the difference automatically — a model whose
+> `feature_spec.json` predates the fix was fitted on the old encoding and must
+> be retrained before it is used with this engine. Do not mix the two.
+
+**Not supported by `search.py`.** `SurrogateSearch` generates candidates from the
+base engine's parameter space, which has no width axes -- and a legal width is a
+function of the problem, so it could not have one that `validate_config` can
+check. Use this engine for training and for ranking a candidate pool you already
+have; surrogate search stays on the base engine.
+
+**No warm start across the boundary.** The schemas differ (72 vs 78), so
+`--warm_start` cannot carry a `gemm_universal` model into a
+`gemm_universal_vec` run or the reverse. Train fresh.
+
+**Python-side only for now.** The C++ deployment path in `ml_heuristic.hpp` pins
+`NUM_FEATURES = 72` and extracts the base list by hand, so a model trained with
+`gemm_universal_vec` cannot be consumed there until that extractor is extended.
 
 ### 3. Evaluate
 
@@ -111,7 +186,7 @@ cd dispatcher/build
 Problem (M, N, K, dtype, layout)
     |
     v
-FeatureEngine.extract_batch()    <-- 55 features: problem, kernel, interaction, hardware
+FeatureEngine.extract_batch()    <-- 72 features: problem, kernel, interaction, hardware
     |
     v
 LGBMRegressor.predict()          <-- predicts TFLOPS for each candidate kernel
@@ -135,7 +210,8 @@ Three models are trained per (op, dtype, arch):
 | `generate_benchmark_data.py` | Build and run benchmarks across ~25 diverse problem sizes, output JSON |
 | `convert_json_to_parquet.py` | Convert benchmark JSON to parquet training format, fix `_mem` pad flags |
 | `data_pipeline.py` | Parse raw benchmark logs into canonical parquet datasets |
-| `feature_engine.py` | 55-feature extraction: problem, kernel, interaction, hardware profile |
+| `feature_engine.py` | 72-feature extraction: problem, kernel, interaction, hardware profile |
+| `feature_engine_vec.py` | The above plus six features for the fixed A/B/C vector widths (raw and problem-relative), 78 in total. Select with `--operation gemm_universal_vec`; see the training section above |
 | `train.py` | Multi-target LGBMRegressor training with GroupKFold CV, IHEM, warm-start |
 | `predict.py` | Predictor class: predict TFLOPS/latency/bandwidth, rank kernels |
 | `evaluate.py` | Full evaluation: global metrics, per-shape/layout/pipeline slices |
@@ -145,13 +221,17 @@ Three models are trained per (op, dtype, arch):
 | `DATA_GENERATION.md` | Detailed guide for building binaries and generating data |
 | `plan.md` | Full design plan with architecture, milestones, and rationale |
 
-## Features Used (55 total)
+## Features Used (72 total)
+
+`GemmUniversalFeatureEngine().get_feature_names()` is authoritative -- the
+per-group headings below are a guide to what the groups contain, not a tally.
+`ml_heuristic.hpp` pins the same 72 for the C++ path, in the same order.
 
 ### Problem features (13)
 `M, N, K, split_k, log2(M), log2(N), log2(K), log2(MNK),
 arithmetic_intensity, aspect_ratio_mn, aspect_ratio_mk, aspect_ratio_nk, layout`
 
-### Kernel features (17)
+### Kernel features
 `tile_m, tile_n, tile_k, warp_m, warp_n, warp_k, warp_tile_m, warp_tile_n,
 warp_tile_k, pipeline, scheduler, epilogue, pad_m, pad_n, pad_k, persistent,
 num_warps, tile_volume, tile_mn, lds_usage_estimate, lds_usage_ratio`
@@ -159,6 +239,23 @@ num_warps, tile_volume, tile_mn, lds_usage_estimate, lds_usage_ratio`
 ### Interaction features (9)
 `num_tiles_m, num_tiles_n, num_tiles_k, total_output_tiles,
 tile_eff_m, tile_eff_n, tile_eff_k, overall_tile_efficiency, cu_utilization`
+
+### Problem-fit and padding features
+`ratio_M_to_tile_m, ratio_N_to_tile_n, ratio_K_to_tile_k,
+problem_smaller_than_tile_m, problem_smaller_than_tile_n,
+problem_smaller_than_tile_k, any_dim_too_small,
+needs_padding_m, needs_padding_n, needs_padding_k,
+has_padding_when_needed_m, has_padding_when_needed_n, has_padding_when_needed_k,
+missing_required_padding_m, missing_required_padding_n,
+missing_required_padding_k, missing_any_required_padding`
+
+These encode how the kernel's tile sits against the problem and whether the
+padding needed to make it legal is actually enabled. Note that
+`missing_any_required_padding` is 0 on every row of a dataset built from
+measurements: a kernel that needed padding and lacked it was rejected at launch
+and produced no measurement, so the feature carries no signal from such data.
+See `gemm_tile_divides_problem` in `dispatcher/codegen/codegen_common.py` for
+the rule a candidate pool has to apply itself.
 
 ### Hardware profile features (12)
 `hw_num_cus, hw_simds_per_cu, hw_total_simds, hw_shader_engines,
@@ -239,14 +336,17 @@ Adding support for a new operation (e.g., `gemm_streamk`, `grouped_conv`):
 1. **Build binaries**: `ninja -C build benchmark_gemm_streamk_fp8_rcr`
 2. **Subclass `FeatureEngine`**: add op-specific features (e.g., StreamK split factor)
 3. **Generate data**: run benchmarks across diverse shapes
-4. **Train**: `python3 train.py --op gemm_streamk --dtype fp8 --data_dir data/ --out_dir models/`
+4. **Train**: `python3 train.py --operation gemm_streamk --dtype fp8 --data_dir data/ --out_dir models/`
 
-The training, evaluation, prediction, and search infrastructure is fully
-op-agnostic -- only the feature engine needs a new subclass.
+The training, evaluation and prediction infrastructure is op-agnostic: a new op
+needs a feature engine plus one entry each in `FEATURE_ENGINES` and
+`OPERATION_ENGINES` (`feature_engine.py`). Surrogate search needs more than a
+subclass when the op's parameter space is problem-dependent -- see the
+`gemm_universal_vec` note above.
 
 ## Tests
 
-102 tests covering all modules:
+Run `python3 -m pytest tests/ -q` for the current count. Covering:
 
 ```bash
 python3 -m pytest tests/ -v
@@ -379,20 +479,22 @@ python3 validate_ml_vs_oracle.py --variant bwd_weight
 ### Solution Architecture (Grouped Conv)
 
 ```
-Problem Config → Feature Engineering (83 features) → LightGBM Model → Predict TFLOPS → Select Best Kernel
-     ↓              - Problem features (38)             ↓                    ↓
-(N,C,K,G,H,W,Y,X)   - Kernel features (12)         Trained on          <1ms total
-                    - Interactions (21)            48K samples          latency
-                    - Hardware (12)                1372 shapes
+Problem Config → Feature Engineering (97 features) → LightGBM Model → Predict TFLOPS → Select Best Kernel
+     ↓              - Problem features                  ↓                    ↓
+(N,C,K,G,H,W,Y,X)   - Kernel features              Trained on          <1ms total
+                    - Interactions                 48K samples          latency
+                    - Hardware                     1372 shapes
 ```
 
 ### Feature Engineering (`feature_engine_grouped_conv.py`)
 
-**83 engineered features**:
-- **Problem Features (38)**: Raw params (N,C,K,G,Hi,Wi,Y,X,strides,pads), derived (Ho,Wo), log-scale transforms, arithmetic intensity, aspect ratios, channel/group metrics
-- **Kernel Features (12)**: Block size, GEMM tiles (M,N), pipeline type, num warps, tile volume, LDS usage
-- **Interaction Features (21)**: Tile efficiency (M,N,K), block-tile ratios, CU utilization, problem-tile comparisons, output tile counts
-- **Hardware Features (12)**: GFX950 specs - CUs (304), SIMDs, clocks, wavefront size, cache sizes (L1/L2/L3), XCD count
+**97 engineered features**, in four groups. The list below describes what each
+group contains; `GroupedConvFeatureEngine().get_feature_names()` is
+authoritative for the names and the count:
+- **Problem features**: raw params (N,C,K,G,Hi,Wi,Y,X,strides,pads), derived (Ho,Wo), log-scale transforms, arithmetic intensity, aspect ratios, channel/group metrics
+- **Kernel features**: block size, GEMM tiles (M,N), pipeline type, num warps, tile volume, LDS usage
+- **Interaction features**: tile efficiency (M,N,K), block-tile ratios, CU utilization, problem-tile comparisons, output tile counts
+- **Hardware features**: gfx950 specs - CUs (304), SIMDs, clocks, wavefront size, cache sizes (L1/L2/L3), XCD count
 
 ### Latency
 
@@ -482,7 +584,7 @@ result = registry.run(problem, input_tensor, weight_tensor)
 
 ### Key Innovations
 
-1. **Comprehensive Feature Engineering**: 83 features capture problem-kernel-hardware interactions
+1. **Comprehensive Feature Engineering**: 97 features capture problem-kernel-hardware interactions
 2. **Tier-1 Extended Training**: 1,372 shapes (vs 185 baseline) for better edge case coverage
 3. **Compressed Models**: LGBM.gz reduces size 8-10× without accuracy loss
 4. **Operation-Specific Models**: Separate optimizations for forward/backward passes
@@ -632,7 +734,8 @@ A new model passes quality validation if:
 #### Different Predictions on Same Model
 
 **Unlikely** - If the same model file produces different predictions, check:
-- Feature engine version (should be 83 features)
+- Feature engine version: compare `len(GroupedConvFeatureEngine().get_feature_names())` against
+  `len(feature_spec.json["feature_names"])` -- the spec is what the booster expects
 - Problem encoding (verify problem_to_dict matches)
 - Predictor initialization (check log transform handling)
 

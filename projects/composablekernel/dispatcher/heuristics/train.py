@@ -83,20 +83,33 @@ MAX_ESTIMATORS = 5000
 WARM_START_N_ESTIMATORS = 500
 
 
+#: Operations that train on another operation's data but use a different
+#: feature engine. Only get_feature_engine should branch on the variant name;
+#: everything data-side -- dataset filtering, group keys, target columns,
+#: efficiency grouping -- normalises through base_operation() so there is one
+#: place to add the next variant rather than a branch per call site.
+ENGINE_VARIANTS = {"gemm_universal_vec": "gemm_universal"}
+
+
+def base_operation(operation: str) -> str:
+    """The operation whose DATA this operation trains on.
+
+    ``gemm_universal_vec`` is ``gemm_universal`` data read through a wider
+    feature engine, so its rows carry ``op_type == "gemm_universal"`` and it
+    groups by ``(m, n, k)`` exactly like the base operation.
+    """
+    return ENGINE_VARIANTS.get(operation, operation)
+
+
 def get_feature_engine(operation: str, **hw_kwargs):
     """Get the appropriate feature engine for the operation type."""
-    if operation == "gemm_universal":
-        from feature_engine import GemmUniversalFeatureEngine
+    from feature_engine import OPERATION_ENGINES, feature_engine_class
 
-        return GemmUniversalFeatureEngine(**hw_kwargs)
-    elif operation == "grouped_conv":
-        from feature_engine_grouped_conv import GroupedConvFeatureEngine
-
-        return GroupedConvFeatureEngine(**hw_kwargs)
-    elif operation == "fmha":
+    if operation == "fmha":
         raise NotImplementedError("FMHA feature engine not yet implemented")
-    else:
+    if operation not in OPERATION_ENGINES:
         raise ValueError(f"Unknown operation type: {operation}")
+    return feature_engine_class(OPERATION_ENGINES[operation])(**hw_kwargs)
 
 
 def check_feature_compatibility(
@@ -178,6 +191,38 @@ def load_warm_start_model(prev_model_dir: Path, target: str) -> str | None:
     return str(model_path)
 
 
+def build_feature_spec(
+    operation: str,
+    fe,
+    dtype: str,
+    arch: str,
+    targets: list,
+    log_targets_used: list,
+    params: dict,
+) -> dict:
+    """The contents of feature_spec.json.
+
+    Factored out of the training pipeline so the write side can be tested
+    without running a training job -- a test that constructs the dict itself
+    would pass even if this function stopped recording the engine.
+    """
+    return {
+        "op_type": operation,
+        # The engine class, so Predictor can rebuild the matching one. op_type
+        # alone is not enough: gemm_universal and gemm_universal_vec read the
+        # same data through different engines, and loading a vec-trained model
+        # with the base engine raises on the missing feature names.
+        "feature_engine": type(fe).__name__,
+        "dtype": dtype,
+        "arch": arch,
+        "feature_names": fe.get_feature_names(),
+        "categorical_features": fe.get_categorical_features(),
+        "targets": targets,
+        "log_targets": log_targets_used,
+        "params": params,
+    }
+
+
 def compute_group_keys(df: pd.DataFrame, operation: str) -> np.ndarray:
     """Create GroupKFold group keys based on operation type.
 
@@ -193,6 +238,7 @@ def compute_group_keys(df: pd.DataFrame, operation: str) -> np.ndarray:
     np.ndarray
         Group keys for GroupKFold cross-validation
     """
+    operation = base_operation(operation)
     if operation == "gemm_universal":
         # Group by (M, N, K)
         return (
@@ -233,6 +279,7 @@ def compute_tflops_efficiency(
     """
     results = []
 
+    operation = base_operation(operation)
     if operation == "gemm_universal":
         groupby_cols = ["m", "n", "k"]
         tflops_col = "measured_tflops"
@@ -353,7 +400,7 @@ def run_cv(
         the scale so that tiny-M shapes (TFLOPS ~ 1) get equal attention
         as large-M shapes (TFLOPS ~ 2000).
     """
-    target_col = TARGET_COLUMNS[operation][target]
+    target_col = TARGET_COLUMNS[base_operation(operation)][target]
 
     # Handle is_valid column (present in GEMM, not in grouped_conv)
     if "is_valid" in df.columns:
@@ -470,7 +517,7 @@ def train_final_model(
         The saved model then predicts in log-space; callers must apply
         expm1() to get raw values.
     """
-    target_col = TARGET_COLUMNS[operation][target]
+    target_col = TARGET_COLUMNS[base_operation(operation)][target]
 
     # Handle is_valid column (present in GEMM, not in grouped_conv)
     if "is_valid" in df.columns:
@@ -499,7 +546,12 @@ def train_final_model(
     return model
 
 
-def main():
+def build_arg_parser() -> argparse.ArgumentParser:
+    """The CLI parser, factored out so tests can assert what it accepts.
+
+    Grepping the source for an option value is not equivalent: a literal can
+    sit in a help string while the choices list rejects it.
+    """
     parser = argparse.ArgumentParser(
         description="Train CK Tile kernel performance models (GEMM, Grouped Conv, FMHA)"
     )
@@ -510,8 +562,12 @@ def main():
     parser.add_argument(
         "--operation",
         default="gemm_universal",
-        choices=["gemm_universal", "grouped_conv", "fmha"],
-        help="Operation type (gemm_universal, grouped_conv, fmha)",
+        choices=["gemm_universal", "gemm_universal_vec", "grouped_conv", "fmha"],
+        help=(
+            "Operation type. gemm_universal_vec is gemm_universal plus six "
+            "features for the fixed A/B/C vector widths; use it when the data "
+            "varies them, since the base engine cannot tell those kernels apart."
+        ),
     )
     parser.add_argument(
         "--op",
@@ -547,6 +603,11 @@ def main():
         help=f"Number of new trees to add when warm-starting (default: {WARM_START_N_ESTIMATORS}). "
         "Lower than a full train since we're refining, not starting from scratch.",
     )
+    return parser
+
+
+def main():
+    parser = build_arg_parser()
     args = parser.parse_args()
 
     # Handle backward compatibility for --op flag
@@ -565,11 +626,13 @@ def main():
     print()
 
     print(f"Loading data from {args.data_dir}...")
-    df = build_training_dataset(args.data_dir, op_type=operation, dtype=args.dtype)
+    df = build_training_dataset(
+        args.data_dir, op_type=base_operation(operation), dtype=args.dtype
+    )
     print(f"  Total rows: {len(df)}")
 
     # Print unique shapes based on operation type
-    if operation == "gemm_universal":
+    if base_operation(operation) == "gemm_universal":
         print(f"  Unique shapes: {df.groupby(['m', 'n', 'k']).ngroups}")
     elif operation == "grouped_conv":
         print(
@@ -632,7 +695,7 @@ def main():
 
     all_cv_results = {}
     for target in targets:
-        if target not in TARGET_COLUMNS[operation]:
+        if target not in TARGET_COLUMNS[base_operation(operation)]:
             print(f"  Skipping unknown target: {target}")
             continue
 
@@ -701,21 +764,14 @@ def main():
             json.dump(importances, f, indent=2)
 
     log_targets_used = sorted(LOG_TARGETS & set(targets)) if use_log else []
-    spec = {
-        "op_type": operation,
-        "dtype": args.dtype,
-        "arch": args.arch,
-        "feature_names": fe.get_feature_names(),
-        "categorical_features": fe.get_categorical_features(),
-        "targets": targets,
-        "log_targets": log_targets_used,
-        "params": params,
-    }
+    spec = build_feature_spec(
+        operation, fe, args.dtype, args.arch, targets, log_targets_used, params
+    )
     with open(out_dir / "feature_spec.json", "w") as f:
         json.dump(spec, f, indent=2)
 
     # Compute unique shapes based on operation type
-    if operation == "gemm_universal":
+    if base_operation(operation) == "gemm_universal":
         unique_shapes = int(df.groupby(["m", "n", "k"]).ngroups)
     elif operation == "grouped_conv":
         unique_shapes = int(

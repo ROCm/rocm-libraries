@@ -364,5 +364,92 @@ class TestParquetIO:
         assert path.exists()
 
 
+class TestVectorWidthSuffix:
+    """The _vecA_B_C suffix is the only source of vec_a/b/c. Without parsing it
+    the columns are absent and GemmUniversalVecFeatureEngine's six features are
+    constant on every row -- a silent no-op rather than an error."""
+
+    BASE = "gemm_universal_bf16_rcr_compv3_default_intrawave_False_False_False_True_128x128x128_2x2x1_32x32x16"
+
+    def test_native_kernel_reports_zero(self):
+        r = parse_kernel_name(self.BASE)
+        assert (r["vec_a"], r["vec_b"], r["vec_c"]) == (0, 0, 0)
+
+    def test_suffix_is_parsed(self):
+        r = parse_kernel_name(self.BASE + "_vec4_4_8")
+        assert (r["vec_a"], r["vec_b"], r["vec_c"]) == (4, 4, 8)
+
+    def test_suffix_does_not_disturb_the_rest_of_the_name(self):
+        """The suffix is stripped before positional splitting, so the trailing
+        warp-tile group must still parse."""
+        plain = parse_kernel_name(self.BASE)
+        vec = parse_kernel_name(self.BASE + "_vec8_1_1")
+        for key in (
+            "tile_m",
+            "tile_n",
+            "tile_k",
+            "warp_tile_k",
+            "pipeline",
+            "persistent",
+        ):
+            assert plain[key] == vec[key], key
+
+    def test_columns_are_canonical(self):
+        for c in ("vec_a", "vec_b", "vec_c"):
+            assert c in CANONICAL_COLUMNS
+
+    def test_vec_is_parsed_when_further_suffixes_follow(self):
+        """_vec is not the last group: GemmKernelConfig.name appends
+        _preshuffle (and then _permuteN) after it, so anchoring the match to
+        end-of-string would drop the widths on every preshuffle kernel."""
+        r = parse_kernel_name(self.BASE + "_vec4_4_8_preshuffle")
+        assert (r["vec_a"], r["vec_b"], r["vec_c"]) == (4, 4, 8)
+        assert r["tile_m"] == 128, "stripping the suffix must not shift the split"
+
+    def test_a_longer_width_is_not_truncated(self):
+        """_vec4_4_8 must not match the leading digits of _vec4_4_80."""
+        r = parse_kernel_name(self.BASE + "_vec4_4_80")
+        assert r["vec_c"] == 80
+
+    def test_malformed_width_suffix_is_rejected_not_read_as_native(self):
+        """A _vec followed by a digit is a width suffix this parser could not
+        read, so the name uses a grammar it does not know. Returning (0, 0, 0)
+        would label a fixed-width kernel as native -- a wrong value, which is
+        worse than no row."""
+        assert parse_kernel_name(self.BASE + "_vec4_4") == {}
+
+    def test_a_non_width_vec_token_is_not_treated_as_a_suffix(self):
+        """The guard keys on _vec followed by a DIGIT. A bare '_vec' token (or a
+        hypothetical '_vector...') is not a width suffix, and dropping the whole
+        row for it would discard a kernel over an unrelated name fragment."""
+        r = parse_kernel_name(self.BASE + "_vecnative")
+        assert (r["vec_a"], r["vec_b"], r["vec_c"]) == (0, 0, 0)
+        assert r["tile_m"] == 128, "the rest of the name must still parse"
+
+    def test_the_bridge_short_prefix_parses(self):
+        """The reason the prefix widened: GemmKernelConfig.name emits gemm_ and
+        is the only producer of a _vec suffix, so requiring gemm_universal_ left
+        the width columns unreachable from every in-tree producer."""
+        short = self.BASE.replace("gemm_universal_", "gemm_", 1)
+        r = parse_kernel_name(short + "_vec4_4_8")
+        assert (r["vec_a"], r["vec_b"], r["vec_c"]) == (4, 4, 8)
+        assert r["dtype"] == "bf16" and r["layout"] == "rcr"
+        assert (r["tile_m"], r["tile_n"], r["tile_k"]) == (128, 128, 128)
+        assert r["pipeline"] == "compv3" and r["persistent"] is True
+
+    def test_both_prefixes_agree_field_for_field(self):
+        long_r = parse_kernel_name(self.BASE)
+        short_r = parse_kernel_name(self.BASE.replace("gemm_universal_", "gemm_", 1))
+        assert long_r == short_r
+
+    def test_a_trailing_non_separator_is_not_a_width_suffix(self):
+        """The lookahead requires the suffix to end at a separator or the end of
+        the name, so _vec4_4_8x is a grammar this parser does not know."""
+        assert parse_kernel_name(self.BASE + "_vec4_4_8x") == {}
+
+    def test_single_digit_and_multi_digit_widths_both_parse(self):
+        assert parse_kernel_name(self.BASE + "_vec16_2_16")["vec_a"] == 16
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

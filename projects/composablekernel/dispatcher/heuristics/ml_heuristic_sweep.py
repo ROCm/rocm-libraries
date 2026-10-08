@@ -491,6 +491,13 @@ def spec_to_feature_dict(spec: KernelSpec, dtype: str, layout: str) -> dict:
         "persistent": False,
         "dtype": dtype,
         "layout": layout,
+        # KERNEL_POOL carries no fixed-width kernels, so every candidate is
+        # native. Stated rather than omitted: GemmUniversalVecFeatureEngine
+        # requires these keys, and without them a vec-trained model cannot be
+        # used for a sweep at all.
+        "vec_a": 0,
+        "vec_b": 0,
+        "vec_c": 0,
     }
 
 

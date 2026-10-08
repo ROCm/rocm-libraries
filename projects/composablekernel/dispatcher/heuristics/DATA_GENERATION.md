@@ -237,6 +237,9 @@ Every parquet file follows this schema:
 | `epilogue` | str | `cshuffle`, `default` |
 | `pad_m`, `pad_n`, `pad_k` | bool | Padding flags |
 | `persistent` | bool | Persistent kernel flag |
+| `vec_a` | int | Fixed A global vector width in elements; 0 = native (widest legal) |
+| `vec_b` | int | Fixed B global vector width in elements; 0 = native |
+| `vec_c` | int | Fixed C global vector width in elements; 0 = native |
 | `run_id` | str | Unique collection run identifier |
 
 ## Shape Selection Guidelines
@@ -320,7 +323,7 @@ To generate benchmark data for a new operation (e.g., `gemm_streamk`):
 
 4. **Train**:
    ```bash
-   python3 train.py --op gemm_streamk --dtype fp8 --arch gfx950 \
+   python3 train.py --operation gemm_streamk --dtype fp8 --arch gfx950 \
        --data_dir data/ --out_dir models/gemm_streamk_fp8_gfx950
    ```
 
