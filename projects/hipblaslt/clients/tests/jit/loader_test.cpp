@@ -39,11 +39,10 @@ TEST_CASE("the loader reads the JIT solution library", "[jit-gpu]")
         REQUIRE((hipGetDevice(&device) == hipSuccess
             && hipGetDeviceProperties(&properties, device) == hipSuccess));
     }
-    const std::string target(properties.gcnArchName);
-    const auto        arch     = target.substr(0, target.find(':'));
-    const auto        hardware = TensileLite::hip::GetDevice(properties, device);
-    const auto        key      = hipblaslt_jit_test::pregeneratedKey(properties);
-    hj::JitLibrary    library(fs::u8path(HIPBLASLT_JIT_LIBRARY));
+    const auto     arch     = hipblaslt_jit_test::deviceTarget(properties).processorName();
+    const auto     hardware = TensileLite::hip::GetDevice(properties, device);
+    const auto     key      = hipblaslt_jit_test::pregeneratedKey(properties);
+    hj::JitLibrary library(fs::u8path(HIPBLASLT_JIT_LIBRARY));
 
     const auto prepared = hipblaslt_jit_test::prepareSolutions(fs::u8path(HIPBLASLT_JIT_DATA));
     const hipblaslt_jit_test::Prepared* plain = nullptr;

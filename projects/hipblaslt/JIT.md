@@ -31,13 +31,28 @@ backend is implemented, and no API reaches JIT.
 ## Current behavior
 
 The interfaces are in `library/src/amd_detail/hipblaslt-jit-component.hpp`. An
-`Artifact` is one file: assembly, HIP source, or a code object. A
-`SourceCodeBundle` is the main kernel, HIP helpers and headers that become one
-solution. It is not a TensileLite library entry. `CodeObjectBuilder::build`
-compiles that bundle with comgr into a code object `Artifact`. `JitLibrary`
-writes the TensileLite solution record when it publishes the code object. The
+`Artifact` is one file of one kind: `Assembly` or `Hip` source, a
+`Relocatable` (compiled and not linked) or an `Executable` (a linked code
+object). A `SourceCodeBundle` is the main kernel, helpers and headers that
+become one solution, with the build inputs: the device's `Target`, the
+code-object version and the kernel names the executable must define. It is not
+a TensileLite library entry. `CodeObjectBuilder::build(bundle, kind, out)`
+builds that bundle with comgr into exactly one `Artifact`: an `Executable` for
+`BuildKind::Executable`, or the main kernel alone as a `Relocatable` for
+`BuildKind::Relocatable`, which is how a helper is built. `JitLibrary` writes
+the TensileLite solution record when it publishes the executable. The
 interfaces are for compiled-in implementations and do not establish a stable
 external plugin application binary interface (ABI).
+
+A `Target` holds the TensileLite `AMDGPU::Processor`, an `Any`, `On` or `Off`
+setting for each of `sramecc` and `xnack`, and the device's ASIC revision.
+`Target::fromTargetId` parses a target ID, such as
+`hipDeviceProp_t::gcnArchName` or the ID in an assembly `.amdgcn_target`
+directive, and rejects an unknown processor, including `gfx000`, and any other
+feature. Strings come only from `processorName()`, `targetId()`, `isaName()`
+(the comgr ISA name) and `libraryArch()` (the GEMM library subtree, `gfx1250v0`
+for a gfx1250 A0 part), so library directory names and `cache-key.msgpack`
+fields are the strings earlier builds wrote.
 
 ### Build
 
@@ -72,30 +87,33 @@ code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
   features the device has; it is then rewritten to the device's full target
   ID. Assembly units that declare different wavefront sizes are rejected.
 - HIP source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
-  `--rocm-path` and a `-cuid` taken from the source name. A HIP helper is its
-  own code object. The helper library stores that relocatable. A hit reuses
-  it. A miss compiles it once and publishes it into the helper library. The
-  solution library then stores one executable: the main kernel linked with
-  those helpers. A build with no library compiles and links each helper and
-  does not keep a second cache. comgr's `AMD_COMGR_CACHE` stays comgr's; it
-  cannot be stored in the library. The ROCm path is `HIP_PATH` when set,
-  otherwise the prefix of the loaded HIP runtime.
+  `--rocm-path` and a `-cuid` taken from the source name. A HIP helper
+  compiles to its own `Relocatable`. The helper library stores that
+  relocatable. A hit reuses it. A miss compiles it once and publishes it into
+  the helper library. A bundle's helpers are HIP sources, which an
+  `Executable` build compiles, or relocatables from the helper library, which
+  it links as they are; the build keeps no second cache. comgr's
+  `AMD_COMGR_CACHE` stays comgr's; it cannot be stored in the library. The
+  ROCm path is `HIP_PATH` when set, otherwise the prefix of the loaded HIP
+  runtime.
 - Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` links the main kernel
-  into one code object, with `-Xlinker --build-id=sha1`. The helper code
-  objects and the main kernel are ready to add to `JitLibrary`.
+  and its helpers into one `Executable`, with `-Xlinker --build-id=sha1`. The
+  solution library stores that executable.
 
 The generator and the builder use the same code-object version, which
-`BuildRequest::codeObjectVersion` carries (4 by default). The output is a
+`SourceCodeBundle::codeObjectVersion` carries (4 by default). The output is a
 raw, uncompressed executable code object. comgr cannot bundle or compress it,
 and `hipModuleLoadData` accepts raw executable and linkable format (ELF)
 objects. A generator needs no offload bundler.
 
-After linking, the builder reads the code object's metadata and checks that its
-instruction set architecture (ISA) is the device's and that it defines every
-main kernel of the entry's solutions. Its message
-carries the first error line of the comgr log, and the builder appends the full
-log to `comgr.log` in `BuildRequest::scratch` and names that file in the
-message.
+After linking, the builder reads the executable's metadata and checks that its
+instruction set architecture (ISA) is the device's, that its code-object
+version is the bundle's, and that it defines every name in
+`SourceCodeBundle::kernelNames`. The builder writes no file. A failure's
+message carries the first error line of the comgr log, and `Status::log`
+carries the full log. A caller that owns a scratch directory passes the status
+to `keepBuildLog`, which appends the log to `comgr.log` there and names that
+file in the message.
 
 ### JIT solution library
 
@@ -108,8 +126,10 @@ kernel, problem type and sizes. A row matches the solution's problem type and
 its exact sizes. A solution whose code-object version or kernarg version this
 build cannot run is skipped; the rest of the library still loads. Publishing
 replaces files atomically, in an order that never leaves a reference to a
-missing file. A backend contributes one `SourceCodeBundle`. Publishing adds
-that solution to the library, which holds many. `readTensileSourceBundle`
+missing file. A backend contributes one `SourceCodeBundle`. `publish` takes the
+executable built from it, its TensileLite record and the local indices of the
+record's solutions to add, and adds them to the library, which holds many.
+`readTensileSourceBundle`
 reads a source directory into a `SourceCodeBundle` and the kernel name. The
 tests publish and load the JIT solution library.
 
@@ -138,7 +158,8 @@ serves a problem, and nothing for a problem none of them was generated for.
 
 A source bundle is one kernel's sources stored as a directory.
 `source_bundle::readSourceBundle`, in `hipblaslt-jit-source-bundle.hpp`, reads
-the sources into a `SourceCodeBundle` and requires one main kernel.
+the sources into a `SourceCodeBundle` and requires one main kernel. The caller
+sets the target and kernel names, which the directory does not hold.
 `readTensileSourceBundle` also reads the library entry for the kernel name.
 
 | Path | Contents |

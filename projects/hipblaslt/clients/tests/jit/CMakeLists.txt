@@ -44,7 +44,8 @@ endfunction()
 
 add_executable(hipblaslt-jit-source-bundle-test source_bundle_test.cpp)
 target_include_directories(hipblaslt-jit-source-bundle-test PRIVATE "${hipblaslt_jit_source}")
-target_link_libraries(hipblaslt-jit-source-bundle-test PRIVATE hipblaslt::headers)
+target_link_libraries(hipblaslt-jit-source-bundle-test PRIVATE
+    hipblaslt::headers roc::tensilelite-host hip::device)
 target_compile_definitions(hipblaslt-jit-source-bundle-test PRIVATE
     "HIPBLASLT_JIT_SCRATCH=\"${hipblaslt_jit_scratch}/source-bundle\"")
 hipblaslt_jit_test(jit-source-bundle jit-cpu hipblaslt-jit-source-bundle-test)
@@ -57,8 +58,8 @@ if(NOT HIPBLASLT_ENABLE_JIT)
 endif()
 
 # Compiles the comgr builder directly and builds a hand-written HIP kernel and
-# every committed assembly file for its target. Needs no GPU, so every
-# architecture runs it.
+# every committed assembly file for its target, alone and linked with that
+# kernel. Needs no GPU, so every architecture runs it.
 add_executable(hipblaslt-jit-builder-test
     builder_test.cpp
     "${hipblaslt_jit_source}/hipblaslt-jit-builder.cpp"
@@ -66,7 +67,7 @@ add_executable(hipblaslt-jit-builder-test
 target_include_directories(hipblaslt-jit-builder-test PRIVATE
     "${hipblaslt_jit_source}" "${hipblaslt_jit_source}/rocblaslt/src/include")
 target_link_libraries(hipblaslt-jit-builder-test PRIVATE
-    roc::hipblaslt amd_comgr hip::host)
+    roc::hipblaslt roc::tensilelite-host amd_comgr hip::device)
 target_compile_definitions(hipblaslt-jit-builder-test PRIVATE
     "HIPBLASLT_JIT_DATA=\"${CMAKE_CURRENT_SOURCE_DIR}/data\""
     "HIPBLASLT_JIT_KERNEL=\"${CMAKE_CURRENT_SOURCE_DIR}/builder_test_kernel.hip\""

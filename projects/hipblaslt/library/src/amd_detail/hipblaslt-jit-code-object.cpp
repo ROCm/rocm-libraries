@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-code-object.hpp"
+#include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt_secure_env.hpp"
 
 #include <amd_comgr/amd_comgr.h>
@@ -14,7 +15,6 @@
 #include <filesystem>
 #include <new>
 #include <set>
-#include <sstream>
 #include <system_error>
 #include <utility>
 #ifndef _WIN32
@@ -253,26 +253,11 @@ namespace hipblaslt_jit::code_object
             return output;
         }
 
-        bool startsWith(const std::string& text, const char* prefix)
-        {
-            return text.rfind(prefix, 0) == 0;
-        }
-
         void validateTarget(const Target& target)
         {
-            if(target.gfx.size() < 4 || !startsWith(target.gfx, "gfx"))
-                fail(Status::InvalidArgument, "target processor must look like gfxNNN, got '"
-                                                  + target.gfx + "'");
-            for(size_t i = 3; i < target.gfx.size(); ++i)
-                if(!std::isalnum(static_cast<unsigned char>(target.gfx[i])))
-                    fail(Status::InvalidArgument, "invalid target processor '" + target.gfx + "'");
-            for(const auto& feature : target.features)
-                if(feature.size() < 2 || (feature.back() != '+' && feature.back() != '-'))
-                    fail(Status::InvalidArgument,
-                         "target feature must end in '+' or '-', got '" + feature + "'");
-            if(target.wavefrontSize != 0 && target.wavefrontSize != 32
-               && target.wavefrontSize != 64)
-                fail(Status::InvalidArgument, "wavefront size must be 0, 32 or 64");
+            if(target.processor == Processor::gfx000 || target.processorName().empty())
+                fail(Status::InvalidArgument,
+                     "unknown target processor " + std::to_string(static_cast<int>(target.processor)));
         }
 
         void validateOptions(const Options& options)
@@ -281,6 +266,9 @@ namespace hipblaslt_jit::code_object
                 fail(Status::InvalidArgument,
                      "code object version must be 4, 5 or 6, got "
                          + std::to_string(options.codeObjectVersion));
+            if(options.wavefrontSize != 0 && options.wavefrontSize != 32
+               && options.wavefrontSize != 64)
+                fail(Status::InvalidArgument, "wavefront size must be 0, 32 or 64");
             std::set<std::string> names;
             for(const auto& include : options.includes)
             {
@@ -332,10 +320,12 @@ namespace hipblaslt_jit::code_object
             return id.empty() ? std::string("unit") : id;
         }
 
-        std::string waveOption(const Target& target)
+        // wavefrontSize, or the processor default when it is 0.
+        std::string waveOption(const Target& target, int wavefrontSize)
         {
-            return target.resolvedWavefrontSize() == 64 ? "-mwavefrontsize64"
-                                                        : "-mno-wavefrontsize64";
+            if(wavefrontSize == 0)
+                wavefrontSize = target.processor < Processor::gfx1010 ? 64 : 32;
+            return wavefrontSize == 64 ? "-mwavefrontsize64" : "-mno-wavefrontsize64";
         }
 
         void addIncludes(DataSet& set, const Options& options)
@@ -402,7 +392,7 @@ namespace hipblaslt_jit::code_object
 
             std::vector<std::string> flags
                 = {"-mcode-object-version=" + std::to_string(options.codeObjectVersion),
-                   waveOption(target),
+                   waveOption(target, options.wavefrontSize),
                    "-Wno-unused-command-line-argument"};
             for(const auto& dir : options.includeDirectories)
                 flags.push_back("-I" + dir);
@@ -445,7 +435,7 @@ namespace hipblaslt_jit::code_object
 
             const auto               version = std::to_string(options.codeObjectVersion);
             std::vector<std::string> compile
-                = {"-O3", "-std=c++17", "-mcode-object-version=" + version, waveOption(target)};
+                = {"-O3", "-std=c++17", "-mcode-object-version=" + version, waveOption(target, 0)};
             if(!options.rocmPath.empty())
                 compile.push_back("--rocm-path=" + options.rocmPath);
             if(options.includeHipRuntimeWrapper)
@@ -457,7 +447,7 @@ namespace hipblaslt_jit::code_object
                                                 "-Xclang",
                                                 "-disable-llvm-optzns",
                                                 "-mcode-object-version=" + version,
-                                                waveOption(target)};
+                                                waveOption(target, 0)};
             codegen.insert(codegen.end(), options.codegenFlags.begin(), options.codegenFlags.end());
 
             const auto        codegenInfo = makeAction(target.isaName(), codegen);
@@ -544,10 +534,10 @@ namespace hipblaslt_jit::code_object
                 fail(Status::NoOutput,
                      "link produced " + std::to_string(executables.size())
                          + " executables; expected one non-empty executable");
-            hipblaslt_jit::Artifact codeObject;
-            codeObject.kind  = hipblaslt_jit::Artifact::Kind::CodeObject;
-            codeObject.bytes = std::move(executables.front().second);
-            return {Status::Success, {}, std::move(codeObject)};
+            hipblaslt_jit::Artifact executable;
+            executable.kind  = hipblaslt_jit::Artifact::Kind::Executable;
+            executable.bytes = std::move(executables.front().second);
+            return {Status::Success, {}, std::move(executable)};
         }
 
         template <typename R, typename F>
@@ -739,8 +729,9 @@ namespace hipblaslt_jit::code_object
         {
             if(bundle.mainKernel.name.empty() || bundle.mainKernel.bytes.empty())
                 fail(Status::InvalidArgument, "no sources supplied");
-            if(bundle.mainKernel.kind == hipblaslt_jit::Artifact::Kind::CodeObject)
-                fail(Status::InvalidArgument, "the main kernel is already a code object");
+            if(bundle.mainKernel.kind != hipblaslt_jit::Artifact::Kind::Assembly
+               && bundle.mainKernel.kind != hipblaslt_jit::Artifact::Kind::Hip)
+                fail(Status::InvalidArgument, "the main kernel is not assembly or HIP source");
             Options               merged = options;
             std::set<std::string> includeNames;
             for(const auto& include : merged.includes)
@@ -768,9 +759,7 @@ namespace hipblaslt_jit::code_object
             }
             if(!hip.empty())
             {
-                auto hipTarget          = target;
-                hipTarget.wavefrontSize = 0;
-                auto compiled           = compileHipImpl(hip, hipTarget, merged, log);
+                auto compiled = compileHipImpl(hip, target, merged, log);
                 for(auto& object : compiled.objects)
                     objects.push_back(std::move(object));
             }
@@ -798,48 +787,13 @@ namespace hipblaslt_jit::code_object
         return "unknown";
     }
 
-    Target Target::fromTargetId(const std::string& targetId, int wavefrontSize)
-    {
-        Target             target;
-        std::istringstream parts(targetId);
-        std::string        part;
-        std::getline(parts, target.gfx, ':');
-        while(std::getline(parts, part, ':'))
-            if(!part.empty())
-                target.features.push_back(part);
-        target.wavefrontSize = wavefrontSize;
-        return target;
-    }
-
-    std::string Target::targetId() const
-    {
-        std::string id = gfx;
-        for(const auto& feature : features)
-            id += ":" + feature;
-        return id;
-    }
-
-    std::string Target::isaName() const
-    {
-        return "amdgcn-amd-amdhsa--" + targetId();
-    }
-
-    int Target::resolvedWavefrontSize() const
-    {
-        if(wavefrontSize != 0)
-            return wavefrontSize;
-        return (gfx.size() == 6 && gfx.rfind("gfx9", 0) == 0) ? 64 : 32;
-    }
-
     Result build(const hipblaslt_jit::SourceCodeBundle& bundle,
                  const Target&                           target,
                  const Options&                          options) noexcept
     {
         return guarded<Result>([&](std::string& log) {
             auto objects = objectsOf(bundle, target, options, log);
-            auto linkTarget          = target;
-            linkTarget.wavefrontSize = 0;
-            return linkImpl(objects, linkTarget, options, log);
+            return linkImpl(objects, target, options, log);
         });
     }
 
@@ -854,7 +808,7 @@ namespace hipblaslt_jit::code_object
             hipblaslt_jit::Artifact object;
             object.name  = objects.front().name.empty() ? bundle.mainKernel.name
                                                         : objects.front().name;
-            object.kind  = hipblaslt_jit::Artifact::Kind::CodeObject;
+            object.kind  = hipblaslt_jit::Artifact::Kind::Relocatable;
             object.bytes = std::move(objects.front().bytes);
             return Result{Status::Success, {}, std::move(object)};
         });
@@ -868,10 +822,12 @@ namespace hipblaslt_jit::code_object
             std::vector<Relocatable> relocatables;
             relocatables.reserve(objects.size());
             for(const auto& object : objects)
+            {
+                if(object.kind != hipblaslt_jit::Artifact::Kind::Relocatable)
+                    fail(Status::InvalidArgument, "'" + object.name + "' is not a relocatable");
                 relocatables.push_back({object.name, object.bytes});
-            auto linkTarget          = target;
-            linkTarget.wavefrontSize = 0;
-            return linkImpl(relocatables, linkTarget, options, log);
+            }
+            return linkImpl(relocatables, target, options, log);
         });
     }
 
@@ -939,5 +895,63 @@ namespace hipblaslt_jit::code_object
         {
             return {};
         }
+    }
+}
+
+namespace hipblaslt_jit
+{
+    std::optional<Target> Target::fromTargetId(const std::string& targetId)
+    {
+        std::vector<std::string> parts;
+        for(size_t begin = 0;;)
+        {
+            const auto end = targetId.find(':', begin);
+            parts.push_back(targetId.substr(begin, end - begin));
+            if(end == std::string::npos)
+                break;
+            begin = end + 1;
+        }
+        Target target;
+        target.processor = TensileLite::AMDGPU::toProcessor(parts.front());
+        if(target.processor == Processor::gfx000 || target.processorName() != parts.front())
+            return std::nullopt;
+        for(size_t i = 1; i < parts.size(); ++i)
+        {
+            const auto& part    = parts[i];
+            const auto  name    = part.substr(0, part.empty() ? 0 : part.size() - 1);
+            auto*       feature = name == "sramecc" ? &target.sramecc
+                                  : name == "xnack" ? &target.xnack
+                                                    : nullptr;
+            if(!feature || *feature != TargetFeature::Any
+               || (part.back() != '+' && part.back() != '-'))
+                return std::nullopt;
+            *feature = part.back() == '+' ? TargetFeature::On : TargetFeature::Off;
+        }
+        return target;
+    }
+
+    std::string Target::processorName() const
+    {
+        return TensileLite::AMDGPU::toString(processor);
+    }
+
+    std::string Target::targetId() const
+    {
+        const auto feature = [](const char* name, TargetFeature setting) {
+            if(setting == TargetFeature::Any)
+                return std::string();
+            return std::string(":") + name + (setting == TargetFeature::On ? "+" : "-");
+        };
+        return processorName() + feature("sramecc", sramecc) + feature("xnack", xnack);
+    }
+
+    std::string Target::isaName() const
+    {
+        return "amdgcn-amd-amdhsa--" + targetId();
+    }
+
+    std::string Target::libraryArch() const
+    {
+        return rocblaslt_revisioned_arch_name(processorName(), asicRevision);
     }
 }
