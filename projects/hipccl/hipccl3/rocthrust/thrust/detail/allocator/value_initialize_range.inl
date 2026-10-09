@@ -61,9 +61,9 @@ struct construct1_via_allocator
 template <typename Allocator, typename T>
 struct needs_default_construct_via_allocator
     : _THRUST_STD::disjunction<has_member_construct1<Allocator, T>, // if the Allocator does something interesting
-                                                                   // or if T's default constructor does something
-                                                                   // interesting
-                              thrust::detail::not_<_THRUST_STD::is_trivially_default_constructible<T>>>
+                                                                    // or if T's default constructor does something
+                                                                    // interesting
+                               thrust::detail::not_<_THRUST_STD::is_trivially_default_constructible<T>>>
 {};
 
 // we know that std::allocator::construct's only effect is to call T's
