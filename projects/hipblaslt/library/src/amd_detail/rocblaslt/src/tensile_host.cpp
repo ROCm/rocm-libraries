@@ -4369,7 +4369,6 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             auto tensileInputs = GetTensileInputs(prob);
             tensileInputs.Synchronizer
                 = synchronizerForSolution(*solution, prob.streamKFlags, prob.Synchronizer);
-            bindFlagRegion(prob, *solution, tensileInputs);
             if(solution->sizeMapping.rmsEpilogue)
             {
                 tensileInputs.partialBuf = partialRmsBuf;
@@ -5467,7 +5466,7 @@ static void filterStreamKSplitForPartialRMS(
     kept.reserve(solutions.size());
     for(const auto& solution : solutions)
     {
-        if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKForceDPOnly == 0)
+        if(solution->sizeMapping.isStreamK() && !solution->sizeMapping.isPersistentDataParallel())
             continue;
         kept.push_back(solution);
     }
@@ -5900,8 +5899,8 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         // Reject StreamK split-K solutions for PartialRMS/RMSNorm problems: those
         // kernels leave partialBuf unwritten on the split-K path, and an explicit-algo
         // caller bypasses the heuristic filter that normally drops them.
-        if(tensile_prob.rmsEpilogue() && solution->sizeMapping.streamK > 0
-           && solution->sizeMapping.streamKForceDPOnly != 1)
+        if(tensile_prob.rmsEpilogue() && solution->sizeMapping.isStreamK()
+           && !solution->sizeMapping.isPersistentDataParallel())
         {
             log_error(__func__, "solution rejected: StreamK split-K unsupported for RMSEpilogue");
             return rocblaslt_status_invalid_value;

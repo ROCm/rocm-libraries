@@ -36,7 +36,7 @@ esac
 echo "--- running $name (LibraryType=$library_type) ---"
 rm -rf "$tmp_dir"
 cd "$TENSILE_DIR"
-./Tensile/bin/Tensile "$yaml" "$tmp_dir"
+./tensilelite/bin/Tensile "$yaml" "$tmp_dir"
 rc=$?
 
 if [[ $rc -ne 0 ]]; then

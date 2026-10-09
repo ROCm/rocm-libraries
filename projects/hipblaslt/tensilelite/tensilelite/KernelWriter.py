@@ -10042,7 +10042,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # SkPartialIdx normally aliases sgprBeta, but Beta is absent when UseBeta=False.
     # Allocate a real SGPR on the parallel-reduction path so the non-DP split-output
     # SrdD calc can resolve it.
-    if (self.states.streamK.emitsParallelReductionSgprAliases or kernel["StreamK"] == 4) \
+    if (self.states.tileProcessing.emitsParallelReductionSgprAliases or hasDynamicAssignment(kernel)) \
         and not kernel["ProblemType"]["UseBeta"]:
       self.defineSgpr("SkPartialIdx", 1)
       # SkPartialIdx is a scratch SGPR computed at runtime, not a kernel argument.

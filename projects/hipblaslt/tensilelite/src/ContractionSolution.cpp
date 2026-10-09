@@ -1303,12 +1303,12 @@ namespace TensileLite
             if(problemType.sparse)
                 args.template append<unsigned char const*>("metadata", inputs.metadata);
 
-            // See the version < 3 branch above for why streamKForceDPOnly must not
-            // append ws/Flags. KernArgsVersion >= 3 keeps only Flags here and appends ws
-            // after alpha/beta; generated version < 3 kernels expect ws and Flags together
-            // here, matching the legacy layout their .kd metadata was built with.
+            // See the version < 3 branch above for why a forced-DP-only StreamK solution
+            // must not append ws/Flags. KernArgsVersion >= 3 keeps only Flags here and
+            // appends ws after alpha/beta; generated version < 3 kernels expect ws and
+            // Flags together here, matching the legacy layout their .kd metadata was built with.
             if(sizeMapping.isStreamK() && sizeMapping.streamKAtomic == 0
-                && sizeMapping.streamKForceDPOnly == 0)
+                && !sizeMapping.isPersistentDataParallel())
             {
                 // Assert hardware is not null
                 // For now grouped gemm is not supported and passes nullptr
@@ -1629,7 +1629,7 @@ namespace TensileLite
             // KernArgsVersion >= 3 places AddressWS after alpha/beta; generated version < 3
             // kernels already appended it next to Flags in the StreamK block above.
             if(deferWorkspaceAfterAlphaBeta && sizeMapping.isStreamK()
-                && sizeMapping.streamKAtomic == 0 && sizeMapping.streamKForceDPOnly == 0)
+                && sizeMapping.streamKAtomic == 0 && !sizeMapping.isPersistentDataParallel())
             {
                 args.template append<void const*>("ws", inputs.ws);
             }
