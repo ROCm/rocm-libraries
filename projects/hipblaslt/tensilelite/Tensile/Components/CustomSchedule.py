@@ -1884,13 +1884,17 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 13
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isTN(kernel) and (not useLDSTr) and TLDS==1:
+        # The partial VMEM waits rely on B being issued before A, including
+        # the prefetch that feeds the first loop iteration. GRA/GRB name
+        # the first/second load streams when SwapGlobalReadOrder is set.
+        kernel["SwapGlobalReadOrder"] = 1
         syncTable = [
             -1, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1 (partial) before starting main loop"),
              4, SWaitCnt(dscnt=0+2, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1 (complete) for the remaining main loop"),
             14, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete to start GRB"),
             14, SBarrier(comment=""),
             # Must be dscnt=0 here: validator requires proving all LRA0 are complete
-            # before the first GRA is issued (vmfma_index window [31,41)).
+            # before the first A load is issued (vmfma_index window [31,41)).
             39, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 / ensure LRA0 complete before starting GRB/GRA"),
             39, SBarrier(comment=""),
             45, SWaitCnt(dscnt=-1, vlcnt=13+2, vscnt=-1, comment="Wait for GRB to complete before LRB1"),
@@ -1909,11 +1913,11 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
             'LRA0'   : [[13,15,18,21,24,26,28,30],
                         [13,16,19,22,25,27,29,31]],
 
-            # GRB must not start before the SYNC at idx 15 (LRB0 completion).
-            'GRB'    : [[14,14, 17,17, 20,20, 23,23, 26,26],
+            # B loads must not start before the SYNC at idx 15 (LRB0 completion).
+            'GRA'    : [[14,14, 17,17, 20,20, 23,23, 26,26],
                         [15,15, 18,18, 21,21, 24,24, 27,27]],
             # Buffer loads.
-            'GRA'    : [[40,40, 43,43, 46,46, 49,49, 59,59, 62,62, 65,65, 67,67],
+            'GRB'    : [[40,40, 43,43, 46,46, 49,49, 59,59, 62,62, 65,65, 67,67],
                         [41,41, 44,44, 47,47, 57,57, 60,60, 63,63, 66,66, 68,68]],
             # Prefetch next iteration.
             # Need 5 local reads for B (MIWaveTileB=5).
@@ -3348,6 +3352,11 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
         if not valid:
             return False, None
         optSchedule = switch_A_B_schedule(opt.optSchedule)
+        # The 224x128 schedule issues B first via SwapGlobalReadOrder, and the
+        # GRA/GRB keys name the first/second load stream rather than a tensor.
+        # Mirrored, A is issued first, so the prologue must not swap either.
+        kernel["SwapGlobalReadOrder"] = 0
+        optSchedule["GRA"], optSchedule["GRB"] = optSchedule["GRB"], optSchedule["GRA"]
         return True, ScheduleInfo(opt.numCodePaths, opt.numMfma, optSchedule, opt.syncCode, opt.nglshift, opt.nllshift)
     else:
         return False, None
