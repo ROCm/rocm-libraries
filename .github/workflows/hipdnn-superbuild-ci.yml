@@ -255,12 +255,16 @@ jobs:
       # "Run tests" wrote and fail if a declared packaging probe (listed in the
       # manifest configure wrote) did not run or failed. Runs whenever "Run
       # tests" ran, pass or fail, so a probe failure is reported by name.
+      # --min-probes 1: this lane never builds every architecture the descriptors
+      # name, so a manifest with no probe means discovery broke. Drop the flag if
+      # the lane starts building them all.
       - name: Check packaging probes ran
         if: ${{ !cancelled() && steps.run-tests.outcome != 'skipped' }}
         run: |
           "$VENV_PYTHON" .github/scripts/check_probe_junit.py \
             --junit build/ctest-junit.xml \
-            --manifest build/hkp-probes/manifest.txt
+            --manifest build/hkp-probes/manifest.txt \
+            --min-probes 1
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
@@ -509,12 +513,16 @@ jobs:
       # "Run tests" wrote and fail if a declared packaging probe (listed in the
       # manifest configure wrote) did not run or failed. Runs whenever "Run
       # tests" ran, pass or fail, so a probe failure is reported by name.
+      # --min-probes 1: this lane never builds every architecture the descriptors
+      # name, so a manifest with no probe means discovery broke. Drop the flag if
+      # the lane starts building them all.
       - name: Check packaging probes ran
         if: ${{ !cancelled() && steps.run-tests.outcome != 'skipped' }}
         run: |
           "$VENV_PYTHON" .github/scripts/check_probe_junit.py \
             --junit build/ctest-junit.xml \
-            --manifest build/hkp-probes/manifest.txt
+            --manifest build/hkp-probes/manifest.txt \
+            --min-probes 1
 
       # Golden-data validation used to live here as a schedule-gated re-run of the
       # external integration targets with HIPDNN_TEST_VERIFICATION_MODE=golden-check.

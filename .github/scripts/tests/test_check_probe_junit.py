@@ -37,12 +37,16 @@ class CheckProbeJunitTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.dir = Path(tmp.name)
 
-    def run_check(self, xml: str, manifest: list[str]) -> list[str]:
+    def run_check(
+        self, xml: str, manifest: list[str], min_probes: int = 0
+    ) -> list[str]:
         junit_path = self.dir / "ctest-junit.xml"
         manifest_path = self.dir / "manifest.txt"
         junit_path.write_text(xml)
         manifest_path.write_text("".join(f"{n}\n" for n in manifest))
-        return [check_id for check_id, _ in cpj.check(junit_path, manifest_path)]
+        return [
+            check_id for check_id, _ in cpj.check(junit_path, manifest_path, min_probes)
+        ]
 
     def test_all_declared_tests_passed(self):
         xml = junit_xml([case_xml(n) for n in MANIFEST])
@@ -115,6 +119,17 @@ class CheckProbeJunitTest(unittest.TestCase):
     def test_unparseable_junit_fails(self):
         self.assertEqual(self.run_check("<testsuite", MANIFEST), ["junit-unreadable"])
 
+    def test_min_probes_fails_on_tools_only_manifest(self):
+        xml = junit_xml([case_xml("hkp-probe-tools")])
+        self.assertEqual(
+            self.run_check(xml, ["hkp-probe-tools"], min_probes=1),
+            ["probes-too-few"],
+        )
+
+    def test_min_probes_met_passes(self):
+        xml = junit_xml([case_xml(n) for n in MANIFEST])
+        self.assertEqual(self.run_check(xml, MANIFEST, min_probes=1), [])
+
     def test_missing_manifest_fails(self):
         junit_path = self.dir / "ctest-junit.xml"
         junit_path.write_text(junit_xml([case_xml(n) for n in MANIFEST]))
@@ -135,6 +150,10 @@ class CheckProbeJunitTest(unittest.TestCase):
         self.assertEqual(cpj.main(argv), 0)
         junit_path.write_text(junit_xml([case_xml(MANIFEST[0])]))
         self.assertEqual(cpj.main(argv), 1)
+        junit_path.write_text(junit_xml([case_xml("hkp-probe-tools")]))
+        manifest_path.write_text("hkp-probe-tools\n")
+        self.assertEqual(cpj.main(argv), 0)
+        self.assertEqual(cpj.main([*argv, "--min-probes", "1"]), 1)
 
 
 if __name__ == "__main__":

@@ -14,19 +14,25 @@ per declared probe. A lane whose GPU_TARGETS cover every architecture the
 descriptors name declares no probe, so "hkp-probe-tools" alone is a valid manifest;
 an empty one means the configure did not write it properly.
 
+The manifest is written by the same configure that discovers the probes, so on its
+own it cannot tell "this lane builds every architecture" from "discovery found
+nothing". A lane that must always declare probes passes --min-probes N: the check
+fails when the manifest names fewer than N tests besides "hkp-probe-tools". The
+default is 0, which accepts a manifest with no probe.
+
 For every manifest name, the junit must hold exactly one testcase with that
 name, and that testcase must have run (status "run" or "fail"; without a status
 attribute, no <skipped> child) and must have no <failure> or <error> child.
 
 Usage:
     check_probe_junit.py --junit build/ctest-junit.xml \
-        --manifest build/hkp-probes/manifest.txt
+        --manifest build/hkp-probes/manifest.txt [--min-probes N]
 
 Exit codes:
     0  every manifest name ran exactly once and passed
     1  one or more checks failed; each prints
        "check_probe_junit: FAIL <id>: <detail>", where <id> is one of
-       manifest-unreadable, manifest-too-small, junit-unreadable,
+       manifest-unreadable, manifest-too-small, probes-too-few, junit-unreadable,
        name-missing, name-duplicate, not-run, failure, error
 """
 
@@ -35,8 +41,9 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-# The "hkp-probe-tools" test; probes are optional.
+# The "hkp-probe-tools" test; probes are optional unless --min-probes asks for them.
 MIN_MANIFEST_ENTRIES = 1
+TOOLS_TEST = "hkp-probe-tools"
 
 
 def read_manifest(path: Path) -> list[str]:
@@ -55,7 +62,9 @@ def ran(case: ET.Element) -> bool:
     return status in ("run", "fail")
 
 
-def check(junit_path: Path, manifest_path: Path) -> list[tuple[str, str]]:
+def check(
+    junit_path: Path, manifest_path: Path, min_probes: int = 0
+) -> list[tuple[str, str]]:
     """Return (id, detail) for every failed check; empty means green."""
     try:
         names = read_manifest(manifest_path)
@@ -69,6 +78,18 @@ def check(junit_path: Path, manifest_path: Path) -> list[tuple[str, str]]:
                 "manifest-too-small",
                 f"{manifest_path} lists {len(names)} test(s), expected at least "
                 f"{MIN_MANIFEST_ENTRIES} (hkp-probe-tools)",
+            )
+        )
+
+    probes = [name for name in names if name != TOOLS_TEST]
+    if len(probes) < min_probes:
+        failures.append(
+            (
+                "probes-too-few",
+                f"{manifest_path} declares {len(probes)} probe(s), expected at "
+                f"least {min_probes}; if this lane now builds every architecture "
+                f"the descriptors name, drop --min-probes for it, otherwise probe "
+                f"discovery found nothing",
             )
         )
 
@@ -122,9 +143,16 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="file listing one declared ctest test name per line",
     )
+    parser.add_argument(
+        "--min-probes",
+        type=int,
+        default=0,
+        help="fail when the manifest names fewer probes than this, not counting "
+        f"{TOOLS_TEST} (default 0: no probe is acceptable)",
+    )
     args = parser.parse_args(argv)
 
-    failures = check(args.junit, args.manifest)
+    failures = check(args.junit, args.manifest, args.min_probes)
     for check_id, detail in failures:
         print(f"check_probe_junit: FAIL {check_id}: {detail}")
     if failures:

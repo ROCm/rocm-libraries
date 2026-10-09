@@ -371,7 +371,9 @@ hkp: probe gfx950: derived root <build>/hkp-probes/gfx950/root (17 UKD(s) for gf
 
 A new architecture, or a new pack under one, is therefore probed with no edit anywhere. A
 lane whose `GPU_TARGETS` cover every named architecture declares no probe; that is valid,
-and the manifest then lists `hkp-probe-tools` alone.
+and the manifest then lists `hkp-probe-tools` alone. A lane that must always have a probe
+passes `--min-probes N` to `check_probe_junit.py`, which fails when the manifest names fewer
+than N probes; without it, a tools-only manifest is accepted.
 
 **Wildcards are excluded.** A descriptor with no `arch` (absent or empty) names no
 architecture and gets no automatic probe. That is safe: a wildcard ships for whatever the
@@ -525,8 +527,9 @@ build and ctest lines fails (unknown target, then "No tests were found").
 In CI both superbuild lanes configure with the option `ON`. The probe packs run in the
 Build step as part of `all`; the probe ctest entries run once, inside the lane's normal
 "Run tests" ctest, which writes `build/ctest-junit.xml`. The "Check packaging probes ran"
-step then runs only `check_probe_junit.py` on that junit against the manifest. It runs
-whenever "Run tests" ran, pass or fail.
+step then runs only `check_probe_junit.py` on that junit against the manifest, with
+`--min-probes 1` because neither lane builds every architecture the production root names
+(drop the flag from a lane that does). It runs whenever "Run tests" ran, pass or fail.
 
 Locally on Linux the build is quick (the wheel environment plus the probed UKDs) and each
 probe ctest entry takes a few seconds; `hkp-probe-tools` takes longer, since it really
