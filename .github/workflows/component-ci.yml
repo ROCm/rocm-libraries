@@ -37,7 +37,10 @@ jobs:
             .github/actions/ci-env
             .github/scripts/ci_utils.py
             .github/scripts/component_ci.py
+            .github/scripts/tests/test_component_ci_paths.py
           fetch-depth: 2
+      - name: Check literal component CI paths
+        run: python .github/scripts/tests/test_component_ci_paths.py
       - uses: ./.github/actions/ci-env
         id: env
       - name: Detect changed components
