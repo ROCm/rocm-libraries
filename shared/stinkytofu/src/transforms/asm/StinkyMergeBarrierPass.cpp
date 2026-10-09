@@ -206,6 +206,30 @@ void addTokensToBarrier(StinkyInstruction* barrier, const std::unordered_set<uin
     barrier->setDestRegs(dsts);
 }
 
+// LDS ring rows carried by any barrier of \p g, deduplicated.
+std::vector<LdsRingAccess> groupRingAccesses(const BarrierGroup& g) {
+    std::vector<LdsRingAccess> rows;
+    for (StinkyInstruction* barrier : g.barriers) {
+        const auto* ring = barrier->getModifier<LdsRingData>();
+        if (ring == nullptr) continue;
+        for (const LdsRingAccess& access : ring->accesses) {
+            if (std::find(rows.begin(), rows.end(), access) == rows.end()) rows.push_back(access);
+        }
+    }
+    return rows;
+}
+
+// Fold \p extra ring rows into a ring-tagged barrier (deduplicated).
+void addRingAccessesToBarrier(StinkyInstruction* barrier, const std::vector<LdsRingAccess>& extra) {
+    auto* ring = barrier->getModifier<LdsRingData>();
+    if (ring == nullptr) return;
+    for (const LdsRingAccess& access : extra) {
+        if (std::find(ring->accesses.begin(), ring->accesses.end(), access) ==
+            ring->accesses.end())
+            ring->accesses.push_back(access);
+    }
+}
+
 // Overwrite barrier comment with merged-token summary:
 // "merged barrier, sync LDS0, sync LDS1, ..."
 void setMergedBarrierComment(StinkyInstruction* barrier,
@@ -254,10 +278,17 @@ bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2
         if (touchesTokens(*inst, mergedTokens)) return false;
     }
 
+    // A ring-tagged barrier takes its tensor wait from its ring rows only, so
+    // it cannot absorb an untagged group's obligations, nor the reverse.
+    const std::vector<LdsRingAccess> g1Ring = groupRingAccesses(g1);
+    const std::vector<LdsRingAccess> g2Ring = groupRingAccesses(g2);
+    if (g1Ring.empty() != g2Ring.empty()) return false;
+
     // Safe: fold g2's tokens into every barrier of g1, then drop g2's redundant
     // signal/wait pair. No instruction is moved.
     for (StinkyInstruction* barrier : g1.barriers) {
         addTokensToBarrier(barrier, g2.tokens);
+        addRingAccessesToBarrier(barrier, g2Ring);
         setMergedBarrierComment(barrier, mergedTokens);
     }
     transferLayer2OverlapPairs(overlaps, g1, g2);

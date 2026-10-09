@@ -33,6 +33,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
+#include "stinkytofu/transforms/asm/waitcnt/RoleSplitDrain.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/ShallowPredPromotion.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/WaitDataflow.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/WaitPlan.hpp"
@@ -82,7 +83,8 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         WaitInsertionPlan plan = df.materializePlan();
 
         ShallowPredPromotion shallowPred;
-        std::vector<WaitPlanOptimizer*> optimizers = {&shallowPred};
+        RoleSplitDrain roleSplit(df);
+        std::vector<WaitPlanOptimizer*> optimizers = {&shallowPred, &roleSplit};
         for (auto* opt : optimizers) opt->rewrite(plan, df.getResult(), func);
 
         df.finalizePlan(plan);

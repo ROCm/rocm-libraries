@@ -229,6 +229,21 @@ bool hasRingKind(const LdsRingData* ring, LdsRingAccessKind kind) {
                        [kind](const LdsRingAccess& access) { return access.kind == kind; });
 }
 
+bool writesPublishedClass(const LdsRingData& ring, const std::unordered_set<int>& published) {
+    return std::any_of(ring.accesses.begin(), ring.accesses.end(), [&](const LdsRingAccess& a) {
+        return a.kind == LdsRingAccessKind::Write && published.contains(a.bufferClass);
+    });
+}
+
+// Waves that follow the CFG edge `pred` -> `succ` out of terminator `term`.
+uint32_t waveRoleEdgeMask(const StinkyInstruction& term, const BasicBlock& pred,
+                          const BasicBlock& succ) {
+    const auto* role = term.getModifier<WaveRoleBranchData>();
+    if (role == nullptr) return LdsRingAccess::kAllWaves;
+    if (pred.getSuccessors().size() < 2) return role->takenWaves | role->fallthroughWaves;
+    return getBranchTarget(term) == succ.getLabel() ? role->takenWaves : role->fallthroughWaves;
+}
+
 bool ringAliases(const QueuedOp& producer, size_t producerIndex, const LdsRingAccess& consumer) {
     if (producer.op == nullptr) return false;
     const auto* ring = producer.op->getModifier<LdsRingData>();
@@ -360,6 +375,19 @@ WaitDataflow::WaitDataflow(Function& /*func*/, const DominanceInfo& /*domInfo*/,
     : rpo(rpo) {
     for (unsigned i = 0; i < rpo.size(); ++i) rpoIndex[rpo[i]] = i;
 
+    for (BasicBlock* bb : rpo) {
+        for (IRBase& ir : *bb) {
+            auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            const auto* ring = inst == nullptr ? nullptr : inst->getModifier<LdsRingData>();
+            if (ring == nullptr) continue;
+            hasLdsRing = true;
+            for (const auto& access : ring->accesses) {
+                if (access.kind == LdsRingAccessKind::Publish)
+                    publishedRingClasses.insert(access.bufferClass);
+            }
+        }
+    }
+
     const unsigned n = static_cast<unsigned>(rpo.size());
     // Wait-count immediates are capped to the hardware window
     // (kMaxInFlight - 1). Keep a floor above that window so loop-carried
@@ -404,9 +432,11 @@ DataflowState WaitDataflow::mergeFromPredecessors(
         if (it == exitState.end()) continue;
         const auto& predState = it->second;
         const LdsRingData* edgeRing = nullptr;
+        uint32_t edgeWaves = LdsRingAccess::kAllWaves;
         if (IRBase* terminator = p->getTerminator()) {
             if (auto* inst = dyn_cast<StinkyInstruction>(terminator)) {
                 edgeRing = inst->getModifier<LdsRingData>();
+                edgeWaves = waveRoleEdgeMask(*inst, *p, bb);
             }
         }
         const bool backEdge = isBackEdge(p, &bb);
@@ -414,6 +444,8 @@ DataflowState WaitDataflow::mergeFromPredecessors(
             for (const auto& predQ : predState.queues[c]) {
                 PerPredQueue q;
                 q.pred = p;
+                q.waves = predQ.waves & edgeWaves;
+                if (q.waves == 0) continue;
                 q.ops = predQ.ops;
                 q.saturatedOps = predQ.saturatedOps;
                 q.ringSaturated = predQ.ringSaturated;
@@ -858,6 +890,7 @@ int phiCurrentQueueWait(StinkyInstruction* phi, CounterKind c, const DataflowSta
 // Compute per-counter required waits for `inst` against the live `state`.
 void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
                           const std::array<WaitDataflow::RawWaitPredicate, CK_Count>& rawNeedsWait,
+                          const std::unordered_set<int>& publishedRingClasses,
                           int required[CK_Count]) {
     // Required wait per counter. -1 = no constraint yet.
     for (int c = 0; c < CK_Count; ++c) required[c] = WaitCountSpec::kUnused;
@@ -944,10 +977,17 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
                         tightenRequired(c, 0);
                         continue;
                     }
+                    // No barrier publishes what this fill writes, so every
+                    // publishing barrier must retire it.
+                    const bool unpublished =
+                        anchorKind == LdsRingAccessKind::Publish &&
+                        !writesPublishedClass(*producerRing, publishedRingClasses);
                     for (size_t accessIdx = 0; accessIdx < producerRing->accesses.size();
                          ++accessIdx) {
-                        if (producerRing->accesses[accessIdx].kind != producerKind) continue;
-                        if (!ringAliases(queued, accessIdx, anchorAccess)) continue;
+                        const auto& producerAccess = producerRing->accesses[accessIdx];
+                        if (producerAccess.kind != producerKind) continue;
+                        if ((producerAccess.waves & anchorAccess.waves & q.waves) == 0) continue;
+                        if (!unpublished && !ringAliases(queued, accessIdx, anchorAccess)) continue;
                         tightenRequired(c, waitToDrain(c, qsize - idx));
                     }
                 }
@@ -1126,7 +1166,7 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
         if (creditIfObservedWait(*inst, state, emit)) continue;
 
         int required[CK_Count];
-        computeRequiredWaits(inst, state, rawNeedsWait, required);
+        computeRequiredWaits(inst, state, rawNeedsWait, publishedRingClasses, required);
 
         // Decide what to emit (apply redundancy elision) and trim per-pred
         // queues accordingly.
@@ -1218,7 +1258,7 @@ bool WaitDataflow::solve() {
         // exactly the steady-state queue saturations.
         overflowSites.clear();
         for (BasicBlock* bb : rpo) {
-            const bool keepLiveTensorState = hasUntaggedTensorAnchor(*bb);
+            const bool keepLiveTensorState = hasLdsRing || hasUntaggedTensorAnchor(*bb);
             DataflowState entry = mergeFromPredecessors(*bb);
             if (!loopCarriedTokenDepsEnabled && iter > 0) {
                 restoreTensorState(entry, result.entryState[bb], keepLiveTensorState);
@@ -1296,7 +1336,7 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
         newAnchors.clear();
 
         for (BasicBlock* bb : rpo) {
-            const bool keepLiveTensorState = hasUntaggedTensorAnchor(*bb);
+            const bool keepLiveTensorState = hasLdsRing || hasUntaggedTensorAnchor(*bb);
             // Entry = merge of recomputed predecessor exits (back-edges
             // start at bottom and tighten over iterations), then apply the
             // optimizer's predecessor tail drains.
@@ -1318,7 +1358,7 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                 if (creditIfObservedWait(*inst, state, emit)) continue;
 
                 int computed[CK_Count];
-                computeRequiredWaits(inst, state, rawNeedsWait, computed);
+                computeRequiredWaits(inst, state, rawNeedsWait, publishedRingClasses, computed);
 
                 // Emit the optimizer's planned wait where present (floor),
                 // else the freshly recomputed requirement.
@@ -1386,6 +1426,18 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
     }
 
     plan.anchorWaits = std::move(newAnchors);
+}
+
+int WaitDataflow::requiredWaitViaPred(StinkyInstruction* anchor, BasicBlock* pred,
+                                      CounterKind c) const {
+    BasicBlock* bb = anchor == nullptr ? nullptr : anchor->getParent();
+    auto it = result.exitState.find(pred);
+    if (capHit || bb == nullptr || it == result.exitState.end()) return 0;
+    const std::unordered_map<const BasicBlock*, DataflowState> viaPred{{pred, it->second}};
+    DataflowState state = mergeFromPredecessors(*bb, viaPred);
+    int required[CK_Count];
+    computeRequiredWaits(anchor, state, rawNeedsWait, publishedRingClasses, required);
+    return required[c];
 }
 
 WaitInsertionPlan WaitDataflow::materializePlan() const {

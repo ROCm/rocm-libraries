@@ -316,6 +316,7 @@ struct Modifier {
         WMMA_POOL_INDEX,
         CALL_TARGETS,
         EXEC_GROUP,
+        WAVE_ROLE_BRANCH,
     };
 
     Modifier(Type type) : type(type) {}
@@ -1112,13 +1113,18 @@ enum class LdsRingAccessKind : int {
 /// One class-specific access into a rotating LDS ring.
 ///
 /// The physical buffer is `(frame + gdelta) mod ring`. `bufferClass` keeps
-/// independent rings (A, B, metadata, ...) disjoint.
+/// independent rings (A, B, metadata, ...) disjoint. `waves` is the set of
+/// workgroup waves performing the access (bit i = wave i), so a
+/// wave-separated load can name a different class per wave.
 struct LdsRingAccess {
+    static constexpr uint32_t kAllWaves = 0xFFFFFFFFu;
+
     int bufferClass = 0;
     int frame = 0;
     int ring = 0;
     int gdelta = 0;
     LdsRingAccessKind kind = LdsRingAccessKind::Read;
+    uint32_t waves = kAllWaves;
 
     bool operator==(const LdsRingAccess&) const = default;
 };
@@ -1143,6 +1149,20 @@ struct LdsRingData : public TypedModifier<LdsRingData> {
         : TypedModifier<LdsRingData>(),
           accesses(std::move(accesses)),
           advances(std::move(advances)) {}
+};
+
+/// Conditional branch whose condition depends only on the wave id: the waves
+/// that take it and the waves that fall through (bit i = wave i).
+struct WaveRoleBranchData : public TypedModifier<WaveRoleBranchData> {
+    static constexpr Modifier::Type Type = Modifier::Type::WAVE_ROLE_BRANCH;
+
+    uint32_t takenWaves = LdsRingAccess::kAllWaves;
+    uint32_t fallthroughWaves = LdsRingAccess::kAllWaves;
+
+    WaveRoleBranchData(uint32_t takenWaves, uint32_t fallthroughWaves)
+        : TypedModifier<WaveRoleBranchData>(),
+          takenWaves(takenWaves),
+          fallthroughWaves(fallthroughWaves) {}
 };
 
 /// Buffer pool index for WMMA instructions in double/triple/N-buffered GEMM kernels.

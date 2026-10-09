@@ -23,6 +23,7 @@
 
 #include "ModifierSerializer.hpp"
 
+#include <algorithm>
 #include <climits>
 #include <cstdint>
 #include <cstdlib>
@@ -514,7 +515,23 @@ bool serializeVisit(const LdsRingData& mod, std::ostream& os) {
     }
 
     os << ", mod.lds_ring = { accesses = " << vectorToString(accesses)
-       << ", advances = " << vectorToString(advances) << " }";
+       << ", advances = " << vectorToString(advances);
+    if (std::any_of(mod.accesses.begin(), mod.accesses.end(), [](const LdsRingAccess& access) {
+            return access.waves != LdsRingAccess::kAllWaves;
+        })) {
+        std::vector<int> waves;
+        waves.reserve(mod.accesses.size());
+        for (const auto& access : mod.accesses) waves.push_back(static_cast<int>(access.waves));
+        os << ", waves = " << vectorToString(waves);
+    }
+    os << " }";
+    return true;
+}
+
+// WaveRoleBranchData
+bool serializeVisit(const WaveRoleBranchData& mod, std::ostream& os) {
+    os << ", mod.wave_role = { taken = " << static_cast<int>(mod.takenWaves)
+       << ", fallthrough = " << static_cast<int>(mod.fallthroughWaves) << " }";
     return true;
 }
 
@@ -552,7 +569,8 @@ bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
                           VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
                           SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData, SDelayAluData,
                           SWaitAluData, MFMAModifiers, MatrixFmtModifiers, MemTokenData,
-                          LdsRingData, WaitProvenanceData, LabelData, CallTargetData>(mod, os);
+                          LdsRingData, WaveRoleBranchData, WaitProvenanceData, LabelData,
+                          CallTargetData>(mod, os);
 }
 
 /*
@@ -705,7 +723,15 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
         for (size_t i = 0; i + 1 < flatAdvances.size(); i += 2) {
             advances.push_back({flatAdvances[i], flatAdvances[i + 1]});
         }
+        const auto waves = getIntVector(fields, "waves");
+        for (size_t i = 0; i < waves.size() && i < accesses.size(); ++i) {
+            accesses[i].waves = static_cast<uint32_t>(waves[i]);
+        }
         inst->addModifier(LdsRingData(std::move(accesses), std::move(advances)));
+    } else if (attrKey == "mod.wave_role") {
+        inst->addModifier(
+            WaveRoleBranchData(static_cast<uint32_t>(getInt(fields, "taken", -1)),
+                               static_cast<uint32_t>(getInt(fields, "fallthrough", -1))));
     } else if (attrKey == "mod.wait_provenance") {
         inst->addModifier(WaitProvenanceData(getStr(fields, "text", "")));
     } else if (attrKey == "mod.label") {

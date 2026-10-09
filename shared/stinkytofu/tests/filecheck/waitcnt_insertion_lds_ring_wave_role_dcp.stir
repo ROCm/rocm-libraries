@@ -1,0 +1,88 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=4 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Decouple PGR body on a wave-separated ring: thick side A (even waves, 3
+# slots, filled early), thin side B (odd waves, 1 slot, filled late). The
+# publishing barriers behind wave-role diamonds wait A/B 1/0; the gate barrier
+# between the early and the late fill needs no tensor wait.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_ring_wave_role_dcp
+# CHECK-LABEL: ^pro_even:
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 1
+# CHECK-LABEL: ^pro_odd:
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-LABEL: ^pro_pub:
+# CHECK-NEXT: s_barrier_signal
+# CHECK-LABEL: ^early_skip:
+# CHECK-NEXT: s_barrier_signal
+# CHECK-LABEL: ^end_even:
+# CHECK-NEXT: s_branch
+# CHECK-LABEL: ^end_odd:
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-LABEL: ^end_pub:
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 1
+# CHECK-NEXT: s_barrier_signal
+
+st.func @waitcnt_insertion_lds_ring_wave_role_dcp() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [0,3] }, mod.lds_ring = { accesses = [0,0,3,0,1,1,0,1,0,1], advances = [], waves = [5,10] } }
+  SCC0 = "st.s_cmp_eq_u32"(s50, 0x1)
+  "st.s_cbranch_scc1"("pro_join", SCC0) { mod.wave_role = { taken = 10, fallthrough = 5 } }
+  Successors: ^pro_join, ^pro_deep
+^pro_deep:
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [1] }, mod.lds_ring = { accesses = [0,0,3,1,1], advances = [], waves = [5] } }
+  Successors: ^pro_join
+^pro_join:
+  SCC1 = "st.s_cmp_eq_u32"(s50, 0x1)
+  "st.s_cbranch_scc1"("pro_odd", SCC1) { mod.wave_role = { taken = 10, fallthrough = 5 } }
+  Successors: ^pro_odd, ^pro_even
+^pro_even:
+  "st.s_branch"("pro_pub")
+  Successors: ^pro_pub
+^pro_odd:
+  Successors: ^pro_pub
+^pro_pub:
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [0,3] }, mod.lds_ring = { accesses = [0,0,3,0,2,1,0,1,0,2], advances = [], waves = [5,10] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [0,3] } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [2] }, mod.lds_ring = { accesses = [0,0,3,2,3], advances = [], waves = [5] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [2] } }
+  SCC2 = "st.s_cmp_eq_u32"(s50, 0x1)
+  "st.s_cbranch_scc1"("early_skip", SCC2) { mod.wave_role = { taken = 10, fallthrough = 5 } }
+  Successors: ^early_skip, ^early
+^early:
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [2] }, mod.lds_ring = { accesses = [0,0,3,2,1], advances = [], waves = [5] } }
+  Successors: ^early_skip
+^early_skip:
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [0,3] }, mod.lds_ring = { accesses = [0,0,3,0,2,1,0,1,0,2], advances = [], waves = [5,10] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [0,3] } }
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [3] }, mod.lds_ring = { accesses = [1,0,1,0,3], advances = [], waves = [10] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [3] } }
+  SCC3 = "st.s_cmp_eq_u32"(s50, 0x0)
+  "st.s_cbranch_scc1"("late_skip", SCC3) { mod.wave_role = { taken = 5, fallthrough = 10 } }
+  Successors: ^late_skip, ^late
+^late:
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [3] }, mod.lds_ring = { accesses = [1,0,1,1,1], advances = [], waves = [10] } }
+  Successors: ^late_skip
+^late_skip:
+  SCC4 = "st.s_cmp_eq_u32"(s50, 0x1)
+  "st.s_cbranch_scc1"("end_odd", SCC4) { mod.wave_role = { taken = 10, fallthrough = 5 } }
+  Successors: ^end_odd, ^end_even
+^end_even:
+  "st.s_branch"("end_pub")
+  Successors: ^end_pub
+^end_odd:
+  Successors: ^end_pub
+^end_pub:
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [1,3] }, mod.lds_ring = { accesses = [0,0,3,1,2,1,0,1,1,2], advances = [], waves = [5,10] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [1,3] } }
+  SCC5 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC5) { mod.lds_ring = { accesses = [], advances = [0,1] } }
+  Successors: ^loop, ^exit
+^exit:
+}

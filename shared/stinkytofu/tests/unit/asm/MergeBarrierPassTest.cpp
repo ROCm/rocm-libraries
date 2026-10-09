@@ -398,6 +398,41 @@ TEST_F(MergeBarrierPassTest, NonLoopBlockUntouched) {
     EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
 }
 
+// Merged LDS-ring barriers keep the ring rows of both groups.
+TEST_F(MergeBarrierPassTest, RingGroupsMergeWithRowUnion) {
+    const LdsRingAccess rowA{0, 0, 4, 1, LdsRingAccessKind::Publish, 0x5};
+    const LdsRingAccess rowB{1, 0, 2, 1, LdsRingAccessKind::Publish, 0xA};
+    for (StinkyInstruction* barrier : {createSignal(0), createWait(0)})
+        barrier->addModifier<LdsRingData>(LdsRingData({rowA}));
+    for (StinkyInstruction* barrier : {createSignal(1), createWait(1)})
+        barrier->addModifier<LdsRingData>(LdsRingData({rowB}));
+
+    runPasses(/*mergeThreshold=*/100000);
+
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 1);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 1);
+    for (const char* mnem : {"s_barrier_signal", "s_barrier_wait"}) {
+        const auto* ring = firstBarrier(mnem)->getModifier<LdsRingData>();
+        ASSERT_NE(ring, nullptr);
+        EXPECT_EQ(ring->accesses, (std::vector<LdsRingAccess>{rowA, rowB}));
+    }
+}
+
+// A ring-tagged group takes its tensor wait from its rows alone, so it does
+// not absorb an untagged group.
+TEST_F(MergeBarrierPassTest, RingAndUntaggedGroupsNotMerged) {
+    for (StinkyInstruction* barrier : {createSignal(0), createWait(0)})
+        barrier->addModifier<LdsRingData>(
+            LdsRingData({LdsRingAccess{0, 0, 4, 1, LdsRingAccessKind::Publish}}));
+    createSignal(1);
+    createWait(1);
+
+    runPasses(/*mergeThreshold=*/100000);
+
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
+}
+
 // The compile-time default mirrors the documented value.
 TEST(MergeBarrierConstants, KnownDefault) {
     EXPECT_EQ(kCdna5MergeBarrierThreshold, 11);

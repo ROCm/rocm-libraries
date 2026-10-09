@@ -46,6 +46,7 @@
 // for every emitting anchor and logs a warning.
 
 #include <array>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <set>
@@ -137,11 +138,14 @@ struct PerPredQueue {
     std::deque<QueuedOp> ops;
     std::unordered_set<StinkyInstruction*> saturatedOps;
     bool ringSaturated = false;
+    /// Waves that can follow this queue's path (bit i = wave i), narrowed by
+    /// wave-role branches on the way.
+    uint32_t waves = 0xFFFFFFFFu;
 
     int countFrom(StinkyInstruction* op) const;
     bool operator==(const PerPredQueue& other) const {
         return pred == other.pred && ops == other.ops && saturatedOps == other.saturatedOps &&
-               ringSaturated == other.ringSaturated;
+               ringSaturated == other.ringSaturated && waves == other.waves;
     }
 };
 
@@ -232,6 +236,12 @@ class WaitDataflow {
     /// getResult().entryState.
     void finalizePlan(WaitInsertionPlan& plan) const;
 
+    /// Wait on counter `c` that `anchor` needs when `pred` is the only path
+    /// into its block, from the solver's converged state; kUnused when
+    /// nothing in flight on that path constrains it. Only meaningful when no
+    /// instruction ahead of `anchor` in its block issues or waits on `c`.
+    int requiredWaitViaPred(StinkyInstruction* anchor, BasicBlock* pred, CounterKind c) const;
+
     /// Iteration cap. Public so tests can override.
     void setIterationCap(unsigned cap) {
         iterationCap = cap;
@@ -262,6 +272,15 @@ class WaitDataflow {
     bool capHit = false;
     unsigned iterationCap = 0;
     bool loopCarriedTokenDepsEnabled = false;
+
+    /// LDS ring classes that some instruction publishes.
+    std::unordered_set<int> publishedRingClasses;
+
+    /// Some instruction carries LdsRingData. Tensor state then stays live in
+    /// every block: a frozen block on a loop path (a wave-role diamond arm,
+    /// say) would hide the previous trip's fills from the next publishing
+    /// barrier, and ring frames already keep loop-carried state exact.
+    bool hasLdsRing = false;
 
     /// (block, counter) pairs whose per-pred queue exceeded the bounded
     /// hardware-count window during a solver sweep. Older producers are

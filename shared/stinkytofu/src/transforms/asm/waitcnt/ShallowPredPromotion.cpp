@@ -45,6 +45,16 @@ bool isPhi(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::PHI;
 }
 
+// Ring rows, not memtoken deps, set the tensor wait of an anchor that reads,
+// publishes or protects an LDS ring.
+bool isRingTensorAnchor(const StinkyInstruction& inst) {
+    const auto* ring = inst.getModifier<LdsRingData>();
+    return ring != nullptr &&
+           std::any_of(ring->accesses.begin(), ring->accesses.end(), [](const LdsRingAccess& a) {
+               return a.kind != LdsRingAccessKind::Write;
+           });
+}
+
 /// Collect the concrete memops on counter `c` that `consumer` transitively
 /// depends on via SSA RAW edges, flattening PHI sources to their incoming
 /// defs.
@@ -154,6 +164,7 @@ void ShallowPredPromotion::rewrite(WaitInsertionPlan& plan, const DataflowResult
             CounterKind c = static_cast<CounterKind>(ci);
             int curWait = getCounter(spec, c);
             if (curWait == WaitCountSpec::kUnused) continue;
+            if (c == CK_Tensor && isRingTensorAnchor(*consumer)) continue;
 
             auto deps = collectMemOpDeps(consumer, c);
             if (deps.empty()) continue;

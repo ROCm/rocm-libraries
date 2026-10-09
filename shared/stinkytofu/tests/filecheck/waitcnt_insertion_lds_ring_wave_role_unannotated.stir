@@ -1,0 +1,82 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=4 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# The (4, 2) wave-separated ring without wave masks or wave-role branches: no
+# path can be told apart from another, so every wave waits for the shallower
+# side at the barrier (prologue 1, main loop and NGLL 0), and no arm drains.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_ring_wave_role_unannotated
+# CHECK-LABEL: ^pro_even:
+# CHECK-NEXT: s_branch
+# CHECK-LABEL: ^pro_odd:
+# CHECK-NOT: s_wait_tensorcnt
+# CHECK-LABEL: ^pro_pub:
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 1
+# CHECK-NEXT: s_barrier_signal
+# CHECK-LABEL: ^fence_even:
+# CHECK-NEXT: s_branch
+# CHECK-LABEL: ^fence:
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-NEXT: s_barrier_signal
+# CHECK-LABEL: ^ngll0_pub:
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-NEXT: s_barrier_signal
+
+st.func @waitcnt_insertion_lds_ring_wave_role_unannotated() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [0,4] }, mod.lds_ring = { accesses = [0,0,4,0,1,1,0,2,0,1], advances = [] } }
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [1,5] }, mod.lds_ring = { accesses = [0,0,4,1,1,1,0,2,1,1], advances = [] } }
+  SCC0 = "st.s_cmp_eq_u32"(s50, 0x1)
+  "st.s_cbranch_scc1"("pro_join", SCC0)
+  Successors: ^pro_join, ^pro_deep
+^pro_deep:
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [2] }, mod.lds_ring = { accesses = [0,0,4,2,1], advances = [] } }
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [3] }, mod.lds_ring = { accesses = [0,0,4,3,1], advances = [] } }
+  Successors: ^pro_join
+^pro_join:
+  SCC1 = "st.s_cmp_eq_u32"(s50, 0x1)
+  "st.s_cbranch_scc1"("pro_odd", SCC1)
+  Successors: ^pro_odd, ^pro_even
+^pro_even:
+  "st.s_branch"("pro_pub")
+  Successors: ^pro_pub
+^pro_odd:
+  Successors: ^pro_pub
+^pro_pub:
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [0,4] }, mod.lds_ring = { accesses = [0,0,4,0,2,1,0,2,0,2], advances = [] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [0,4] } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  SCC2 = "st.s_cmp_eq_u32"(s50, 0x1)
+  "st.s_cbranch_scc1"("fence_odd", SCC2)
+  Successors: ^fence_odd, ^fence_even
+^fence_even:
+  "st.s_branch"("fence")
+  Successors: ^fence
+^fence_odd:
+  Successors: ^fence
+^fence:
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [0,1,4,5] }, mod.lds_ring = { accesses = [0,0,4,1,2,1,0,2,1,2,0,0,4,0,3,1,0,2,0,3], advances = [] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [0,1,4,5] } }
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [0,4] }, mod.lds_ring = { accesses = [0,0,4,4,1,1,0,2,2,1], advances = [] } }
+  SCC3 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC3) { mod.lds_ring = { accesses = [], advances = [0,1] } }
+  Successors: ^loop, ^ngll0
+^ngll0:
+  SCC4 = "st.s_cmp_eq_u32"(s50, 0x1)
+  "st.s_cbranch_scc1"("ngll0_odd", SCC4)
+  Successors: ^ngll0_odd, ^ngll0_even
+^ngll0_even:
+  "st.s_branch"("ngll0_pub")
+  Successors: ^ngll0_pub
+^ngll0_odd:
+  Successors: ^ngll0_pub
+^ngll0_pub:
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [2,4] }, mod.lds_ring = { accesses = [0,0,4,2,2,1,0,2,2,2], advances = [] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [2,4] } }
+  Successors: ^exit
+^exit:
+}

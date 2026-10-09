@@ -10,7 +10,7 @@
 - **Tensor loop policy** — TensileLite promises tagged tensor-token deps are correct without propagating `CK_Tensor` through loop back-edges, so by default exact `CK_Tensor` queues are frozen after the first solver sweep; blocks with untagged tensor anchors keep their live tensor queues because those anchors are fences, and `loopCarriedTokenDepsEnabled` restores normal tensor fixed-point iteration when conservative propagation is needed
 - **Anti-dependency scans** for hazards the SSA RAW chain does not capture (WAR-on-LDS, barrier ordering, untagged conservative fallbacks)
 - **Existing waits are credited** — an `s_wait_*` already in the input drains the model like one the pass plans, so no duplicate is emitted; see "Existing waits in the input"
-- **Analyze → Optimize → Finalize** — dataflow solve, then `ShallowPredPromotion`, then `finalizePlan()` to align the plan with post-optimizer FIFO simulation
+- **Analyze → Optimize → Finalize** — dataflow solve, then `ShallowPredPromotion` and `RoleSplitDrain`, then `finalizePlan()` to align the plan with post-optimizer FIFO simulation
 - **Selective IR mutation**: `buildUseDefChain` and `WaitDataflow::solve()` run over every basic block so skipped preds still contribute in-flight state; `PassContext::shouldProcessBasicBlock` gates `emitWaits` and `removePHIs` only
 
 ---
@@ -109,7 +109,8 @@ df.solve();
 WaitInsertionPlan plan = df.materializePlan();
 
 ShallowPredPromotion shallowPred;
-std::vector<WaitPlanOptimizer*> optimizers = {&shallowPred};
+RoleSplitDrain roleSplit(df);
+std::vector<WaitPlanOptimizer*> optimizers = {&shallowPred, &roleSplit};
 for (auto* opt : optimizers) opt->rewrite(plan, df.getResult(), func);
 
 df.finalizePlan(plan);
@@ -206,7 +207,7 @@ Loop-carried tensor-token dependencies are controlled separately:
 df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 ```
 
-By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during the solver's first iteration (sweep 0), then freezes the exact tensor queues and tensor PHI waits on later sweeps. `restoreTensorState` skips that restore for any block where `hasUntaggedTensorAnchor` finds an untagged tensor anchor (`s_barrier`, DS read/write, or DS atomic). Those anchors are fences: their live tensor queues must continue through back-edges so the existing conservative fallback can emit `s_wait_tensorcnt 0` when any tensor load is still in flight. Freezing exact tensor state elsewhere prevents tagged tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
+By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during the solver's first iteration (sweep 0), then freezes the exact tensor queues and tensor PHI waits on later sweeps. `restoreTensorState` skips that restore for any block where `hasUntaggedTensorAnchor` finds an untagged tensor anchor (`s_barrier`, DS read/write, or DS atomic). Those anchors are fences: their live tensor queues must continue through back-edges so the existing conservative fallback can emit `s_wait_tensorcnt 0` when any tensor load is still in flight. Freezing exact tensor state elsewhere prevents tagged tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`. A function in which any instruction carries LDS ring data keeps live tensor state in every block: ring frames already make loop-carried tensor state exact, and a frozen block on a loop path (a wave-role diamond arm, for one) would hide the previous trip's fills from the next publishing barrier.
 
 When `enableLoopCarriedTokenDeps` is **enabled**, `CK_Tensor` participates in the normal fixed-point iteration just like the other counters. This is the conservative mode and can reintroduce loop-header tensor waits when a back-edge carries tensor token state.
 
@@ -308,7 +309,7 @@ Intuition: after emitting `s_wait N`, at most `N` old ops remain; each new op is
 
 1. Seed every block with empty state (lattice bottom).
 2. Each iteration: for each block, `mergeFromPredecessors` builds entry state, then `transferBlock` walks instructions and mutates state.
-3. In default mode, after sweep 0, call `restoreTensorState` on each block's entry and exit state. It restores exact `CK_Tensor` queues and tensor PHI waits from the frozen sweep-0 snapshot, unless `hasUntaggedTensorAnchor(bb)` is true. DS, buffer, and KM continue normal fixed-point iteration.
+3. In default mode, after sweep 0, call `restoreTensorState` on each block's entry and exit state. It restores exact `CK_Tensor` queues and tensor PHI waits from the frozen sweep-0 snapshot, unless `hasUntaggedTensorAnchor(bb)` is true or the function carries LDS ring data. DS, buffer, and KM continue normal fixed-point iteration.
 4. Convergence = full RPO sweep with no exit-state change.
 5. On convergence, report any counter that exceeded `kMaxInFlight` as a non-fatal diagnostic.
 
@@ -426,7 +427,7 @@ These widen waits, never narrow them. In default tensor-freeze mode, blocks with
 
 ## ShallowPredPromotion
 
-After `materializePlan()`, `WaitPlanOptimizer::rewrite` may relax the plan. `ShallowPredPromotion` is the only shipped optimizer.
+After `materializePlan()`, `WaitPlanOptimizer::rewrite` may relax the plan. `ShallowPredPromotion` runs first, then `RoleSplitDrain` (below). `ShallowPredPromotion` leaves the tensor counter of an LDS-ring anchor (one with a Read, Publish or Protect ring row) alone: ring rows, not memory-token deps, decide that wait.
 
 **Problem**: at a CFG join, the baseline solver emits a single anchor wait sized for the shallowest constrained path (`min` across paths), over-draining deeper paths.
 
@@ -445,6 +446,12 @@ After `materializePlan()`, `WaitPlanOptimizer::rewrite` may relax the plan. `Sha
 
 **Net effect** on a diamond with shallow and deep paths: the shallow predecessor gets a tail drain (e.g. `s_wait_tensorcnt 0` before its branch), and the merge anchor relaxes from the shallow path's depth to the deep path's depth, preserving in-flight overlap on the deep path.
 
+## RoleSplitDrain
+
+A wave-separated `tensor_load_to_lds` fills a different LDS ring class on each set of waves; its ring rows carry the waves that perform them (`waves`, bit i = wave i), and a branch on the wave id alone carries `WaveRoleBranchData` with the waves that take it and the waves that fall through. `mergeFromPredecessors` narrows each per-pred queue to the waves that can follow its path and drops queues no wave can reach; a ring producer row aliases an anchor row only if the producer row, the anchor row and the queue share a wave.
+
+The solver still emits one wait at a publishing barrier, the strictest over all waves. `RoleSplitDrain` takes a ring publishing barrier that is the first tensor event of a join block whose predecessors each have it as their only successor. When the tensor waits those predecessors need on their own (`WaitDataflow::requiredWaitViaPred`) differ, it moves the wait into per-pred tail drains, merged with any existing drain by `min`, and drops the anchor's tensor wait. `finalizePlan()` then re-adds whatever the barrier still needs, so on a wave-role diamond the stricter side drains at the end of its arm and the looser wait stays in its arm or in front of the barrier.
+
 ---
 
 ## finalizePlan
@@ -460,7 +467,7 @@ After optimizers, `WaitDataflow::finalizePlan()` replays blocks where the solver
 For each block in RPO order:
 
 1. **`adjustedEntry`** — start from converged `entryState[bb]`. For each predecessor with a `TailDrain` in the plan, virtually trim only that pred's per-pred queues by the tail-drain wait values. Tail drains execute on the predecessor **before** control enters the successor; converged `entryState` does not include them.
-2. **Tensor freeze restore** — in default mode and after replay sweep 0, call `restoreTensorState` on the replay entry. It restores exact `CK_Tensor` queues and tensor PHI waits from the frozen replay entry snapshot, unless `hasUntaggedTensorAnchor(bb)` is true.
+2. **Tensor freeze restore** — in default mode and after replay sweep 0, call `restoreTensorState` on the replay entry. It restores exact `CK_Tensor` queues and tensor PHI waits from the frozen replay entry snapshot, unless `hasUntaggedTensorAnchor(bb)` is true or the function carries LDS ring data.
 3. **Program-order walk** — for each non-PHI instruction:
    - `computed = computeRequiredWaits(inst, state, rawNeedsWait)`
    - `applySpec = mergePlanAndComputed(plan, inst, computed, emitState)`
