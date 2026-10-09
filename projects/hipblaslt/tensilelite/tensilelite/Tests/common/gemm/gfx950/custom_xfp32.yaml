@@ -31,7 +31,7 @@ BenchmarkProblems:
       TransposeA: False
       TransposeB: True
       UseBeta: True
-      Batched: True
+      Batched: False
       UseBias: 1
       BiasDataTypeList: [s]
       UseScaleAlphaVec: 1
@@ -63,7 +63,7 @@ BenchmarkProblems:
       TransposeA: True
       TransposeB: False
       UseBeta: True
-      Batched: True
+      Batched: False
       UseBias: 1
       BiasDataTypeList: [s]
       UseScaleAlphaVec: 1
@@ -95,7 +95,7 @@ BenchmarkProblems:
       TransposeA: False
       TransposeB: False
       UseBeta: True
-      Batched: True
+      Batched: False
       UseBias: 1
       BiasDataTypeList: [s]
       UseScaleAlphaVec: 1
