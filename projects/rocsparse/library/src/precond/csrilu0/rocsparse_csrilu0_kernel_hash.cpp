@@ -249,7 +249,7 @@ namespace rocsparse
             }
         }
 
-        // Make sure updated csr_val is written to global memory
+        // Complete the stores of the results before the done flag is set
         rocsparse::release_done_row_data();
 
         if(lid == 0)
@@ -462,7 +462,7 @@ namespace rocsparse
                                                           rocsparse_double_complex>(p...) //
                             : (i == rocsparse_datatype_f64_r) //
                                   ? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, HASH, double>(
-                                        p...) //
+                                      p...) //
                                   : nullptr;
     }
 

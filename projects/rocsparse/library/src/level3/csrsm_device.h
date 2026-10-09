@@ -198,16 +198,15 @@ namespace rocsparse
             // Wait for spin looping thread to finish as the whole block depends on this row
             __syncthreads();
 
-            // Make sure updated B is visible globally
+            // Read the results of the dependencies only after their done flags
             rocsparse::acquire_done_rows();
 
             // Index into X
             const int64_t idx_X = local_col * ldb + col_B;
 
             // Local sum computation for each lane
-            local_sum = (col_B < nrhs) ? rocsparse::fma(-local_val,
-                                                        rocsparse::load_done_row_data(&B[idx_X]),
-                                                        local_sum)
+            local_sum = (col_B < nrhs) ? rocsparse::fma(
+                            -local_val, rocsparse::load_done_row_data(&B[idx_X]), local_sum)
                                        : static_cast<T>(0);
         }
 
@@ -224,10 +223,10 @@ namespace rocsparse
             rocsparse::store_done_row_data(&B[idx_B], local_sum);
         }
 
-        // Make sure B is written to global memory before setting row is done flag
+        // Complete the stores of the results before the done flag is set
         rocsparse::release_done_row_data();
 
-        // Wait for all threads to finish the threadfence before we mark the row "done"
+        // Wait for all wavefronts to complete their stores before we mark the row "done"
         __syncthreads();
 
         if(hipThreadIdx_x == 0)

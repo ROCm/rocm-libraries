@@ -305,14 +305,7 @@ namespace rocsparse
 
         if(lid == WF_SIZE - 1)
         {
-            if constexpr(rocsparse::done_flag_bypass_l2)
-            {
-                rocsparse::store_done_row_data(&y[row * y_inc], local_sum);
-            }
-            else
-            {
-                rocsparse::nontemporal_store(local_sum, &y[row * y_inc]);
-            }
+            rocsparse::store_done_row_result(&y[row * y_inc], local_sum);
 
             rocsparse::set_done_flag(&done_array[row], 1);
         }

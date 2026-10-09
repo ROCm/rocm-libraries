@@ -2817,20 +2817,42 @@ namespace rocsparse
         return local_done;
     }
 
-#if defined(__gfx942__) || defined(__gfx950__)
-    // Each XCD has its own non-coherent L2, so agent scope acquire and release fences invalidate
-    // and write back the whole L2. Kernels that hand results from one row to another through done
-    // flags therefore exchange these results with device scope atomic loads and stores instead.
-    static constexpr bool done_flag_bypass_l2 = true;
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
+    // Each XCD has its own L2, and the L2s are not coherent with each other. Agent scope acquire
+    // and release fences therefore invalidate and write back the whole L2, and device scope atomics
+    // are resolved beyond the L2. Kernels that hand results from one row to another through done
+    // flags exchange these results with device scope atomic loads and stores instead, which are
+    // coherent across XCDs. This is correct only if every such result is written and read through
+    // the done row helpers below, and it relies on the gfx9 wait counters: stores are counted in
+    // vmcnt (and lgkmcnt for flat stores), so waiting for all counters to reach zero completes
+    // them. Newer architectures count stores separately and must not be added here without
+    // changing the waits.
+    // See the GFX942 memory model in the LLVM AMDGPUUsage documentation.
+    static constexpr bool has_noncoherent_xcd_l2 = true;
 #else
-    static constexpr bool done_flag_bypass_l2 = false;
+    static constexpr bool has_noncoherent_xcd_l2 = false;
 #endif
 
-    // Makes the results of the rows the caller has waited for with spin_loop visible. Results
-    // have to be read with load_done_row_data.
+    // Waits until all stores of the calling wavefront have completed. s_waitcnt is not a memory
+    // operation for the compiler, so the workgroup release fence keeps the preceding stores before
+    // it. The fence itself does not touch the caches.
+    __device__ __forceinline__ void wait_store_completion()
+    {
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+        __builtin_amdgcn_s_waitcnt(0);
+    }
+
+    // Orders the reads of the results of the rows the caller has waited for with spin_loop after
+    // the done flag loads. Results have to be read with load_done_row_data. With non-coherent XCD
+    // L2s the results are read with device scope atomics, so only the compiler has to keep them
+    // after the flag loads; a workgroup scope fence does that without touching the caches.
     __device__ __forceinline__ void acquire_done_rows()
     {
-        if constexpr(!done_flag_bypass_l2)
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+        }
+        else
         {
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
         }
@@ -2840,7 +2862,7 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ T load_done_row_data(const T* ptr)
     {
-        if constexpr(done_flag_bypass_l2)
+        if constexpr(has_noncoherent_xcd_l2)
         {
             return rocsparse::atomic_load(ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         }
@@ -2854,7 +2876,7 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ void store_done_row_data(T* ptr, T val)
     {
-        if constexpr(done_flag_bypass_l2)
+        if constexpr(has_noncoherent_xcd_l2)
         {
             rocsparse::atomic_store(ptr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         }
@@ -2864,16 +2886,29 @@ namespace rocsparse
         }
     }
 
+    // Like store_done_row_data, for a final result the calling wavefront does not read again.
+    // Other architectures store it nontemporally.
+    template <typename T>
+    __device__ __forceinline__ void store_done_row_result(T* ptr, T val)
+    {
+        if constexpr(has_noncoherent_xcd_l2)
+        {
+            rocsparse::store_done_row_data(ptr, val);
+        }
+        else
+        {
+            rocsparse::nontemporal_store(val, ptr);
+        }
+    }
+
     // Completes all results the calling wavefront stored with store_done_row_data. Other
     // wavefronts of the workgroup may set the done flag after a following __syncthreads().
     __device__ __forceinline__ void release_done_row_data()
     {
-        if constexpr(done_flag_bypass_l2)
+        if constexpr(has_noncoherent_xcd_l2)
         {
-            // The stores are device scope already, they only have to complete. The workgroup fence
-            // keeps the compiler from moving them past the wait.
-            __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-            __builtin_amdgcn_s_waitcnt(0);
+            // The stores are device scope already, they only have to complete.
+            rocsparse::wait_store_completion();
         }
         else
         {
@@ -2882,13 +2917,14 @@ namespace rocsparse
     }
 
     // Sets a done flag after the results of the calling wavefront have been stored with
-    // store_done_row_data.
+    // store_done_row_data. With non-coherent XCD L2s the results are device scope stores already,
+    // so waiting for them to complete before the relaxed flag store makes them visible to every
+    // row that has seen the flag.
     __device__ __forceinline__ void set_done_flag(int32_t* ptr, int32_t val)
     {
-        if constexpr(done_flag_bypass_l2)
+        if constexpr(has_noncoherent_xcd_l2)
         {
-            __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-            __builtin_amdgcn_s_waitcnt(0);
+            rocsparse::wait_store_completion();
             rocsparse::atomic_store(ptr, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         }
         else

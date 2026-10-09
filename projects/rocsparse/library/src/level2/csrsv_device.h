@@ -30,26 +30,26 @@ extern "C" void __builtin_amdgcn_s_sleep(int);
 
 namespace rocsparse
 {
-    // Device scope atomics cannot be resolved in the per XCD L2 of gfx942 and gfx950, so atomics
-    // of all rows on max_nnz serialize. There, the maximum row length is reduced per workgroup
-    // and the last row of the workgroup to finish publishes it with a single atomic.
+    // With non-coherent XCD L2s, device scope atomics are resolved beyond the L2, so atomics of
+    // all rows on max_nnz serialize. There, each workgroup takes the maximum row length of its rows
+    // with a shared memory atomic, and the last of its rows to finish publishes it with a single
+    // device scope atomic.
     template <typename I>
     __device__ __forceinline__ void
         csrsv_analysis_max_nnz(I* max_nnz, I* block_max_nnz, int* block_rows_left, I row_nnz)
     {
-        if constexpr(rocsparse::done_flag_bypass_l2)
+        if constexpr(rocsparse::has_noncoherent_xcd_l2)
         {
-            __hip_atomic_fetch_max(
-                block_max_nnz, row_nnz, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);
+            __scoped_atomic_fetch_max(
+                block_max_nnz, row_nnz, __ATOMIC_RELAXED, __MEMORY_SCOPE_WRKGRP);
 
-            if(__hip_atomic_fetch_add(
-                   block_rows_left, -1, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_WORKGROUP)
+            if(__scoped_atomic_fetch_add(
+                   block_rows_left, -1, __ATOMIC_ACQ_REL, __MEMORY_SCOPE_WRKGRP)
                == 1)
             {
-                rocsparse::atomic_max(max_nnz,
-                                      __hip_atomic_load(block_max_nnz,
-                                                        __ATOMIC_RELAXED,
-                                                        __HIP_MEMORY_SCOPE_WORKGROUP));
+                rocsparse::atomic_max(
+                    max_nnz,
+                    rocsparse::atomic_load(block_max_nnz, __ATOMIC_RELAXED, __MEMORY_SCOPE_WRKGRP));
             }
         }
         else
@@ -94,7 +94,7 @@ namespace rocsparse
         // Initialize local done array
         local_done_array[wid] = 0;
 
-        if constexpr(rocsparse::done_flag_bypass_l2)
+        if constexpr(rocsparse::has_noncoherent_xcd_l2)
         {
             if(hipThreadIdx_x == 0)
             {
@@ -235,7 +235,7 @@ namespace rocsparse
         // Initialize local done array
         local_done_array[wid] = 0;
 
-        if constexpr(rocsparse::done_flag_bypass_l2)
+        if constexpr(rocsparse::has_noncoherent_xcd_l2)
         {
             if(hipThreadIdx_x == 0)
             {
@@ -503,14 +503,7 @@ namespace rocsparse
         if(lid == WF_SIZE - 1)
         {
             // Store the rows result in y
-            if constexpr(rocsparse::done_flag_bypass_l2)
-            {
-                rocsparse::store_done_row_data(&y[row * y_inc], local_sum);
-            }
-            else
-            {
-                rocsparse::nontemporal_store(local_sum, &y[row * y_inc]);
-            }
+            rocsparse::store_done_row_result(&y[row * y_inc], local_sum);
 
             // Mark row as done
             rocsparse::set_done_flag(&done_array[row], 1);

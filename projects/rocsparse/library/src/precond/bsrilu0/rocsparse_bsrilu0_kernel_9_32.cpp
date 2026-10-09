@@ -112,7 +112,7 @@ namespace rocsparse
                     &done_array[bsr_col], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE))
                     ;
 
-                // Make sure dependencies are visible in global memory
+                // Read the results of the dependencies only after their done flags
                 rocsparse::acquire_done_rows();
 
                 // Load updated BSR block into shared memory

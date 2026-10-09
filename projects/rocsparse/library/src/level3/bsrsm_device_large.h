@@ -95,8 +95,9 @@ namespace rocsparse
                 rocsparse::spin_loop<SLEEP>(&done_array[local_col + id], __MEMORY_SCOPE_DEVICE);
             }
 
-            // Make sure updated X is visible globally
-            if constexpr(!rocsparse::done_flag_bypass_l2)
+            // Make the results of the dependency visible. With non-coherent XCD L2s they are read with
+            // device scope atomics instead
+            if constexpr(!rocsparse::has_noncoherent_xcd_l2)
             {
                 __threadfence();
             }
@@ -171,10 +172,10 @@ namespace rocsparse
             }
         }
 
-        // Make sure X is written to global memory before setting row is done flag
+        // Complete the stores of the results before the done flag is set
         rocsparse::release_done_row_data();
 
-        // Wait for all threads to finish the threadfence before we mark the row "done"
+        // Wait for all wavefronts to complete their stores before we mark the row "done"
         __syncthreads();
 
         if(row < mb && threadIdx.x == 0)
@@ -257,8 +258,9 @@ namespace rocsparse
                 rocsparse::spin_loop<SLEEP>(&done_array[local_col + id], __MEMORY_SCOPE_DEVICE);
             }
 
-            // Make sure updated X is visible globally
-            if constexpr(!rocsparse::done_flag_bypass_l2)
+            // Make the results of the dependency visible. With non-coherent XCD L2s they are read with
+            // device scope atomics instead
+            if constexpr(!rocsparse::has_noncoherent_xcd_l2)
             {
                 __threadfence();
             }
@@ -333,10 +335,10 @@ namespace rocsparse
             }
         }
 
-        // Make sure X is written to global memory before setting row is done flag
+        // Complete the stores of the results before the done flag is set
         rocsparse::release_done_row_data();
 
-        // Wait for all threads to finish the threadfence before we mark the row "done"
+        // Wait for all wavefronts to complete their stores before we mark the row "done"
         __syncthreads();
 
         if(row < mb && threadIdx.x == 0)

@@ -155,7 +155,7 @@ namespace rocsparse
                 !rocsparse::atomic_load(&done[local_col], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE))
                 ;
 
-            // Make sure updated csr_val is visible globally
+            // Read the results of the dependencies only after their done flags
             rocsparse::acquire_done_rows();
 
             // Load diagonal entry

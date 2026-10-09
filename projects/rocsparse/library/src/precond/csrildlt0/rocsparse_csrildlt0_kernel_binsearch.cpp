@@ -208,7 +208,7 @@ namespace rocsparse
                     d_i = boost_val;
                 }
 
-                // Publish D_i before the done[] release store below so dependent rows can read it.
+                // Publish D_i before the done flag below so dependent rows can read it.
                 rocsparse::store_done_row_data(&csr_val[row_diag], static_cast<T>(d_i));
 
                 if(d_i == static_cast<floating_data_t<T>>(0))
@@ -375,7 +375,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    // clang-format off
+// clang-format off
 #define INST_ALL_BINSEARCH(WF, T, I, J)                                                          \
     template rocsparse_status csrildlt0_kernel_binsearch_launch<false, 256, WF, T, I, J>(        \
         rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr, void*, size_t, void*); \

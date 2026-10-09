@@ -190,7 +190,7 @@ namespace rocsparse
             }
         }
 
-        // Make sure updated csr_val is written to global memory
+        // Complete the stores of the results before the done flag is set
         rocsparse::release_done_row_data();
 
         if(lid == 0)
@@ -348,13 +348,11 @@ namespace rocsparse
               typename... P>
     static csrilu0_kernel_launch_t transform_j_type(rocsparse_indextype j, P... p)
     {
-        return (j == rocsparse_indextype_i32)
-                   ? rocsparse::
-                         csrilu0_kernel_binsearch_launch<BLOCKSIZE, WF_SIZE, SLEEP, T, I, int32_t>
-               : (j == rocsparse_indextype_i64)
-                   ? rocsparse::
-                         csrilu0_kernel_binsearch_launch<BLOCKSIZE, WF_SIZE, SLEEP, T, I, int64_t>
-                   : nullptr;
+        return (j == rocsparse_indextype_i32) ? rocsparse::
+                       csrilu0_kernel_binsearch_launch<BLOCKSIZE, WF_SIZE, SLEEP, T, I, int32_t>
+               : (j == rocsparse_indextype_i64) ? rocsparse::
+                       csrilu0_kernel_binsearch_launch<BLOCKSIZE, WF_SIZE, SLEEP, T, I, int64_t>
+                                                : nullptr;
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename T, typename... P>
@@ -372,12 +370,10 @@ namespace rocsparse
     {
         return (i == rocsparse_datatype_f32_r)
                    ? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, float>(p...)
-               : (i == rocsparse_datatype_f32_c)
-                   ? rocsparse::
-                         transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, rocsparse_float_complex>(p...)
-               : (i == rocsparse_datatype_f64_c)
-                   ? rocsparse::
-                         transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, rocsparse_double_complex>(p...)
+               : (i == rocsparse_datatype_f32_c) ? rocsparse::
+                       transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, rocsparse_float_complex>(p...)
+               : (i == rocsparse_datatype_f64_c) ? rocsparse::
+                       transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, rocsparse_double_complex>(p...)
                : (i == rocsparse_datatype_f64_r)
                    ? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, double>(p...)
                    : nullptr;

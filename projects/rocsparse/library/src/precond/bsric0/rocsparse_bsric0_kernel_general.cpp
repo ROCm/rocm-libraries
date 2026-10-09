@@ -231,7 +231,7 @@ namespace rocsparse
                     const T diag = static_cast<T>(rocsparse::sqrt(rocsparse::abs(
                         rocsparse::load_done_row_data(&bsr_val[row_diag]) - row_sum)));
 
-                    if constexpr(rocsparse::done_flag_bypass_l2)
+                    if constexpr(rocsparse::has_noncoherent_xcd_l2)
                     {
                         rocsparse::store_done_row_data(&bsr_val[row_diag], diag);
                     }
@@ -245,7 +245,7 @@ namespace rocsparse
                 }
 
                 T diag_val;
-                if constexpr(rocsparse::done_flag_bypass_l2)
+                if constexpr(rocsparse::has_noncoherent_xcd_l2)
                 {
                     // Dependent block rows read the diagonal entry as well, so it is exchanged
                     // with device scope accesses, completed before the other lanes load it

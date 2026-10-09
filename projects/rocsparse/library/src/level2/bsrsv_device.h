@@ -97,7 +97,7 @@ namespace rocsparse
             // Spin loop until dependency has been resolved
             rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
 
-            // Wait for y to be visible globally
+            // Read the results of the dependencies only after their done flags
             rocsparse::acquire_done_rows();
 
             // Local sum computation
@@ -238,7 +238,7 @@ namespace rocsparse
             // Spin loop until dependency has been resolved
             rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
 
-            // Wait for y to be visible globally
+            // Read the results of the dependencies only after their done flags
             rocsparse::acquire_done_rows();
 
             // Local sum computation
@@ -397,7 +397,7 @@ namespace rocsparse
             // Spin loop until dependency has been resolved
             rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
 
-            // Wait for y to be visible globally
+            // Read the results of the dependencies only after their done flags
             rocsparse::acquire_done_rows();
 
             // Load all updated dependencies into shared memory
@@ -568,7 +568,7 @@ namespace rocsparse
             // Spin loop until dependency has been resolved
             rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
 
-            // Wait for y to be visible globally
+            // Read the results of the dependencies only after their done flags
             rocsparse::acquire_done_rows();
 
             // Load all updated dependencies into shared memory

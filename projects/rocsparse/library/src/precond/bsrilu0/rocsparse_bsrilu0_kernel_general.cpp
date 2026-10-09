@@ -100,7 +100,7 @@ namespace rocsparse
                 // Spin loop until dependency has been resolved
                 rocsparse::spin_loop<SLEEP>(&done_array[bsr_col], __MEMORY_SCOPE_DEVICE);
 
-                // Make sure dependencies are visible in global memory
+                // Read the results of the dependencies only after their done flags
                 rocsparse::acquire_done_rows();
 
                 // Loop through all rows within the BSR block

@@ -243,7 +243,7 @@ namespace rocsparse
                     d_i = boost_val;
                 }
 
-                // Publish D_i before the done[] release store below so dependent rows can read it.
+                // Publish D_i before the done flag below so dependent rows can read it.
                 rocsparse::store_done_row_data(&csr_val[row_diag], static_cast<T>(d_i));
 
                 if(d_i == static_cast<floating_data_t<T>>(0))
