@@ -891,10 +891,18 @@ double aotScore(const MatchContext& context,
                 const KernelDefinition& kernel)
 {
     // Deterministic fallback only. Only kernels the kernel matcher admitted are scored,
-    // so a refusal here is a contract violation, ranked last. As in score(), a direct
-    // instance ranks above every implicit-GEMM one (conv::aotInstanceScore stays below
-    // 2) and the default direct arm first. An instance carries no build group count, so
-    // the default arm is the one for the graph's.
+    // so a refusal here is a contract violation, ranked last (-1). As in score(), a
+    // depthwise direct instance (std, spatial, tiled, col) ranks above every
+    // implicit-GEMM one (conv::aotInstanceScore stays in [0, 2)), the default direct arm
+    // first: implicit GEMM leaves most lanes idle on one channel per group. An instance
+    // carries no build group count, so the default arm is the one for the graph's.
+    //
+    // The grouped and non-grouped direct kernels compete with implicit GEMM on ordinary
+    // graphs, and nothing yet measures which wins where. Until rocKE's dispatcher or a
+    // tuned heuristic ranks them, they take a neutral placeholder below every
+    // implicit-GEMM instance (and above a refusal): an unbenchmarked plan keeps serving
+    // implicit GEMM wherever it can, and the direct kernels are chosen by benchmarking,
+    // a recorded winner, the kernel_family knob, or where nothing else serves.
     const auto matched = matchProblem(context);
     const auto instance = aotInstance(kernel);
     const auto launch = matched && instance ? aotInstanceLaunch(*matched, *instance) : std::nullopt;
@@ -904,6 +912,10 @@ double aotScore(const MatchContext& context,
     }
     if(const auto* direct = std::get_if<conv::DirectInstance>(&*instance))
     {
+        if(!conv::isDepthwiseDirectVariant(direct->variant))
+        {
+            return -0.5;
+        }
         return conv::isDefaultDirectArm(
                    matched->problem.groups, direct->variant, direct->blockW, direct->blockWaves)
                    ? 4.0
