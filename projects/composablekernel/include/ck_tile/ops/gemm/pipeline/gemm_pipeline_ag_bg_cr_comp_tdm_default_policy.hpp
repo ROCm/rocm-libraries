@@ -58,6 +58,50 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
     using LdsBDataType = typename Problem::BDataType;
 
     static constexpr index_t VecByteSize = 16;
+
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfig()
+    {
+        constexpr auto config = Base::template GetLdsPaddingConfig<Problem, IsA>();
+
+        // Check transpose load & disabled padding
+        constexpr bool is_tr_load =
+            IsA ? Base::template is_a_load_tr<Problem> : Base::template is_b_load_tr<Problem>;
+        if constexpr(is_tr_load || !static_cast<bool>(config[Base::I0]))
+        {
+            return config;
+        }
+        else
+        {
+            using DataType = std::conditional_t<IsA, LdsADataType<Problem>, LdsBDataType<Problem>>;
+            constexpr index_t PackedSize   = numeric_traits<DataType>::PackedSize;
+            constexpr index_t DataTypeSize = sizeof(DataType);
+            constexpr index_t KPerBlock    = Problem::BlockGemmShape::kK;
+
+            // Num. of logical M/N rows folded into 1 LDS row.
+            constexpr index_t LdsLayer = max(1,
+                                             get_n_lds_banks() * get_n_dwords_per_128b() /
+                                                 KPerBlock / DataTypeSize * PackedSize);
+
+            // LDS descriptor inserts 1 pad after this many dwords
+            constexpr index_t row_dwords =
+                KPerBlock * LdsLayer * DataTypeSize / PackedSize / sizeof(int32_t);
+
+            // TDM inserts 1 pad after 2^(pad_interval + 1) dwords
+            constexpr index_t interval_dwords = 1 << (static_cast<index_t>(config[Base::I2]) + 1);
+
+            // If TDM and LDS descriptor pad at same positions: keep the padding
+            if constexpr(row_dwords == interval_dwords)
+            {
+                return config;
+            }
+            else
+            {
+                // Otherwise: disable padding, return (false,0,0)
+                return make_tuple(number<false>{}, number<0>{}, number<0>{});
+            }
+        }
+    }
     // currently implement basic situation: the tile is divided into same parts
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeADramTileDistribution()
@@ -171,7 +215,7 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
             constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
             constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
 
-            constexpr auto LdsPaddingConfigA = Base::template GetLdsPaddingConfig<Problem, true>();
+            constexpr auto LdsPaddingConfigA = GetLdsPaddingConfig<Problem, true>();
             constexpr auto IsNeedPadding     = LdsPaddingConfigA[Base::I0];
             // set to -1 to make sure PaddingDataAmount = 0 when IsNeedPadding = false
             constexpr auto PaddingAmount = IsNeedPadding ? LdsPaddingConfigA[Base::I1] : -1;
@@ -231,7 +275,7 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
             constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
             constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
 
-            constexpr auto LdsPaddingConfigB = Base::template GetLdsPaddingConfig<Problem, false>();
+            constexpr auto LdsPaddingConfigB = GetLdsPaddingConfig<Problem, false>();
             constexpr auto IsNeedPadding     = LdsPaddingConfigB[Base::I0];
             // set to -1 to make sure PaddingDataAmount = 0 when IsNeedPadding = false
             constexpr auto PaddingAmount = IsNeedPadding ? LdsPaddingConfigB[Base::I1] : -1;
