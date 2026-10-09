@@ -231,7 +231,9 @@ TEST(TestGfx950ConvFwdGeometry, FamilyAndVariantValueSetsAreClosed)
     EXPECT_EQ(parseDirectVariant("none"), DirectVariant::NONE);
     EXPECT_EQ(parseDirectVariant("std"), DirectVariant::STD);
     EXPECT_EQ(parseDirectVariant("spatial"), DirectVariant::SPATIAL);
-    for(const auto* value : {"", "Std", "SPATIAL", "direct_depthwise", "std "})
+    EXPECT_EQ(parseDirectVariant("tiled"), DirectVariant::TILED);
+    for(const auto* value :
+        {"", "Std", "SPATIAL", "direct_depthwise", "std ", "direct_depthwise_tiled", "Col"})
     {
         SCOPED_TRACE(value);
         EXPECT_FALSE(parseDirectVariant(value));
@@ -713,6 +715,105 @@ TEST(TestGfx950ConvFwdGeometry, DirectInstanceLaunchAppliesTheGuardAndTheVariant
                           {{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::NONE, 4, 1}));
     EXPECT_FALSE(launches(depthwise(32, 14, 14, 3, 1, 1),
                           {{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::STD, 4, 17}));
+}
+
+/// One (instance, problem) case of the AOT direct variants and what
+/// gfx950_conv_fwd_aot_serves, Gfx950ConvFwdAotSpec.grid() and .block() in
+/// convolution_forward.py give for it: whether the instance serves the problem, and then
+/// its grid and block. test_make_conv_aot_config.py recomputes every row from the adapter,
+/// which test_convolution_forward_aot_packaging.py holds to rocKE's own plan_for.
+struct DirectLaunchCase
+{
+    DirectInstance instance;
+    Problem problem;
+    bool served;
+    unsigned int gridX;
+    unsigned int gridY;
+    unsigned int gridZ;
+    unsigned int blockX;
+};
+
+// Instance: {filter_h, filter_w, stride_h, stride_w, pad_h, pad_w, dilation_h, dilation_w},
+// variant, block_w, block_waves, block_h. Problem: Problem's field order.
+// clang-format off
+const std::vector<DirectLaunchCase>& directLaunchCases()
+{
+    static const std::vector<DirectLaunchCase> s_cases{
+        {{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::TILED, 4, 1, 1}, {2, 2, 2, 8, 33, 3, 3, 1, 1, 1, 1, 1, 1, 2}, true, 9, 1, 16, 64},
+        {{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::TILED, 4, 1, 1}, {2, 32, 32, 31, 7, 3, 3, 1, 1, 1, 1, 1, 1, 32}, true, 2, 1, 62, 64},
+        {{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::TILED, 4, 1, 1}, {1, 64, 64, 33, 28, 3, 3, 1, 1, 1, 1, 1, 1, 64}, true, 7, 1, 33, 64},
+        {{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::TILED, 4, 1, 1}, {1, 2, 2, 3, 31, 3, 3, 1, 1, 1, 1, 1, 1, 2}, true, 8, 1, 3, 64},
+        {{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::TILED, 4, 1, 1}, {2, 16, 16, 56, 2, 3, 3, 1, 1, 1, 1, 1, 1, 16}, true, 1, 1, 112, 64},
+        {{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::TILED, 4, 1, 1}, {3, 65, 65, 56, 7, 3, 3, 1, 1, 0, 0, 1, 1, 65}, false, 0, 0, 0, 0},
+        {{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::TILED, 4, 1, 1}, {2, 130, 130, 56, 7, 3, 3, 1, 2, 1, 1, 1, 1, 65}, false, 0, 0, 0, 0},
+        {{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::TILED, 4, 1, 1}, {3, 16, 16, 31, 3, 5, 5, 1, 1, 1, 1, 1, 1, 16}, false, 0, 0, 0, 0},
+        {{{7, 7, 2, 2, 3, 3, 1, 1}, DirectVariant::TILED, 4, 2, 7}, {3, 65, 65, 28, 31, 7, 7, 2, 2, 3, 3, 1, 1, 65}, true, 4, 1, 6, 128},
+        {{{7, 7, 2, 2, 3, 3, 1, 1}, DirectVariant::TILED, 4, 2, 7}, {1, 300, 300, 5, 28, 7, 7, 2, 2, 3, 3, 1, 1, 300}, true, 4, 3, 1, 128},
+        {{{7, 7, 2, 2, 3, 3, 1, 1}, DirectVariant::TILED, 4, 2, 7}, {1, 5, 5, 3, 1, 7, 7, 2, 2, 3, 3, 1, 1, 5}, true, 1, 1, 1, 128},
+        {{{7, 7, 2, 2, 3, 3, 1, 1}, DirectVariant::TILED, 4, 2, 7}, {1, 96, 96, 8, 28, 7, 7, 2, 2, 3, 3, 1, 1, 96}, true, 4, 1, 1, 128},
+        {{{7, 7, 2, 2, 3, 3, 1, 1}, DirectVariant::TILED, 4, 2, 7}, {3, 65, 65, 3, 8, 7, 7, 2, 2, 3, 3, 1, 1, 65}, true, 1, 1, 3, 128},
+        {{{7, 7, 2, 2, 3, 3, 1, 1}, DirectVariant::TILED, 4, 2, 7}, {3, 64, 64, 1, 7, 7, 7, 2, 2, 4, 4, 1, 1, 64}, false, 0, 0, 0, 0},
+        {{{7, 7, 2, 2, 3, 3, 1, 1}, DirectVariant::TILED, 4, 2, 7}, {2, 600, 600, 3, 8, 7, 7, 2, 2, 3, 3, 1, 1, 300}, false, 0, 0, 0, 0},
+        {{{7, 7, 2, 2, 3, 3, 1, 1}, DirectVariant::TILED, 4, 2, 7}, {3, 128, 128, 28, 33, 7, 7, 2, 3, 3, 3, 1, 1, 128}, false, 0, 0, 0, 0},
+        {{{13, 13, 1, 1, 6, 6, 1, 1}, DirectVariant::TILED, 16, 1, 2}, {1, 96, 96, 31, 2, 13, 13, 1, 1, 6, 6, 1, 1, 96}, true, 1, 2, 16, 64},
+        {{{13, 13, 1, 1, 6, 6, 1, 1}, DirectVariant::TILED, 16, 1, 2}, {3, 5, 5, 28, 12, 13, 13, 1, 1, 6, 6, 1, 1, 5}, true, 1, 1, 42, 64},
+        {{{13, 13, 1, 1, 6, 6, 1, 1}, DirectVariant::TILED, 16, 1, 2}, {1, 48, 48, 5, 3, 13, 13, 1, 1, 6, 6, 1, 1, 48}, true, 1, 1, 3, 64},
+        {{{13, 13, 1, 1, 6, 6, 1, 1}, DirectVariant::TILED, 16, 1, 2}, {2, 96, 96, 2, 5, 13, 13, 1, 1, 6, 6, 1, 1, 96}, true, 1, 2, 2, 64},
+        {{{13, 13, 1, 1, 6, 6, 1, 1}, DirectVariant::TILED, 16, 1, 2}, {2, 16, 16, 8, 2, 13, 13, 1, 1, 6, 6, 1, 1, 16}, true, 1, 1, 8, 64},
+        {{{13, 13, 1, 1, 6, 6, 1, 1}, DirectVariant::TILED, 16, 1, 2}, {1, 32, 32, 17, 31, 13, 13, 1, 1, 6, 6, 2, 2, 32}, false, 0, 0, 0, 0},
+        {{{13, 13, 1, 1, 6, 6, 1, 1}, DirectVariant::TILED, 16, 1, 2}, {1, 128, 128, 8, 5, 13, 13, 2, 2, 6, 6, 1, 1, 128}, false, 0, 0, 0, 0},
+        {{{13, 13, 1, 1, 6, 6, 1, 1}, DirectVariant::TILED, 16, 1, 2}, {3, 8, 8, 17, 3, 13, 13, 1, 2, 6, 6, 1, 1, 8}, false, 0, 0, 0, 0},
+        {{{21, 21, 1, 1, 10, 10, 1, 1}, DirectVariant::TILED, 14, 2, 1}, {2, 1, 1, 28, 31, 21, 21, 1, 1, 10, 10, 1, 1, 1}, true, 3, 1, 56, 128},
+        {{{21, 21, 1, 1, 10, 10, 1, 1}, DirectVariant::TILED, 14, 2, 1}, {1, 8, 8, 33, 31, 21, 21, 1, 1, 10, 10, 1, 1, 8}, true, 3, 1, 33, 128},
+        {{{21, 21, 1, 1, 10, 10, 1, 1}, DirectVariant::TILED, 14, 2, 1}, {2, 16, 16, 5, 7, 21, 21, 1, 1, 10, 10, 1, 1, 16}, true, 1, 1, 10, 128},
+        {{{21, 21, 1, 1, 10, 10, 1, 1}, DirectVariant::TILED, 14, 2, 1}, {3, 300, 300, 3, 33, 21, 21, 1, 1, 10, 10, 1, 1, 300}, true, 3, 3, 9, 128},
+        {{{21, 21, 1, 1, 10, 10, 1, 1}, DirectVariant::TILED, 14, 2, 1}, {2, 2, 2, 5, 12, 21, 21, 1, 1, 10, 10, 1, 1, 2}, true, 1, 1, 10, 128},
+        {{{21, 21, 1, 1, 10, 10, 1, 1}, DirectVariant::TILED, 14, 2, 1}, {1, 4, 4, 3, 12, 21, 21, 1, 1, 10, 10, 1, 1, 2}, false, 0, 0, 0, 0},
+        {{{21, 21, 1, 1, 10, 10, 1, 1}, DirectVariant::TILED, 14, 2, 1}, {2, 63, 63, 33, 28, 21, 21, 1, 1, 2, 2, 1, 1, 63}, false, 0, 0, 0, 0},
+        {{{21, 21, 1, 1, 10, 10, 1, 1}, DirectVariant::TILED, 14, 2, 1}, {1, 192, 192, 1, 56, 21, 21, 1, 1, 10, 10, 1, 1, 96}, false, 0, 0, 0, 0},
+    };
+    return s_cases;
+}
+// clang-format on
+
+TEST(TestGfx950ConvFwdGeometry, AotDirectVariantsLaunchWhereAndHowTheAdapterDoes)
+{
+    size_t served = 0;
+    for(size_t i = 0; i < directLaunchCases().size(); ++i)
+    {
+        SCOPED_TRACE(i);
+        const auto& entry = directLaunchCases()[i];
+        const auto geometry = deriveGeometry(entry.problem);
+        ASSERT_TRUE(geometry);
+        const auto launch = directInstanceLaunch(entry.problem, *geometry, entry.instance);
+        ASSERT_EQ(launch.has_value(), entry.served);
+        if(launch)
+        {
+            ++served;
+            EXPECT_EQ(std::tie(launch->gridX, launch->gridY, launch->gridZ, launch->blockX),
+                      std::tie(entry.gridX, entry.gridY, entry.gridZ, entry.blockX));
+        }
+    }
+    // Both verdicts for every variant.
+    EXPECT_GT(served, size_t{0});
+    EXPECT_LT(served, directLaunchCases().size());
+}
+
+TEST(TestGfx950ConvFwdGeometry, AotDirectVariantsRefuseWhatRockesValidatorsRefuse)
+{
+    const auto launches = [](const Problem& problem, const DirectInstance& instance) {
+        const auto geometry = deriveGeometry(problem);
+        return geometry && directInstanceLaunch(problem, *geometry, instance).has_value();
+    };
+    DirectInstance tiled{{3, 3, 1, 1, 1, 1, 1, 1}, DirectVariant::TILED, 4, 1};
+    tiled.blockH = 2;
+    EXPECT_TRUE(launches(depthwise(32, 14, 14, 3, 1, 1), tiled));
+    // Pure depthwise only, and one stride and padding for both axes.
+    EXPECT_FALSE(launches(Problem{2, 16, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 16}, tiled));
+    EXPECT_FALSE(launches(Problem{2, 16, 16, 14, 14, 3, 3, 1, 2, 1, 1, 1, 1, 16}, tiled));
+    auto noRows = tiled;
+    noRows.blockH = 0;
+    EXPECT_FALSE(launches(depthwise(32, 14, 14, 3, 1, 1), noRows));
 }
 
 TEST(TestGfx950ConvFwdGeometry, DefaultDirectArmFollowsTheGroupCount)

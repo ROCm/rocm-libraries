@@ -10,10 +10,10 @@ dict (``KernelIdentity.to_dict()``) or an object carrying one under ``"identity"
 other keys of such an object are ignored here.
 
 Every entry must be a gfx950 forward identity in fp16 or bf16 that the packaged
-launch supports: an implicit-GEMM identity of the AOT sweep, or a ``direct_depthwise``
-(std) or ``direct_depthwise_spatial`` identity of the direct sweep
-(``benchmarks/common/direct_kernel_sweep.py``). Anything else is listed with its
-reason and the tool exits non-zero, unless ``--skip-unsupported`` is given. Entries
+launch supports: an implicit-GEMM identity of the AOT sweep, or a forward identity of
+the direct sweep (``benchmarks/common/direct_kernel_sweep.py``), any of its algorithms
+(``PACKAGED_DIRECT_ALGORITHMS``). Anything else is listed with its reason and the tool
+exits non-zero, unless ``--skip-unsupported`` is given. Entries
 are de-duplicated by ``instance_id`` (``KernelIdentity.stable_hash()``), which is the
 key that ties a packaged kernel back to the identity it was built from.
 
@@ -122,8 +122,9 @@ _CONSTANT = (
 #: Spec field order of an implicit-GEMM Gfx950ConvFwdAotSpec; also its descriptor
 #: spec order.
 SPEC_ORDER = ("dtype",) + _CARRIED + ("instance_id", "layout")
-#: The direct fields Gfx950ConvFwdAotSpec appends. Their KMD default_value is the
-#: dataclass default (builder_default), so implicit-GEMM descriptors omit them.
+#: The direct fields Gfx950ConvFwdAotSpec appends, which every direct instance
+#: states. Their KMD default_value is the dataclass default (builder_default), so
+#: implicit-GEMM descriptors omit them.
 DIRECT_FIELDS = {
     "kernel_family": 0,
     "direct_variant": "none",
@@ -138,8 +139,37 @@ DIRECT_FIELDS = {
     "block_w": 0,
     "block_waves": 0,
 }
-#: Spec field order of a direct instance.
+#: The block knobs of the tiled, col, grouped and non-grouped direct variants, after
+#: DIRECT_FIELDS, with their builder_default. A direct instance states those of its
+#: variant only (DIRECT_VARIANT_FIELDS), so std and spatial descriptors are as they
+#: were before these existed.
+DIRECT_KNOB_FIELDS = {
+    "block_h": 0,
+    "unroll_rows": 0,
+    "block_q": 0,
+    "block_groups": 0,
+    "double_buffer": 0,
+    "cpg": 0,
+    "kpg": 0,
+    "tile_h": 0,
+    "tile_w": 0,
+    "tile_k_out": 0,
+    "ck": 0,
+    "waves_m": 0,
+    "waves_n": 0,
+    "atom": "none",
+    "swizzle_wgm": 0,
+    "iglp": -1,
+    "waves_per_eu": 0,
+}
+#: Spec field order of a std or spatial direct instance.
 DIRECT_SPEC_ORDER = SPEC_ORDER + tuple(DIRECT_FIELDS)
+#: The DIRECT_KNOB_FIELDS each direct variant states, in their KMD order.
+DIRECT_VARIANT_FIELDS = {
+    "std": (),
+    "spatial": (),
+    "tiled": ("block_h", "unroll_rows"),
+}
 _STRING_FIELDS = (
     "dtype",
     "pipeline",
@@ -147,15 +177,27 @@ _STRING_FIELDS = (
     "instance_id",
     "layout",
     "direct_variant",
+    "atom",
 )
-_INT_FIELDS = tuple(f for f in DIRECT_SPEC_ORDER if f not in _STRING_FIELDS)
+_INT_FIELDS = tuple(
+    f for f in DIRECT_SPEC_ORDER + tuple(DIRECT_KNOB_FIELDS) if f not in _STRING_FIELDS
+)
 #: Direct-sweep algorithm -> the instance's direct_variant, for the algorithms the
-#: exact-shape engine's direct launch runs.
+#: exact-shape engine's direct launch runs. tools/enumerate_conv_aot_instances.py
+#: ships these.
 DIRECT_ALGORITHMS = {"direct_depthwise": "std", "direct_depthwise_spatial": "spatial"}
-#: The knob keys each direct algorithm's identity carries.
-_DIRECT_KNOBS = {
-    "direct_depthwise": ("block_w", "block_waves"),
-    "direct_depthwise_spatial": ("block_waves",),
+#: Every forward direct-sweep algorithm the packaged AOT launch runs, and its
+#: direct_variant: AOT_DIRECT_ALGORITHMS of the rocKE adapter.
+PACKAGED_DIRECT_ALGORITHMS = {
+    **DIRECT_ALGORITHMS,
+    "direct_depthwise_tiled": "tiled",
+}
+#: The generator variant (kernel name) of each direct variant. std and spatial keep
+#: the name they had when they were the only direct instances.
+_DIRECT_VARIANT_NAMES = {
+    "std": "gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}",
+    "spatial": "gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}",
+    "tiled": "gfx950_conv_fwd_aot_dwtiled_{dtype}_{instance_id}",
 }
 
 
@@ -167,8 +209,10 @@ def _bind_rocke(rocke_root: Path) -> None:
 
 
 def spec_order(spec) -> tuple:
-    """The descriptor spec order of ``spec``'s family."""
-    return DIRECT_SPEC_ORDER if spec.is_direct else SPEC_ORDER
+    """The descriptor spec order of ``spec``'s family and direct variant."""
+    if not spec.is_direct:
+        return SPEC_ORDER
+    return DIRECT_SPEC_ORDER + DIRECT_VARIANT_FIELDS[spec.direct_variant]
 
 
 def instance_spec(identity_dict: dict):
@@ -262,51 +306,36 @@ def _implicit_instance_spec(identity):
 
 
 def _direct_instance_spec(identity):
-    """A forward direct identity: the direct sweep must be able to build it, and
-    the exact-shape engine's direct launch must run its kernel unchanged."""
+    """A forward direct identity: the direct sweep must be able to build it, and the
+    packaged AOT launch must run its algorithm."""
     from benchmarks.common.direct_kernel_sweep import direct_job_for_identity
-    from builders.common.convolution_forward import Gfx950ConvFwdAotSpec
+    from builders.common.convolution_forward import (
+        Gfx950ConvFwdAotSpec,
+        aot_direct_instance_fields,
+    )
 
     if identity.arch != "gfx950":
         return None, f"not a gfx950 forward direct identity ({identity.arch})"
-    variant = DIRECT_ALGORITHMS.get(identity.algorithm)
-    if variant is None:
+    if identity.algorithm not in PACKAGED_DIRECT_ALGORITHMS:
         return None, (
             f"direct algorithm {identity.algorithm!r} has no packaged launch "
-            f"(supported: {sorted(DIRECT_ALGORITHMS)})"
+            f"(supported: {sorted(PACKAGED_DIRECT_ALGORITHMS)})"
         )
     if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
         return None, "mixed operand dtypes are not packaged"
-    if (identity.cpg, identity.kpg) != (1, 1):
-        return None, f"cpg={identity.cpg}, kpg={identity.kpg} is not depthwise"
     # Every other field must be what the direct grid writes for these caps and
     # knobs; the sweep's own round trip refuses anything else, after asking the
     # kernel's validator.
     try:
         direct_job_for_identity(identity)
+        fields = aot_direct_instance_fields(identity)
     except (LookupError, TypeError, ValueError) as exc:
         return None, str(exc)
-    knobs = json.loads(identity.knobs) if identity.knobs else {}
-    if tuple(sorted(knobs)) != _DIRECT_KNOBS[identity.algorithm]:
-        return None, (
-            f"knobs {sorted(knobs)} are not {list(_DIRECT_KNOBS[identity.algorithm])}"
-        )
     spec = Gfx950ConvFwdAotSpec(
         dtype=identity.dtype_a,
         instance_id=identity.stable_hash(),
         **_carried_values(identity),
-        kernel_family=1,
-        direct_variant=variant,
-        filter_h=identity.filter_h,
-        filter_w=identity.filter_w,
-        stride_h=identity.stride_h,
-        stride_w=identity.stride_w,
-        pad_h=identity.pad_h,
-        pad_w=identity.pad_w,
-        dilation_h=identity.dilation_h,
-        dilation_w=identity.dilation_w,
-        block_w=int(knobs.get("block_w", 0)),
-        block_waves=int(knobs["block_waves"]),
+        **fields,
     )
     return _checked(spec)
 
@@ -372,7 +401,9 @@ def build_config(
     discriminator: they are shards of one catalog, and the engine's graph_match
     and the shared kernel matcher admit every one of them. Within a pack,
     implicit-GEMM instances keep their own variant and leave the direct fields to
-    their builder_default; direct instances are a second variant stating them.
+    their builder_default. Direct instances are one variant per direct kernel
+    (std and spatial share one), each stating DIRECT_FIELDS and its own block
+    knobs (DIRECT_VARIANT_FIELDS) and leaving the others to theirs.
     """
     kmd = [
         {"name": name, "type": "int" if name in _INT_FIELDS else "string"}
@@ -384,22 +415,38 @@ def build_config(
             "default_value": default,
             "builder_default": True,
         }
-        for name, default in DIRECT_FIELDS.items()
+        for name, default in {**DIRECT_FIELDS, **DIRECT_KNOB_FIELDS}.items()
     ]
-    metadata = list(DIRECT_SPEC_ORDER)
+    metadata = list(DIRECT_SPEC_ORDER + tuple(DIRECT_KNOB_FIELDS))
     shards = collections.defaultdict(list)
     for spec in specs:
         shards[shard_name(spec, sharding)].append(spec)
     packs = []
     for shard in sorted(shards):
         variants = []
-        for name, order, family in (
-            ("gfx950_conv_fwd_aot_{dtype}_{instance_id}", SPEC_ORDER, False),
-            ("gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}", DIRECT_SPEC_ORDER, True),
+        implicit = [s for s in shards[shard] if not s.is_direct]
+        if implicit:
+            variants.append(
+                _variant(
+                    "gfx950_conv_fwd_aot_{dtype}_{instance_id}", SPEC_ORDER, implicit
+                )
+            )
+        # std and spatial share one variant, as before the other direct variants.
+        for group in (
+            ("std", "spatial"),
+            ("tiled",),
         ):
-            members = [s for s in shards[shard] if s.is_direct == family]
+            members = [
+                s for s in shards[shard] if s.is_direct and s.direct_variant in group
+            ]
             if members:
-                variants.append(_variant(name, order, members))
+                variants.append(
+                    _variant(
+                        _DIRECT_VARIANT_NAMES[group[0]],
+                        spec_order(members[0]),
+                        members,
+                    )
+                )
         packs.append(
             {
                 "name": shard,

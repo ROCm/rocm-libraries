@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
@@ -376,8 +377,10 @@ std::optional<ConvLaunch> directLaunch(const MatchedProblem& matched,
             return std::nullopt;
         }
     }
+    // The exact-shape engine packages the std and spatial kernels only.
     if(!metadataEquals(kernel, "pipeline", std::string("none"))
-       || !metadataEquals(kernel, "epilogue", std::string("none")))
+       || !metadataEquals(kernel, "epilogue", std::string("none"))
+       || (variant != conv::DirectVariant::STD && variant != conv::DirectVariant::SPATIAL))
     {
         return std::nullopt;
     }
@@ -564,7 +567,51 @@ constexpr std::array<const char*, 3> AOT_FLAG_FIELDS{"unroll_k", "async_dma", "g
 constexpr std::array<const char*, 8> AOT_DIRECT_FIELDS{
     "filter_h", "filter_w", "stride_h", "stride_w", "pad_h", "pad_w", "dilation_h", "dilation_w"};
 
-/// One instance of either family: an implicit-GEMM identity or a direct depthwise one.
+/// The block knobs after block_w and block_waves, with the KMD default each holds where
+/// its variant does not use it (_AOT_DIRECT_KNOB_DEFAULTS in convolution_forward.py, less
+/// the string "atom"). iglp -1 and waves_per_eu 0 stand for rocKE's None.
+constexpr std::array<std::pair<const char*, int64_t>, 16> AOT_DIRECT_KNOB_DEFAULTS{{
+    {"block_h", 0},
+    {"unroll_rows", 0},
+    {"block_q", 0},
+    {"block_groups", 0},
+    {"double_buffer", 0},
+    {"cpg", 0},
+    {"kpg", 0},
+    {"tile_h", 0},
+    {"tile_w", 0},
+    {"tile_k_out", 0},
+    {"ck", 0},
+    {"waves_m", 0},
+    {"waves_n", 0},
+    {"swizzle_wgm", 0},
+    {"iglp", -1},
+    {"waves_per_eu", 0},
+}};
+
+/// The fields of block_w, block_waves, AOT_DIRECT_KNOB_DEFAULTS and "atom" that
+/// @p variant states (AOT_DIRECT_KNOBS in convolution_forward.py); every other one must
+/// hold its default.
+bool aotDirectVariantUses(conv::DirectVariant variant, std::string_view field)
+{
+    const auto among = [&](std::initializer_list<std::string_view> fields) {
+        return std::find(fields.begin(), fields.end(), field) != fields.end();
+    };
+    switch(variant)
+    {
+    case conv::DirectVariant::STD:
+        return among({"block_w", "block_waves"});
+    case conv::DirectVariant::SPATIAL:
+        return among({"block_waves"});
+    case conv::DirectVariant::TILED:
+        return among({"block_w", "block_h", "block_waves", "unroll_rows"});
+    case conv::DirectVariant::NONE:
+    default:
+        return false;
+    }
+}
+
+/// One instance of either family: an implicit-GEMM identity or a direct one.
 using AotKernel = std::variant<conv::AotInstance, conv::DirectInstance>;
 
 /// The implicit-GEMM instance @p kernel describes: a reviewed pipeline (unroll_k and
@@ -613,10 +660,12 @@ std::optional<conv::AotInstance> aotImplicitGemmInstance(const KernelDefinition&
                              flags[2]};
 }
 
-/// The direct depthwise instance @p kernel describes. Its implicit-GEMM fields hold the
-/// values rocKE's direct sweep writes into a direct identity (0, and "direct" for the
-/// pipeline and epilogue), so a forced tile_k of 64 or 128 never selects one. The variant
-/// and block knobs are checked where they are used, by conv::directLaunchGeometry.
+/// The direct instance @p kernel describes. Its implicit-GEMM fields hold the values
+/// rocKE's direct sweep writes into a direct identity (0, and "direct" for the pipeline
+/// and epilogue), so a forced tile_k of 64 or 128 never selects one. Each variant states
+/// its own block knobs (aotDirectVariantUses) and leaves every other one at its KMD
+/// default; the flags hold 0 or 1. The knobs' ranges are checked where they are used, by
+/// conv::directInstanceLaunch.
 std::optional<conv::DirectInstance> aotDirectInstance(const KernelDefinition& kernel,
                                                       conv::DirectVariant variant,
                                                       int64_t blockW,
@@ -645,17 +694,57 @@ std::optional<conv::DirectInstance> aotDirectInstance(const KernelDefinition& ke
         }
         compiled[i] = *value;
     }
-    return conv::DirectInstance{{compiled[0],
-                                 compiled[1],
-                                 compiled[2],
-                                 compiled[3],
-                                 compiled[4],
-                                 compiled[5],
-                                 compiled[6],
-                                 compiled[7]},
-                                variant,
-                                blockW,
-                                blockWaves};
+    if((!aotDirectVariantUses(variant, "block_w") && blockW != 0)
+       || (!aotDirectVariantUses(variant, "block_waves") && blockWaves != 0))
+    {
+        return std::nullopt;
+    }
+    std::array<int64_t, AOT_DIRECT_KNOB_DEFAULTS.size()> knobs{};
+    for(size_t i = 0; i < AOT_DIRECT_KNOB_DEFAULTS.size(); ++i)
+    {
+        const auto& [field, unset] = AOT_DIRECT_KNOB_DEFAULTS[i];
+        const auto value = intMetadata(kernel, field);
+        if(!value || (!aotDirectVariantUses(variant, field) && *value != unset))
+        {
+            return std::nullopt;
+        }
+        knobs[i] = *value;
+    }
+    const auto knob = [&](std::string_view field) {
+        for(size_t i = 0; i < AOT_DIRECT_KNOB_DEFAULTS.size(); ++i)
+        {
+            if(AOT_DIRECT_KNOB_DEFAULTS[i].first == field)
+            {
+                return knobs[i];
+            }
+        }
+        return int64_t{-1};
+    };
+    // Compile-only knobs: they shape the code, not the launch, but must be well formed.
+    for(const auto* flag : {"unroll_rows", "double_buffer"})
+    {
+        if(knob(flag) != 0 && knob(flag) != 1)
+        {
+            return std::nullopt;
+        }
+    }
+    if(!metadataEquals(kernel, "atom", std::string("none")))
+    {
+        return std::nullopt;
+    }
+    conv::DirectInstance instance{{compiled[0],
+                                   compiled[1],
+                                   compiled[2],
+                                   compiled[3],
+                                   compiled[4],
+                                   compiled[5],
+                                   compiled[6],
+                                   compiled[7]},
+                                  variant,
+                                  blockW,
+                                  blockWaves};
+    instance.blockH = knob("block_h");
+    return instance;
 }
 
 /// The instance @p kernel describes, when its metadata is a complete instance of either
@@ -692,9 +781,14 @@ std::optional<AotKernel> aotInstance(const KernelDefinition& kernel)
     {
         return std::nullopt;
     }
-    if(!std::all_of(AOT_DIRECT_FIELDS.begin(), AOT_DIRECT_FIELDS.end(), [&](const char* field) {
-           return metadataEquals(kernel, field, int64_t{0});
-       }))
+    if(!std::all_of(AOT_DIRECT_FIELDS.begin(),
+                    AOT_DIRECT_FIELDS.end(),
+                    [&](const char* field) { return metadataEquals(kernel, field, int64_t{0}); })
+       || !std::all_of(
+           AOT_DIRECT_KNOB_DEFAULTS.begin(),
+           AOT_DIRECT_KNOB_DEFAULTS.end(),
+           [&](const auto& knob) { return metadataEquals(kernel, knob.first, knob.second); })
+       || !metadataEquals(kernel, "atom", std::string("none")))
     {
         return std::nullopt;
     }

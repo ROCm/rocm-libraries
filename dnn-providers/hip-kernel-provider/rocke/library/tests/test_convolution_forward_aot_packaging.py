@@ -5,9 +5,10 @@
 
 An instance is packaged from a rocKE ``KernelIdentity``; these tests hold the adapter to
 the sweep it comes from. Implicit GEMM: the same kernel IR as ``kernel_sweep.build_kernel``
-and the same served-problem predicate as ``KernelCache.supports_problem``. Direct
-depthwise: the same probe and IR as ``direct_kernel_sweep.build_direct_job``, and the
-served problems of ``supports_problem`` plus the per-shape validator ``plan_for`` runs.
+and the same served-problem predicate as ``KernelCache.supports_problem``. Direct, every
+forward algorithm of the direct sweep: the same probe and IR as
+``direct_kernel_sweep.build_direct_job``, the served problems of ``supports_problem`` plus
+the per-shape re-validation ``plan_for`` runs, and ``plan_for``'s launch.
 """
 
 from __future__ import annotations
@@ -17,14 +18,18 @@ import json
 import os
 import random
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from benchmarks.common import direct_kernel_sweep, kernel_sweep
 from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 from builders.common.convolution_forward import (
+    AOT_DIRECT_ALGORITHMS,
     KERNEL_FAMILY_DIRECT_DEPTHWISE,
     Gfx950ConvFwdAotSpec,
     Gfx950ConvFwdSpec,
+    aot_direct_fields_from_knobs,
+    aot_direct_instance_fields,
     build_gfx950_conv_fwd_aot,
     gfx950_conv_fwd_aot_problem_for_request,
     gfx950_conv_fwd_aot_runtime_candidates,
@@ -33,8 +38,9 @@ from builders.common.convolution_forward import (
     supports_gfx950_conv_fwd_aot_problem,
 )
 from dispatch.grouped_convolution import ConvGroupedRequest
+from kernels.common.conv_abi import conv_direct_args_signature
 from kernels.common.conv_args import ConvArgs
-from kernels.common.conv_direct_grouped import DirectConvProblem, direct_launch_geometry
+from kernels.common.conv_direct_grouped import DirectConvProblem
 from rocke.core.arch import ArchTarget
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -426,61 +432,80 @@ def test_runtime_candidates_keep_every_serving_direct_instance(direct_jobs):
     assert serving and gfx950_conv_fwd_aot_runtime_candidates(problem, specs) == serving
 
 
-# ---- Direct depthwise instances ----
+# ---- Direct instances ----
 
-#: The direct-sweep algorithms the packaged direct launch runs, and their variant.
-_DIRECT_VARIANTS = {"direct_depthwise": "std", "direct_depthwise_spatial": "spatial"}
+#: Direct identities per (dtype, algorithm) in the sweep's forward grid.
+_DIRECT_COUNTS = {
+    "direct_depthwise": 54,
+    "direct_depthwise_spatial": 30,
+    "direct_depthwise_tiled": 1536,
+}
+#: Identities per (dtype, algorithm) the IR and serving tests sample, spread evenly
+#: over the sweep's order (capabilities outermost, then knobs). std and spatial are
+#: checked whole. ``check_direct_ir.py``-style runs of every identity are out of tree.
+_DIRECT_SAMPLE = 10
 
 
 def _direct_spec(identity: KernelIdentity) -> Gfx950ConvFwdAotSpec:
     """The instance make_conv_aot_config.py packages for a direct identity."""
-    knobs = json.loads(identity.knobs)
-    return replace(
-        _spec(identity),
-        kernel_family=KERNEL_FAMILY_DIRECT_DEPTHWISE,
-        direct_variant=_DIRECT_VARIANTS[identity.algorithm],
-        filter_h=identity.filter_h,
-        filter_w=identity.filter_w,
-        stride_h=identity.stride_h,
-        stride_w=identity.stride_w,
-        pad_h=identity.pad_h,
-        pad_w=identity.pad_w,
-        dilation_h=identity.dilation_h,
-        dilation_w=identity.dilation_w,
-        block_w=knobs.get("block_w", 0),
-        block_waves=knobs["block_waves"],
-    )
+    return replace(_spec(identity), **aot_direct_instance_fields(identity))
 
 
 @pytest.fixture(scope="module")
 def direct_jobs():
-    """Every forward std and spatial depthwise job of the direct sweep, both dtypes."""
-    jobs = []
-    for dtype in ("fp16", "bf16"):
-        for algorithm in _DIRECT_VARIANTS:
-            direction, caps_list = direct_kernel_sweep.DIRECT_CAPABILITIES[algorithm]
-            for caps in caps_list:
-                _, cell = direct_kernel_sweep._caps_jobs(
-                    "gfx950", 64, algorithm, direction, caps, dtype
-                )
-                jobs += [(dtype, job) for _, job in cell]
-    return jobs
+    """Every forward job of the direct sweep that the AOT engine packages, both
+    dtypes, in the sweep's order."""
+    target = ArchTarget.from_gfx("gfx950")
+    return [
+        (dtype, job)
+        for dtype in ("fp16", "bf16")
+        for job in direct_kernel_sweep.enumerate_direct_jobs(
+            arch="gfx950", target=target, directions=("fwd",), dtype=dtype
+        )
+        if job.identity.algorithm in AOT_DIRECT_ALGORITHMS
+    ]
+
+
+def _sampled(direct_jobs, count: int = _DIRECT_SAMPLE):
+    """Whole std and spatial; ``count`` evenly spread jobs of every other algorithm."""
+    by_cell: dict = {}
+    for dtype, job in direct_jobs:
+        by_cell.setdefault((dtype, job.identity.algorithm), []).append(job)
+    picked = []
+    for (dtype, algorithm), jobs in by_cell.items():
+        if algorithm in ("direct_depthwise", "direct_depthwise_spatial"):
+            picked += [(dtype, job) for job in jobs]
+        else:
+            step = len(jobs) / count
+            picked += [(dtype, jobs[int(i * step)]) for i in range(count)]
+    return picked
 
 
 def test_every_direct_sweep_identity_is_packageable_on_the_sweeps_probe(direct_jobs):
-    # The native direct launch runs every std and spatial depthwise kernel the sweep builds.
-    assert len(direct_jobs) == 2 * (54 + 30)
+    counts: dict = {}
     for dtype, job in direct_jobs:
+        counts[dtype, job.identity.algorithm] = (
+            counts.get((dtype, job.identity.algorithm), 0) + 1
+        )
         spec = _direct_spec(job.identity)
         assert supports_gfx950_conv_fwd_aot(spec) == (True, "ok"), job.identity.label()
+        assert spec.direct_variant == AOT_DIRECT_ALGORITHMS[job.identity.algorithm]
         caps = direct_kernel_sweep.DirectCaps(**job.caps)
         assert spec.probe_problem() == direct_kernel_sweep.probe_problem(
             caps, dtype, job.identity.algorithm
         )
+        assert spec.direct_knobs() == json.loads(job.identity.knobs)
+    assert counts == {
+        (dtype, algorithm): count
+        for dtype in ("fp16", "bf16")
+        for algorithm, count in _DIRECT_COUNTS.items()
+    }
 
 
 def test_packaged_direct_ir_is_the_sweep_kernel_up_to_its_symbol(direct_jobs):
-    for dtype, job in direct_jobs:
+    sample = _sampled(direct_jobs)
+    assert {job.identity.algorithm for _, job in sample} == set(_DIRECT_COUNTS)
+    for dtype, job in sample:
         spec = _direct_spec(job.identity)
         ours = build_gfx950_conv_fwd_aot(spec)
         theirs, _ = direct_kernel_sweep.build_direct_job(job, "gfx950", dtype)
@@ -531,9 +556,63 @@ def _depthwise_problems(dtype: str):
     return problems
 
 
+def _instance_problems(spec: Gfx950ConvFwdAotSpec, count: int = 24):
+    """Problems around one direct instance: mostly its own compiled filter, stride,
+    padding, dilation and channel counts over varied batches, images and group counts
+    (tails, images smaller than a block, too small for the filter), and a share with
+    one capability changed, which it must decline. Only problems inside the graph
+    contract are kept."""
+    rng = random.Random(f"{_SEED}-{spec.instance_id}-{spec.dtype}")
+    variant = spec.direct_variant
+    problems = []
+    while len(problems) < count:
+        filt, stride, pad = spec.filter_h, spec.stride_h, spec.pad_h
+        dil_h, dil_w = spec.dilation_h, spec.dilation_w
+        stride_w, pad_w = stride, pad
+        change = rng.choice([None] * 7 + ["filter", "stride", "pad", "dil", "axes"])
+        if change == "filter":
+            filt = rng.choice([1, 3, 5, 7, 13]) if filt != 3 else 5
+        elif change == "stride":
+            stride = stride_w = 3 - stride if stride in (1, 2) else 1
+        elif change == "pad":
+            pad = pad_w = rng.choice([p for p in (0, 1, 2, filt // 2 + 1) if p != pad])
+        elif change == "dil":
+            dil_h = dil_w = 2 if dil_h == 1 else 1
+        elif change == "axes":
+            stride_w = stride + 1
+        cpg, kpg = rng.choice([(1, 1)] * 8 + [(1, 2), (2, 2)])
+        groups = rng.choice([1, 2, 5, 8, 16, 32, 48, 63, 64, 65, 96, 128, 300])
+        c, k = groups * cpg, groups * kpg
+        hi = rng.choice([1, 2, 3, 5, 7, 8, 12, 17, 28, 31, 33, 56])
+        wi = rng.choice([1, 2, 3, 5, 7, 8, 12, 17, 28, 31, 33, 56])
+        problem = Gfx950ConvFwdSpec(
+            N=rng.choice([1, 2, 3]),
+            Hi=hi,
+            Wi=wi,
+            C=c,
+            K=k,
+            Y=filt,
+            X=filt,
+            sH=stride,
+            sW=stride_w,
+            pH=pad,
+            pW=pad_w,
+            dH=dil_h,
+            dW=dil_w,
+            groups=groups,
+            dtype=spec.dtype,
+        )
+        if supports_gfx950_conv_fwd_aot_problem(problem)[0]:
+            problems.append(problem)
+    return problems
+
+
 def _rocke_direct_serves(identity: KernelIdentity, problem: Gfx950ConvFwdSpec):
-    """What rocKE's direct benchmark offers ``identity`` for: the cache's capability
-    match, then ``plan_for``'s re-validation of the spec on the real problem."""
+    """What rocKE's direct benchmark offers ``identity`` for (``direct_plans``): the
+    cache's capability match, then ``plan_for``'s re-validation of the spec on the
+    real problem."""
+    if problem.dtype != identity.dtype_a:
+        return False, "dtype"
     direct = DirectConvProblem(
         N=problem.N,
         H=problem.Hi,
@@ -549,59 +628,94 @@ def _rocke_direct_serves(identity: KernelIdentity, problem: Gfx950ConvFwdSpec):
         dil_h=problem.dH,
         dil_w=problem.dW,
     )
-    if problem.dtype != identity.dtype_a:
-        return False, "dtype"
     cache = KernelCache.__new__(KernelCache)
     ok, why = cache.supports_problem(identity, direct)
     if not ok:
         return False, why
-    spec = direct_kernel_sweep.make_spec(
-        identity.algorithm, direct, json.loads(identity.knobs)
+    plan, why = direct_kernel_sweep.plan_for(
+        cache, identity, Path("unused.hsaco"), {"kernel_name": "k"}, direct, "gfx950"
     )
-    return direct_kernel_sweep.validate_spec(identity.algorithm, spec, "gfx950")
+    return plan is not None, why
+
+
+def _known_difference(spec, problem, ours: bool, reason: str, theirs: bool) -> bool:
+    """Where the packaged guard is knowingly stricter than rocKE's offer: rocKE's
+    spatial validator admits 64 groups (one column per wave), which its own benchmark
+    never runs and the direct guard declines, and rocKE's direct problem has one
+    stride and one padding, so it cannot state a graph whose axes differ."""
+    if problem.sH != problem.sW or problem.pH != problem.pW:
+        assert not ours, problem
+        return True
+    if spec.direct_variant == "spatial" and theirs and not ours:
+        assert problem.groups == 64 and "groups < 64" in reason, reason
+        return True
+    return False
 
 
 def test_direct_served_problems_agree_with_the_direct_benchmarks_offer(direct_jobs):
-    """Every (direct instance, problem) verdict matches what rocKE would launch.
-
-    The packaged guard is stricter in one place: rocKE's spatial validator admits 64
-    groups (one column per wave), which its own benchmark never runs, and the direct
-    guard declines it.
-    """
-    compared = served = 0
-    for dtype, job in direct_jobs:
+    """Every (direct instance, problem) verdict matches what rocKE would launch."""
+    compared: dict = {}
+    served: dict = {}
+    for dtype, job in _sampled(direct_jobs):
         identity = replace(job.identity, llvm_flavor=kernel_sweep.current_llvm_flavor())
         spec = _direct_spec(job.identity)
-        for problem in _depthwise_problems(dtype)[::3]:
+        problems = _instance_problems(spec)
+        if spec.direct_variant in ("std", "spatial"):
+            problems += _depthwise_problems(dtype)[::15]
+        for problem in problems:
             ours, reason = gfx950_conv_fwd_aot_serves(spec, problem)
             theirs, why = _rocke_direct_serves(identity, problem)
-            if theirs and not ours and spec.direct_variant == "spatial":
-                assert problem.groups == 64 and "groups < 64" in reason, reason
+            if _known_difference(spec, problem, ours, reason, theirs):
                 continue
             assert ours == theirs, (job.identity.label(), problem, reason, why)
-            compared += 1
-            served += ours
-    assert compared > 10000 and 0 < served < compared
+            compared[spec.direct_variant] = compared.get(spec.direct_variant, 0) + 1
+            served[spec.direct_variant] = served.get(spec.direct_variant, 0) + ours
+    # Both verdicts occur for every variant, so the agreement is not vacuous.
+    for variant, count in compared.items():
+        assert count > 300 and 0 < served[variant] < count, (variant, count)
+    assert set(compared) == set(AOT_DIRECT_ALGORITHMS.values())
 
 
 def test_direct_launch_is_rockes_for_the_runtime_problem(direct_jobs):
-    for _, job in direct_jobs[:: len(direct_jobs) // 12]:
+    for _, job in _sampled(direct_jobs, 4)[::3]:
         spec = _direct_spec(job.identity)
-        assert (
-            spec.launch_signature()
-            == spec.runtime_spec(_depthwise_problems(spec.dtype)[0]).launch_signature()
-        )
-        for problem in _depthwise_problems(spec.dtype):
-            if not gfx950_conv_fwd_aot_serves(spec, problem)[0]:
-                continue
-            direct = problem.to_direct_problem()
-            rocke = direct_kernel_sweep.make_spec(
-                job.identity.algorithm, direct, json.loads(job.identity.knobs)
+        problems = [
+            p
+            for p in _instance_problems(spec, 48)
+            if gfx950_conv_fwd_aot_serves(spec, p)[0]
+        ]
+        assert problems, job.identity.label()
+        for problem in problems:
+            assert spec.launch_signature() == conv_direct_args_signature(spec.dtype)
+            direct = DirectConvProblem(
+                N=problem.N,
+                H=problem.Hi,
+                W=problem.Wi,
+                groups=problem.groups,
+                cpg=problem.C // problem.groups,
+                kpg=problem.K // problem.groups,
+                KH=problem.Y,
+                KW=problem.X,
+                PAD=problem.pH,
+                stride=problem.sH,
+                dtype=problem.dtype,
+                dil_h=problem.dH,
+                dil_w=problem.dW,
             )
-            assert (spec.grid(problem), spec.block()) == direct_launch_geometry(rocke)
+            plan, why = direct_kernel_sweep.plan_for(
+                KernelCache.__new__(KernelCache),
+                replace(job.identity, llvm_flavor=kernel_sweep.current_llvm_flavor()),
+                Path("unused.hsaco"),
+                {"kernel_name": "k"},
+                direct,
+                "gfx950",
+            )
+            assert plan is not None, why
+            (step,) = plan.steps
+            assert (spec.grid(problem), spec.block()) == (step.grid, step.block)
             assert spec.launch_values(
                 problem, 0, 0, 0, 1, 2, 3
-            ) == ConvArgs.from_problem(direct).to_launch_values(0, 0, 0, 1, 2, 3)
+            ) == step.conv_args.to_launch_values(0, 0, 0, 1, 2, 3)
 
 
 def test_one_direct_instance_serves_other_images_batches_and_group_counts(direct_jobs):
@@ -634,6 +748,29 @@ def test_one_direct_instance_serves_other_images_batches_and_group_counts(direct
         assert not ok and "compiled for" in why, why
 
 
+def _first(direct_jobs, algorithm: str, **caps) -> Gfx950ConvFwdAotSpec:
+    return next(
+        _direct_spec(job.identity)
+        for _, job in direct_jobs
+        if job.identity.algorithm == algorithm
+        and all(getattr(job.identity, k) == v for k, v in caps.items())
+    )
+
+
+def test_tiled_serves_large_filters_the_row_stream_cannot(direct_jobs):
+    tiled = _first(direct_jobs, "direct_depthwise_tiled", filter_h=31, stride_h=2)
+    problem = Gfx950ConvFwdSpec(
+        N=1, Hi=40, Wi=37, C=96, K=96, Y=31, X=31, sH=2, sW=2, pH=15, pW=15, groups=96
+    )
+    assert gfx950_conv_fwd_aot_serves(tiled, problem) == (True, "ok")
+    assert not any(
+        gfx950_conv_fwd_aot_serves(_direct_spec(job.identity), problem)[0]
+        for _, job in direct_jobs
+        if job.identity.algorithm in ("direct_depthwise", "direct_depthwise_spatial")
+        and job.identity.dtype_a == "fp16"
+    )
+
+
 @pytest.mark.parametrize(
     ("change", "reason"),
     [
@@ -651,28 +788,54 @@ def test_one_direct_instance_serves_other_images_batches_and_group_counts(direct
         ({"block_waves": 17}, "block_waves"),
         ({"pad_h": 2, "pad_w": 2}, "same' padding"),
         ({"filter_h": 4, "filter_w": 4}, "odd filter"),
+        ({"block_h": 4}, "does not use block_h"),
+        ({"atom": "32x32x16"}, "does not use atom"),
+        ({"iglp": 0}, "does not use iglp"),
     ],
 )
 def test_out_of_contract_direct_instances_are_declined(direct_jobs, change, reason):
-    spec = next(
-        _direct_spec(job.identity)
-        for _, job in direct_jobs
-        if job.identity.algorithm == "direct_depthwise"
-    )
+    spec = _first(direct_jobs, "direct_depthwise")
+    ok, why = supports_gfx950_conv_fwd_aot(replace(spec, **change))
+    assert not ok and reason in why, why
+
+
+@pytest.mark.parametrize(
+    ("algorithm", "change", "reason"),
+    [
+        ("direct_depthwise_tiled", {"block_h": 0}, "block_h must be a positive"),
+        ("direct_depthwise_tiled", {"unroll_rows": 2}, "unroll_rows must be 0 or 1"),
+        ("direct_depthwise_tiled", {"block_q": 16}, "does not use block_q"),
+        ("direct_depthwise_tiled", {"dilation_h": 2}, "no dilation"),
+    ],
+)
+def test_out_of_contract_variant_knobs_are_declined(
+    direct_jobs, algorithm, change, reason
+):
+    spec = _first(direct_jobs, algorithm)
+    assert supports_gfx950_conv_fwd_aot(spec) == (True, "ok")
     ok, why = supports_gfx950_conv_fwd_aot(replace(spec, **change))
     assert not ok and reason in why, why
 
 
 def test_direct_block_width_follows_the_variant(direct_jobs):
-    spatial = next(
-        _direct_spec(job.identity)
-        for _, job in direct_jobs
-        if job.identity.algorithm == "direct_depthwise_spatial"
-    )
+    spatial = _first(direct_jobs, "direct_depthwise_spatial")
     ok, why = supports_gfx950_conv_fwd_aot(replace(spatial, block_w=4))
     assert not ok and "derives block_w" in why
     ok, why = supports_gfx950_conv_fwd_aot(replace(spatial, direct_variant="std"))
     assert not ok and "block_w must be a positive" in why
+
+
+def test_direct_knobs_round_trip_rockes_spelling():
+    # Booleans are descriptor ints.
+    assert aot_direct_fields_from_knobs(
+        "tiled", {"block_w": 4, "block_h": 1, "block_waves": 1, "unroll_rows": True}
+    ) == {"block_w": 4, "block_h": 1, "block_waves": 1, "unroll_rows": 1}
+    with pytest.raises(ValueError, match="bool"):
+        aot_direct_fields_from_knobs(
+            "tiled", {"block_w": 4, "block_h": 1, "block_waves": 1, "unroll_rows": 1}
+        )
+    with pytest.raises(ValueError, match="are not"):
+        aot_direct_fields_from_knobs("tiled", {"block_w": 4, "block_waves": 1})
 
 
 @pytest.mark.parametrize(
@@ -683,6 +846,10 @@ def test_direct_block_width_follows_the_variant(direct_jobs):
         {"filter_h": 3},
         {"dilation_w": 1},
         {"block_waves": 1},
+        {"block_h": 4},
+        {"cpg": 4},
+        {"atom": "32x32x16"},
+        {"iglp": 0},
     ],
 )
 def test_implicit_instances_leave_every_direct_field_at_its_default(sweep_jobs, change):

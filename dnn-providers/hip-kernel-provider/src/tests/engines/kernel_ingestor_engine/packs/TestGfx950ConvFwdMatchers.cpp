@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <array>
 #include <functional>
 #include <limits>
@@ -1423,7 +1424,24 @@ KernelDefinition aotKernel(AotWidths widths = {},
                        {"dilation_h", int64_t{0}},
                        {"dilation_w", int64_t{0}},
                        {"block_w", int64_t{0}},
-                       {"block_waves", int64_t{0}}};
+                       {"block_waves", int64_t{0}},
+                       {"block_h", int64_t{0}},
+                       {"unroll_rows", int64_t{0}},
+                       {"block_q", int64_t{0}},
+                       {"block_groups", int64_t{0}},
+                       {"double_buffer", int64_t{0}},
+                       {"cpg", int64_t{0}},
+                       {"kpg", int64_t{0}},
+                       {"tile_h", int64_t{0}},
+                       {"tile_w", int64_t{0}},
+                       {"tile_k_out", int64_t{0}},
+                       {"ck", int64_t{0}},
+                       {"waves_m", int64_t{0}},
+                       {"waves_n", int64_t{0}},
+                       {"atom", std::string("none")},
+                       {"swizzle_wgm", int64_t{0}},
+                       {"iglp", int64_t{-1}},
+                       {"waves_per_eu", int64_t{0}}};
     return kernel;
 }
 
@@ -1454,6 +1472,36 @@ KernelDefinition aotDirectKernel(const std::string& variant,
     kernel.metadata["block_w"] = variant == "spatial" ? int64_t{0} : blockW;
     kernel.metadata["block_waves"] = blockWaves;
     return kernel;
+}
+
+/// A tiled, col, grouped or non-grouped instance as make_conv_aot_config.py emits it:
+/// aotDirectKernel's placeholders and compiled values, block_w and block_waves cleared,
+/// then @p knobs. The values are knobs of rocKE's direct sweep for the variant.
+KernelDefinition aotVariantKernel(const std::string& variant,
+                                  int64_t filter,
+                                  int64_t stride,
+                                  int64_t pad,
+                                  const std::vector<std::pair<const char*, MetadataValue>>& knobs)
+{
+    auto kernel = aotDirectKernel(variant, filter, stride, 0, 0);
+    kernel.metadata["pad_h"] = kernel.metadata["pad_w"] = pad;
+    for(const auto& [field, value] : knobs)
+    {
+        kernel.metadata[field] = value;
+    }
+    return kernel;
+}
+
+KernelDefinition aotTiledKernel(int64_t filter = 3, int64_t stride = 1)
+{
+    return aotVariantKernel("tiled",
+                            filter,
+                            stride,
+                            (filter - 1) / 2,
+                            {{"block_w", int64_t{7}},
+                             {"block_h", int64_t{2}},
+                             {"block_waves", int64_t{1}},
+                             {"unroll_rows", int64_t{1}}});
 }
 
 TEST(TestGfx950ConvFwdAotKernelMatcher, OneInstanceServesEveryShapeItsCapabilitiesAdmit)
@@ -1846,6 +1894,133 @@ TEST(TestGfx950ConvFwdAotDispatch, DirectInstancePassesTheContractAndReachesCode
     // A spatial instance cannot serve 96 groups, so it is refused before any code loads.
     EXPECT_THROW(handler.prepare(fixture.context(), *bound, aotDirectKernel("spatial")),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachDirectVariantServesItsOwnProblemClass)
+{
+    const auto matches = [](const ConvShape& shape, const KernelDefinition& kernel) {
+        const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+        return matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel);
+    };
+    // tiled: depthwise with its compiled filter, here 15x15, which std cannot unroll.
+    EXPECT_TRUE(matches(depthwiseShape(96, 17, 19, 15, 1, 7), aotTiledKernel(15)));
+    EXPECT_TRUE(matches(depthwiseShape(5, 33, 7, 3, 1, 1), aotTiledKernel()));
+    EXPECT_FALSE(matches(depthwiseShape(96, 17, 19, 13, 1, 6), aotTiledKernel(15)));
+    // The exact-shape engine admits none of them.
+    const GraphFixture depthwise(buildGraph(convSpec(depthwiseShape(32, 14, 14, 3, 1, 1))),
+                                 gfx950Properties());
+    for(const auto& kernel : {aotTiledKernel()})
+    {
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, depthwise.context(), kernel));
+        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, depthwise.context(), kernel));
+    }
+}
+
+TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachVariantStatesOnlyItsOwnKnobs)
+{
+    // Every block knob, its KMD default and a value no variant here holds.
+    const std::vector<std::tuple<const char*, MetadataValue, MetadataValue>> knobs{
+        {"block_w", int64_t{0}, int64_t{5}},
+        {"block_waves", int64_t{0}, int64_t{3}},
+        {"block_h", int64_t{0}, int64_t{5}},
+        {"unroll_rows", int64_t{0}, int64_t{1}},
+        {"block_q", int64_t{0}, int64_t{48}},
+        {"block_groups", int64_t{0}, int64_t{2}},
+        {"double_buffer", int64_t{0}, int64_t{1}},
+        {"cpg", int64_t{0}, int64_t{16}},
+        {"kpg", int64_t{0}, int64_t{16}},
+        {"tile_h", int64_t{0}, int64_t{16}},
+        {"tile_w", int64_t{0}, int64_t{64}},
+        {"tile_k_out", int64_t{0}, int64_t{32}},
+        {"ck", int64_t{0}, int64_t{32}},
+        {"waves_m", int64_t{0}, int64_t{1}},
+        {"waves_n", int64_t{0}, int64_t{4}},
+        {"atom", std::string("none"), std::string("16x16x32")},
+        {"swizzle_wgm", int64_t{0}, int64_t{4}},
+        {"iglp", int64_t{-1}, int64_t{1}},
+        {"waves_per_eu", int64_t{0}, int64_t{3}}};
+    // Each variant's own knobs: AOT_DIRECT_KNOBS in convolution_forward.py.
+    const std::vector<std::tuple<ConvShape, KernelDefinition, std::vector<std::string>>> cases{
+        {depthwiseShape(32, 14, 14, 3, 1, 1),
+         aotTiledKernel(),
+         {"block_w", "block_h", "block_waves", "unroll_rows"}},
+    };
+    for(const auto& [shape, base, own] : cases)
+    {
+        SCOPED_TRACE(std::get<std::string>(base.metadata.at("direct_variant")));
+        const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+        ASSERT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), base));
+        // A knob of another variant, set, is malformed metadata.
+        for(const auto& [field, unset, value] : knobs)
+        {
+            if(std::find(own.begin(), own.end(), field) != own.end())
+            {
+                continue;
+            }
+            EXPECT_EQ(base.metadata.at(field), unset) << field;
+            SCOPED_TRACE(field);
+            auto kernel = base;
+            kernel.metadata[field] = value;
+            EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel));
+        }
+        // Every field is required; the loader completes omitted ones from the KMD.
+        for(const auto& field : base.metadata)
+        {
+            if(field.first == "instance_id")
+            {
+                continue;
+            }
+            SCOPED_TRACE(field.first);
+            auto kernel = base;
+            kernel.metadata.erase(field.first);
+            EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel));
+        }
+        // The implicit-GEMM placeholders hold for every variant.
+        auto relabeled = base;
+        relabeled.metadata["tile_k"] = int64_t{64};
+        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), relabeled));
+    }
+    // Compile-only knobs must still be well formed.
+    const GraphFixture depthwise(buildGraph(convSpec(depthwiseShape(32, 14, 14, 3, 1, 1))),
+                                 gfx950Properties());
+    auto flag = aotTiledKernel();
+    flag.metadata["unroll_rows"] = int64_t{2};
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, depthwise.context(), flag));
+    // An implicit-GEMM instance leaves every knob at its KMD default too.
+    for(const auto& [field, unset, value] : knobs)
+    {
+        SCOPED_TRACE(field);
+        auto kernel = aotKernel({1, 1, 1});
+        ASSERT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, depthwise.context(), kernel));
+        kernel.metadata[field] = value;
+        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, depthwise.context(), kernel));
+    }
+}
+
+TEST(TestGfx950ConvFwdAotDispatch, EveryDirectVariantPassesTheContractAndReachesCodeLoading)
+{
+    for(const auto& [shape, kernel] : std::vector<std::pair<ConvShape, KernelDefinition>>{
+            {depthwiseShape(32, 14, 14, 3, 1, 1), aotTiledKernel()},
+        })
+    {
+        SCOPED_TRACE(std::get<std::string>(kernel.metadata.at("direct_variant")));
+        const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+        const auto bound = matchesGraph(GFX950_CONV_FWD_AOT, fixture.context());
+        ASSERT_TRUE(bound);
+        const auto& handler = dispatchHandler(GFX950_CONV_FWD_AOT);
+        EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, kernel), 0U);
+        try
+        {
+            // The descriptor names no archive, so loading is the first step that can fail.
+            handler.prepare(fixture.context(), *bound, kernel);
+            FAIL() << "Preparation loaded a kernel from an empty archive path";
+        }
+        catch(const std::exception& error)
+        {
+            const std::string message = error.what();
+            EXPECT_EQ(message.find("convolution contract"), std::string::npos) << message;
+        }
+    }
 }
 
 } // namespace
