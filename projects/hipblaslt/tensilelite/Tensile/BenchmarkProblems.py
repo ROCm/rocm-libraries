@@ -810,6 +810,12 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
             # I think the size portion of this yaml could be removed,
             # but for now it's needed, so we update it even in the cache case
             with timing_context("python_write_solutions"):
+                # Tuning-only: names above already carry its tag; keep the values out of the yaml.
+                for s in solutions or []:
+                    if isinstance(s, dict):
+                        s.pop("_StinkyTofuParameters", None)
+                    else:
+                        s.dropStinkyTofuParameters()
                 LibraryIO.writeSolutions(solutionsFileName, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
                     benchmarkStep.activationArgs, solutions, gateTypeArgs=getattr(benchmarkStep, "gateTypeArgs", None), cache=isCached)
 

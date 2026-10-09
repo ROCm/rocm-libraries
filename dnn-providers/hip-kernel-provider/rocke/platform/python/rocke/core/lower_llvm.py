@@ -54,6 +54,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    require_streaming_arch,
     split_loc,
 )
 
@@ -1498,6 +1499,8 @@ class _Lowerer:
         self._needs_fp_atomic_md: bool = False
         # Set when av.load/store.b128 intrinsics are lowered (agent-scope MD).
         self._needs_av_scope_md: bool = False
+        # ``!5 = !{i32 1}`` referenced by ``!nontemporal`` loads/stores.
+        self._needs_nontemporal_md: bool = False
         # Off unless the kernel was built with source-location capture (see
         # IRBuilder's ``capture_loc`` / ROCKE_DEBUG_LOC). When off, not one byte
         # of the emitted .ll changes, so the byte-identity gate and the IR
@@ -3019,8 +3022,24 @@ class _Lowerer:
         align = int(op.attrs.get("align", vec * 2))
         self._current().emit(
             f"  {op.result.name} = load <{vec} x {elem_ty}>, ptr addrspace(1) {gep}, "
-            f"align {align}"
+            f"align {align}{self._nontemporal_md(op)}"
         )
+
+    def _nontemporal_md(self, op: Op) -> str:
+        """``, !nontemporal !5`` for an op carrying ``nontemporal=True``.
+
+        The attr is absent on ordinary ops; any non-bool value is rejected
+        rather than coerced, and so is a streaming op lowered for a target
+        outside ``STREAMING_ARCHS``.
+        """
+        nt = op.attrs.get("nontemporal", False)
+        if not isinstance(nt, bool):
+            raise ValueError(f"{op.name}: nontemporal attr must be a bool, got {nt!r}")
+        if not nt:
+            return ""
+        require_streaming_arch(op.name, self._backend.arch.gfx)
+        self._needs_nontemporal_md = True
+        return ", !nontemporal !5"
 
     def _op_tile_smem_store(self, op: Op) -> None:
         smem = op.operands[0]
@@ -5439,7 +5458,8 @@ class _Lowerer:
             )
         ty = _llvm_type(val.type)
         self._current().emit(
-            f"  store {ty} {self._operand(val)}, ptr addrspace(1) {gep}, align {align}"
+            f"  store {ty} {self._operand(val)}, ptr addrspace(1) {gep}, "
+            f"align {align}{self._nontemporal_md(op)}"
         )
 
     def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
@@ -6187,6 +6207,9 @@ class _Lowerer:
             out.append("")
         if self._needs_av_scope_md:
             out.append('!3 = !{!"agent"}')
+            out.append("")
+        if self._needs_nontemporal_md:
+            out.append("!5 = !{i32 1}")
             out.append("")
         if self._debug is not None:
             out.extend(self._debug.render())

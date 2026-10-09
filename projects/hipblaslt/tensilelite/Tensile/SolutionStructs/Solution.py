@@ -36,7 +36,7 @@ from ..AsmStoreState import VectorDataTypes
 from ..Activation import ActivationType
 from ..AsmStoreState import VectorDataTypes
 from ..Common import assignParameterWithDefault, IsaInfo, \
-                    print2, printExit, printWarning, \
+                    print1, print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
                     clusterEnabled, streamKCluster, streamKMulticast, \
@@ -686,6 +686,8 @@ def isExtractableIndex(ks, index, tc='x'):
 ################################################################################
 # Solution
 ################################################################################
+_stinkyTuneAnnounced = set()  # print the StinkyTofuParameters notice once per distinct value
+
 class Solution(collections.abc.Mapping):
   MAX_NUM_DS_LOAD_VGPRS: int = 4
   MAX_NUM_DS_LOAD_BYTES: int = 4 * MAX_NUM_DS_LOAD_VGPRS
@@ -765,6 +767,19 @@ class Solution(collections.abc.Mapping):
     for key in config:
       if (key != "ProblemType" or key != "InternalSupportParams") and key not in self._state:
         self._state[key] = config[key]
+    # User-facing StinkyTofuParameters -> internal _StinkyTofuParameters. The public key is
+    # removed; the internal copy tags the kernel name when set and is dropped before the logic yaml.
+    self._state.pop("StinkyTofuParameters", None)
+    stinkyTune = config.get("StinkyTofuParameters") or config.get("_StinkyTofuParameters")
+    if stinkyTune:
+      self._state["_StinkyTofuParameters"] = dict(stinkyTune)
+    userTune = config.get("StinkyTofuParameters")
+    if userTune:
+      tuneKey = tuple(sorted(userTune.items()))
+      if tuneKey not in _stinkyTuneAnnounced:
+        _stinkyTuneAnnounced.add(tuneKey)
+        print1(f"# INFO: StinkyTofuParameters {dict(userTune)} is tuning-only and will NOT appear "
+               "in the generated logic yaml.")
     self["Valid"] = True
     # this could prevent OriginalSolution from re-assigning the parameters, save lots of time
     if "AssignedProblemIndependentDerivedParameters" not in self._state:
@@ -7318,6 +7333,11 @@ class Solution(collections.abc.Mapping):
   def __setitem__(self, key, value):
     self._name = None
     self._state[key] = value
+
+  def dropStinkyTofuParameters(self):
+    """Remove the tuning-only _StinkyTofuParameters (call after naming, before writing yaml)."""
+    self._name = None
+    self._state.pop("_StinkyTofuParameters", None)
 
   def __str__(self):
     if self._name is None:

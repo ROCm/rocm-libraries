@@ -7232,6 +7232,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # Tuning overrides from GlobalParameters win over the values above.
       stinky_module_options.update(globalParameters.get("StinkyTofuModuleOptions") or {})
 
+      stinky_module_options.update(kernel.get("_StinkyTofuParameters") or {})
       print2(f"StinkyTofu module options: {stinky_module_options}")
       # Convert rocisa module to stinkytofu with signature
       # Returns a KernelBody wrapper that includes signature and instruction module
