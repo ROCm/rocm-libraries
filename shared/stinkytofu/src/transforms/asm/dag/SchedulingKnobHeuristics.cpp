@@ -139,11 +139,10 @@ SchedulingKnobOverrides schedulingKnobOverridesFromModuleOptions(
     // Rule3 lead: <0 unset; 0 means co-locate signal and wait.
     if (opts.ClusterBarrierRule3SignalLeadCycles >= 0)
         out.clusterBarrierRule3SignalLeadCycles = opts.ClusterBarrierRule3SignalLeadCycles;
-    // ds cap window: any explicit window/PerCap value is taken verbatim (PerCap < 0 -> off).
-    if (opts.DsCapWindowPerCap >= 0 || opts.DsCapWindow1Begin >= 0) {
-        out.dsCapWindow = SchedulingKnobOverrides::DsCapWindow{
-            opts.DsCapWindow1Begin, opts.DsCapWindow1End, std::max(0, opts.DsCapWindowPerCap)};
-    }
+    // TDM-anchored ds cap: each field independent, < 0 unset (PerCap 0 = explicit off).
+    if (opts.DsCapTdmBeginCycles >= 0) out.dsCapTdmBeginCycles = opts.DsCapTdmBeginCycles;
+    if (opts.DsCapTdmEndCycles >= 0) out.dsCapTdmEndCycles = opts.DsCapTdmEndCycles;
+    if (opts.DsCapTdmPerCap >= 0) out.dsCapTdmPerCap = opts.DsCapTdmPerCap;
     return out;
 }
 
@@ -206,13 +205,13 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::Policy;
 
     // TDM kernels: keep ds_loads out of the TDM LDS-write window (measured: ds->ds stalls peak
-    // ~600-800 cycles after tensor_load issue). Non-TDM kernels keep the cap window off.
-    if (features.stats.tensorLoadCount > 0 && wmma >= kPolicyDsCapWindowMinWmmas) {
-        out.dsCapWindow1Begin = kPolicyDsCapWindowBegin;
-        out.dsCapWindow1End = kPolicyDsCapWindowEnd;
-        out.dsCapWindowPerCap = kPolicyDsCapWindowPerCap;
+    // ~600-800 cycles after tensor_load issue). Non-TDM kernels keep the cap off.
+    if (features.stats.tensorLoadCount > 0 && wmma >= kPolicyDsCapTdmMinWmmas) {
+        out.dsCapTdmBeginCycles = kPolicyDsCapTdmBeginCycles;
+        out.dsCapTdmEndCycles = kPolicyDsCapTdmEndCycles;
+        out.dsCapTdmPerCap = kPolicyDsCapTdmPerCap;
     }
-    out.dsCapWindowSource = SchedulingKnobSource::Policy;
+    out.dsCapTdmSource = SchedulingKnobSource::Policy;
 
     return out;
 }
@@ -263,18 +262,20 @@ ResolvedSchedulingKnobs resolveSchedulingKnobs(const SchedulingFeatures& feature
         out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::StaticDefault;
     }
 
-    if (overrides.dsCapWindow.has_value()) {
-        out.dsCapWindow1Begin = overrides.dsCapWindow->begin;
-        out.dsCapWindow1End = overrides.dsCapWindow->end;
-        out.dsCapWindowPerCap = overrides.dsCapWindow->perCap;
-        out.dsCapWindowSource = SchedulingKnobSource::User;
-    } else if (!features.stats.degenerate()) {
-        out.dsCapWindow1Begin = proposed.dsCapWindow1Begin;
-        out.dsCapWindow1End = proposed.dsCapWindow1End;
-        out.dsCapWindowPerCap = proposed.dsCapWindowPerCap;
-        out.dsCapWindowSource = SchedulingKnobSource::Policy;
-    } else {
-        out.dsCapWindowSource = SchedulingKnobSource::StaticDefault;
+    // TDM-anchored ds cap: per field, user > policy (non-degenerate) > static (off).
+    {
+        const bool anyUser = overrides.dsCapTdmBeginCycles || overrides.dsCapTdmEndCycles ||
+                             overrides.dsCapTdmPerCap;
+        const bool policy = !features.stats.degenerate();
+        out.dsCapTdmBeginCycles = overrides.dsCapTdmBeginCycles.value_or(
+            policy ? proposed.dsCapTdmBeginCycles : defaults.dsCapTdmBeginCycles);
+        out.dsCapTdmEndCycles = overrides.dsCapTdmEndCycles.value_or(
+            policy ? proposed.dsCapTdmEndCycles : defaults.dsCapTdmEndCycles);
+        out.dsCapTdmPerCap = overrides.dsCapTdmPerCap.value_or(policy ? proposed.dsCapTdmPerCap
+                                                                      : defaults.dsCapTdmPerCap);
+        out.dsCapTdmSource =
+            anyUser ? SchedulingKnobSource::User
+                    : (policy ? SchedulingKnobSource::Policy : SchedulingKnobSource::StaticDefault);
     }
 
     // Diagnostic. Stays -1 when propose() did not run.
@@ -301,9 +302,9 @@ void applyResolvedSchedulingKnobs(PassFeatureConfig& config,
                                   const ResolvedSchedulingKnobs& resolved) {
     config.dagFeatures.dsReadThrottleLatency = resolved.dsReadThrottleLatency;
     config.dagFeatures.dsReadPerCap = resolved.dsReadPerCap;
-    config.dagFeatures.dsCapWindow1Begin = resolved.dsCapWindow1Begin;
-    config.dagFeatures.dsCapWindow1End = resolved.dsCapWindow1End;
-    config.dagFeatures.dsCapWindowPerCap = resolved.dsCapWindowPerCap;
+    config.dagFeatures.dsCapTdmBeginCycles = resolved.dsCapTdmBeginCycles;
+    config.dagFeatures.dsCapTdmEndCycles = resolved.dsCapTdmEndCycles;
+    config.dagFeatures.dsCapTdmPerCap = resolved.dsCapTdmPerCap;
 }
 
 const char* schedulingKnobSourceName(SchedulingKnobSource source) {
@@ -332,9 +333,9 @@ void logResolvedSchedulingKnobs(std::ostream& os, std::string_view moduleName,
        << schedulingKnobSourceName(resolved.dsReadPerCapSource) << ")"
        << " rule3SignalLeadCycles=" << resolved.clusterBarrierRule3SignalLeadCycles << "("
        << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")"
-       << " tensorLoad=" << features.stats.tensorLoadCount << " dsCapWindow=["
-       << resolved.dsCapWindow1Begin << "," << resolved.dsCapWindow1End << ")x"
-       << resolved.dsCapWindowPerCap << "(" << schedulingKnobSourceName(resolved.dsCapWindowSource)
+       << " tensorLoad=" << features.stats.tensorLoadCount << " dsCapTdm=["
+       << resolved.dsCapTdmBeginCycles << "," << resolved.dsCapTdmEndCycles << ")x"
+       << resolved.dsCapTdmPerCap << "(" << schedulingKnobSourceName(resolved.dsCapTdmSource)
        << ")";
     // optimisticDsReadThrottleLatency is this logger's heuristic recompute.
     // policyOptimisticDsReadThrottleLatency is whatever propose() stored.

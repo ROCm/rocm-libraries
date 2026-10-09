@@ -194,9 +194,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                     moduleOptions.BarrierAfterShiftWmmas;
                 passFeatureConfig.dagFeatures.barrierBeforeShiftWmmas =
                     moduleOptions.BarrierBeforeShiftWmmas;
-                // dsCapWindow1*/PerCap come from resolvedKnobs (applyResolvedSchedulingKnobs).
-                passFeatureConfig.dagFeatures.dsCapWindow2Begin = moduleOptions.DsCapWindow2Begin;
-                passFeatureConfig.dagFeatures.dsCapWindow2End = moduleOptions.DsCapWindow2End;
+                // dsCapTdm* come from resolvedKnobs (applyResolvedSchedulingKnobs).
                 passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
                     moduleOptions.DsIssueCapSpanCycles;
                 passFeatureConfig.dagFeatures.dsIssueCapMode =

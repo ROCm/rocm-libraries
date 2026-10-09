@@ -1826,105 +1826,93 @@ TEST_F(DAGSchedulerPassTest, DsIssueCapPeriodic_NonDsSeparatesPeriods) {
     EXPECT_EQ(shape, "WddddWddddWddddW");
 }
 
-// DsCapWindow: inside half-open ranges of the region's issued-WMMA count the ds cap is
-// min(DsCapWindowPerCap, normal cap); outside, the normal cap is untouched.
-// 24 ds_loads and 16 WMMAs; shape string uses 'W' for a WMMA and 'd' for a ds_load.
-struct DsCapWindowArgs {
-    int perCap = 0, cap = 4, b1 = -1, e1 = -1, b2 = -1, e2 = -1;
+// DsCapTdm: while the age of the latest tensor_load issue is in [DsCapTdmBeginCycles,
+// DsCapTdmEndCycles) the ds cap is min(DsCapTdmPerCap, normal cap); outside, the normal cap.
+// 24 ds_loads, 16 WMMAs (8 cycles each) and one tensor_load. Shape: 'W' WMMA, 'd' ds_load,
+// 't' tensor_load.
+struct DsCapTdmArgs {
+    int perCap = 0, cap = 4, begin = -1, end = -1;
 };
 
-// ds_loads issued while the WMMA count is in [b, e) (the same counter the cap reads).
-static std::string dsCapWindowSlice(const std::string& shape, int b, int e) {
+// ds_loads issued while the cycles since the (first) tensor_load are in [b, e), assuming one
+// WMMA = 8 cycles and nothing else costs time between WMMAs.
+static std::string dsCapTdmSlice(const std::string& shape, int b, int e) {
     std::string out;
-    int w = 0;
+    int wmmaSinceTl = -1;  // -1 until the tensor_load
     for (char c : shape) {
-        if (c == 'W')
-            ++w;
-        else if (w >= b && w < e)
-            out += c;
+        if (c == 't') {
+            wmmaSinceTl = 0;
+            continue;
+        }
+        if (wmmaSinceTl < 0) continue;
+        if (c == 'W') ++wmmaSinceTl;
+        if (wmmaSinceTl * 8 >= b && wmmaSinceTl * 8 < e) out += c;
     }
     return out;
 }
 
-static bool dsCapWindowHasBurst(const std::string& shape, int b, int e) {
-    std::string slice;
-    int w = 0;
-    for (char c : shape) {
-        if (c == 'W') {
-            ++w;
-            slice += (w > b && w <= e) ? "|" : "";
-        } else if (w >= b && w < e) {
-            slice += c;
-        }
-    }
-    return slice.find("dd") != std::string::npos;
+TEST_F(DAGSchedulerPassTest, DsCapTdm_ShapeHelpers) {
+    EXPECT_EQ(dsCapTdmSlice("tWddWdW", 8, 16), "Wdd");  // cycles [8,16): after the 1st W
+    EXPECT_EQ(dsCapTdmSlice("WddW", 0, 100), "");       // no tensor_load: nothing anchored
 }
 
-TEST_F(DAGSchedulerPassTest, DsCapWindow_ShapeHelpers) {
-    EXPECT_EQ(dsCapWindowSlice("WddWdW", 1, 2), "dd");
-    EXPECT_TRUE(dsCapWindowHasBurst("WddWdW", 1, 2));
-    EXPECT_FALSE(dsCapWindowHasBurst("WdWdW", 1, 3));
-}
-
-class DsCapWindowTest : public DAGSchedulerPassTest {
+class DsCapTdmTest : public DAGSchedulerPassTest {
    protected:
-    std::string run(const DsCapWindowArgs& a) {
+    std::string run(const DsCapTdmArgs& a) {
         SetUp();
         for (int i = 0; i < 24; i++) createMovableDsLoad(i * 4, 80, i + 1);
         for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(200 + 8 * i, 300 + 8 * i);
+        createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/40);
         runWithDsCapMode(PassFeatureConfig::DsIssueCapMode::Sliding, [&](PassFeatureConfig& p) {
             p.dagFeatures.dsReadPerCap = a.cap;
             p.dagFeatures.dsIssueCapSpanCycles = 8;
             p.dagFeatures.dsReadQueueDepth = 32;
             p.dagFeatures.dsReadThrottleLatency = 1;
-            p.dagFeatures.dsCapWindowPerCap = a.perCap;
-            p.dagFeatures.dsCapWindow1Begin = a.b1;
-            p.dagFeatures.dsCapWindow1End = a.e1;
-            p.dagFeatures.dsCapWindow2Begin = a.b2;
-            p.dagFeatures.dsCapWindow2End = a.e2;
+            p.dagFeatures.dsCapTdmPerCap = a.perCap;
+            p.dagFeatures.dsCapTdmBeginCycles = a.begin;
+            p.dagFeatures.dsCapTdmEndCycles = a.end;
         });
         std::string shape;
-        for (const std::string& m : mnemonicSequence(*bb))
-            shape += m.find("wmma") != std::string::npos ? 'W' : (m == "ds_load_b128" ? 'd' : '?');
+        for (const std::string& m : mnemonicSequence(*bb)) {
+            if (m.find("wmma") != std::string::npos)
+                shape += 'W';
+            else if (m == "ds_load_b128")
+                shape += 'd';
+            else if (m == "tensor_load_to_lds")
+                shape += 't';
+            else
+                shape += '?';
+        }
         return shape;
+    }
+    static bool hasBurst(const std::string& slice) {
+        return slice.find("dd") != std::string::npos;
     }
 };
 
-// (a) Off: windows without PerCap, or PerCap without windows, equal the plain schedule.
-TEST_F(DsCapWindowTest, OffEqualsExistingSchedule) {
+// (a) Off: no PerCap, an empty/unset window, or PerCap 0 all equal the plain schedule.
+TEST_F(DsCapTdmTest, OffEqualsExistingSchedule) {
     const std::string base = run({});
-    EXPECT_EQ(base, "WddddWddddWddddWddddWddddWddddWWWWWWWWWW");
-    EXPECT_EQ(run({0, 4, 4, 8, -1, -1}), base);
-    EXPECT_EQ(run({1, 4, -1, -1, -1, -1}), base);
-    EXPECT_EQ(run({1, 4, -1, 8, -1, -1}), base);  // Begin unset = window unused
+    EXPECT_EQ(std::count(base.begin(), base.end(), 't'), 1) << base;
+    EXPECT_EQ(run({0, 4, 0, 64}), base);
+    EXPECT_EQ(run({1, 4, -1, -1}), base);
+    EXPECT_EQ(run({1, 4, 32, 32}), base);  // empty window
 }
 
-// (b) One window: no adjacent ds_loads inside it; the default pattern resumes after it.
-TEST_F(DsCapWindowTest, OneWindowBreaksUpBursts) {
+// (b) The window is anchored on the tensor_load: no adjacent ds_loads inside it.
+TEST_F(DsCapTdmTest, WindowAfterTensorLoadBreaksUpBursts) {
     const std::string base = run({});
-    const std::string w = run({1, 4, 4, 8, -1, -1});
-    EXPECT_FALSE(dsCapWindowHasBurst(w, 4, 8)) << w;
-    EXPECT_NE(dsCapWindowSlice(w, 4, 8).size(), 0u) << w;
-    // Before the window the schedule is the default one.
-    EXPECT_EQ(w.substr(0, 15), base.substr(0, 15)) << w;
+    const std::string w = run({1, 4, 0, 64});
     EXPECT_NE(w, base);
+    EXPECT_FALSE(hasBurst(dsCapTdmSlice(w, 0, 64))) << w;
     EXPECT_EQ(std::count(w.begin(), w.end(), 'd'), 24);
     EXPECT_EQ(std::count(w.begin(), w.end(), 'W'), 16);
+    EXPECT_EQ(std::count(w.begin(), w.end(), 't'), 1);
 }
 
-// (c) Two windows: both are free of bursts, the stretch between them keeps the normal cap.
-TEST_F(DsCapWindowTest, TwoWindows) {
-    const std::string w = run({1, 4, 2, 4, 10, 12});
-    EXPECT_FALSE(dsCapWindowHasBurst(w, 2, 4)) << w;
-    EXPECT_FALSE(dsCapWindowHasBurst(w, 10, 12)) << w;
-    EXPECT_TRUE(dsCapWindowHasBurst(w, 4, 10)) << w;
-    EXPECT_EQ(std::count(w.begin(), w.end(), 'd'), 24);
-}
-
-// (d) A PerCap above the normal cap never loosens anything.
-TEST_F(DsCapWindowTest, LargerPerCapDoesNotLoosen) {
-    EXPECT_EQ(run({9, 4, 4, 8, -1, -1}), run({}));
-    EXPECT_EQ(run({9, 4, 2, 4, 10, 12}), run({}));
+// (c) A PerCap above the normal cap never loosens anything.
+TEST_F(DsCapTdmTest, LargerPerCapDoesNotLoosen) {
+    EXPECT_EQ(run({9, 4, 0, 64}), run({}));
 }
 
 TEST_F(DAGSchedulerPassTest, DsIssueCapMode_BothModesBoundTheBurst) {

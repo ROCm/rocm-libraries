@@ -591,17 +591,22 @@ class CDNA5ReadyQueue : public ReadyQueue {
         assert(resolved > 0 && "arch config dsIssueCapSpanCycles must be positive");
         return resolved;
     }
-    // Per-pick ds cap limit. Inside a DsCapWindow (a half-open range of
-    // wmmaIssuedCountThisRegion_) the limit is min(DsCapWindowPerCap, normal cap);
-    // elsewhere 0, which means the normal cap.
+    // Per-pick ds cap limit. While the age of the most recent tensor_load issue is in
+    // [DsCapTdmBeginCycles, DsCapTdmEndCycles) the limit is min(DsCapTdmPerCap, normal cap);
+    // elsewhere 0, which means the normal cap. That age window is when the TDM writes LDS and
+    // ds_loads stall. Two anchors, both in scheduler clock_ cycles:
+    //  - dsCapOwnTlClock_: a tensor_load already issued in this region;
+    //  - dsCapTdmCarryAge_: the previous region's tensor_load, aged to this region's start (set
+    //    in onInitRegion from the after-barrier threshold; assumes identical regions).
     int dsCapWindowLimit() const {
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
-        if (f.dsCapWindowPerCap <= 0) return 0;
-        const int w = wmmaIssuedCountThisRegion_;
-        const bool in =
-            (f.dsCapWindow1Begin >= 0 && w >= f.dsCapWindow1Begin && w < f.dsCapWindow1End) ||
-            (f.dsCapWindow2Begin >= 0 && w >= f.dsCapWindow2Begin && w < f.dsCapWindow2End);
-        return in ? std::min(f.dsCapWindowPerCap, dsIssueCap_.depth()) : 0;
+        if (f.dsCapTdmPerCap <= 0 || f.dsCapTdmEndCycles <= f.dsCapTdmBeginCycles) return 0;
+        auto in = [&](int age) {
+            return age >= f.dsCapTdmBeginCycles && age < f.dsCapTdmEndCycles;
+        };
+        const bool carried = dsCapTdmCarryAge_ >= 0 && in(dsCapTdmCarryAge_ + clock_);
+        const bool own = dsCapOwnTlClock_ >= 0 && in(clock_ - dsCapOwnTlClock_);
+        return (carried || own) ? std::min(f.dsCapTdmPerCap, dsIssueCap_.depth()) : 0;
     }
     bool dsCapFull() const {
         return dsIssueCap_.full(dsCapWindowLimit());
@@ -815,6 +820,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     };
 
     int wmmaIssuedCountThisRegion_ = 0;
+    int dsCapOwnTlClock_ = -1;   // clock_ at this region's tensor_load issue; -1 = none yet
+    int dsCapTdmCarryAge_ = -1;  // previous region's tensor_load age at region start; -1 = none
 
     BasicBlock* currentBB_ = nullptr;
     std::vector<Layer2BarrierOverlapCandidate> layer2BarrierOverlapCandidates_;
@@ -1265,6 +1272,7 @@ bool CDNA5ReadyQueue::isValuPickable() const {
 // 2=other, 3=valu), update all scheduling counters, and return the node.
 DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     assert(node != nullptr);
+    if (isTensorLoad(*node->inst)) dsCapOwnTlClock_ = clock_;
     if (pickKind == kGlobalRead) {
         globalReadQueue.erase(node);
         globalReadCounter++;
@@ -2934,6 +2942,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     regionDag_ = &deps.dag;
     carryQueuedWar();
     wmmaIssuedCountThisRegion_ = 0;
+    dsCapOwnTlClock_ = -1;
+    dsCapTdmCarryAge_ = -1;
     lastPickedNode_ = nullptr;
     // SCC chain locks are per-region: chain ids index the prior region's
     // DAGNodeList, and region boundaries are side-effect cuts no reordering
@@ -3514,6 +3524,33 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             shiftGroup(group, shiftFeatures.barrierAfterShiftWmmas);
         for (const auto& group : exclusiveBeforeGroups)
             shiftGroup(group, shiftFeatures.barrierBeforeShiftWmmas);
+
+        // TDM-anchored ds cap: the tensor_load behind an after (tensor_load-feeding) barrier
+        // group issues once that group's barrier wait reaches its (final, shifted) threshold
+        // in WMMAs. Assuming the next region repeats this layout, that tensor_load is
+        // (totalWmma - threshold) WMMA windows old when the next region starts. Only regions
+        // that contain a tensor_load anchor.
+        {
+            bool regionHasTensorLoad = false;
+            for (auto it = regionStart; it != regionEnd && !regionHasTensorLoad; ++it)
+                if (auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr()))
+                    regionHasTensorLoad = isTensorLoad(*inst);
+            int tlWmma = -1;
+            if (regionHasTensorLoad) {
+                for (const auto& group : exclusiveAfterGroups) {
+                    for (StinkyInstruction* barrier : group.barriers) {
+                        if (!isBarrierWait(*barrier)) continue;
+                        auto it = barrierWmmaThresholds_.find(barrier);
+                        if (it != barrierWmmaThresholds_.end())
+                            tlWmma = std::max(tlWmma, it->second);
+                    }
+                }
+            }
+            const int latency = wmmaIssueConfig.latency > 0
+                                    ? wmmaIssueConfig.latency
+                                    : std::max(1, config_.dsIssueCapSpanCycles);
+            if (tlWmma >= 0) dsCapTdmCarryAge_ = std::max(0, totalWmma - tlWmma) * latency;
+        }
 
         // Publish the final, normalized threshold together with each barrier
         // estimator's DS-load demand. Publish once per split-barrier group:

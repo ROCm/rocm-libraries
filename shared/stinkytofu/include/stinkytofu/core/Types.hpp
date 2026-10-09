@@ -142,14 +142,14 @@ struct PassFeatureConfig {
         /// Clamped to [0, region WMMAs]. 0 = off.
         int barrierAfterShiftWmmas = 0;
         int barrierBeforeShiftWmmas = 0;
-        /// Experimental: inside half-open ranges [Begin, End) of the region's issued-WMMA count,
-        /// the ds_load cap is min(dsCapWindowPerCap, normal cap) per span. Window -1 = unused;
-        /// dsCapWindowPerCap 0 = off.
-        int dsCapWindow1Begin = -1;
-        int dsCapWindow1End = -1;
-        int dsCapWindow2Begin = -1;
-        int dsCapWindow2End = -1;
-        int dsCapWindowPerCap = 0;
+        /// TDM-anchored ds cap: while the age of the most recent tensor_load issue (scheduler
+        /// cycles; a tensor_load of the previous region counts, assuming identical regions) is in
+        /// [dsCapTdmBeginCycles, dsCapTdmEndCycles), the ds_load cap is min(dsCapTdmPerCap, normal
+        /// cap) per span. That is the window in which the TDM writes LDS and ds_loads stall.
+        /// dsCapTdmPerCap 0 = off.
+        int dsCapTdmBeginCycles = -1;
+        int dsCapTdmEndCycles = -1;
+        int dsCapTdmPerCap = 0;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
         /// WMMA windows by the region's matrix latency. 0 disables the extra
