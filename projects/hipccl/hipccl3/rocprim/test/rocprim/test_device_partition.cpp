@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,7 @@
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/block/block_load.hpp>
@@ -107,7 +108,22 @@ using RocprimDevicePartitionTestsParams = ::testing::Types<
     DevicePartitionParams<int, int, unsigned int, rocprim::default_config, false, true>,
     DevicePartitionParams<common::custom_huge_type<1024, long long>>>;
 
-TYPED_TEST_SUITE(RocprimDevicePartitionTests, RocprimDevicePartitionTestsParams);
+struct RocprimDevicePartitionTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::input_type>() + "_"
+                        + type_tag<typename Params::output_type>();
+        if constexpr(Params::use_identity_iterator) n += "_Ident";
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDevicePartitionTests,
+                 RocprimDevicePartitionTestsParams,
+                 RocprimDevicePartitionTestsNameGenerator);
 
 TYPED_TEST(RocprimDevicePartitionTests, Flagged)
 {
@@ -1195,12 +1211,20 @@ struct modulo_predicate
 struct RocprimDevicePartitionLargeInputTests : public ::testing::TestWithParam<std::pair<size_t, bool>>
 {};
 
-INSTANTIATE_TEST_SUITE_P(RocprimDevicePartitionLargeInputTest,
-                         RocprimDevicePartitionLargeInputTests,
-                         ::testing::Values(std::make_pair(2, false), // params: size, use_graphs
-                                           std::make_pair(2048, false),
-                                           std::make_pair(38713, false),
-                                           std::make_pair(38713, true)));
+INSTANTIATE_TEST_SUITE_P(
+    RocprimDevicePartitionLargeInputTest,
+    RocprimDevicePartitionLargeInputTests,
+    ::testing::Values(std::make_pair(2, false), // params: size, use_graphs
+                      std::make_pair(2048, false),
+                      std::make_pair(38713, false),
+                      std::make_pair(38713, true)),
+    [](const ::testing::TestParamInfo<RocprimDevicePartitionLargeInputTests::ParamType>& info)
+    {
+        std::string name = "Size" + std::to_string(std::get<0>(info.param));
+        if(std::get<1>(info.param))
+            name += "Graphs";
+        return name;
+    });
 
 TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartition)
 {

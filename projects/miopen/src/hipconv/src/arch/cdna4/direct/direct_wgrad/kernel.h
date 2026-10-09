@@ -181,12 +181,17 @@ inline bool serves(const ConvParams& par, const Config& cfg)
            par.filters_per_group() == cfg.group_k();
 }
 
-// Whether this entry's filter and group shape fit the layer, before the packing narrows further.
+// Whether this entry's element width, filter and group shape fit the layer, before the packing
+// narrows further.
 //
 // Field compares only. is_valid_config leads with these because they reject most of the table,
 // and what follows them is per-layer work that would otherwise run once per entry.
 inline bool fits_the_layer(const ConvParams& par, const Config& cfg)
 {
+    // The two tables are partitioned by the operand's type, not its width: sizeof is 4 for fp32
+    // as well as tf32.
+    if((par.input_type == DataType::tf32) != cfg.is_tf32())
+        return false;
     return cfg.kh == par.kh && cfg.kw == par.kw && serves(par, cfg);
 }
 
@@ -220,11 +225,14 @@ struct WindowBytes
 
 inline WindowBytes window_bytes(const ConvParams& par, int s_rows, int delta_rows)
 {
-    const int64_t images  = preferred_unfold_n(par);
-    const int64_t s_row   = int64_t{par.w} * par.groups * par.channels_per_group() * 2;
-    const int64_t d_row   = int64_t{par.q} * par.groups * par.filters_per_group() * 2;
-    const int64_t s_count = s_rows > 0 ? s_rows : images * par.h;
-    const int64_t d_count = delta_rows > 0 ? delta_rows : images * par.p;
+    const int64_t images = preferred_unfold_n(par);
+    // The operands' own width, which is 4 for tf32: what has to fit 32 bits is the buffer
+    // descriptor's window, and that is measured on the fp32 the loader fetches.
+    const int64_t elem_bytes = static_cast<int64_t>(sizeof_data_type(par.input_type));
+    const int64_t s_row      = int64_t{par.w} * par.groups * par.channels_per_group() * elem_bytes;
+    const int64_t d_row      = int64_t{par.q} * par.groups * par.filters_per_group() * elem_bytes;
+    const int64_t s_count    = s_rows > 0 ? s_rows : images * par.h;
+    const int64_t d_count    = delta_rows > 0 ? delta_rows : images * par.p;
     return {s_count * s_row, d_count * d_row};
 }
 
@@ -412,6 +420,10 @@ __device__ void conv2d_direct_wgrad_impl(const ToType<DT>* __restrict__ in,
 
             DeltaRegRing<cfg, DT> delta_regs;
 
+            // The rows in flight, on the tf32 path: fetched one iteration, split and written
+            // the next. Empty on the 16-bit path, whose DMA writes LDS itself.
+            RowStage<cfg, DT> stage;
+
             // Zeroed rather than folded into a three-operand mma.
             //
             // Folding needs the segment's first entry peeled, which instantiates the row loop
@@ -450,7 +462,8 @@ __device__ void conv2d_direct_wgrad_impl(const ToType<DT>* __restrict__ in,
                                                            sched.tile_origin(0),
                                                            sched.delta_tile_rows());
 
-                run_prologue<cfg, DT>(slot.load_wave,
+                run_prologue<cfg, DT>(wave_group,
+                                      slot.load_wave,
                                       slot.item,
                                       sched,
                                       s_loader,
@@ -459,6 +472,7 @@ __device__ void conv2d_direct_wgrad_impl(const ToType<DT>* __restrict__ in,
                                       delta_ring,
                                       scratch,
                                       k_base,
+                                      stage,
                                       delta_regs);
 
                 run_main_loop<cfg, DT, /*FirstTouch=*/false>(wave_group,
@@ -472,6 +486,7 @@ __device__ void conv2d_direct_wgrad_impl(const ToType<DT>* __restrict__ in,
                                                              c_base,
                                                              k_base,
                                                              delta_regs,
+                                                             stage,
                                                              acc);
 
                 // On to this wave's entry of the next round.
@@ -569,7 +584,9 @@ void launch_impl(const LaunchParams& lp,
                 par.pad_h,
                 par.pad_w);
     };
-    if(par.input_type == DataType::bf16)
+    if constexpr(cfg.is_tf32())
+        typed_launch.template operator()<DataType::tf32>();
+    else if(par.input_type == DataType::bf16)
         typed_launch.template operator()<DataType::bf16>();
     else
         typed_launch.template operator()<DataType::fp16>();
@@ -602,10 +619,13 @@ public:
     // That base serves the fprop/dgrad families and rejects Wgrad outright.
     bool is_applicable(const ConvParams& par) const override
     {
-        // S and Delta are fp16 or bf16 and share a type; dW is fp32.
-        if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
-            return false;
-        if(par.weight_type != par.input_type || par.output_grad_type() != par.input_type)
+        const bool ok_16bit =
+            (par.input_type == DataType::fp16 || par.input_type == DataType::bf16) &&
+            par.weight_type == par.input_type && par.output_grad_type() == par.input_type;
+        const bool ok_tf32 = par.input_type == DataType::tf32 &&
+                             par.weight_type == DataType::tf32 &&
+                             par.output_grad_type() == DataType::fp32;
+        if(!ok_16bit && !ok_tf32)
             return false;
         if(par.weight_grad_type != DataType::fp32)
             return false;
@@ -614,8 +634,10 @@ public:
         if(par.direction != Direction::Wgrad)
             return false;
         // The global reader requires a 4-byte multiple on the last dimension.
-        // At 16 bits per element that makes both channel counts even.
-        if(par.channels_per_group() % 2 != 0 || par.filters_per_group() % 2 != 0)
+        // At 16 bits per element that makes both channel counts even; a 4-byte element meets it
+        // whatever the count.
+        if(sizeof_data_type(par.input_type) == 2 &&
+           (par.channels_per_group() % 2 != 0 || par.filters_per_group() % 2 != 0))
             return false;
         if(par.stride_h != 1 || par.stride_w != 1)
             return false;

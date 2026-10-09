@@ -48,6 +48,8 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
     {
         cmd.push_back(o);
     }
+    // Assemble only: linking writes a.out into the working directory, which may be read-only.
+    cmd.insert(cmd.end(), {"-c", "-o", nullDevicePath()});
     cmd.push_back("-");
     std::vector<char*> args(cmd.size());
     std::transform(cmd.begin(), cmd.end(), args.begin(), [](auto& str) { return &str[0]; });

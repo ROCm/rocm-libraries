@@ -232,7 +232,7 @@ Source-correlated trace:
 ```bash
 export ROCPROF_TRACE_DECODER_LIB=<dir containing librocprof-trace-decoder.so>
 python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_trace.py \
-    --output-dir ./att_out --kernel-regex "rocke_bench_igemm_wgrad.*kouter_spkrt" \
+    --output-dir ./att_out --kernel-regex "rocke_bench_igemm_wgrad.*kouter_spk" \
     -- python3 <single-config driver>
 ```
 

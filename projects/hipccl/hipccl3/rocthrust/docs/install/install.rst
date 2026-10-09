@@ -34,19 +34,19 @@ Install ROCm primitives libraries on Linux
 
 Alternatively, if you want to install rocThrust as part of the ROCm
 CCL package (a subset of the ROCm Core SDK ``amdrocm-core-sdk``) without
-additional ROCm libraries and tools, install the ``amdrocm-ccl`` package.
+additional ROCm libraries and tools, install the ``amdrocm-hipccl`` package.
 This includes rocThrust, hipCUB, and rocPRIM.
 
 1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
    install dependencies and configure GPU access permissions.
 
-2. Install the ROCm CCL package that matches your desired ROCm version,
+2. Install the hipCCL package that matches your desired ROCm version,
    development package needs, and AMD GPU architecture. Package names use the
    following format:
 
    .. code-block:: shell-session
 
-      amdrocm-ccl<dev/devel><rocm_version>-<llvm_target>
+      amdrocm-hipccl<dev/devel><rocm_version>-<llvm_target>
 
    Where:
 
@@ -73,19 +73,19 @@ This includes rocThrust, hipCUB, and rocPRIM.
 
          .. code-block:: bash
 
-            sudo apt install amdrocm-ccl-dev
+            sudo apt install amdrocm-hipccl-dev
 
       .. tab-item:: RHEL-based distros
 
          .. code-block:: bash
 
-            sudo dnf install amdrocm-ccl-devel
+            sudo dnf install amdrocm-hipccl-devel
 
       .. tab-item:: SLES
 
          .. code-block:: bash
 
-            sudo zypper install amdrocm-ccl-devel
+            sudo zypper install amdrocm-hipccl-devel
 
 .. _install-nightly:
 
