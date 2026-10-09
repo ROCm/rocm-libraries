@@ -73,8 +73,10 @@ namespace rocsparse
             // Column index currently being processes
             J local_col = csr_col_ind[j] - idx_base;
 
-            // Corresponding value
-            T local_val = rocsparse::load_done_row_data(&csr_val[j]);
+            // Corresponding value. With non-coherent XCD L2s it is read after the spin loop.
+            T local_val = rocsparse::has_noncoherent_xcd_l2
+                              ? static_cast<T>(0)
+                              : rocsparse::load_done_row_data(&csr_val[j]);
 
             // End of the row that corresponds to local_col
             I local_end = csr_row_ptr[local_col + 1] - idx_base;
@@ -93,6 +95,14 @@ namespace rocsparse
 
             // Read the results of the dependencies only after their done flags
             rocsparse::acquire_done_rows();
+
+            // Earlier columns may have updated entry j with device scope stores, which have to
+            // complete before it is read back.
+            if constexpr(rocsparse::has_noncoherent_xcd_l2)
+            {
+                rocsparse::wait_store_completion();
+                local_val = rocsparse::load_done_row_data(&csr_val[j]);
+            }
 
             // Load diagonal entry
             T diag_val = rocsparse::load_done_row_data(&csr_val[local_diag]);
@@ -148,6 +158,13 @@ namespace rocsparse
         }
 
         __threadfence_block();
+
+        // The updates of the diagonal entry are device scope stores, which have to complete
+        // before it is read back.
+        if constexpr(rocsparse::has_noncoherent_xcd_l2)
+        {
+            rocsparse::wait_store_completion();
+        }
 
         const bool is_diag = (row_diag >= 0);
         if(is_diag)
