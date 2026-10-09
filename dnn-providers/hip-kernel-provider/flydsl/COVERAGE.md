@@ -456,7 +456,7 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64, non-causal 128 without a bias and the generic tier up to 64, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 66 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
 | **gfx12-generic** | the same table, built from the same sources for RDNA4 | **144** | shipped; GPU suites pass on gfx1201 |
 | **Total, both families** | | **288** | |
-| SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias` | 30 on gfx950, 12 on gfx942 | shipped; GPU suites pass on both |
+| SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias`; companion tiers (§7.6); the MLA objects by `head_dim_v` and `qk_mask` | 48 on gfx950, 58 on gfx942 | shipped; GPU suites pass on both |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime
 feature, is part of adding the feature.
@@ -499,6 +499,8 @@ and f16, the default tier first:
 | gfx950 bias | 64, 128 | `dualwave` | `dualwave` (+ offset-0 build at 128) |
 | gfx950 bias | 256 | `generic` 128, one wave per SIMD | the same |
 | gfx942 bias | 64, 128, 256 | `generic` 128 | the same (at 128 without KV global prefetch) |
+| gfx950 MLA | Q/K up to 256 (multiples of 16), V 128 | `generic` 128 with a Q/K mask (`qk_mask`, `head_dim_v` 128), one wave per SIMD | the same |
+| gfx942 MLA | Q/K up to 256 (multiples of 16), V 128 | `generic` 128 with a Q/K mask | the same |
 
 The dual-wave kernel takes `head_dim` 64 and 128 only, so gfx950's 256 comes from the
 generic kernel, which at that width holds its tile without spilling only with the
@@ -515,7 +517,8 @@ baked field at a time (§7.3).
 | Baked per object | Runtime kernel argument |
 |---|---|
 | dtype (`bf16`, `f16`) | batch |
-| `head_dim` (64, 128, 256) | query and key lengths, independently |
+| `head_dim` (64, 128, 256), or a 256 bucket whose Q/K width is runtime (`qk_mask`) | query and key lengths, independently; the Q/K head dim under `qk_mask` |
+| V's head dim (`head_dim_v`: `head_dim`'s, or 128 on the MLA objects) | V's strides, apart from K's |
 | causal, or none | the causal diagonal: top-left, bottom-right, a band to its right; a sliding window's lower edge (generic kernel) |
 | | query and KV head counts (MHA, GQA, MQA) |
 | | every operand's (batch, sequence, head) strides: BSHD, BHSD, packed QKV |
@@ -552,10 +555,10 @@ One SDPA-forward node, and:
 
 | Condition | Why |
 |---|---|
-| Q, K, V, O rank 4, device operands, **not ragged**; head-dim stride 1; every other stride on an axis longer than 1 positive and a multiple of 8 elements; K and V with the same strides; one (batch, head) slice of each within 32-bit addressing | The batch, sequence and head strides are kernel arguments, so BSHD, BHSD and packed-QKV views are served; each lane moves 16-byte vectors; the kernels take one stride set for K and V; each slice is one buffer view, whose record count is 32-bit. |
+| Q, K, V, O rank 4, device operands, **not ragged**; head-dim stride 1; every other stride on an axis longer than 1 positive and a multiple of 8 elements; K and V with the same strides unless V is narrower (the MLA objects take V's own); one (batch, head) slice of each within 32-bit addressing | The batch, sequence and head strides are kernel arguments, so BSHD, BHSD and packed-QKV views are served; each lane moves 16-byte vectors; the kernels take one stride set for K and V; each slice is one buffer view, whose record count is 32-bit. |
 | One dtype for all four, `bf16` or `f16` | One object per dtype. |
-| `Hq % Hk == 0`; V shaped as K, O as Q | The kernels have one head dimension and do not broadcast. |
-| `head_dim` equal to an object's baked value | Checked by the kernel matcher against each candidate's metadata. |
+| `Hq % Hk == 0`; V shaped as K but for a head dim at most K's, O as Q with V's head dim | The kernels do not broadcast; V's head dim is its own only on the MLA objects (modification 13). |
+| `head_dim` equal to an object's baked value, or, on a `qk_mask` object, a multiple of 16 up to its bucket; V's head dim equal to the object's `head_dim_v` | Checked by the kernel matcher against each candidate's metadata. A masked K load zeroes whole 16-column vectors. |
 | No mask, or `right_bound` ≥ 0 at either alignment (or the deprecated causal booleans), with a diagonal offset `align + right_bound` of at most `Skv − Sq`; a `left_bound` only with a right one | The kernels apply the reference's rule, key `j` visible from query row `i` iff `i + align − left ≤ j ≤ i + offset`, with `align` 0 top-left and `Skv − Sq` bottom-right. The causal objects mask the last KV tile's padding with the same compare, which holds only while every row's diagonal stays inside the keys: so bottom-right is served at any lengths, top-left when `Sq ≤ Skv`, and a band only as far as `Skv − Sq`. A sliding window (`left_bound`) runs on the generic kernel only (modification 11) -- on gfx950 its causal tiers beside the dual-wave objects; a window no row reaches is no window. |
 | Scale: `attn_scale_value` (> 0), a pass-by-value scalar tensor, or absent | Absent is `1/√head_dim`, the reference's default. The running max is over unscaled scores, which orders them correctly only for a positive scale. |
 | Key length a multiple of 64, for a `kv_align` 64 object | That object does not mask the last KV tile. |
@@ -583,6 +586,7 @@ against the coverage it buys. In order:
 | ~~`head_dim` 64 and 256, f16~~ | Done: rows in the instance table. Other head dims need the generic kernel's row loads generalised past powers of two. 256 on gfx942 followed with unpadded LDS tiles (modification 9). |
 | Varlen, paged KV | Both kernels already take cumulative sequence offsets and a block table, passed unused today. |
 | ~~Additive bias~~ | Done: the dual-wave kernel's (modification 8), and the generic kernel's (modification 12) for gfx942 and gfx950's `head_dim` 256. f32 bias and misaligned rows need a conversion or unaligned path. |
+| ~~V head dim ≠ Q/K (MLA prefill)~~ | Done on the generic kernel (modification 13): V's own strides, a baked `head_dim_v`, and a runtime Q/K width masked to zero past it within a 256 bucket. The same masks are the route to every other Q/K head dim that is a multiple of 16 (bucket objects at 64/128/256 with V equal), not yet shipped. Absorbed MLA (576/512, one KV head) needs head dims past 256 and a decode path. |
 
 The instance set is then chosen by the provider's AOT selection process (build
 every candidate, tune, cover, prune) rather than by hand -- done for the features
@@ -653,6 +657,18 @@ the harness's own bias. The measurements are kept outside the repository.
    a window-free causal build beside the windowed one would remove it. Also: gfx950
    windows run on the generic kernel at about half the dual-wave kernel's speed --
    a window start in the dual-wave pipeline would recover it.
+9. *V's own strides on the generic objects* (modification 13). Every generic object
+   now addresses V through its own batch, head and token strides. Measured against the
+   objects before it: neutral on the gfx942 tiers but the `head_dim` 128 causal one
+   without KV global prefetch (a fraction of a percent slower, consistently); on gfx950
+   the `head_dim` 256 non-causal default got slightly faster and the 64-row companions
+   slightly slower (up to about a percent). A shared-stride build for the graphs whose
+   K and V match (all but MLA) would remove it.
+10. *The MLA objects stage V at the Q/K bucket's width.* V is loaded and transposed
+    256 columns wide where 128 are used, and Q/K at 192 run a 256-wide QK product. A
+    V-width load mapping and a 192-wide build (a new K swizzle and row mapping, since
+    192 is not a power of two) would recover both, once a model's prefill time
+    justifies it.
 
 ### 7.6 How the instance set was chosen
 
