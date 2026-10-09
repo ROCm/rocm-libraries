@@ -309,7 +309,10 @@ def test_halfplr_streamk_rejects_non_stinkytofu_sia(
 def test_halfplr_rejects_use_subtile_impl(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
 ):
-    sol, out = _derive(gfx1250_iim, assembler, capsys, UseSubtileImpl=True)
+    # bf16: wave32 subtile rejects 8-bit operands before this guard is reached.
+    sol, out = _derive(gfx1250_iim, assembler, capsys, UseSubtileImpl=True,
+                       ProblemType={"DataType": "B", "DestDataType": "B"},
+                       mi=[16, 16, 32, 1, 1, 2, 2, 2, 2], DepthU=128)
     assert sol.get("Valid") is False
     assert "HalfPLR is not supported with UseSubtileImpl" in out
 

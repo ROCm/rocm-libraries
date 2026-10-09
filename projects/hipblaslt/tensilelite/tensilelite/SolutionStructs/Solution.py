@@ -1253,6 +1253,15 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason,
                "UseSubtileImpl=1 MX TLU=1 requires a power-of-two DepthU")
 
+      abTypes = [state["ProblemType"][f"DataType{tc}"] for tc in ('A', 'B')]
+      if state["WavefrontSize"] == 32 and not all(t.isBFloat16() or t.isHalf() for t in abTypes):
+        # Only AB_B16_W32 models the wave32 WMMA operand layout.  The 8/6/4-bit
+        # geometries (and the MX scale layout) are the gfx950 wave64 MFMA ones:
+        # fp8 emits operands of the wrong width and MX fp4 computes a wrong D.
+        reject(state, printRejectionReason,
+               "UseSubtileImpl=1 with WavefrontSize 32 is implemented only for bf16/fp16, not A/B = %s/%s"
+               % tuple(abTypes))
+
       for tc in ('A', 'B'):
         dtype = state["ProblemType"][f"DataType{tc}"]
         tlu = state["ProblemType"][f"TLU{tc}"]

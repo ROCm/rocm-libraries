@@ -184,7 +184,7 @@ def _make_params(gfx1250_iim, **overrides):
     isa = gfxToIsa("gfx1250")
     # [M, N, K, B, ?, MIWaveTile0, MIWaveTile1, WaveGroup0, WaveGroup1]
     # -> MacroTile 64x256, NumWaves 4.
-    mi = [16, 16, 128, 1, 1, 2, 8, 2, 2]
+    mi = overrides.pop("mi", [16, 16, 128, 1, 1, 2, 8, 2, 2])
     pt = overrides.pop("ProblemType", {})
     problem_type = {
         "OperationType": "GEMM",
@@ -454,8 +454,12 @@ def test_rap_k_predicates_admit_a_range_of_whole_ktiles(
         ),
         pytest.param(
             # Asked with PAP off, or the subtile path's own gfx950 audit gate
-            # rejects first and this guard is never reached.
-            {"UseSubtileImpl": True, "PrefetchAcrossPersistent": 0},
+            # rejects first and this guard is never reached.  bf16 because
+            # wave32 subtile rejects 8-bit operands first.
+            {"UseSubtileImpl": True, "PrefetchAcrossPersistent": 0,
+             "ProblemType": {"DataType": "B", "DestDataType": "B"},
+             "mi": [16, 16, 32, 1, 1, 2, 8, 2, 2],
+             "DepthU": 64, "AssertSummationElementMultiple": 64},
             "ReuseAcrossPersistent is not implemented for the subtile path",
             id="with_subtile",
         ),
