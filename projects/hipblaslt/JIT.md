@@ -112,7 +112,7 @@ code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
 - Assembly: `AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE`. A unit's
   `.amdgcn_target` directive must name the device's processor and only
   features the device has; it is then rewritten to the device's full target
-  ID. Assembly units that declare different wavefront sizes are rejected. An
+  ID. The main kernel's declared wavefront size is the one the assembler uses. An
   `Executable` build also accepts a main kernel already assembled into a
   `Relocatable`.
 - HIP source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with

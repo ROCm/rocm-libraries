@@ -37,7 +37,6 @@ namespace hipblaslt_jit
         Generate,
         Build,
         Support,
-        Load,
         Lookup,
         Publish,
     };
@@ -292,13 +291,13 @@ namespace hipblaslt_jit
         // Throws std::invalid_argument when a component is missing.
         explicit Jit(Components components);
 
-        // Generate, build, check support with supportingSolutions, then
-        // publish to the store. Returns the library indices of at most count
-        // published solutions that support the request, best first; JitLibrary
-        // is the only place they live, and nothing is loaded in process. A
-        // bundle whose build, support check or publish fails adds a failure
-        // and contributes no solution. Thread-safe. Sets the stage of every
-        // failure it reports.
+        // Generate, check each bundle's solutions with supportingSolutions,
+        // build, then publish to the store. Returns the library indices of at
+        // most count published solutions that support the request, best first;
+        // JitLibrary is the only place they live, and nothing is loaded in
+        // process. A bundle whose support check, build or publish fails adds a
+        // failure and contributes no solution. Thread-safe. Sets the stage of
+        // every failure it reports.
         Outcome generate(const GemmRequest&         request,
                          const DeviceTarget&             target,
                          size_t                          count,
