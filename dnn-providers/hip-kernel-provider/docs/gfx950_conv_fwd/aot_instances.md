@@ -54,7 +54,7 @@ engine; all share `kernel_family` 1 and the same forward ABI:
 That is 5,298 identities per dtype. `make_conv_aot_config.py` accepts every one of them
 (`PACKAGED_DIRECT_ALGORITHMS`, checked by the direct sweep's own round trip
 `direct_job_for_identity`). The exact-shape engine's direct launch runs only `std` and
-`spatial`, and the shipped catalog holds only those two so far (see
+`spatial`; the shipped catalog holds all six (see
 [The shipped catalog](#the-shipped-catalog)).
 
 A direct binary bakes the filter, stride, padding and dilation, plus its variant's block
@@ -233,37 +233,58 @@ together:
 
 ## The shipped catalog
 
-`hipkernel:Gfx950ConvFwdAot` ships rocKE's full forward sweep for gfx950 with no
-selection of ours. The only limits are the sweeps' own validity checks and, for
-direct kernels, which algorithms the packaged launch runs. The catalog is listed
-per dtype in `projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd_aot_<dtype>.instances.json`:
+`hipkernel:Gfx950ConvFwdAot` ships rocKE's forward sweep for gfx950, less one
+exclusion policy for implicit GEMM. The other limits are the sweeps' own validity
+checks and, for direct kernels, which algorithms the packaged launch runs. The catalog
+is listed per dtype in `projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd_aot_<dtype>.instances.json`:
 
 | Family | fp16 | bf16 |
 |---|---:|---:|
-| Implicit GEMM | 78,940 | 78,940 |
-| Direct depthwise, `std` | 54 | 54 |
-| Direct depthwise, `spatial` | 30 | 30 |
-| **Total** | **79,024** | **79,024** |
+| Implicit GEMM | 20,412 | 20,412 |
+| Direct (all six algorithms) | 5,298 | 5,298 |
+| **Total** | **25,710** | **25,710** |
 
-158,048 instances in all. `tools/enumerate_conv_aot_instances.py` writes the lists.
+51,420 instances in all. `tools/enumerate_conv_aot_instances.py` writes the lists.
 
 **Implicit GEMM** is every valid identity of the AOT sweep's gfx950 forward grid
-(`kernel_sweep.py`): its 620 tile and warp geometries, the `mem`, `compv3` and
-`compv4` pipelines, the `default` and `cshuffle` epilogues, every load and store width
-it builds, and the plain, unrolled and async DMA K loops with each async chunk pair.
-Every one of them converts; an identity the converter refused would fail the
-enumeration rather than be dropped. Identities whose kernels compile to the same IR are
-still separate instances, each with its own `instance_id`: 69,402 of the 78,940 per
-dtype have distinct IR.
+(`kernel_sweep.py`) that the exclusion policy keeps (`excluded_reason`): its 620 tile
+and warp geometries, the `mem`, `compv3` and `compv4` pipelines, the `default` and
+`cshuffle` epilogues, and the plain and unrolled K loops, in these load and store
+widths (`PACKAGED_VECTOR_WIDTHS`; the A and B load widths are always equal):
+
+| Epilogue | Load/store widths shipped |
+|---|---|
+| `cshuffle` | 1/1/4, 2/2/2, 4/4/4, 8/8/8 |
+| `default` | 1/1/1, 4/4/1 |
+
+The sweep's 78,940 identities per dtype lose:
+
+| Excluded | Why |
+|---|---|
+| The async DMA K loop (every chunk pair) | 12,160 per dtype, and three in four of them compile to the IR of another async instance. |
+| Every other width pair, e.g. 8/8/4, 4/4/2, 8/8/1 | The runtime selection keeps only the widest pair that serves a graph, so these mostly add build cost; a graph falls back to the next pair down the list above. |
+| `cshuffle` with a store width of 1 | A graph whose K/groups is odd runs the `default` epilogue instead. |
+
+Every kept identity converts; an identity the converter refused would fail the
+enumeration rather than be dropped. No two shipped instances compile to the same IR, up
+to the symbol, so the catalog needs no IR deduplication.
+
+What the exclusions cost a graph: no problem class loses its last implicit-GEMM
+instance (`test_the_catalog_serves_every_problem_class`), but some lose wider loads.
+A graph whose K/groups is odd runs only the `default` epilogue's 1/1/1 and 4/4/1. 8-wide
+A/B loads need both C/groups and K/groups divisible by 8. And a K/groups of 2 mod 4 caps
+`cshuffle` at 2/2/2.
 
 **Direct** is every forward identity of the direct sweep (`direct_kernel_sweep.py`)
-that `make_conv_aot_config.py` accepts. Today that is the 54 `std` and 30 `spatial`
-depthwise identities per dtype. The sweep's other forward direct algorithms (tiled and
-column depthwise, grouped and non-grouped; 5,214 identities per dtype) have no packaged
-launch yet, and the tool reports them by algorithm with the converter's reason. Once
-the converter accepts them, rerunning the tool adds them with no change to the tool.
+that `make_conv_aot_config.py` accepts, which today is all six algorithms (see
+[Direct instances](#direct-instances)). An identity of an algorithm the converter
+refuses is reported by algorithm with the converter's reason; once the converter
+accepts it, rerunning the tool adds it with no change to the tool.
 
-Which instances serve a given problem is decided at runtime, not by the catalog.
+Which instances serve a given problem is decided at runtime, not by the catalog. For the
+GPU suite's graphs the engine selects 2,652 implicit-GEMM candidates per dtype for a
+dense graph with C and K divisible by 8, 3,336 to 3,720 for narrower channels and
+3,720 for depthwise (`aotGraphs()` in `IntegrationGpuGfx950ConvFwd.cpp`).
 
 The lists are compact: one identity per line, holding only the fields that have no
 plain default or that differ from it. `KernelIdentity.from_dict` restores the rest, and
@@ -279,18 +300,20 @@ for the direct instances (`make_conv_aot_config.py --sharding k-loop`, the defau
 
 | KDP shard, per dtype | Instances |
 |---|---:|
-| `gfx950_conv_fwd_aot_<dtype>_mem_plain`, `_mem_unroll` | 11,130 each |
-| `gfx950_conv_fwd_aot_<dtype>_mem_async` | 12,160 |
-| `gfx950_conv_fwd_aot_<dtype>_compv3_plain`, `_compv3_unroll` | 11,130 each |
-| `gfx950_conv_fwd_aot_<dtype>_compv4_plain`, `_compv4_unroll` | 11,130 each |
-| `gfx950_conv_fwd_aot_<dtype>_direct` | 84 |
+| `gfx950_conv_fwd_aot_<dtype>_mem_plain`, `_mem_unroll` | 3,402 each |
+| `gfx950_conv_fwd_aot_<dtype>_compv3_plain`, `_compv3_unroll` | 3,402 each |
+| `gfx950_conv_fwd_aot_<dtype>_compv4_plain`, `_compv4_unroll` | 3,402 each |
+| `gfx950_conv_fwd_aot_<dtype>_direct` | 5,298 |
+
+The async DMA K loop is excluded from the catalog, so there is no `mem_async` shard.
 
 The packs declare no `discriminator`, so they are shards of one catalog: the engine's
 graph matcher and the one shared kernel matcher admit all of them, and there is no
 operation-scoped matcher (the IngestorGenerator README, "UMD policy"). Each authored
-implicit-GEMM shard is about 19 to 20 MB, and each instance list about 31 MB. The census
-`TestGfx950ConvFwdAotPacks.cpp` lists every pack and kernel name exactly, at about
-12 MB. The test-only seed keeps one pack per dtype (`--sharding dtype`).
+implicit-GEMM shard is about 5.7 MB, each direct shard about 14 MB, and each instance
+list about 11 MB. The census `TestGfx950ConvFwdAotPacks.cpp` lists every pack and kernel
+name exactly, at about 3.9 MB. The test-only seed keeps one pack per dtype
+(`--sharding dtype`).
 
 ### Regenerating the bundle
 
@@ -331,7 +354,8 @@ regenerates it from the lists on every run. The tests hold the pieces together:
 
 - `tests/test_enumerate_conv_aot_instances.py` fails when the lists are not what the
   tool enumerates from the rocKE tree beside it, or when the implicit-GEMM catalog is
-  not exactly what `kernel_sweep` enumerates.
+  not exactly what `kernel_sweep` enumerates less the identities `excluded_reason`
+  names. It also fails when an exclusion rule drops nothing, and it checks each rule.
 - `tests/test_make_conv_aot_config.py` fails when a shipped shard is not exactly the
   lists' instances of its shard, with instance-derived ids, or when a committed file is
   50 MB or larger. It also fails when a problem class loses its last implicit-GEMM
@@ -346,23 +370,31 @@ current sources.
 
 ### Build and package cost
 
-The product pack compiles every instance, about 159,000 variants with the other
-product bundles. On one host with 96 pack workers
-(`-DHIPKERNELPROVIDER_PRODUCT_PACK_JOBS=96`):
+The product pack compiles every instance, 51,420 variants for this engine. The
+committed files measure:
 
 | Artifact | Size |
 |---|---:|
-| Instance list, each dtype (committed) | about 31 MB |
-| Authored implicit-GEMM KDP shard, each (committed) | about 19 to 20 MB |
-| Authored direct KDP shard, each (committed) | about 0.2 MB |
-| Census `TestGfx950ConvFwdAotPacks.cpp` (committed) | about 12 MB |
-| gfx950 kpack archive (build output, all product bundles) | about 1.3 GB |
-| Packed implicit-GEMM KDP shard, each (build output) | about 40 to 44 MB |
-| Provenance sidecar, each implicit-GEMM shard (build output) | about 4.2 to 4.6 MB, 110 to 120 MB inflated |
+| Instance list, each dtype | about 11 MB |
+| Authored implicit-GEMM KDP shard, each | about 5.7 MB |
+| Authored direct KDP shard, each | about 14 MB |
+| Census `TestGfx950ConvFwdAotPacks.cpp` | about 3.9 MB |
 
-Packing all product bundles takes about 7 minutes with a warm comgr cache and about
-23 minutes with an empty one; the comgr cache grows to about 14 GB. The packer holds
-every code object in memory before it writes the archive, so it peaks at about 16 GB
+The build figures below were measured for the earlier catalog, rocKE's whole forward
+sweep with only the std and spatial direct kernels (about 159,000 variants with the
+other product bundles), on one host with 96 pack workers
+(`-DHIPKERNELPROVIDER_PRODUCT_PACK_JOBS=96`). They have not been re-measured for this
+catalog, which has about a third as many instances:
+
+| Build output (earlier catalog) | Size |
+|---|---:|
+| gfx950 kpack archive (all product bundles) | about 1.3 GB |
+| Packed implicit-GEMM KDP shard, each | about 40 to 44 MB |
+| Provenance sidecar, each implicit-GEMM shard | about 4.2 to 4.6 MB, 110 to 120 MB inflated |
+
+Packing all product bundles took about 7 minutes with a warm comgr cache and about
+23 minutes with an empty one; the comgr cache grew to about 14 GB. The packer holds
+every code object in memory before it writes the archive, so it peaked at about 16 GB
 of resident memory. `HIPKERNELPROVIDER_PRODUCT_PACK_JOBS` sets the worker count of the
 production pack alone (empty, the default, lets the packer size its pool to the
 machine). The test roots keep their own small, fixed pools. The census compiles in
@@ -407,10 +439,14 @@ per dtype, covering:
 - the `mem`, `compv3` and `compv4` pipelines;
 - `unroll_k` and `async_dma`.
 
+8/8/4, 4/4/2, `cshuffle` 2/2/1 and `async_dma` are outside the shipped catalog (see
+[The shipped catalog](#the-shipped-catalog)). The seed keeps them so that the native
+launch's handling of them stays tested.
+
 `tests/test_make_conv_aot_config.py` checks that the seed holds every pipeline,
 epilogue, K loop, load width and store width of the shipped catalog, in each dtype. The
-catalog's other width pairs and async chunk pairs run the same launch with other
-arguments; rocKE's packaging test checks the IR of every one of those classes.
+catalog's other width pairs run the same launch with other arguments; rocKE's packaging
+test checks the IR of every width, K loop and async chunk class of the sweep.
 
 It also has 92 direct instances per dtype. 4 are std and spatial: std 3x3 stride 1
 (`block_w` 4, one wave), std 5x5 stride 2 (`block_w` 16, two waves), spatial 3x3
