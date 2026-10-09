@@ -20,7 +20,7 @@ from codegen.generator import (
     emitted_inventory,
     mint_ids,
 )
-from codegen.models import DEFAULT_FIXTURE_ARCH, KmdField
+from codegen.models import DEFAULT_FIXTURE_ARCH, KernelSource, KmdField
 from tests.helpers import make_engine, make_kernel, make_minimal_config, make_pack
 
 
@@ -1714,3 +1714,32 @@ class TestProjectedMetadataIsTypeChecked:
         config = load_test_config(config_name)
         documents = build_kdp_documents(config, mint_ids(config))
         assert any(document["kernelDescriptors"] for _pack, document in documents)
+
+
+class TestPackagedHsacoKdp:
+    def test_every_hsaco_ukd_carries_exactly_kind_file_symbol(self):
+        """hkp_pack validates a closed field set per kind, so a UKD carrying any other
+        kind's key is refused at pack time."""
+        kernels = [
+            make_kernel(
+                name=f"test.{symbol}",
+                kernel_source=KernelSource(
+                    kind="hsaco", file="HsacoFixture.co", symbol=symbol
+                ),
+                metadata={"block_size": block_size, "dtype": "FLOAT"},
+            )
+            for symbol, block_size in (
+                ("HsacoFixtureAdd", 64),
+                ("HsacoFixtureScale", 128),
+            )
+        ]
+        config = make_minimal_config(
+            dialect="packaged",
+            kernel_source_kind="hsaco",
+            packs=[make_pack(kernels=kernels, arch=["gfx942"])],
+        )
+        kdp = build_kdp(config, config.packs[0], mint_ids(config))
+        assert [k["kernel_source"] for k in kdp["kernelDescriptors"]] == [
+            {"kind": "hsaco", "file": "HsacoFixture.co", "symbol": "HsacoFixtureAdd"},
+            {"kind": "hsaco", "file": "HsacoFixture.co", "symbol": "HsacoFixtureScale"},
+        ]

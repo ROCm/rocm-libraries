@@ -84,13 +84,12 @@ When ``split_k == 1`` the kernel writes ``dW`` normally (no atomics).
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace as dc_replace
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.ir import (
     BF16,
     F16,
     F32,
-    I32,
     IRBuilder,
     KernelDef,
     PtrType,
@@ -107,7 +106,13 @@ from rocke.helpers.pipeline import SoftwarePipeline
 from rocke.helpers.schedule import SchedulePolicy
 from rocke.helpers.spec import kernel_name_join
 from rocke.helpers.tensor_view import make_buffer_resource
-from rocke.helpers.transforms import TensorDescriptor, embed, pad, unmerge_magic
+from rocke.helpers.transforms import (
+    TensorDescriptor,
+    DynamicTensorDescriptor,
+    pad,
+    unmerge_magic,
+)
+from kernels.common.conv_abi import conv_arg_names
 from kernels.common._conv_implicit_gemm_common import (
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -117,7 +122,11 @@ from kernels.common._conv_implicit_gemm_common import (
     _emit_mfma,
     _emit_smem_load,
     _ir_dtype,
+    emit_param_block,
     make_a_descriptor,
+    make_a_descriptor_dynamic,
+    make_b_descriptor_dynamic,
+    spatial_unmerge_dynamic,
 )
 
 
@@ -324,6 +333,87 @@ def make_dw_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
     )
 
 
+# -----------------------------------------------------------------------
+# Dynamic (AOT) descriptor builders for wgrad
+# -----------------------------------------------------------------------
+
+
+def make_dy_descriptor_dynamic(
+    b: IRBuilder, params: Dict[str, Value], *, is_3d: bool = False
+):
+    """AOT counterpart of :func:`make_dy_descriptor`: ``(k_wg, k_out) -> N[D]HWK``.
+
+    ``k_wg`` is the wgrad reduction index over output positions, so it
+    decomposes exactly like the forward ``m``. The group (when grouped) rides
+    in the stride-1 ``k_out`` coord that the caller supplies, so the descriptor
+    itself is group-agnostic.
+    """
+    if is_3d:
+        coord_names = ["n", "do", "ho", "wo", "k_out"]
+        strides = [
+            params["p_dY_stride_n"],
+            params["p_dY_stride_do"],
+            params["p_dY_stride_ho"],
+            params["p_dY_stride_wo"],
+            b.const_i32(1),
+        ]
+        name = "dY_ndhwk"
+    else:
+        coord_names = ["n", "ho", "wo", "k_out"]
+        strides = [
+            params["p_dY_stride_n"],
+            params["p_dY_stride_ho"],
+            params["p_dY_stride_wo"],
+            b.const_i32(1),
+        ]
+        name = "dY_nhwk"
+    return DynamicTensorDescriptor.create(
+        name, coord_names=coord_names, strides=strides
+    ).transform(spatial_unmerge_dynamic(params, upper="k_wg", prefix="k_", is_3d=is_3d))
+
+
+def make_x_wgrad_descriptor_dynamic(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    is_3d: bool = False,
+    grouped: bool = False,
+):
+    """AOT counterpart of :func:`make_x_wgrad_descriptor`: ``(k_wg, n_wg) -> N[D]HWC``.
+
+    Structurally identical to the forward A descriptor -- which is why the
+    static version simply reuses ``make_a_descriptor`` -- so the upper coord
+    names stay ``m`` (output position) and ``k`` (filter+channel), matching
+    what the load closures pass. Only the magic-pair family and the stride
+    names differ, because wgrad numbers those axes ``k_wg`` / ``n_wg``.
+    """
+    return make_a_descriptor_dynamic(
+        b,
+        params,
+        is_3d=is_3d,
+        grouped=grouped,
+        spatial_prefix="k_",
+        channel_prefix="n_",
+        stride_prefix="p_X_stride_",
+        name="X_ndhwc" if is_3d else "X_nhwc",
+    )
+
+
+def make_dw_descriptor_dynamic(
+    b: IRBuilder, params: Dict[str, Value], *, is_3d: bool = False
+):
+    """AOT counterpart of :func:`make_dw_descriptor`: ``(k_out, n_wg) -> K[Z]YXC``."""
+    return make_b_descriptor_dynamic(
+        b,
+        params,
+        is_3d=is_3d,
+        channel_upper="n_wg",
+        channel_prefix="n_",
+        stride_prefix="p_dW_stride_",
+        name="dW_kzyxc" if is_3d else "dW_kyxc",
+    )
+
+
 # ---------------------------------------------------------------------
 # Spec
 # ---------------------------------------------------------------------
@@ -435,18 +525,17 @@ class WgradConvSpec:
     acc_epilogue: ConvAccumulatorEpilogue = field(
         default_factory=ConvAccumulatorEpilogue
     )
-    # Split-K: partition K_wg into this many equal slices along block_id_z.
+    # Split-K: partition K_wg into slices along block_id_z.
     # -1 = auto (resolved by build_implicit_gemm_conv_wgrad via the CK formula).
-    #  0 = runtime atomic: kernel accepts ``ks`` as an i32 argument; the caller
-    #      supplies the slice width at launch.  Only one kernel is compiled; any
-    #      split-K degree is achievable at runtime by varying grid-Z and ``ks``.
-    #      Caller must zero-init dW before every launch.
     #  1 = disabled (default, normal store).
-    # >1 = fixed atomic: the exact degree is baked into the kernel name/IR.
-    #      Caller must zero-init dW before launch.
-    # ABI for 0 and >1: dW is not writeonly; K_wg is padded as needed.
+    # >1 = the split-K kernel: partial sums are atomic-added into a caller-zeroed
+    #      dW (or, with two_stage, into the f32 scratch). The degree itself is
+    #      never compiled in -- it is a launch parameter (``ks_count`` / ``ks``)
+    #      and always > 1 -- so every value > 1 builds the same kernel; the
+    #      value only serves the host helpers as the default launch degree.
+    # ABI for >1: dW is not writeonly; K_wg is padded as needed.
     split_k: int = 1
-    # Two-stage mode (requires split_k > 1).
+    # Two-stage mode (requires a split: split_k > 1).
     # When True, Stage 1 f32-atomic-adds its partial sums into a scratch
     # buffer (ws_ptr) instead of 16-bit-atomic-adding into dW.  The caller
     # must zero the scratch first and launch a Stage 2 cast kernel
@@ -554,8 +643,7 @@ class WgradConvSpec:
     def wg_K_padded(self, split_k: Optional[int] = None) -> int:
         """K_wg rounded up to the nearest multiple of ``tile_k * split_k``.
 
-        When ``split_k=0`` (runtime) the caller must pass the concrete degree
-        to use for padding (e.g. the degree that will be used at launch time).
+        ``split_k`` is the launch degree; it defaults to the spec's.
         """
         sk = split_k if split_k is not None else self.split_k
         if sk <= 0:
@@ -588,9 +676,10 @@ class WgradConvSpec:
                 # N times. Only tagged when set explicitly, so a spec that
                 # leaves it None keeps its historical name and golden.
                 f"pad{self.lds_k_pad}": self.lds_k_pad is not None,
-                f"spk{self.split_k}": self.split_k > 1,
+                # The degree is a launch parameter, so the name records only
+                # that the kernel splits -- every degree > 1 is one binary.
+                "spk": self.split_k > 1,
                 "spkauto": self.split_k == -1,
-                "spkrt": self.split_k == 0,
                 # Gm changes the emitted code but nothing else in the name
                 # reflects it -- p.short() carries the true group count either
                 # way. Untagged, a Gm sweep would collide on one symbol and the
@@ -607,6 +696,10 @@ class WgradConvSpec:
                 # reads. Tracks the `twostage` flag above so the two move
                 # together.
                 f"wsr{self.ws_replicas}": self.two_stage and self.ws_replicas > 1,
+                # unroll_k hand-rolls a double-buffered K-loop -- a different
+                # body under the same name otherwise. Only tagged when set, so
+                # every other kernel keeps its name.
+                "unroll": self.unroll_k,
             },
         )
 
@@ -627,10 +720,10 @@ class WgradConvSpec:
             )
         if self.block_size > 1024:
             raise ValueError(f"block_size {self.block_size} > 1024")
-        if self.split_k < -1:
+        if self.split_k < -1 or self.split_k == 0:
             raise ValueError(
-                f"split_k must be -1 (auto), 0 (runtime atomic), 1 (disabled), "
-                f"or >1 (fixed); got {self.split_k}"
+                f"split_k must be -1 (auto), 1 (disabled), or >1 (split-K, "
+                f"degree chosen at launch); got {self.split_k}"
             )
         if self.two_stage and self.split_k == 1:
             raise ValueError(
@@ -647,16 +740,12 @@ class WgradConvSpec:
         _gm_ok, _gm_why = wgrad_group_merge_available(self)
         if not _gm_ok:
             raise ValueError(_gm_why)
-        # The `split_k > 1` term is load-bearing, not defensive: the builder
-        # computes `_is_two_stage = split_k > 1 and two_stage`, so at
-        # split_k == 0 (runtime degree) a two_stage spec still lands on the
-        # *atomic* epilogue. Dropping the term here would exempt exactly that
-        # spec from the atomic gates below and re-open the admits/build hole
-        # one axis over.
+        # Two-stage is in effect whenever the reduction is split; the scratch
+        # slab index does not depend on the degree. Must match the builder's
+        # `_is_two_stage` exactly, or a spec could pass the atomic gates below
+        # and then build the other epilogue.
         _effective_two_stage = self.two_stage and self.split_k > 1
-        _needs_atomic = (
-            self.split_k == 0 or self.split_k > 1
-        ) and not _effective_two_stage
+        _needs_atomic = self.split_k > 1 and not _effective_two_stage
         if _needs_atomic:
             if self.data.dtype_d not in ("fp32", "bf16", "fp16"):
                 raise ValueError(
@@ -718,19 +807,6 @@ class WgradConvSpec:
                 "wgrad async_dma requires lds_k_outer=True: the direct "
                 "global->LDS load needs a stride-1 reduction axis, which wgrad "
                 "only has once the tile is stored K-outer"
-            )
-        if self.split_k == 0 and (self.async_dma or self.unroll_k):
-            # split_k == 0 means the split degree is a launch-time kernel
-            # argument, so the K-slice length is not known at build time. The
-            # async and unrolled k-loops both need a compile-time trip count to
-            # lay out their pipeline, and wg_K_padded() cannot supply one for a
-            # runtime degree. Reject here with the reason rather than let the
-            # builder raise a confusing ValueError deep in the k-loop, which the
-            # sweep drivers swallow into a silent skip.
-            raise ValueError(
-                "wgrad split_k=0 (runtime degree) is incompatible with "
-                "async_dma/unroll_k: those pipelines need a compile-time "
-                "iteration count. Use a fixed split_k >= 1."
             )
         if self.lds_k_outer:
             # The transpose read is a 16-bit-lane instruction in both regimes.
@@ -833,8 +909,7 @@ class WgradConvSpec:
         candidate ladder, so folding an fp32 dW into ``dtype`` would clamp the
         reported A/B widths to 4 while the kernel still loads 8 wide.
 
-        When ``split_k != 1`` (including ``split_k == 0`` for runtime selection)
-        the epilogue is ``default`` (direct scalar store), which does not support
+        When ``split_k != 1`` the epilogue is ``default`` (direct scalar store), which does not support
         vec_c > 1, so vec_c is forced to 1.
         """
 
@@ -909,9 +984,6 @@ class WgradConvSpec:
 _LDS_K_OUTER_ARCH_WAVE = {"gfx950": 64, "gfx1250": 32}
 _LDS_K_OUTER_ARCH = "gfx950"  # retained: the wave64 regime's arch
 
-# Cap on the K-iteration count of the Python-unrolled loops
-# (pipeline='basic' and async_dma). Mirrors ROCKE_MAX_UNROLLED_K_ITERS.
-_MAX_UNROLLED_K_ITERS = 128
 
 # Group-merge degrees the merged-tile index math is written for. Powers of two
 # keep the group split (`m // kpg`, `(n // cpg) % Gm`) and the diagonal test to
@@ -936,6 +1008,12 @@ def _gm_coord_splitter(b: IRBuilder, p: ConvProblem, gm: int):
     The ``kpg``/``cpg`` guards are load-bearing: :class:`IRBuilder` does no
     constant folding, so a div or mod by 1 emits real instructions rather than
     disappearing.
+
+    ``kpg`` and ``cpg`` stay compile-time here, unlike everywhere else in the
+    AOT builder, because :func:`wgrad_group_merge_available` only admits
+    ``group_merge > 1`` for depthwise (``cpg == kpg == 1``). They are therefore
+    a *capability* of the compiled kernel, not a property of the shape it is
+    launched on, and the AOT cache filter refuses any problem that disagrees.
     """
     c_gm = b.const_i32(gm)
     c_kpg = b.const_i32(p.kpg)
@@ -1028,10 +1106,10 @@ def wgrad_group_merge_available(
     # compose, and the best depthwise configuration generally uses both. What a
     # merged tile cannot use is the packed-atomic split-K epilogue: it has no
     # way to drop an off-diagonal group pair, so it would accumulate garbage
-    # into a live dW element instead of skipping the store. Route split_k > 1
+    # into a live dW element instead of skipping the store. Route split-K
     # through two-stage, whose scratch atomic carries the mask.
     _effective_two_stage = spec.two_stage and spec.split_k > 1
-    if (spec.split_k == 0 or spec.split_k > 1) and not _effective_two_stage:
+    if spec.split_k > 1 and not _effective_two_stage:
         return False, (
             f"group_merge with split_k={spec.split_k} needs the two-stage path "
             f"(two_stage=True); the packed-atomic split-K epilogue cannot drop "
@@ -1097,8 +1175,8 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         )
 
     sk = spec.split_k
-    if sk < -1:
-        return False, f"split_k must be -1 (auto), 0 (runtime), 1, or >1 (got {sk})"
+    if sk < -1 or sk == 0:
+        return False, f"split_k must be -1 (auto), 1, or >1 (got {sk})"
     # Mirror of validate(): two_stage has nothing to reduce at split_k == 1.
     # Without this the public predicate blesses a spec that then raises inside
     # the builder's spec.validate() call.
@@ -1113,13 +1191,10 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"number of scratch slabs a group's K-slices spread over"
         )
     # -1 = auto: resolved at build time; always valid at the spec-check stage.
-    # 0 = runtime atomic; validate constraints identically to >1 without a degree.
-    _is_atomic = sk == 0 or sk > 1
-    # The `sk > 1` term mirrors the builder's
-    # `_is_two_stage = split_k > 1 and two_stage`: at sk == 0 a two_stage spec
-    # still lands on the atomic epilogue, so it must stay subject to the atomic
-    # gates below. See the matching comment in WgradConvSpec.validate().
-    _effective_two_stage = spec.two_stage and sk > 1
+    _is_atomic = sk > 1
+    # Mirrors the builder's `_is_two_stage`: two-stage applies whenever the
+    # reduction is split. See the matching comment in WgradConvSpec.validate().
+    _effective_two_stage = spec.two_stage and _is_atomic
     # The two-stage scratch-atomic epilogue is MFMA-only. The packed *atomic*
     # epilogue does have a WMMA variant (_emit_wgrad_split_k_epilogue_wmma), so
     # split-K itself is fine on wave32 -- but _emit_wgrad_workspace_store_epilogue
@@ -1172,12 +1247,6 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             "epilogue='cshuffle' is invalid (use epilogue='default')"
         )
 
-    if spec.split_k == 0 and (spec.async_dma or spec.unroll_k):
-        return False, (
-            "wgrad split_k=0 (runtime degree) is incompatible with "
-            "async_dma/unroll_k: those pipelines need a compile-time iteration "
-            "count. Use a fixed split_k >= 1."
-        )
     if spec.lds_k_outer and spec.lds_k_pad is not None:
         # Mirror of the validate() gate: the K-outer row stride comes from
         # _KOUTER_PAD in the builder, so an explicit pad changes the kernel name
@@ -1249,17 +1318,14 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
 
     if spec.pipeline == "basic" and spec.async_dma:
         return False, "pipeline='basic' is incompatible with async_dma=True"
-
-    if spec.async_dma:
-        # async_dma is Python-unrolled; a deep reduction explodes compile time.
-        _slice_k = spec.wg_K_padded() // max(spec.split_k, 1)
-        _k_iters = (_slice_k + spec.tile_k - 1) // spec.tile_k
-        if _k_iters > _MAX_UNROLLED_K_ITERS:
-            return False, (
-                f"async_dma would unroll to {_k_iters} K iterations "
-                f"(slice_k={_slice_k}, tile_k={spec.tile_k}), over the "
-                f"{_MAX_UNROLLED_K_ITERS} limit; raise split_k or tile_k"
-            )
+    # The wgrad builder has no load/math wave split, so a "wavelet" spec built
+    # silently as "mem" under another name. Reject it instead of benchmarking
+    # one kernel twice.
+    if spec.pipeline == "wavelet":
+        return False, (
+            "pipeline='wavelet' is not implemented for wgrad (it would build the "
+            "'mem' kernel); use pipeline='mem'"
+        )
 
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
     if not target.mma.has_shape(
@@ -1455,9 +1521,10 @@ def build_implicit_gemm_conv_wgrad(
     ir_dtype_b = _ir_dtype(spec.data.dtype_b)
     ir_dtype_d = _ir_dtype(spec.data.dtype_d)
 
-    _is_split_k = spec.split_k > 1 or spec.split_k == 0
-    _is_two_stage = spec.split_k > 1 and spec.two_stage
-    _split_k_runtime = spec.split_k == 0  # ks passed as kernel arg at launch
+    _is_split_k = spec.split_k > 1
+    # Two-stage: the scratch slab index is group * R + z % R and the group
+    # decode reads ks_count, so nothing in the body depends on the degree.
+    _is_two_stage = _is_split_k and spec.two_stage
     # At group_merge == groups the merged problem has a single group, but the
     # kernel still has to decode the K-slice off z and the epilogue still has to
     # mask off-diagonal pairs -- so the grouped path stays engaged. Without this
@@ -1468,50 +1535,89 @@ def build_implicit_gemm_conv_wgrad(
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 
-    # dY (output gradient): A operand in the GEMM sense (K rows, K_wg reduction)
-    dY = b.param(
-        "dY", PtrType(ir_dtype_a, "global"), noalias=True, readonly=True, align=16
-    )
-    # X (input activations): B operand in the GEMM sense (K_wg reduction, N_wg cols)
-    X = b.param(
-        "X", PtrType(ir_dtype_b, "global"), noalias=True, readonly=True, align=16
-    )
-    # dW (weight gradient): output D.
-    # split_k=1: normal writeonly store.
-    # split_k>1 atomic: atomic-add into caller-zero-init dW; writeonly dropped.
-    # split_k>1 two_stage: dW is still the final output written by Stage 2;
-    #   Stage 1 (this kernel) never touches dW, but we keep it in the ABI so
-    #   the signature is identical between the atomic and two-stage variants.
-    _dw_writeonly = not _is_split_k
-    dW = b.param(
-        "dW",
-        PtrType(ir_dtype_d, "global"),
-        noalias=True,
-        writeonly=_dw_writeonly,
-        align=16,
-    )
-    dY_bytes = b.param("dY_bytes", I32)
-    X_bytes = b.param("X_bytes", I32)
-    dW_bytes = b.param("dW_bytes", I32)
-    # Two-stage only: f32 scratch accumulator every K-slice atomic-adds into.
-    # Size = groups * wg_M * wg_N * 4 -- one slab per conv group, NOT per
-    # K-slice: the slices accumulate on top of each other rather than each
-    # landing in its own region.  Not present in the 16-bit atomic ABI.
+    # ---- Kernel arguments (AOT) ---------------------------------------------
+    # Emitted straight from the ordered ABI list so the kernel's parameter
+    # order and conv_args_signature(direction="wgrad") cannot drift apart. Kernargs
+    # are packed positionally (see rocke.runtime.packing), so a divergence
+    # would silently shift every later argument rather than raise.
+    # library/tests/test_conv_abi.py pins the two together for every
+    # variant combination.
     #
-    # Not ``writeonly``: an atomicrmw reads its target.
-    if _is_two_stage:
-        ws_ptr = b.param("ws_ptr", PtrType(F32, "global"), noalias=True, align=16)
-        _ws_bytes = b.param(
-            "ws_bytes", I32
-        )  # noqa: F841  (side-effect: adds param to kernel signature)
-    # Runtime split-K: ks = slice width per CTA, computed and passed by the launcher.
-    # Only present when split_k == 0; fixed-degree kernels bake ks as a constant.
-    # ks_count = number of slices; only needed when grouped+runtime so the kernel
-    # can decode (group, slice) from block_id_z = group*ks_count + slice.
-    _ks_param = b.param("ks", I32) if _split_k_runtime else None
-    _ks_count_param = (
-        b.param("ks_count", I32) if (_split_k_runtime and _grouped) else None
+    # Pointer roles: dY is the A operand (K rows, K_wg reduction), X the B
+    # operand (K_wg reduction, N_wg cols), dW the output D.
+    #   split_k == 1        : dW is a normal writeonly store.
+    #   split_k > 1 atomic  : atomic-add into a caller-zeroed dW; not writeonly.
+    #   split_k > 1 two-stage: Stage 1 never touches dW (Stage 2 writes it),
+    #                         but dW stays in the ABI so the atomic and
+    #                         two-stage signatures line up.
+    _dw_writeonly = not _is_split_k
+
+    def _declare_wgrad_ptr(name: str, kind: str) -> Value:
+        if kind == "a":
+            return b.param(
+                name,
+                PtrType(ir_dtype_a, "global"),
+                noalias=True,
+                readonly=True,
+                align=16,
+            )
+        if kind == "b":
+            return b.param(
+                name,
+                PtrType(ir_dtype_b, "global"),
+                noalias=True,
+                readonly=True,
+                align=16,
+            )
+        if kind == "d":
+            return b.param(
+                name,
+                PtrType(ir_dtype_d, "global"),
+                noalias=True,
+                writeonly=_dw_writeonly,
+                align=16,
+            )
+        # Two-stage scratch: f32 accumulator every K-slice atomic-adds into,
+        # size groups*ws_replicas*wg_M*wg_N*4. Not ``writeonly``: an
+        # atomicrmw reads its target.
+        return b.param(name, PtrType(F32, "global"), noalias=True, align=16)
+
+    params = emit_param_block(
+        b,
+        conv_arg_names(direction="wgrad", is_3d=p.is_3d, two_stage=_is_two_stage),
+        declare_ptr=_declare_wgrad_ptr,
     )
+    dY = params["dY"]
+    X = params["X"]
+    dW = params["dW"]
+    dY_bytes = params["dY_bytes"]
+    X_bytes = params["X_bytes"]
+    dW_bytes = params["dW_bytes"]
+    p_N = params["p_N"]
+    p_Hi = params["p_Hi"]
+    p_Wi = params["p_Wi"]
+    p_C = params["p_C"]
+    p_K = params["p_K"]
+    p_Y = params["p_Y"]
+    p_X = params["p_X"]
+    p_groups = params["p_groups"]
+    p_Ho = params["p_Ho"]
+    p_Wo = params["p_Wo"]
+    p_cpg = params["p_cpg"]
+    p_kpg = params["p_kpg"]
+    p_wg_M = params["p_wg_M"]  # kpg (weight rows)
+    p_wg_N = params["p_wg_N"]  # [Z*]Y*X*cpg (weight cols)
+    p_wg_K = params["p_wg_K"]  # N*[Do*]Ho*Wo (reduction)
+    p_num_pid_m = params["p_num_pid_m"]
+    p_num_pid_n = params["p_num_pid_n"]
+    # Variant-specific extras; absent from the parameter list when unused.
+    ws_ptr = params.get("ws_ptr")
+    # Slice width and slice count, always kernargs. ks_count is what decodes
+    # block_id_z = group*ks_count + slice; ks is how wide each slice is. They
+    # are different numbers, so one cannot stand in for the other.
+    _ks_param = params["ks"]
+    _ks_count_param = params["ks_count"]
+    # -------------------------------------------------------------------------
 
     op = _resolve_wgrad_op(spec, arch)
     atom = spec.atom if op.family == "mma" else None
@@ -1564,15 +1670,13 @@ def build_implicit_gemm_conv_wgrad(
 
     c0 = b.const_i32(0)
     c_block_k = b.const_i32(block_k)
-    c_wg_K = b.const_i32(wg_K)
+    c_wg_K = p_wg_K  # runtime Value (was b.const_i32(wg_K))
 
     # Grouped wgrad: the group index rides on ``block_id_z`` (grid-per-group,
-    # matching forward).  When split_k>1 the group and the K-slice SHARE the z
-    # axis: the grid launches z = groups*split_k and every CTA decodes
-    # ``group = block_id_z // split_k`` and ``slice = block_id_z % split_k``.
-    # split_k==0 (runtime): same scheme but split_k degree is runtime; the kernel
-    # receives ``ks_count`` (the degree) as an extra arg alongside ``ks`` (slice
-    # width) so both div and mod can be emitted.  Grid: z = groups * ks_count.
+    # matching forward).  The group and the K-slice SHARE the z axis: the grid
+    # launches z = groups * ks_count and every CTA decodes
+    # ``group = block_id_z // ks_count`` and ``slice = block_id_z % ks_count``,
+    # with the degree ``ks_count`` and slice width ``ks`` both kernargs.
     # ``group_v`` stays None on the ungrouped path so all groups==1 IR is
     # byte-identical to the pre-grouped kernel.
     grouped = _grouped
@@ -1581,60 +1685,50 @@ def build_implicit_gemm_conv_wgrad(
     # rebuild the true workspace slab. None whenever merging is off.
     slice_v = None
     if grouped:
-        c_kpg = b.const_i32(p_load.kpg)  # kpg: dY output-channel slab stride
-        if not _is_split_k:
-            group_v = b.to_sgpr_u32(b.block_id_z())
+        c_kpg = p_kpg  # runtime Value — dY output-channel slab stride
+        if spec.group_merge > 1:
+            # The load side reads the MERGED problem: Gm groups' output
+            # channels form one slab of kpg*Gm, indexed by the merged group.
+            # The kernargs describe the true problem, so scale in-kernel (Gm
+            # is a build-time knob). The epilogue keeps the true kpg.
+            c_kpg = b.mul(p_kpg, b.const_i32(spec.group_merge))
 
-    # Split-K K-slice bounds.  K_wg is padded so every slice is exactly ks
-    # elements wide and ks % tile_k == 0.  OOB loads return 0 via buffer clamp.
-    # split_k == 1: k_lo = 0, k_hi = None (loop runs to c_wg_K, unpadded).
-    # split_k == 0: ks/ks_count are runtime kernel args; k_lo/k_hi computed at runtime.
-    # split_k > 1: ks is a compile-time constant.
-    if _is_split_k:
-        if _split_k_runtime:
-            c_ks = _ks_param  # runtime i32 from kernel arg
-            if grouped:
-                # z = group * ks_count + slice; decode both at runtime.
-                z_id = b.block_id_z()
-                group_v = b.to_sgpr_u32(b.div(z_id, _ks_count_param))
-                slice_id = b.mod(z_id, _ks_count_param)
-                if spec.group_merge > 1:
-                    slice_v = slice_id
-                k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
-            else:
-                k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
-        else:
-            wg_K_padded = spec.wg_K_padded()
-            c_ks = b.const_i32(wg_K_padded // spec.split_k)
-            if grouped:
-                # z = group*split_k + slice: recover both from block_id_z.
-                c_split_k = b.const_i32(spec.split_k)
-                z_id = b.block_id_z()
-                group_v = b.to_sgpr_u32(b.div(z_id, c_split_k))
-                slice_id = b.mod(z_id, c_split_k)
-                if spec.group_merge > 1:
-                    slice_v = slice_id
-                k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
-            else:
-                k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
-        k_hi = b.to_sgpr_u32(b.add(k_lo, c_ks))
+    # Split-K K-slice bounds. The degree is a launch parameter (``ks_count``),
+    # never a compile-time constant, so there is exactly one shape of decode:
+    #
+    #     group = z // ks_count ;  slice = z % ks_count
+    #     k_lo  = slice * ks    ;  k_hi  = k_lo + ks
+    #
+    # An unsplit launch passes ks_count = 1 and ks = wg_K rounded up to a whole
+    # number of K tiles, which collapses that to group = z, k_lo = 0,
+    # k_hi = padded wg_K. The tail past wg_K reads zero through the descriptor
+    # bounds, so the padding contributes nothing -- which is what lets the split
+    # and unsplit cases share one bound computation instead of two branches
+    # that have to be kept in step.
+    c_ks = _ks_param
+    z_id = b.block_id_z()
+    if grouped:
+        group_v = b.to_sgpr_u32(b.div(z_id, _ks_count_param))
+        slice_id = b.mod(z_id, _ks_count_param)
+        if spec.group_merge > 1:
+            slice_v = slice_id
     else:
-        k_lo = c0
-        k_hi = None
+        slice_id = b.mod(z_id, _ks_count_param)
+    k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
+    k_hi = b.to_sgpr_u32(b.add(k_lo, c_ks))
 
-    # Chiplet swizzle (same logic as forward; tile counts from wgrad GEMM dims)
+    # Chiplet swizzle (same logic as forward; tile counts from wgrad GEMM dims).
+    # The tile counts are runtime kernargs — the host computes them from the
+    # launch shape and the tile size it dispatched.
     if spec.chiplet_swizzle:
-        from rocke.helpers.grid import chiplet_aware_super_tile
+        from rocke.helpers.grid import chiplet_aware_super_tile_dynamic
 
-        num_pid_m = (wg_M + block_m - 1) // block_m
-        num_pid_n = (wg_N + block_n - 1) // block_n
-        c_num_pid_n = b.const_i32(num_pid_n)
-        wgid_flat = b.add(b.mul(b.block_id_y(), c_num_pid_n), b.block_id_x())
-        swz = chiplet_aware_super_tile(
+        wgid_flat = b.add(b.mul(b.block_id_y(), p_num_pid_n), b.block_id_x())
+        swz = chiplet_aware_super_tile_dynamic(
             b,
             wgid_flat,
-            num_pid_m=num_pid_m,
-            num_pid_n=num_pid_n,
+            num_pid_m=p_num_pid_m,
+            num_pid_n=p_num_pid_n,
             wgm=spec.chiplet_wgm,
             num_xcds=spec.chiplet_num_xcds,
             chunk_size=spec.chiplet_chunk_size,
@@ -1766,16 +1860,34 @@ def build_implicit_gemm_conv_wgrad(
     if p.is_pointwise:
         dY_desc = None
         X_desc = None
-        _c_K_ir = b.const_i32(p.kpg)
-        _c_C_ir = b.const_i32(p.cpg)
-        _c_wgM_ir = b.const_i32(wg_M)
-        _c_wgN_ir = b.const_i32(wg_N)
-        _c_wgK_ir = b.const_i32(wg_K)
+        _c_K_ir = p_kpg
+        _c_C_ir = p_cpg
+        _c_wgM_ir = p_wg_M
+        _c_wgN_ir = p_wg_N
+        _c_wgK_ir = p_wg_K
     else:
-        dY_desc = make_dy_descriptor(p, dtype=spec.data.dtype_a)
-        # X's channel decode spans the group's cpg slab, selected by the group
-        # index (grid-per-group).
-        X_desc = make_x_wgrad_descriptor(p_load, dtype=spec.data.dtype_b)
+        dY_desc = make_dy_descriptor_dynamic(b, params, is_3d=p.is_3d)
+        x_params = params
+        if spec.group_merge > 1:
+            # X's channel decode must run over the merged per-group channel run
+            # (cpg*Gm) and the merged group's slab -- not the true cpg the host
+            # packed. Merging is depthwise-only (wgrad_group_merge_available),
+            # so that run is exactly Gm, a build-time constant: fold it and its
+            # magic pair here instead of reading the kernargs. The epilogue
+            # keeps the true cpg through ``params``.
+            from rocke.helpers.transforms import calculate_magic_numbers
+
+            _merged_cpg = p_load.cpg
+            _mult, _shift = calculate_magic_numbers(_merged_cpg)
+            x_params = dict(
+                params,
+                p_cpg=_merged_cpg,
+                p_magic_n_cpg_mult=_mult,
+                p_magic_n_cpg_shift=_shift,
+            )
+        X_desc = make_x_wgrad_descriptor_dynamic(
+            b, x_params, is_3d=p.is_3d, grouped=_grouped
+        )
         _c_K_ir = _c_C_ir = _c_wgM_ir = _c_wgN_ir = _c_wgK_ir = None
 
     dy_buf_rsrc = make_buffer_resource(b, dY, num_bytes=dY_bytes)
@@ -2147,33 +2259,59 @@ def build_implicit_gemm_conv_wgrad(
         return new_accs
 
     # ---- K loop ----
-    # k_lo / k_hi select the slice this CTA processes:
-    #   split_k == 1: k_lo=0, k_hi=None → full [0, wg_K)
-    #   split_k >  1: k_lo=z*ks, k_hi=k_lo+ks (SGPR-pinned, scalar arith)
+    # k_lo / k_hi select the slice this CTA processes: k_lo = slice*ks,
+    # k_hi = k_lo + ks (SGPR-pinned, scalar arith); an unsplit launch passes
+    # ks_count = 1, which makes that the whole padded reduction.
     _k_upper = c_wg_K if k_hi is None else k_hi
 
-    if spec.unroll_k:
-        slice_k = wg_K if k_hi is None else (spec.wg_K_padded() // spec.split_k)
-        K_iters = (slice_k + block_k - 1) // block_k
-        current_accs = [v for _, v in accs]
-        bufs = [(A_smem, B_smem), (A_smem2, B_smem2)]
+    # Where a prefetch past the slice end is sent. The double-buffered loops
+    # compute two tiles per step, and with an odd tile count the second one
+    # lies past _k_upper; that reads zero only at the real end of the tensor.
+    # Under split-K _k_upper is a slice end inside it, so the stray tile would
+    # be the next slice's first -- redirect it to wg_K, which zero-fills.
+    _k_zero_fill = None if k_hi is None else c_wg_K
 
-        emit_load_phase(k_lo, bufs[0][0], bufs[0][1])
+    if spec.unroll_k:
+        # AOT double-buffered K-loop, same shape as the forward conv's: the
+        # trip count is runtime, so an LDS buffer cannot be picked by
+        # ``bufs[it % 2]``. The body is unrolled twice and steps by
+        # 2*block_k, which binds each phase to a build-time buffer while still
+        # alternating them. One barrier per tile publishes the prefetched
+        # buffer and orders the current tile's ds_reads ahead of the prefetch
+        # that reuses that buffer two tiles later.
+        c_2block_k = b.const_i32(2 * block_k)
+
+        # Prologue: stage the first tile of the slice into buf0 and publish it.
+        emit_load_phase(k_lo, A_smem, B_smem)
         b.sync()
 
-        for it in range(K_iters):
-            cur = bufs[it % 2]
-            if it + 1 < K_iters:
-                nxt = bufs[(it + 1) % 2]
-                emit_load_phase(
-                    b.add(k_lo, b.const_i32((it + 1) * block_k)), nxt[0], nxt[1]
-                )
-            k_off_capture[0] = b.add(k_lo, b.const_i32(it * block_k))
-            current_accs = emit_mfma_phase(cur[0], cur[1], current_accs)
+        for_op_uk = b.scf_for_iter(k_lo, _k_upper, c_2block_k, accs, iv_name="k_unroll")
+        with for_op_uk as (k_unroll, iter_accs):
+            k_odd = b.add(k_unroll, c_block_k)
+            k_nxt_pair = b.add(k_unroll, c_2block_k)
+            k_odd_load = (
+                k_odd
+                if _k_zero_fill is None
+                else b.select(b.cmp_lt(k_odd, _k_upper), k_odd, _k_zero_fill)
+            )
+
+            # Phase A: prefetch tile k+1 into buf1, MFMA tile k out of buf0.
+            emit_load_phase(k_odd_load, A_smem2, B_smem2)
+            k_off_capture[0] = k_unroll
+            accs_a = emit_mfma_phase(A_smem, B_smem, list(iter_accs))
+            # Publishes buf1 and drains buf0's ds_reads.
             b.sync()
 
-        final_accs = current_accs
+            # Phase B: the buffers swap roles.
+            emit_load_phase(k_nxt_pair, A_smem, B_smem)
+            k_off_capture[0] = k_odd
+            accs_b = emit_mfma_phase(A_smem2, B_smem2, accs_a)
+            b.sync()
+
+            b.scf_yield(*accs_b)
+        final_accs = list(for_op_uk.results)
     elif not spec.async_dma:
+        # mem/compv3/compv4/basic: scf_for_iter with dynamic _k_upper (= p_wg_K or k_hi)
         for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):
             emit_load_phase(k0, A_smem, B_smem)
@@ -2183,12 +2321,10 @@ def build_implicit_gemm_conv_wgrad(
             b.scf_yield(*new_accs)
         final_accs = for_op.results
     else:
-        slice_k = wg_K if k_hi is None else (spec.wg_K_padded() // spec.split_k)
-        K_iters = (slice_k + block_k - 1) // block_k
+        # async_dma: dynamic ping-pong.
         bufs = [(A_smem, B_smem), (A_smem2, B_smem2)]
-
         pipeline = SoftwarePipeline(
-            num_iters=K_iters,
+            num_iters=1,  # unused: the dynamic path takes its bounds as arguments
             double_buffer=double_buffer,
             wait_vmcnt=True,
             sync_after_wait=True,
@@ -2196,20 +2332,23 @@ def build_implicit_gemm_conv_wgrad(
             overlap_vmcnt=True,
         )
 
-        def issue_load(it: int, buf_pair):
-            emit_load_phase(
-                b.add(k_lo, b.const_i32(it * block_k)), buf_pair[0], buf_pair[1]
-            )
+        def issue_load_dyn_wg(k_offset_val, buf_pair):
+            emit_load_phase(k_offset_val, buf_pair[0], buf_pair[1])
 
-        def compute(_, buf_pair, state):
+        def compute_dyn_wg(k_offset_val, buf_pair, state):
+            k_off_capture[0] = k_offset_val
             return emit_mfma_phase(buf_pair[0], buf_pair[1], state)
 
-        final_accs = pipeline.run_ping_pong(
+        final_accs = pipeline.run_ping_pong_dynamic(
             b,
+            k_extent=_k_upper,
+            block_k=block_k,
+            k_lo=k_lo,
+            k_zero_fill=_k_zero_fill,
             buffers=bufs,
-            initial_state=[v for _, v in accs],
-            issue_load=issue_load,
-            compute=compute,
+            iter_args=accs,
+            issue_load_fn=issue_load_dyn_wg,
+            compute_fn=compute_dyn_wg,
             schedule=schedule,
         )
 
@@ -2231,6 +2370,7 @@ def build_implicit_gemm_conv_wgrad(
             block_n_off_v,
             ws_ptr,
             c_per_lane,
+            params,
             gm_group=group_v,
         )
     elif _is_split_k and op.family == "wmma":
@@ -2246,6 +2386,7 @@ def build_implicit_gemm_conv_wgrad(
             block_m_off_v,
             block_n_off_v,
             dW,
+            params,
             group=group_v,
         )
     elif _is_split_k and spec.epilogue == "cshuffle":
@@ -2258,6 +2399,7 @@ def build_implicit_gemm_conv_wgrad(
             final_accs,
             grid,
             dW,
+            params,
             group=group_v,
         )
     elif _is_split_k:
@@ -2274,10 +2416,13 @@ def build_implicit_gemm_conv_wgrad(
             block_n_off_v,
             dW,
             c_per_lane,
+            params,
             group=group_v,
         )
     elif spec.epilogue == "cshuffle":
-        _emit_wgrad_cshuffle_epilogue(b, spec, final_accs, grid, dw_rsrc, group=group_v)
+        _emit_wgrad_cshuffle_epilogue(
+            b, spec, final_accs, grid, dw_rsrc, params, group=group_v
+        )
     elif op.family == "wmma":
         _emit_wgrad_direct_epilogue_wmma(
             b,
@@ -2291,10 +2436,13 @@ def build_implicit_gemm_conv_wgrad(
             block_n_off_v,
             dw_rsrc,
             c0,
+            params,
             group=group_v,
         )
     else:
-        _emit_wgrad_direct_epilogue(b, spec, final_accs, grid, dw_rsrc, group=group_v)
+        _emit_wgrad_direct_epilogue(
+            b, spec, final_accs, grid, dw_rsrc, params, group=group_v
+        )
 
     return b.kernel
 
@@ -2302,6 +2450,22 @@ def build_implicit_gemm_conv_wgrad(
 # ---------------------------------------------------------------------
 # Epilogues
 # ---------------------------------------------------------------------
+
+
+def _grid_mn_runtime(b: IRBuilder, spec: "WgradConvSpec", params: Dict[str, Value]):
+    """Runtime ``(grid_M, grid_N)`` — the GEMM extent one tile is bounded by.
+
+    Mirrors :attr:`WgradConvSpec.grid_M` / :attr:`~WgradConvSpec.grid_N`:
+    a group-merged tile covers ``Gm`` conv groups per side, so the per-group
+    wgrad extents are scaled by the merge degree. ``Gm`` is a build-time knob;
+    the extents themselves are kernargs. At ``Gm == 1`` this is the kernarg
+    unchanged, with no multiply emitted.
+    """
+    gm = spec.group_merge
+    if gm <= 1:
+        return params["p_wg_M"], params["p_wg_N"]
+    c_gm = b.const_i32(gm)
+    return b.mul(params["p_wg_M"], c_gm), b.mul(params["p_wg_N"], c_gm)
 
 
 def _emit_wgrad_split_k_epilogue(
@@ -2316,6 +2480,7 @@ def _emit_wgrad_split_k_epilogue(
     block_n_off: Value,
     dw_ptr: Value,
     c_per_lane: int,
+    params: Dict[str, Value],
     group: Optional[Value] = None,
 ) -> None:
     """Atomic-add partial accumulator directly into dW for all split-K slices.
@@ -2373,14 +2538,14 @@ def _emit_wgrad_split_k_epilogue(
         rows.append(x_row)
         cols.append(x_col)
 
-    wg_M_v = b.const_i32(_wg_M(p))
-    wg_N_v = b.const_i32(_wg_N(p))
+    wg_M_v = params["p_wg_M"]
+    wg_N_v = params["p_wg_N"]
 
     # Grouped: the accumulator row ``c_m`` is per-group ([0, kpg)); the atomic
     # address must land in the group's absolute dW output-channel slab
     # (k_out = group*kpg + c_m).  Bounds checks stay on the per-group ``c_m``.
     # Ungrouped (group is None) leaves every address byte-identical.
-    _c_kpg = b.const_i32(p.kpg) if group is not None else None
+    _c_kpg = params["p_kpg"] if group is not None else None
 
     def _row_addr(c_m: Value) -> Value:
         if group is None:
@@ -2475,6 +2640,7 @@ def _emit_wgrad_split_k_epilogue_wmma(
     block_m_off: Value,
     block_n_off: Value,
     dw_ptr: Value,
+    params: Dict[str, Value],
     group: Optional[Value] = None,
 ) -> None:
     """Atomic-add partial WMMA accumulator directly into dW for split-K.
@@ -2510,10 +2676,10 @@ def _emit_wgrad_split_k_epilogue_wmma(
     block_warp_m_off = b.add(block_m_off, warp_m_off)
     block_warp_n_off = b.add(block_n_off, warp_n_off)
 
-    wg_M_v = b.const_i32(_wg_M(p))
-    wg_N_v = b.const_i32(_wg_N(p))
+    wg_M_v = params["p_wg_M"]
+    wg_N_v = params["p_wg_N"]
 
-    _c_kpg = b.const_i32(p.kpg) if group is not None else None
+    _c_kpg = params["p_kpg"] if group is not None else None
 
     def _row_addr(c_m: Value) -> Value:
         if group is None:
@@ -2575,6 +2741,7 @@ def _emit_wgrad_split_k_cshuffle_epilogue(
     accs: Sequence[Value],
     grid,
     dW: Value,
+    params: Dict[str, Value],
     group: Optional[Value] = None,
 ) -> None:
     """Split-K epilogue via cshuffle + packed atomic-adds into dW.
@@ -2613,12 +2780,12 @@ def _emit_wgrad_split_k_cshuffle_epilogue(
         )
         _cshuffle_kwargs["max_store_vec"] = vec_c
 
-    wg_N_v = b.const_i32(_wg_N(p))
+    wg_N_v = params["p_wg_N"]
 
     # Grouped: shift block_m_off by group*kpg so the atomic addresses land in
     # the group's absolute output-channel slab.  N axis is unaffected.
     if group is not None:
-        c_kpg = b.const_i32(p.kpg)
+        c_kpg = params["p_kpg"]
         eff_grid = dc_replace(
             grid, block_m_off=b.add(grid.block_m_off, b.mul(group, c_kpg))
         )
@@ -2639,7 +2806,7 @@ def _emit_wgrad_split_k_cshuffle_epilogue(
         wg_M_v = b.add(b.mul(group, c_kpg), c_kpg)
     else:
         eff_grid = grid
-        wg_M_v = b.const_i32(_wg_M(p))
+        wg_M_v = params["p_wg_M"]
 
     CShuffleEpilogue.from_grid(
         atom=atom, grid=eff_grid, **_cshuffle_kwargs
@@ -2658,6 +2825,7 @@ def _emit_wgrad_direct_epilogue(
     accs: Sequence[Value],
     grid: WarpGrid,
     dw_rsrc: Value,
+    params: Dict[str, Value],
     group: Optional[Value] = None,
 ) -> None:
     """Per-lane scalar store to dW via the weight-gradient descriptor.
@@ -2672,7 +2840,7 @@ def _emit_wgrad_direct_epilogue(
     """
     p = spec.problem
     if p.is_pointwise:
-        _c_N = b.const_i32(_wg_N(p))
+        _c_N = params["p_wg_N"]
 
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             return b_.add(b_.mul(m_val, _c_N), n_val), b.const_i32(1)
@@ -2680,21 +2848,21 @@ def _emit_wgrad_direct_epilogue(
     elif group is not None and spec.group_merge > 1:
         # Group-merged: the tile covers Gm groups per side. Rebuild the true dW
         # address from the merged coords and drop off-diagonal group pairs.
-        dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
+        dW_desc = make_dw_descriptor_dynamic(b, params, is_3d=p.is_3d)
         dw_addr = _gm_dw_addr_fn(b, spec, dW_desc, group)
 
     elif group is not None:
         # Grouped: dW packed [K,Y,X,cpg]; the group rides on the global k_out
         # only (m_val is the per-group [0,kpg) row).
-        dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
-        _c_kpg = b.const_i32(p.kpg)
+        dW_desc = make_dw_descriptor_dynamic(b, params, is_3d=p.is_3d)
+        _c_kpg = params["p_kpg"]
 
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             m_g = b_.add(m_val, b_.mul(group, _c_kpg))
             return dW_desc.offset(b_, k_out=m_g, n_wg=n_val)
 
     else:
-        dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
+        dW_desc = make_dw_descriptor_dynamic(b, params, is_3d=p.is_3d)
 
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             return dW_desc.offset(b_, k_out=m_val, n_wg=n_val)
@@ -2706,7 +2874,7 @@ def _emit_wgrad_direct_epilogue(
         d_rsrc=dw_rsrc,
         # Merged tiles are bounded by what the TILE covers; the address above
         # maps back to the true per-group dW position.
-        bounds=(b.const_i32(spec.grid_M), b.const_i32(spec.grid_N)),
+        bounds=_grid_mn_runtime(b, spec, params),
     )
 
 
@@ -2722,6 +2890,7 @@ def _emit_wgrad_direct_epilogue_wmma(
     block_n_off: Value,
     dw_rsrc: Value,
     c0: Value,
+    params: Dict[str, Value],
     group: Optional[Value] = None,
 ) -> None:
     """Per-lane store for the WMMA (gfx1151/gfx1250) accumulator layout into dW.
@@ -2736,11 +2905,13 @@ def _emit_wgrad_direct_epilogue_wmma(
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
 
-    c_M = b.const_i32(_wg_M(p))
-    c_N = b.const_i32(_wg_N(p))
-    _c_wgN_wmma = b.const_i32(_wg_N(p)) if p.is_pointwise else None
-    _c_kpg = b.const_i32(p.kpg) if group is not None else None
-    dW_desc = None if p.is_pointwise else make_dw_descriptor(p, dtype=spec.data.dtype_d)
+    c_M = params["p_wg_M"]
+    c_N = params["p_wg_N"]
+    _c_wgN_wmma = params["p_wg_N"] if p.is_pointwise else None
+    _c_kpg = params["p_kpg"] if group is not None else None
+    dW_desc = (
+        None if p.is_pointwise else make_dw_descriptor_dynamic(b, params, is_3d=p.is_3d)
+    )
     c_map = op.c_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
@@ -2793,6 +2964,7 @@ def _emit_wgrad_cshuffle_epilogue(
     accs: Sequence[Value],
     grid: WarpGrid,
     dw_rsrc: Value,
+    params: Dict[str, Value],
     group: Optional[Value] = None,
 ) -> None:
     """LDS-staged cshuffle epilogue writing to dW (KYXC layout).
@@ -2808,7 +2980,7 @@ def _emit_wgrad_cshuffle_epilogue(
     """
     p = spec.problem
     if p.is_pointwise:
-        _c_N = b.const_i32(_wg_N(p))
+        _c_N = params["p_wg_N"]
 
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             return b_.add(b_.mul(m_val, _c_N), n_val), b.const_i32(1)
@@ -2818,19 +2990,19 @@ def _emit_wgrad_cshuffle_epilogue(
         # the off-diagonal group pairs. Safe to do per element here because the
         # store stays scalar -- cpg == 1 under the group-merge gate, so the
         # vector width derived below is 1.
-        dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
+        dW_desc = make_dw_descriptor_dynamic(b, params, is_3d=p.is_3d)
         dw_addr = _gm_dw_addr_fn(b, spec, dW_desc, group)
 
     elif group is not None:
-        dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
-        _c_kpg = b.const_i32(p.kpg)
+        dW_desc = make_dw_descriptor_dynamic(b, params, is_3d=p.is_3d)
+        _c_kpg = params["p_kpg"]
 
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             m_g = b_.add(m_val, b_.mul(group, _c_kpg))
             return dW_desc.offset(b_, k_out=m_g, n_wg=n_val)
 
     else:
-        dW_desc = make_dw_descriptor(p, dtype=spec.data.dtype_d)
+        dW_desc = make_dw_descriptor_dynamic(b, params, is_3d=p.is_3d)
 
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             return dW_desc.offset(b_, k_out=m_val, n_wg=n_val)
@@ -2854,7 +3026,7 @@ def _emit_wgrad_cshuffle_epilogue(
         d_rsrc=dw_rsrc,
         # Merged tiles are bounded by what the TILE covers; the address fn maps
         # back to the true per-group dW position.
-        bounds=(b.const_i32(spec.grid_M), b.const_i32(spec.grid_N)),
+        bounds=_grid_mn_runtime(b, spec, params),
     )
 
 
@@ -2870,6 +3042,7 @@ def _emit_wgrad_workspace_store_epilogue(
     block_n_off: Value,
     ws_ptr: Value,
     c_per_lane: int,
+    params: Dict[str, Value],
     gm_group: Optional[Value] = None,
 ) -> None:
     """Two-stage Stage 1 epilogue: f32 atomic-add into the scratch accumulator.
@@ -2908,10 +3081,9 @@ def _emit_wgrad_workspace_store_epilogue(
     p = spec.problem
     mfmas_m = spec.mfmas_per_warp_m
     mfmas_n = spec.mfmas_per_warp_n
-    wg_M = _wg_M(p)
-    wg_N = _wg_N(p)
-    wg_M_v = b.const_i32(wg_M)
-    wg_N_v = b.const_i32(wg_N)
+    wg_M_v = params["p_wg_M"]
+    wg_N_v = params["p_wg_N"]
+    slab_v = b.mul(wg_M_v, wg_N_v)
 
     # Scratch slab index = group * R + (blockIdx.z % R): every K-slice of a
     # group accumulates into one of that group's R replica slabs, chosen by a
@@ -2923,9 +3095,9 @@ def _emit_wgrad_workspace_store_epilogue(
     # elided rather than multiplied by a constant zero -- IRBuilder.const_i32
     # does no folding, so an unconditional constant would renumber every
     # downstream SSA value and break byte-identity on the default path.
-    # Scratch total size = groups * R * wg_M * wg_N (f32 elements).
+    # Scratch total size = groups * R * wg_M * wg_N (f32 elements); R is a
+    # build-time knob, the slab size is the runtime wg_M * wg_N.
     reps = spec.ws_replicas
-    slab_elems = wg_M * wg_N
     _slab_idx = None
     if gm_group is not None and reps > 1:
         _slab_idx = b.add(
@@ -2936,9 +3108,7 @@ def _emit_wgrad_workspace_store_epilogue(
         _slab_idx = gm_group
     elif reps > 1:
         _slab_idx = b.mod(b.block_id_z(), b.const_i32(reps))
-    slab_off = (
-        b.mul(_slab_idx, b.const_i32(slab_elems)) if _slab_idx is not None else None
-    )
+    slab_off = b.mul(_slab_idx, slab_v) if _slab_idx is not None else None
 
     # Merged-path setup. Only materialised when gm > 1, for the same
     # SSA-renumbering reason.
@@ -2952,11 +3122,10 @@ def _emit_wgrad_workspace_store_epilogue(
             )
         _gm_split, c_zero_v = _gm_coord_splitter(b, p, gm)
         c_gm_v = b.const_i32(gm)
-        c_cpg_v = b.const_i32(p.cpg)
-        c_slab_v = b.const_i32(slab_elems)
+        c_cpg_v = params["p_cpg"]
+        c_slab_v = slab_v
         c_reps_v = b.const_i32(reps) if reps > 1 else None
-        bound_m_v = b.const_i32(spec.grid_M)
-        bound_n_v = b.const_i32(spec.grid_N)
+        bound_m_v, bound_n_v = _grid_mn_runtime(b, spec, params)
 
     # Per-warp M/N offsets (same as the atomic epilogue).
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
