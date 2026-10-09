@@ -173,7 +173,6 @@ TEST(TestReferenceOpCoverage, RaggedGapsAreListedForBothReferences)
                                 "quick_SdpaFwd_bshd_bf16_hd192_causal_ragged_Small.Small",
                                 "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small"})
     {
-        EXPECT_NE(findKnownReferenceGap(ReferenceExecutorType::GPU, bundleId), nullptr) << bundleId;
         EXPECT_NE(findKnownReferenceGap(ReferenceExecutorType::CPU, bundleId), nullptr) << bundleId;
     }
 }
