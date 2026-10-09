@@ -158,6 +158,25 @@ TEST(TestPoolAssembly, TheSameProblemFromTwoSourcesIsMeasuredOnce)
     EXPECT_EQ(unique.at("sweep").size(), 1u);
 }
 
+TEST(TestPoolAssembly, TwoPointsThatAreOneGraphAreOneProblem)
+{
+    // Points differing only in a parameter the graph does not carry build the same graph;
+    // keyed by graph, the corpus holds it once.
+    SourcePools pools;
+    pools["sweep"] = {entryAt("sweep", 1, "r"), entryAt("sweep", 2, "r"), entryAt("sweep", 3, "r")};
+    const auto sameGraph = [](const PoolEntry& entry) {
+        return std::get<int64_t>(entry.point.at("batch")) == 3 ? std::string("other")
+                                                               : std::string("one graph");
+    };
+
+    std::map<std::string, int64_t> dropped;
+    const auto unique = deduplicate(pools, defaultShares(), dropped, sameGraph);
+
+    ASSERT_EQ(unique.at("sweep").size(), 2U);
+    EXPECT_EQ(std::get<int64_t>(unique.at("sweep").front().point.at("batch")), 1);
+    EXPECT_EQ(dropped.at("sweep"), 1);
+}
+
 TEST(TestPoolAssembly, ADisabledSourceCannotTakeAPointFromAnEnabledOne)
 {
     // The model pool names one of the pack's two geometries; with share 0 it must not keep it.

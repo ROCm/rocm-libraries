@@ -31,6 +31,7 @@ def _l1_corpus(path, metric="tflops"):
                 "engine_id": 1,
                 "engine_name": "probe:A",
                 "graph_id": f"g{index}",
+                "graph_key": f"g{index}",
                 "device_id": "board",
                 "arch": "gfx942",
                 "binding": binding,

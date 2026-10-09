@@ -17,10 +17,10 @@
 #include <vector>
 
 /// @file TestGraphIdentity.cpp
-/// @brief The identity a written graph carries.
+/// @brief The id a written graph carries, and the content key that identifies it.
 ///
-/// An id-less graph gets a random id from `GraphDescriptor::finalize` at load, and
-/// `uhd_gen/corpus_io.py` treats `benchmark` and `graph_id` as one identity; both fail silently.
+/// An id-less graph gets a random id from `GraphDescriptor::finalize` at load, so every
+/// written graph is stamped; measurements are keyed by content, never by that id.
 
 using namespace hipdnn_corpus_gen;
 
@@ -100,8 +100,7 @@ TEST(TestGraphIdentity, AGraphIdentityIsShapedLikeAUuidSoItRoundTripsThroughTheG
 
 TEST(TestGraphIdentity, TheStampedGraphCarriesTheNameAndTheIdItReports)
 {
-    // The returned id (manifest `benchmark`) must equal the id in the document (bench
-    // `graph_id`), so the document is read back.
+    // The returned id must equal the id in the document, so the document is read back.
     const auto stamped = stampGraphIdentity(someGraph(), "sdpa_fwd_prefill_short_batch1");
 
     const auto* graph = fb::GetGraph(stamped.bytes.data());
@@ -131,4 +130,49 @@ TEST(TestGraphIdentity, TwoGraphsDifferingOnlyInTheirNameGetDifferentIds)
     const auto right = stampGraphIdentity(someGraph(), "another_graph");
 
     EXPECT_NE(left.id, right.id);
+}
+
+TEST(TestGraphIdentity, TheContentKeyIsTheSameGraphUnderAnyNameOrId)
+{
+    // A graph's id names its file; the key says which graph it is, so a training set keyed on
+    // it holds one graph once however many names it was written under.
+    const auto left = stampGraphIdentity(someGraph(), "a_graph");
+    const auto right = stampGraphIdentity(someGraph(), "another_graph");
+
+    EXPECT_NE(left.id, right.id);
+    EXPECT_EQ(left.key, right.key);
+    const auto unstamped = someGraph();
+    EXPECT_EQ(graphContentKey(unstamped.data(), unstamped.size()), left.key);
+    EXPECT_EQ(graphContentKey(left.bytes.data(), left.bytes.size()), left.key);
+}
+
+TEST(TestGraphIdentity, DifferentGraphsGetDifferentContentKeys)
+{
+    auto other = someGraph();
+    const auto original = stampGraphIdentity(other, "a_graph");
+    // Another shape through the same declaration.
+    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
+    std::ifstream file(path);
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok());
+    const ProblemPoint point{{"batch", int64_t{2}},
+                             {"heads", int64_t{32}},
+                             {"heads_kv", int64_t{32}},
+                             {"seqlen_q", int64_t{2048}},
+                             {"seqlen_k", int64_t{2048}},
+                             {"head_dim", int64_t{128}},
+                             {"is_causal", true},
+                             {"alignment", std::string("top_left")},
+                             {"generate_stats", false},
+                             {"dtype", std::string("bf16")}};
+    const auto built = buildGraphFor(*parsed.metadata, point);
+    ASSERT_TRUE(built.ok()) << built.error;
+    EXPECT_NE(stampGraphIdentity(built.bytes, "a_graph").key, original.key);
+}
+
+TEST(TestGraphIdentity, BytesThatAreNotAGraphHaveNoContentKey)
+{
+    const std::string text = "not a graph";
+    EXPECT_THROW(graphContentKey(reinterpret_cast<const uint8_t*>(text.data()), text.size()),
+                 std::exception);
 }

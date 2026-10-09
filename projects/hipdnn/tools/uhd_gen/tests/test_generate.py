@@ -30,6 +30,7 @@ def _cli():
 def _page():
     return {
         "engine_id": 7,
+        "graph_key": "graph",
         "graph_id": "graph",
         "device_id": "board",
         "device_arch": "gfx942",
@@ -55,6 +56,7 @@ def _timing(page):
         key: copy.deepcopy(page[key])
         for key in (
             "engine_id",
+            "graph_key",
             "graph_id",
             "device_id",
             "device_arch",
@@ -402,6 +404,7 @@ def _immediate_bench(
             "engine_id": 7,
             "engine_name": engine,
             "graph_id": graph["id"],
+            "graph_key": graph["id"],
             "device_id": "board",
             "arch": "gfx942",
             "metric": metric,

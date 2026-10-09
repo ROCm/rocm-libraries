@@ -437,7 +437,7 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
 
 /// The manifest's `served_extent` for one operation. With @p takeEdges, the edge points are
 /// added to the sweep pool (where no pool holds them) and named in @p reserved so the cut keeps
-/// them. @p admit stamps a new pool entry and returns its graph id, or empty when held out.
+/// them. @p admit stamps a new pool entry and returns its content key, or empty when held out.
 ///
 /// A served maximum within a tenth of @p searchCeiling is marked `at_search_ceiling` (the walk
 /// proposes nothing above it), unless the declaration bounds the parameter there.
@@ -491,7 +491,7 @@ nlohmann::json
         entry.source = "sweep";
         entry.origin = metadata.operation + " extreme " + edge.end + " " + edge.parameter;
         entry.regime = hipdnn_corpus_gen::regimeLabel(metadata, entry.point);
-        // Pooled or not, the id comes from the same stamp emission uses.
+        // Pooled or not, the key comes from the same stamp emission uses.
         const auto id = admit(entry);
         if(id.empty())
         {
@@ -737,25 +737,17 @@ int runGenerator(const std::vector<std::string>& args)
         }
     }
 
-    // `benchmark` ids are content-derived, so exclusion is an exact set difference.
+    // Exclusion is by content key, so a graph an earlier set holds under another name is
+    // still held out.
     std::set<std::string> excluded;
-    for(const auto& path : options.excludeCorpora)
+    try
     {
-        std::ifstream file(path);
-        if(!file)
-        {
-            std::cerr << "cannot read --exclude-corpus " << path << "\n";
-            return 1;
-        }
-        nlohmann::json manifest;
-        file >> manifest;
-        for(const auto& graph : manifest.value("graphs", nlohmann::json::array()))
-        {
-            if(graph.contains("benchmark"))
-            {
-                excluded.insert(graph.at("benchmark").get<std::string>());
-            }
-        }
+        excluded = hipdnn_corpus_gen::excludedGraphKeys(options.excludeCorpora);
+    }
+    catch(const std::exception& error)
+    {
+        std::cerr << "--exclude-corpus: " << error.what() << "\n";
+        return 1;
     }
 
     // Only with an engine, so engine-free runs need no GPU. MIOpen's AI solver predictor
@@ -995,8 +987,8 @@ int runGenerator(const std::vector<std::string>& args)
     // An excluded configuration is valid -- the engine serves it -- and only not returned: the
     // search holds it, as it holds a point already pooled, and keeps walking through it. Refused
     // instead, it fences the walk out of the region the excluded corpora cover, and a search that
-    // starts there finds nothing new however many problems are asked for. The id is the one the
-    // graph would be written under, content-derived, computed exactly as emission computes it.
+    // starts there finds nothing new however many problems are asked for. The key is the one the
+    // graph would be written under, computed exactly as emission computes it.
     std::set<std::string> heldOutIds;
     std::map<std::string, bool> excludedByKey;
     const auto excludedPoint = [&](const std::string& operation, const ProblemPoint& point) {
@@ -1026,7 +1018,7 @@ int runGenerator(const std::vector<std::string>& args)
                           graphNameFor(operation,
                                        hipdnn_corpus_gen::regimeLabel(declaration->second, point),
                                        point))
-                          .id;
+                          .key;
                 held = excluded.count(id) > 0;
                 if(held)
                 {
@@ -1121,7 +1113,7 @@ int runGenerator(const std::vector<std::string>& args)
         const auto searchOracle = everyEngine(options.maxBytes);
 
         // Graphs are built and stamped at admission, before selection, so `--exclude-corpus`
-        // filters by final id and `--count` is not left short afterwards.
+        // filters by content key and `--count` is not left short afterwards.
         const auto admit = [&](hipdnn_corpus_gen::PoolEntry& entry, bool alreadyAdmitted) {
             if(!hipdnn_corpus_gen::keeps(keep, entry.point))
             {
@@ -1150,9 +1142,9 @@ int runGenerator(const std::vector<std::string>& args)
                                          graphNameFor(result.operation, entry.regime, entry.point)))
                             .first;
             }
-            if(excluded.count(known->second.id) > 0)
+            if(excluded.count(known->second.key) > 0)
             {
-                heldOutIds.insert(known->second.id);
+                heldOutIds.insert(known->second.key);
                 return false;
             }
             return true;
@@ -1406,7 +1398,7 @@ int runGenerator(const std::vector<std::string>& args)
                 }
                 return stamped
                     .at(result.operation + "|" + hipdnn_corpus_gen::detail::describe(entry.point))
-                    .id;
+                    .key;
             });
 
         // Spread a cut over categorical combinations as well as regimes.
@@ -1434,7 +1426,17 @@ int runGenerator(const std::vector<std::string>& args)
         }
 
         std::map<std::string, int64_t> dropped;
-        const auto deduplicated = hipdnn_corpus_gen::deduplicate(pools, options.shares, dropped);
+        // One entry per graph: two points a builder renders identically (one differing only in
+        // a parameter the graph does not carry) are one problem, whatever their names.
+        const auto deduplicated = hipdnn_corpus_gen::deduplicate(
+            pools, options.shares, dropped, [&](const hipdnn_corpus_gen::PoolEntry& entry) {
+                const auto found = stamped.find(result.operation + "|"
+                                                + hipdnn_corpus_gen::detail::describe(entry.point));
+                return found != stamped.end()
+                           ? found->second.key
+                           : result.operation + "|"
+                                 + hipdnn_corpus_gen::detail::describe(entry.point);
+            });
 
         // 0 means everything the pools hold. Larger requests are never filled: `allocate` is
         // capped by pool capacity and the shortfall is recorded against `requested`.
@@ -1537,7 +1539,7 @@ int runGenerator(const std::vector<std::string>& args)
 
             hipdnn_corpus_gen::ManifestEntry row;
             row.entry = entry;
-            row.benchmark = graph.id;
+            row.benchmark = graph.key;
             row.name = graph.name;
             row.file = "graphs/" + name;
             row.operation = result.operation;

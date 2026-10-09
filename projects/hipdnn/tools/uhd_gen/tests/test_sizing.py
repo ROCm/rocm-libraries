@@ -73,7 +73,9 @@ def test_the_ceiling_scores_repeats_against_the_label_never_the_label_itself():
     label = {"benchmark": "g", "arch": "gfx", "tflops": 100.0}
     same_gpu_again = {"benchmark": "g", "arch": "gfx", "tflops": 104.0}
     other_gpu = {"benchmark": "g", "arch": "gfx", "tflops": 130.0}
-    key = ("g", "gfx", "None", "None")
+    from uhd_gen.generate import _measurement_key
+
+    key = _measurement_key(label)
     labels = {key: ((2, "gpu0"), label)}
     measurements = [
         ((0, "gpu0"), same_gpu_again),
@@ -197,6 +199,7 @@ def store(tmp_path, monkeypatch):
             "engine_id": 7,
             "engine_name": "provider:engine7",
             "graph_id": graph["id"],
+            "graph_key": graph["id"],
             "device_id": engine["device"],
             "arch": "gfx942",
             "metric": metric,

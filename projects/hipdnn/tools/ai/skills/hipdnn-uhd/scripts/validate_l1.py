@@ -117,7 +117,7 @@ def measurement(answer: dict, metric: str) -> dict:
         return {"ok": False, "error": str(error)}
     return {"ok": True, "value": row[LABELS[metric]], "metric": metric,
             "tflops": row.get("tflops"), "avgTimeMs": row["avgTimeMs"],
-            "graph_id": row["benchmark"], "device": row["device"]}
+            "graph_key": row["benchmark"], "device": row["device"]}
 
 
 def main(argv: list[str] | None = None) -> int:

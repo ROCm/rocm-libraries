@@ -258,7 +258,8 @@ def normalize_row(value: dict) -> dict:
     name = _text(value.get("engine_name"), "engine_name")
     if name != binding["engine"]:
         raise ValueError("measurement engine_name differs from binding.engine")
-    graph = _text(value.get("graph_id", value.get("benchmark")), "graph_id")
+    # A response names the graph by content key and id; a stored row's `benchmark` is the key.
+    graph = _text(value.get("graph_key", value.get("benchmark")), "graph_key")
     device = _text(value.get("device_id", value.get("device")), "device_id")
     arch = _text(value.get("arch"), "arch")
     if not _ARCH.fullmatch(arch) or binding["arch"] not in (arch, "default"):
@@ -496,7 +497,7 @@ def prediction_scorer(descriptor: dict, responses: list[dict]):
         if isinstance(engine, bool) or not isinstance(engine, int):
             raise ValueError("runtime prediction engine_id must be an integer")
         key = (
-            _text(response.get("graph_id"), "graph_id"),
+            _text(response.get("graph_key"), "graph_key"),
             _text(response.get("device_id"), "device_id"),
             engine,
         )

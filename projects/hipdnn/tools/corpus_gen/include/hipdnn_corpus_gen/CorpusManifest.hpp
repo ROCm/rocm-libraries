@@ -17,6 +17,8 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -58,10 +60,11 @@ struct ManifestEntry
 {
     PoolEntry entry;
 
-    /// Must be the id written into the graph document (see @ref graphIdentity).
+    /// The graph's content key (@ref graphContentKey): the key a measurement of it is stored
+    /// and deduplicated under, which `hipdnn_bench` reports as `graph_key`.
     std::string benchmark;
 
-    /// The graph document's name; L2 collections mint their own ids and join on this.
+    /// The graph document's name.
     std::string name;
 
     /// Corpus-relative, e.g. `graphs/sdpa_fwd_0001.fb`.
@@ -175,11 +178,10 @@ inline nlohmann::json corpusManifest(const std::vector<ManifestEntry>& entries,
     manifest["reports"] = context.reports;
     manifest["graphs"] = records;
     manifest["note"]
-        = "`benchmark` is the content-derived id written into each graph document, and is the "
-          "`benchmark` column of the corpus collected from it -- join manifest.csv on it to "
-          "give `uhd_gen evaluate --regime-column regime` the column RFC 0019.13 section 11.2 "
-          "requires. An L2 collection mints its own graph ids; join on `name` there, which the "
-          "graph document carries.";
+        = "`benchmark` is each graph's content key, which hipdnn_bench reports as `graph_key` "
+          "and uhd_gen stores as the `benchmark` column of every collection made from it -- "
+          "join manifest.csv on it to give `uhd_gen evaluate --regime-column regime` the column "
+          "RFC 0019.13 section 11.2 requires.";
     return manifest;
 }
 
@@ -286,6 +288,38 @@ inline std::string corpusManifestCsv(const std::vector<ManifestEntry>& entries)
         text += "\n";
     }
     return text;
+}
+
+/// @brief The content keys of every graph the corpora at @p manifests hold, hashed from the
+/// graph files the manifests list, so a corpus is held out by what it holds whatever its
+/// manifest recorded. Throws when a manifest or one of its graph files cannot be read.
+inline std::set<std::string> excludedGraphKeys(const std::vector<std::filesystem::path>& manifests)
+{
+    std::set<std::string> keys;
+    for(const auto& path : manifests)
+    {
+        std::ifstream file(path);
+        if(!file)
+        {
+            throw std::runtime_error("cannot read " + path.string());
+        }
+        nlohmann::json manifest;
+        file >> manifest;
+        for(const auto& graph : manifest.value("graphs", nlohmann::json::array()))
+        {
+            const auto graphPath = path.parent_path() / graph.at("file").get<std::string>();
+            std::ifstream bytes(graphPath, std::ios::binary);
+            if(!bytes)
+            {
+                throw std::runtime_error("cannot read " + graphPath.string()
+                                         + ", which keys a graph of " + path.string());
+            }
+            const std::vector<uint8_t> content((std::istreambuf_iterator<char>(bytes)),
+                                               std::istreambuf_iterator<char>());
+            keys.insert(graphContentKey(content.data(), content.size()));
+        }
+    }
+    return keys;
 }
 
 /// @brief Writes both manifests into @p root, and returns the JSON one.

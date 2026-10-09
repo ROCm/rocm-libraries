@@ -80,7 +80,7 @@ def run(bench: str, graph: Path, plugin_dir: str, engine_id: str, env: dict,
         row["error"] = "hipdnn_bench emitted no positive avgTimeMs"
     else:
         row["avgTimeMs"] = timing
-    row["benchmark"] = response.get("benchmark") or response.get("graph_id")
+    row["benchmark"] = response.get("graph_key")
     row["device"] = response.get("device") or response.get("device_id")
     return row
 

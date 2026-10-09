@@ -515,6 +515,7 @@ if "--collect-immediate" in args:
     flops = 1e12
     print(json.dumps({"engine_id": int(args[args.index("--engine-id") + 1]),
                       "engine_name": "OPAQUE_ENGINE", "graph_id": f"graph-{index}",
+                      "graph_key": f"key-{index}",
                       "device_id": "gpu#0", "arch": "gfx950", "selection_mode": "immediate",
                       "timing_statistic": "robustMeanMs", "is_valid": True, "binding": binding,
                       "features": {"graph.flops": flops, "device.cu_count": 256},
@@ -691,7 +692,7 @@ candidate = "descriptor_tree" in _tree
 if candidate:
     print("[error] uhd: the model is not used and kernels rank by priority, then id",
           file=sys.stderr)
-print(json.dumps({"avgTimeMs": 2.0 if candidate else 1.0, "graph_id": "g", "device_id": 0}))
+print(json.dumps({"avgTimeMs": 2.0 if candidate else 1.0, "graph_key": "g", "device_id": 0}))
 """
 
 

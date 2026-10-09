@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <hipdnn_corpus_gen/CorpusManifest.hpp>
+#include <hipdnn_corpus_gen/GraphBuilderRegistry.hpp>
 #include <hipdnn_corpus_gen/OperationMetadata.hpp>
 
 #include <gtest/gtest.h>
@@ -10,7 +11,9 @@
 
 #include "OperationsDir.hpp"
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -60,7 +63,7 @@ ManifestEntry sdpaEntry(const std::string& name,
     entry.entry.source = source;
     entry.entry.origin = origin;
     entry.entry.regime = regime;
-    entry.benchmark = graphIdentity(reinterpret_cast<const uint8_t*>(name.data()), name.size());
+    entry.benchmark = "key-" + name;
     entry.name = name;
     entry.file = "graphs/" + name + ".fb";
     entry.bytes = 4096;
@@ -314,4 +317,74 @@ TEST(TestCorpusManifest, TwoOperationsShareOneHeaderAndLeaveEachOthersColumnsEmp
     ASSERT_LT(column("phase"), header.size());
     EXPECT_EQ(rows[1][column("phase")], "decode");
     EXPECT_EQ(rows[2][column("phase")], "");
+}
+
+namespace
+{
+
+/// A directory removed when the test ends.
+struct ScratchDirectory
+{
+    std::filesystem::path path;
+    explicit ScratchDirectory(const std::string& name)
+        : path(std::filesystem::temp_directory_path()
+               / (name + "-" + std::to_string(::testing::UnitTest::GetInstance()->random_seed())))
+    {
+        std::filesystem::remove_all(path);
+        std::filesystem::create_directories(path / "graphs");
+    }
+    ~ScratchDirectory()
+    {
+        std::error_code ignored;
+        std::filesystem::remove_all(path, ignored);
+    }
+    ScratchDirectory(const ScratchDirectory&) = delete;
+    ScratchDirectory& operator=(const ScratchDirectory&) = delete;
+};
+
+std::vector<uint8_t> builtSdpaGraph(int64_t seqlenQ)
+{
+    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
+    std::ifstream file(path);
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    EXPECT_TRUE(parsed.ok());
+    auto point = sdpaPoint(seqlenQ, 4096);
+    point["alignment"] = std::string("top_left");
+    point["generate_stats"] = false;
+    const auto built = buildGraphFor(*parsed.metadata, point);
+    EXPECT_TRUE(built.ok()) << built.error;
+    return built.bytes;
+}
+
+void writeJson(const std::filesystem::path& path, const nlohmann::json& document)
+{
+    std::ofstream(path) << document.dump();
+}
+
+} // namespace
+
+TEST(TestCorpusManifest, AnExcludedCorpusIsHeldOutByTheContentKeysOfItsGraphFiles)
+{
+    // Whatever the manifest recorded as `benchmark`, the files say which graphs it holds; the
+    // same graph under another name is still held out.
+    const ScratchDirectory corpus("excluded");
+    const auto graph = stampGraphIdentity(builtSdpaGraph(64), "an_old_name");
+    std::ofstream(corpus.path / "graphs" / "old.fb", std::ios::binary)
+        .write(reinterpret_cast<const char*>(graph.bytes.data()),
+               static_cast<std::streamsize>(graph.bytes.size()));
+    writeJson(corpus.path / "manifest.json",
+              {{"graphs", {{{"benchmark", "anything"}, {"file", "graphs/old.fb"}}}}});
+
+    const auto keys = excludedGraphKeys({corpus.path / "manifest.json"});
+    EXPECT_EQ(keys, std::set<std::string>{graph.key});
+    EXPECT_EQ(keys.count(stampGraphIdentity(builtSdpaGraph(64), "a_new_name").key), 1U)
+        << "the same graph under a new name is still held out";
+}
+
+TEST(TestCorpusManifest, AnExcludedCorpusMissingAGraphFileIsAnErrorNotAnEmptySet)
+{
+    const ScratchDirectory corpus("excluded-missing");
+    writeJson(corpus.path / "manifest.json",
+              {{"graphs", {{{"benchmark", "an-id"}, {"file", "graphs/gone.fb"}}}}});
+    EXPECT_THROW(excludedGraphKeys({corpus.path / "manifest.json"}), std::runtime_error);
 }

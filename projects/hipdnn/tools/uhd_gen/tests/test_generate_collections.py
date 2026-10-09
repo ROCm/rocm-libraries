@@ -69,6 +69,7 @@ def world(tmp_path, monkeypatch):
             "engine_id": 7,
             "engine_name": engine["engine_name"],
             "graph_id": graph["id"],
+            "graph_key": graph["id"],
             "device_id": device,
             "arch": "gfx942",
             "metric": metric,
@@ -426,6 +427,51 @@ def test_distinct_configurations_on_one_shape_are_distinct_rows():
         one_measurement_per_shape([("a", bound("r1", "x")), ("b", bound("r2", "x"))])
     rebuilt = [("a", bound("r1", "x")), ("b", bound("r1", "y"))]
     assert one_measurement_per_shape(rebuilt) == ([rebuilt[1][1]], 1)
+
+
+def test_one_graph_measured_twice_in_one_session_is_kept_once():
+    """A graph supplied twice to one run (two files, two names) is one content key: the
+    later measurement is the label and the earlier is dropped, never both trained on."""
+    from uhd_gen.generate import one_measurement_per_shape
+
+    first = {"benchmark": "key-1", "arch": "gfx942", "avgTimeMs": 1.0}
+    again = {"benchmark": "key-1", "arch": "gfx942", "avgTimeMs": 1.1}
+    other = {"benchmark": "key-2", "arch": "gfx942", "avgTimeMs": 2.0}
+    kept, dropped = one_measurement_per_shape(
+        [("gpu0", first), ("gpu0", other), ("gpu0", again)]
+    )
+    assert (kept, dropped) == ([other, again], 1)
+
+
+def test_published_candidates_of_one_problem_stay_distinct_rows():
+    """A published row names its candidate by `kernel.*` fields, not `kernel`."""
+    from uhd_gen.generate import one_measurement_per_shape
+
+    rows = [
+        {"benchmark": "p", "arch": "gfx942", "kernel.solver_id": 1},
+        {"benchmark": "p", "arch": "gfx942", "kernel.solver_id": 2},
+    ]
+    assert one_measurement_per_shape([("s", r) for r in rows]) == (rows, 0)
+
+
+def test_a_bench_that_names_no_graph_key_cannot_collect(world, caplog):
+    """A row keyed by anything but content could enter a training set twice."""
+    from uhd_gen import generate
+
+    measure = generate._run_json
+
+    def unkeyed(*args, **kwargs):
+        response = measure(*args, **kwargs)
+        response.pop("graph_key", None)
+        return response
+
+    generate._run_json = unkeyed
+    try:
+        with pytest.raises(AssertionError):
+            _collect(world, "unkeyed")
+    finally:
+        generate._run_json = measure
+    assert "reported no graph_key" in caplog.text
 
 
 @pytest.mark.parametrize(
