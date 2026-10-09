@@ -239,12 +239,10 @@ targets and the validation commands.
 
 The returned heuristic result contains the required workspace size. Supply that
 workspace and follow the same handle, stream and workspace sharing rules as
-`hipblasLtMatmul` and `Gemm` calls using prebuilt algorithms. The algorithm
-carries its JIT solution library index, resolves to the published solution and
-the library's adapter, and then runs through the same launch path as a
-prebuilt algorithm, including its synchronization storage. Registry synchronization
-protects algorithm lookup; it does not protect application buffers or make
-simultaneous calls on one `Gemm` object safe.
+`hipblasLtMatmul` and `Gemm` calls using prebuilt algorithms. A heuristic
+result is a JIT solution library index, from 2^30, and it runs through the
+same launch path as a prebuilt index. Another process that queries the same
+problem receives that index.
 
 `getJitAlgo` returns a JIT solution library index from 2^30.
 `hipblaslt_ext::getIndexFromAlgo` returns that index, and another process that
