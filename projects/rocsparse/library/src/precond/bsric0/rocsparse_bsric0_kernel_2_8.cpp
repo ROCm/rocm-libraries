@@ -25,6 +25,7 @@
 #include "rocsparse_bsric0_kernel_2_8.hpp"
 #include "rocsparse_bsric0_info.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -40,7 +41,8 @@ namespace rocsparse
                                                 int32_t* __restrict__ block_done,
                                                 const J* __restrict__ block_map,
                                                 J*                   zero_pivot,
-                                                rocsparse_index_base idx_base)
+                                                rocsparse_index_base idx_base,
+                                                J                    idx)
     {
         static constexpr uint32_t BSRDIM = 8;
 
@@ -56,14 +58,7 @@ namespace rocsparse
         __shared__ T values[BSRDIM][BSRDIM + 1];
         __shared__ T local_values[BSRDIM][BSRDIM + 1];
 
-        const J idx = hipBlockIdx_x;
-
-        //
-        // Do not run out of bounds. The row map is indexed by the block id, and
-        // bsrilu0_kernel_general is the only kernel in the family that checked
-        // it; the CSR kernels all do. Cheap, and the only thing standing between
-        // a grid rounded up past mb and a read outside the map allocation.
-        //
+        // Keep the row map read in bounds.
         if(idx >= mb)
         {
             return;
@@ -395,17 +390,29 @@ namespace rocsparse
                            rocsparse_index_base idx_base)
     {
         const auto batch_index = hipBlockIdx_y;
-        rocsparse::bsric0_2_8_device<MX_NNZB>(dir,
-                                              mb,
-                                              bsr_dim,
-                                              bsr_row_ptr,
-                                              bsr_col_ind,
-                                              bsr_val + batch_index * bsr_val_stride,
-                                              bsr_diag_ind,
-                                              done_array + batch_index * done_array_stride,
-                                              map,
-                                              zero_pivot + batch_index * zero_pivot_stride,
-                                              idx_base);
+        //
+        // grid.x is clamped, so walk the contiguous chunk of rows grid_x_chunk gives
+        // this block. The block is a single wavefront, so the next row can reuse the
+        // shared arrays without a barrier.
+        //
+        int64_t first, last;
+        rocsparse::grid_x_chunk(mb, hipGridDim_x, hipBlockIdx_x, first, last);
+
+        for(int64_t idx = first; idx < last; ++idx)
+        {
+            rocsparse::bsric0_2_8_device<MX_NNZB>(dir,
+                                                  mb,
+                                                  bsr_dim,
+                                                  bsr_row_ptr,
+                                                  bsr_col_ind,
+                                                  bsr_val + batch_index * bsr_val_stride,
+                                                  bsr_diag_ind,
+                                                  done_array + batch_index * done_array_stride,
+                                                  map,
+                                                  zero_pivot + batch_index * zero_pivot_stride,
+                                                  idx_base,
+                                                  static_cast<J>(idx));
+        }
     }
 
     template <uint32_t MX_NNZB, typename T, typename I, typename J>
@@ -421,25 +428,26 @@ namespace rocsparse
         const int64_t done_array_stride = A->rows;
         auto          numeric_exact     = bsric0_info->get_singularity_numeric_exact();
 
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsric0_kernel_2_8<MX_NNZB>),
-                                           dim3(A->rows, A->batch_count),
-                                           dim3(8, 8),
-                                           0,
-                                           handle->stream,
-                                           A->block_dir,
-                                           static_cast<J>(A->rows),
-                                           reinterpret_cast<const I*>(A->const_row_data),
-                                           reinterpret_cast<const J*>(A->const_col_data),
-                                           reinterpret_cast<T*>(A->val_data),
-                                           A->batch_stride,
-                                           reinterpret_cast<const I*>(trm_info->get_diag_ind()),
-                                           static_cast<J>(A->block_dim),
-                                           done_array,
-                                           done_array_stride,
-                                           reinterpret_cast<const J*>(trm_info->get_row_map()),
-                                           reinterpret_cast<J*>(numeric_exact->get_position()),
-                                           numeric_exact->get_stride(),
-                                           A->descr->base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsric0_kernel_2_8<MX_NNZB>),
+            dim3(rocsparse::get_grid_size_x(handle, A->rows, 8), A->batch_count),
+            dim3(8, 8),
+            0,
+            handle->stream,
+            A->block_dir,
+            static_cast<J>(A->rows),
+            reinterpret_cast<const I*>(A->const_row_data),
+            reinterpret_cast<const J*>(A->const_col_data),
+            reinterpret_cast<T*>(A->val_data),
+            A->batch_stride,
+            reinterpret_cast<const I*>(trm_info->get_diag_ind()),
+            static_cast<J>(A->block_dim),
+            done_array,
+            done_array_stride,
+            reinterpret_cast<const J*>(trm_info->get_row_map()),
+            reinterpret_cast<J*>(numeric_exact->get_position()),
+            numeric_exact->get_stride(),
+            A->descr->base);
         return rocsparse_status_success;
     }
 
