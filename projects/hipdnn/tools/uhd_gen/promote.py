@@ -589,33 +589,9 @@ def _slug(name: str) -> str:
     ).strip("_")
 
 
-def _build_plan(
-    model_dir,
-    descriptor_tree,
-    engine,
-    role,
-    arch,
-    remove_knobs,
-    corpus=None,
-    uhd_ids=None,
-    feature_evaluator=None,
-):
-    uhd_ids = uhd_ids or {}
-    if role not in ROLES:
-        raise PromoteError(f"unknown heuristic role {role!r}")
-    # First: a correctness defect refuses regardless of the descriptors.
-    gate_warnings = _correctness_gate(model_dir, corpus)
-    descriptor_path = _find_descriptor(model_dir)
-    _contained(descriptor_path, model_dir, "source descriptor")
-    descriptor = _load_json(descriptor_path, "UHD")
-    _validate_descriptor(descriptor, descriptor_path)
-    identity = descriptor_id(descriptor.get("id"), str(descriptor_path))
-    manifest_path = model_dir / "train_manifest.json"
-    manifest = (
-        _load_json(manifest_path, "training manifest")
-        if manifest_path.is_file()
-        else {}
-    )
+def _promotion_arch(manifest: dict, arch: str | None) -> str:
+    """The role-map arch key a model installs under: `arch`, or the one arch it was
+    trained on; never one it was not trained on."""
     arches = manifest.get("training_arches", [])
     if not isinstance(arches, list) or any(
         not isinstance(item, str) or not _ARCH.fullmatch(item) for item in arches
@@ -631,6 +607,16 @@ def _build_plan(
         raise PromoteError(f"invalid target architecture {arch!r}")
     if arches and arch != "default" and arch not in arches:
         raise PromoteError(f"target {arch} is not in training_arches {arches}")
+    return arch
+
+
+def _check_model(
+    descriptor: dict, descriptor_path, manifest: dict, role: str, feature_evaluator
+) -> None:
+    """Refuse a model the runtime would refuse: provenance its training manifest
+    contradicts, another role, feature semantics or a features_hash the build does not
+    reproduce, or an engine-level model without the selector revision it is checked
+    against."""
     if "trained_against" in manifest and validate_provenance(
         manifest["trained_against"]
     ) != validate_provenance(descriptor.get("trained_against")):
@@ -670,6 +656,74 @@ def _build_plan(
                 "engine's current one; this model records none. Retrain from a corpus collected "
                 "with uhd_gen generate"
             )
+
+
+def _installed_uhds(descriptor_tree) -> tuple[list, dict]:
+    """Every UHD document in the tree as (path, document, id), and each id's path; two
+    documents under one id are refused."""
+    installed = []
+    installed_ids = {}
+    for path in sorted(descriptor_tree.rglob(f"*{UHD_SUFFIX}")):
+        if path.name == UHD_SUFFIX:
+            continue
+        doc = _load_json(path, "installed UHD")
+        current_id = descriptor_id(doc.get("id"), str(path))
+        if current_id in installed_ids:
+            raise PromoteError(
+                f"duplicate installed UHD identity {current_id}: {installed_ids[current_id]} and {path}"
+            )
+        installed_ids[current_id] = path
+        installed.append((path, doc, current_id))
+    return installed, installed_ids
+
+
+def _remove_knobs(ued: dict, remove_knobs) -> list:
+    """Withdraw authored knobs from the UED (a new major revision); returns them sorted."""
+    exposed = ued.get("knobs", [])
+    if not isinstance(exposed, list) or any(
+        not isinstance(item, str) for item in exposed
+    ):
+        raise PromoteError("UED knobs must be an array of strings")
+    unknown = set(remove_knobs) - set(exposed)
+    if unknown:
+        raise PromoteError(f"cannot remove unauthored knobs: {sorted(unknown)}")
+    dropped = sorted(set(remove_knobs))
+    major, _ = revision(ued.get("revision", "1.0"), "UED")
+    ued["revision"] = f"{major + 1}.0"
+    ued["knobs"] = [knob for knob in exposed if knob not in dropped]
+    return dropped
+
+
+def _build_plan(
+    model_dir,
+    descriptor_tree,
+    engine,
+    role,
+    arch,
+    remove_knobs,
+    corpus=None,
+    uhd_ids=None,
+    feature_evaluator=None,
+):
+    uhd_ids = uhd_ids or {}
+    if role not in ROLES:
+        raise PromoteError(f"unknown heuristic role {role!r}")
+    # First: a correctness defect refuses regardless of the descriptors.
+    gate_warnings = _correctness_gate(model_dir, corpus)
+    descriptor_path = _find_descriptor(model_dir)
+    _contained(descriptor_path, model_dir, "source descriptor")
+    descriptor = _load_json(descriptor_path, "UHD")
+    _validate_descriptor(descriptor, descriptor_path)
+    identity = descriptor_id(descriptor.get("id"), str(descriptor_path))
+    manifest_path = model_dir / "train_manifest.json"
+    manifest = (
+        _load_json(manifest_path, "training manifest")
+        if manifest_path.is_file()
+        else {}
+    )
+    arch = _promotion_arch(manifest, arch)
+    provenance = descriptor.get("trained_against", {})
+    _check_model(descriptor, descriptor_path, manifest, role, feature_evaluator)
     artifact_path, artifact_key = _artifact_path(descriptor, descriptor_path, model_dir)
     digest = _verify_artifact(descriptor, artifact_path, role)
     installed_descriptor = copy.deepcopy(descriptor)
@@ -717,19 +771,7 @@ def _build_plan(
         destination_dir /= metric
     ueds = list(index["ued"].values())
     references = [ref for path, doc in ueds for ref in _role_references(path, doc)]
-    installed = []
-    installed_ids = {}
-    for path in sorted(descriptor_tree.rglob(f"*{UHD_SUFFIX}")):
-        if path.name == UHD_SUFFIX:
-            continue
-        doc = _load_json(path, "installed UHD")
-        current_id = descriptor_id(doc.get("id"), str(path))
-        if current_id in installed_ids:
-            raise PromoteError(
-                f"duplicate installed UHD identity {current_id}: {installed_ids[current_id]} and {path}"
-            )
-        installed_ids[current_id] = path
-        installed.append((path, doc, current_id))
+    installed, installed_ids = _installed_uhds(descriptor_tree)
     ued = copy.deepcopy(original_ued)
     bound, replaced = _rebind(ued, role, arch, identity, metric, installed_ids)
     old = replaced[0] if replaced else None
@@ -751,18 +793,7 @@ def _build_plan(
     )
     plan.warnings.extend(gate_warnings)
     if remove_knobs:
-        exposed = ued.get("knobs", [])
-        if not isinstance(exposed, list) or any(
-            not isinstance(item, str) for item in exposed
-        ):
-            raise PromoteError("UED knobs must be an array of strings")
-        unknown = set(remove_knobs) - set(exposed)
-        if unknown:
-            raise PromoteError(f"cannot remove unauthored knobs: {sorted(unknown)}")
-        plan.dropped_knobs = sorted(set(remove_knobs))
-        major, _ = revision(ued.get("revision", "1.0"), "UED")
-        ued["revision"] = f"{major + 1}.0"
-        ued["knobs"] = [knob for knob in exposed if knob not in plan.dropped_knobs]
+        plan.dropped_knobs = _remove_knobs(ued, remove_knobs)
     if descriptor.get("features_signature"):
         # RFC 0019 §6.3 check 2, against the UED after any --remove-knob.
         knobs = ued.get("knobs", [])
