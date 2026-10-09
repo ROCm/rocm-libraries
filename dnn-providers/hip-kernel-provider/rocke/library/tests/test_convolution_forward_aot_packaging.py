@@ -25,6 +25,7 @@ from benchmarks.common import direct_kernel_sweep, kernel_sweep
 from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 from builders.common.convolution_forward import (
     AOT_DIRECT_ALGORITHMS,
+    DIRECT_VARIANT_GROUPED,
     KERNEL_FAMILY_DIRECT_DEPTHWISE,
     Gfx950ConvFwdAotSpec,
     Gfx950ConvFwdSpec,
@@ -440,6 +441,7 @@ _DIRECT_COUNTS = {
     "direct_depthwise_spatial": 30,
     "direct_depthwise_tiled": 1536,
     "direct_depthwise_col": 540,
+    "direct_grouped": 80,
 }
 #: Identities per (dtype, algorithm) the IR and serving tests sample, spread evenly
 #: over the sweep's order (capabilities outermost, then knobs). std and spatial are
@@ -581,8 +583,15 @@ def _instance_problems(spec: Gfx950ConvFwdAotSpec, count: int = 24):
             dil_h = dil_w = 2 if dil_h == 1 else 1
         elif change == "axes":
             stride_w = stride + 1
-        cpg, kpg = rng.choice([(1, 1)] * 8 + [(1, 2), (2, 2)])
-        groups = rng.choice([1, 2, 5, 8, 16, 32, 48, 63, 64, 65, 96, 128, 300])
+        if variant == DIRECT_VARIANT_GROUPED:
+            cpg, kpg = rng.choice(
+                [(spec.cpg, spec.kpg)] * 6
+                + [(spec.cpg, 2 * spec.kpg), (4 + spec.cpg, 4 + spec.kpg)]
+            )
+            groups = rng.choice([1, 2, 3, 4, 6, 8, 16, 24, 32, 48, 64, 128])
+        else:
+            cpg, kpg = rng.choice([(1, 1)] * 8 + [(1, 2), (2, 2)])
+            groups = rng.choice([1, 2, 5, 8, 16, 32, 48, 63, 64, 65, 96, 128, 300])
         c, k = groups * cpg, groups * kpg
         hi = rng.choice([1, 2, 3, 5, 7, 8, 12, 17, 28, 31, 33, 56])
         wi = rng.choice([1, 2, 3, 5, 7, 8, 12, 17, 28, 31, 33, 56])
@@ -796,6 +805,31 @@ def test_tiled_serves_large_filters_the_row_stream_cannot(direct_jobs):
     )
 
 
+@pytest.mark.parametrize("cpg", [4, 8, 16, 32])
+def test_grouped_serves_its_compiled_channel_counts_only(direct_jobs, cpg):
+    spec = _first(direct_jobs, "direct_grouped", cpg=cpg)
+    problem = Gfx950ConvFwdSpec(
+        N=2,
+        Hi=9,
+        Wi=19,
+        C=16 * cpg,
+        K=16 * cpg,
+        Y=3,
+        X=3,
+        pH=1,
+        pW=1,
+        groups=16,
+    )
+    assert gfx950_conv_fwd_aot_serves(spec, problem) == (True, "ok")
+    for change in ({"K": 32 * cpg}, {"C": 32 * cpg, "K": 32 * cpg}):
+        ok, why = gfx950_conv_fwd_aot_serves(spec, replace(problem, **change))
+        assert not ok and "cpg, kpg" in why, why
+    ok, why = gfx950_conv_fwd_aot_serves(
+        replace(spec, block_groups=32), replace(problem)
+    )
+    assert not ok and "not divisible by block_groups" in why, why
+
+
 @pytest.mark.parametrize(
     ("change", "reason"),
     [
@@ -834,6 +868,11 @@ def test_out_of_contract_direct_instances_are_declined(direct_jobs, change, reas
         ("direct_depthwise_col", {"block_w": 0}, "block_w must be a positive"),
         ("direct_depthwise_col", {"unroll_rows": 1}, "does not use unroll_rows"),
         ("direct_depthwise_col", {"block_waves": 17}, "block_waves"),
+        ("direct_grouped", {"block_h": 8}, "row tile block_h=16"),
+        ("direct_grouped", {"cpg": 0}, "cpg must be a positive"),
+        ("direct_grouped", {"block_w": 4}, "does not use block_w"),
+        ("direct_grouped", {"stride_h": 2, "stride_w": 2}, "stride > 1"),
+        ("direct_grouped", {"block_q": 24}, "multiple of 16"),
     ],
 )
 def test_out_of_contract_variant_knobs_are_declined(

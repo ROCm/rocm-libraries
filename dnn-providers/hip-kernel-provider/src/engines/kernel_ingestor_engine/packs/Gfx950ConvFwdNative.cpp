@@ -590,8 +590,8 @@ constexpr std::array<std::pair<const char*, int64_t>, 16> AOT_DIRECT_KNOB_DEFAUL
 }};
 
 /// The fields of block_w, block_waves, AOT_DIRECT_KNOB_DEFAULTS and "atom" that
-/// @p variant states (AOT_DIRECT_KNOBS in convolution_forward.py); every other one must
-/// hold its default.
+/// @p variant states (AOT_DIRECT_KNOBS and _AOT_DIRECT_EXTRA_FIELDS in
+/// convolution_forward.py); every other one must hold its default.
 bool aotDirectVariantUses(conv::DirectVariant variant, std::string_view field)
 {
     const auto among = [&](std::initializer_list<std::string_view> fields) {
@@ -607,6 +607,8 @@ bool aotDirectVariantUses(conv::DirectVariant variant, std::string_view field)
         return among({"block_w", "block_h", "block_waves", "unroll_rows"});
     case conv::DirectVariant::COL:
         return among({"block_w", "block_h", "block_waves"});
+    case conv::DirectVariant::GROUPED:
+        return among({"block_h", "block_q", "block_groups", "double_buffer", "cpg", "kpg"});
     case conv::DirectVariant::NONE:
     default:
         return false;
@@ -746,6 +748,10 @@ std::optional<conv::DirectInstance> aotDirectInstance(const KernelDefinition& ke
                                   blockW,
                                   blockWaves};
     instance.blockH = knob("block_h");
+    instance.blockQ = knob("block_q");
+    instance.blockGroups = knob("block_groups");
+    instance.cpg = knob("cpg");
+    instance.kpg = knob("kpg");
     return instance;
 }
 

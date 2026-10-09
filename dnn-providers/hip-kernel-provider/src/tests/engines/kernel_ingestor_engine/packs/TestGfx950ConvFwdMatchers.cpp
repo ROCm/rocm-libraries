@@ -1514,6 +1514,28 @@ KernelDefinition aotColKernel(int64_t filter = 5, int64_t stride = 2, int64_t pa
         {{"block_w", int64_t{2}}, {"block_h", int64_t{8}}, {"block_waves", int64_t{1}}});
 }
 
+KernelDefinition aotGroupedKernel(int64_t cpg = 8)
+{
+    return aotVariantKernel("grouped",
+                            3,
+                            1,
+                            1,
+                            {{"block_h", int64_t{16}},
+                             {"block_q", int64_t{16}},
+                             {"block_groups", int64_t{4}},
+                             {"double_buffer", int64_t{1}},
+                             {"cpg", cpg},
+                             {"kpg", cpg}});
+}
+
+ConvShape groupedShape(int64_t groups, int64_t cpg)
+{
+    ConvShape shape;
+    shape.groups = groups;
+    shape.c = shape.k = groups * cpg;
+    return shape;
+}
+
 TEST(TestGfx950ConvFwdAotKernelMatcher, OneInstanceServesEveryShapeItsCapabilitiesAdmit)
 {
     // No geometry field exists to compare: the same descriptor claims every shape.
@@ -1920,9 +1942,15 @@ TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachDirectVariantServesItsOwnProbl
     EXPECT_TRUE(matches(depthwiseShape(24, 13, 17, 5, 2, 0), aotColKernel()));
     EXPECT_FALSE(matches(depthwiseShape(24, 13, 5, 5, 2, 0), aotColKernel()));
     EXPECT_FALSE(matches(depthwiseShape(24, 13, 17, 5, 2, 2), aotColKernel()));
-    // The exact-shape engine admits none of them.
+    // grouped: its compiled channels per group, block_groups dividing the groups.
+    EXPECT_TRUE(matches(groupedShape(8, 8), aotGroupedKernel(8)));
+    EXPECT_FALSE(matches(groupedShape(8, 8), aotGroupedKernel(4)));
+    EXPECT_FALSE(matches(groupedShape(6, 8), aotGroupedKernel(8)));
+    // A depthwise graph is no grouped kernel's, and the exact-shape engine admits none of
+    // them.
     const GraphFixture depthwise(buildGraph(convSpec(depthwiseShape(32, 14, 14, 3, 1, 1))),
                                  gfx950Properties());
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, depthwise.context(), aotGroupedKernel()));
     for(const auto& kernel : {aotTiledKernel(), aotColKernel(3, 1, 1)})
     {
         EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, depthwise.context(), kernel));
@@ -1961,6 +1989,9 @@ TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachVariantStatesOnlyItsOwnKnobs)
         {depthwiseShape(24, 13, 17, 5, 2, 0),
          aotColKernel(),
          {"block_w", "block_h", "block_waves"}},
+        {groupedShape(8, 8),
+         aotGroupedKernel(),
+         {"block_h", "block_q", "block_groups", "double_buffer", "cpg", "kpg"}},
     };
     for(const auto& [shape, base, own] : cases)
     {
@@ -2019,6 +2050,7 @@ TEST(TestGfx950ConvFwdAotDispatch, EveryDirectVariantPassesTheContractAndReaches
     for(const auto& [shape, kernel] : std::vector<std::pair<ConvShape, KernelDefinition>>{
             {depthwiseShape(32, 14, 14, 3, 1, 1), aotTiledKernel()},
             {depthwiseShape(24, 13, 17, 5, 2, 0), aotColKernel()},
+            {groupedShape(8, 8), aotGroupedKernel()},
         })
     {
         SCOPED_TRACE(std::get<std::string>(kernel.metadata.at("direct_variant")));
