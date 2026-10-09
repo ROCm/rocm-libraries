@@ -620,7 +620,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                          solutionPoolIndex: dict = None,
                          archNames: Optional[List[str]] = None,
     ):
-    """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config
+    """Run the benchmarking for a single entry in the BenchmarkProblems of a TensileLite config
 
     Args:
         buildOnly: If True, generate and build kernels but skip benchmarking.
@@ -910,7 +910,7 @@ def main(
     solutionPoolFiles: list = None,
     archNames: Optional[List[str]] = None,
 ):
-    """Entry point for the "BenchmarkProblems" section of a Tensile config yaml
+    """Entry point for the "BenchmarkProblems" section of a TensileLite config yaml
 
     Args:
         backend: Backend configuration from config["Backend"] (defaults to {})
