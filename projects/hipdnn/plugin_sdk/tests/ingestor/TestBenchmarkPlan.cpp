@@ -48,6 +48,11 @@ struct HipStreamWaitFaults
     int failFromArm = 0;
     int rejectedArms = 0;
     hipError_t lastError = hipSuccess;
+    // Makes this many successful hipEventElapsedTime readings taken while a stall gate
+    // wait was enqueued report a finite negative span, the shape seen on Windows.
+    int negativeStalledReadings = 0;
+    int stalledReadings = 0;
+    bool waitEnqueued = false;
 };
 
 thread_local HipStreamWaitFaults gStreamWaitFaults;
@@ -59,6 +64,7 @@ extern "C" hipError_t __real_hipStreamWaitValue32(
     hipStream_t stream, void* ptr, uint32_t value, unsigned int flags, uint32_t mask);
 extern "C" hipError_t
     __real_hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attribute, int device);
+extern "C" hipError_t __real_hipEventElapsedTime(float* ms, hipEvent_t start, hipEvent_t stop);
 
 extern "C" hipError_t __wrap_hipStreamWaitValue32(
     hipStream_t stream, void* ptr, uint32_t value, unsigned int flags, uint32_t mask)
@@ -77,7 +83,9 @@ extern "C" hipError_t __wrap_hipStreamWaitValue32(
             return gStreamWaitFaults.lastError;
         }
     }
-    return __real_hipStreamWaitValue32(stream, ptr, value, flags, mask);
+    const hipError_t status = __real_hipStreamWaitValue32(stream, ptr, value, flags, mask);
+    gStreamWaitFaults.waitEnqueued = status == hipSuccess;
+    return status;
 }
 
 extern "C" hipError_t
@@ -91,6 +99,23 @@ extern "C" hipError_t
         return hipSuccess;
     }
     return __real_hipDeviceGetAttribute(value, attribute, device);
+}
+
+extern "C" hipError_t __wrap_hipEventElapsedTime(float* ms, hipEvent_t start, hipEvent_t stop)
+{
+    const hipError_t status = __real_hipEventElapsedTime(ms, start, stop);
+    if(gStreamWaitFaults.enabled && status == hipSuccess && gStreamWaitFaults.waitEnqueued)
+    {
+        ++gStreamWaitFaults.stalledReadings;
+        if(gStreamWaitFaults.negativeStalledReadings > 0)
+        {
+            --gStreamWaitFaults.negativeStalledReadings;
+            *ms = -0.01F;
+        }
+    }
+    // The ingestor arms before every stalled sample, so the next wait decides again.
+    gStreamWaitFaults.waitEnqueued = false;
+    return status;
 }
 // NOLINTEND(readability-identifier-naming, bugprone-reserved-identifier)
 #endif
@@ -798,6 +823,50 @@ TEST_F(TestIngestorHipTimerFaults, UnsupportedDeviceStartsUnstalledWithoutDiscar
     EXPECT_EQ(gStreamWaitFaults.armCalls, 0);
     ASSERT_EQ(recorded.size(), 1U);
     EXPECT_EQ(candidatePtr->launchCount(), SAMPLING_LAUNCHES + 1);
+}
+
+TEST_F(TestIngestorHipTimerFaults, NegativeStalledReadingsRestartTheComparisonUnstalled)
+{
+    int device = 0;
+    int canWait = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    ASSERT_EQ(hipDeviceGetAttribute(&canWait, hipDeviceAttributeCanUseStreamWaitValue, device),
+              hipSuccess);
+    if(canWait == 0)
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    auto first = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
+    auto second = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
+    const auto* firstRaw = first.get();
+    const auto* secondRaw = second.get();
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(1), std::move(first)});
+    candidates.push_back({testId(2), std::move(second)});
+
+    // Every stalled reading is negative. The first candidate spends its retry budget on
+    // the first slot; that must restart the comparison unstalled, not drop the candidate.
+    gStreamWaitFaults.negativeStalledReadings = std::numeric_limits<int>::max();
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates),
+                                 handle,
+                                 TestBenchmarkPlan::Timer{},
+                                 [&recorded](auto ranking) { recorded = std::move(ranking); });
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_EQ(gStreamWaitFaults.stalledReadings, 1 + MAX_NEGATIVE_SAMPLE_RETRIES);
+    ASSERT_EQ(recorded.size(), 2U) << "a candidate with only negative stalled readings was dropped";
+    for(const auto& entry : recorded)
+    {
+        EXPECT_GE(entry.timeMs, 0.0);
+    }
+    const int firstDelegated = recorded.front().kernelId == testId(1) ? 1 : 0;
+    EXPECT_EQ(firstRaw->launchCount(),
+              BENCHMARK_WARMUP_RUNS + 1 + MAX_NEGATIVE_SAMPLE_RETRIES + SAMPLING_LAUNCHES
+                  + firstDelegated);
+    EXPECT_EQ(secondRaw->launchCount(), SAMPLING_LAUNCHES + 1 - firstDelegated);
 }
 #endif
 

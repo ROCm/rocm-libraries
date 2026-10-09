@@ -36,17 +36,20 @@ namespace hipdnn_frontend::autotune
  * neither a benchmark failure nor a restart request counts as converged.
  * @c benchmarkFailed / @c errorMessage carry the failure path back to the
  * caller so it can mark the engine failed without aborting the autotune run.
- * @c restartUnstalled is set when a stalled pass hit a timeout or a valid
- * UNSTALLED measurement: the loop stopped immediately without recording that
- * sample, and the caller must discard the whole comparison and rerun it
- * unstalled rather than trust this partial result.
+ * @c restartUnstalled is set when a stalled pass hit a timeout, a valid
+ * UNSTALLED measurement, or a third negative reading for one candidate: the
+ * loop stopped immediately without recording that sample, and the caller must
+ * discard the whole comparison and rerun it unstalled rather than trust this
+ * partial result.
  * @c finalQuality is the TimingQuality of the last recorded sample (INVALID
  * if none was recorded), useful for a caller that wants to know which mode
  * produced @c timings without re-deriving it from the timing callback itself.
- * A finite negative elapsed reading (e.g. from a transient device clock glitch) is not a
- * failure: it is invisibly replaced with a fresh measurement, up to two extra attempts per
- * candidate across the whole loop. @c timings therefore never contains a negative sample; a
- * third such reading sets @c benchmarkFailed instead of a fourth retry.
+ * A finite negative elapsed reading is not a failure: it is replaced with a fresh
+ * measurement, up to two extra attempts per candidate across the whole loop. @c timings
+ * therefore never contains a negative sample. A third such reading stops the loop. In a
+ * stalled pass it sets @c restartUnstalled, because stalled timing can read negative for
+ * short work on some runtimes (seen on Windows); in an unstalled pass it sets
+ * @c benchmarkFailed.
  */
 struct TimedRunOutcome
 {
@@ -116,13 +119,14 @@ inline TimedSampleOutcome classifyTimedSample(const ExecutionTiming& timing, boo
 
 // Maximum number of extra measurement attempts a single candidate gets, across its whole
 // timed run, to replace a TRANSIENT_INVALID sample with a fresh one. Shared by both loop
-// strategies via measureOneSample(). Once exhausted, a further transient sample fails the
-// candidate instead of retrying again, so a candidate can never spin forever.
+// strategies via measureOneSample(). Once exhausted, a further transient sample ends the
+// candidate's run instead of retrying again, so a candidate can never spin forever.
 inline constexpr int K_MAX_EXTRA_ATTEMPTS_PER_CANDIDATE = 2;
 
 // Outcome of resolving one output sample slot: either a valid measurement, a
 // restart-unstalled request, or an unrecoverable failure (a real Error, a malformed
-// contract violation, or a transient sample after the retry budget above is exhausted).
+// contract violation, or a transient sample in an unstalled pass after the retry budget
+// above is exhausted).
 enum class MeasureOutcome
 {
     RECORDED,
@@ -165,6 +169,14 @@ MeasureOutcome measureOneSample(TimeOnceFn&& timeOnce,
         {
             if(extraAttemptsRemaining == 0)
             {
+                // Repeated negative readings under the stall gate say the stalled span
+                // is unusable for this workload, not that the candidate is broken.
+                // Dropping it would silently remove the fastest candidates (the ones
+                // closest to the timer floor), so re-measure the comparison unstalled.
+                if(stalled)
+                {
+                    return MeasureOutcome::RESTART_UNSTALLED;
+                }
                 errorMessage = "Benchmark iteration " + std::to_string(attempt)
                                + " reported a third invalid (negative) elapsed time; exhausted "
                                  "the retry budget for this candidate";
