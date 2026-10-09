@@ -492,7 +492,17 @@ def test_the_candidate_is_the_only_document_carrying_the_declared_id(tree, tmp_p
 
 # --- the L1 run, end to end against a fake engine -----------------------------------
 
-_FAKE_L1_BENCH = _ISOLATION_GUARD + r'''
+#: The engine under test is staged only in the root the validation names, as a test descriptor
+#: set or an engine staged outside the build's default tree is: with no tree named, the
+#: runtime does not know it, and a side that reads the build's default tree fails every graph.
+_STAGED_ONLY_IN_ROOT = r"""
+if not _tree:
+    print("[error] Engine id is not in a valid range of engine IDs", file=sys.stderr)
+    sys.exit(4)
+"""
+
+
+_FAKE_L1_BENCH = _ISOLATION_GUARD + _STAGED_ONLY_IN_ROOT + r'''
 import json, os, sys
 args = sys.argv[1:]
 graph = args[args.index("--graph") + 1]
@@ -519,7 +529,8 @@ else:
 
 def test_the_l1_run_and_its_verdict_end_to_end(tmp_path):
     """The caller's descriptor roots and cache reach no run (the fake bench exits 3 if they
-    do), and the candidate is scored against the incumbent on the same graphs."""
+    do), the incumbent side reads the root it is given (the engine exists nowhere else), and
+    the candidate is scored against the incumbent on the same graphs."""
     pytest.importorskip("pandas")
     env = _scripts_env(**LEAKY_ENV)
     _require_uhd_gen(env)
@@ -674,7 +685,7 @@ def test_a_promoted_candidate_is_bound_in_the_copy_and_the_build_is_untouched(
                               "gfx942")
 
 
-_FAKE_L2_BENCH = _ISOLATION_GUARD + r"""
+_FAKE_L2_BENCH = _ISOLATION_GUARD + _STAGED_ONLY_IN_ROOT + r"""
 import json
 candidate = "descriptor_tree" in _tree
 if candidate:
@@ -685,6 +696,8 @@ print(json.dumps({"avgTimeMs": 2.0 if candidate else 1.0, "graph_id": "g", "devi
 
 
 def test_the_l2_run_and_its_verdict_end_to_end(promotable, tmp_path):
+    """Both sides run the engine, staged only in the root, so the verdict rests on whether the
+    runtime read the candidate: here it declines it, and the ranker is never installed."""
     bench = _fake_bench(tmp_path, _FAKE_L2_BENCH)
     graphs = tmp_path / "graphs"
     graphs.mkdir()

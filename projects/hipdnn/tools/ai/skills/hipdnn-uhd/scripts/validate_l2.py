@@ -11,9 +11,11 @@ catalog sweeps); this asks whether the runtime READS the candidate at all. A ran
 refuses still lets the engine run (it ranks by priority, then id, and logs why), so a plan that
 builds proves nothing. For every graph the engine runs twice with `--collect-immediate`:
 
-  incumbent  the build's own tree;
-  candidate  a copy of it with the model promoted into the engine's UED, as the only tree the
-             runtime reads (candidate_tree.py).
+  incumbent  the root (`--root`) as it stands;
+  candidate  a copy of it with the model promoted into the engine's UED (candidate_tree.py).
+
+Both sides read one tree, the same one but for the candidate, so the comparison is the
+model's alone, whichever root the engine is staged in.
 
 Each run reads only the tree named for it and gets its own empty HIPDNN_CACHE_DIR
 (engine_run.py), because a benchmark winner record takes precedence over any ranker and a run
@@ -112,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
 
     graphs = engine_run.graphs_of(args.sample, args.graphs or [], args.limit)
     # INFO, not warn: the record-served line is INFO; refusals are errors and print either way.
-    sides = {"incumbent": dict(engine_run.isolated_env(), HIPDNN_LOG_LEVEL="info"),
+    sides = {"incumbent": dict(engine_run.isolated_env(Path(args.root)), HIPDNN_LOG_LEVEL="info"),
              "candidate": dict(engine_run.isolated_env(farm), HIPDNN_LOG_LEVEL="info")}
     rows = []
     for graph in graphs:

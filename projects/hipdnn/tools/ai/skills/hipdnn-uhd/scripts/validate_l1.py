@@ -9,7 +9,8 @@ rule the model was trained against) and `uhd_gen promote` for a descriptor engin
 For every graph it asks the engine three questions:
 
   measured   `--collect-immediate`: the engine runs its own selection and is timed.
-  incumbent  `--predict-engine` against the build's own tree: the model it binds now.
+  incumbent  `--predict-engine` against the root (`--descriptor-root`) as it stands: the
+             model it binds now.
   candidate  `--predict-engine` with HIPDNN_DESCRIPTOR_DIR on a copy of that tree in which the
              candidate is the only document carrying the engine's declared id.
 
@@ -23,7 +24,7 @@ reads (candidate_tree.py).
 
 A descriptor engine's L1 (`--promote`, in order: the L2 its rows were measured under, then
 the candidate) predicts the selection its L2 makes, so its truth is measured under the
-candidate tree; the incumbent model's truth is measured under the build's own tree.
+candidate tree; the incumbent model's truth is measured under the root as it stands.
 
 Every call reads only the tree named for it and gets an empty cache of its own, so neither a
 descriptor root in the caller's environment nor a benchmark winner record answers in a
@@ -152,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
         tree = opaque_tree(Path(args.descriptor_root), work / "descriptor_tree",
                            Path(args.candidate_dir), declared)
 
-    base_env = engine_run.isolated_env()
+    base_env = engine_run.isolated_env(Path(args.descriptor_root))
     candidate_env = engine_run.isolated_env(Path(tree["farm"]))
     caches = work / "caches"
 
