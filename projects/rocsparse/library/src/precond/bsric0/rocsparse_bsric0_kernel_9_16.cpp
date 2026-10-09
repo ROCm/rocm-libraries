@@ -195,10 +195,9 @@ namespace rocsparse
                 }
             }
 
-            // Loop over the row the current column index depends on
-            // Each lane processes one entry
-            // The blocks of row block_col come from other block rows and need device scope
-            // loads. The blocks of this block row were stored by this wavefront.
+            // Loop over the row the current column index depends on. Each lane processes one
+            // entry. The blocks of row block_col come from other block rows and need device
+            // scope loads. The blocks of this block row were stored by this wavefront.
             for(I l = 0; l < count - 1; l++)
             {
                 J idx2 = local_index[l];
