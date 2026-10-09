@@ -429,6 +429,88 @@ def _summarise(regrets: list[float]) -> dict[str, float | None]:
 # --------------------------------------------------------------------------------------
 
 
+def _grouping_warnings(grouping: Grouping) -> list[str]:
+    """What the scores below cannot claim, given how problems were identified."""
+    warnings: list[str] = []
+    if grouping.degraded:
+        warnings.append(
+            "DEGRADED PROBLEM GROUPING: problems are identified by "
+            f"{BENCHMARK_COLUMN!r} ALONE because {grouping.detail}. The same graph "
+            "measured on two devices is being scored as ONE problem: the oracle "
+            "becomes the best kernel on whichever device is faster, and the model's "
+            "pick is drawn from that merged pool too. The figures below can come out "
+            "either too high -- a correct pick on the slower device charged the faster "
+            "device's time as its target -- or too low, when a problem that should "
+            "have been scored twice collapses into one easy comparison. They are not "
+            "comparable with figures from a corpus that carries device identity. "
+            "Re-export from a sweep that logs the `device` column."
+        )
+    elif "carry no device identity" in grouping.detail:
+        warnings.append(
+            f"PARTIAL DEVICE IDENTITY: {grouping.detail}. Regret for those problems is "
+            "computed against an oracle drawn from a bucket that may span devices."
+        )
+    return warnings
+
+
+def _measurement_noise(
+    eval_df: pd.DataFrame, target: str, tie_rel_tolerance: float
+) -> tuple[pd.Series | None, pd.Series | None, str | None, str | None]:
+    """Each row's `stddevMs` and `iters`, which widen a tie by measurement noise; when
+    they cannot (the target is not a millisecond timing, or the corpus carries no
+    spread), why not, and the warning to give."""
+    if target not in MILLISECOND_TARGETS:
+        return (
+            None,
+            None,
+            f"the target {target!r} is not a millisecond timing column, so the corpus "
+            "spread is not in comparable units",
+            None,
+        )
+    if "stddevMs" not in eval_df.columns:
+        # §8.3 requires `stddevMs`/`iters`; say so rather than reporting a units mismatch.
+        return (
+            None,
+            None,
+            "this corpus carries no `stddevMs` column, though the target is a "
+            "millisecond timing. §8.3 lists `stddevMs` and `iters` as required columns "
+            "of the result envelope",
+            "NO MEASUREMENT NOISE: the corpus has no `stddevMs` column, so the "
+            f"tie-aware recall for target {target!r} falls back to the "
+            f"{tie_rel_tolerance:.1%} relative tolerance alone and the "
+            "--tie-sigma band never applies. §8.3 requires `stddevMs` and `iters`; "
+            "re-collect with a producer that emits them.",
+        )
+    iters = (
+        pd.to_numeric(eval_df["iters"], errors="coerce")
+        if "iters" in eval_df.columns
+        else pd.Series(1.0, index=eval_df.index)
+    )
+    return pd.to_numeric(eval_df["stddevMs"], errors="coerce"), iters, None, None
+
+
+def _calibration_bias_warning(calibration: dict, objective: str) -> str | None:
+    """A warning when the score is systematically off on the candidates the model picks.
+
+    Not a gate (§11.4), but a systematic bias is invisible in ranking figures. Over-reading
+    a throughput or under-reading a time wins arbitrations it should lose."""
+    selected = calibration.get("selected_candidate")
+    if selected is not None:
+        bias = selected["signed_relative_bias"]
+        if abs(bias) > CALIBRATION_BIAS_WARN:
+            return (
+                f"CALIBRATED SCORE IS BIASED: on the candidates this model picks it "
+                f"{'OVER' if bias > 0 else 'UNDER'}-predicts by {abs(bias):.1%} on average "
+                f"(threshold {CALIBRATION_BIAS_WARN:.0%}). Ranking within this engine is "
+                "unaffected -- a constant factor cannot reorder a catalog -- but RFC 0019 "
+                "§11.3 compares this number against other engines' predictions, so the "
+                "quick and thorough policies will "
+                f"{'favour' if (bias > 0) == (objective == 'max') else 'avoid'} this engine "
+                "by roughly that margin."
+            )
+    return None
+
+
 def evaluate_corpus(
     df: pd.DataFrame,
     scorer: Scorer,
@@ -455,24 +537,7 @@ def evaluate_corpus(
     warnings: list[str] = []
     if grouping is None:
         grouping = resolve_grouping(df, device_column)
-    if grouping.degraded:
-        warnings.append(
-            "DEGRADED PROBLEM GROUPING: problems are identified by "
-            f"{BENCHMARK_COLUMN!r} ALONE because {grouping.detail}. The same graph "
-            "measured on two devices is being scored as ONE problem: the oracle "
-            "becomes the best kernel on whichever device is faster, and the model's "
-            "pick is drawn from that merged pool too. The figures below can come out "
-            "either too high -- a correct pick on the slower device charged the faster "
-            "device's time as its target -- or too low, when a problem that should "
-            "have been scored twice collapses into one easy comparison. They are not "
-            "comparable with figures from a corpus that carries device identity. "
-            "Re-export from a sweep that logs the `device` column."
-        )
-    elif "carry no device identity" in grouping.detail:
-        warnings.append(
-            f"PARTIAL DEVICE IDENTITY: {grouping.detail}. Regret for those problems is "
-            "computed against an oracle drawn from a bucket that may span devices."
-        )
+    warnings.extend(_grouping_warnings(grouping))
 
     keys = problem_keys(df, grouping)
     split = split_problems(keys.unique().tolist(), eval_fraction, seed)
@@ -510,38 +575,12 @@ def evaluate_corpus(
     exclusions.missing_target_rows = int((valid & ~np.isfinite(values)).sum())
     usable = valid & np.isfinite(values)
 
-    if target not in MILLISECOND_TARGETS:
-        stddev_all = iters_all = None
-        noise_available = False
-        noise_absent_reason = (
-            f"the target {target!r} is not a millisecond timing column, so the corpus "
-            "spread is not in comparable units"
-        )
-    elif "stddevMs" not in eval_df.columns:
-        # §8.3 requires `stddevMs`/`iters`; say so rather than reporting a units mismatch.
-        stddev_all = iters_all = None
-        noise_available = False
-        noise_absent_reason = (
-            "this corpus carries no `stddevMs` column, though the target is a "
-            "millisecond timing. §8.3 lists `stddevMs` and `iters` as required columns "
-            "of the result envelope"
-        )
-        warnings.append(
-            "NO MEASUREMENT NOISE: the corpus has no `stddevMs` column, so the "
-            f"tie-aware recall for target {target!r} falls back to the "
-            f"{tie_rel_tolerance:.1%} relative tolerance alone and the "
-            "--tie-sigma band never applies. §8.3 requires `stddevMs` and `iters`; "
-            "re-collect with a producer that emits them."
-        )
-    else:
-        stddev_all = pd.to_numeric(eval_df["stddevMs"], errors="coerce")
-        iters_all = (
-            pd.to_numeric(eval_df["iters"], errors="coerce")
-            if "iters" in eval_df.columns
-            else pd.Series(1.0, index=eval_df.index)
-        )
-        noise_available = True
-        noise_absent_reason = None
+    stddev_all, iters_all, noise_absent_reason, noise_warning = _measurement_noise(
+        eval_df, target, tie_rel_tolerance
+    )
+    noise_available = noise_absent_reason is None
+    if noise_warning:
+        warnings.append(noise_warning)
 
     results: list[ProblemResult] = []
     calibration_predicted: list[float] = []
@@ -691,22 +730,9 @@ def evaluate_corpus(
         calibration_picked_measured,
         discarded_predictions,
     )
-    # Not a gate (§11.4), but a systematic bias is invisible in ranking figures, so warn.
-    # Over-reading a throughput or under-reading a time wins arbitrations it should lose.
-    selected = calibration.get("selected_candidate")
-    if selected is not None:
-        bias = selected["signed_relative_bias"]
-        if abs(bias) > CALIBRATION_BIAS_WARN:
-            warnings.append(
-                f"CALIBRATED SCORE IS BIASED: on the candidates this model picks it "
-                f"{'OVER' if bias > 0 else 'UNDER'}-predicts by {abs(bias):.1%} on average "
-                f"(threshold {CALIBRATION_BIAS_WARN:.0%}). Ranking within this engine is "
-                "unaffected -- a constant factor cannot reorder a catalog -- but RFC 0019 "
-                "§11.3 compares this number against other engines' predictions, so the "
-                "quick and thorough policies will "
-                f"{'favour' if (bias > 0) == (objective == 'max') else 'avoid'} this engine "
-                "by roughly that margin."
-            )
+    bias_warning = _calibration_bias_warning(calibration, objective)
+    if bias_warning:
+        warnings.append(bias_warning)
 
     report = _build_report(
         results,
