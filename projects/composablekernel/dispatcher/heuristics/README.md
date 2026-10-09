@@ -51,6 +51,25 @@ python3 data_pipeline.py ck_tile_testrun_2.log \
     --arch gfx950 --capture_hw
 ```
 
+**Alternative: Convert a `gemm_full_benchmark.py` sweep**
+
+The tile_engine GEMM driver (`tile_engine/ops/gemm/gemm_full_benchmark.py`)
+writes one CSV row per measured `(kernel, problem)`. Convert it with the
+hardware constants of the arch it ran on:
+
+```bash
+python3 convert_csv_to_parquet.py \
+    --input sweep_bf16_rcr.csv \
+    --output data/gemm_universal_bf16_rcr_gfx950.parquet \
+    --arch gfx950
+```
+
+Every kernel field, the dtype and the layout come from the kernel name, the
+label is the CSV's `tflops` column, and rows that failed `--verify` are dropped.
+Run the sweep with `--verify` so a numerically wrong (and often fast) kernel
+does not become a training label. `data_pipeline.py sweep.csv -o ...` produces
+the same rows without the `hw_*` columns.
+
 ### 2. Train a model
 
 ```bash
@@ -75,10 +94,10 @@ python3 train.py \
 ```
 
 It reads `gemm_universal` data. Rows need non-null `vec_a/b/c`, `arch`,
-`epilogue` and the nine tile, warps-per-block and warp-tile columns. Only
-`data_pipeline.py` fills `vec_a/b/c`; no in-tree tool converts
-`gemm_full_benchmark.py`'s CSV into such a parquet. `search.py` and the C++
-path (`ml_heuristic.hpp`) support only the base engine.
+`epilogue` and the nine tile, warps-per-block and warp-tile columns, which
+`data_pipeline.py` fills; a `gemm_full_benchmark.py` CSV converted as in step 1
+has them. `search.py` and the C++ path (`ml_heuristic.hpp`) support only the
+base engine.
 
 #### Batched GEMM
 
