@@ -143,6 +143,10 @@ def _solution(toolchain, **kw):
 
 
 def _emit(toolchain, **kw):
+    return _emit_solution(toolchain, _solution(toolchain, **kw))
+
+
+def _emit_solution(toolchain, sol):
     import rocisa
     from Tensile.Common.Types import DebugConfig
     from Tensile.KernelWriterAssembly import KernelWriterAssembly
@@ -153,7 +157,6 @@ def _emit(toolchain, **kw):
     )
 
     isa, iim, assembler, cxx = toolchain
-    sol = _solution(toolchain, **kw)
     assert sol.get("Valid") is True, "w4a16 solution should derive cleanly"
 
     kernels = generateKernelObjectsFromSolutions([sol])
@@ -260,9 +263,9 @@ def test_emits_dequantize_per_local_write(toolchain):
     saves = re.findall(r"w4a16: save packed int4 dword", src)
     bfes = re.findall(r"v_bfe_i32 .*w4a16: sign-extend int4", src)
     # gfx950/gfx12.5 pack with v_cvt_pk_bf16_f32; everywhere else the pack is
-    # open-coded and ends in v_pack_b32_f16. Match on the comment tag so this
+    # open-coded and ends in v_perm_b32. Match on the comment tag so this
     # counts packs on either path.
-    packs = re.findall(r"(?:v_cvt_pk_bf16_f32|v_pack_b32_f16) .*w4a16: pack 2 bf16", src)
+    packs = re.findall(r"(?:v_cvt_pk_bf16_f32|v_perm_b32) .*w4a16: pack 2 bf16", src)
     assert saves, "no dequantize block emitted"
     assert len(bfes) == 8 * len(saves)
     assert len(packs) == 4 * len(saves)
@@ -359,27 +362,14 @@ def test_fp16_unsigned_dequantizes_in_packed_fp16(toolchain):
     # fp16 too, and that is not what this is about.
     src = whole[whole.index("w4a16: save packed int4 dword 0"):whole.index("ds_store")]
 
-    # One magic per nibble position, each with the exponent that makes its
-    # nibble's lowest bit worth 1.0: 1024.0 at mantissa bits 0-3, 64.0 at 4-7.
-    # They sit in SGPRs because the fused mask+OR has spent its one literal.
-    for magic in ("0x64006400", "0x54005400"):
-        assert re.search(r"s_mov_b32 s\[sgprScaleAPkMagic\+\d\], " + magic, whole), \
-            "fp16 magic constant %s missing" % magic
-    for mask in ("0xf000f", "0xf000f0"):
-        assert re.search(
-            r"v_and_or_b32 \S+, \S+, " + mask + r", s\[sgprScaleAPkMagic\+\d\]", src), \
-            "no fused mask+OR for nibble mask %s" % mask
-    assert re.search(r"v_pk_add_f16 ", src), "no packed subtract"
-    assert re.search(r"v_pk_mul_f16 ", src), "no packed scale"
-
-    # The f32 lowering's fingerprints must all be gone from the dequantize.
-    assert "0x43004300" not in src, "still using the bf16 magic constant"
-    assert not re.search(r"v_or_b32 ", src), "mask and OR not fused"
-    assert not re.search(r"v_cvt_f16_f32 ", src), "still converting f32 -> fp16"
-
-    # A fused v_pk_fma_f16 would need -(1024+z)*s pre-rounded to fp16, an error
-    # the same size as the answer. Pin that it is not used here.
-    assert not re.search(r"v_pk_fma_f16 ", src), "fused FMA reintroduces the cancellation"
+    for i, (mask, magic) in enumerate((("0xf000f", "0x64006400"), ("0xf000f0", "0x54005400"))):
+        assert f"s_mov_b32 s[sgprScaleAPkMagic+{i}], {mask}" in whole
+        assert re.search(r"v_and_or_b32 \S+, \S+, s\[sgprScaleAPkMagic\+" + str(i) + r"\], " + magic, src)
+    assert src.rindex("v_pk_add_f16") < src.index("v_pk_fma_f16")
+    assert len(re.findall(r"v_pk_fma_f16 [^\n]*, 0(?: +//|\n)", src)) == 4
+    assert not re.search(r"v_cvt_f16_f32 ", src)
+    assert "v_cmp_class_f16" in whole
+    assert "0x7e007e00" in whole
 
 
 def test_fp16_unsigned_lifts_nibbles_in_place(toolchain):
@@ -422,8 +412,8 @@ def test_fp16_scale_is_masked_before_duplication(toolchain):
     that garbage in the low lane and the kernel returns NaN."""
     _, src = _emit(toolchain, blockSize=128, depthU=64, zeroPoint=True,
                    problemType=dict(FP16_UNSIGNED))
-    dup = re.search(r"v_and_b32 (\S+), 0xffff, \S+.*\n.*v_lshl_or_b32 \1, \1, 16, \1", src)
-    assert dup, "scale duplicated without masking the stale d16 high half"
+    dup = re.search(r"v_pack_b32_f16 \S+, (v\[vgprG2LScaleA\+\d+\]), \1", src)
+    assert dup, "scale packing must select the low half twice"
 
 
 def test_scale_offset_uses_group_shift(toolchain):
@@ -447,7 +437,7 @@ def test_problem_type_carries_block_scale_to_predicates(toolchain):
     assert sol.get("Valid") is True
     pt = CProblemType.FromOriginalState(sol["ProblemType"].state)
 
-    assert pt.useScaleAB == "Block"
+    assert pt.useScaleAB == ""
     assert pt.scaleBlockSizeA == 32
     assert not hasattr(pt, "scaleTypeA")
     # A is int4 in memory but bf16 at the MAC.
@@ -456,7 +446,7 @@ def test_problem_type_carries_block_scale_to_predicates(toolchain):
 
     states = [p.state() for p in pt.predicates(includeBatch=True, includeType=True)]
     byType = {s["type"]: s["value"] for s in states if isinstance(s, dict) and "type" in s}
-    assert byType.get("UseScaleAB") == "Block"
+    assert byType.get("UseScaleAB") == ""
     assert byType.get("ScaleBlockSizeA") == 32
     # No DataTypeScaleA predicate: TypesEqual already pins B, and the scale
     # follows it.
@@ -609,15 +599,12 @@ def test_signed_encoding_sign_extends_and_needs_no_bias(toolchain):
     assert re.search(r"v_mul_f32 .*w4a16: dequantize", src)
 
 
-def test_unsigned_bias8_zero_extends_and_folds_the_bias(toolchain):
-    """UnsignedBias8 reads raw nibbles and turns the symmetric multiply into an
-    FMA against a precomputed -8*s."""
+def test_unsigned_bias8_uses_signed_nibbles_after_bias_flip(toolchain):
     _, src = _emit(toolchain, problemType={"Int4EncodingA": "UnsignedBias8"})
-    assert re.search(r"v_bfe_u32 .*w4a16: zero-extend int4", src)
-    assert not re.search(r"v_bfe_i32 .*w4a16: sign-extend int4", src)
-    # 8.0f, the implicit zero-point, folded into the per-load bias.
-    assert re.search(r"v_mul_f32 \S+, 0x41000000", src), "expected an 8.0f * s bias"
-    assert re.search(r"v_fma_f32 .*w4a16: q\*s - z\*s", src)
+    assert "0x88888888" in src
+    assert re.search(r"v_bfe_i32 .*w4a16: sign-extend int4", src)
+    assert re.search(r"v_mul_f32 .*w4a16: dequantize", src)
+    assert "w4a16: q*s - z*s" not in src
 
 
 # ---------------------------------------------------------------------------
@@ -634,16 +621,14 @@ def test_fp16_mac_type_is_valid(toolchain, encoding):
     assert sol.get("Valid") is True, f"fp16 + {encoding} should be valid"
 
 
-def test_fp16_uses_the_native_convert_not_the_open_coded_rounding(toolchain):
-    """bf16 has no f32->bf16 convert on gfx11 so the pack is open-coded; fp16
-    does, so the same dequantize should collapse to cvt/cvt/pack."""
+def test_signed_fp16_uses_biased_packed_arithmetic(toolchain):
     _, src = _emit(toolchain, problemType=dict(_FP16))
-    assert re.search(r"v_cvt_f16_f32 .*w4a16: f32 -> fp16", src)
-    assert re.search(r"w4a16: pack 2 fp16", src)
-    assert re.search(r"v_cvt_f32_f16 .*scaleA: fp16 -> f32", src)
-    # None of the bf16 rounding emulation should survive.
-    assert not re.search(r"w4a16: lsb of the bf16 mantissa", src)
-    assert not re.search(r"w4a16: check Nan", src)
+    assert "0x88888888" in src
+    assert "0xe408e408" in src and "0xd480d480" in src
+    assert "v_pk_add_f16" in src and "v_pk_mul_f16" in src
+    assert "scaleA: duplicate fp16 scale" in src
+    assert "w4a16: f32 -> fp16" not in src
+    assert "w4a16: lsb of the bf16 mantissa" not in src
 
 
 def test_fp16_dequantize_is_cheaper_than_bf16(toolchain):
@@ -674,7 +659,7 @@ def test_scale_type_follows_b(toolchain):
     _, fp16 = _emit(toolchain, problemType=dict(_FP16))
     assert re.search(r"scaleA: bf16 -> f32", bf16)
     assert not re.search(r"scaleA: fp16 -> f32", bf16)
-    assert re.search(r"scaleA: fp16 -> f32", fp16)
+    assert re.search(r"scaleA: duplicate fp16 scale", fp16)
     assert not re.search(r"scaleA: bf16 -> f32", fp16)
 
 
@@ -771,6 +756,29 @@ def test_no_zero_point_state_when_symmetric(toolchain):
         assert sym not in src, f"{sym} leaked into a symmetric kernel"
 
 
+@pytest.mark.parametrize("zero_point", [False, True])
+def test_runtime_group_scale_addressing(toolchain, zero_point):
+    _, src = _emit(toolchain, blockSize=32, depthU=64, zeroPoint=zero_point,
+                   problemType={"ScaleBlockSizesA": [32, 64, 128]})
+    assert ".name:            groupSize" in src
+    assert "s_ff1_i32_b32 s[sgprScaleAGShift], s[sgprScaleAGMinus1]" in src
+    assert re.search(r"v_lshrrev_b32 v\d+, s\[sgprScaleAGShift\],", src)
+    loop = src.split("label_LoopBeginL:", 1)[1].split("label_LoopEndL:", 1)[0]
+    assert "s[sgprScaleAKMask]" in loop
+    assert "s[sgprScaleAInc]" in loop
+    if zero_point:
+        assert "s[sgprScaleZeroAInc]" in loop
+        assert "scaleZeroA limit -= inc" in loop
+
+
+def test_runtime_group_kernel_name_differs_from_fixed_group(toolchain):
+    fixed, _ = _emit(toolchain, blockSize=32, depthU=64)
+    runtime, _ = _emit(toolchain, blockSize=32, depthU=64,
+                       problemType={"ScaleBlockSizesA": [32, 64, 128]})
+    assert fixed["BaseName"] != runtime["BaseName"]
+    assert "SABBG" in runtime["BaseName"]
+
+
 @pytest.mark.parametrize("block_size", [32, 64, 128])
 def test_zero_point_byte_offsets_are_hoisted(toolchain, block_size):
     kernel, src = _emit(toolchain, blockSize=block_size, depthU=64, zeroPoint=True,
@@ -795,11 +803,12 @@ def test_unsigned_fp16_restores_consecutive_pairs(toolchain, zero_point):
     assert "0x5040100" in src and "0x7060302" in src
     # Each four-instruction stage completes before the next begins.
     assert body.rindex("v_and_or_b32") < body.index("v_pk_add_f16")
-    assert body.rindex("v_pk_add_f16") < body.index("v_pk_mul_f16")
-    assert body.rindex("v_pk_mul_f16") < body.index("v_perm_b32")
+    scale_op = "v_pk_fma_f16" if zero_point else "v_pk_mul_f16"
+    assert body.rindex("v_pk_add_f16") < body.index(scale_op)
+    assert body.rindex(scale_op) < body.index("v_perm_b32")
 
 
-def test_runtime_group_catalog_survives_custom_launch_conversion(toolchain):
+def test_runtime_group_catalog_generates_prefill(toolchain):
     from pathlib import Path
     from Tensile import LibraryIO
 
@@ -814,12 +823,22 @@ def test_runtime_group_catalog_survives_custom_launch_conversion(toolchain):
             data, str(path), assembler, False, False, False, iim, False)
         assert len(logic.solutions) == len(data["Solutions"])
         for solution in logic.solutions:
-            custom = solution["CustomKernel"]
-            assert custom["name"].startswith("RuntimeGroup")
-            assert custom["args"][-1]["semantic"] == "ScaleBlockSizeA"
-            assert not custom.get("generated", False)
-            assert all(value > 0 for value in custom["macrotile"])
-            if "Decode" in custom["name"]:
+            if solution.get("CustomKernelName"):
+                custom = solution["CustomKernel"]
+                assert "Decode" in custom["name"]
+                assert custom["args"][-1]["semantic"] == "ScaleBlockSizeA"
                 assert custom["macrotile"][:2] == ([16, 1] if "_T512_" in custom["name"] else [4, 1])
-            seen.add(custom["name"])
-    assert len(seen) == 28
+                continue
+            kernel, src = _emit_solution(toolchain, solution)
+            assert kernel["ProblemType"]["ScaleBlockSizesA"] == [32, 64, 128]
+            assert ".name:            groupSize" in src
+            assert "v_wmma_f32_16x16x16" in src
+            assert "s[sgprScaleAGShift]" in src
+            assert kernel["StaggerU"] == 0
+            if not kernel["ProblemType"]["ScaleZeroPointA"]:
+                assert "G2LScaleZeroA" not in src
+                if kernel["ProblemType"]["MacDataTypeA"].isHalf():
+                    assert "v_pk_fma_f16" not in src
+                    assert "0xe408e408" in src and "0xd480d480" in src
+            seen.add(kernel["BaseName"])
+    assert len(seen) == 20

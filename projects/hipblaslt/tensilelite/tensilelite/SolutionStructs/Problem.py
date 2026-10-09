@@ -445,12 +445,12 @@ def blockDequantUnsignedA(problemType):
 
 
 def blockDequantPackedFp16A(problemType):
-    """Unsigned int4 with FP16 scales and MAC operands can dequantize in pairs.
+    """Int4 with FP16 scales and MAC operands can dequantize in pairs.
 
     The two integer lifts and zero-point subtraction are exact; only scaling
     rounds to FP16. Sequential pairs are restored before the LDS write.
     """
-    return (blockDequantUnsignedA(problemType)
+    return (usesBlockDequantA(problemType)
             and problemType["MacDataTypeA"].isHalf()
             and problemType["DataTypeB"].isHalf())
 

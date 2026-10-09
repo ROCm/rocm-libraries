@@ -466,6 +466,11 @@ class SignatureDefault(Signature):
             signature.addArg("batchOffsetB", SVK.SIG_VALUE, "u64")
             userArgumentsInfo.gemmArgumentSize += 32  # 4 offsets * 8 bytes each
 
+        if kernel["ProblemType"]["ScaleBlockSizesA"]:
+            writer.states.scaleGroupKernArgOffset = signature.offset - userArgumentsInfo.commonArgsSize
+            signature.addArg("groupSize", SVK.SIG_VALUE, "u32")
+            userArgumentsInfo.gemmArgumentSize += 4
+
         # Fused GEMM.A2A kernarg metadata; registered LAST so it lands at the
         # tail. See fusedA2AKernArgLayout() for the offset contract.
         if kernel["ProblemType"]["FusedGemmA2A"]:

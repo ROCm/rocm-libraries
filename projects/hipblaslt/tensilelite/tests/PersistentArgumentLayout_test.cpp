@@ -105,6 +105,42 @@ namespace
     };
 }
 
+TEST(W4A16ArgumentLayoutTest, GeneratedRuntimeGroupFollowsBatchOffsets)
+{
+    for(bool named : {false, true})
+    for(bool zeroPoint : {false, true})
+    for(int group : {32, 64, 128})
+    {
+        ContractionSolution solution;
+        configurePersistentSolution(solution, 3, 0);
+        solution.customKernel.name = named ? "generated_w4a16" : "";
+        solution.customKernel.generated = named;
+        solution.problemType.scaleBlockSizeA = 32;
+        solution.problemType.scaleBlockSizesA = {32, 64, 128};
+        solution.problemType.scaleZeroPointA = zeroPoint;
+        solution.problemType.useScaleAB = "";
+        auto problem = persistentProblem(65, 3, 384, 1);
+        problem.setW4A16ScaleBlockSizeA(group, rocisa::DataType::Half, 65, 384 / group,
+                                       zeroPoint);
+        auto inputs = persistentInputs();
+        uint16_t scales[2]{};
+        uint8_t zeros[4]{};
+        inputs.scaleA = scales;
+        inputs.scaleZeroA = zeros;
+        auto device = persistentDevice();
+        auto launch = solution.resolvePersistentSettings(problem, device);
+        auto invocation = solution.generateSingleCall<true>(
+            problem, inputs, device, launch, GSUSettings{});
+        auto const& args = invocation.args;
+        EXPECT_EQ(value<void const*>(args, "scaleA"), scales);
+        EXPECT_EQ(hasArgument(args, "scaleZeroA"), zeroPoint);
+        if(zeroPoint)
+            EXPECT_EQ(value<void const*>(args, "scaleZeroA"), zeros);
+        EXPECT_EQ(value<uint32_t>(args, "groupSize"), group);
+        EXPECT_EQ(offset(args, "groupSize"), offset(args, "batchOffsetB") + sizeof(int64_t));
+    }
+}
+
 TEST_P(PersistentArgumentLayoutTest, PackedLayoutAndLaunch)
 {
     auto [outer, layout] = GetParam();
