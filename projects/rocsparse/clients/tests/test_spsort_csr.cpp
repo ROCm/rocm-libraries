@@ -38,5 +38,5 @@ TEST_ROUTINE_WITH_CONFIG(spsort_csr,
                          arg.offsets_batch_stride_zero_B,
                          arg.pad_A,
                          arg.pad_B,
-                         arg.algo,
+                         arg.spsort_alg,
                          arg.matrix);
