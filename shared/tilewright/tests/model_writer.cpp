@@ -304,6 +304,14 @@ Image write_model(const ModelSpec& spec) {
         for (std::int64_t v : at.values) w.u64(static_cast<std::uint64_t>(v));
       }
     }
+    if ((spec.v3_serving_flags & 0x80) != 0) {
+      w.mark("n_trained_keys");
+      w.u32(static_cast<std::uint32_t>(spec.trained_keys.size()));
+      for (std::size_t i = 0; i < spec.trained_keys.size(); ++i) {
+        w.mark("trained_key" + std::to_string(i));
+        w.u64(spec.trained_keys[i]);
+      }
+    }
     if (!spec.provenance.empty()) {
       w.mark("n_provenance");
       w.u16(static_cast<std::uint16_t>(spec.provenance.size()));

@@ -547,7 +547,21 @@ NB_MODULE(_tilewright, m) {
       .def_ro("small_batched_rule", &tw::ModelInfo::small_batched_rule)
       .def_ro("dot2_rule", &tw::ModelInfo::dot2_rule)
       .def_ro("non_temporal_rule", &tw::ModelInfo::non_temporal_rule)
+      .def_ro("non_temporal_family_rule",
+              &tw::ModelInfo::non_temporal_family_rule,
+              "Whether a kernel family the non-temporal rule rejects whole keeps one signature, "
+              "with every kernel of it, in the rule's region (MLREC_v3).")
       .def_ro("clip", &tw::ModelInfo::clip)
+      .def_ro("bank",
+              &tw::ModelInfo::bank,
+              "Whether the model was trained on the integration's bank as well as its table.")
+      .def_ro("trained_key_gate",
+              &tw::ModelInfo::trained_key_gate,
+              "Whether only kernels whose view key had training data are scored while one of "
+              "them is feasible.")
+      .def_ro("trained_keys",
+              &tw::ModelInfo::trained_keys,
+              "The number of view keys the trained-key gate lists.")
       .def_ro("uncovered_base_labels", &tw::ModelInfo::uncovered_base_labels)
       .def_ro("packed_bytes", &tw::ModelInfo::packed_bytes, "Bytes of the packed weights.")
       .def_ro("expanded_bytes",
@@ -675,6 +689,12 @@ NB_MODULE(_tilewright, m) {
           "fp32 weights, whitelist membership and item embeddings of every config; with a "
           "problem and hardware, also the kernel-only interaction features for its data types.")
       .def_prop_ro("configs", [](const tw::CandidateSet& s) { return s.configs(); })
+      .def_prop_ro("untrained_keys",
+                   &tw::CandidateSet::untrained_keys,
+                   "Groups of configs the model's trained-key gate leaves out while a trained "
+                   "one is feasible (0 without a gate).")
+      .def_prop_ro(
+          "untrained_configs", &tw::CandidateSet::untrained_configs, "The configs of those groups.")
       .def("__len__", [](const tw::CandidateSet& s) { return s.configs().size(); });
 
   m.def(

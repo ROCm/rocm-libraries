@@ -31,15 +31,22 @@ constexpr char kMagicV3[]                 = "MLREC_v3";
 constexpr std::uint8_t kNoNonTemporalRule = 0x01;
 constexpr std::uint8_t kServingFlagsKnown = kNoNonTemporalRule;
 // MLREC_v3 serving flags: the soft feasibility rules that apply (none by
-// default), whether the cell whitelists are ignored, and whether the pool is
-// grouped by launch key.
-constexpr std::uint32_t kV3SmallBatchedRule = 0x01;
-constexpr std::uint32_t kV3Dot2Rule         = 0x02;
-constexpr std::uint32_t kV3NonTemporalRule  = 0x04;
-constexpr std::uint32_t kV3NoWhitelistTier  = 0x08;
-constexpr std::uint32_t kV3LaunchKeys       = 0x10;
+// default), whether the cell whitelists are ignored, whether the pool is
+// grouped by launch key, whether the non-temporal rule keeps one member of a
+// family it would reject whole (needs the rule itself), whether the model
+// was trained on the bank as well as the table, and whether only the keys
+// the header lists as trained are scored while one of them is feasible.
+constexpr std::uint32_t kV3SmallBatchedRule  = 0x01;
+constexpr std::uint32_t kV3Dot2Rule          = 0x02;
+constexpr std::uint32_t kV3NonTemporalRule   = 0x04;
+constexpr std::uint32_t kV3NoWhitelistTier   = 0x08;
+constexpr std::uint32_t kV3LaunchKeys        = 0x10;
+constexpr std::uint32_t kV3NonTemporalFamily = 0x20;
+constexpr std::uint32_t kV3Bank              = 0x40;
+constexpr std::uint32_t kV3TrainedKeyGate    = 0x80;
 constexpr std::uint32_t kV3ServingFlagsKnown =
-    kV3SmallBatchedRule | kV3Dot2Rule | kV3NonTemporalRule | kV3NoWhitelistTier | kV3LaunchKeys;
+    kV3SmallBatchedRule | kV3Dot2Rule | kV3NonTemporalRule | kV3NoWhitelistTier | kV3LaunchKeys |
+    kV3NonTemporalFamily | kV3Bank | kV3TrainedKeyGate;
 constexpr std::uint8_t kScheduleBits     = 0x07;
 constexpr std::uint16_t kMaxAttributes   = 64;
 constexpr std::uint16_t kMaxOneHotValues = 64;
@@ -444,6 +451,9 @@ class Parser {
       return false;
     if ((flags & ~kV3ServingFlagsKnown) != 0)
       return fail("unknown serving flags " + std::to_string(flags));
+    if ((flags & kV3NonTemporalFamily) != 0 && (flags & kV3NonTemporalRule) == 0)
+      return fail("serving flags " + std::to_string(flags) +
+                  " ask for the family-wise non-temporal rule without the non-temporal rule");
     if (!(model_->min_cu_fraction > 0.0 && model_->min_cu_fraction <= model_->max_cu_fraction &&
           model_->max_cu_fraction <= 1.0))
       return fail("CU fraction range must satisfy 0 < min <= max <= 1");
@@ -453,8 +463,11 @@ class Parser {
     model_->soft_rules.small_batched_one_tile = (flags & kV3SmallBatchedRule) != 0;
     model_->soft_rules.dot2_small_m           = (flags & kV3Dot2Rule) != 0;
     model_->soft_rules.non_temporal           = (flags & kV3NonTemporalRule) != 0;
+    model_->soft_rules.non_temporal_family    = (flags & kV3NonTemporalFamily) != 0;
     model_->whitelist_tier                    = (flags & kV3NoWhitelistTier) == 0;
     model_->launch_keys                       = (flags & kV3LaunchKeys) != 0;
+    model_->bank                              = (flags & kV3Bank) != 0;
+    model_->trained_key_gate                  = (flags & kV3TrainedKeyGate) != 0;
     model_->cascade_keys                      = cascade;
     model_->schedules                         = schedules;
     model_->clip                              = clip != 0;
@@ -495,6 +508,7 @@ class Parser {
       item_dim += attribute_feature_count(f);
       spec.push_back(std::move(f));
     }
+    if (model_->trained_key_gate && !parse_trained_keys(r)) return false;
     if (r.remaining() != 0 && !parse_provenance(r)) return false;
     if (r.remaining() != 0) return fail("header_size does not match the header contents");
     if (feature_spec_hash(spec) != spec_hash)
@@ -510,6 +524,25 @@ class Parser {
     }
     model_->view_key_size           = kV3ViewKeyFields + model_->attribute_reads.size();
     model_->soft_rules.leading_free = false;
+    return true;
+  }
+
+  // `u32` count (at least 1), then the view-key hashes, strictly ascending.
+  bool parse_trained_keys(Reader& r) {
+    const std::size_t at = r.pos();
+    std::uint32_t n      = 0;
+    if (!r.u32(&n, "trained key count")) return false;
+    if (n == 0) return r.fail_at("the trained-key gate lists no trained key", at);
+    if (n > r.remaining() / 8)
+      return r.fail_at("trained key count " + std::to_string(n) + " exceeds the header", at);
+    const unsigned char* p           = r.take(8 * static_cast<std::size_t>(n), "trained keys");
+    std::vector<std::uint64_t>& keys = model_->trained_keys;
+    keys.resize(n);
+    for (std::uint32_t i = 0; i < n; ++i) {
+      keys[i] = le64(p + 8 * i);
+      if (i > 0 && keys[i] <= keys[i - 1])
+        return r.fail_at("trained keys are not strictly ascending", at);
+    }
     return true;
   }
 

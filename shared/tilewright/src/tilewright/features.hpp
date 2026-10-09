@@ -153,6 +153,16 @@ struct PlainBounds {
   }
 };
 
+// Where the family-wise non-temporal rule applies: batched problems with
+// K <= 512 that are thin along exactly one of M and N (M <= 32 < N, or
+// 32 < M <= 128 with N <= 32). The bounds are the routing grid's tier edges.
+inline bool in_family_region(std::uint64_t m,
+                             std::uint64_t n,
+                             std::uint64_t k,
+                             std::uint64_t batch) {
+  return batch > 1 && k <= 512 && ((m <= 32 && n > 32) || (m > 32 && m <= 128 && n <= 32));
+}
+
 // The feasibility rules for one problem and device, with the values that
 // depend only on them computed once. `nt_a_available` / `nt_b_available`: the
 // candidate pool contains a kernel with cache_hints_a / cache_hints_b == 4.
@@ -191,19 +201,40 @@ class Feasibility {
     return non_temporal_rule(tile_aligned(k.mt_k % 1024),
                              b_branch(k.mt_m),
                              a_branch(k.mt_n),
-                             hint_class(k.cache_hints_a, k.cache_hints_b));
+                             hint_class(k.cache_hints_a, k.cache_hints_b),
+                             k.family);
   }
 
   // The non-temporal rule from its tests of a kernel: whether its tile keeps
-  // K aligned (tile_aligned), whether the B and A branches apply, and its
-  // hint_class.
-  bool non_temporal_rule(bool aligned, bool by_b, bool by_a, unsigned hints) const {
+  // K aligned (tile_aligned), whether the B and A branches apply, its
+  // hint_class and its family bits (kFamily*).
+  bool non_temporal_rule(bool aligned,
+                         bool by_b,
+                         bool by_a,
+                         unsigned hints,
+                         unsigned family = 0) const {
     if (!non_temporal_rule_) return true;
-    if (!aligned) return hints == 0;
-    if (by_b) return !(nt_b_ && (hints & 4) == 0);
-    if (by_a) return !(nt_a_ && (hints & 2) == 0);
-    return hints == 0;
+    bool pass = hints == 0;
+    if (aligned && by_b)
+      pass = !(nt_b_ && (hints & 4) == 0);
+    else if (aligned && by_a)
+      pass = !(nt_a_ && (hints & 2) == 0);
+    return pass || ((family & kFamilyFallback) != 0 && family_keeps(aligned, by_b, by_a, family));
   }
+
+  // Whether the family-wise rule passes a family's kept member here: the
+  // problem is in its region and the non-temporal rule passes no member of
+  // the family. The tests are the family's, which its members share. Out of
+  // line: the rule is inlined wherever a ranking tests a key, and only
+  // problems in the region get this far.
+  bool family_keeps(bool aligned, bool by_b, bool by_a, unsigned family) const;
+
+  // family_keeps for every value of its tests and of a family's members, at
+  // aligned | by_b << 1 | by_a << 2 | (family & 7) << 3.
+  void family_keep_table(unsigned char keep[64]) const;
+
+  // Whether the family-wise rule applies to this problem.
+  bool family_region() const { return family_; }
   bool tile_aligned(std::uint64_t mt_k_low) const {
     return k_aligned_ && mt_k_low * a_bits_ % 1024 == 0;
   }
@@ -214,7 +245,13 @@ class Feasibility {
 
   // Whether rules_pass may accept a kernel with a cache hint.
   bool hinted_may_pass() const {
-    return !non_temporal_rule_ || (k_aligned_ && (skinny_a_ || skinny_b_));
+    return !non_temporal_rule_ || family_ || (k_aligned_ && (skinny_a_ || skinny_b_));
+  }
+
+  // Whether the only kernels with a cache hint rules_pass may accept are the
+  // kept members of families without a hint-free member.
+  bool only_kept_hinted_may_pass() const {
+    return family_ && !(k_aligned_ && (skinny_a_ || skinny_b_));
   }
 
   // Whether every kernel without a cache hint within `b` is feasible. Each
@@ -244,13 +281,13 @@ class Feasibility {
   double bytes_a_ = 0.0, bytes_b_ = 0.0, lds_capacity_ = 0.0;
   bool lds_valid_ = false, small_batched_ = false, dot2_rule_ = true, leading_free_a_ = false,
        leading_free_b_ = false, non_temporal_rule_ = true, k_aligned_ = false, skinny_a_ = false,
-       skinny_b_ = false, nt_a_ = false, nt_b_ = false;
+       skinny_b_ = false, nt_a_ = false, nt_b_ = false, family_ = false;
 };
 
 // Whether Feasibility rejects `k` for every problem within `bounds` whatever
 // its data types, layout and device, by the rules decided by M, N, K and the
-// batch alone: the non-temporal, Dot2 and small batched rules. False when
-// `bounds` reaches no problem.
+// batch alone: the non-temporal (with KernelShape::family), Dot2 and small
+// batched rules. False when `bounds` reaches no problem.
 bool never_feasible(const CellBounds& bounds,
                     const KernelShape& k,
                     bool nt_a_available,

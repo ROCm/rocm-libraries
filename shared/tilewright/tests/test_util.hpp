@@ -8,6 +8,7 @@
 #include "tilewright/model.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -139,9 +140,11 @@ inline tilewright::detail::PoolKeys singleton_keys(const std::vector<tilewright:
   k.first.resize(n);
   k.members.resize(n);
   k.member_begin.resize(n + 1);
+  const std::vector<std::uint8_t> family = tilewright::detail::family_bits(pool);
   for (std::size_t i = 0; i < n; ++i) {
     k.key_of[i] = k.first[i] = k.members[i] = k.member_begin[i] = i;
     k.shape.push_back(tilewright::detail::kernel_shape(pool[i]));
+    k.shape.back().family = family[i];
     k.nt_a |= pool[i].cache_hints_a == 4;
     k.nt_b |= pool[i].cache_hints_b == 4;
   }

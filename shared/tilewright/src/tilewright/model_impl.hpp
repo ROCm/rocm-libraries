@@ -140,12 +140,15 @@ struct AttributeFeature {
 // Feasibility rules beyond the LDS fit, which always applies. `leading_free`
 // is a validity rule on Config::grvw_a/grvw_b; MLREC_v3 models do not read
 // those fields, so they leave it to the integration's own kernel predicates.
-// The others are soft.
+// The others are soft. `non_temporal_family` refines `non_temporal` in the
+// region in_family_region describes: a kernel family it rejects whole keeps
+// one member (Feasibility::family_keeps).
 struct SoftRules {
   bool leading_free           = true;
   bool small_batched_one_tile = true;
   bool dot2_small_m           = true;
   bool non_temporal           = true;
+  bool non_temporal_family    = false;
 };
 
 }  // namespace detail
@@ -182,6 +185,11 @@ class Model {
   std::size_t cascade_keys = 0;
   bool launch_keys         = false;
   bool clip                = false;
+  // MLREC_v3: whether the model was trained on the integration's bank as well
+  // as its table, which ranking does not read, and whether it has the
+  // trained-key gate (trained_keys).
+  bool bank             = false;
+  bool trained_key_gate = false;
 
   // Contexts an MLREC_v3 model supports: usable CUs as a fraction of the
   // device, and a bit per Schedule value.
@@ -201,6 +209,10 @@ class Model {
 
   // The payload bytes of the model file (split and cell records).
   std::vector<unsigned char> payload;
+  // With the trained-key gate, the view_key_hash of every view key with
+  // training data, ascending: a pool's other keys are scored only for a
+  // problem none of these suits.
+  std::vector<std::uint64_t> trained_keys;
 
   Model();
   ~Model();
@@ -248,14 +260,16 @@ bool valid_hardware(const Hardware& hardware) noexcept;
 // Cell scoring `problem` (honoring TILEWRIGHT_FORCE_CELL), or -1.
 int route_cell(const Model& model, const Problem& problem) noexcept;
 
-// Bounds of the problems resolve_cell sends to one cell: the least M and N,
-// the greatest M, N and K, and whether a problem of batch 1 is among them.
-// Exact or wider; `reached` is false for a cell no problem reaches.
+// Bounds of the problems resolve_cell sends to one cell: the least M, N and K,
+// the greatest M, N and K, and whether problems of batch 1 and of a larger
+// batch are among them. Exact or wider; `reached` is false for a cell no
+// problem reaches.
 struct CellBounds {
-  std::uint64_t m_lo = ~std::uint64_t{0}, n_lo = ~std::uint64_t{0};
+  std::uint64_t m_lo = ~std::uint64_t{0}, n_lo = ~std::uint64_t{0}, k_lo = ~std::uint64_t{0};
   std::uint64_t m_hi = 0, n_hi = 0, k_hi = 0;
-  bool batch_one = false;
-  bool reached   = false;
+  bool batch_one  = false;
+  bool batch_many = false;
+  bool reached    = false;
 };
 
 // Per cell of `model`, without TILEWRIGHT_FORCE_CELL.
@@ -269,16 +283,31 @@ void set_rank_epoch(std::uint32_t epoch) noexcept;
 // model and `launch` is null or has another id.
 void check_launch(const Model& model, const LaunchModel* launch);
 
-// The Config fields the feasibility rules read.
+// What the family-wise non-temporal rule reads of a kernel's family, the
+// pool's kernels with equal mt and mi: whether a member has no cache hint,
+// cache_hints_a == 4 or cache_hints_b == 4, and whether the kernel is the
+// member the family keeps (its hint-free member if any, else its lowest
+// (cache_hints_a, cache_hints_b)).
+constexpr std::uint8_t kFamilyPlain    = 1;
+constexpr std::uint8_t kFamilyNtA      = 2;
+constexpr std::uint8_t kFamilyNtB      = 4;
+constexpr std::uint8_t kFamilyFallback = 8;
+
+// The Config fields the feasibility rules read, and the kernel's family bits
+// within its pool (pool_keys sets them for models with the family-wise rule).
 struct KernelShape {
   std::uint64_t mt_m = 0, mt_n = 0, mt_k = 0;
   std::uint64_t mk = 0, nk = 0;  // mt.mk(), mt.nk()
   std::uint64_t grvw_a = 0, grvw_b = 0;
   int cache_hints_a = 0, cache_hints_b = 0;
-  bool dot2 = false;  // MI 1x1x64
+  bool dot2           = false;  // MI 1x1x64
+  std::uint8_t family = 0;
 };
 
 KernelShape kernel_shape(const Config& c);
+
+// The family bits of every config of `configs` (KernelShape::family).
+std::vector<std::uint8_t> family_bits(const std::vector<Config>& configs);
 
 // The values of Model::attribute_reads in `c`, in that order.
 void read_attributes(const Model& model, const Config& c, std::int64_t* out);
@@ -304,6 +333,11 @@ struct PoolKeys {
   std::vector<std::size_t> view_of;
   std::vector<std::size_t> view_begin;
   std::vector<std::size_t> view_keys;
+  // For a model with the trained-key gate: per key, whether the model lists
+  // its view key (Model::trained_keys), and the number of keys it does not.
+  // Empty for any other model.
+  std::vector<unsigned char> trained;
+  std::size_t untrained = 0;
 
   const std::int64_t* attributes(std::size_t key) const {
     return attribute_values.data() + key * attribute_count;
