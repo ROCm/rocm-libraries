@@ -182,6 +182,7 @@ def compile_c(name, archive, src_dir=None):
         str(src),
         str(archive),
         "-lm",
+        *(["-ldl", "-pthread"] if sys.platform == "linux" else []),
         "-o",
         str(out),
     ]
