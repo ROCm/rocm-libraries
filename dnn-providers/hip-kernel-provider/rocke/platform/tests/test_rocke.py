@@ -6939,8 +6939,8 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                 with self.assertRaises(comgr_mod.ComgrError) as error:
                     comgr_mod._load_lib()
                 load.assert_not_called()
-            self.assertIn(host, str(error.exception))
-            self.assertIn(wheel, str(error.exception))
+            self.assertIn(repr(host), str(error.exception))
+            self.assertIn(repr(wheel), str(error.exception))
             self.assertIn("separate process", str(error.exception))
 
             # A different spelling of the *same* mapped file keeps override
