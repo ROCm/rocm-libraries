@@ -23,6 +23,7 @@ from dispatch.attention.common import ATTENTION_FEATURES
 _GFX950_DENSE_FEATURES = {"causal", "sinks", "sliding_window"}
 _GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
 EXPECTED_FEATURES = {
+    "attention_paged_decode_t32": {"causal", "causal_bottom_right", "sliding_window"},
     "attention_strided_decode": {
         "strided_kv",
         "causal",

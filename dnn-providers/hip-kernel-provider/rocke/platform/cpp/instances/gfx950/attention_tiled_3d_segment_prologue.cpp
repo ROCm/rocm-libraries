@@ -36,6 +36,7 @@
  * individually.
  */
 
+#include "rocke/instance_attention_paged_kv_internal.h"
 #include <math.h> /* INFINITY */
 #include <stdio.h> /* snprintf */
 #include <string.h>
@@ -538,6 +539,10 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
         return;
     }
     ctx->seq_base = rocke_b_mul(B, ctx->seq_idx, ctx->bt_stride_p);
+    if(CFG.T != CFG.BS)
+    {
+        return;
+    }
 
     /* paged_kv_desc = TensorDescriptor.naive("paged_kv_bytes",
      *   lengths=[1<<24, T, NUM_KV, HD],
@@ -723,6 +728,20 @@ void rocke_gfx950_attention_tiled_3d_issue_k_load(rocke_gfx950_attention_tiled_3
             voff = rocke_strided_kv_offset(
                 B, &ctx->k_strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T);
         }
+        else if(CFG.T != CFG.BS)
+        {
+            voff = rocke_paged_kv_offset(B,
+                                         ctx->block_tables,
+                                         ctx->seq_base,
+                                         ctx->kv_head_idx,
+                                         kv_tile_idx,
+                                         linear_half,
+                                         ctx->seq_len,
+                                         CFG.HD,
+                                         CFG.BS,
+                                         CFG.T,
+                                         CFG.NUM_KV);
+        }
         else if(CFG.I64_KV_ADDR)
         {
             /* offset_i64_split folds the per-block byte base into a 64-bit
@@ -782,6 +801,20 @@ void rocke_gfx950_attention_tiled_3d_issue_v_load(rocke_gfx950_attention_tiled_3
         {
             voff = rocke_strided_kv_offset(
                 B, &ctx->v_strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T);
+        }
+        else if(CFG.T != CFG.BS)
+        {
+            voff = rocke_paged_kv_offset(B,
+                                         ctx->block_tables,
+                                         ctx->seq_base,
+                                         ctx->kv_head_idx,
+                                         kv_tile_idx,
+                                         linear_half,
+                                         ctx->seq_len,
+                                         CFG.HD,
+                                         CFG.BS,
+                                         CFG.T,
+                                         CFG.NUM_KV);
         }
         else if(CFG.I64_KV_ADDR)
         {

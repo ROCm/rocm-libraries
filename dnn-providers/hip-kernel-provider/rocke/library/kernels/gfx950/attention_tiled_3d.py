@@ -28,6 +28,7 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from kernels.common._attention_paged_kv import paged_kv_offset
 from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
     strided_kv_offset,
@@ -129,12 +130,7 @@ class UnifiedAttention3DTiledSpec:
     # FP8 K/V cache (mirrors UnifiedAttention2DTiledSpec.kv_storage_dtype).
     # See that spec's docstring for the semantics.
     kv_storage_dtype: Optional[str] = None
-    # ``tile_size_override`` / ``use_invariant_hoist`` / ``use_wide_kv_load``
-    # are accepted for signature parity with the shared dispatch spec builder
-    # (``_tiled_3d_spec_from_problem``) and the gfx942 spec. They select gfx942
-    # narrow-atom 3D optimizations; the corresponding ``_gfx942_3d_*`` helpers
-    # return None/False on gfx950, so the gfx950 segment kernel does not key on
-    # them.
+    # Logical compute tile; None preserves page-sized tiles (page 1 uses 32).
     tile_size_override: Optional[int] = None
     use_invariant_hoist: bool = False
     use_wide_kv_load: bool = False
@@ -152,6 +148,19 @@ class UnifiedAttention3DTiledSpec:
     kv_layout: str = "paged"
 
     def __post_init__(self):
+        if self.block_size not in (1, 16, 32, 64) or self.tile_size not in (16, 32, 64):
+            raise ValueError(
+                "tiled decode requires page size 1/16/32/64 and tile size 16/32/64"
+            )
+        if self.uses_paged_gather and (
+            self.tile_size != 32
+            or self.kv_storage_dtype is not None
+            or self.use_i64_kv_addr
+            or self.use_wide_kv_load
+        ):
+            raise ValueError(
+                "paged gather requires tile 32 and fp16/bf16 bounded async loads"
+            )
         if self.kv_layout not in ("paged", "strided"):
             raise ValueError("kv_layout must be 'paged' or 'strided'")
         if self.kv_layout == "strided" and (
@@ -181,7 +190,15 @@ class UnifiedAttention3DTiledSpec:
 
     @property
     def tile_size(self) -> int:
-        return self.block_size
+        return (
+            self.tile_size_override
+            if self.tile_size_override is not None
+            else (32 if self.block_size == 1 else self.block_size)
+        )
+
+    @property
+    def uses_paged_gather(self) -> bool:
+        return self.kv_layout == "paged" and self.tile_size != self.block_size
 
     @property
     def dtype_ir(self) -> Type:
@@ -210,6 +227,7 @@ class UnifiedAttention3DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            f"t{self.tile_size}" if self.tile_size != self.block_size else "",
             "stridedkv" if self.kv_layout == "strided" else "",
         )
 
@@ -247,14 +265,16 @@ def supports_tiled_3d(
             False,
             f"tiled 3D kernel requires head_size divisible by 32 (got {head_size})",
         )
-    if block_size not in (16, 32, 64):
+    if block_size not in (1, 16, 32, 64):
         return (
             False,
-            f"tiled 3D kernel only supports block_size in {{16,32,64}} (got {block_size})",
+            f"tiled 3D kernel only supports block_size in {{1,16,32,64}} (got {block_size})",
         )
     # FP8 K/V cache: enabled via ``kv_storage_dtype="fp8e4m3"``. The
     # ``use_fp8`` flag mirrors the upstream API; both must be set
     # consistently.
+    if block_size == 1 and (use_fp8 or kv_storage_dtype is not None):
+        return False, "one-token pages require fp16/bf16 KV storage"
     if kv_storage_dtype is not None and kv_storage_dtype != "fp8e4m3":
         return (
             False,
@@ -653,6 +673,20 @@ def build_unified_attention_3d_tiled(
                 voff = strided_kv_offset(
                     b, k_strides, kv_tile_idx, linear_half, seq_len, HD, T
                 )
+            elif spec.uses_paged_gather:
+                voff = paged_kv_offset(
+                    b,
+                    block_tables,
+                    seq_base,
+                    kv_head_idx,
+                    kv_tile_idx,
+                    linear_half,
+                    seq_len,
+                    HD,
+                    BS,
+                    T,
+                    NUM_KV,
+                )
             elif I64_KV_ADDR:
                 base_i64, voff, _ = paged_kv_desc.offset_i64_split(
                     b,
@@ -684,6 +718,20 @@ def build_unified_attention_3d_tiled(
             if spec.kv_layout == "strided":
                 voff = strided_kv_offset(
                     b, v_strides, kv_tile_idx, linear_half, seq_len, HD, T
+                )
+            elif spec.uses_paged_gather:
+                voff = paged_kv_offset(
+                    b,
+                    block_tables,
+                    seq_base,
+                    kv_head_idx,
+                    kv_tile_idx,
+                    linear_half,
+                    seq_len,
+                    HD,
+                    BS,
+                    T,
+                    NUM_KV,
                 )
             elif I64_KV_ADDR:
                 base_i64, voff, _ = paged_kv_desc.offset_i64_split(

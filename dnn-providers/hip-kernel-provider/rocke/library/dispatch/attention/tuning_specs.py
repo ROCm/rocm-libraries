@@ -27,6 +27,7 @@ TILE_POLICIES: Tuple[str, ...] = (
     "64",
     "128",
 )
+TILE_POLICIES_3D: tuple[str, ...] = (*TILE_POLICIES, "32")
 NUM_WARPS: Tuple[int, ...] = (1, 2, 4, 8)
 BLOCK_M_PER_WARP: Tuple[int, ...] = (16, 32)
 WAVES_PER_EU: Tuple[Optional[int], ...] = (None, 1, 2, 3, 4)
@@ -83,9 +84,18 @@ class ExplicitAttention3DConfig:
         return dict(self.knobs)
 
 
-def resolve_tile_policy(block_size: int, policy: str) -> int:
-    """Resolve a finite dispatcher tile token without a production heuristic."""
+def resolve_tile_policy(block_size: int, policy: str, *, path: str = "2d") -> int:
+    """Resolve a tile token; the 3D vocabulary also permits subpage T32 tiles.
+
+    The default retains the original 2D policy contract. Concrete specs still
+    validate whether the resolved geometry is supported on the target.
+    """
+    if path not in ("2d", "3d"):
+        raise ValueError(f"tile policy path must be '2d' or '3d', got {path!r}")
+    policies = TILE_POLICIES_3D if path == "3d" else TILE_POLICIES
     token = str(policy).strip().lower()
+    if token == "32" and path == "3d":
+        return 32
     if token == "half":
         if int(block_size) < 32:
             raise ValueError("half-block tile requires block_size >= 32")
@@ -102,7 +112,7 @@ def resolve_tile_policy(block_size: int, policy: str) -> int:
                 f"tile {tile} is not a multiple of block_size={block_size}"
             )
         return tile
-    raise ValueError(f"tile_policy must be one of {TILE_POLICIES}, got {policy!r}")
+    raise ValueError(f"tile_policy must be one of {policies}, got {policy!r}")
 
 
 def _semantic_fields(problem: UnifiedAttentionProblem) -> dict:
@@ -257,15 +267,7 @@ def make_explicit_attention_3d_specs(
     if config.waves_per_eu not in WAVES_PER_EU:
         raise ValueError(f"waves_per_eu must be one of {WAVES_PER_EU}")
 
-    tile = resolve_tile_policy(problem.block_size, config.tile_policy)
-    if arch == "gfx950" and tile != int(problem.block_size):
-        raise ValueError("gfx950 3D implements only tile_size == block_size")
-    if arch == "gfx942" and tile not in (
-        int(problem.block_size),
-        max(1, int(problem.block_size) // 2),
-    ):
-        raise ValueError("gfx942 3D implements only full- or half-block tiles")
-
+    tile = resolve_tile_policy(problem.block_size, config.tile_policy, path="3d")
     spec_type, reduce_type, _, _, supports = _tiled_3d_impl(arch)
     knobs = _checked_knobs(config.knob_dict())
     if arch == "gfx950" and any(

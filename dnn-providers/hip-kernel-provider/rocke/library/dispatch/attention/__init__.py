@@ -44,6 +44,7 @@ from . import (
     gfx950_unified,
     gfx1250,
     strided_decode,
+    paged_decode,
 )
 from .candidate import (
     DENSE_ALGORITHM,
@@ -81,6 +82,7 @@ ATTENTION_EXECUTION_REGISTRY = CandidateRegistry(
 )
 for _module in (
     strided_decode,
+    paged_decode,
     generic,
     gfx942_dense,
     gfx942_unified,

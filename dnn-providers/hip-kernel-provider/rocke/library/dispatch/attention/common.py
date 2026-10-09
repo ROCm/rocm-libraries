@@ -110,7 +110,7 @@ class AttentionRequest(OperatorRequest):
     mask_type: AttentionMaskType | int = AttentionMaskType.NO_MASK
     use_sinks: bool = False
     sliding_window: int = 0
-    kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
+    kv_block_size: int = 16  # paged KV page size; {16,32,64}, or 1 for tiled decode
     num_cus: int = (
         0  # 0 => auto-resolve to the device CU count at dispatch (_resolve_num_cus)
     )

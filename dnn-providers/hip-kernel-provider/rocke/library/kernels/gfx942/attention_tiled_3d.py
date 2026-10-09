@@ -34,6 +34,7 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from kernels.common._attention_paged_kv import paged_kv_offset
 from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
     strided_kv_offset,
@@ -134,6 +135,19 @@ class UnifiedAttention3DTiledSpec:
     kv_layout: str = "paged"
 
     def __post_init__(self):
+        if self.block_size not in (1, 16, 32, 64) or self.tile_size not in (16, 32, 64):
+            raise ValueError(
+                "tiled decode requires page size 1/16/32/64 and tile size 16/32/64"
+            )
+        if self.uses_paged_gather and (
+            self.tile_size != 32
+            or self.kv_storage_dtype is not None
+            or self.use_i64_kv_addr
+            or self.use_wide_kv_load
+        ):
+            raise ValueError(
+                "paged gather requires tile 32 and fp16/bf16 bounded async loads"
+            )
         if self.kv_layout not in ("paged", "strided"):
             raise ValueError("kv_layout must be 'paged' or 'strided'")
         if self.kv_layout == "strided" and (
@@ -171,8 +185,12 @@ class UnifiedAttention3DTiledSpec:
         return (
             self.tile_size_override
             if self.tile_size_override is not None
-            else self.block_size
+            else (32 if self.block_size == 1 else self.block_size)
         )
+
+    @property
+    def uses_paged_gather(self) -> bool:
+        return self.kv_layout == "paged" and self.tile_size > self.block_size
 
     @property
     def dtype_ir(self) -> Type:
@@ -203,6 +221,7 @@ class UnifiedAttention3DTiledSpec:
             "qqb" if self.use_qq_bias else "",
             "hoist" if self.use_invariant_hoist else "",
             "wkv" if self.use_wide_kv_load else "",
+            f"t{self.tile_size}" if self.tile_size != self.block_size else "",
             "stridedkv" if self.kv_layout == "strided" else "",
         )
 
@@ -239,11 +258,13 @@ def supports_tiled_3d(
             False,
             f"tiled 3D kernel requires head_size divisible by 32 (got {head_size})",
         )
-    if block_size not in (16, 32, 64):
+    if block_size not in (1, 16, 32, 64):
         return (
             False,
-            f"tiled 3D kernel only supports block_size in {{16,32,64}} (got {block_size})",
+            f"tiled 3D kernel only supports block_size in {{1,16,32,64}} (got {block_size})",
         )
+    if block_size == 1 and (use_fp8 or kv_storage_dtype is not None):
+        return False, "one-token pages require fp16/bf16 KV storage"
     if kv_storage_dtype is not None and kv_storage_dtype != "fp8e4m3":
         return (
             False,
@@ -461,7 +482,11 @@ def build_unified_attention_3d_tiled(
     # built from strided LDS loads (no transpose-read intrinsic).
     Q_lds = b.smem_alloc(dtype, [BLOCK_M, HD], name_hint="Qlds")
     K_lds = b.smem_alloc(dtype, [2, T, HD], name_hint="Klds")
-    V_lds = b.smem_alloc(dtype, [2, T, HD], name_hint="Vlds")
+    # D256/T32 otherwise exceeds gfx942's LDS budget. V has no next-tile
+    # prefetch: the loop-entry wait/barrier completes previous PV reads before
+    # issuing this tile's V load, so one tile buffer is sufficient.
+    V_BUFFERS = 1 if HD == 256 and T == 32 else 2
+    V_lds = b.smem_alloc(dtype, [V_BUFFERS, T, HD], name_hint="Vlds")
     P_lds = b.smem_alloc(dtype, [BLOCK_M, T], name_hint="Plds")
 
     neg_inf = b.const_f32(float("-inf"))
@@ -622,7 +647,7 @@ def build_unified_attention_3d_tiled(
             ),
             unmerge("linear_half", into=("token", "dim"), dims=(T, HD)),
         )
-    else:
+    elif T < BS:
         assert BS % T == 0, "3D tile_size_override must divide block_size"
         BLOCKS_PER_CACHE_BLOCK = BS // T
         paged_kv_desc = _kv_base.transform(
@@ -655,6 +680,20 @@ def build_unified_attention_3d_tiled(
                 voff = strided_kv_offset(
                     b, k_strides, kv_tile_idx, linear_half, seq_len, HD, T
                 )
+            elif spec.uses_paged_gather:
+                voff = paged_kv_offset(
+                    b,
+                    block_tables,
+                    seq_base,
+                    kv_head_idx,
+                    kv_tile_idx,
+                    linear_half,
+                    seq_len,
+                    HD,
+                    BS,
+                    T,
+                    NUM_KV,
+                )
             else:
                 voff, _ = paged_kv_desc.offset(
                     b,
@@ -676,6 +715,20 @@ def build_unified_attention_3d_tiled(
             if spec.kv_layout == "strided":
                 voff = strided_kv_offset(
                     b, v_strides, kv_tile_idx, linear_half, seq_len, HD, T
+                )
+            elif spec.uses_paged_gather:
+                voff = paged_kv_offset(
+                    b,
+                    block_tables,
+                    seq_base,
+                    kv_head_idx,
+                    kv_tile_idx,
+                    linear_half,
+                    seq_len,
+                    HD,
+                    BS,
+                    T,
+                    NUM_KV,
                 )
             else:
                 voff, _ = paged_kv_desc.offset(
@@ -789,6 +842,7 @@ def build_unified_attention_3d_tiled(
         l_vals = [carry[2 * r + 1] for r in range(4)]
         acc_vals = [carry[8 + n] for n in range(PV_N_TILES)]
         cur_buf = carry[8 + PV_N_TILES]
+        v_buf = b.const_i32(0) if V_BUFFERS == 1 else cur_buf
         nxt_buf = b.sub(b.const_i32(1), cur_buf)
         tile_off = b.mul(kv_tile_iv, b.const_i32(T))
 
@@ -818,7 +872,7 @@ def build_unified_attention_3d_tiled(
                 acc_v = _mfma_16x16x16(b, dtype, A_kits[k], B_v, acc_v)
             S_n.append(acc_v)
 
-        _issue_v(kv_tile_iv, cur_buf)
+        _issue_v(kv_tile_iv, v_buf)
         _issue_k(safe_next_tile, nxt_buf)
 
         if USE_ALIBI:
@@ -948,9 +1002,7 @@ def build_unified_attention_3d_tiled(
                 for j in range(4):
                     v_row = b.add(b.const_i32(k_iter * 16 + j), v_k_chunk_base)
                     elem = b.vec_extract(
-                        b.smem_load_vN(
-                            V_lds, cur_buf, v_row, v_n_col, dtype=dtype, n=1
-                        ),
+                        b.smem_load_vN(V_lds, v_buf, v_row, v_n_col, dtype=dtype, n=1),
                         0,
                     )
                     bv = b.vec_insert(bv, elem, j)
