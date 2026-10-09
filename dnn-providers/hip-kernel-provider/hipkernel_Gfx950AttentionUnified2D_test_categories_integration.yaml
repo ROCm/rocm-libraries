@@ -1,0 +1,53 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hip-kernel-provider hipkernel:Gfx950AttentionUnified2D external integration test categories.
+#
+# Pinned to hipkernel:Gfx950AttentionUnified2D via --test-engine. Matches causal BSHD
+# bundles under integration-test-bundles/{quick,standard}/SdpaFwd/bshd/.
+# The harness skips any case the engine does not service.
+#
+# IMPORTANT: This engine only serves CAUSAL graphs (the kernel unconditionally masks
+# bottom-right). The SdpaFwd_bshd_* patterns cover both causal and unmasked shapes;
+# unmasked shapes are intentional declines and the harness counts them as skips.
+
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+  - "*SdpaBackward*"
+
+test_categories:
+  quick:
+    description: "Quick gfx950 unified-2D attention BSHD bundle coverage"
+    test_patterns:  [ "quick_*Sdpa*bshd*" ]
+    exclude: *common_excludes
+    labels: [ "quick", "pre-commit", "smoke" ]
+  standard:
+    description: "Standard gfx950 unified-2D attention BSHD bundle coverage"
+    test_patterns: [ "quick_*Sdpa*bshd*", "standard_*Sdpa*bshd*" ]
+    exclude: *common_excludes
+    labels: [ "standard", "pr", "precheckin" ]
+  comprehensive:
+    description: "Comprehensive gfx950 unified-2D attention BSHD bundle coverage"
+    test_patterns: [ "*Sdpa*bshd*" ]
+    exclude: *common_excludes
+    labels: [ "comprehensive", "nightly", "extended" ]
+  full:
+    description: "Full gfx950 unified-2D attention BSHD bundle coverage"
+    test_patterns: [ "*Sdpa*bshd*" ]
+    exclude: *common_excludes
+    labels: [ "full", "all" ]
+  ffm-quick:
+    description: "FFM quick gfx950 unified-2D attention BSHD bundle coverage"
+    test_patterns: [ "quick_*Sdpa*bshd*" ]
+    exclude: *common_excludes
+    labels: [ "ffm-quick", "ffm-full" ]
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 1800
+    comprehensive: 7200
+    full: 14400
+    ffm-quick: 1800

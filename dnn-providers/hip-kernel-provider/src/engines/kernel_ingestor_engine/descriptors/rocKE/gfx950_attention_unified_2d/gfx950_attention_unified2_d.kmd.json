@@ -1,0 +1,81 @@
+{
+  "version": "1.0",
+  "id": "729a408a-53c8-45a0-bebd-a70720f28833",
+  "name": "Gfx950AttentionUnified2D variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int",
+      "default_value": 128
+    },
+    {
+      "name": "num_query_heads",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "num_kv_heads",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 16
+    },
+    {
+      "name": "sliding_window",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_sinks",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "num_seqs",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "tile_size",
+      "type": "int",
+      "default_value": 16
+    },
+    {
+      "name": "num_warps",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "block_m_per_warp",
+      "type": "int",
+      "default_value": 16
+    },
+    {
+      "name": "use_mfma_32x32",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_transposed_qk_32x32",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_register_pv",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_k_single_buffer",
+      "type": "int",
+      "default_value": 0
+    }
+  ]
+}

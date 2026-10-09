@@ -1,0 +1,16 @@
+# Integration test configuration for hipkernel:Gfx950AttentionUnified2D
+# Filters use GTest-style globs: * matches any sequence of characters
+
+[meta]
+version = 1
+
+# All bundles for this engine are causal BSHD SDPA on gfx950, served through a
+# synthesized identity block_tables / seq_lens / query_start_len workspace.
+#
+# No tolerance overrides needed: the forward pass uses the common SdpaAttributes
+# tolerance (tol::sdpa::getToleranceFwd<T>()).
+#
+# NOTE: This engine declines NO_MASK graphs because the kernel is unconditionally
+# causal (bottom-right). The integration harness will count those as skips rather
+# than failures. An explicit [[test_skips]] entry is not needed: the engine returns
+# no plan for them and the harness records them as "no engine" declines.

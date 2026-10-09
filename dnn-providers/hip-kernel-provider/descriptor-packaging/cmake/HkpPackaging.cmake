@@ -1410,6 +1410,33 @@ function(hkp_product_offers_engine out_var engine)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_gfx950_attention_unified_2d_available(<out>)
+#   The same three conjuncts as hkp_gfx950_attention_dense_available, for the gfx950
+#   unified 2D bundle. Separate rather than parameterised so each engine's registrations
+#   name the predicate they actually depend on: the two bundles share the `product` root
+#   but either can be absent from it on its own, and a shared predicate would register one
+#   engine's tests on the strength of the other engine shipping.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_attention_unified_2d_available out_var)
+    set(${out_var} FALSE PARENT_SCOPE)
+
+    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    if(NOT "product" IN_LIST _labels)
+        return()
+    endif()
+
+    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_product)
+    if(NOT "gfx950" IN_LIST _arches)
+        return()
+    endif()
+
+    get_property(_root GLOBAL PROPERTY HKP_PACK_SOURCE_ROOT_product)
+    _hkp_root_declares_engine_for_arch(_declares "${_root}"
+                                       "hipkernel:Gfx950AttentionUnified2D" "gfx950")
+    set(${out_var} "${_declares}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # _hkp_resolve_rocke_args(out_args out_comgr_lib)
 #   Resolve the rocKE toolchain once and return the keyword list every pack target is
 #   wired with, plus the comgr library the ctest entries forward. Called once for all
