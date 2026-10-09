@@ -72,7 +72,19 @@ add_custom_command(
   OUTPUT "${TENSILE_TEST_DATA_DIR}/test_tile_aware_selection/library/test_tile_aware_selection.cpp"
   WORKING_DIRECTORY "${TENSILE_SOURCE_TREE}/../..")
 
+# Keep beta-only kernels independent of the architecture-specific GEMM fixtures.
+set(beta_only_command ${tcl_command} --embed-library=test_beta_only --embed-library-key=beta_only
+                      "${TENSILE_CONFIG_DIR}/beta_only" "${TENSILE_TEST_DATA_DIR}/test_beta_only" HIP)
+
+add_custom_command(
+  COMMENT "Generating ${TENSILE_TEST_DATA_DIR}/test_beta_only/library/test_beta_only.cpp"
+  COMMAND ${beta_only_command}
+  OUTPUT "${TENSILE_TEST_DATA_DIR}/test_beta_only/library/test_beta_only.cpp"
+  DEPENDS "${TENSILE_CONFIG_DIR}/beta_only/hip_Cijk_Ailk_Bjlk_SB.yaml"
+  WORKING_DIRECTORY "${TENSILE_SOURCE_TREE}/../..")
+
 add_library(test-device-kernels OBJECT
+  "${TENSILE_TEST_DATA_DIR}/test_beta_only/library/test_beta_only.cpp"
   "${TENSILE_TEST_DATA_DIR}/test_kernels_lite/library/test_kernels_lite.cpp"
   "${TENSILE_TEST_DATA_DIR}/test_kernels_lite_2/library/test_kernels_lite_2.cpp"
   "${TENSILE_TEST_DATA_DIR}/test_kernels_lite_mixed/library/test_kernels_lite_mixed.cpp"
