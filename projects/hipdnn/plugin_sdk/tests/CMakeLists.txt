@@ -34,8 +34,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                     "TestUhdGenArtifact NOT built: uhd_gen's dependencies are not importable "
                     "by ${Python3_EXECUTABLE}. Nothing then checks that a real uhd_gen "
                     "artifact loads at run time. Install "
-                    "projects/hipdnn/tools/uhd_gen/requirements.txt, or use the hipDNN dev "
-                    "image, which does.")
+                    "projects/hipdnn/tools/uhd_gen/requirements.txt into that interpreter.")
         endif()
     else()
         message(${_uhd_gen_missing_severity}

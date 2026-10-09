@@ -188,9 +188,8 @@ protected:
         // Not a skip: the configure step checked the tool's dependencies import, so a failure
         // here is a broken environment, not "nothing to run".
         ASSERT_EQ(runUhdGen(csv, _outputDir), 0)
-            << "uhd_gen failed. Its dependencies are in "
-               "projects/hipdnn/tools/uhd_gen/requirements.txt, which the hipDNN dev image "
-               "installs.";
+            << "uhd_gen failed though configure found its dependencies importable; see its "
+               "output above.";
     }
 
     /// The tool's descriptor, loaded through the same path the runtime uses.
