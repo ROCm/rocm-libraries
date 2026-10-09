@@ -64,7 +64,8 @@ from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, g
                                                get_fp16_valid_blocks, get_fp32_valid_blocks, \
                                                MXS_LDS_BLOCK_BYTES, MXS_LDS_PAD_BYTES
 from ..Common.GlobalParameters import defaultSolution, \
-                                            defaultInternalSupportParams
+                                            defaultInternalSupportParams, \
+                                            globalParameters
 from ..Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
@@ -76,7 +77,7 @@ from .Naming import getSolutionNameFull
 from .Problem import ProblemType
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
 from ..Toolchain.Component import Assembler
-from ..Components.CustomSchedule import hasCustomSchedule
+from ..Components.CustomSchedule import hasCustomSchedule, megaFusedEpilogueCompatible
 
 from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
@@ -320,8 +321,16 @@ def _validateSubtileEpiloguePrereqs(state, printRejectionReason, epilogueName):
   emitters use AGPR read/write instructions). Returns True when all hold;
   rejects the solution and returns False otherwise.
   """
-  if not state["UseSubtileImpl"]:
-    reject(state, printRejectionReason, "%s requires UseSubtileImpl" % epilogueName)
+  # The fused epilogue runs wherever it has a compatible accumulator-tile view:
+  # Subtile's native tile view, or a CMS kernel with any VectorWidthA/VectorWidthB and any
+  # SourceSwap value. For SourceSwap=True, an in-place AGPR transpose (SS->nonSS before the
+  # emitter, nonSS->SS after) is emitted so the non-SS emitter sees the correct layout; the
+  # transpose is VW-independent because it iterates all MFMA tiles flat.
+  if not megaFusedEpilogueCompatible(state):
+    reject(state, printRejectionReason,
+           "fused epilogue %s requires UseSubtileImpl, or a CMS kernel "
+           "(UseCustomMainLoopSchedule=1); any VectorWidthA/VectorWidthB and any SourceSwap "
+           "value are supported" % epilogueName)
     return False
   if state["ISA"] != (9, 5, 0):
     reject(state, printRejectionReason, "%s is only implemented on gfx950" % epilogueName)
@@ -357,15 +366,13 @@ def _partialRMSSideTypeSupported(dtype):
   return dtype.isBFloat16() or dtype.isSingle()
 
 
-def _resolvePartialRMSSideType(state, printRejectionReason, key, mustValidate):
+def _resolvePartialRMSSideType(state, printRejectionReason, key):
   """Validate a PartialRMS side-input type param (bf16 'b' default, f32 's').
 
   Normalizes state[key] to the lowercase char the emitter and kernel name read.
-  Returns False only when mustValidate is True and the type is unsupported.
   """
   raw = str(state.get(key, "") or "b").lower()
-  sideDt = DataType(raw)
-  if mustValidate and not _partialRMSSideTypeSupported(sideDt):
+  if not _partialRMSSideTypeSupported(DataType(raw)):
     reject(state, printRejectionReason,
            "%s=%s is not a supported PartialRMS side-input type (use b or s)" % (key, raw))
     return False
@@ -373,7 +380,18 @@ def _resolvePartialRMSSideType(state, printRejectionReason, key, mustValidate):
   return True
 
 
+def _resolveRMSGammaType(state, printRejectionReason):
+  """Validate RMSEpilogueGammaType: gamma must be bf16 ('b'); f32 is not supported.
 
+  Normalizes the value to the lowercase char the emitter and kernel name read.
+  """
+  raw = str(state.get("RMSEpilogueGammaType", "") or "b").lower()
+  if not DataType(raw).isBFloat16():
+    reject(state, printRejectionReason,
+           "RMSEpilogueGammaType=%s is not supported; gamma must be bf16 (b)" % raw)
+    return False
+  state["RMSEpilogueGammaType"] = raw
+  return True
 
 
 def _validateRMSEpilogue(state, printRejectionReason):
@@ -390,10 +408,46 @@ def _validateRMSEpilogue(state, printRejectionReason):
     return
   if not _validateSubtileEpiloguePrereqs(state, printRejectionReason, "RMSEpilogue"):
     return
-  if not _resolvePartialRMSSideType(state, printRejectionReason, "RMSEpilogueGammaType", True):
+  # Non-subtile (CMS/interleaved) RMSEpilogue is unsupported: the native emitter
+  # is Subtile-only and there is no fallback path. Reject outright.
+  if not state["UseSubtileImpl"]:
+    reject(state, printRejectionReason,
+           "RMSEpilogue requires UseSubtileImpl=True; non-subtile (CMS) RMSEpilogue is not supported")
+    return
+  # The native RMSEpilogueEmitter supports bf16 and MXFP8 (float8) output.
+  # All other dest types are unsupported; reject them.
+  destType = state["ProblemType"]["DestDataType"]
+  if not destType.isBFloat16() and not destType.isFloat8():
+    reject(state, printRejectionReason,
+           "RMSEpilogue supports bf16 or float8 output only; a non-bf16, non-float8 dest "
+           "is not supported")
+    return
+  # Native-path even tile-M guard: pair-based body has no odd-T_M leftover path.
+  tM = (state["MacroTile0"] // 16) // state["MIWaveGroup"][0]
+  if tM % 2 != 0:
+    reject(state, printRejectionReason,
+           "RMSEpilogue native path requires even tile-M "
+           "(tM = (MacroTile0 // 16) // MIWaveGroup[0])")
+    return
+  # RMSEpiloguePrefetchDepth selects the native residual prefetch-ring depth.
+  # -1 (auto, the default) lets the emitter derive the historical depth; an
+  # explicit depth must be in [1, numPairs] -- the ring cannot prefetch more
+  # pairs than exist (numPairs = (tM//2)*tN). Over-budget depths are NOT
+  # rejected here: the generic kernel register/occupancy check drops a kernel
+  # whose ring exceeds the VGPR budget.
+  prefetchDepth = state.get("RMSEpiloguePrefetchDepth", -1)
+  if prefetchDepth != -1:
+    tN = (state["MacroTile1"] // 16) // state["MIWaveGroup"][1]
+    numPairs = (tM // 2) * tN
+    if prefetchDepth < 1 or prefetchDepth > numPairs:
+      reject(state, printRejectionReason,
+             "RMSEpiloguePrefetchDepth (%d) must be -1 (auto) or in [1, numPairs=%d]"
+             % (prefetchDepth, numPairs))
+      return
+  if not _resolveRMSGammaType(state, printRejectionReason):
     return
   # Residual-add is always active under RMSEpilogue; validate the type unconditionally.
-  if not _resolvePartialRMSSideType(state, printRejectionReason, "RMSEpilogueResidualType", True):
+  if not _resolvePartialRMSSideType(state, printRejectionReason, "RMSEpilogueResidualType"):
     return
   # PAP is not co-validated with the RMSEpilogue path; reject until audited.
   if state.get("PrefetchAcrossPersistent", 0):

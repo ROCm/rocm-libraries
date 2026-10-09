@@ -13,10 +13,12 @@ GlobalParameters:
   EnqueuesPerSync: 20
   NumWarmups: 20
   KernelTime: true
-  NumElementsToValidate: 0
+  NumElementsToValidate: -1
   DataInitTypeA: 12
   DataInitTypeB: 13
   DataInitTypeD: 12
+  # Native RMS epilogue is gamma-only (does not apply alpha); validate at alpha=1.
+  DataInitTypeAlpha: 1
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   PreciseKernelTime: false
@@ -85,6 +87,8 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1, 5, 20, 4, 1]  # MT 320x320 (160KB)
           - [16, 16, 32, 1,  1, 4, 23, 4, 1]  # MT 256x368 (156KB)
           - [16, 16, 32, 1,  1, 2, 24, 4, 1]  # MT 128x384 (128KB)
+          - [16, 16, 32, 1,  1, 4, 16, 4, 1]  # MT 256x256 (128KB, alt decomp of [8,8,2,2])
+          - [16, 16, 32, 1,  1, 2, 32, 4, 1]  # MT 128x512 (160KB, alt decomp; completes trio)
           - [16, 16, 32, 1,  1, 8, 8,  1, 4]  # MT 128x512 (160KB)
           - [16, 16, 32, 1,  1, 12, 7, 1, 4]  # MT 192x448 (160KB)
           - [16, 16, 32, 1,  1, 16, 6, 1, 4]  # MT 256x384 (160KB)
@@ -96,25 +100,28 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1, 23, 4, 1, 4]  # MT 368x256 (156KB)
           - [16, 16, 32, 1,  1, 24, 4, 1, 4]  # MT 384x256 (160KB)
           - [16, 16, 32, 1,  1, 32, 2, 1, 4]  # MT 512x128 (160KB)
+          - [16, 16, 32, 1,  1, 16, 4, 1, 4]  # MT 256x256 (128KB, production-dispatched solution)
         - RMSEpilogue: [True]
         - StreamK: [3]
         - StreamKForceDPOnly: [1]
         - StreamKAtomic: [0]
-        - GlobalSplitU: [1]
+        # Sweep all four params where the production-dispatched solution differs from the old fixed values, covering both [old, production]: GlobalSplitU 1/0, DirectToLds 1/0, StaggerU 0/16, PreloadKernArgs False/True.
+        - GlobalSplitU: [0, 1]
         - ScheduleIterAlg: [3]
         - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchAcrossPersistent: [0]
-        - DirectToLds: [1]
+        - DirectToLds: [0, 1]
         - UseSubtileImpl: [True]
-        - StaggerU: [0]
+        - StaggerU: [0, 16]
         - DepthU: [64]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - StoreVectorWidth: [-1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - PreloadKernArgs: [False]
+        - PreloadKernArgs: [False, True]
         - 1LDSBuffer: [0]
+        - RMSEpiloguePrefetchDepth: [1, 2, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

@@ -571,8 +571,9 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "RMSEpilogue": [False, True],
-    "RMSEpilogueGammaType": ["b", "s"],
+    "RMSEpilogueGammaType": ["b"],
     "RMSEpilogueResidualType": ["b", "s"],
+    "RMSEpiloguePrefetchDepth": [-1, 1, 2, 3, 4],
     "UseDeepseekScaleA": [False, True],
     "UseDeepseekScaleB": [False, True],
     "DeepseekScaleAq0": list(range(1, 1025)),

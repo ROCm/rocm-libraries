@@ -453,7 +453,7 @@ class SignatureDefault(Signature):
         if kernel["RMSEpilogue"]:
             # RMSEpilogue (K1) epilogue appends in this order:
             #   RMSNormGamma: global buffer pointer (8 bytes) — per-column gamma weight;
-            #     element type set by RMSEpilogueGammaType (bf16 by default).
+            #     element type is always bf16 (RMSEpilogueGammaType).
             #   PartialBuf:   fp32 global buffer pointer (8 bytes) — output Σx² per (row, N-tile).
             #   ResidualBuf:  global buffer pointer (8 bytes) — residual-add input.
             #   AddressResidualOut: bf16 global buffer pointer (8 bytes) — pre-quant output.

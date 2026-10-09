@@ -41,7 +41,7 @@ GlobalParameters:
   EnqueuesPerSync: 20
   NumWarmups: 20
   KernelTime: true
-  NumElementsToValidate: 0
+  NumElementsToValidate: -1
   DataInitTypeBeta: 12
   DataInitTypeA: 12
   DataInitTypeB: 13
@@ -54,6 +54,7 @@ GlobalParameters:
   PreciseKernelTime: false
   Device: 0
   SkipSlowSolutionRatio: 0.0
+  DataInitTypeAlpha: 1
   # PrintSolutionRejectionReason: true
   KeepBuildTmp: true
   RotatingBufferSize: 1024
@@ -146,18 +147,15 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - StoreVectorWidth: [-1]
         - PreloadKernArgs: [False]
+        - RMSEpiloguePrefetchDepth: [1, 2, 4]
         - 1LDSBuffer: [0]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
             - Exact: [256, 256, 1, 256]
             - Exact: [512, 512, 1, 512]
-            - Exact: [4096, 4096, 1, 4096]
-            - Exact: [8192, 8192, 1, 8192]
-            - Exact: [16384, 2048, 1, 2048]
+            - Exact: [513, 513, 1, 513]
             - Exact: [2048, 16384, 1, 2048]
-            - Exact: [4096, 16384, 1, 4096]
-            - Exact: [8192, 16384, 1, 8192]
 
 LibraryLogic:
   ScheduleName: "epilogues_rms_mxfp8_k1"

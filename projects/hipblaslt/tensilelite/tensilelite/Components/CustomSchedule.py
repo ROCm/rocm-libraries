@@ -543,6 +543,30 @@ def hasCustomSchedule(kernel):
     return False, None
 
 
+def megaFusedEpilogueCompatible(d):
+    """True when the MegaFused fused epilogue has a known-compatible accumulator-tile view.
+
+    Compatible when UseSubtileImpl (Subtile's own contiguous tile view), or when running
+    under CMS with any VectorWidthA and VectorWidthB and any SourceSwap value. The emitter's
+    row and column addressing are reparameterized for VW>1. For SourceSwap=True, an in-place
+    AGPR transpose (SS->nonSS before the emitter, nonSS->SS after) ensures the emitter always
+    sees the non-SS layout; the transpose iterates all MFMA tiles flat so it is VW-independent.
+
+    Accepts either a Solution 'state' dict (validation time, UseCustomMainLoopSchedule may be
+    unresolved/-1) or a resolved 'kernel' dict (codegen time).
+    """
+    if d.get("UseSubtileImpl"):
+        return True
+    cms = d.get("UseCustomMainLoopSchedule", -1)
+    if cms == 1:
+        isCMS = True
+    elif cms == 0:
+        isCMS = False
+    else:  # -1 auto: resolve against the CMS catalog (validation time).
+        isCMS, _ = hasCustomSchedule(d)
+    return isCMS
+
+
 def query_cms_kernels(dtype: Optional[str] = None, layout: Optional[str] = None) -> list[dict]:
     """Query for available CMS kernels matching the given data type and/or layout.
 
