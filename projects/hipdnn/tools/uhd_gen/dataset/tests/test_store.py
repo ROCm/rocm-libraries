@@ -548,3 +548,37 @@ def test_the_training_table_follows_remove_and_retag(tmp_path):
     store.remove(dataset, ["b"])
     assert store.read_training_rows(dataset) == []
     assert store.read_manifest(dataset)["training_view"]["contributions"] == []
+
+
+def test_exported_rows_added_again_keep_their_id(tmp_path):
+    """A dataset rebuilt from exported rows names each contribution as the original did,
+    though Parquet hands back an int column holding a gap as floats."""
+    rows = [
+        {
+            "benchmark": "g0",
+            "device": "d0",
+            "arch": "gfx942",
+            "kernel": "k0",
+            "knob_settings": "{}",
+            "avgTimeMs": 1.5,
+            "iters": 10,
+            "rank": None,
+        },
+        {
+            "benchmark": "g1",
+            "device": "d0",
+            "arch": "gfx942",
+            "kernel": "k0",
+            "knob_settings": "{}",
+            "avgTimeMs": 2.5,
+            "iters": 20,
+            "rank": 3,
+        },
+    ]
+    original = tmp_path / "original"
+    entry, _ = store.from_collection(_collection(tmp_path, "a", rows=rows))
+    added = store.add(original, *store.from_collection(tmp_path / "a"))
+    (stored,) = store.read_manifest(original)["contributions"]
+    exported = store.export_rows(original, contributions=[added["contribution_id"]])
+    again = store.add(tmp_path / "rebuilt", stored, {None: exported})
+    assert again["contribution_id"] == added["contribution_id"]
