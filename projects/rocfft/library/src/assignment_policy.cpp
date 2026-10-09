@@ -293,9 +293,9 @@ static bool MatchingLengthStride(const std::vector<size_t>& lengthA,
 }
 
 // Output lengths, and the matching strides, that a node actually writes.
-static std::pair<std::vector<size_t>, std::vector<size_t>> OutputFootprint(TreeNode& node)
+static std::pair<std::vector<size_t>, std::vector<size_t>> OutputFootprint(const TreeNode& node)
 {
-    auto len    = node.UseOutputLengthForPadding() ? node.GetOutputLength() : node.length;
+    auto len    = node.LengthForOutStride();
     auto stride = node.outStride;
     // the last fused Bluestein stage only stores the first transform_length of its padded dims 0-1
     if(node.fuseBlue == BFT_INV_CHIRP_MUL && node.scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
