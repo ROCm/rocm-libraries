@@ -26,6 +26,7 @@ from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 from builders.common.convolution_forward import (
     AOT_DIRECT_ALGORITHMS,
     DIRECT_VARIANT_GROUPED,
+    DIRECT_VARIANT_NONGROUPED,
     KERNEL_FAMILY_DIRECT_DEPTHWISE,
     Gfx950ConvFwdAotSpec,
     Gfx950ConvFwdSpec,
@@ -442,6 +443,7 @@ _DIRECT_COUNTS = {
     "direct_depthwise_tiled": 1536,
     "direct_depthwise_col": 540,
     "direct_grouped": 80,
+    "direct_nongrouped": 3058,
 }
 #: Identities per (dtype, algorithm) the IR and serving tests sample, spread evenly
 #: over the sweep's order (capabilities outermost, then knobs). std and spatial are
@@ -583,18 +585,26 @@ def _instance_problems(spec: Gfx950ConvFwdAotSpec, count: int = 24):
             dil_h = dil_w = 2 if dil_h == 1 else 1
         elif change == "axes":
             stride_w = stride + 1
-        if variant == DIRECT_VARIANT_GROUPED:
-            cpg, kpg = rng.choice(
-                [(spec.cpg, spec.kpg)] * 6
-                + [(spec.cpg, 2 * spec.kpg), (4 + spec.cpg, 4 + spec.kpg)]
-            )
-            groups = rng.choice([1, 2, 3, 4, 6, 8, 16, 24, 32, 48, 64, 128])
+        if variant == DIRECT_VARIANT_NONGROUPED:
+            groups = rng.choice([1] * 6 + [2])
+            c = rng.choice([8, 16, 24, 32, 48, 64, 96, 128, 256])
+            k = rng.choice([16, 24, 32, 48, 64, 96, 128, 160, 256])
+            c, k = c * groups, k * groups
+            hi = rng.choice([3, 8, 13, 17, 28, 33])
+            wi = rng.choice([14, 16, 28, 30, 32, 48, 56, 64, 96, 100, 192])
         else:
-            cpg, kpg = rng.choice([(1, 1)] * 8 + [(1, 2), (2, 2)])
-            groups = rng.choice([1, 2, 5, 8, 16, 32, 48, 63, 64, 65, 96, 128, 300])
-        c, k = groups * cpg, groups * kpg
-        hi = rng.choice([1, 2, 3, 5, 7, 8, 12, 17, 28, 31, 33, 56])
-        wi = rng.choice([1, 2, 3, 5, 7, 8, 12, 17, 28, 31, 33, 56])
+            if variant == DIRECT_VARIANT_GROUPED:
+                cpg, kpg = rng.choice(
+                    [(spec.cpg, spec.kpg)] * 6
+                    + [(spec.cpg, 2 * spec.kpg), (4 + spec.cpg, 4 + spec.kpg)]
+                )
+                groups = rng.choice([1, 2, 3, 4, 6, 8, 16, 24, 32, 48, 64, 128])
+            else:
+                cpg, kpg = rng.choice([(1, 1)] * 8 + [(1, 2), (2, 2)])
+                groups = rng.choice([1, 2, 5, 8, 16, 32, 48, 63, 64, 65, 96, 128, 300])
+            c, k = groups * cpg, groups * kpg
+            hi = rng.choice([1, 2, 3, 5, 7, 8, 12, 17, 28, 31, 33, 56])
+            wi = rng.choice([1, 2, 3, 5, 7, 8, 12, 17, 28, 31, 33, 56])
         problem = Gfx950ConvFwdSpec(
             N=rng.choice([1, 2, 3]),
             Hi=hi,
@@ -619,8 +629,8 @@ def _instance_problems(spec: Gfx950ConvFwdAotSpec, count: int = 24):
 
 def _rocke_direct_serves(identity: KernelIdentity, problem: Gfx950ConvFwdSpec):
     """What rocKE's direct benchmark offers ``identity`` for (``direct_plans``): the
-    cache's capability match, then ``plan_for``'s re-validation of the spec on the
-    real problem."""
+    cache's capability match, the non-grouped family only for one group, then
+    ``plan_for``'s re-validation of the spec on the real problem."""
     if problem.dtype != identity.dtype_a:
         return False, "dtype"
     direct = DirectConvProblem(
@@ -642,6 +652,8 @@ def _rocke_direct_serves(identity: KernelIdentity, problem: Gfx950ConvFwdSpec):
     ok, why = cache.supports_problem(identity, direct)
     if not ok:
         return False, why
+    if identity.algorithm == "direct_nongrouped" and direct.groups != 1:
+        return False, "direct_plans offers the non-grouped family one group only"
     plan, why = direct_kernel_sweep.plan_for(
         cache, identity, Path("unused.hsaco"), {"kernel_name": "k"}, direct, "gfx950"
     )
@@ -830,6 +842,53 @@ def test_grouped_serves_its_compiled_channel_counts_only(direct_jobs, cpg):
     assert not ok and "not divisible by block_groups" in why, why
 
 
+def test_nongrouped_serves_dense_runtime_channels_and_dilation(direct_jobs):
+    spec = _first(
+        direct_jobs, "direct_nongrouped", dilation_h=3, dilation_w=1, stride_h=2
+    )
+    assert (spec.tile_w, spec.atom) == (32, "32x32x16")
+    # Wo = 96, which a 32-wide tile divides; C and K are kernel arguments.
+    problem = Gfx950ConvFwdSpec(
+        N=1,
+        Hi=20,
+        Wi=191,
+        C=64,
+        K=96,
+        Y=3,
+        X=3,
+        sH=2,
+        sW=2,
+        pH=1,
+        pW=1,
+        dH=3,
+        dW=1,
+        dtype=spec.dtype,
+    )
+    for c, k in ((64, 96), (16, 32), (256, 64)):
+        ok, why = gfx950_conv_fwd_aot_serves(spec, replace(problem, C=c, K=k))
+        assert ok, (c, k, why)
+    # Grouped graphs, unaligned channel counts and another dilation are declined.
+    for change, reason in (
+        ({"C": 128, "K": 192, "groups": 2}, "groups == 1"),
+        ({"C": 60}, "C 60"),
+        ({"dH": 1}, "dilation"),
+    ):
+        ok, why = gfx950_conv_fwd_aot_serves(spec, replace(problem, **change))
+        assert not ok and reason in why, (change, why)
+    # A sweep for Wo = 96 tries the 32- and 96-wide tiles of the 32-wide atom only.
+    wider = next(
+        s
+        for s in (
+            _direct_spec(job.identity)
+            for _, job in direct_jobs
+            if job.identity.algorithm == "direct_nongrouped"
+        )
+        if (s.dilation_h, s.stride_h, s.tile_w, s.atom) == (3, 2, 64, "32x32x16")
+    )
+    ok, why = gfx950_conv_fwd_aot_serves(wider, replace(problem, dtype=wider.dtype))
+    assert not ok and "does not fit Wo=96" in why, why
+
+
 @pytest.mark.parametrize(
     ("change", "reason"),
     [
@@ -873,6 +932,13 @@ def test_out_of_contract_direct_instances_are_declined(direct_jobs, change, reas
         ("direct_grouped", {"block_w": 4}, "does not use block_w"),
         ("direct_grouped", {"stride_h": 2, "stride_w": 2}, "stride > 1"),
         ("direct_grouped", {"block_q": 24}, "multiple of 16"),
+        ("direct_nongrouped", {"atom": "8x8x8"}, "atom must be one of"),
+        ("direct_nongrouped", {"tile_k_out": 48}, "multiple of"),
+        ("direct_nongrouped", {"waves_per_eu": -1}, "waves_per_eu"),
+        ("direct_nongrouped", {"iglp": -2}, "iglp"),
+        ("direct_nongrouped", {"block_waves": 1}, "does not use block_waves"),
+        ("direct_nongrouped", {"cpg": 16}, "does not use cpg"),
+        ("direct_nongrouped", {"stride_h": 3, "stride_w": 3}, "stride 3"),
     ],
 )
 def test_out_of_contract_variant_knobs_are_declined(
@@ -903,6 +969,33 @@ def test_direct_knobs_round_trip_rockes_spelling():
         )
     with pytest.raises(ValueError, match="are not"):
         aot_direct_fields_from_knobs("tiled", {"block_w": 4, "block_waves": 1})
+    # None is a sentinel, and tile_k is carried as tile_k_out.
+    assert aot_direct_fields_from_knobs(
+        "nongrouped",
+        {
+            "tile_h": 8,
+            "tile_w": 32,
+            "tile_k": 64,
+            "ck": 16,
+            "waves_m": 2,
+            "waves_n": 2,
+            "atom": "32x32x16",
+            "swizzle_wgm": 8,
+            "iglp": None,
+            "waves_per_eu": None,
+        },
+    ) == {
+        "tile_h": 8,
+        "tile_w": 32,
+        "tile_k_out": 64,
+        "ck": 16,
+        "waves_m": 2,
+        "waves_n": 2,
+        "atom": "32x32x16",
+        "swizzle_wgm": 8,
+        "iglp": -1,
+        "waves_per_eu": 0,
+    }
 
 
 @pytest.mark.parametrize(

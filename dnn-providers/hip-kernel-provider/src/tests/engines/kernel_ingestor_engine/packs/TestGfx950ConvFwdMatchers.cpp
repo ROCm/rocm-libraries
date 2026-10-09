@@ -1528,6 +1528,36 @@ KernelDefinition aotGroupedKernel(int64_t cpg = 8)
                              {"kpg", cpg}});
 }
 
+KernelDefinition aotNongroupedKernel(int64_t stride = 1)
+{
+    return aotVariantKernel("nongrouped",
+                            3,
+                            stride,
+                            1,
+                            {{"tile_h", int64_t{8}},
+                             {"tile_w", int64_t{32}},
+                             {"tile_k_out", int64_t{64}},
+                             {"ck", int64_t{16}},
+                             {"waves_m", int64_t{2}},
+                             {"waves_n", int64_t{2}},
+                             {"atom", std::string("32x32x16")},
+                             {"swizzle_wgm", int64_t{8}},
+                             {"iglp", int64_t{0}},
+                             {"waves_per_eu", int64_t{0}}});
+}
+
+ConvShape denseShape(int64_t c, int64_t k, int64_t h, int64_t w, int64_t stride = 1)
+{
+    ConvShape shape;
+    shape.groups = 1;
+    shape.c = c;
+    shape.k = k;
+    shape.h = h;
+    shape.w = w;
+    shape.sH = shape.sW = stride;
+    return shape;
+}
+
 ConvShape groupedShape(int64_t groups, int64_t cpg)
 {
     ConvShape shape;
@@ -1946,11 +1976,22 @@ TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachDirectVariantServesItsOwnProbl
     EXPECT_TRUE(matches(groupedShape(8, 8), aotGroupedKernel(8)));
     EXPECT_FALSE(matches(groupedShape(8, 8), aotGroupedKernel(4)));
     EXPECT_FALSE(matches(groupedShape(6, 8), aotGroupedKernel(8)));
-    // A depthwise graph is no grouped kernel's, and the exact-shape engine admits none of
-    // them.
+    // nongrouped: a dense graph with C a multiple of 16 and 8, K of 32, and Wo = 96.
+    EXPECT_TRUE(matches(denseShape(64, 96, 10, 96), aotNongroupedKernel()));
+    EXPECT_TRUE(matches(denseShape(16, 32, 3, 32), aotNongroupedKernel()));
+    EXPECT_TRUE(matches(denseShape(64, 96, 10, 191, 2), aotNongroupedKernel(2)));
+    EXPECT_FALSE(matches(denseShape(24, 96, 10, 96), aotNongroupedKernel()));
+    EXPECT_FALSE(matches(denseShape(64, 80, 10, 96), aotNongroupedKernel()));
+    EXPECT_FALSE(matches(denseShape(64, 96, 10, 96, 2), aotNongroupedKernel()));
+    auto groupedDense = denseShape(64, 96, 10, 96);
+    groupedDense.groups = 2;
+    EXPECT_FALSE(matches(groupedDense, aotNongroupedKernel()));
+    // A depthwise graph is no grouped or non-grouped kernel's, and the exact-shape engine
+    // admits none of them.
     const GraphFixture depthwise(buildGraph(convSpec(depthwiseShape(32, 14, 14, 3, 1, 1))),
                                  gfx950Properties());
     EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, depthwise.context(), aotGroupedKernel()));
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, depthwise.context(), aotNongroupedKernel()));
     for(const auto& kernel : {aotTiledKernel(), aotColKernel(3, 1, 1)})
     {
         EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, depthwise.context(), kernel));
@@ -1992,6 +2033,18 @@ TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachVariantStatesOnlyItsOwnKnobs)
         {groupedShape(8, 8),
          aotGroupedKernel(),
          {"block_h", "block_q", "block_groups", "double_buffer", "cpg", "kpg"}},
+        {denseShape(64, 96, 10, 96),
+         aotNongroupedKernel(),
+         {"tile_h",
+          "tile_w",
+          "tile_k_out",
+          "ck",
+          "waves_m",
+          "waves_n",
+          "atom",
+          "swizzle_wgm",
+          "iglp",
+          "waves_per_eu"}},
     };
     for(const auto& [shape, base, own] : cases)
     {
@@ -2029,6 +2082,18 @@ TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachVariantStatesOnlyItsOwnKnobs)
         EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), relabeled));
     }
     // Compile-only knobs must still be well formed.
+    const GraphFixture dense(buildGraph(convSpec(denseShape(64, 96, 10, 96))), gfx950Properties());
+    for(const auto& [field, value] :
+        std::vector<std::pair<const char*, MetadataValue>>{{"atom", std::string("8x8x8")},
+                                                           {"iglp", int64_t{-2}},
+                                                           {"waves_per_eu", int64_t{-1}},
+                                                           {"swizzle_wgm", int64_t{0}}})
+    {
+        SCOPED_TRACE(field);
+        auto kernel = aotNongroupedKernel();
+        kernel.metadata[field] = value;
+        EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD_AOT, dense.context(), kernel));
+    }
     const GraphFixture depthwise(buildGraph(convSpec(depthwiseShape(32, 14, 14, 3, 1, 1))),
                                  gfx950Properties());
     auto flag = aotTiledKernel();
@@ -2051,6 +2116,7 @@ TEST(TestGfx950ConvFwdAotDispatch, EveryDirectVariantPassesTheContractAndReaches
             {depthwiseShape(32, 14, 14, 3, 1, 1), aotTiledKernel()},
             {depthwiseShape(24, 13, 17, 5, 2, 0), aotColKernel()},
             {groupedShape(8, 8), aotGroupedKernel()},
+            {denseShape(64, 96, 10, 96), aotNongroupedKernel()},
         })
     {
         SCOPED_TRACE(std::get<std::string>(kernel.metadata.at("direct_variant")));
