@@ -31,6 +31,7 @@ target_sources(stinkytofu_objs PRIVATE
     Gfx1250HazardPass.cpp
     waitcnt/WaitDataflow.cpp
     waitcnt/ShallowPredPromotion.cpp
+    waitcnt/WmmaRunWaitMerge.cpp
     StinkyRemoveWaitCntPass.cpp
     RemoveDscntPass.cpp
     StinkyRemoveNopPass.cpp
@@ -47,6 +48,7 @@ target_sources(stinkytofu_objs PRIVATE
     InsertDelayAluPass.cpp
     LoopRegionRemarkPass.cpp
     RemoveWaitAluPass.cpp
+    PrefetchBridgeSubstitutionPass.cpp
     InsertWaitAluPass.cpp
     EstimateAsmCyclesPass.cpp
     InsertCoexecHazardPass.cpp

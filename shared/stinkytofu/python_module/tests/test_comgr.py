@@ -260,6 +260,7 @@ class TestArchCaps:
         assert arch["HasInvWbDevFences"] == 1
         assert arch["MaxSgprPreload"] == 32
         assert arch["LDSBankCount"] == 64
+        assert arch["WmmaArbStallBitOffset"] == 2
 
 
 class TestRegCaps:

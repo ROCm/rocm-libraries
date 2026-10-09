@@ -41,8 +41,9 @@ the packaging suite's `PYTHONPATH` entry and `--kpack-python-dir` name:
 export HIPKERNELPROVIDER_ROCM_KPACK_DIR=/opt/rocm-kpack/python
 ```
 
-Unset -- or exported empty, which counts as unset -- that class **skips**; set but wrong
-fails loudly, because naming one is a request to run the class. See the
+Unset -- or exported empty, which counts as unset -- that class runs if `rocm_kpack` is
+importable anyway and **skips** otherwise; set but wrong fails loudly, because naming one is
+a request to run the class. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 
 ## Usage
@@ -130,14 +131,23 @@ counts, SDK version and runtime source kind come from the actual output, after
 normalization and deduplication. Packaged runtime source kind is KPACK, not the authored
 builder kind.
 
+**The census lives in its own binary.** `Test<Name>Packs.cpp` is spliced into
+`hip_kernel_provider_census_tests`; the generated matcher test stays in the ordinary
+`hip_kernel_provider_tests`. Every census case needs a descriptor shard and the census
+environment, so a census case inside the ordinary unit binary makes an ordinary unit run
+require package state it should never need. The `cmake_test_sources.txt` fragment emits
+the two `target_sources()` lines separately for exactly this reason; splice them into the
+two different blocks rather than merging them.
+
 Declare the literal `Test<Name>Packs` suite in one `hkp_register_census_tests()` call in
 `.../src/tests/CMakeLists.txt`, beside `hkp_verify_embedded_sources()` and after the test
 target exists:
 
 ```cmake
 hkp_register_census_tests(
-    TARGET hip_kernel_provider_tests
+    TARGET hip_kernel_provider_census_tests
     PACK_NAME <the pack target holding this bundle's shard>
+    ARCHES <the architectures this bundle actually emitted>   # optional; see below
     SUITES Test<Name>Packs
     EXPECTED_CASES
         <one line per case name the suite registers>
@@ -150,12 +160,29 @@ The `cmake_test_sources.txt` fragment emits it pre-filled; re-splice when the bu
 changes.
 
 `PACK_NAME` selects the wired pack target whose `OUT_ROOT` and arch list the entries
-address. CMake registers one `hip-kernel-provider-hkp-census-<arch>-Test<Name>Packs` per
-arch in that list, each running
-`hip_kernel_provider_tests --gtest_filter=Test<Name>Packs.*` directly, with:
+address.
+
+**Shard eligibility is restricted, not universal.** `ARCHES` narrows registration to the
+architectures the bundle emitted, intersected with the pack target's wired list, and the
+fragment fills it in from this run's own inventory. The three spellings are distinct:
+
+| `ARCHES` | Meaning |
+|---|---|
+| omitted | every arch the pack target was wired for -- the right answer for a bundle whose descriptors name no architecture |
+| given | the intersection with the wired list; an arch the bundle ships nothing for is not registered at all |
+| present with no values | a configure error, not "no restriction" |
+
+`ARCHES *` is never correct: `*` is how a descriptor says it ships everywhere, and no
+shard is named after it. Registering a bundle's suite for every product arch is the
+failure this prevents -- a gfx950-only bundle otherwise gets a gfx942 entry that asserts
+a gfx950 inventory against a gfx942 shard.
+
+CMake registers one `hip-kernel-provider-hkp-census-<arch>-Test<Name>Packs` per eligible
+arch, each running `hip_kernel_provider_census_tests --gtest_filter=Test<Name>Packs.*`
+directly, with:
 
 - `HIPDNN_TEST_CENSUS_SUITE=Test<Name>Packs`
-- `HIPDNN_TEST_EXPECTED_ARCH=<arch>` (from the wired list, not detected or read from descriptors)
+- `HIPDNN_TEST_EXPECTED_ARCH=<arch>` (from the eligible list, not detected or read from descriptors)
 - `HIPDNN_DESCRIPTOR_DIR=<that pack target's OUT_ROOT>/<arch>` -- its own shard, not a shared stage tree
 - `HIPDNN_TEST_CENSUS_EXPECTED_CASES=<the pinned case names, comma-separated>`
 
@@ -181,6 +208,14 @@ censused nowhere and states its inventory through its ordinary host run. Declari
 suite at two pack targets is a configure error: the entry name carries arch and suite
 alone. Host registration/loading proves nothing about dispatch or numerical correctness.
 
+**The generator writes the call for a kpack bundle only.** A packaged bundle lowers to
+one production pack target with a known arch list, so the fragment can emit a complete,
+arch-restricted, case-pinned call. A direct-load bundle's authored set is chosen by the
+author, so its call is hand-added -- and it **omits `ARCHES` entirely**, because its
+descriptors declare no architecture and ship on every arch its pack target carries.
+Writing `ARCHES *` or a bare `ARCHES` keyword there turns "unrestricted" into a shard
+name nothing materializes or into a configure error.
+
 ## The five CMake/registration splice points
 
 `fragments/*.txt` are text for a human (or the driving skill's extend flow) to hand-apply;
@@ -192,7 +227,7 @@ alone. Host registration/loading proves nothing about dispatch or numerical corr
 | `cmake_target_sources.txt` | `.../kernel_ingestor_engine/CMakeLists.txt`'s `target_sources(hip_kernel_provider_impl ...)` block |
 | `ingestor_packs.hpp.txt` | `.../kernel_ingestor_engine/IngestorPacks.hpp` -- the `register<Name>Symbols` declaration |
 | `ingestor_packs.cpp.txt` | `.../kernel_ingestor_engine/IngestorPacks.cpp` -- the `s_packs` table row |
-| `cmake_test_sources.txt` | `.../src/tests/engines/kernel_ingestor_engine/CMakeLists.txt`'s `target_sources(hip_kernel_provider_tests ...)` block |
+| `cmake_test_sources.txt` | `.../src/tests/engines/kernel_ingestor_engine/CMakeLists.txt` -- **two** blocks: the census source into `target_sources(hip_kernel_provider_census_tests ...)`, the matcher source into `target_sources(hip_kernel_provider_tests ...)`. For a kpack bundle it also carries the `hkp_register_census_tests()` call for `.../src/tests/CMakeLists.txt` |
 
 **`cmake_descriptor_files.txt` names no splice target because there is none.** The packer
 walks a source root recursively and no descriptor is named in CMake, so installing a bundle
@@ -206,8 +241,8 @@ to the binary meant to read it. Authors repoint only
 An `embedded_source` engine additionally needs an
 `add_kernels_for_embedding(TARGET … FILES … KEYS …)` entry in
 `.../src/tests/CMakeLists.txt`, each `KEYS` value equal to the `source_file` string its
-descriptor authors; that belongs to the kernel source, so no fragment carries it. The
-`hip`, `rocke`, `hsaco` and `kpack` kinds lower at pack time.
+descriptor authors; that belongs to the kernel source, so no fragment carries it. Authored
+`hip`, `rocke` and `hsaco` are packaged into the shipped `kpack`.
 
 **Both `IngestorPacks.hpp` and `IngestorPacks.cpp` edits are required.** A pack registered
 in the header but missing from the `.cpp` `s_packs` table silently vanishes from the
@@ -261,10 +296,10 @@ machine.
 
 | Tool | Answers | Invocation |
 |---|---|---|
-| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode | `verify_variant_sets.py --mode {full,structural} [--arch A] [--profile P] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--profile` supplies the bundle to gate and the matcher vocabulary, which full mode requires over string fields no declaration spells out |
-| `tools/variant_reachability.py` | Can any shape in the corpus actually select each variant, or is one dead weight? | `variant_reachability.py --kdp K --shapes S [--profile P]` |
+| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--profile P] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--profile` supplies the bundle to gate and the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2 |
+| `tools/variant_reachability.py` | Can any shape in the corpus actually select each variant, or is one dead weight? | `variant_reachability.py --kdp K --shapes S [--provenance-root DIR] [--profile P]`; `--provenance-root` mirrors the tree the KDP is read from, for an installed tree |
 | `tools/launch_surface.py` | Is every surface the C++ restates from the kernel's Python declared, guarded and tested? | `launch_surface.py PROFILE --check [--allow-unguarded]` |
-| `tools/coverage_gate.py` | Structural, loading and serving obligations, reported separately; an unmet required obligation cannot pass | `coverage_gate.py --tree T --mode {full,structural} [--arch A] [--validator V] [--expect-engine E] [--min-served N]`; `--mode` is required and governs what rung 1 may claim. A missing `--validator` makes rung 2 `loads-not-run`, a failure rather than a skip; an offline result is not serving evidence |
+| `tools/coverage_gate.py` | Structural, loading and serving obligations, reported separately; an unmet required obligation cannot pass | `coverage_gate.py --tree T --mode {full,structural} [--provenance-root DIR] [--arch A] [--validator V] [--expect-engine E] [--min-served N]`; `--mode` is required and governs what rung 1 may claim. A missing `--validator` makes rung 2 `loads-not-run`, a failure rather than a skip; an offline result is not serving evidence. `--provenance-root` mirrors `--tree`, for an installed tree, and is forwarded to rung 1 |
 | `tools/knob_sweep.py` | Which knob arms are worth measuring, isolation first then pairwise. | `knob_sweep.py --profile P --shapes S [--plan]` |
 | `tools/dispatch_parity.py` | Do the emitted descriptors match what the kernel's real dispatcher resolves? | see `--help` |
 | `tools/reconcile_applicability.py` | Does this engine decline anything the reference library serves? | `reconcile_applicability.py --profile P --shapes S [--declines D]` |
@@ -330,10 +365,19 @@ Packaging observes the actual builder object and compares **every consumer** ind
 before publication, recording effective values and declaration digests, authored inputs,
 producer identities and origins, descriptors, KMD content, completed metadata, architecture
 and library/toc-key/symbol/payload hashes; authored passthrough never overwrites fresh
-observations. Full checking verifies that record against the current descriptors and named
-payload bytes without importing rocKE on the verifier, structural-only checking cannot
-supply missing compiler agreement, and neither proves machine-code equivalence, native
-semantics or numerical correctness -- see the
+observations. That record, like all of a packed UKD's provenance, ships in the
+descriptor's type-named sidecar (`foo.kdp.provenance.json.gz` beside `foo.kdp.json`,
+format v1), bound to its UKD by `ukd_sha256`, not inline. Every checker reads a
+descriptor as packed exactly when its directory holds the packer's empty
+`hkp-packed.marker`, which ships with the runtime tree; a copied tree without it reads
+as authored. The runtime package carries no sidecars; with tests enabled they install
+under `test_arch_content/hip-kernel-provider/provenance/`, mirroring the descriptor
+tree, and a checker pointed at an installed tree takes that folder through
+`--provenance-root`, without which a marked descriptor fails on its missing sidecar.
+Full checking verifies that record against the current descriptors and named payload
+bytes without importing rocKE on the verifier,
+structural-only checking cannot supply missing compiler agreement, and neither proves
+machine-code equivalence, native semantics or numerical correctness -- see the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 
@@ -343,7 +387,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 |---|---|
 | `configs/scale_add.yaml` | Single-pack engine, like the shipped `conv_fwd`: one pack, one operation, its `graph_match` both admits the node type and validates shape |
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
-| `configs/gfx950_attention_dense.yaml` | Packaged rocKE kernel: a builder lowered by `hkp_pack` at build time |
+| `configs/gfx950_attention_dense.yaml` | The shipped `hipkernel:Gfx950AttentionDense` catalog (840 packaged rocKE kernels, a builder lowered by `hkp_pack` at build time), generated entirely from `variants`; also the packaged-dialect reference config the tests load |
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
 
@@ -426,7 +470,8 @@ graph_match:                      # documentation of shape, not consumed by temp
 
 dialect: direct_load | packaged   # optional, default "direct_load"
 kernel_source_kind: embedded_source   # direct-load example; packaged sources use
-                                        # their build-time source kind
+                                        # their build-time source kind: hip | rocke |
+                                        # hsaco
 authored_subpath: unit            # REQUIRED for direct_load, naming one of the four
                                     # authored sets: shared | unit | integration |
                                     # archive_fixture. Each is a separate pack target
@@ -477,14 +522,23 @@ implementations:
   candidate KMD fields (externally-supplied `HIP_PLUGIN_*` defines, template parameters).
 
 `rocke` authoring uses the packaged path, its effective policy observations belonging to the
-producing compiler. `hsaco_file` is rejected explicitly, naming `supportsSourceKind()` as the
-missing prerequisite on `IKernelDispatchHandler`.
+producing compiler. `hsaco` authoring also uses the packaged path: `kernel_source` is
+`{kind: hsaco, file, symbol}`, `file` naming a prebuilt code object relative to the
+descriptor that names it and `symbol` its kernel. `file` must stay inside the source root,
+with no root-relative fallback. `hkp_pack` packs that object as-is, without compiling, so
+like `hip` the specialization declares `metadata_fields: []`. The packer does not check the
+object's format or target processor: every hsaco kernel must carry a non-empty per-kernel `arch` listing the
+arch(es) its object runs on (a generic-target object lists each one), and the loader
+rejects one without.
+`hsaco_file` is rejected explicitly, naming `supportsSourceKind()` as the missing
+prerequisite on `IKernelDispatchHandler`.
 
 ## Tests
 
 This suite is **developer-run**, not registered with CTest or run by superbuild CI. Cases
-needing `HIPDNN_VALIDATE_DESCRIPTORS` (`-m round_trip`) or `HIPKERNELPROVIDER_ROCM_KPACK_DIR`
-(the real-archive class above) skip when those are unset.
+needing `HIPDNN_VALIDATE_DESCRIPTORS` (`-m round_trip`) skip when it is unset; the
+real-archive class above skips only when `HIPKERNELPROVIDER_ROCM_KPACK_DIR` is unset and
+`rocm_kpack` is not importable.
 
 ```bash
 .venv/bin/python -m pytest
@@ -538,6 +592,9 @@ Contracts between the emitted fragments, checked against each other:
 - `cmake_test_sources.txt` names files this run wrote.
 - The census case pin is exactly the case set the emitted suite renders, follows the suite's
   conditional arms, and survives the wire to the binary.
+- The emitted `ARCHES` restriction is exactly the concrete architectures of the emitted
+  inventory: never the `*` wildcard, and never the keyword with nothing after it. A
+  direct-load bundle's documented call carries no `ARCHES` at all.
 - The placeholder scan sees every emitted file across the two provider trees, reports an
   unlocatable one as missing, and treats two files at one spliced path as ambiguous.
 

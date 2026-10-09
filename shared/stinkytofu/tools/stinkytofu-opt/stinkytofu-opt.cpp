@@ -46,6 +46,7 @@
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/StandardInstrumentations.hpp"
+#include "stinkytofu/support/TimePassesInstrumentation.hpp"
 
 using namespace stinkytofu;
 
@@ -173,7 +174,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
         if (arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3") continue;
         if (arg.substr(0, 2) == "--") {
             if (arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
-                arg == "--verify-each" || arg == "--dump-passes" ||
+                arg == "--verify-each" || arg == "--dump-passes" || arg == "--time-passes" ||
                 arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
                 arg.starts_with("--ds-read-order=") || arg.starts_with("--ds-read-queue-depth=") ||
                 arg.starts_with("--ds-read-drain-latency=") ||
@@ -182,12 +183,23 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-read-throttle-transition-entries=") ||
                 arg.starts_with("--ds-read-per-cap=") ||
                 arg.starts_with("--ds-issue-cap-span-cycles=") ||
+                arg.starts_with("--ds-issue-cap-mode=") ||
                 arg.starts_with("--tensor-load-wmma-space=") ||
+                arg.starts_with("--tensor-load-ds-load-gap-cycles=") ||
+                arg.starts_with("--barrier-half-slack=") ||
+                arg.starts_with("--wmma-queue-depth=") ||
+                arg.starts_with("--wmma-queue-cover-cycles=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
                 arg.starts_with("--merge-barrier-threshold=") ||
-                arg == "--enable-wmma-hide-budget-prescan" || arg.starts_with("--vgpr-msb-mode=") ||
-                arg == "--from-label" || arg == "--to-label" || isKernelConfigArg(arg))
+                arg == "--enable-wmma-hide-budget-prescan" ||
+                arg == "--enable-esm2-track-valu-vsrc" ||
+                arg.starts_with("--wait-alu-hold-strict-count=") ||
+                arg.starts_with("--prefetch-lead-wmmas=") ||
+                arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
+                arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
+                arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
+                arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
             // Two-arg flags: skip both the flag and its value so the value
             // doesn't get mistaken for a pass name and the flag doesn't get
@@ -321,6 +333,7 @@ int main(int argc, char** argv) {
         std::cerr << "  --dump-passes    Dump IR before/after each pass into before.txt and\n";
         std::cerr << "                   after.txt in the working directory (implied by\n";
         std::cerr << "                   --debug-pass)\n";
+        std::cerr << "  --time-passes    Report per-pass wall time on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -382,6 +395,7 @@ int main(int argc, char** argv) {
         std::cerr << "  --dump-passes    Dump IR before/after each pass into before.txt and\n";
         std::cerr << "                   after.txt in the working directory (implied by\n";
         std::cerr << "                   --debug-pass)\n";
+        std::cerr << "  --time-passes    Report per-pass wall time on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -532,14 +546,50 @@ int main(int argc, char** argv) {
             // anything alone, so both are reachable from the CLI.
             passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
                 std::stoi(a.substr(std::string("--ds-issue-cap-span-cycles=").size()));
+        } else if (a.starts_with("--ds-issue-cap-mode=")) {
+            const std::string val = a.substr(std::string("--ds-issue-cap-mode=").size());
+            if (val == "sliding")
+                passFeatureConfig.dagFeatures.dsIssueCapMode =
+                    stinkytofu::PassFeatureConfig::DsIssueCapMode::Sliding;
+            else if (val == "periodic")
+                passFeatureConfig.dagFeatures.dsIssueCapMode =
+                    stinkytofu::PassFeatureConfig::DsIssueCapMode::Periodic;
+            else {
+                std::cerr << "error: --ds-issue-cap-mode must be sliding or periodic\n";
+                return 1;
+            }
         } else if (a.starts_with("--tensor-load-wmma-space=")) {
             passFeatureConfig.dagFeatures.tensorLoadWmmaSpace = std::stoi(a.substr(25));
+        } else if (a.starts_with("--tensor-load-ds-load-gap-cycles=")) {
+            passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
+                std::stoi(a.substr(std::string("--tensor-load-ds-load-gap-cycles=").size()));
+        } else if (a.starts_with("--barrier-half-slack=")) {
+            passFeatureConfig.dagFeatures.barrierHalfSlack =
+                std::stoi(a.substr(std::string("--barrier-half-slack=").size()));
+        } else if (a.starts_with("--wmma-queue-depth=")) {
+            passFeatureConfig.dagFeatures.wmmaQueueDepth =
+                std::stoi(a.substr(std::string("--wmma-queue-depth=").size()));
+        } else if (a.starts_with("--wmma-queue-cover-cycles=")) {
+            passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
+                std::stoi(a.substr(std::string("--wmma-queue-cover-cycles=").size()));
         } else if (a.starts_with("--global-read-queue-depth=")) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {
             passFeatureConfig.dagFeatures.globalReadDrainLatency = std::stoi(a.substr(28));
         } else if (a == "--enable-wmma-hide-budget-prescan") {
             passFeatureConfig.dagFeatures.enableWmmaHideBudgetPrescan = true;
+        } else if (a == "--enable-esm2-track-valu-vsrc") {
+            passFeatureConfig.dagFeatures.enableESM2TrackValuVsrc = true;
+        } else if (a.starts_with("--wait-alu-hold-strict-count=")) {
+            passFeatureConfig.dagFeatures.waitAluHoldStrictCount = std::stoi(a.substr(29));
+        } else if (a.starts_with("--prefetch-lead-wmmas=")) {
+            passFeatureConfig.dagFeatures.prefetchLeadWmmas = std::stoi(a.substr(22));
+        } else if (a.starts_with("--prefetch-lead-min-stage-wmmas=")) {
+            passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas = std::stoi(a.substr(32));
+        } else if (a.starts_with("--war-gate-wmmas=")) {
+            passFeatureConfig.dagFeatures.warGateWmmas = std::stoi(a.substr(17));
+        } else if (a == "--ds-slot-first") {
+            passFeatureConfig.dagFeatures.dsSlotFirst = true;
         } else if (a.starts_with("--merge-barrier-threshold=")) {
             passFeatureConfig.dagFeatures.mergeBarrierThreshold = std::stoi(a.substr(26));
         }
@@ -588,6 +638,7 @@ int main(int argc, char** argv) {
     // eagerly, so installing it unconditionally littered the working directory of every
     // run. Mirrors the needsFileOutput gate the pipeline path already has.
     bool dumpPasses = false;
+    bool timePasses = false;
     bool preserveSymbolicRegs = false;
     bool preserveComments = false;
     std::string outputFile;
@@ -599,6 +650,7 @@ int main(int argc, char** argv) {
         if (std::string(argv[i]) == "--remarks") enableRemarks = true;
         if (std::string(argv[i]) == "--verify-each") verifyEach = true;
         if (std::string(argv[i]) == "--dump-passes") dumpPasses = true;
+        if (std::string(argv[i]) == "--time-passes") timePasses = true;
         if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
         if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
         if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
@@ -806,6 +858,7 @@ int main(int argc, char** argv) {
             moduleOpts.OptLevel = optLevel;
             moduleOpts.EnableRemarks = enableRemarks;
             moduleOpts.VerifyEach = verifyEach;
+            moduleOpts.TimePasses = timePasses;
             // The --Tile*/--NumGR*/--NumWaves flags are parsed for both modes but
             // used to be applied only in individual-pass mode, so pipeline mode
             // silently ran every kernel with a zeroed tile config. Backend's entry
@@ -845,10 +898,17 @@ int main(int argc, char** argv) {
             stinkytofu::PassManager passManager;
             stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
 
+            // Pipeline mode gets its session from Backend (ModuleOptions.TimePasses);
+            // here there is no module, so the driver owns it.
+            stinkytofu::TimePassesSession timing(timePasses, parsedFunc->funcName, std::cerr);
+
             if (dumpPasses) passManager.addInstrumentation(createDebugPrintInstrumentation());
             if (verifyEach) {
                 passManager.addInstrumentation(
                     std::make_shared<stinkytofu::VerifyInstrumentation>());
+            }
+            if (auto timer = stinkytofu::getActiveTimePasses()) {
+                passManager.addInstrumentation(std::move(timer));
             }
             passManager.setPassFeatureConfig(passFeatureConfig);
             gemmTileConfig.arch = arch;
