@@ -576,7 +576,12 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             imod.add(nonTdmModB)
             # Defer both A and B tensor_load_to_lds to after the LDS swap (at tdmLoadIter).
             # This ensures both loads go into the post-swap buffer, matching the ds_load reads.
-            deferMod = writer.codes.perIterGlobalRead[tdmLoadIter].add(Module())
+            if writer.states.tdmDeepRing and writer.states.tdmRingFence == "fused":
+                # The merged ring fence frees the slot it refills: KernelWriter issues the refill
+                # right after the fence barrier, ahead of the next tile's local reads.
+                deferMod = writer.codes.tdmRingRefill = Module("TDM ring refill")
+            else:
+                deferMod = writer.codes.perIterGlobalRead[tdmLoadIter].add(Module())
             if tdmLoadModA.itemsSize() > 0:
                 deferMod.addComment1("Global Read A (TDM deferred after LDS swap)")
                 deferMod.add(tdmLoadModA)

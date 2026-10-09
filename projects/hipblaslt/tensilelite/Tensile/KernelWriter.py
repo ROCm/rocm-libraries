@@ -579,6 +579,7 @@ class CodeModules:
   ## MFMA
   unrollLoopHeader: Optional[Module]                                  = None
   perIterGlobalRead: Optional[List[Module]]                           = None
+  tdmRingRefill: Optional[Module]                                     = None
   perIterLocalWrite: Optional[List[Tuple[List[int], Module]]]         = None
   perIterLocalWriteCodeNGLL: Optional[List[Tuple[List[int], Module]]] = None
 
@@ -857,20 +858,21 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
   def _tdmRingWait(self, kernel, tPA, tPB, waits, stages):
     """s_wait_tensorcnt ahead of a TDM ring barrier: waits[side] on the waves issuing `side`,
-    which leaves the oldest of its stages[side] stages landed."""
+    which leaves the oldest of its stages[side] stages landed. Every global read of a ring is a
+    TDM, so no s_wait_loadcnt goes with it."""
     comment = "TDM ring: wait for the oldest of %u stages"
     if waits["A"] == waits["B"]:
-      return self._wait(kernel, tPA, tPB, waits["A"], -1, -1, comment % stages["A"])
+      return self._wait(kernel, tPA, tPB, waits["A"], -1, -1, comment % stages["A"], waitVmem=False)
     tcEven, tcOdd = self._tdmParityMembers(kernel, "A", "B")
     module = Module("TDM ring wait per side")
     lblOdd = Label(self.labels.getNameInc("TdmRingWait%s" % tcOdd), "")
     lblEnd = Label(self.labels.getNameInc("TdmRingWaitEnd"), "")
     self._emitTdmWaveParitySCCAuto(module, kernel, comment="wave parity (A=even/B=odd)")
     module.add(SCBranchSCC1(labelName=lblOdd.getLabelName(), comment="odd waves issue %s" % tcOdd))
-    module.add(self._wait(kernel, tPA, tPB, waits[tcEven], -1, -1, comment % stages[tcEven]))
+    module.add(self._wait(kernel, tPA, tPB, waits[tcEven], -1, -1, comment % stages[tcEven], waitVmem=False))
     module.add(SBranch(labelName=lblEnd.getLabelName()))
     module.add(lblOdd)
-    module.add(self._wait(kernel, tPA, tPB, waits[tcOdd], -1, -1, comment % stages[tcOdd]))
+    module.add(self._wait(kernel, tPA, tPB, waits[tcOdd], -1, -1, comment % stages[tcOdd], waitVmem=False))
     module.add(lblEnd)
     return module
 
@@ -5181,6 +5183,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             # DTVA/B, DTLA/B, or TDM case: global read wait is handled above, skip force waitcnt0
             skipForceWaitcnt0 = True
           syncCode.add(self._syncThreads(kernel, "PGR, and wait until LW done to sync", skipForceWaitcnt0=skipForceWaitcnt0))
+          if self.states.tdmDeepRing and self.states.tdmRingFence == "fused":
+            syncCode.add(deepcopy(self.codes.tdmRingRefill))
           if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["PrefetchGlobalRead"] == 1 \
              and not self.states.tdmDeepRing:
             syncCode.add(self._syncThreads(kernel, "PGR1 and TDM, another wait to sync", skipForceWaitcnt0=skipForceWaitcnt0))
@@ -11285,10 +11289,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   ##############################################################################
   # WaitCnt
   ##############################################################################
-  def _wait(self, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, skipLocalRead, comment, skipGlobalReadInst=-1):
+  def _wait(self, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, skipLocalRead, comment, skipGlobalReadInst=-1,
+            waitVmem=True):
     if not self.do["Wait"]: return Module("noWait")
     if kernel["enableTDMA"] and kernel["enableTDMB"] and skipGlobalRead > -1:
-      return tdmWait(self.states, kernel, tPA, tPB, skipGlobalRead, comment)
+      return tdmWait(self.states, kernel, tPA, tPB, skipGlobalRead, comment, waitVmem)
     return wait(self.states, kernel, tPA, tPB, skipGlobalRead, \
       skipLocalWrite, skipLocalRead, self.db["ConservativeWaitCnt"], comment, skipGlobalReadInst)
 

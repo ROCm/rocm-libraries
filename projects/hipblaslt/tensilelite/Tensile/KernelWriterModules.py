@@ -29,12 +29,12 @@ from rocisa.functions import BranchIfNotZero
 
 from .Common.DataType import DataType
 
-def tdmWait(states, kernel, tPA, tPB, tensorcnt: int, comment: str) -> Module:
+def tdmWait(states, kernel, tPA, tPB, tensorcnt: int, comment: str, waitVmem=True) -> Module:
   #TODO: refactor this
   skipGR = tensorcnt > -1
   vmcnt = 0 if skipGR else -1
   mod = Module()
-  if skipGR:
+  if skipGR and waitVmem:
     #TODO: remove
     # numMXSA = kernel["NumLoadsPerpendicularMXSA"] * kernel["NumLoadsCoalescedMXSA"] if kernel["ProblemType"]["MXBlockA"] else 0
     # numMXSB = kernel["NumLoadsPerpendicularMXSB"] * kernel["NumLoadsCoalescedMXSB"] if kernel["ProblemType"]["MXBlockB"] else 0
