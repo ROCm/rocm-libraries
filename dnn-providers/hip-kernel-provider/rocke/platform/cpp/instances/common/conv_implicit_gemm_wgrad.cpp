@@ -36,6 +36,7 @@
 #include <cstring> /* strcmp, memset, memcpy */
 
 #include "rocke/error_boundary.hpp"
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_async_lds_max_dwords */
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_abi.h"
@@ -2187,17 +2188,22 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          * operands, which is exactly what the intrinsic requires. contig_cols
          * keeps a chunk inside one such run: kpg for dY (NHWK, dense over the
          * output-channel slab) and cpg for X (NHWC, dense only within one
-         * filter position). Mirrors the Python call. */
+         * filter position). Mirrors the Python call.
+         * max_dwords is the arch's own buffer_load_lds width cap (CDNA3 moves
+         * only a dword per lane; the b96/b128 forms arrived with CDNA4). An
+         * over-wide one is not diagnosed -- the backend aborts the process. */
         const int a_rows = ctx->lds_k_outer ? ctx->block_k : ctx->block_m;
         const int a_cols = ctx->lds_k_outer ? ctx->block_m : ctx->block_k;
         const int b_rows = ctx->lds_k_outer ? ctx->block_k : ctx->block_n;
         const int b_cols = ctx->lds_k_outer ? ctx->block_n : ctx->block_k;
         const int a_contig = ctx->lds_k_outer ? rocke_conv_problem_kpg(&spec->problem) : 0;
         const int b_contig = ctx->lds_k_outer ? rocke_conv_problem_cpg(&spec->problem) : 0;
+        const int max_dwords
+            = rocke_archtarget_async_lds_max_dwords(rocke_archtarget_from_gfx(ctx->arch));
         rocke_status_t sa = rocke_async_tile_loader_from_tile(
-            a_rows, a_cols, ctx->threads, spec->wave_size, 4, a_contig, &ctx->a_loader);
+            a_rows, a_cols, ctx->threads, spec->wave_size, max_dwords, a_contig, &ctx->a_loader);
         rocke_status_t sb = rocke_async_tile_loader_from_tile(
-            b_rows, b_cols, ctx->threads, spec->wave_size, 4, b_contig, &ctx->b_loader);
+            b_rows, b_cols, ctx->threads, spec->wave_size, max_dwords, b_contig, &ctx->b_loader);
         if(sa != ROCKE_OK || sb != ROCKE_OK)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: async tile loader init failed");
