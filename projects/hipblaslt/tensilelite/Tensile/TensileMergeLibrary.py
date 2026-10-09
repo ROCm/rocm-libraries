@@ -30,15 +30,16 @@ import argparse
 from copy import deepcopy
 from typing import Any
 
-from Tensile import __version__
-from Tensile import LibraryIO
-from Tensile.SolutionStructs.Naming import getSolutionNameMin
-from Tensile.SolutionStructs.Naming import getKernelNameMin
-from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
-from Tensile.Common import ParallelMap2
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Common import assignParameterWithDefault
+from . import __version__
+from . import LibraryIO
+from .SolutionStructs.Naming import getSolutionNameMin
+from .SolutionStructs.Naming import getKernelNameMin
+from .SolutionStructs.Problem import ProblemType, problemTypeToEnum
+from .Common import ParallelMap2
+from .Common.GlobalParameters import defaultSolution
+from .Common import assignParameterWithDefault
 from .CustomYamlLoader import load_yaml_stream
+from .ExecutionPolicy import normalize_execution_policy_with_defaults
 
 verbosity = 1
 
@@ -137,11 +138,12 @@ def reNameSolutions(data: dict[str, Any]) -> None:
     problemType = data["ProblemType"]
     defaultSol = data.get("DefaultSolution") if isinstance(data.get("DefaultSolution"), dict) else None
     for sol in data["Solutions"]:
+        normalized = normalize_execution_policy_with_defaults(sol, defaultSol or {})
+        sol.clear()
+        sol.update(normalized)
         for key in defaultSolution:
             assignParameterWithDefault(sol, key, sol, defaultSolution)
         sol["ProblemType"] = problemType
-        if defaultSol and "GlobalSplitU" not in sol:
-            sol["GlobalSplitU"] = defaultSol["GlobalSplitU"]
         sol["SolutionNameMin"] = getSolutionNameMin(sol, splitGSU=False)
         sol["KernelNameMin"] = getKernelNameMin(sol, splitGSU=False)
         del sol["ProblemType"]

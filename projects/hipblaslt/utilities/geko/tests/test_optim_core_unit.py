@@ -63,6 +63,64 @@ def test_run_validates_inputs_and_empty_configs(monkeypatch: pytest.MonkeyPatch,
     assert called["build"] is False
 
 
+def test_gpu_targets_from_configs_reads_architecture_name(tmp_path: Path) -> None:
+    cfg = tmp_path / "job.yaml"
+    cfg.write_text("LibraryLogic:\n  ArchitectureName: gfx950\n", encoding="utf-8")
+
+    assert ocore._gpu_targets_from_configs([cfg]) == "gfx950"
+
+
+def test_gpu_targets_from_configs_returns_none_when_missing(tmp_path: Path) -> None:
+    cfg = tmp_path / "job.yaml"
+    cfg.write_text("Other: 1\n", encoding="utf-8")
+
+    assert ocore._gpu_targets_from_configs([cfg]) is None
+
+
+def test_gpu_targets_from_configs_skips_invalid_yaml_and_missing_files(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.yaml"
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("not: [valid: yaml", encoding="utf-8")
+    good = tmp_path / "good.yaml"
+    good.write_text("LibraryLogic:\n  ArchitectureName: gfx1250\n", encoding="utf-8")
+
+    assert ocore._gpu_targets_from_configs([missing, bad, good]) == "gfx1250"
+
+
+def test_run_passes_gpu_targets_from_configs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    hip = tmp_path / "hip"
+    (hip / "tensilelite/Tensile/bin").mkdir(parents=True)
+    tuning = tmp_path / "tuning"
+    tuning.mkdir()
+    cfg = tuning / "job_1.yaml"
+    cfg.write_text("LibraryLogic:\n  ArchitectureName: gfx950\n", encoding="utf-8")
+
+    monkeypatch.setattr(ocore, "list_optimization_configs", lambda _p: [str(cfg)])
+
+    captured = {}
+
+    def _fake_build(_hip_path, build_dir=None, gpu_targets=None):
+        captured["gpu_targets"] = gpu_targets
+
+    monkeypatch.setattr(ocore, "build_tensilelite_client", _fake_build)
+    monkeypatch.setattr(ocore, "parse_devices", lambda d: list(d))
+    monkeypatch.setattr(ocore, "get_build_state", lambda _p: "completed")
+    monkeypatch.setattr(ocore, "clean_failed_build", lambda _p: None)
+
+    class _StubRunner:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def __call__(self, _tuning_dir):
+            return []
+
+    monkeypatch.setattr(ocore, "Runner", _StubRunner)
+
+    ocore.run(hip, tuning, devices=[0], n_slots=1)
+
+    assert captured["gpu_targets"] == "gfx950"
+
+
 def test_run_worker_flow_updates_config_and_timing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
     (hip / "tensilelite/Tensile/bin").mkdir(parents=True)

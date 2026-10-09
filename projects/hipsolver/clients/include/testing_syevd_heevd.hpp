@@ -24,6 +24,7 @@
 #pragma once
 
 #include "clientcommon.hpp"
+#include "hipsolver_timer.hpp"
 
 template <testAPI_t API, typename I, typename SIZE, typename Td, typename Sd, typename U>
 void syevd_heevd_checkBadArgs(const hipsolverHandle_t   handle,
@@ -570,13 +571,13 @@ void syevd_heevd_getPerfData(const hipsolverHandle_t   handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
         syevd_heevd_initData<false, true, T, I>(handle, evect, n, dA, lda, bc, hA, A, 0);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_syevd_heevd(API,
                               handle,
                               params,
@@ -592,9 +593,9 @@ void syevd_heevd_getPerfData(const hipsolverHandle_t   handle,
                               lworkHost,
                               dinfo.data(),
                               bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <testAPI_t API,
@@ -749,7 +750,7 @@ void testing_syevd_heevd(Arguments& argus)
         // }
 
         // // collect performance data
-        // if(argus.timing)
+        // if(argus.timing && hot_calls > 0)
         // {
         //     syevd_heevd_getPerfData<API, T, I, SIZE>(handle,
         //                                         params,
@@ -811,7 +812,7 @@ void testing_syevd_heevd(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             syevd_heevd_getPerfData<API, T, I, SIZE>(handle,
                                                      params,

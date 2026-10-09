@@ -109,6 +109,8 @@ struct Arguments
     int64_t ldd[MAX_SUPPORTED_NUM_PROBLEMS];
     int64_t lde[MAX_SUPPORTED_NUM_PROBLEMS];
 
+    int64_t a2a_extent;
+
     int32_t batch_count;
     int32_t batch_mode;
 
@@ -165,12 +167,23 @@ struct Arguments
 
     // bytes
     uint8_t devices;
+    uint8_t a2a_world;
 
     int8_t norm_check;
     int8_t allclose_check;
     int8_t unit_check;
     int8_t ulp_check;
-    int8_t timing;
+    int8_t fast_check;
+    // fast_check: operand to place across a 4 GiB boundary (a, b, c, d, bias,
+    // scale_alpha_vec, workspace), and the bytes before the boundary (0 = middle)
+    char   placement[16];
+    size_t placement_offset;
+    // fast_check: launches and checks per solution; the self-test iteration whose result
+    // is corrupted on purpose (-1 = none); and whether the case needs Stream-K solutions
+    int32_t fast_check_repeat;
+    int32_t fast_check_inject;
+    int8_t  requires_streamk;
+    int8_t  timing;
 
     char transA;
     char transB;
@@ -256,6 +269,7 @@ struct Arguments
     OPER(ldc) SEP                    \
     OPER(ldd) SEP                    \
     OPER(lde) SEP                    \
+    OPER(a2a_extent) SEP             \
     OPER(batch_count) SEP            \
     OPER(batch_mode) SEP             \
     OPER(batch_offset_a) SEP         \
@@ -294,10 +308,17 @@ struct Arguments
     OPER(threads) SEP                \
     OPER(streams) SEP                \
     OPER(devices) SEP                \
+    OPER(a2a_world) SEP              \
     OPER(norm_check) SEP             \
     OPER(allclose_check) SEP         \
     OPER(unit_check) SEP             \
     OPER(ulp_check) SEP              \
+    OPER(fast_check) SEP             \
+    OPER(placement) SEP              \
+    OPER(placement_offset) SEP       \
+    OPER(fast_check_repeat) SEP      \
+    OPER(fast_check_inject) SEP      \
+    OPER(requires_streamk) SEP       \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \
@@ -694,12 +715,6 @@ enum hipblaslt_argument : int
     FOR_EACH_ARGUMENT(CREATE_ENUM, )
 };
 #undef CREATE_ENUM
-
-#if __clang__
-#define HIPBLASLT_CLANG_STATIC static
-#else
-#define HIPBLASLT_CLANG_STATIC
-#endif
 
 // ArgumentsHelper contains a templated lambda apply<> where there is a template
 // specialization for each line in the CPP macro FOR_EACH_ARGUMENT. For example,

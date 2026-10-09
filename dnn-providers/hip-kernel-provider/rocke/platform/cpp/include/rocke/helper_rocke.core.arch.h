@@ -95,6 +95,9 @@ const rocke_arch_mma_catalog_t* rocke_archtarget_mma(const rocke_archtarget_t* t
 
 /* target.mma.op_for_shape(...): the resolved MmaOp for an exact (m, n, k) atom
  * shape and (normalised) dtype combo, or NULL if absent. `family` NULL => "mma".
+ * The trailing scales argument is required: NULL leaves scales unconstrained;
+ * {NULL, NULL, ROCKE_MMA_SCALE_NONE} selects unscaled atoms. Invalid filters or
+ * ambiguous matches raise ckc::Error; callers handle errors at a C++ boundary.
  * This is the entry point build_universal_gemm uses to resolve the atom from the
  * target catalog. Forwards to rocke_mma_catalog_op_for_shape on t->mma. */
 const rocke_mmaop_t* rocke_archtarget_op_for_shape(const rocke_archtarget_t* t,
@@ -104,7 +107,8 @@ const rocke_mmaop_t* rocke_archtarget_op_for_shape(const rocke_archtarget_t* t,
                                                    const char* c_dtype,
                                                    int m,
                                                    int n,
-                                                   int k);
+                                                   int k,
+                                                   const rocke_mma_scale_filter_t* scales);
 
 /* target.mma.by_op_id(op_id): the catalog atom whose op_id handle matches
  * `op_id` (the backend's MMA key, e.g. "mfma_f32_16x16x16_f16"), or NULL if the

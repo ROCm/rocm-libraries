@@ -20,8 +20,9 @@ through when the user explicitly asked for it.
 The guard lives in ``vgprAllocationImplClassic``, a closure nested inside the
 ~2000-line ``_initKernel``, and cannot be called on its own. Rather than
 restating the condition (which would test a copy, not the shipped code), these
-tests locate the real statements in the real source via the AST and execute
-them against a stub writer.
+tests locate the nested guard statements in the real source via the AST and
+execute them against a stub writer. The ForceGenerateKernel tests call the
+production ``_getKernelSource`` method directly with its normal module globals.
 """
 
 import ast
@@ -29,6 +30,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from Tensile.KernelWriter import KernelWriter
 
 pytestmark = pytest.mark.unit
 
@@ -203,43 +206,56 @@ class TestOverflowStillRejectsTheKernel:
 class TestForceGenerateKernel:
     """``_getKernelSource`` is where an overflowing kernel now lands."""
 
-    def _getKernelSource(self, warnings):
-        namespace = {"Solution": object, "printWarning": warnings.append}
-        _exec(_funcDef(_KERNEL_WRITER_PY, "_getKernelSource"), namespace)
-        return namespace["_getKernelSource"]
-
     def _writer(self, error, forceGenerateKernel):
+        # _getKernelSource also records the kernel's own CustomKernel metadata, so a
+        # SimpleNamespace standing in for a real writer must carry what that path
+        # reads: the arg-registration hook, the kernel name and the collected arg
+        # definitions. A real KernelWriter always has all three.
         return SimpleNamespace(
             _initKernel=lambda kernel, tPA, tPB: None,
+            _registerKernelArgs=lambda kernel: None,
+            states=SimpleNamespace(kernelName="test_kernel"),
+            kernelArgDefs=[],
             stringIdx=0,
             kernelBody=lambda kernel, tPA, tPB: (error, "s_endpgm\n"),
             kernelBodySubtile=lambda kernel, tPA, tPB: (error, "s_endpgm\n"),
             debugConfig=SimpleNamespace(forceGenerateKernel=forceGenerateKernel),
         )
 
+    def _kernel(self):
+        # The solution keys that same metadata is built from; a real Solution always
+        # has them. The policy is nonpersistent, so no persistent grid is needed.
+        return {
+            "UseSubtileImpl": False,
+            "TileProcessingStrategy": "None",
+            "MacroTile0": 128,
+            "MacroTile1": 128,
+            "DepthU": 32,
+            "NumThreads": 256,
+        }
+
     def test_overflowing_kernel_is_rejected_by_default(self):
         # Default behaviour is unchanged from before the fix: an overflowing
         # kernel still fails the build, just from here instead of _initKernel.
-        getKernelSource = self._getKernelSource([])
-        with pytest.raises(RuntimeError):
-            getKernelSource(self._writer(error=1, forceGenerateKernel=False),
-                            {"UseSubtileImpl": False})
+        with pytest.raises(RuntimeError, match="Generating kernel source resulted in error 1"):
+            KernelWriter._getKernelSource(self._writer(error=1, forceGenerateKernel=False),
+                                          self._kernel())
 
-    def test_force_generate_kernel_keeps_the_source(self):
+    def test_force_generate_kernel_keeps_the_source(self, monkeypatch):
         # The behaviour the early raise made unreachable.
         warnings = []
-        getKernelSource = self._getKernelSource(warnings)
-        source = getKernelSource(self._writer(error=1, forceGenerateKernel=True),
-                                 {"UseSubtileImpl": False})
+        monkeypatch.setattr("Tensile.KernelWriter.printWarning", warnings.append)
+        source = KernelWriter._getKernelSource(self._writer(error=1, forceGenerateKernel=True),
+                                               self._kernel())
         assert "s_endpgm" in source
         assert any("ForceGenerateKernel" in str(w) for w in warnings), (
             "saving the source of a rejected kernel must be announced"
         )
 
-    def test_clean_kernel_is_unaffected(self):
+    def test_clean_kernel_is_unaffected(self, monkeypatch):
         warnings = []
-        getKernelSource = self._getKernelSource(warnings)
-        source = getKernelSource(self._writer(error=0, forceGenerateKernel=False),
-                                 {"UseSubtileImpl": False})
+        monkeypatch.setattr("Tensile.KernelWriter.printWarning", warnings.append)
+        source = KernelWriter._getKernelSource(self._writer(error=0, forceGenerateKernel=False),
+                                               self._kernel())
         assert "s_endpgm" in source
         assert warnings == []

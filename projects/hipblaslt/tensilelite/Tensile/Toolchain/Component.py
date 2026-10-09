@@ -25,12 +25,13 @@
 from os import name as os_name
 from os import environ
 from pathlib import Path
-from re import search, IGNORECASE
+from re import search, sub, IGNORECASE
 from shlex import split
 from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
 
-from Tensile.Common import SemanticVersion, print2
+from ..Common import SemanticVersion, print2
+from ..Common.Architectures import compilerTargetOf, deviceTargetFeaturesOf
 from .Validators import ToolchainDefaults, validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
@@ -159,6 +160,39 @@ class Assembler(Component):
             "-c",
         ]
 
+    @staticmethod
+    def _retargetAssemblySource(targetGfx: str, srcPath: str):
+        path = Path(srcPath)
+        try:
+            src = path.read_text()
+        except (UnicodeDecodeError, OSError):
+            # Opportunistic rewrite: a source that can't be read here (missing,
+            # unreadable, not text) is left alone -- the assembler invocation
+            # right after this will raise its own clear error if srcPath is
+            # genuinely bad, rather than a confusing traceback from this helper.
+            return
+
+        target = f"amdgcn-amd-amdhsa--{targetGfx}"
+        # The processor is the whole hyphenated name: a stepping (gfx1250-strict)
+        # or a generic (gfx9-4-generic) must be replaced as one token, or a source
+        # already naming the stepping gains its suffix twice. Only the `:feature`
+        # tail is carried over.
+        processor = r'gfx[0-9a-fA-F]+(?:-[0-9A-Za-z]+)*'
+        updated = sub(
+            rf'(\.amdgcn_target\s+")amdgcn-amd-amdhsa--{processor}([^"]*")',
+            rf'\1{target}\2',
+            src,
+        )
+        updated = sub(
+            rf'(amdhsa\.target:\s*)amdgcn-amd-amdhsa--{processor}([^\s]*)',
+            rf'\1{target}\2',
+            updated,
+        )
+
+        if updated != src:
+            print2(f"Retargeting assembly source {path.name} to {targetGfx}")
+            path.write_text(updated)
+
     def __call__(self, targetGfx: str, wavefrontSize: int, srcPath: str, destPath: str):
         """Assemble an assembly source file into an object file.
         Args:
@@ -168,12 +202,16 @@ class Assembler(Component):
             srcPath: The path to the assembly source file.
             destPath: The destination path for the generated object file.
         """
+        features = deviceTargetFeaturesOf(targetGfx)
+        targetGfx = compilerTargetOf(targetGfx)
+        self._retargetAssemblySource(targetGfx, srcPath)
         args = self._default_args
-        # Enable true16 syntax on targets that support +real-true16.
-        if targetGfx in ("gfx1250", "gfx1201", "gfx1200", "gfx1100"):
+        # Enable true16 on all gfx11*/gfx12* (NoSDWA); gfx10* stays fake16.
+        if targetGfx.startswith(("gfx11", "gfx12")):
             args = args + ["-Xclangas", "-target-feature", "-Xclangas", "+real-true16"]
         args = [
             *args,
+            *[a for f in features for a in ("-Xclangas", "-target-feature", "-Xclangas", f)],
             f"-mcpu={targetGfx}",
             "-mwavefrontsize64" if wavefrontSize == 64 else "-mno-wavefrontsize64",
             srcPath,
@@ -245,9 +283,12 @@ class Compiler(Component):
         Raises:
             RuntimeError: If the compilation command fails.
         """
-        archFlags = [f"--offload-arch={gfx}" for gfx in target_list]
+        archFlags = [f"--offload-arch={compilerTargetOf(gfx)}" for gfx in target_list]
+        # -Xclang reaches every device compile; an alias always builds alone.
+        features = [f for gfx in target_list for f in deviceTargetFeaturesOf(gfx)]
+        featureFlags = [a for f in features for a in ("-Xclang", "-target-feature", "-Xclang", f)]
         args = [
-            *(self.default_args), "-I", include_path, *archFlags, srcPath, "-c", "-o", destPath
+            *(self.default_args), "-I", include_path, *archFlags, *featureFlags, srcPath, "-c", "-o", destPath
         ]
         return _invoke(args, f"Compiling HIP source kernels into objects (.cpp -> .o)")
 
@@ -289,7 +330,9 @@ class Bundler(Component):
         Args:
             srcPath: The source path of the code object file to be compressed.
             destPath: The destination path for the compressed code object file.
-            gfx: The target GPU architecture.
+            target: The compiler target to tag the bundle entry with. This is the
+                stepping's own name where one was asked for, not the ISA-derived
+                name, since the runtime unbundles by matching the agent's target.
 
         Raises:
             RuntimeError: If compressing the code object file fails.
@@ -362,10 +405,16 @@ class Linker(Component):
         Since it is possible for the character limit of the operating system to be exceeded
         when invoking the linker, LLVM allows the provision of arguments via a "response file"
         Reference: https://llvm.org/docs/CommandLine.html#response-files
+
+        Named after the code object it describes, and so written beside it rather
+        than into the working directory: two builds covering architectures that
+        share an ISA run at once from one directory, and a shared name lets one
+        link the other's objects into its own code object, silently.
         """
-        with open(Path.cwd() / "clang_args.txt", "wt") as file:
+        responsePath = Path(destPath).with_name(Path(destPath).name + ".linker_args")
+        with open(responsePath, "wt") as file:
             file.write(" ".join(srcPaths).replace('\\', '\\\\') if os_name == "nt" else " ".join(srcPaths))
-        return [*(self.default_args), "-o", destPath, "@clang_args.txt"]
+        return [*(self.default_args), "-o", destPath, f"@{responsePath}"]
 
     def _use_response_file(self, args: List[str]) -> bool:
         """

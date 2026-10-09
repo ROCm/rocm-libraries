@@ -95,7 +95,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence, Tuple
 
 from .hip_module import Runtime
-from .packing import pack_args
+from .packing import compile_packer
 from .torch_interop import resolve_stream
 
 __all__ = [
@@ -420,6 +420,14 @@ class KernelLauncher:
         rt = _runtime()
         self._module = rt.load_module(hsaco)
         self._fn = self._module.get_function(kernel_name)
+        # Precompiled hot-path kernarg packer (signature is immutable for
+        # the launcher's lifetime). Byte-identical to ``pack_args``: it
+        # precomputes the fixed argument layout once here so a launch does
+        # not rebuild the offset table, re-dispatch on argument types, or
+        # re-assemble the format string. Note ``struct`` already caches
+        # recently used formats, so the saving is that surrounding work,
+        # not the format compile itself.
+        self._packer = compile_packer(self._signature)
 
     @property
     def kernel_name(self) -> str:
@@ -436,7 +444,7 @@ class KernelLauncher:
         config: LaunchConfig,
     ) -> LaunchSummary:
         rt = _runtime()
-        args = pack_args(self._signature, values)
+        args = self._packer(values)
         stream = resolve_stream(config.stream)
         fence = _resolved_fence(config.fence)
 
@@ -481,6 +489,37 @@ class KernelLauncher:
         )
         rt.retain_for_stream(stream, *values.values())
         return LaunchSummary(launches=1)
+
+    def bind(
+        self,
+        values: Mapping[str, Any],
+        *,
+        config: LaunchConfig,
+    ) -> Callable[[], None]:
+        """Pack ``values`` once; return a zero-argument asynchronous launch.
+
+        The callable enqueues the kernel with exactly these arguments on
+        ``config``'s stream and returns -- no packing, no stream lookup,
+        no fence. Hand it to :func:`time_launches`: a timed loop of
+        ``launcher(values, config=...)`` pays the Python packing on every
+        launch, and for a kernel shorter than that the loop times the
+        host. The callable keeps ``values`` alive for as long as it
+        lives; drain the stream before dropping it.
+        """
+        launch = _runtime().prepare_launch(
+            self._fn,
+            config.grid,
+            config.block,
+            self._packer(values),
+            shared_bytes=config.shared_bytes,
+            stream=resolve_stream(config.stream),
+        )
+        keep = tuple(values.values())
+
+        def run(_keep=keep) -> None:
+            launch()
+
+        return run
 
     def __repr__(self) -> str:
         key_str = f", cache_key={self._cache_key!r}" if self._cache_key else ""

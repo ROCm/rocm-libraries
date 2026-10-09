@@ -2,6 +2,9 @@
 
 Top-level re-exports from `rocke` and `rocke.helpers`. Use this as a quick lookup when reading other docs.
 
+For `MmaOp` fields, scale layouts, and `MmaCatalog` selection rules, see
+[MMA metadata and queries](mma_metadata.md).
+
 ## `from rocke import ...`
 
 ```text
@@ -36,7 +39,8 @@ SoftwarePipeline
 
 # Manifests
 make_gemm_manifest, make_conv_manifest, make_attention_manifest
-attention_args_signature, conv_args_signature, gemm_args_signature
+attention_args_signature, gemm_args_signature
+# (conv signatures live next to the conv instances: kernels.common.conv_abi)
 write_artifact
 
 # Attention helpers
@@ -48,6 +52,8 @@ select_2d_config, select_3d_config, use_2d_kernel
 # Transforms (CK Tile coord-DAG)
 CoordVar, Indirect, PadDynamic, TensorDescriptor
 pass_through, pad, pad_dynamic, embed, merge, unmerge, indirect
+# (runtime-shape variants are imported from rocke.helpers.transforms:
+#  embed_dynamic, unmerge_magic_dynamic, DynamicTensorDescriptor)
 
 # Analysis / benchmark
 BenchmarkSummary, benchmark_manifest, summarize_runs
@@ -230,6 +236,7 @@ GroupedGemmLauncher, grouped_gemm_problems
 ConvProblem, ImplicitGemmConvSpec, build_implicit_gemm_conv
 DirectConvProblem, DirectConv16cSpec, build_direct_conv_16c
 DirectConv4cSpec, build_direct_conv_4c
+DirectNongroupedConvSpec, build_direct_conv_nongrouped, is_valid_nongrouped_spec, nongrouped_specs, nongrouped_knobs
 Img2ColSpec, build_img2col
 PoolingProblem, Pooling2DSpec, PoolOp, build_pooling2d
 
@@ -395,6 +402,6 @@ pass_through, pad, pad_dynamic, embed, merge, unmerge, indirect
 ```text
 python -m rocke # list discoverable entry points
 python -m rocke.run_manifest # numpy + HIP manifest runner
-python -m rocke.examples.common.bake_off_implicit_gemm # example generator
+python -m builders.common.bake_off_implicit_gemm # example generator
 python -m rocke.sweep_bench # benchmark a sweep manifest
 ```

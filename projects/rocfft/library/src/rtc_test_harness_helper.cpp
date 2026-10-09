@@ -141,5 +141,5 @@ std::unique_ptr<RTCKernel> compile(const std::string& name, const std::string& s
     std::shared_future<hipModule_wrapper_t> module_future = module_promise.get_future();
     module_promise.set_value(std::move(module));
 
-    return std::make_unique<RTCKernel>(name, module_future);
+    return std::make_unique<RTCKernel>(name, KIntType::U32, module_future);
 }

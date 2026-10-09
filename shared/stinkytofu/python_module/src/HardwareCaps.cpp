@@ -9,6 +9,7 @@
 
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/ComgrProbe.hpp"
+#include "stinkytofu/hardware/HwReg.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 
 namespace stinkytofu {
@@ -42,6 +43,13 @@ bool checkMajorIn(uint32_t major, std::initializer_list<uint32_t> list) {
 
 bool checkMajorNotIn(uint32_t major, std::initializer_list<uint32_t> list) {
     return !checkMajorIn(major, list);
+}
+
+// Bit position of DISABLE_XDL_ARB_STALL, read from HwReg so it has one source of truth.
+// -1 where the field does not exist; 0 would alias DEP_MODE's LSB.
+int arbStallBitOffset(GfxArchID archID) {
+    auto field = HwReg::schedModeDisableXdlArbStall(archID);
+    return field.size ? static_cast<int>(field.offset) : -1;
 }
 
 // ── asmCaps ──────────────────────────────────────────────────────────────
@@ -272,7 +280,7 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
 }
 
 // ── archCaps ─────────────────────────────────────────────────────────────
-std::map<std::string, int> initArchCaps(const IsaVersion& v) {
+std::map<std::string, int> initArchCaps(const IsaVersion& v, GfxArchID archID) {
     std::map<std::string, int> rv;
 
     rv["HasEccHalf"] =
@@ -308,6 +316,7 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v) {
     rv["VOP3ByteSel"] = v[0] == 12;
     rv["HasFP8_OCP"] = v[0] == 12;
     rv["HasWmmaArbStallBit"] = v[0] == 12 && v[1] == 5;
+    rv["WmmaArbStallBitOffset"] = arbStallBitOffset(archID);
     rv["HasF32XEmulation"] = checkInList(v, {{9, 5, 0}, {12, 5, 0}});
     rv["MaxSgprPreload"] = checkInList(v, {{12, 5, 0}}) ? 32 : 16;
     rv["SgprPreloadPad"] =
@@ -330,9 +339,15 @@ std::map<std::string, int> initRegCaps(const IsaVersion& v,
     std::map<std::string, int> rv;
 
     rv["MaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 256;
-    rv["MaxSgpr"] = (v[0] == 12 && v[1] == 5) ? 106 : 102;
+    // Highest addressable SGPR index plus one. gfx8/gfx9 stop at s101 (102); every
+    // RDNA target (gfx10, gfx11, gfx12) addresses s0-s105 (106). Keep in lock-step
+    // with rocisa hardware_caps.hpp.
+    rv["MaxSgpr"] = v[0] >= 10 ? 106 : 102;
     rv["PhysicalMaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 512;
-    rv["PhysicalMaxSgpr"] = 800;
+    // gfx11 (RDNA) does not have an SGPR-file occupancy limit; use a large value so it
+    // never binds. Keep in lock-step with rocisa hardware_caps.hpp
+    // TODO: gfx10/gfx12 are RDNA too and carry the same phantom limit.
+    rv["PhysicalMaxSgpr"] = v[0] == 11 ? 1696 : 800;
     rv["maxLDSConstOffset"] = 65536;
 
     if (v[0] == 10) {
@@ -406,7 +421,7 @@ HardwareCapsResult HardwareCaps::query(uint32_t major, uint32_t minor, uint32_t 
         const auto& mnemonicMap = info->getMnemonicToIsaOpcodeMap();
 
         entry.result.asmCaps = initAsmCaps(v, mnemonicMap, archID, info);
-        entry.result.archCaps = initArchCaps(v);
+        entry.result.archCaps = initArchCaps(v, archID);
         entry.result.regCaps = initRegCaps(v, entry.result.archCaps);
         entry.result.asmBugs = initAsmBugs(entry.result.asmCaps);
     });

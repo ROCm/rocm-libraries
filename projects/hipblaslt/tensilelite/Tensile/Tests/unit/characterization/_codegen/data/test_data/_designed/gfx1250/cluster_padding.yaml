@@ -69,7 +69,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]

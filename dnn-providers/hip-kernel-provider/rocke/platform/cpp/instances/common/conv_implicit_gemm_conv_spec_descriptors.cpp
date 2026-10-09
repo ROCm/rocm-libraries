@@ -380,7 +380,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
      *     f"a{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
      *     f"{pipeline}_{epilogue}",
      *     self.acc_epilogue.tag(),
-     *     flags={"async": self.async_dma}) */
+     *     flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias,
+     *            "unroll": self.unroll_k}) */
     char short_buf[128];
     char t_buf[48];
     char w_buf[32];
@@ -388,8 +389,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char pe_buf[64];
     char tag_buf[256];
     const char* parts[6];
-    const char* flag_names[2];
-    int flag_on[2];
+    const char* flag_names[3];
+    int flag_on[3];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -428,8 +429,11 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     flag_on[0] = s->async_dma ? 1 : 0;
     flag_names[1] = "noalc";
     flag_on[1] = s->cshuffle_no_alias ? 1 : 0;
+    /* unroll_k: a different K-loop body under the same name otherwise. */
+    flag_names[2] = "unroll";
+    flag_on[2] = s->unroll_k ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 2, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 3, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -881,6 +885,48 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
          * group-aware descriptor/epilogue are family-neutral (Python PR #10064). */
     }
 
+    /* The tile loaders (Python: the async_tile_loaders / _sync_load_vecs block
+     * at the end of is_valid_spec). An explicit vector width, or the async
+     * chunk width the tile admits, has to split the tile evenly over the
+     * block's threads. The wavelet loaders pick their own width. */
+    if(s->async_dma)
+    {
+        const int cpg = rocke_conv_problem_cpg(&s->problem);
+        rocke_async_tile_loader_t al;
+        if(rocke_async_tile_loader_from_tile(
+               s->tile_m, s->tile_k, block_size, s->wave_size, 4, cpg, &al)
+               != ROCKE_OK
+           || rocke_async_tile_loader_from_tile(
+                  s->tile_n, s->tile_k, block_size, s->wave_size, 4, cpg, &al)
+                  != ROCKE_OK)
+        {
+            ROCKE_CONVVS_REJECT(
+                "async_dma: no usable chunk width for the A/B tiles with block_size %d",
+                block_size);
+        }
+    }
+    else if(!(s->pipeline && strcmp(s->pipeline, "wavelet") == 0))
+    {
+        const int def_vec = rocke_conv_default_load_vec(s);
+        if(def_vec <= 0)
+        {
+            ROCKE_CONVVS_REJECT("no usable load width for tile %dx%dx%d with block_size %d",
+                                s->tile_m,
+                                s->tile_n,
+                                s->tile_k,
+                                block_size);
+        }
+        const int vec_a = s->has_vector_size_a ? s->vector_size_a : def_vec;
+        const int vec_b = s->has_vector_size_b ? s->vector_size_b : def_vec;
+        if(!rocke_conv_coalesced_load_ok(
+               "A", s->tile_m, s->tile_k, block_size, vec_a, reason, reason_cap)
+           || !rocke_conv_coalesced_load_ok(
+               "B", s->tile_n, s->tile_k, block_size, vec_b, reason, reason_cap))
+        {
+            return false;
+        }
+    }
+
     if(reason != NULL && reason_cap > 0)
     {
         snprintf(reason, reason_cap, "ok");
@@ -959,7 +1005,8 @@ const rocke_mmaop_t* rocke_conv_resolve_op(rocke_ir_builder_t* b,
                                            "fp32",
                                            spec->warp_tile_m,
                                            spec->warp_tile_n,
-                                           spec->warp_tile_k);
+                                           spec->warp_tile_k,
+                                           nullptr);
     }
     if(op == NULL)
     {
@@ -1402,4 +1449,548 @@ struct rocke_tensor_descriptor* rocke_conv_make_d_descriptor(rocke_ir_builder_t*
         return NULL;
     }
     return rocke_tensor_descriptor_transform(b, desc, xforms, 1);
+}
+
+/* ====================================================================== *
+ * AOT runtime dynamic descriptor builders                                  *
+ * Mirrors Python _make_a/b/d_descriptor_dynamic from                       *
+ * kernels.common._conv_implicit_gemm_common                                *
+ * ====================================================================== */
+
+#include "rocke/instance_conv_implicit_gemm_internal.h"
+/* rocke_conv_build_ctx_t has all the runtime param Values (p_N, p_Hi, ...) */
+
+struct rocke_dynamic_tensor_descriptor*
+    rocke_conv_make_a_descriptor_dynamic_opts(rocke_ir_builder_t* b,
+                                              rocke_conv_build_ctx_t* ctx,
+                                              bool decompose_m,
+                                              const rocke_conv_dyn_desc_opts_t* opts)
+{
+    /* Mirrors Python _make_a_descriptor_dynamic:
+     *   DynamicTensorDescriptor.create("A_nhwc",
+     *       coord_names=["n","hi","wi","c"],
+     *       strides=[p_A_stride_n, p_A_stride_hi, p_A_stride_wi, const_i32(1)])
+     *   .transform(
+     *       unmerge_magic_dynamic("m", into=["n","ho","wo"], ...),
+     *       embed_dynamic(["ho","y"] -> "hi", ...),
+     *       embed_dynamic(["wo","x"] -> "wi", ...),
+     *       unmerge_magic_dynamic("k", into=["y","x","c"], ...),
+     *       pad_dynamic("y"), pad_dynamic("x"))
+     */
+    const bool is_3d = ctx->params_is_3d;
+    const char* coord_names_2d[4] = {"n", "hi", "wi", "c"};
+    const char* coord_names_3d[5] = {"n", "di", "hi", "wi", "c"};
+    const char** coord_names = is_3d ? coord_names_3d : coord_names_2d;
+    const int n_coords = is_3d ? 5 : 4;
+    rocke_value_t* strides[5];
+    rocke_dynamic_tensor_descriptor_t* desc;
+
+    /* Negated padding offsets, emitted first -- Python computes them at the
+     * top of make_a_descriptor_dynamic, before the stride array, so anything
+     * emitted ahead of them here shifts every later SSA id. p_pD_neg follows
+     * the other two because Python only computes it inside the 3-D branch,
+     * after the H/W pair. */
+    ctx->p_pH_neg = rocke_b_sub(b, rocke_b_const_i32(b, 0), ctx->p_pH);
+    ctx->p_pW_neg = rocke_b_sub(b, rocke_b_const_i32(b, 0), ctx->p_pW);
+    if(is_3d)
+    {
+        ctx->p_pD_neg = rocke_b_sub(b, rocke_b_const_i32(b, 0), ctx->p_pD);
+    }
+
+    {
+        int si = 0;
+        strides[si++] = opts->stride_n;
+        if(is_3d)
+        {
+            strides[si++] = opts->stride_di;
+        }
+        strides[si++] = opts->stride_hi;
+        strides[si++] = opts->stride_wi;
+        strides[si++] = rocke_b_const_i32(b, 1);
+    }
+
+    desc = rocke_tensor_descriptor_naive_dynamic(b, opts->name, coord_names, n_coords, strides);
+    if(desc == NULL)
+    {
+        return NULL;
+    }
+
+    /* Build the transform chain. */
+    {
+        const rocke_transform_t* xforms[12];
+        int n_x = 0;
+        bool grouped = (ctx->p->groups > 1);
+
+        /* unmerge_magic_dynamic("m" -> ["n",["do",]"ho","wo"]) if decompose_m */
+        if(decompose_m)
+        {
+            const char* into_m_2d[3] = {"n", "ho", "wo"};
+            const char* into_m_3d[4] = {"n", "do", "ho", "wo"};
+            rocke_magic_triple_t trips_m[3];
+            int nt = 0;
+            if(is_3d)
+            {
+                trips_m[nt].mult = opts->spatial_di.mult;
+                trips_m[nt].shift = opts->spatial_di.shift;
+                trips_m[nt].dim = ctx->p_Do;
+                nt++;
+            }
+            trips_m[nt].mult = opts->spatial_hi.mult;
+            trips_m[nt].shift = opts->spatial_hi.shift;
+            trips_m[nt].dim = ctx->p_Ho;
+            nt++;
+            trips_m[nt].mult = opts->spatial_wi.mult;
+            trips_m[nt].shift = opts->spatial_wi.shift;
+            trips_m[nt].dim = ctx->p_Wo;
+            nt++;
+            xforms[n_x] = rocke_unmerge_magic_dynamic(
+                b,
+                (opts->spatial_upper != NULL) ? opts->spatial_upper : "m",
+                is_3d ? into_m_3d : into_m_2d,
+                nt + 1,
+                trips_m);
+            if(!xforms[n_x])
+            {
+                return NULL;
+            }
+            n_x++;
+        }
+
+        /* embed_dynamic(["do","z"] -> "di", strides=[p_sD, p_dD], offset=p_pD_neg,
+         * lo=0, hi=p_Di) -- 3-D only, ahead of the H/W embeds. */
+        if(is_3d)
+        {
+            const char* up_do[2] = {"do", "z"};
+            rocke_value_t* strides_do[2] = {ctx->p_sD, ctx->p_dD};
+            xforms[n_x] = rocke_embed_dynamic_lo_const(
+                b, up_do, 2, "di", strides_do, ctx->p_pD_neg, 0, ctx->p_Di);
+            if(!xforms[n_x])
+            {
+                return NULL;
+            }
+            n_x++;
+        }
+
+        /* embed_dynamic(["ho","y"] -> "hi", strides=[p_sH, p_dH], offset=p_pH_neg, lo=0, hi=p_Hi) */
+        {
+            const char* up_ho[2] = {"ho", "y"};
+            rocke_value_t* strides_ho[2] = {ctx->p_sH, ctx->p_dH};
+            xforms[n_x] = rocke_embed_dynamic_lo_const(
+                b, up_ho, 2, "hi", strides_ho, ctx->p_pH_neg, 0, ctx->p_Hi);
+            if(!xforms[n_x])
+            {
+                return NULL;
+            }
+            n_x++;
+        }
+
+        /* embed_dynamic(["wo","x"] -> "wi", strides=[p_sW, p_dW], offset=p_pW_neg, lo=0, hi=p_Wi) */
+        {
+            const char* up_wo[2] = {"wo", "x"};
+            rocke_value_t* strides_wo[2] = {ctx->p_sW, ctx->p_dW};
+            xforms[n_x] = rocke_embed_dynamic_lo_const(
+                b, up_wo, 2, "wi", strides_wo, ctx->p_pW_neg, 0, ctx->p_Wi);
+            if(!xforms[n_x])
+            {
+                return NULL;
+            }
+            n_x++;
+        }
+
+        /* unmerge_magic_dynamic("k" -> ["y","x","c"] or ["y","x","c_in_group"]) */
+        {
+            /* k -> [[z,] y, x, c] (ungrouped) or [[z,] y, x, c_in_group]. */
+            const char* last = grouped ? "c_in_group" : "c";
+            const char* into_k_2d[3] = {"y", "x", NULL};
+            const char* into_k_3d[4] = {"z", "y", "x", NULL};
+            rocke_magic_triple_t trips_k[3];
+            int nt = 0;
+            into_k_2d[2] = last;
+            into_k_3d[3] = last;
+            if(is_3d)
+            {
+                trips_k[nt].mult = opts->channel_y.mult;
+                trips_k[nt].shift = opts->channel_y.shift;
+                trips_k[nt].dim = ctx->p_Y;
+                nt++;
+            }
+            trips_k[nt].mult = opts->channel_x.mult;
+            trips_k[nt].shift = opts->channel_x.shift;
+            trips_k[nt].dim = ctx->p_X;
+            nt++;
+            trips_k[nt].mult = opts->channel_c.mult;
+            trips_k[nt].shift = opts->channel_c.shift;
+            trips_k[nt].dim = ctx->p_cpg;
+            nt++;
+            xforms[n_x] = rocke_unmerge_magic_dynamic(
+                b,
+                (opts->channel_upper != NULL) ? opts->channel_upper : "k",
+                is_3d ? into_k_3d : into_k_2d,
+                nt + 1,
+                trips_k);
+            if(!xforms[n_x])
+            {
+                return NULL;
+            }
+            n_x++;
+        }
+        if(grouped)
+        {
+
+            /* embed_dynamic(["group","c_in_group"] -> "c", strides=[p_cpg,1],
+             * offset=0, lo=0, hi=p_C). The literal 1 stride and the 0 offset
+             * stay ints so the multiply is skipped and the constants are
+             * emitted where Python emits them. */
+            const char* up_grp[2] = {"group", "c_in_group"};
+            rocke_value_t* strides_grp[2] = {ctx->p_cpg, NULL};
+            const int strides_grp_c[2] = {0, 1};
+            xforms[n_x] = rocke_embed_dynamic_mixed(
+                b, up_grp, 2, "c", strides_grp, strides_grp_c, NULL, 0, 0, ctx->p_C);
+            if(!xforms[n_x])
+            {
+                return NULL;
+            }
+            n_x++;
+        }
+
+        /* pad_dynamic("z", lo=0, hi=p_Z) -- 3-D only */
+        if(is_3d)
+        {
+            xforms[n_x] = rocke_pad_dynamic_lo_const(b, "z", 0, ctx->p_Z);
+            if(!xforms[n_x])
+            {
+                return NULL;
+            }
+            n_x++;
+        }
+
+        /* pad_dynamic("y", lo=0, hi=p_Y) */
+        xforms[n_x] = rocke_pad_dynamic_lo_const(b, "y", 0, ctx->p_Y);
+        if(!xforms[n_x])
+        {
+            return NULL;
+        }
+        n_x++;
+
+        /* pad_dynamic("x", lo=0, hi=p_X) */
+        xforms[n_x] = rocke_pad_dynamic_lo_const(b, "x", 0, ctx->p_X);
+        if(!xforms[n_x])
+        {
+            return NULL;
+        }
+        n_x++;
+
+        /* Apply the chain to the base descriptor. */
+        rocke_tensor_descriptor_t* chained
+            = rocke_tensor_descriptor_transform(b, &desc->base, xforms, n_x);
+        if(!chained)
+        {
+            return NULL;
+        }
+        desc->base = *chained;
+    }
+    return desc;
+}
+
+/* Forward A descriptor: the p_A_stride_* slots and the m_/k_ magic families. */
+struct rocke_dynamic_tensor_descriptor* rocke_conv_make_a_descriptor_dynamic(
+    rocke_ir_builder_t* b, rocke_conv_build_ctx_t* ctx, bool decompose_m)
+{
+    rocke_conv_dyn_desc_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.name = ctx->params_is_3d ? "A_ndhwc" : "A_nhwc";
+    opts.stride_n = ctx->p_A_stride_n;
+    opts.stride_di = ctx->p_A_stride_di;
+    opts.stride_hi = ctx->p_A_stride_hi;
+    opts.stride_wi = ctx->p_A_stride_wi;
+    opts.spatial_di.mult = ctx->p_magic_m_Do_mult;
+    opts.spatial_di.shift = ctx->p_magic_m_Do_shift;
+    opts.channel_y.mult = ctx->p_magic_k_Y_mult;
+    opts.channel_y.shift = ctx->p_magic_k_Y_shift;
+    opts.spatial_hi.mult = ctx->p_magic_m_Ho_mult;
+    opts.spatial_hi.shift = ctx->p_magic_m_Ho_shift;
+    opts.spatial_wi.mult = ctx->p_magic_m_Wo_mult;
+    opts.spatial_wi.shift = ctx->p_magic_m_Wo_shift;
+    opts.channel_x.mult = ctx->p_magic_k_X_mult;
+    opts.channel_x.shift = ctx->p_magic_k_X_shift;
+    opts.channel_c.mult = ctx->p_magic_k_cpg_mult;
+    opts.channel_c.shift = ctx->p_magic_k_cpg_shift;
+    return rocke_conv_make_a_descriptor_dynamic_opts(b, ctx, decompose_m, &opts);
+}
+
+struct rocke_dynamic_tensor_descriptor*
+    rocke_conv_make_b_descriptor_dynamic_opts(rocke_ir_builder_t* b,
+                                              const rocke_conv_build_ctx_t* ctx,
+                                              const char* upper_name,
+                                              const rocke_conv_dyn_desc_opts_t* opts)
+{
+    /* Mirrors Python _make_b_descriptor_dynamic:
+     *   DynamicTensorDescriptor.create("B_kyxc",
+     *       coord_names=["k_out","y","x","c"],
+     *       strides=[p_B_stride_k, p_B_stride_y, p_B_stride_x, const_i32(1)])
+     *   .transform(
+     *       unmerge_magic_dynamic("k_gemm", into=["y","x","c"], ...),
+     *       pad_dynamic("y"), pad_dynamic("x"))
+     */
+    const bool is_3d = ctx->params_is_3d;
+    const char* coord_names_2d[4] = {"k_out", "y", "x", "c"};
+    const char* coord_names_3d[5] = {"k_out", "z", "y", "x", "c"};
+    const char** coord_names = is_3d ? coord_names_3d : coord_names_2d;
+    const int n_coords = is_3d ? 5 : 4;
+    rocke_value_t* strides[5];
+    rocke_dynamic_tensor_descriptor_t* desc;
+
+    {
+        int si = 0;
+        strides[si++] = opts->stride_n;
+        if(is_3d)
+        {
+            strides[si++] = opts->stride_di;
+        }
+        strides[si++] = opts->stride_hi;
+        strides[si++] = opts->stride_wi;
+        strides[si++] = rocke_b_const_i32(b, 1);
+    }
+
+    desc = rocke_tensor_descriptor_naive_dynamic(b, opts->name, coord_names, n_coords, strides);
+    if(!desc)
+    {
+        return NULL;
+    }
+
+    {
+        const char* into_k_2d[3] = {"y", "x", "c"};
+        const char* into_k_3d[4] = {"z", "y", "x", "c"};
+        rocke_magic_triple_t trips[3];
+        int nt = 0;
+        if(is_3d)
+        {
+            trips[nt].mult = opts->channel_y.mult;
+            trips[nt].shift = opts->channel_y.shift;
+            trips[nt].dim = ctx->p_Y;
+            nt++;
+        }
+        trips[nt].mult = opts->channel_x.mult;
+        trips[nt].shift = opts->channel_x.shift;
+        trips[nt].dim = ctx->p_X;
+        nt++;
+        trips[nt].mult = opts->channel_c.mult;
+        trips[nt].shift = opts->channel_c.shift;
+        trips[nt].dim = ctx->p_cpg;
+        nt++;
+
+        const rocke_transform_t* xforms[4];
+        int n_x = 0;
+        xforms[n_x] = rocke_unmerge_magic_dynamic(
+            b, upper_name, is_3d ? into_k_3d : into_k_2d, nt + 1, trips);
+        if(!xforms[n_x])
+        {
+            return NULL;
+        }
+        n_x++;
+        if(is_3d)
+        {
+            xforms[n_x] = rocke_pad_dynamic_lo_const(b, "z", 0, ctx->p_Z);
+            if(!xforms[n_x])
+            {
+                return NULL;
+            }
+            n_x++;
+        }
+        xforms[n_x] = rocke_pad_dynamic_lo_const(b, "y", 0, ctx->p_Y);
+        if(!xforms[n_x])
+        {
+            return NULL;
+        }
+        n_x++;
+        xforms[n_x] = rocke_pad_dynamic_lo_const(b, "x", 0, ctx->p_X);
+        if(!xforms[n_x])
+        {
+            return NULL;
+        }
+        n_x++;
+
+        rocke_tensor_descriptor_t* chained
+            = rocke_tensor_descriptor_transform(b, &desc->base, xforms, n_x);
+        if(!chained)
+        {
+            return NULL;
+        }
+        desc->base = *chained;
+    }
+    return desc;
+}
+
+/* wgrad dY descriptor: (k, m) -> NHWK with runtime dims.
+ *
+ * ``k`` is the wgrad reduction index over output positions, so it decomposes
+ * exactly like the forward ``m``; ``m`` here is the output channel, which the
+ * caller supplies group-absolute. The coord names are the forward A ones
+ * ("m", "k") so the shared load phase can query it unchanged.
+ */
+struct rocke_dynamic_tensor_descriptor*
+    rocke_conv_make_dy_descriptor_dynamic(rocke_ir_builder_t* b,
+                                          const rocke_conv_build_ctx_t* ctx,
+                                          const rocke_conv_dyn_desc_opts_t* opts)
+{
+    const bool is_3d = ctx->params_is_3d;
+    const char* coord_names_2d[4] = {"n", "ho", "wo", "m"};
+    const char* coord_names_3d[5] = {"n", "do", "ho", "wo", "m"};
+    const char** coord_names = is_3d ? coord_names_3d : coord_names_2d;
+    const int n_coords = is_3d ? 5 : 4;
+    rocke_value_t* strides[5];
+    rocke_dynamic_tensor_descriptor_t* desc;
+
+    {
+        int si = 0;
+        strides[si++] = opts->stride_n;
+        if(is_3d)
+        {
+            strides[si++] = opts->stride_di;
+        }
+        strides[si++] = opts->stride_hi;
+        strides[si++] = opts->stride_wi;
+        strides[si++] = rocke_b_const_i32(b, 1);
+    }
+
+    desc = rocke_tensor_descriptor_naive_dynamic(b, opts->name, coord_names, n_coords, strides);
+    if(!desc)
+    {
+        return NULL;
+    }
+
+    {
+        const char* into_k_2d[3] = {"n", "ho", "wo"};
+        const char* into_k_3d[4] = {"n", "do", "ho", "wo"};
+        rocke_magic_triple_t trips[3];
+        const rocke_transform_t* xforms[1];
+        rocke_tensor_descriptor_t* chained;
+        int nt = 0;
+
+        if(is_3d)
+        {
+            trips[nt].mult = opts->spatial_di.mult;
+            trips[nt].shift = opts->spatial_di.shift;
+            trips[nt].dim = ctx->p_Do;
+            nt++;
+        }
+        trips[nt].mult = opts->spatial_hi.mult;
+        trips[nt].shift = opts->spatial_hi.shift;
+        trips[nt].dim = ctx->p_Ho;
+        nt++;
+        trips[nt].mult = opts->spatial_wi.mult;
+        trips[nt].shift = opts->spatial_wi.shift;
+        trips[nt].dim = ctx->p_Wo;
+        nt++;
+
+        xforms[0]
+            = rocke_unmerge_magic_dynamic(b, "k", is_3d ? into_k_3d : into_k_2d, nt + 1, trips);
+        if(!xforms[0])
+        {
+            return NULL;
+        }
+        chained = rocke_tensor_descriptor_transform(b, &desc->base, xforms, 1);
+        if(!chained)
+        {
+            return NULL;
+        }
+        desc->base = *chained;
+    }
+    return desc;
+}
+
+/* Forward B descriptor: the p_B_stride_* slots and the k_ magic family. */
+struct rocke_dynamic_tensor_descriptor*
+    rocke_conv_make_b_descriptor_dynamic(rocke_ir_builder_t* b, const rocke_conv_build_ctx_t* ctx)
+{
+    rocke_conv_dyn_desc_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.name = ctx->params_is_3d ? "B_kzyxc" : "B_kyxc";
+    opts.stride_n = ctx->p_B_stride_k;
+    opts.stride_di = ctx->p_B_stride_z;
+    opts.stride_hi = ctx->p_B_stride_y;
+    opts.stride_wi = ctx->p_B_stride_x;
+    opts.channel_y.mult = ctx->p_magic_k_Y_mult;
+    opts.channel_y.shift = ctx->p_magic_k_Y_shift;
+    opts.channel_x.mult = ctx->p_magic_k_X_mult;
+    opts.channel_x.shift = ctx->p_magic_k_X_shift;
+    opts.channel_c.mult = ctx->p_magic_k_cpg_mult;
+    opts.channel_c.shift = ctx->p_magic_k_cpg_shift;
+    return rocke_conv_make_b_descriptor_dynamic_opts(b, ctx, "k_gemm", &opts);
+}
+
+struct rocke_dynamic_tensor_descriptor*
+    rocke_conv_make_d_descriptor_dynamic(rocke_ir_builder_t* b, const rocke_conv_build_ctx_t* ctx)
+{
+    /* Mirrors Python _make_d_descriptor_dynamic:
+     *   DynamicTensorDescriptor.create("D_nhwk",
+     *       coord_names=["n","ho","wo","k_out"],
+     *       strides=[p_D_stride_n, p_D_stride_ho, p_D_stride_wo, const_i32(1)])
+     *   .transform(unmerge_magic_dynamic("m", into=["n","ho","wo"], ...))
+     */
+    const bool is_3d = ctx->params_is_3d;
+    const char* coord_names_2d[4] = {"n", "ho", "wo", "k_out"};
+    const char* coord_names_3d[5] = {"n", "do", "ho", "wo", "k_out"};
+    const char** coord_names = is_3d ? coord_names_3d : coord_names_2d;
+    const int n_coords = is_3d ? 5 : 4;
+    rocke_value_t* strides[5];
+    rocke_dynamic_tensor_descriptor_t* desc;
+
+    {
+        int si = 0;
+        strides[si++] = ctx->p_D_stride_n;
+        if(is_3d)
+        {
+            strides[si++] = ctx->p_D_stride_do;
+        }
+        strides[si++] = ctx->p_D_stride_ho;
+        strides[si++] = ctx->p_D_stride_wo;
+        strides[si++] = rocke_b_const_i32(b, 1);
+    }
+
+    desc = rocke_tensor_descriptor_naive_dynamic(
+        b, is_3d ? "D_ndhwk" : "D_nhwk", coord_names, n_coords, strides);
+    if(!desc)
+    {
+        return NULL;
+    }
+
+    {
+        const char* into_m_2d[3] = {"n", "ho", "wo"};
+        const char* into_m_3d[4] = {"n", "do", "ho", "wo"};
+        rocke_magic_triple_t trips[3];
+        int nt = 0;
+        if(is_3d)
+        {
+            trips[nt].mult = ctx->p_magic_m_Do_mult;
+            trips[nt].shift = ctx->p_magic_m_Do_shift;
+            trips[nt].dim = ctx->p_Do;
+            nt++;
+        }
+        trips[nt].mult = ctx->p_magic_m_Ho_mult;
+        trips[nt].shift = ctx->p_magic_m_Ho_shift;
+        trips[nt].dim = ctx->p_Ho;
+        nt++;
+        trips[nt].mult = ctx->p_magic_m_Wo_mult;
+        trips[nt].shift = ctx->p_magic_m_Wo_shift;
+        trips[nt].dim = ctx->p_Wo;
+        nt++;
+
+        const rocke_transform_t* xforms[1];
+        xforms[0]
+            = rocke_unmerge_magic_dynamic(b, "m", is_3d ? into_m_3d : into_m_2d, nt + 1, trips);
+        if(!xforms[0])
+        {
+            return NULL;
+        }
+
+        rocke_tensor_descriptor_t* chained
+            = rocke_tensor_descriptor_transform(b, &desc->base, xforms, 1);
+        if(!chained)
+        {
+            return NULL;
+        }
+        desc->base = *chained;
+    }
+    return desc;
 }

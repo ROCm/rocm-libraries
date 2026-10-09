@@ -82,6 +82,9 @@ std::vector<Violation> analyzeBlock(const BasicBlock& bb) {
 
     for (int ruleIdx = 0; ruleIdx < kNumCdna5HazardRules; ++ruleIdx) {
         const HazardRule& rule = kCdna5HazardRules[ruleIdx];
+        // This pass measures write->read cycle gaps only; other directions/units are
+        // enforced by the scheduler, not measurable as a cycle distance here.
+        if (rule.dir != HazardDir::WriteThenRead || rule.unit != HazardUnit::Cycles) continue;
 
         // lastWriter[regKey] = the most recent instruction that wrote that reg, plus
         // whether that writer is a hazard producer. A non-producer write (e.g. a load
@@ -126,7 +129,7 @@ std::vector<Violation> analyzeBlock(const BasicBlock& bb) {
 
             Violation v;
             v.ruleName = rule.name;
-            v.required = rule.cycles;
+            v.required = rule.distance;
             v.producerMnemonic = instMnemonic(*instrs[latestProducer].inst);
             v.producerIdx = latestProducer;
             v.consumerMnemonic = instMnemonic(inst);
@@ -183,7 +186,7 @@ class HazardGapAnalysisPass : public StinkyInstPass {
         for (int i = 0; i < kNumCdna5HazardRules; ++i) {
             const auto& rule = kCdna5HazardRules[i];
             const auto& s = stats[rule.name];
-            std::cerr << "  " << rule.name << " (>=" << rule.cycles << " cyc):" << "  " << s.pairs
+            std::cerr << "  " << rule.name << " (>=" << rule.distance << " cyc):" << "  " << s.pairs
                       << " pair(s) checked," << "  " << s.violations << " VIOLATION(s)\n";
         }
 

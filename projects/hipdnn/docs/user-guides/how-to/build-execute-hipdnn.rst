@@ -114,3 +114,44 @@ The variant pack specifies which GPU memory address correspond to which tensors.
 The tensors are added to the variant pack using the tensor UID as the key and the GPU memory address as the value.
 It's the responsibility of the application to ensure sufficient GPU memory is allocated for each tensor, and to ensure data is synchronized between the GPU and host memory.
 The Data SDK ``utilities::Tensor`` class assists with tensor host and GPU memory management, though it may not be suitable for all applications.
+
+Measure execution time
+======================
+
+Use ``Graph::execute_timed_ext()`` to execute the active plan once and obtain an
+``ExecutionTiming`` result. Allocate buffers and workspace before the call. The call
+waits for timing to complete, but it does not perform hidden warmups or retries.
+
+Check the returned ``Error`` before using the timing:
+
+* ``DEVICE_ONLY`` means that a stall gate excluded host submission gaps.
+* ``UNSTALLED`` means that the measurement did not use the gate. Depending on the
+  runtime and engine, the event interval may include host submission time.
+* ``INVALID`` means that no usable elapsed value is available.
+
+Do not rank ``DEVICE_ONLY`` and ``UNSTALLED`` samples together. Valid elapsed values
+are finite and non-negative; zero is valid for work below the event timer's resolution.
+
+A watchdog timeout sets ``timedOut`` to true, ``quality`` to ``INVALID``, and leaves
+``elapsedMs`` empty, even if execution succeeds. It does not disable later timed
+executions. A bad ``Error`` also invalidates the timing; it does not imply that no
+device work ran.
+
+A finite negative elapsed time is a bad reading, not a failure: the call still returns
+an OK ``Error``, ``quality`` is ``INVALID``, ``elapsedMs`` is empty, and execution ran
+exactly once with no retry or replay. Only a non-finite (NaN or Inf) elapsed time is a
+backend error and returns a bad ``Error``.
+
+Python returns ``(Error, ExecutionTiming)`` from ``graph.execute_timed_ext()``. The
+corresponding result fields are ``quality``, ``timed_out``, and ``elapsed_ms``.
+
+Autotune and ingestor benchmarking discard a stalled pass on timeout or a valid
+unstalled sample, then rerun every candidate unstalled once. Each new comparison
+attempts device-only timing again. A finite negative elapsed reading during a timed
+run is instead treated as a transient invalid sample: it is replaced with a fresh
+measurement, up to two extra attempts per candidate, without disturbing the requested
+sample count or the convergence window. A third negative reading for the same
+candidate exhausts that budget, even if valid readings occurred between negatives.
+
+See :ref:`backend-api-attribute` for the low-level profiling attributes and
+backend context reuse.

@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -28,6 +29,7 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 TEST(TestGpuLayernormBwdPlanBuilder, PlanConstruction)
 {
@@ -43,7 +45,7 @@ TEST(TestGpuLayernormBwdPlanBuilder, PlanConstruction)
 
     const std::vector<int64_t> ioDims = {2, 3, 4, 5};
     const TensorLayout layout = TensorLayout::NCHW;
-    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     const int64_t normalizedDimCount = 2;
 
     auto graphBuilder = createLayernormBwdGraph(DY_UID,
@@ -59,6 +61,7 @@ TEST(TestGpuLayernormBwdPlanBuilder, PlanConstruction)
                                                 layout,
                                                 epsilon,
                                                 normalizedDimCount,
+                                                DataType::FLOAT,
                                                 DataType::FLOAT,
                                                 DataType::FLOAT,
                                                 DataType::FLOAT,
@@ -106,7 +109,7 @@ TEST(TestGpuLayernormBwdPlanBuilder, IsApplicable)
 
     const std::vector<int64_t> ioDims = {2, 3, 4, 5};
     const TensorLayout layout = TensorLayout::NCHW;
-    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     const int64_t normalizedDimCount = 2;
 
     auto graphBuilder = createLayernormBwdGraph(DY_UID,
@@ -122,6 +125,7 @@ TEST(TestGpuLayernormBwdPlanBuilder, IsApplicable)
                                                 layout,
                                                 epsilon,
                                                 normalizedDimCount,
+                                                DataType::FLOAT,
                                                 DataType::FLOAT,
                                                 DataType::FLOAT,
                                                 DataType::FLOAT,
@@ -152,16 +156,16 @@ TEST(TestGpuLayernormBwdPlanBuilder, IsApplicable)
     EXPECT_FALSE(
         halfPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
-    // Half epsilon should not be applicable for a graph with a float epsilon
+    // Half compute type builder should not be applicable for a graph with a float compute type
     const GpuLayernormBwdPlanBuilder<DataType::FLOAT,
                                      DataType::FLOAT,
                                      DataType::FLOAT,
                                      DataType::FLOAT,
                                      DataType::HALF>
-        halfEpsilonPlanBuilder;
+        halfComputePlanBuilder;
 
     EXPECT_FALSE(
-        halfEpsilonPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+        halfComputePlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
     // Missing tensor should return false
     auto tensorMapCopy = graphWrapper.getTensorMap();
@@ -176,6 +180,56 @@ TEST(TestGpuLayernormBwdPlanBuilder, IsApplicable)
 
     EXPECT_FALSE(floatPlanBuilder.isApplicable(batchnormGraphWrapper.getNode(0),
                                                batchnormGraphWrapper.getTensorMap()));
+}
+
+TEST(TestGpuLayernormBwdPlanBuilder, IsApplicableAcceptsEpsilonTypeDifferentFromComputeType)
+{
+    constexpr int64_t DY_UID = 10;
+    constexpr int64_t X_UID = 11;
+    constexpr int64_t SCALE_UID = 12;
+    constexpr int64_t DX_UID = 13;
+    constexpr int64_t DSCALE_UID = 14;
+    constexpr int64_t DBIAS_UID = 15;
+    constexpr int64_t EPSILON_UID = 16;
+    constexpr int64_t MEAN_UID = 17;
+    constexpr int64_t INV_VARIANCE_UID = 18;
+
+    const std::vector<int64_t> ioDims = {2, 3, 4, 5};
+    const TensorLayout layout = TensorLayout::NCHW;
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
+    const int64_t normalizedDimCount = 2;
+
+    auto graphBuilder = createLayernormBwdGraph(DY_UID,
+                                                X_UID,
+                                                SCALE_UID,
+                                                DX_UID,
+                                                DSCALE_UID,
+                                                DBIAS_UID,
+                                                EPSILON_UID,
+                                                MEAN_UID,
+                                                INV_VARIANCE_UID,
+                                                ioDims,
+                                                layout,
+                                                epsilon,
+                                                normalizedDimCount,
+                                                DataType::FLOAT, // dy
+                                                DataType::FLOAT, // dx/x
+                                                DataType::FLOAT, // scale/bias
+                                                DataType::FLOAT, // mean/inv_variance
+                                                DataType::FLOAT, // compute
+                                                DataType::DOUBLE // epsilon
+    );
+
+    auto graphWrapper = GraphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+    const GpuLayernormBwdPlanBuilder<DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT>
+        planBuilder;
+
+    EXPECT_TRUE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 }
 
 // ====================================================
@@ -193,7 +247,8 @@ template <typename DyType,
 void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
                             const TensorLayout& layout,
                             int64_t normalizedDimCount,
-                            float tolerance)
+                            float tolerance,
+                            DataType epsilonDataType = DataType::UNSET)
 {
     const auto normalizedDim = static_cast<int64_t>(ioDims.size()) - normalizedDimCount;
 
@@ -230,8 +285,12 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
     auto meanInvVarianceDataType = nativeTypeToDataType<MeanInvVarianceType>();
     auto computeDataType = nativeTypeToDataType<ComputeType>();
+    if(epsilonDataType == DataType::UNSET)
+    {
+        epsilonDataType = computeDataType;
+    }
 
-    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     auto graphBuilder = createLayernormBwdGraph(DY_UID,
                                                 X_UID,
                                                 SCALE_UID,
@@ -249,7 +308,8 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
                                                 dxDataType,
                                                 scaleBiasDataType,
                                                 meanInvVarianceDataType,
-                                                computeDataType);
+                                                computeDataType,
+                                                epsilonDataType);
 
     const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
@@ -289,15 +349,19 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     Tensor<ScaleBiasType> cpuDbias(normDims, normStrides);
 
     constexpr unsigned int SEED = 42;
-    dyTensor.fillWithRandomValues(static_cast<DyType>(-1.0), static_cast<DyType>(1.0), SEED);
-    xTensor.fillWithRandomValues(static_cast<DxType>(-1.0), static_cast<DxType>(1.0), SEED + 1);
-    scaleTensor.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 2);
+    fillWithRandomValues(dyTensor, static_cast<DyType>(-1.0), static_cast<DyType>(1.0), SEED);
+    fillWithRandomValues(xTensor, static_cast<DxType>(-1.0), static_cast<DxType>(1.0), SEED + 1);
+    fillWithRandomValues(
+        scaleTensor, static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 2);
     epsilonTensor.fillWithValue(static_cast<ComputeType>(LAYERNORM_DEFAULT_EPSILON));
-    meanTensor.fillWithRandomValues(
-        static_cast<MeanInvVarianceType>(-1.0), static_cast<MeanInvVarianceType>(1.0), SEED + 3);
-    rstdTensor.fillWithRandomValues(
-        static_cast<MeanInvVarianceType>(-1.0), static_cast<MeanInvVarianceType>(1.0), SEED + 4);
+    fillWithRandomValues(meanTensor,
+                         static_cast<MeanInvVarianceType>(-1.0),
+                         static_cast<MeanInvVarianceType>(1.0),
+                         SEED + 3);
+    fillWithRandomValues(rstdTensor,
+                         static_cast<MeanInvVarianceType>(-1.0),
+                         static_cast<MeanInvVarianceType>(1.0),
+                         SEED + 4);
 
     Tensor<DxType> gpuDx(ioDims, ioStrides);
     Tensor<ScaleBiasType> gpuDscale(normDims, normStrides);
@@ -393,6 +457,14 @@ TEST(TestGpuLayernormBwdPlanFp32, ExecutePlanNhwc)
 
     runPlanExecuteVsCpuRef<float, float, float, float, float>(
         {5, 4, 3, 2}, TensorLayout::NHWC, 3, layernorm::getTolerance<float>());
+}
+
+TEST(TestGpuLayernormBwdPlanFp32, ExecutePlanNchwWithDoubleEpsilon)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<float, float, float, float, float>(
+        {5, 4, 3, 2}, TensorLayout::NCHW, 3, layernorm::getTolerance<float>(), DataType::DOUBLE);
 }
 
 // =========================

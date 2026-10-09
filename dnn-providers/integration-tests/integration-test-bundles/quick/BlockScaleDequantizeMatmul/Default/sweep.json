@@ -3888,6 +3888,1476 @@
         "seed": 1,
         "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulE5M2ToFp32.Correctness_5"
       }
+    },
+    {
+      "id": "32_128_bfp16_701caf",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp4_e2m1"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp4_e2m1"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulE2M1ToBf16.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_fp16_970348",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp4_e2m1"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp4_e2m1"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulE2M1ToFp16.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_fp32_540e4d",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp4_e2m1"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp4_e2m1"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulE2M1ToFp32.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_bfp16_76bfc4",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp6_e2m3"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp6_e2m3"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulE2M3ToBf16.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_fp16_7aa252",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp6_e2m3"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp6_e2m3"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulE2M3ToFp16.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_fp32_49f7d7",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp6_e2m3"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp6_e2m3"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulE2M3ToFp32.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_bfp16_697106",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp6_e3m2"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp6_e3m2"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulE3M2ToBf16.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_fp16_ec3060",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp6_e3m2"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp6_e3m2"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulE3M2ToFp16.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_fp32_dad7fb",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp6_e3m2"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp6_e3m2"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulE3M2ToFp32.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_fp16_7cdaaf",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp4_e2m1"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp6_e2m3"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulMixedE2M1E2M3ToFp16.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_fp16_5b9d5a",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp4_e2m1"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e4m3"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulMixedE2M1E4M3ToFp16.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_fp16_94bf51",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp6_e2m3"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp4_e2m1"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulMixedE2M3E2M1ToFp16.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_fp16_39705e",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp6_e2m3"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp6_e3m2"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulMixedE2M3E3M2ToFp16.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_fp16_6ff4bd",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp6_e2m3"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e4m3"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulMixedE2M3E4M3ToFp16.Correctness_0",
+        "seed": 1
+      }
+    },
+    {
+      "id": "32_128_fp16_fe6da8",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              128
+            ],
+            "strides": [
+              1,
+              32
+            ],
+            "data_type": "fp8_e4m3"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              128,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp4_e2m1"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              32,
+              4
+            ],
+            "strides": [
+              4,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              4,
+              32
+            ],
+            "strides": [
+              32,
+              1
+            ],
+            "data_type": "fp8_e8m0"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuMxMatmulMixedE4M3E2M1ToFp16.Correctness_0",
+        "seed": 1
+      }
     }
   ]
 }

@@ -567,6 +567,105 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(param_generator_token(test_prob, adhoc_nondefault_layout_real_tokens)),
     accuracy_test::TestName);
 
+// MaxKernelStride boundary. batch 1 => dist contributes nothing to ptrdiff,
+// so buffers stay tiny while the packed dist crosses UINT32_MAX.
+// 4294967295 stays i32; 4294967296 flips to i64.
+const auto adhoc_kint_stride_boundary_tokens = {
+    // clang-format off
+    // CS_KERNEL_STOCKHAM (single-kernel 1D) 
+"complex_forward_len_64_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967295_odist_64_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_64_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967296_odist_64_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_STOCKHAM_BLOCK_CC via CS_L1D_CC 
+    "complex_forward_len_32768_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967295_odist_32768_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32768_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967296_odist_32768_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32768_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_32768_odist_4294967295_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32768_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_32768_odist_4294967296_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_2D_SINGLE 
+    "complex_forward_len_32_32_single_op_batch_1_istride_32_1_CI_ostride_32_1_CI_idist_4294967295_odist_1024_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32_32_single_op_batch_1_istride_32_1_CI_ostride_32_1_CI_idist_4294967296_odist_1024_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_STOCKHAM_BLOCK_RC via CS_3D_BLOCK_RC 
+    "complex_forward_len_128_128_128_single_op_batch_1_istride_16384_128_1_CI_ostride_16384_128_1_CI_idist_4294967295_odist_2097152_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_128_128_128_single_op_batch_1_istride_16384_128_1_CI_ostride_16384_128_1_CI_idist_4294967296_odist_2097152_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_STOCKHAM_BLOCK_CC in 3D via CS_3D_RC 
+    "complex_forward_len_64_64_64_single_op_batch_1_istride_4096_64_1_CI_ostride_4096_64_1_CI_idist_4294967295_odist_262144_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_64_64_64_single_op_batch_1_istride_4096_64_1_CI_ostride_4096_64_1_CI_idist_4294967296_odist_262144_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_BLUESTEIN_SINGLE 
+    "complex_forward_len_19_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967295_odist_19_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_19_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967296_odist_19_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_PAD_MUL (input side) and CS_KERNEL_RES_MUL (output side), multi-kernel Bluestein
+    "complex_forward_len_2053_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967295_odist_2053_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_2053_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_4294967296_odist_2053_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_2053_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_2053_odist_4294967295_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_2053_single_op_batch_1_istride_1_CI_ostride_1_CI_idist_2053_odist_4294967296_ioffset_0_0_ooffset_0_0",
+    // RTCKernelRealComplexEven (CS_KERNEL_R_TO_CMPLX / CMPLX_TO_R, fused or standalone)
+    "real_forward_len_64_single_op_batch_1_istride_1_R_ostride_1_HI_idist_8589934590_odist_33_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_64_single_op_batch_1_istride_1_R_ostride_1_HI_idist_8589934592_odist_33_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_64_single_op_batch_1_istride_1_HI_ostride_1_R_idist_33_odist_8589934590_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_64_single_op_batch_1_istride_1_HI_ostride_1_R_idist_33_odist_8589934592_ioffset_0_0_ooffset_0_0",
+    // RTCKernelRealComplex (odd length -> CS_REAL_TRANSFORM_USING_CMPLX copy kernels)
+    "real_forward_len_33_single_op_batch_1_istride_1_R_ostride_1_HI_idist_4294967295_odist_17_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_33_single_op_batch_1_istride_1_R_ostride_1_HI_idist_4294967296_odist_17_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_33_single_op_batch_1_istride_1_R_ostride_1_HI_idist_33_odist_4294967295_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_33_single_op_batch_1_istride_1_R_ostride_1_HI_idist_33_odist_4294967296_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_33_single_op_batch_1_istride_1_HI_ostride_1_R_idist_4294967295_odist_33_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_33_single_op_batch_1_istride_1_HI_ostride_1_R_idist_4294967296_odist_33_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_TRANSPOSE_CMPLX_TO_R 
+    "real_inverse_len_16_16_16384_single_op_batch_1_istride_131088_8193_1_HI_ostride_262144_16384_1_R_idist_131088_odist_8589934590_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_16_16_16384_single_op_batch_1_istride_131088_8193_1_HI_ostride_262144_16384_1_R_idist_131088_odist_8589934592_ioffset_0_0_ooffset_0_0",
+    // clang-format on
+};
+INSTANTIATE_TEST_SUITE_P(
+    adhoc_kint_stride_boundary,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_token(test_prob, adhoc_kint_stride_boundary_tokens)),
+    accuracy_test::TestName);
+
+// MaxKernelIndex boundary. Scale batch on a fully packed layout.
+// Each case allocates ~34.4 GB of VRAM for the padded side only;
+// the other side stays packed and is a few megabytes.
+const auto adhoc_kint_index_tokens = {
+    // clang-format off
+    // CS_KERNEL_STOCKHAM
+    "complex_forward_len_64_single_ip_batch_67108864_istride_1_CI_ostride_1_CI_idist_64_odist_64_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_64_single_ip_batch_67108865_istride_1_CI_ostride_1_CI_idist_64_odist_64_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_2D_SINGLE 
+    "complex_forward_len_32_32_single_ip_batch_4194304_istride_32_1_CI_ostride_32_1_CI_idist_1024_odist_1024_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32_32_single_ip_batch_4194305_istride_32_1_CI_ostride_32_1_CI_idist_1024_odist_1024_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_STOCKHAM_BLOCK_CC via CS_L1D_CC
+    "complex_forward_len_32768_single_ip_batch_131072_istride_1_CI_ostride_1_CI_idist_32768_odist_32768_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32768_single_ip_batch_131073_istride_1_CI_ostride_1_CI_idist_32768_odist_32768_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_STOCKHAM_BLOCK_RC via CS_3D_BLOCK_RC
+    "complex_forward_len_128_128_128_single_ip_batch_2048_istride_16384_128_1_CI_ostride_16384_128_1_CI_idist_2097152_odist_2097152_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_128_128_128_single_ip_batch_2049_istride_16384_128_1_CI_ostride_16384_128_1_CI_idist_2097152_odist_2097152_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_BLUESTEIN_SINGLE 
+    "complex_forward_len_19_single_ip_batch_226050910_istride_1_CI_ostride_1_CI_idist_19_odist_19_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_19_single_ip_batch_226050911_istride_1_CI_ostride_1_CI_idist_19_odist_19_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_COPY_R_TO_CMPLX
+    "real_forward_len_33_single_op_batch_1_istride_134217727_R_ostride_1_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_33_single_op_batch_1_istride_134217728_R_ostride_1_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_COPY_CMPLX_TO_R
+    "real_inverse_len_33_single_op_batch_1_istride_1_HI_ostride_134217727_R_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_33_single_op_batch_1_istride_1_HI_ostride_134217728_R_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_COPY_CMPLX_TO_HERM
+    "real_forward_len_33_single_op_batch_1_istride_1_R_ostride_268435455_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_33_single_op_batch_1_istride_1_R_ostride_268435456_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_COPY_HERM_TO_CMPLX
+    "real_inverse_len_33_single_op_batch_1_istride_268435455_HI_ostride_1_R_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_33_single_op_batch_1_istride_268435456_HI_ostride_1_R_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_R_TO_CMPLX
+    "real_forward_len_65536_single_op_batch_3_istride_1_R_ostride_1_HI_idist_4294934528_odist_32769_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_65536_single_op_batch_3_istride_1_R_ostride_1_HI_idist_4294934530_odist_32769_ioffset_0_0_ooffset_0_0",
+    // CS_KERNEL_CMPLX_TO_R
+    "real_inverse_len_65536_single_op_batch_3_istride_1_HI_ostride_1_R_idist_2147467263_odist_65536_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_65536_single_op_batch_3_istride_1_HI_ostride_1_R_idist_2147467264_odist_65536_ioffset_0_0_ooffset_0_0",
+    // clang-format on
+};
+INSTANTIATE_TEST_SUITE_P(adhoc_kint_index_boundary,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_token(test_prob,
+                                                                   adhoc_kint_index_tokens)),
+                         accuracy_test::TestName);
+
 inline auto param_even_real_odd_base_index()
 {
     std::vector<fft_params> params;

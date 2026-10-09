@@ -25,9 +25,7 @@
 #pragma once
 
 #include "rocsparse_arguments.hpp"
-#include <rocsparse/rocsparse-config.h>
 
-#ifdef ROCSPARSE_WITH_ILDLT0
 template <typename I, typename J, typename T>
 void testing_spildlt0_bad_arg(const Arguments& arg);
 
@@ -35,4 +33,3 @@ void testing_spildlt0_extra(const Arguments& arg);
 
 template <typename I, typename J, typename T>
 void testing_spildlt0(const Arguments& arg);
-#endif

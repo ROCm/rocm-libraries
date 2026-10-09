@@ -276,6 +276,11 @@ class _Verifier:
     # ---- contracts ----
 
     def _check_contract(self, op: Op, scope: Dict[str, Value]) -> None:
+        from .tf32 import tf32_op_error
+
+        error = tf32_op_error(op)
+        if error:
+            self.err(error, op)
         name = op.name
         if name in _BINARY_SAME_TYPE:
             if len(op.operands) != 2 or len(op.results) != 1:
@@ -309,6 +314,12 @@ class _Verifier:
                 self.err(
                     f"{name}: result type {op.results[0].type.name} != "
                     f"operand type {op.operands[0].type.name}",
+                    op,
+                )
+            if name == "math.tanh" and op.operands[0].type.name != "f32":
+                self.err(
+                    f"math.tanh requires f32 operand, got "
+                    f"{op.operands[0].type.name}",
                     op,
                 )
         elif name in _CMP_OPS:

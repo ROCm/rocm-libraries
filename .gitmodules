@@ -7,3 +7,8 @@
 	path = shared/tensile/HostLibraryTests/googletest
 	url = https://github.com/google/googletest.git
 	branch = master
+
+[submodule "projects/hipccl/hipccl3/libhipcxx"]
+	path = projects/hipccl/hipccl3/libhipcxx
+	url = https://github.com/ROCm/libhipcxx.git
+	branch = amd-develop

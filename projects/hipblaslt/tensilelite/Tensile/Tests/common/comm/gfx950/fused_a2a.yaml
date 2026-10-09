@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: MIT
 # Fused GEMM+A2A (FusedGemmA2A=1) config for gfx950.
 
+TestParameters:
+  marks: [skip-gfx1250, skip-gfx1250-strict] # gfx950-only
+
 GlobalParameters:
   SyncsPerBenchmark: 0
   SleepPercent: 0
@@ -42,16 +45,17 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StaggerU: [0]
-        - StreamK: [0]
+        - TileProcessingStrategy: ["None"]
         - WorkGroupMapping: [1]
         - MIArchVgpr: [False]
         - UseSubtileImpl: [True, False]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # AM is not expressible here; the client defaults it to M, which for
-          # these shapes satisfies AM%W==0, (AM/W)%MT0==0, AM%MT0==0 and AM<=M
-          # at both W=2 and W=4. Override with --fused-a2a-am to leave a local
-          # tail. M is the feature (A2A) dim, N the token dim.
+          # AM is not expressible here; the client defaults it to M. These
+          # shapes satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0 and AM<=M for
+          # W in {2, 3, 4, 6} with MT0=256. For W in {5, 7, 8} pass
+          # --fused-a2a-am with a multiple of MT0*W that is <= M.
+          # M is the feature (A2A) dim, N the token dim.
           - Exact: [3072, 512, 1, 2048]
           - Exact: [3072, 511, 1, 2048]

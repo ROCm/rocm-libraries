@@ -28,6 +28,7 @@ from rocisa.instruction import MacroInstruction, SAddCU32, SAddU32, SAndB32, \
     VCmpEQU32, VCmpGtU32, VCmpLtU32, VCmpXNeU32, VCndMaskB32, VLShiftLeftB32, \
     VMadI32I24, VMovB32, VMulLOU32, VSubI32, VSubU32
 from rocisa.functions import vectorAddMultiplyBpe, vectorMultiply64Bpe
+from .ExecutionPolicy import isPersistent
 from .Common import INDEX_CHARS, DataDirection, log2
 
 ##############################################################################
@@ -183,7 +184,7 @@ class AddrCalculation:
                           sgpr("StrideC%s"%strideChar), rowInc, tmpS01, "ROWINC- Move cinRowPtr to next row"))
                 module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrD), vgpr(kw.vgprs.coutRowPtrD), \
                           sgpr("StrideD%s"%strideChar), rowInc, tmpS01, "Move coutRowPtrD to next row"))
-            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+            if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
                 ecomment = "coutRowPtrE.la: += StrideE%s*rowInc"%strideChar if lookahead else "Move coutRowPtrE to next row"
                 module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrE), vgpr(kw.vgprs.coutRowPtrE), \
                           sgpr("StrideE%s"%strideChar), rowInc, tmpS01, ecomment))
@@ -195,7 +196,7 @@ class AddrCalculation:
                           sgpr(strideW1), rowInc, tmpS01, bcomment))
             if kw.vgprs.coutRowPtrGate != -1:
                 module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrGate), vgpr(kw.vgprs.coutRowPtrGate), \
-                            sgpr("GateStride+0"), self.rowInc, tmpS01, "Move coutRowPtrGate to next row"))
+                            sgpr("GateStride+0"), rowInc, tmpS01, "Move coutRowPtrGate to next row"))
         elif len(kernel["PackedC1IndicesX"]) > 1:
             module.add(kw.extractPackedCoord1ToRowStart(kernel, kernel["PackedC1IndicesX"] , self.coord1Vgpr, 'D'))
         return module
@@ -381,7 +382,7 @@ class AddrCalculation:
                 comment="scale element by non-unit stride"))
             elementVgpr = addrVgpr
 
-        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or kernel["StreamK"] > 0
+        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or isPersistent(kernel)
         if ss.optSingleColVgpr:
             # This is first element in the first batch, create a byte address that will
             # be re-used by subsequent elements:
@@ -764,7 +765,7 @@ class AddrCalculation:
                              comment="new rowStart address += shift column * StridesD"))
                 module.add(VCndMaskB32(dst=vgpr(kw.vgprs.coutRowPtrD), src0=vgpr(kw.vgprs.coutRowPtrD), src1=vgpr(vTmp1), src2=sgpr(sTmp1,sgprCnt), \
                              comment="set new rowStart if meet conditions" ))
-                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
                     module.add(VMadI32I24(dst=vgpr(vTmp1), src0=sgpr(strideE1), src1=vgpr(vTmp2), src2=vgpr(kw.vgprs.coutRowPtrE), \
                              comment="new rowStart address += shift column * StridesE"))
                     module.add(VCndMaskB32(dst=vgpr(kw.vgprs.coutRowPtrE), src0=vgpr(kw.vgprs.coutRowPtrE), src1=vgpr(vTmp1), src2=sgpr(sTmp1,sgprCnt), \
@@ -783,7 +784,7 @@ class AddrCalculation:
                                 comment="new lds write address += shift column * Lds byte Stride"))
                     module.add(VCndMaskB32(dst=vgpr(kw.vgprs.storeRemapLW), src0=vgpr(kw.vgprs.storeRemapLW), src1=vgpr(vTmp1), \
                                   src2=sgpr(sTmp1,sgprCnt), comment="set new rowStart if meet conditions" ))
-                    if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                    if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
                         printExit("Output E does not support StoreRemapVectorWidth")
                     if kw.vgprs.coutRowPtrBias != -1:
                         printExit("Bias reduction does not support StoreRemapVectorWidth")
@@ -798,7 +799,7 @@ class AddrCalculation:
 
         laneSGPRCount = self.kernelWriter.states.laneSGPRCount
         module = Module("emitLdChange")
-        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or kernel["StreamK"] > 0
+        isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or isPersistent(kernel)
         if kernel["BufferStore"]:
             module.add(self.emitScaleToBpe(kernel, ss, tmpVgpr, tmpSgpr, singleUpdate, tc, dim))
             if edge and (not kernel["StoreRemapVectorWidth"] or (kernel["StoreRemapVectorWidth"] and (beta or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"))) and \

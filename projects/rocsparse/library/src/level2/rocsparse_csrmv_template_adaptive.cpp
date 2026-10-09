@@ -27,6 +27,7 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_csrmv_adaptive_analysis.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "internal/generic/rocsparse_v2_spmv.h"
@@ -767,7 +768,10 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
             J last_row         = info->adaptive.last_row;
             J required_threads = (first_row - 0) + (m - last_row);
 
-            dim3 scale_blocks((required_threads - 1) / gen_wg + 1);
+            // Size the grid for the scale operation itself (previously this reused the adaptive
+            // kernel's grid). Clamp the grid; the kernel grid-strides over all required threads.
+            dim3 scale_blocks(rocsparse::get_grid_size_x(
+                handle, (static_cast<int64_t>(required_threads) - 1) / gen_wg + 1, gen_wg));
             dim3 scale_threads(gen_wg);
 #define ROCSPARSE_LAUNCH_PARTIAL_SCALE_Y(GEN_WG)                     \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                              \

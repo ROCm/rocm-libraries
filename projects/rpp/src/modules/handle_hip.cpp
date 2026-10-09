@@ -89,7 +89,7 @@ void set_ctx(hipCtx_t ctx) {
 struct HandleImpl {
     using StreamPtr = std::shared_ptr<typename std::remove_pointer<hipStream_t>::type>;
 
-    hipCtx_t ctx;
+    hipCtx_t ctx{};
     StreamPtr stream = nullptr;
     int device = -1;
     Allocator allocator{};
@@ -111,7 +111,9 @@ struct HandleImpl {
     Rpp32f* audioScratchBufferHip = nullptr;
     size_t audioScratchBufferSize = 0;
 
-    HandleImpl() : ctx(get_ctx()) {}
+    // A host handle must not initialize HIP. The GPU-facing Handle constructor
+    // initializes ctx explicitly after constructing this backend-neutral state.
+    HandleImpl() = default;
 
     static StreamPtr reference_stream(hipStream_t s) {
         return StreamPtr{s, null_deleter{}};
@@ -233,10 +235,10 @@ void Handle::SetStream(rppAcceleratorQueue_t streamID) const {
 }
 
 void Handle::rpp_destroy_object_gpu() {
-    this->rpp_destroy_object_host();
-
-    // Only touch rocFFT if it was resolved and set up for this handle; otherwise its entry
-    // points are unbound and the plan cache is necessarily empty.
+    // Before any of the memory teardown below, which ends in rpp_destroy_object_host() clearing
+    // impl. Only touch rocFFT if it was resolved and set up for this handle; otherwise its entry
+    // points are unbound and the plan cache is necessarily empty. Clearing the flag keeps this
+    // safe to re-enter if a HIP release below fails and the caller destroys the handle again.
     if (this->impl->rocfft_initialized) {
         // Destroy all cached rocFFT plans
         for (auto& cache_entry : this->impl->rocfft_plan_cache) {
@@ -251,18 +253,28 @@ void Handle::rpp_destroy_object_gpu() {
         this->impl->rocfft_initialized = false;
     }
 
-    auto status = hipFree(this->GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
-    if (status != hipSuccess) RPP_THROW_HIP_STATUS(status, "hipFree failed for scratchBufferHip");
-    status = hipHostFree(this->GetInitHandle()->mem.mgpu.scratchBufferPinned.floatmem);
-    if (status != hipSuccess)
-        RPP_THROW_HIP_STATUS(status, "hipHostFree failed for scratchBufferPinned");
-
-    delete this->GetInitHandle();
-    this->impl = nullptr;
+    auto& memory = this->GetInitHandle()->mem;
+    // A failed HIP release leaves the handle available for another destroy attempt.
+    // Never release an allocation twice or discard the remaining allocation state.
+    if (memory.mgpu.scratchBufferHip.floatmem != nullptr) {
+        auto status = hipFree(memory.mgpu.scratchBufferHip.floatmem);
+        if (status != hipSuccess)
+            RPP_THROW_HIP_STATUS(status, "hipFree failed for scratchBufferHip");
+        memory.mgpu.scratchBufferHip.floatmem = nullptr;
+    }
+    if (memory.mgpu.scratchBufferPinned.floatmem != nullptr) {
+        auto status = hipHostFree(memory.mgpu.scratchBufferPinned.floatmem);
+        if (status != hipSuccess)
+            RPP_THROW_HIP_STATUS(status, "hipHostFree failed for scratchBufferPinned");
+        memory.mgpu.scratchBufferPinned.floatmem = nullptr;
+    }
+    this->rpp_destroy_object_host();
 }
 
 void Handle::rpp_destroy_object_host() {
     free(this->GetInitHandle()->mem.mcpu.scratchBufferHost);
+    delete this->GetInitHandle();
+    this->impl = nullptr;
 }
 
 size_t Handle::GetBatchSize() const {

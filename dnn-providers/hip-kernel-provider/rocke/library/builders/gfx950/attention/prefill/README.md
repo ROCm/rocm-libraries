@@ -27,10 +27,19 @@ rocke IR DSL. Forward-only, bf16/fp16, head_dim 64/128, MHA or GQA.
   slab-padded K/V layouts. IGLP-1 owns this loop schedule and K-major PV traversal
   keeps the 256-VGPR kernel spill-free.
 
-Shape (batch / seqlen / heads / head_dim / causal / dtype) is baked at build time
-(dense, statically-sized ABI). Tile/resource knobs are `block_n`, `waves_per_eu`,
-and `lds_k_group_pad`; persistent scheduling knobs are `num_persistent`,
-`persist_decode`, `interleave`, and `wide_lds_dma`.
+Heads / head_dim / causal / dtype are baked at build time. On the aligned, unshifted path
+`batch`, `seqlen_q`, and `seqlen_kv` are **runtime kernel params** — the spec
+declares them in `runtime_param_fields`, the launcher cache key excludes them, and
+one compiled binary therefore serves every shape (see
+[runtime param field](../../../../../platform/dsl_docs/instances/attention.md#runtime-param-fields)).
+Sub-modes that still bake seqlen into the body — persistent, ragged, varlen,
+paged, sliding-window, and moving bottom-right causal — keep per-shape identity.
+Non-persistent kernels still take the shape parameters; that ABI does not make
+a baked diagonal safe to reuse for a different sequence-length difference.
+
+Tile/resource knobs are `block_n`, `waves_per_eu`, and `lds_k_group_pad`;
+persistent scheduling knobs are `num_persistent`, `persist_decode`, `interleave`,
+and `wide_lds_dma`.
 
 ## Persistent (grid-stride) mode
 
@@ -178,31 +187,48 @@ spec = Gfx950AttentionDenseSpec(
 kernel = build_attention_dense(spec)       # -> KernelDef; compile with backend="python"
 ```
 
-Through the dispatcher (opt-in; picks the persistent best-config for large Sq):
+Through the dispatcher (opt-in: pin the candidate by `algorithm` and `spec_id`,
+and optionally a swept point by `tuning_id`):
 
 ```python
-from dispatch.attention import AttentionRequest, dispatch_attention, dense_spec_for_request
+from dispatch.attention import AttentionRequest, attention_tuning_spec
 from kernels.gfx950.attention_dense import run_attention_dense_torch
 
 req = AttentionRequest(
     batch=1, nhead_q=128, nhead_k=8, seqlen_q=8192, seqlen_k=8192,
     hdim_q=128, hdim_v=128, arch="gfx950", dtype="bf16", mask_type=1,
-    algorithm="attention_dense",   # opt-in; "auto" keeps the unified 2D/3D path
-    # dense_persistent="auto"      # "auto"|"on"|"off"; auto => persistent for large Sq
-    # dense_persist_decode="auto"  # also accepts gqa_pair / gqa_pair_2phase
 )
-res  = dispatch_attention(req)                 # res.spec.kernel_name() -> ...persist256_hkvmaj
-spec = dense_spec_for_request(req)             # launch-ready best-config AttentionDenseSpec
-run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=1/128**0.5)
+tuning = attention_tuning_spec(req, "gfx950_dense_persist_widedma")
+# tuning.tuning_id replays this point; tuning.kernel_spec is the dense spec.
+run_attention_dense_torch(spec=tuning.kernel_spec, q=q, k=k, v=v, out=out, scale=1/128**0.5)
 ```
 
-`dense_persistent="auto"` turns on the persistent grid-stride variant once there is
-enough work to fill the grid (`⌈Sq/256⌉·Hq·B >= num_persistent`) — i.e. the large-Sq
-prefill regime — so the dispatcher reaches the persistent path, not the default
-grid. Aligned causal D128/BN64 shapes enable wide DMA/IGLP; auto then chooses a
-balanced pair mapping when its CTA-count equation holds. The kernel name exposes
-the decisions through `wdma`, `gqapair`, or `gqapair2` tokens. Callers may also
-request either pair mapping explicitly.
+There are two algorithms, one per body, and three candidates:
+
+| `algorithm` | `spec_id` | Body |
+|---|---|---|
+| `attention_dense_grid` | `gfx950_dense_grid` | one CTA per query block and head |
+| `attention_dense_persist` | `gfx950_dense_persist` | persistent grid-stride |
+| `attention_dense_persist` | `gfx950_dense_persist_widedma` | persistent with wide LDS DMA (D128, `block_n=64`) |
+
+Nothing is chosen for the caller: an unpinned request keeps the unified 2D/3D
+path. The tile (`block_m` 128 or 256, `block_n`) and knobs such as
+`num_persistent`, `persist_decode` (`gqa_pair` / `gqa_pair_2phase`),
+`interleave` and `waves_per_eu` are spec fields of the candidate; set them with
+`tuning_spec_with_knobs(req, spec_id, knobs)` or replay a swept `tuning_id`.
+The kernel name exposes the persistent decisions through `wdma`, `gqapair`, or
+`gqapair2` tokens.
+
+For bottom-right masking, set `mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL`
+(exported by `dispatch.attention`). With unequal Q/K lengths, only the grid
+algorithm of this standalone gfx950 dense path admits it; the persistent
+candidates reject it. Equal lengths preserve the equivalent top-left path.
+`algorithm="auto"` still uses the existing unified 2D/3D paths or their eligible
+dense-pipe/D256 candidates: those kernels already shift the causal diagonal by
+each sequence's runtime KV/query length difference. The standalone gfx942 dense
+and gfx1250 WMMA candidates still reject a moving bottom-right diagonal.
+That rejection does not disable gfx942 dense sliding-window attention: top-left
+and equal-length bottom-right requests retain the windowed path on both grids.
 
 ## Tuning — lds_k_group_pad
 

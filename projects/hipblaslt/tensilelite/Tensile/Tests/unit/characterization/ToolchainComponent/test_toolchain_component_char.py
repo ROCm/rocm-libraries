@@ -164,6 +164,40 @@ def test_assembler_call_true16_and_no_wavefront64(fixed_version, captured_invoke
     assert "+real-true16" in args
 
 
+def test_assembler_call_missing_source_does_not_crash(fixed_version, captured_invoke):
+    # srcPath need not exist for arg-construction purposes here (stubbed
+    # _invoke never touches it). _retargetAssemblySource is opportunistic and
+    # must not raise when the source can't be read -- the real assembler
+    # invocation is what should surface a genuinely-missing source, not this
+    # pre-processing helper.
+    asm = C.Assembler(Path("/x/amdclang++"), co_version="5")
+    asm("gfx942", 64, "does-not-exist.s", "out.o")
+    assert captured_invoke[0][-3:] == ["does-not-exist.s", "-o", "out.o"]
+
+
+def test_retarget_assembly_source_rewrites_mismatched_target(tmp_path):
+    src = tmp_path / "k.s"
+    src.write_text(
+        '\t.amdgcn_target "amdgcn-amd-amdhsa--gfx900:sramecc+:xnack-"\n'
+        "\tamdhsa.target: amdgcn-amd-amdhsa--gfx900:sramecc+:xnack-\n"
+        "s_endpgm\n"
+    )
+    C.Assembler._retargetAssemblySource("gfx942", str(src))
+    updated = src.read_text()
+    assert '.amdgcn_target "amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-"' in updated
+    assert "amdhsa.target: amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-" in updated
+
+
+def test_retarget_assembly_source_leaves_matching_target_untouched(tmp_path):
+    src = tmp_path / "k.s"
+    original = '\t.amdgcn_target "amdgcn-amd-amdhsa--gfx942"\ns_endpgm\n'
+    src.write_text(original)
+    mtime_before = src.stat().st_mtime_ns
+    C.Assembler._retargetAssemblySource("gfx942", str(src))
+    assert src.read_text() == original
+    assert src.stat().st_mtime_ns == mtime_before  # untouched -> no write happened
+
+
 # ---------------------------------------------------------------------------
 # Compiler
 # ---------------------------------------------------------------------------
@@ -254,23 +288,37 @@ def test_linker_call_short_no_response_file(fixed_version, captured_invoke):
 
 
 def test_linker_call_long_uses_response_file(fixed_version, captured_invoke, tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(C.Linker, "_use_response_file", lambda self, args: True)
     lk = C.Linker("/x/amdclang++", build_id_kind="sha1")
-    lk(["a.o", "b.o"], "out.co")
+    dest = tmp_path / "out.co"
+    lk(["a.o", "b.o"], str(dest))
     args = captured_invoke[0]
-    assert "@clang_args.txt" in args
-    assert (tmp_path / "clang_args.txt").read_text() == "a.o b.o"
+    assert f"@{dest}.linker_args" in args
+    assert (tmp_path / "out.co.linker_args").read_text() == "a.o b.o"
+
+
+def test_linker_response_file_is_named_after_its_code_object(fixed_version, tmp_path):
+    """Builds covering architectures that share an ISA link from one working
+    directory, so a shared response file name lets one link the other's
+    objects."""
+    lk = C.Linker("/x/amdclang++", build_id_kind="sha1")
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    lk._response_file_args(["plain.o"], str(tmp_path / "a" / "TensileLibrary.co.raw"))
+    lk._response_file_args(["strict.o"], str(tmp_path / "b" / "TensileLibrary.co.raw"))
+
+    assert (tmp_path / "a" / "TensileLibrary.co.raw.linker_args").read_text() == "plain.o"
+    assert (tmp_path / "b" / "TensileLibrary.co.raw.linker_args").read_text() == "strict.o"
 
 
 def test_linker_response_file_args_windows(fixed_version, tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(C, "os_name", "nt")
     lk = C.Linker("/x/amdclang++", build_id_kind="sha1")
-    out = lk._response_file_args(["a\\b.o", "c.o"], "out.co")
-    assert "@clang_args.txt" in out
+    dest = tmp_path / "out.co"
+    out = lk._response_file_args(["a\\b.o", "c.o"], str(dest))
+    assert f"@{dest}.linker_args" in out
     # backslashes are doubled on Windows
-    assert (tmp_path / "clang_args.txt").read_text() == "a\\\\b.o c.o"
+    assert (tmp_path / "out.co.linker_args").read_text() == "a\\\\b.o c.o"
 
 
 def test_linker_use_response_file_windows_true(fixed_version, monkeypatch):
