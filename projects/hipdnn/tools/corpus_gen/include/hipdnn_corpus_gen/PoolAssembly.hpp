@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -131,13 +132,18 @@ inline std::map<std::string, int64_t> allocate(int64_t count,
     return allocation;
 }
 
-/// @brief One entry per distinct problem (all declared parameters), earlier sources winning.
+/// @brief One entry per distinct problem, earlier sources winning.
 ///
-/// Sources @p shares disables are dropped first, so they cannot claim an enabled source's
-/// point. @p dropped receives the per-source duplicate count, for the manifest.
-inline SourcePools deduplicate(const SourcePools& pools,
-                               const std::map<std::string, double>& shares,
-                               std::map<std::string, int64_t>& dropped)
+/// Two entries are one problem when @p identity gives them the same value; by default, when
+/// every declared parameter agrees. Sources @p shares disables are dropped first, so they
+/// cannot claim an enabled source's point. @p dropped receives the per-source duplicate
+/// count, for the manifest.
+inline SourcePools deduplicate(
+    const SourcePools& pools,
+    const std::map<std::string, double>& shares,
+    std::map<std::string, int64_t>& dropped,
+    const std::function<std::string(const PoolEntry&)>& identity
+    = [](const PoolEntry& entry) { return detail::describe(entry.point); })
 {
     std::set<std::string> seen;
     SourcePools unique;
@@ -152,7 +158,7 @@ inline SourcePools deduplicate(const SourcePools& pools,
         {
             for(const auto& entry : found->second)
             {
-                if(!seen.insert(detail::describe(entry.point)).second)
+                if(!seen.insert(identity(entry)).second)
                 {
                     ++duplicates;
                     continue;

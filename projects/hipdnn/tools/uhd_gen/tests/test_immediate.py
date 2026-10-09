@@ -43,6 +43,7 @@ def measurement(*, engine=7, graph="graph", elapsed=2.0, robust=2.5, metric="tfl
         "engine_id": engine,
         "engine_name": name,
         "graph_id": graph,
+        "graph_key": graph,
         "device_id": "board",
         "arch": "gfx942",
         "binding": {

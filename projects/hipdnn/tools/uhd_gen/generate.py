@@ -28,6 +28,7 @@ from .correctness import (
     numerical_verdict,
     suppress_timings,
 )
+from .corpus_io import graph_key
 from .coverage import device_field_coverage, enforce_device_coverage, propose_features
 from .evaluate import BENCHMARK_COLUMN, problem_keys, resolve_grouping, split_problems
 from .features import (
@@ -358,30 +359,37 @@ def parse_shard(text: str) -> tuple[int, int]:
 
 
 def _measurement_key(row: dict) -> tuple:
-    """What a measurement is of: a configuration on a shape (graph id), on an arch.
+    """What a measurement is of: a configuration on a graph, on an arch.
 
-    Graph ids are content-derived, so the same geometry has the same id wherever it was
-    generated. An L1 row carries no configuration, so its key is the shape alone.
+    `benchmark` is the graph's content key, so one graph is one key however it was named or
+    generated. A collected row names its configuration by `kernel` and `knob_settings`; a
+    published row, by its `kernel.*` fields. An L1 row carries no configuration, so its key is
+    the graph alone.
     """
+    published = tuple(
+        (name, str(row[name])) for name in sorted(row) if name.startswith("kernel.")
+    )
     return (
         str(row["benchmark"]),
         str(row["arch"]),
         str(row.get("kernel")),
         str(row.get("knob_settings")),
+        published if row.get("kernel") is None else (),
     )
 
 
 def one_measurement_per_shape(measured: list) -> tuple[list, int]:
-    """Keep one measurement of each configuration on each shape: the newest session's.
+    """Keep exactly one measurement of each configuration on each graph: the newest.
 
     `measured` is `(session, row)` in measurement order; returns (rows, dropped). A repeat
-    kept twice is weighted twice and can straddle the holdout split, which keys on device.
-    A repeat under another binding is refused, not superseded, so a mix cannot hide. The
-    binding's `provider_build` is diagnostic: a rebuilt provider's measurement supersedes.
+    kept twice is weighted twice and can straddle the holdout split, which keys on device;
+    that holds for a repeat within one session too. A repeat under another binding is
+    refused, not superseded, so a mix cannot hide. The binding's `provider_build` is
+    diagnostic: a rebuilt provider's measurement supersedes.
     """
-    newest: dict = {}
+    last: dict = {}
     binding: dict = {}
-    for session, row in measured:
+    for index, (session, row) in enumerate(measured):
         key = _measurement_key(row)
         current = row.get("binding")
         if current is not None:
@@ -393,9 +401,11 @@ def one_measurement_per_shape(measured: list) -> tuple[list, int]:
                 f"{key[0]} on {key[1]} was measured under two engine bindings; "
                 "the selector or descriptor provenance changed between measurements"
             )
-        newest[key] = session
+        last[key] = index
     kept = [
-        row for session, row in measured if newest[_measurement_key(row)] == session
+        row
+        for index, (_, row) in enumerate(measured)
+        if last[_measurement_key(row)] == index
     ]
     return kept, len(measured) - len(kept)
 
@@ -627,7 +637,7 @@ def _identity(response: dict) -> tuple:
         response.get(key)
         for key in (
             "engine_id",
-            "graph_id",
+            "graph_key",
             "device_id",
             "device_arch",
             "engine_descriptor_id",
@@ -722,7 +732,7 @@ def collect_graph(
         _feature_map(candidate, "kernel_features")
         candidates.append(candidate)
     if not candidates:
-        raise ValueError(f"no matched candidates for graph {measured.get('graph_id')}")
+        raise ValueError(f"no matched candidates for graph {measured.get('graph_key')}")
     # Accumulated across graphs: one graph's catalog shows only the values its
     # candidates carry.
     if addressing_table is not None:
@@ -776,7 +786,7 @@ def collect_graph(
                 "successful timing requires a positive finite robust_time_ms"
             )
         row = {
-            "benchmark": first["graph_id"],
+            "benchmark": graph_key(first),
             "device": first["device_id"],
             "arch": first["device_arch"].split(":", 1)[0],
             "device_arch": first["device_arch"],
@@ -844,6 +854,7 @@ def collect_immediate_graph(
             f"immediate measurement was taken for metric {response.get('metric')!r}, "
             f"not the requested {metric!r}"
         )
+    graph_key(response)
     row = normalize_row(response)
     if str(row["engine"]) != command[command.index("--engine-id") + 1]:
         raise ValueError("immediate measurement returned another engine")

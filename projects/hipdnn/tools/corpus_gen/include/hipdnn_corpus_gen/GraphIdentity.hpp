@@ -4,18 +4,25 @@
 #pragma once
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 /// @file GraphIdentity.hpp
-/// @brief Content-derived names and ids for written graphs.
+/// @brief A written graph's id, and the content key that identifies it.
 ///
-/// The id must equal the manifest's `benchmark` column so bench results join to the corpus.
+/// A graph is identified by its **content key**, the kernel ingestor's `GraphContentKey`: it
+/// ignores the graph's name and id and numbers tensors by position, so two graphs that
+/// compute the same thing share it however they were made. It is the manifest's `benchmark`,
+/// the key a measurement is stored, deduplicated and held out under. Every written graph is
+/// also stamped with a stable id, since an id-less one gets a random id at load.
 namespace hipdnn_corpus_gen
 {
 
@@ -52,13 +59,31 @@ inline std::string graphIdentity(const uint8_t* data, size_t size)
     return hipdnn_flatbuffers_sdk::utilities::formatUuid(graphIdentityBytes(data, size));
 }
 
-/// The bytes of one graph and the identity it now carries.
+/// @brief The content key of a serialized graph (or of the graph inside a graph-and-plan
+/// container), as `hipdnn_bench` reports it: `GraphContentKey::hash()` in decimal.
+inline std::string graphContentKey(const uint8_t* data, size_t size)
+{
+    const auto graph
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(data,
+                                                                                         size);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey key{graph};
+    if(!key.isUsable())
+    {
+        throw std::runtime_error("graph has no verifiable serialized content to key");
+    }
+    return std::to_string(key.hash());
+}
+
+/// The bytes of one graph and the identities it now carries.
 struct IdentifiedGraph
 {
     std::vector<uint8_t> bytes;
 
-    /// The formatted id, as the bench will report it.
+    /// The formatted id written into the document.
     std::string id;
+
+    /// Its content key (@ref graphContentKey): the manifest's `benchmark`.
+    std::string key;
 
     /// The name it was given.
     std::string name;
@@ -88,6 +113,7 @@ inline IdentifiedGraph stampGraphIdentity(const std::vector<uint8_t>& bytes,
     const auto* stamped = builder.GetBufferPointer();
     return {{stamped, stamped + builder.GetSize()},
             hipdnn_flatbuffers_sdk::utilities::formatUuid(identity),
+            graphContentKey(stamped, builder.GetSize()),
             name};
 }
 

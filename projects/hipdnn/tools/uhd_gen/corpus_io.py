@@ -14,6 +14,7 @@ import pandas as pd
 
 __all__ = [
     "IDENTITY_COLUMNS",
+    "graph_key",
     "IDENTITY_DTYPES",
     "pin_identity_dtypes",
     "read_corpus_frame",
@@ -21,7 +22,20 @@ __all__ = [
 
 #: Columns that name a thing rather than measure one, in both the §8.3 envelope's and
 #: the immediate corpus's spelling; read as text even when numeric-looking.
-IDENTITY_COLUMNS = ("benchmark", "device", "graph_id", "device_id")
+IDENTITY_COLUMNS = ("benchmark", "device", "graph_id", "graph_key", "device_id")
+
+
+def graph_key(response: dict) -> str:
+    """The content key `hipdnn_bench` reports for the graph a response measured: the one
+    identity a measurement is stored, deduplicated and held out under."""
+    key = response.get("graph_key")
+    if not isinstance(key, str) or not key:
+        raise ValueError(
+            "hipdnn_bench reported no graph_key, so the graph cannot be identified by "
+            "content; rebuild hipdnn_bench from this checkout"
+        )
+    return key
+
 
 #: `dtype=` map for the CSV reader; Parquet and JSON are pinned by `pin_identity_dtypes`.
 IDENTITY_DTYPES = {name: str for name in IDENTITY_COLUMNS}

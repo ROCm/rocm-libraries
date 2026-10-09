@@ -565,8 +565,14 @@ stay in the dataset, because a candidate that could not run is information about
 space and §8.3 keeps it; they are excluded at the fit, exactly as `evaluate` excludes
 them from the oracle.
 
-**Identity columns are read as text on every route.** `benchmark`, `device`, `graph_id`
-and `device_id` name something; nothing computes with them. Left to inference a device
+**A graph is identified by its content.** A collected row's `benchmark` is the graph's
+content key, which `hipdnn_bench` reports as `graph_key` and `hipdnn_corpus_gen` records
+as the manifest's `benchmark`: it ignores the graph's name and id, so one graph is one key
+however many names it was written under, and a training set holds each measurement of it
+once.
+
+**Identity columns are read as text on every route.** `benchmark`, `device`, `graph_id`,
+`graph_key` and `device_id` name something; nothing computes with them. Left to inference a device
 called `0007` becomes the integer 7 from one format and the string `"0007"` from the
 other, and one problem becomes two.
 

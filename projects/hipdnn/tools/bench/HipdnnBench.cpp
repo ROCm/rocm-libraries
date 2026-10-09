@@ -752,7 +752,10 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
     return {};
 }
 
-int runEngineMode(hipdnnHandle_t handle, BenchGraph& graph, const Options& options)
+int runEngineMode(hipdnnHandle_t handle,
+                  BenchGraph& graph,
+                  const std::string& graphKey,
+                  const Options& options)
 {
     std::vector<KnobSetting> settings;
     settings.reserve(options.knobs.size());
@@ -855,6 +858,7 @@ int runEngineMode(hipdnnHandle_t handle, BenchGraph& graph, const Options& optio
                 = prediction.value ? nlohmann::json(*prediction.value) : nlohmann::json(nullptr);
         }
         error = engineIdentity(handle, graph, options.engineId, stream, output);
+        output["graph_key"] = graphKey;
     }
     if(error.is_good())
     {
@@ -959,9 +963,36 @@ int runBench(const std::vector<std::string>& args)
                   << "\n";
         return 1;
     }
+    // The key of the bytes read, so a corpus graph's key equals its manifest `benchmark`; a
+    // JSON graph is keyed as it serializes.
+    std::string graphKey;
+    try
+    {
+        if(looksLikeJson)
+        {
+            std::vector<uint8_t> serialized;
+            const auto written = graph.serialize(serialized);
+            if(!written.is_good())
+            {
+                std::cerr << "Could not serialize " << options.graphPath << ": "
+                          << written.get_message() << "\n";
+                return 1;
+            }
+            graphKey = hipdnn_bench::graphContentKey(serialized.data(), serialized.size());
+        }
+        else
+        {
+            graphKey = hipdnn_bench::graphContentKey(graphBytes.data(), graphBytes.size());
+        }
+    }
+    catch(const std::exception& error)
+    {
+        std::cerr << "Could not key " << options.graphPath << ": " << error.what() << "\n";
+        return 1;
+    }
     if(options.engineMode != EngineMode::NONE)
     {
-        return runEngineMode(handle, graph, options);
+        return runEngineMode(handle, graph, graphKey, options);
     }
 
     std::vector<KnobSetting> pinned;
@@ -996,7 +1027,7 @@ int runBench(const std::vector<std::string>& args)
         }
         if(options.enumerate)
         {
-            std::cout << hipdnn_bench::pageJson(catalog, graphId).dump() << "\n";
+            std::cout << hipdnn_bench::pageJson(catalog, graphKey, graphId).dump() << "\n";
             return 0;
         }
         while(catalog.nextOffset)
@@ -1166,7 +1197,7 @@ int runBench(const std::vector<std::string>& args)
 
     if(options.json)
     {
-        auto output = hipdnn_bench::pageJson(catalog, graphId);
+        auto output = hipdnn_bench::pageJson(catalog, graphKey, graphId);
         // --sweep keeps the catalog so callers need not enumerate separately; a single
         // configuration run drops it since the caller already named the tuple.
         if(!options.sweep)
