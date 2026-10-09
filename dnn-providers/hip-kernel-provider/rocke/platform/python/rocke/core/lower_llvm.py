@@ -35,7 +35,7 @@ from __future__ import annotations
 import enum
 import os
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
+from typing import Dict, FrozenSet, List, Literal, NamedTuple, Optional, Set, Tuple
 
 from .codegen_policy import codegen_policy_for_kernel
 from .dtypes import dtype_info
@@ -55,8 +55,10 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    dtype_to_ir_type,
     require_streaming_arch,
     split_loc,
+    type_bits,
 )
 
 
@@ -1482,6 +1484,23 @@ class _DebugInfo:
 # ----------------------------- lowerer -----------------------------------
 
 
+# Position of each multiplicand among an MMA op's operands (A, B, C).
+_MMA_OPERAND_INDEX = {"a": 0, "b": 1}
+_MmaOperandRole = Literal["a", "b"]
+
+
+def _mma_op_id(op: Op) -> str:
+    """The op_id of an MMA op; MMA ops reach their handlers as ``tile.<op_id>``."""
+    if not op.name.startswith("tile."):
+        raise ValueError(f"{op.name!r} is not an MMA op named 'tile.<op_id>'")
+    return op.name.removeprefix("tile.")
+
+
+def _element_type(t: Type) -> Type:
+    """The element type of a vector type, or the type itself for a scalar."""
+    return t.elem if isinstance(t, VectorType) else t
+
+
 class _Lowerer:
     def __init__(
         self,
@@ -1581,6 +1600,79 @@ class _Lowerer:
 
     def _operand_with_type(self, v: Value) -> str:
         return f"{_llvm_type(v.type)} {self._operand(v)}"
+
+    def _operand_as(self, v: Value, register_type: Type, *, operand_name: str) -> str:
+        """Return the LLVM operand text for ``v`` read as ``register_type``.
+
+        A value whose LLVM type is already ``register_type`` passes through
+        unchanged. A value of the same bit width is reinterpreted with one
+        ``bitcast``; its bits are never converted, padded or truncated. Any
+        other value raises, naming ``operand_name`` in the message.
+        """
+        value_llvm, register_llvm = _llvm_type(v.type), _llvm_type(register_type)
+        if value_llvm == register_llvm:
+            return self._operand(v)
+        value_bits, register_bits = type_bits(v.type), type_bits(register_type)
+        if value_bits != register_bits:
+            raise ValueError(
+                f"{operand_name} is {v.type.name} ({value_bits} bits); the "
+                f"instruction takes {register_llvm} ({register_bits} bits) -- pass "
+                f"a {register_bits}-bit value"
+            )
+        reinterpreted = self._fresh("reg")
+        self._current().emit(
+            f"  {reinterpreted} = bitcast {value_llvm} {self._operand(v)} "
+            f"to {register_llvm}"
+        )
+        return reinterpreted
+
+    @staticmethod
+    def _mma_operand_value(op: Op, role: _MmaOperandRole) -> Value:
+        """MMA operand ``role`` ("a" or "b") of ``op``."""
+        return op.operands[_MMA_OPERAND_INDEX[role]]
+
+    @staticmethod
+    def _mma_operand_label(op: Op, role: _MmaOperandRole) -> str:
+        """How errors name MMA operand ``role`` of ``op``."""
+        return f"MMA operand {role} of {_mma_op_id(op)!r}"
+
+    def _mma_operand_elements(
+        self, op: Op, role: _MmaOperandRole, register_type: Type
+    ) -> frozenset[Type]:
+        """The element types MMA operand ``role`` may hold in another shape.
+
+        They are the register's own element type (a reshape, such as
+        ``<1 x float>`` for ``float``) and the element type the target's MMA
+        catalog records for that operand (the instruction's packed values,
+        such as ``<16 x i8>`` for ``<4 x i32>``).
+        """
+        elements = {_element_type(register_type)}
+        catalog_op = self._backend.arch.mma.by_op_id(_mma_op_id(op))
+        if catalog_op is not None:
+            dtype = catalog_op.a_dtype if role == "a" else catalog_op.b_dtype
+            elements.add(dtype_to_ir_type(dtype))
+        return frozenset(elements)
+
+    def _mma_operand(self, op: Op, role: _MmaOperandRole, register_type: Type) -> str:
+        """Return MMA operand ``role`` as the instruction's register type.
+
+        An operand of the register type passes through unchanged. An operand
+        of another shape is reinterpreted with one ``bitcast`` only when it
+        holds one of :meth:`_mma_operand_elements`; any other element type is
+        a different number format and raises instead of being reinterpreted.
+        """
+        value = self._mma_operand_value(op, role)
+        label = self._mma_operand_label(op, role)
+        if _llvm_type(value.type) != _llvm_type(register_type):
+            element = _element_type(value.type)
+            allowed = self._mma_operand_elements(op, role, register_type)
+            if element not in allowed:
+                names = " or ".join(sorted(t.name for t in allowed))
+                raise ValueError(
+                    f"{label} holds {element.name} values; the instruction takes "
+                    f"{names} -- convert the values first"
+                )
+        return self._operand_as(value, register_type, operand_name=label)
 
     @staticmethod
     def _composed_constant(value: int | float, ty: Type, ity: str) -> Value:
@@ -3373,23 +3465,27 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
-        a, b, c = op.operands
+        c = op.operands[2]
         self._need("mfma.f32.16x16x4f32")
+        a_arg = self._mma_operand(op, "a", F32)
+        b_arg = self._mma_operand(op, "b", F32)
         self._current().emit(
             f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
-            f"float {self._operand(a)}, "
-            f"float {self._operand(b)}, "
+            f"float {a_arg}, "
+            f"float {b_arg}, "
             f"<4 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
 
     def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
-        a, b, c = op.operands
+        c = op.operands[2]
         self._need("mfma.f32.32x32x2f32")
+        a_arg = self._mma_operand(op, "a", F32)
+        b_arg = self._mma_operand(op, "b", F32)
         self._current().emit(
             f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x2f32("
-            f"float {self._operand(a)}, "
-            f"float {self._operand(b)}, "
+            f"float {a_arg}, "
+            f"float {b_arg}, "
             f"<16 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
