@@ -19,8 +19,69 @@
 // the loader waves can run ahead instead of meeting the compute waves at a workgroup
 // barrier every K step.
 //
+// MEMORY ORDERING. A barrier built from bare S_BARRIER_SIGNAL/S_BARRIER_WAIT is not enough to
+// keep a ring correct: a consumer loop whose only reads are plain ds_loads, with no write the
+// optimiser can attribute to the loop body, is loop-invariant by inspection, and LICM has been
+// observed to hoist those loads clean out of it. The kernel then multiplies one stale register
+// set across every K step: wrong results, no fault, no hang. Reproduced on this toolchain at
+// -O3, NumSlots=2, as 30/90 gtest failures (~99.95% of elements wrong, non-deterministic).
+//
+// That is one consequence of the missing fence, at the IR level. A later attempt to ship
+// without the fences below reproduced a SECOND, instruction-level consequence on real hardware:
+// without a release fence, a signal can land while this wave's own DS access is still in
+// flight, so a peer's wait returns and reuses the slot underneath it -- a hardware race, not an
+// optimiser decision, and the shape of failure that hangs a ring instead of merely computing it
+// wrong. Reproduced as HANGS concentrated in deep-K shapes at NumSlots=3, where more ring
+// iterations mean more chances to hit the window. See the hardware bullet below for the ISA.
+//
+// The exact LLVM-level mechanism is NOT settled. The s_barrier_* intrinsics are declared
+// IntrNoMem in IntrinsicsAMDGPU.td, which would suggest they order execution only -- but the
+// attribute group Clang actually emits for them carries no memory(...) attribute at all, which
+// defaults to a full memory(readwrite) clobber in LLVM IR, and a full clobber should already
+// have blocked this exact hoist. It did not: disassembly of the unfenced build shows loops with
+// the barrier calls present and zero ds_load. So whatever blocks or permits the hoist is
+// resolved below the IR LICM pass this file used to blame -- plausibly MachineLICM or another
+// machine-level pass -- and that is not yet identified. Do not re-cite IntrNoMem as the
+// settled explanation; the fences below are empirically necessary and sufficient regardless of
+// which pass the unfenced build was actually losing to.
+//
+// named_barrier_signal and named_barrier_wait therefore carry an explicit release/acquire
+// fence, which is how __syncthreads() itself is built (fence(release); s_barrier;
+// fence(acquire)) rather than as a bare barrier. The fence gives the signal no memory order of
+// its own -- a fence has none to give, and there is no atomic here to pair with -- it orders
+// this wave's prior accesses against the barrier's completion, and the hardware's completion
+// rule (cited on named_barrier_signal) supplies the rest. Any new primitive added here must do
+// the same.
+//
+// What the fence does and does not buy, on gfx1250 (established by compile probe, -O3):
+//   - It has TWO effects, and the HARDWARE one is the larger. A release fence is what makes
+//     s_barrier_signal wait for this wave's own in-flight DS traffic: without it, disassembly
+//     of this exact header shows a consumer's ds_load (or a producer's ds_store) followed
+//     directly by s_barrier_signal with no drain between them -- the signal lands, the peer's
+//     wait returns, and the peer overwrites or re-reads that slot while the original access is
+//     still outstanding. That is a hardware race with nothing for an optimiser pass to do with
+//     it, and unlike the LICM hoist above (which corrupts results silently) a slot reused under
+//     an in-flight access is the shape of failure that deadlocks a ring -- the likelier
+//     explanation for hangs reproduced on hardware at deeper K, where more ring iterations mean
+//     more chances to hit the race window.
+//   - Its hardware effect at "workgroup" scope is a drain of this wave's own outstanding
+//     counters before the signal: s_wait_dscnt 0x0 for a pending DS access (load OR store),
+//     s_wait_storecnt 0x0 for a pending global store, or the fused s_wait_storecnt_dscnt 0x0 for
+//     both. A wave with nothing in flight, and a wave whose only LDS writes are asynchronous
+//     (TENSOR_LOAD_TO_LDS), get no instruction at all from the fence.
+//   - Its other effect is on the OPTIMISER: it is a barrier to every memory access LLVM can
+//     see, so LICM and GVN cannot move an LDS access across it. That holds regardless of tile
+//     shape, dtype, wave count or register pressure -- unlike the hoist itself, which only
+//     some of those conditions trigger.
+//   - It emits NO s_wait_tensorcnt at any scope: the memory legaliser does not model TENSORcnt.
+//     An asynchronous producer MUST still drain its own counter before publishing; the fence
+//     is not a substitute for that wait and never will be. See producer::publish() below.
+//   - "workgroup" is the correct scope and is not a knob. At "agent" the same fence emits
+//     global_wb / global_inv scope:SCOPE_DEV, invalidating the vector L0 on every ring step --
+//     pure loss, since the ring never leaves one work-group's LDS.
+//
 // ABI, as emitted by the gfx1250 backend (established by compile probe, not by published
-// documentation -- see the UNVERIFIED note on named_barrier_signal before relying on it):
+// documentation -- the completion semantics it rests on are cited on named_barrier_signal):
 //   - The compiler assigns ids, not the programmer: within a kernel, the i'th element of a
 //     named barrier array is id i+1. Numbering restarts per kernel, so two kernels may each
 //     size their array independently.
@@ -29,9 +90,9 @@
 //   - S_BARRIER_SIGNAL and S_BARRIER_WAIT encode the id as a literal, so ids must be
 //     compile-time constants and cannot be recovered from the object.
 //   - Named barriers are a separate hardware pool and cost no group-segment bytes. A kernel
-//     reserves ceil(extent / 4) groups, driven by the array's EXTENT, not by how many
-//     barriers it actually uses -- so the array is sized to the pipeline, not to the
-//     hardware maximum.
+//     reserves ceil(extent / kNamedBarrierGroupSize) groups, driven by the array's EXTENT, not
+//     by how many barriers it actually uses -- so the array is sized to the pipeline, not to
+//     the hardware maximum.
 //
 // Why a kernel may hold only one array. Ids are handed out per array in allocation order,
 // which the front end cannot observe, so a second array leaves S_BARRIER_SIGNAL/WAIT pointing
@@ -72,8 +133,7 @@
 //                 if(get_warp_id() < kNumConsumerWaves)  // wave-uniform role selection
 //                 {
 //                     ring::consumer::run(bar, num_steps, [&](auto slot, index_t step) {
-//                         consume(slots[slot], step);
-//                         __threadfence_block();         // retire the reads before release
+//                         consume(slots[slot], step);    // no fence here: release() carries one
 //                     });
 //                 }
 //                 else
@@ -82,7 +142,12 @@
 //                         bar,
 //                         num_steps,
 //                         [&](auto slot, index_t step) { fill(slots[slot], step); },
-//                         [](auto) { __threadfence_block(); });  // retire the stores
+//                         // The retire hook, and the ONLY thing that covers an asynchronous
+//                         // fill: the release fence inside publish() does not drain TENSORcnt.
+//                         // A synchronous ds_write fill needs nothing here.
+//                         [](auto in_flight) {
+//                             s_wait_tensorcnt<decltype(in_flight)::value>();
+//                         });
 //                 }
 //             }
 //         }
@@ -98,15 +163,54 @@
 
 namespace ck_tile {
 
-/** Conservative policy cap on named barrier ids. NOT a verified hardware limit: this toolchain
- * emits ids past 15 (the m0 id field is 6 bits) and reserves up to 7 groups.
+/** Named barrier id space.
+ *
+ * VERIFIED against the gfx1250 ISA Reference Guide. Table 21 (Barrier ID's) assigns ids
+ * 1-16 to work-group named barriers, with id 0 reserved as the "Named Barrier Null"; sec. 5.6.2
+ * states a work-group "may allocate up to 16 additional barriers", drawn "out of a pool of 64
+ * per WGP".
+ *
+ * INFERRED, not quoted: because the pool is per WGP and each work-group's allocation is
+ * exclusive, two co-resident work-groups cannot alias each other's ids (64 / 16 => at most four
+ * fully-allocated work-groups per WGP). The ISA does not state this consequence directly.
+ *
+ * @note kMaxNamedBarrierId is deliberately one BELOW the hardware maximum: the ISA permits id 16,
+ * this header caps at 15. That costs the (NumSlots, NumProducerWaves) pairs needing exactly 16
+ * barriers -- e.g. <4,3> and <8,1>. Raising it to 16 is a behaviour change: it admits new ring
+ * shapes, so it must go through the host replay in test_barrier.cpp before it is relied upon.
+ *
+ * @warning The hardware gives no help if this bound is got wrong. Sec. 5.6.3: "Attempting to use
+ * named barriers not allocated to this wave results in S_NOP behavior"; sec. 5.6.5.3: "Barrier
+ * instructions that reference barrier ID's that are out-of-range ... are ignored." An off-by-one
+ * at the top of the id space is a silently dropped signal and a hang, never a fault. Note too
+ * that 16 barriers is 4 of the 64-per-WGP pool's groups, capping co-resident work-groups per WGP
+ * at 4 -- an occupancy cliff that must be measured, not reasoned about.
  */
 inline constexpr index_t kNumNamedBarriers  = 16;
 inline constexpr index_t kMaxNamedBarrierId = kNumNamedBarriers - 1;
 
-/// .amdhsa_named_barrier_count counts groups of 4 and saturates at 7. At 8 groups it wraps to
-/// 0 with no diagnostic, and the kernel then signals barriers it never reserved.
-inline constexpr index_t kMaxNamedBarrierGroups = 7;
+/** Barriers are allocated in groups of 4 (ISA sec. 5.6.5.2). Two DIFFERENT limits apply here and
+ * they are not the same number:
+ *   - a work-group may allocate at most 4 groups (16 barriers)  -- ISA sec. 5.6.2, the hardware
+ *   - .amdhsa_named_barrier_count is a 3-bit kernel-descriptor field, so it saturates at 7 groups
+ *     and wraps silently beyond that                            -- the encoding, not the hardware
+ *
+ * Assert against the former: it is the binding one, and it stays binding if kMaxNamedBarrierId is
+ * ever raised as the NOTE above invites. Asserting only against 7 would admit 28 barriers, twelve
+ * past what a work-group may allocate.
+ *
+ * @note the per-pipeline assert below is unreachable while kMaxNamedBarrierId caps a pipeline at
+ * 15 barriers (ceil(15 / 4) = 4 groups); it is retained as insurance for raising that cap. The
+ * RELATIONAL assert is the one that can fire today, and it guards the direction that actually
+ * has no other check: widening the hardware cap past what the descriptor field can encode.
+ */
+inline constexpr index_t kNamedBarrierGroupSize     = 4;
+inline constexpr index_t kMaxNamedBarrierGroups     = 4;
+inline constexpr index_t kMaxNamedBarrierCountField = 7;
+
+static_assert(kMaxNamedBarrierGroups <= kMaxNamedBarrierCountField,
+              "the group cap must stay inside the 3-bit .amdhsa_named_barrier_count field, which "
+              "saturates at 7 groups and wraps silently past it");
 
 /** True only in a gfx125x DEVICE pass.
  *
@@ -181,10 +285,10 @@ CK_TILE_DEVICE void named_barrier_init(named_barrier (&pool)[N], uint32_t member
 {
     static_assert(1 <= Id && Id <= N, "named barrier id outside the pool backing it");
     ignore = pool;
+    ignore = member_count;
 #if defined(__gfx125__)
     __builtin_amdgcn_s_barrier_init(&pool[Id - 1], member_count);
 #else
-    ignore = member_count;
     static_assert(always_false_v<number<Id>>, "named barriers require gfx1250 or later");
 #endif
 }
@@ -204,10 +308,17 @@ CK_TILE_DEVICE void named_barrier_join(named_barrier (&pool)[N])
 
 /* Arrive without blocking. This is the run-ahead side of the handshake.
  *
- * UNVERIFIED, and load-bearing for every handshake in this header: that a signal from a wave
- * which never joined still counts toward the generation's member_count. Both the DATA and the
- * FREE protocols rely on it. It matches observed codegen but is not confirmed by published
- * gfx1250 documentation; if it is false the rings deadlock universally, not marginally.
+ * Load-bearing for every handshake in this header: a signal from a wave which never joined
+ * still counts toward the generation's member_count. Both the DATA and the FREE protocols
+ * rely on it.
+ *
+ * VERIFIED against the gfx1250 Instruction Set Architecture Reference Guide, sec. 5.6.5.3
+ * (Using Named Barriers): "Completing a barrier occurs when the barrier has been signaled as
+ * many times as its member count (it does not track which waves have signaled, only the count)."
+ * Sec. 5.6.5.5 adds: "Waves may signal any barrier, not just the one they have joined but they
+ * only receive notification for the joined barrier's completion."
+ *
+ * Carries a release fence (see MEMORY ORDERING in the file header); it is not a bare arrive.
  */
 template <index_t Id, index_t N>
 CK_TILE_DEVICE void named_barrier_signal(named_barrier (&pool)[N])
@@ -215,6 +326,12 @@ CK_TILE_DEVICE void named_barrier_signal(named_barrier (&pool)[N])
     static_assert(1 <= Id && Id <= N, "named barrier id outside the pool backing it");
     ignore = pool;
 #if defined(__gfx125__)
+    // The release half of the handshake; see MEMORY ORDERING in the file header for why a bare
+    // s_barrier_signal is not enough. Must precede the signal: it is what the peers' waits
+    // acquire against. It releases only what this wave itself wrote, and emits no
+    // s_wait_tensorcnt -- an asynchronous producer must still drain its own fills before it
+    // reaches here. See publish().
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
     __builtin_amdgcn_s_barrier_signal(Id);
 #else
     static_assert(always_false_v<number<Id>>, "named barriers require gfx1250 or later");
@@ -228,7 +345,17 @@ CK_TILE_DEVICE void named_barrier_wait(named_barrier (&pool)[N])
     static_assert(1 <= Id && Id <= N, "named barrier id outside the pool backing it");
     ignore = pool;
 #if defined(__gfx125__)
-    __builtin_amdgcn_s_barrier_wait(Id);
+    // The cast is deliberate: llvm.amdgcn.s.barrier.wait takes an i16 immediate while
+    // s.barrier.signal takes i32, so the two calls are asymmetric despite reading alike.
+    // Truncation is impossible today (the static_assert above bounds Id by the pool extent,
+    // which kMaxNamedBarrierId caps at 15) -- but that bounds Id against the POOL, not against
+    // this field's width, and an out-of-range id is silently ignored by the hardware rather
+    // than faulting. Spell the width out at the call site.
+    __builtin_amdgcn_s_barrier_wait(static_cast<int16_t>(Id));
+    // The acquire half: everything the peers released before completing this generation must
+    // be visible to loads issued after this point, and those loads must not be hoisted above
+    // it. See MEMORY ORDERING in the file header.
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
 #else
     static_assert(always_false_v<number<Id>>, "named barriers require gfx1250 or later");
 #endif
@@ -488,10 +615,12 @@ struct named_barrier_slot_ring
                 named_barrier_pool<Pipeline>());
         }
 
-        /** Announce that this slot is filled. Never blocks, which is what lets the producer run
-         * ahead. The caller must have retired the slot's stores first; the ring issues no drain
-         * of its own, and __threadfence_block() does not wait for async global-to-LDS DMA, so
-         * an async loader must drain its own counter before publishing.
+        /** Announce that this slot is filled. Never blocks on a peer, which is what lets the
+         * producer run ahead (the release fence inside named_barrier_signal may still wait on
+         * this wave's own DS traffic). That fence orders this wave's prior stores before the
+         * signal, but it has no reach into TENSORcnt: an asynchronous fill (e.g. TDM) must
+         * still drain its own counter before this call, which is why run()'s retire hook
+         * exists.
          */
         template <index_t Slot>
         CK_TILE_DEVICE static void publish(token)
@@ -524,8 +653,10 @@ struct named_barrier_slot_ring
             named_barrier_arrive_and_wait<data_id<Slot>()>(named_barrier_pool<Pipeline>());
         }
 
-        /** Hand this slot back to every producer. Never blocks. The caller must have retired
-         * the slot's loads first, or the producers race the reads.
+        /** Hand this slot back to every producer. Never blocks on a peer. named_barrier_signal's
+         * own release fence retires this wave's reads of the slot before the signal, so unlike
+         * publish() there is nothing left for the caller: consumer reads are always synchronous
+         * ds_loads, and the fence covers those completely.
          */
         template <index_t Slot>
         CK_TILE_DEVICE static void release(token)
@@ -596,9 +727,10 @@ struct named_barrier_pipeline
     static_assert(kNumBarriers <= kMaxNamedBarrierId,
                   "the pipeline needs more named barriers than the hardware has: reduce slots "
                   "or producer waves");
-    // Implied by the cap above as it stands; it guards against raising kNumNamedBarriers.
-    static_assert((kNumBarriers + 3) / 4 <= kMaxNamedBarrierGroups,
-                  "the pool would overflow amdhsa_named_barrier_count, which wraps silently");
+    static_assert((kNumBarriers + kNamedBarrierGroupSize - 1) / kNamedBarrierGroupSize <=
+                      kMaxNamedBarrierGroups,
+                  "the pipeline needs more named barrier groups than a work-group may "
+                  "allocate: reduce slots or producer waves");
 
     /// Named barriers cost no LDS; this exists so a consumer can aggregate it uniformly.
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return 0; }

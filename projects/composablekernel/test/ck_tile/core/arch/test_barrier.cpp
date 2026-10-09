@@ -171,7 +171,7 @@ namespace {
 // run() hands the protocol to drivers that are generic over their role operations, so the host
 // can record exactly the handshakes a kernel issues and replay every wave's log against a model
 // of the barrier semantics under many interleavings. The model encodes what named_barrier.hpp
-// assumes, the UNVERIFIED part included: a generation completes on its member_count-th signal
+// assumes, signal-without-join included: a generation completes on its member_count-th signal
 // whether or not the signallers joined it. Passing here proves the protocol sound under those
 // semantics, not that the hardware has them.
 
@@ -504,9 +504,16 @@ TEST(NamedBarrierRingProtocol, SoundForEveryStepCountAndInterleaving)
     expect_protocol_sound<ring_spec<3, 2, 2>, 0>();
     expect_protocol_sound<ring_spec<3, 2, 2>, 1>();
     expect_protocol_sound<ring_spec<3, 2, 2>, 2>();
-    // The producer/consumer GEMM test's ring: default policy, A/B loaders, 2x2 consumer warps.
-    expect_protocol_sound<ring_spec<3, 2, 4>, 0>();
+    // The producer/consumer GEMM test's rings: default policy <NumSlots=3, PublishLag=0>, two
+    // A/B loader waves. [2, 2, 1] is what the fixture instantiates; [4, 4, 1] is forward
+    // coverage for the 16-consumer-wave shape the tile engine can still generate. The consumer
+    // count is the only input to the member counts the hardware barriers are armed with
+    // (kDataMemberCount = producers + consumers, kFreeMemberCount = 1 + consumers), so both
+    // must be replayed or one arming is unmodelled.
+    expect_protocol_sound<ring_spec<3, 2, 4>, 0>(); // [2, 2, 1] warps
     expect_protocol_sound<ring_spec<3, 2, 4>, 1>();
+    expect_protocol_sound<ring_spec<3, 2, 16>, 0>(); // [4, 4, 1] warps
+    expect_protocol_sound<ring_spec<3, 2, 16>, 1>();
     expect_protocol_sound<ring_spec<4, 2, 1>, 3>();
     expect_protocol_sound<ring_spec<5, 2, 2>, 0>();
     expect_protocol_sound<ring_spec<5, 2, 2>, 4>();
