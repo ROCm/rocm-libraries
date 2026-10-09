@@ -25,6 +25,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestSerializableSourceKind.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdAotSelection.cpp
 )
 
 # The schema hash test compares the pinned constant with the hash of the schema file. Line

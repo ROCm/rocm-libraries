@@ -33,6 +33,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdAotSelection.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine
@@ -775,6 +776,37 @@ double aotScore(const MatchContext& context,
                                   launch->geometry);
 }
 
+/// Which of the instances serving a graph run: the CandidateFilterFn registered under the
+/// kernel matcher's symbol, so it sees every instance aotKernelMatches admitted at once.
+/// Among implicit-GEMM instances it is rocKE's own runtime selection
+/// (conv::widestVectorSelection); "serves" is the capability, this is the policy. rocKE's
+/// direct benchmark runs every direct kernel that serves, so direct instances all stay.
+std::vector<bool> aotCandidateFilter(const MatchContext& /*context*/,
+                                     const BoundTokens& /*bound*/,
+                                     const std::vector<const KernelDefinition*>& candidates)
+{
+    std::vector<bool> keep(candidates.size(), true);
+    std::vector<size_t> implicitGemm;
+    std::vector<conv::AotSelectionKey> keys;
+    for(size_t i = 0; i < candidates.size(); ++i)
+    {
+        const auto instance = aotInstance(*candidates[i]);
+        const auto* gemm = instance ? std::get_if<conv::AotInstance>(&*instance) : nullptr;
+        const auto* epilogue = stringMetadata(*candidates[i], "epilogue");
+        if(gemm != nullptr && epilogue != nullptr)
+        {
+            implicitGemm.push_back(i);
+            keys.push_back({*epilogue, gemm->vectorA, gemm->vectorB, gemm->vectorC});
+        }
+    }
+    const auto selected = conv::widestVectorSelection(keys);
+    for(size_t j = 0; j < implicitGemm.size(); ++j)
+    {
+        keep[implicitGemm[j]] = selected[j];
+    }
+    return keep;
+}
+
 /// How one engine of this pack admits a kernel for a matched graph and launches it:
 /// kernelFits for hipkernel:Gfx950ConvFwd, aotKernelFits for hipkernel:Gfx950ConvFwdAot.
 using KernelFits = std::optional<ConvLaunch> (*)(const MatchedProblem&, const KernelDefinition&);
@@ -1046,6 +1078,7 @@ void registerGfx950ConvFwdAotSymbols(SymbolScope<Handle>& scope)
     // Both engines read the graph the same way; only the kernels they admit differ.
     scope.add(std::string(AOT_GRAPH_MATCHER_SYMBOL), &graphMatches);
     scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotKernelMatches);
+    scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotCandidateFilter);
     scope.add(std::string(AOT_SCORE_SYMBOL), &aotScore);
     scope.add(std::string(AOT_DISPATCH_SYMBOL), &aotDispatchHandler());
 }
