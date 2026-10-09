@@ -462,6 +462,10 @@ if(NOT MIOPEN_ENABLE_SQLITE)
     list(APPEND EXCLUDE_TESTS test_sqlite)
 endif()
 
+# Registered manually below (it drives hiprtc directly and must not link
+# MIOpen_with_plugins), so keep it out of the add_test_executable glob.
+list(APPEND EXCLUDE_TESTS test_hiprtc_selfcontained)
+
 if(NOT MIOPEN_TEST_ENABLE_TEST_SQLITE_PERFDB)
     list(APPEND EXCLUDE_TESTS test_sqlite_perfdb)
     message(STATUS "Flaky test_sqlite_perfdb currently disabled (May 28 2025)")
@@ -485,6 +489,131 @@ foreach(TEST_SOURCE ${TEST_SOURCES})
     get_filename_component(BASE_NAME ${TEST_SOURCE} NAME_WE)
     add_test_executable(test_${BASE_NAME} ${TEST_SOURCE})
 endforeach()
+
+# HIPRTC kernel self-containment regression (compile-only; no GPU needed).
+# Compiles the real MIOpenBatchNormFwdTrainSpatial.cpp - the kernel whose
+# RTC failure reported the bug - through hiprtc with the host C++
+# standard library unreachable: passes only when that kernel's include
+# closure stays self-contained (the __has_include/freestanding headers)
+# and produces a non-empty code object. The other self-containment sites
+# (miopen_utility.hpp, radix.hpp, tensor_view.hpp) are not compiled by
+# this default suite; they belong to the A/B validation harnesses, like
+# the negative control. A host that cannot reproduce the no-STL
+# condition at all (the test's embedded probe still sees standard
+# headers under isolation) reports the run as skipped, never as a pass.
+# Registered by hand rather than via add_test_executable because the
+# test must not link MIOpen_with_plugins - it exercises hiprtc exactly
+# like the runtime compile path, without MIOpen itself in the process.
+if(MIOPEN_USE_HIPRTC)
+    add_executable(test_hiprtc_selfcontained EXCLUDE_FROM_ALL hiprtc_selfcontained.cpp)
+    clang_tidy_check(test_hiprtc_selfcontained)
+    # Link whichever hiprtc target the package actually exports: modern
+    # ROCm CMake packages export the namespaced hiprtc::hiprtc imported
+    # target (include dirs + link location); the plain name is only a
+    # fallback for packages that export no namespaced target. (The
+    # MIOpen implementation target survives the plain name only because
+    # it also links hip::host/hip::device, which carry the search paths;
+    # this test deliberately links nothing else.)
+    if(TARGET hiprtc::hiprtc)
+        target_link_libraries(test_hiprtc_selfcontained PRIVATE hiprtc::hiprtc)
+    else()
+        target_link_libraries(test_hiprtc_selfcontained PRIVATE hiprtc)
+    endif()
+    if(WIN32)
+        target_compile_definitions(test_hiprtc_selfcontained PRIVATE NOMINMAX)
+    endif()
+    # Configure-time target architecture for the compile-only invocation:
+    # explicit cache override first, else the first configured GPU target
+    # (feature suffix stripped), else CMAKE_HIP_ARCHITECTURES. gfx1151 is
+    # the test's built-in last resort.
+    set(MIOPEN_TEST_HIPRTC_ARCH "" CACHE STRING "AMDGPU target for test_hiprtc_selfcontained")
+    set(_hiprtc_test_arch "${MIOPEN_TEST_HIPRTC_ARCH}")
+    if(_hiprtc_test_arch STREQUAL "")
+        if(GPU_TARGETS)
+            list(GET GPU_TARGETS 0 _hiprtc_test_arch)
+        elseif(CMAKE_HIP_ARCHITECTURES)
+            list(GET CMAKE_HIP_ARCHITECTURES 0 _hiprtc_test_arch)
+        endif()
+        string(FIND "${_hiprtc_test_arch}" ":" _hiprtc_test_arch_feat)
+        if(NOT _hiprtc_test_arch_feat EQUAL -1)
+            string(SUBSTRING "${_hiprtc_test_arch}" 0 ${_hiprtc_test_arch_feat} _hiprtc_test_arch)
+        endif()
+    endif()
+    # Same selection policy as add_test_command (SKIP_TESTS /
+    # SKIP_ALL_EXCEPT_TESTS), so restricted legs (e.g. MIOPEN_NO_GPU)
+    # keep disabling this test like any other.
+    if( (NOT (test_hiprtc_selfcontained IN_LIST SKIP_ALL_EXCEPT_TESTS) AND SKIP_ALL_EXCEPT_TESTS)
+        OR (test_hiprtc_selfcontained IN_LIST SKIP_TESTS))
+        add_test(NAME test_hiprtc_selfcontained COMMAND echo skipped)
+        set_tests_properties(test_hiprtc_selfcontained PROPERTIES DISABLED On)
+    elseif(NOT _hiprtc_test_arch STREQUAL "")
+        add_test(NAME test_hiprtc_selfcontained
+                 COMMAND test_hiprtc_selfcontained
+                         ${CMAKE_CURRENT_SOURCE_DIR}/../src/kernels
+                         --arch=${_hiprtc_test_arch})
+    else()
+        add_test(NAME test_hiprtc_selfcontained
+                 COMMAND test_hiprtc_selfcontained
+                         ${CMAKE_CURRENT_SOURCE_DIR}/../src/kernels)
+    endif()
+    # Registered directly rather than through add_test_command: the
+    # helper's MIOPEN_TEST_GDB wrapper (default On for non-WIN32) folds
+    # every nonzero exit into a generic failure, so this test's exit
+    # code - the verdict itself - would never reach CTest and exit 4
+    # below could never be recognized. Exit 4 means this host cannot
+    # reproduce the no-STL condition (the embedded probe still sees
+    # standard headers under isolation): report that as skipped, not
+    # failed. Capability-aware, not platform-aware: hosts that can
+    # isolate still get a hard PASS/FAIL from exit 0/1.
+    # The test drives hiprtc itself. On Windows the hiprtc package
+    # installs its runtime DLL apart from the import library (import lib
+    # in <prefix>/lib, DLL in <prefix>/bin), so a plain ctest run whose
+    # PATH lacks that directory cannot even start the test
+    # (STATUS_DLL_NOT_FOUND). Derive the runtime directory from the
+    # imported target's own location metadata - its library file if the
+    # package set one, else the first interface library entry that is a
+    # real file - and expose it to this test only by prepending it to
+    # PATH, with the configure-time PATH escaped after it so the value
+    # stays a single environment entry (CTest splits ENVIRONMENT on
+    # unescaped semicolons). Windows-only: other platforms' shared-library
+    # loaders do not search PATH, so their tests keep the inherited
+    # environment untouched.
+    set(_hiprtc_test_env "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR}")
+    if(WIN32)
+        set(_hiprtc_runtime_dir "")
+        if(TARGET hiprtc::hiprtc)
+            get_target_property(_hiprtc_lib_loc hiprtc::hiprtc IMPORTED_LOCATION)
+            if(NOT _hiprtc_lib_loc)
+                get_target_property(_hiprtc_link_line hiprtc::hiprtc INTERFACE_LINK_LIBRARIES)
+                foreach(_hiprtc_lib IN LISTS _hiprtc_link_line)
+                    if(EXISTS "${_hiprtc_lib}")
+                        get_filename_component(_hiprtc_lib_loc "${_hiprtc_lib}" ABSOLUTE)
+                        break()
+                    endif()
+                endforeach()
+            endif()
+            if(_hiprtc_lib_loc)
+                get_filename_component(_hiprtc_lib_dir "${_hiprtc_lib_loc}" DIRECTORY)
+                get_filename_component(_hiprtc_pkg_root "${_hiprtc_lib_dir}/.." ABSOLUTE)
+                if(EXISTS "${_hiprtc_pkg_root}/bin")
+                    set(_hiprtc_runtime_dir "${_hiprtc_pkg_root}/bin")
+                else()
+                    set(_hiprtc_runtime_dir "${_hiprtc_lib_dir}")
+                endif()
+            endif()
+        endif()
+        if(NOT _hiprtc_runtime_dir STREQUAL "")
+            string(REPLACE ";" "\\;" _hiprtc_path_tail "$ENV{PATH}")
+            list(APPEND _hiprtc_test_env
+                "PATH=${_hiprtc_runtime_dir}\;${_hiprtc_path_tail}")
+        endif()
+    endif()
+    set_tests_properties(test_hiprtc_selfcontained PROPERTIES
+        ENVIRONMENT "${_hiprtc_test_env}"
+        SKIP_RETURN_CODE 4)
+    add_dependencies(miopen-tests test_hiprtc_selfcontained)
+    add_dependencies(miopen-check test_hiprtc_selfcontained)
+endif()
 
 if(MIOPEN_TEST_ENABLE_TEST_SQLITE_PERFDB)
     set_tests_properties(test_sqlite_perfdb PROPERTIES RUN_SERIAL On)
