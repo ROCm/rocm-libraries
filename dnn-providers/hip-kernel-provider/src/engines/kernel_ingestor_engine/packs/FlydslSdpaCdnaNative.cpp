@@ -122,6 +122,9 @@ constexpr std::string_view O_TOKEN = "flydsl_sdpa_cdna.o.uid";
 constexpr std::string_view CAUSAL_TOKEN = "flydsl_sdpa_cdna.causal";
 /// The causal diagonal: query row i sees keys j <= i + offset. Unused without a mask.
 constexpr std::string_view DIAG_OFFSET_TOKEN = "flydsl_sdpa_cdna.diag_offset";
+/// The sliding window's lower edge: query row i sees no key j < i + window_lo; NO_WINDOW
+/// when the graph has none (or one no row of it reaches).
+constexpr std::string_view WINDOW_TOKEN = "flydsl_sdpa_cdna.window_lo";
 /// The uid of the softmax-statistics (LSE) output, or NO_STATS when the graph wants none.
 constexpr std::string_view STATS_TOKEN = "flydsl_sdpa_cdna.stats.uid";
 constexpr int64_t NO_STATS = -1;
@@ -144,6 +147,9 @@ constexpr int64_t INT32_LIMIT = 2147483647LL;
 constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and f16 only
 /// A bound the graph leaves open (hipDNN's sentinel for left_bound / right_bound).
 constexpr int64_t UNBOUNDED = -1;
+/// The generic kernel's `window_lo` for "no window": below any row's reach (the kernels'
+/// _NO_WINDOW, vendored-kernel modification 11).
+constexpr int64_t NO_WINDOW = -(int64_t{1} << 30);
 
 /// Where the softmax scale comes from; see ScaleSource.
 constexpr std::string_view SCALE_SOURCE_TOKEN = "flydsl_sdpa_cdna.scale_source";
@@ -463,11 +469,13 @@ bool isServableStats(const data_objects::TensorAttributes& stats,
            && !stats.ragged_offset_tensor_uid().has_value();
 }
 
-/// The mask the kernels apply: none, or j <= i + offset for query row i and key j.
+/// The mask the kernels apply: none, or j <= i + offset for query row i and key j, and
+/// with a sliding window also j >= i + windowLo.
 struct CdnaMask
 {
     bool causal = false;
     int64_t offset = 0;
+    int64_t windowLo = NO_WINDOW;
 };
 
 /**
@@ -475,10 +483,13 @@ struct CdnaMask
  *
  * The reference (CpuFpReferenceSdpa isMasked) hides key j from query row i when
  * j > i + align + right, with align 0 top-left and Skv - Sq bottom-right; so causal and a
- * band to the right of the diagonal are both one offset, align + right. A left bound (a
- * sliding window) declines. So does an offset past Skv - Sq: the causal objects mask the
- * last KV tile's padding with the same compare, which holds only while every row's
- * diagonal stays inside the keys -- top-left with more queries than keys, or a band.
+ * band to the right of the diagonal are both one offset, align + right. It hides j <
+ * i + align - left too, a sliding window: the window's lower edge, align - left, is the
+ * generic kernel's `window_lo` (vendored-kernel modification 11), and a window no row
+ * reaches is none. A left bound with no right one declines: only the causal objects mask
+ * at all. So does an offset past Skv - Sq: the causal objects mask the last KV tile's
+ * padding with the same compare, which holds only while every row's diagonal stays
+ * inside the keys -- top-left with more queries than keys, or a band.
  */
 std::optional<CdnaMask>
     maskFor(const data_objects::SdpaAttributes& attributes, int64_t seqLenQ, int64_t seqLenKv)
@@ -493,7 +504,7 @@ std::optional<CdnaMask>
         = attributes.left_bound().has_value() ? attributes.left_bound().value() : UNBOUNDED;
     int64_t right
         = attributes.right_bound().has_value() ? attributes.right_bound().value() : UNBOUNDED;
-    if(left != UNBOUNDED || right < UNBOUNDED)
+    if(left < UNBOUNDED || right < UNBOUNDED)
     {
         return std::nullopt;
     }
@@ -511,14 +522,26 @@ std::optional<CdnaMask>
     }
     if(right == UNBOUNDED)
     {
+        if(left != UNBOUNDED)
+        {
+            return std::nullopt;
+        }
         return CdnaMask{};
     }
-    const int64_t offset = (alignBottomRight ? seqLenKv - seqLenQ : 0) + right;
+    const int64_t align = alignBottomRight ? seqLenKv - seqLenQ : 0;
+    const int64_t offset = align + right;
     if(offset > seqLenKv - seqLenQ)
     {
         return std::nullopt;
     }
-    return CdnaMask{true, offset};
+    CdnaMask mask{true, offset};
+    // The last query row, the one reaching furthest right, hides keys j < (Sq - 1) +
+    // window_lo; at or below -(Sq - 1) the window hides nothing.
+    if(left != UNBOUNDED && align - left > -(seqLenQ - 1))
+    {
+        mask.windowLo = align - left;
+    }
+    return mask;
 }
 
 /**
@@ -706,6 +729,7 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     bound[std::string(O_TOKEN)] = attributes.o_tensor_uid();
     bound[std::string(CAUSAL_TOKEN)] = mask->causal ? 1 : 0;
     bound[std::string(DIAG_OFFSET_TOKEN)] = mask->offset;
+    bound[std::string(WINDOW_TOKEN)] = mask->windowLo;
     bound[std::string(STATS_TOKEN)] = statsUid;
     bound[std::string(BIAS_TOKEN)] = biasUid;
     bound[std::string(SCALE_SOURCE_TOKEN)] = static_cast<int64_t>(scaleSource);
@@ -722,6 +746,7 @@ struct FlydslSdpaCdnaBinding
     int64_t o = 0;
     int64_t causal = 0;
     int64_t diagOffset = 0;
+    int64_t windowLo = NO_WINDOW;
     int64_t stats = NO_STATS;
     int64_t bias = NO_BIAS;
     ScaleSource scaleSource = ScaleSource::VALUE;
@@ -749,6 +774,7 @@ FlydslSdpaCdnaBinding flydslSdpaCdnaBinding(const BoundTokens& bound)
     binding.o = read(O_TOKEN);
     binding.causal = read(CAUSAL_TOKEN);
     binding.diagOffset = read(DIAG_OFFSET_TOKEN);
+    binding.windowLo = read(WINDOW_TOKEN);
     binding.stats = read(STATS_TOKEN);
     binding.bias = read(BIAS_TOKEN);
     binding.scaleSource = static_cast<ScaleSource>(read(SCALE_SOURCE_TOKEN));
@@ -870,6 +896,12 @@ bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
     const auto diagOffset = tryGetBoundInt(bound, DIAG_OFFSET_TOKEN);
     if(!anyDiagonal.has_value() || !diagOffset.has_value()
        || (*anyDiagonal == 0 && *diagOffset != 0))
+    {
+        return false;
+    }
+    // Only the generic kernel takes a window (vendored-kernel modification 11).
+    const auto windowLo = tryGetBoundInt(bound, WINDOW_TOKEN);
+    if(!windowLo.has_value() || (*windowLo != NO_WINDOW && tile->dualwave))
     {
         return false;
     }
@@ -1023,7 +1055,7 @@ const std::vector<KernelArgument>& dualwaveSignature()
 const std::vector<KernelArgument>& genericSignature()
 {
     static const std::vector<KernelArgument> s_signature
-        = signatureOf({{5, true}, {2, false}, {3, true}, {15, false}});
+        = signatureOf({{5, true}, {2, false}, {3, true}, {16, false}});
     return s_signature;
 }
 
@@ -1348,7 +1380,8 @@ public:
                       i32(strides.o.sequence),
                       i32(strides.o.head),
                       i32(strides.kv.batch),
-                      i32(strides.kv.head));
+                      i32(strides.kv.head),
+                      static_cast<int32_t>(binding.windowLo));
     }
 
 private:

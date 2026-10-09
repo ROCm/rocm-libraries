@@ -190,7 +190,7 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
             tensors(5);
             scalars(2);
             tensors(3);
-            scalars(15);
+            scalars(16);
         }
         return slots;
     };

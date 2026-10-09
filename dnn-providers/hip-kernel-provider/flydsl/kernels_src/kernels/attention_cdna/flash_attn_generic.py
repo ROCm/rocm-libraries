@@ -48,6 +48,11 @@ from kernels.attention_cdna.flash_attn_utils import (
 from kernels.common.kernels_common import dtype_to_elem_type
 
 
+# The sliding-window argument's "no window" (modification 11): below any key's row
+# offset, so no key is left of it.
+_NO_WINDOW = -(1 << 30)
+
+
 def build_flash_attn_func_module_primary(
     num_heads,
     head_dim,
@@ -302,6 +307,7 @@ def build_flash_attn_func_module_primary(
         stride_o_h: fx.Int32,
         stride_kv_b: fx.Int32,
         stride_kv_h: fx.Int32,
+        window_lo: fx.Int32,
     ):
         # Make shape/mode traits visible to the JIT cache key.
         _ = _flash_attn_generic_cache_tag
@@ -326,6 +332,7 @@ def build_flash_attn_func_module_primary(
                 "kv_b": stride_kv_b,
                 "kv_h": stride_kv_h,
             },
+            window_lo=window_lo,
         )
         ctx.init_types_and_pointers()
         gemm_helper = GenericGemmHelper(ctx)
@@ -378,16 +385,16 @@ def build_flash_attn_func_module_primary(
             init_args.append(ctx.c_zero_v16f32)
         if const_expr(_use_dma_dbuf):
             init_args.append(fx.Index(0))
-            kv_gmem_to_lds.coop_dma_k(fx.Index(0), buf_id=0)
+            kv_gmem_to_lds.coop_dma_k(ctx.kv_lower, buf_id=0)
             rocdl.s_waitcnt(0)
         if const_expr(_pipe_k):
-            _k0_vecs = kv_gmem_to_lds.coop_load_k_global(fx.Index(0))
+            _k0_vecs = kv_gmem_to_lds.coop_load_k_global(ctx.kv_lower)
             for _kb in range_constexpr(traits.NUM_BATCHES_KV):
                 init_args.append(_k0_vecs[_kb])
 
         loop_results = init_args
         for kv_block_start, inner_iter_args in range(
-            0, kv_upper, traits.BLOCK_N_OUT, init=init_args
+            ctx.kv_lower, kv_upper, traits.BLOCK_N_OUT, init=init_args
         ):
             m_running = inner_iter_args[0]
             l_running = inner_iter_args[1]
@@ -672,6 +679,7 @@ def build_flash_attn_func_module_primary(
         stride_o_h: fx.Int32,
         stride_kv_b: fx.Int32,
         stride_kv_h: fx.Int32,
+        window_lo: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         bs_idx = fx.Index(batch_size)
@@ -713,6 +721,7 @@ def build_flash_attn_func_module_primary(
             stride_o_h,
             stride_kv_b,
             stride_kv_h,
+            window_lo,
             value_attrs={
                 "rocdl.waves_per_eu": waves_per_eu,
                 "rocdl.flat_work_group_size": (
@@ -805,6 +814,7 @@ def build_flash_attn_func_module_primary(
                 traits.HEAD_DIM,
                 skv * traits.STRIDE_TOKEN_KV,
                 traits.HEAD_DIM,
+                _NO_WINDOW,
                 fx.Stream(stream),
             )
 
@@ -857,6 +867,7 @@ def build_flash_attn_func_module_primary(
                 traits.HEAD_DIM,
                 skv * traits.STRIDE_TOKEN_KV,
                 traits.HEAD_DIM,
+                _NO_WINDOW,
                 fx.Stream(stream),
             )
 

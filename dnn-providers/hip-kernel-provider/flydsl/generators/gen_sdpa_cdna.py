@@ -136,6 +136,7 @@ _PARAMS = {
         ("stride_o_h", "i32"),
         ("stride_kv_b", "i32"),
         ("stride_kv_h", "i32"),
+        ("window_lo", "i32"),
     ),
 }
 

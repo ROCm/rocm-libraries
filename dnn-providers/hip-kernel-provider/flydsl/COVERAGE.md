@@ -511,7 +511,7 @@ baked field at a time (§7.3).
 |---|---|
 | dtype (`bf16`, `f16`) | batch |
 | `head_dim` (64, 128, 256) | query and key lengths, independently |
-| causal, or none | the causal diagonal: top-left, bottom-right, a band to its right |
+| causal, or none | the causal diagonal: top-left, bottom-right, a band to its right; a sliding window's lower edge (generic kernel) |
 | | query and KV head counts (MHA, GQA, MQA) |
 | | every operand's (batch, sequence, head) strides: BSHD, BHSD, packed QKV |
 | | softmax scale |
@@ -551,7 +551,7 @@ One SDPA-forward node, and:
 | One dtype for all four, `bf16` or `f16` | One object per dtype. |
 | `Hq % Hk == 0`; V shaped as K, O as Q | The kernels have one head dimension and do not broadcast. |
 | `head_dim` equal to an object's baked value | Checked by the kernel matcher against each candidate's metadata. |
-| No mask, or `right_bound` ≥ 0 at either alignment (or the deprecated causal booleans), with no `left_bound`, and a diagonal offset `align + right_bound` of at most `Skv − Sq` | The kernels apply the reference's rule, key `j` visible from query row `i` iff `j ≤ i + offset`, with `align` 0 top-left and `Skv − Sq` bottom-right. The causal objects mask the last KV tile's padding with the same compare, which holds only while every row's diagonal stays inside the keys: so bottom-right is served at any lengths, top-left when `Sq ≤ Skv`, and a band only as far as `Skv − Sq`. A sliding window (`left_bound`) declines. |
+| No mask, or `right_bound` ≥ 0 at either alignment (or the deprecated causal booleans), with a diagonal offset `align + right_bound` of at most `Skv − Sq`; a `left_bound` only with a right one | The kernels apply the reference's rule, key `j` visible from query row `i` iff `i + align − left ≤ j ≤ i + offset`, with `align` 0 top-left and `Skv − Sq` bottom-right. The causal objects mask the last KV tile's padding with the same compare, which holds only while every row's diagonal stays inside the keys: so bottom-right is served at any lengths, top-left when `Sq ≤ Skv`, and a band only as far as `Skv − Sq`. A sliding window (`left_bound`) runs on the generic kernel only (modification 11) -- on gfx950 its causal tiers beside the dual-wave objects; a window no row reaches is no window. |
 | Scale: `attn_scale_value` (> 0), a pass-by-value scalar tensor, or absent | Absent is `1/√head_dim`, the reference's default. The running max is over unscaled scores, which orders them correctly only for a positive scale. |
 | Key length a multiple of 64, for a `kv_align` 64 object | That object does not mask the last KV tile. |
 | Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor in packed (batch, head, query) order | The kernels write the natural-log LSE of the scaled scores as one contiguous `[B, H, Sq]`. |
@@ -573,7 +573,8 @@ against the coverage it buys. In order:
 | ~~Runtime head counts~~ | Done: trailing i32 arguments on both kernels, and the generic kernel's token pitches with them (modification 3). |
 | ~~Full strides: BHSD, packed QKV~~ | Done: per-(batch, head) buffer views, the head's offset in each view's base (modification 6). K and V with different strides, and stats strides, are next. |
 | ~~LSE output~~ | Done: compiled in, switched at launch (modification 4). Any stats strides are next, with the full strides. |
-| ~~`Sq ≠ Skv`, both causal alignments, right-side bands~~ | Done: the diagonal offset is a kernel argument (modification 5). Top-left with more queries than keys and wider bands need the last KV tile's padding masked apart from the diagonal; sliding windows need a left bound in the mask and the KV loop's start. |
+| ~~`Sq ≠ Skv`, both causal alignments, right-side bands~~ | Done: the diagonal offset is a kernel argument (modification 5). Top-left with more queries than keys and wider bands need the last KV tile's padding masked apart from the diagonal. |
+| ~~Sliding windows~~ | Done on the generic kernel: a runtime lower edge in the mask and the KV loop's start (modification 11). The dual-wave kernel's pipeline starts at a fixed tile; gfx950 windows run on its generic tiers. |
 | ~~`head_dim` 64 and 256, f16~~ | Done: rows in the instance table. Other head dims need the generic kernel's row loads generalised past powers of two. 256 on gfx942 followed with unpadded LDS tiles (modification 9). |
 | Varlen, paged KV | Both kernels already take cumulative sequence offsets and a block table, passed unused today. |
 | ~~Additive bias~~ | Done on gfx950 (modification 8). gfx942 and gfx950's `head_dim` 256 run the generic kernel, which has no bias operand; f32 bias and misaligned rows need a conversion or unaligned path. |
@@ -610,6 +611,7 @@ the harness's own bias. The measurements are kept outside the repository.
 | LSE output, switched at runtime | 2–4 more VGPRs, no occupancy step; with LSE off, no measurable cost but on the gfx942 causal object, which is slower by a fraction of a percent on every shape | runtime, for coverage — **deferred** (gfx942 causal) |
 | Causal diagonal as an argument, and `cross_seqlen` on gfx950 | neutral on gfx942. On gfx950 the `cross_seqlen` build is a few percent slower on every causal shape; the plain build at offset 0 (`any_diagonal` 0) recovers most of it, still slower by under a percent than computing the offset in-kernel | two gfx950 causal objects; the residual cost **deferred** |
 | Runtime operand strides (per-(batch, head) views) | neutral on the gfx950 dual-wave objects. On gfx942 the d64 objects grew past the three-waves-per-SIMD register step, measurably slower; LLVM's register-pressure trackers bring them back under it and recover the time, but on the d128 objects the same option schedules the loop much worse, so it applies at d64 only. The remaining cost -- gfx942 d128, gfx950 d256 -- is under a few percent | runtime, for coverage; trackers at gfx942 d64; the rest **deferred** |
+| Sliding window on the generic kernel (`window_lo`, modification 11) | gfx942, against the objects without it, no window bound: a few more VGPRs on d64; the causal d128 object slower by about half a percent with a repeating sign (two compares on each diagonal tile's mask), d64 within noise. With a window, time scales with the window | runtime, for coverage -- **deferred** (gfx942 causal d128) |
 | Additive bias (`has_bias`, a compile-time axis) | the plain dual-wave objects carry two unused bias-stride arguments, neutral but for a fraction of a percent on two d64 shapes. A bias object costs what reading its bias costs -- a full `[B, H, S, S]` bias is as many bytes as the scores. At `head_dim` 128 the bias objects spill a few VGPRs (upstream's own bias addressing spills too), with no cost visible beyond the bias's own | two objects per class on gfx950; the d128 spill allowed and recorded |
 
 **Deferred performance work** -- costs accepted for coverage, to revisit:
@@ -637,6 +639,11 @@ the harness's own bias. The measurements are kept outside the repository.
    place of the padding (as K has), a smaller KV tile, or a head-dim split as the RDNA
    kernel does at 256 are the candidates. Nothing else in hipDNN serves this class on
    gfx942, so it ships as it is.
+7. *The window compares on the generic causal objects.* Every diagonal tile's mask does
+   a lower-edge compare too, and `window_lo` is read whether or not a window is bound;
+   a window-free causal build beside the windowed one would remove it. Also: gfx950
+   windows run on the generic kernel at about half the dual-wave kernel's speed --
+   a window start in the dual-wave pipeline would recover it.
 
 ### 7.6 How the instance set was chosen
 

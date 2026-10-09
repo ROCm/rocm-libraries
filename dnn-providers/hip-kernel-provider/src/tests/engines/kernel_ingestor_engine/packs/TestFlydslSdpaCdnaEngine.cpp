@@ -75,6 +75,8 @@ constexpr const char* CDNA_SCALE_SOURCE_TOKEN = "flydsl_sdpa_cdna.scale_source";
 constexpr const char* CDNA_SCALE_TOKEN = "flydsl_sdpa_cdna.scale";
 constexpr const char* CDNA_STATS_TOKEN = "flydsl_sdpa_cdna.stats.uid";
 constexpr const char* CDNA_DIAG_OFFSET_TOKEN = "flydsl_sdpa_cdna.diag_offset";
+constexpr const char* CDNA_WINDOW_TOKEN = "flydsl_sdpa_cdna.window_lo";
+constexpr int64_t CDNA_NO_WINDOW = -(int64_t{1} << 30);
 
 constexpr const char* CDNA_DTYPE_FIELD = "dtype";
 constexpr const char* CDNA_KERNEL_FIELD = "kernel";
@@ -220,6 +222,15 @@ std::vector<CdnaCase> acceptedCases()
     band.seqLenKv = 1024;
     band.rightBound = 100;
     cases.push_back({"TopLeftBandInsideTheKeys", band});
+    auto window = cdnaSpec();
+    window.mask = SdpaMask::SLIDING_WINDOW;
+    cases.push_back({"SlidingWindow", window});
+    auto bottomRightWindow = cdnaSpec();
+    bottomRightWindow.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    bottomRightWindow.seqLenQ = 64;
+    bottomRightWindow.seqLenKv = 1024;
+    bottomRightWindow.leftBound = 128;
+    cases.push_back({"BottomRightSlidingWindow", bottomRightWindow});
     return cases;
 }
 
@@ -249,9 +260,9 @@ std::vector<CdnaCase> declinedCases()
     bottomRightBand.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
     bottomRightBand.rightBound = 8;
     cases.push_back({"BottomRightBand", bottomRightBand});
-    auto window = cdnaSpec();
-    window.mask = SdpaMask::SLIDING_WINDOW;
-    cases.push_back({"SlidingWindow", window});
+    auto leftOnly = cdnaSpec();
+    leftOnly.leftBound = 64;
+    cases.push_back({"SlidingWindowWithNoRightBound", leftOnly});
     auto band = cdnaSpec();
     band.mask = SdpaMask::TOP_LEFT_CAUSAL;
     band.rightBound = 16;
@@ -317,6 +328,25 @@ TEST(TestFlydslSdpaCdnaBinding, BindsTheCausalFlag)
     ASSERT_TRUE(plainBound.has_value());
     EXPECT_EQ(tryGetBoundInt(*causalBound, CDNA_CAUSAL_TOKEN), 1);
     EXPECT_EQ(tryGetBoundInt(*plainBound, CDNA_CAUSAL_TOKEN), 0);
+}
+
+TEST(TestFlydslSdpaCdnaBinding, BindsTheWindowsLowerEdgeOrNone)
+{
+    const auto windowOf = [](SdpaMask mask, int64_t sq, int64_t skv, std::optional<int64_t> left) {
+        auto spec = cdnaSpec();
+        spec.mask = mask;
+        spec.seqLenQ = sq;
+        spec.seqLenKv = skv;
+        spec.leftBound = left;
+        const auto bound = cdnaGraphMatch(spec);
+        return bound.has_value() ? tryGetBoundInt(*bound, CDNA_WINDOW_TOKEN) : std::nullopt;
+    };
+    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, std::nullopt), CDNA_NO_WINDOW);
+    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 64), -64);
+    EXPECT_EQ(windowOf(SdpaMask::BOTTOM_RIGHT_CAUSAL, 256, 1024, 64), 704);
+    // A window no row reaches is none, so the dual-wave objects still serve it.
+    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 255), CDNA_NO_WINDOW);
+    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 254), -254);
 }
 
 TEST(TestFlydslSdpaCdnaBinding, BindsTheDiagonalOffset)
@@ -464,6 +494,21 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsTheOffsetZeroObjectOnlyAtOffsetZero)
     EXPECT_TRUE(admits(SdpaMask::TOP_LEFT_CAUSAL, 256, 1024, offsetZero));
     EXPECT_FALSE(admits(SdpaMask::BOTTOM_RIGHT_CAUSAL, 256, 1024, offsetZero));
     EXPECT_TRUE(admits(SdpaMask::BOTTOM_RIGHT_CAUSAL, 256, 1024, anyOffset));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsASlidingWindowOnlyOnTheGenericKernel)
+{
+    auto spec = cdnaSpec();
+    spec.mask = SdpaMask::SLIDING_WINDOW;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_FALSE(matchesKernel(
+        FLYDSL_SDPA_CDNA, fixture.context(), makeCdnaKernel("dualwave", 128, 1), *bound));
+    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA,
+                              fixture.context(),
+                              makeCdnaKernel("generic", 128, 1, "bf16", 128),
+                              *bound));
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, HoldsTheKeyLengthToTheCandidatesAlignment)
@@ -774,8 +819,14 @@ void expectCandidateMatchesReference(const MatchContext& context,
     const int64_t group = h / hk;
     // The reference's rule: query row i sees key j <= i + align + right, align 0 top-left
     // and Skv - Sq bottom-right.
-    const int64_t offset
-        = (spec.mask == SdpaMask::BOTTOM_RIGHT_CAUSAL ? skv - s : 0) + spec.rightBound.value_or(0);
+    const int64_t align = spec.mask == SdpaMask::BOTTOM_RIGHT_CAUSAL ? skv - s : 0;
+    const int64_t offset = align + spec.rightBound.value_or(0);
+    // And with a left bound, no key j < i + align - left (a sliding window).
+    std::optional<int64_t> left = spec.leftBound;
+    if(spec.mask == SdpaMask::SLIDING_WINDOW && !left.has_value())
+    {
+        left = 64;
+    }
     double worst = 0.0;
     std::string where;
     double worstLse = 0.0;
@@ -789,8 +840,10 @@ void expectCandidateMatchesReference(const MatchContext& context,
             {
                 // Negative for a row no key reaches: O is 0 and the LSE -inf.
                 const int64_t lastKey = causal ? std::min(si + offset, skv - 1) : skv - 1;
+                const int64_t firstKey
+                    = left.has_value() ? std::max<int64_t>(0, si + align - *left) : 0;
                 double maxScore = -std::numeric_limits<double>::infinity();
-                for(int64_t j = 0; j <= lastKey; ++j)
+                for(int64_t j = firstKey; j <= lastKey; ++j)
                 {
                     double dot = 0.0;
                     for(int64_t e = 0; e < d; ++e)
@@ -803,7 +856,7 @@ void expectCandidateMatchesReference(const MatchContext& context,
                     maxScore = std::max(maxScore, scores[static_cast<size_t>(j)]);
                 }
                 double sum = 0.0;
-                for(int64_t j = 0; j <= lastKey; ++j)
+                for(int64_t j = firstKey; j <= lastKey; ++j)
                 {
                     scores[static_cast<size_t>(j)]
                         = std::exp(scores[static_cast<size_t>(j)] - maxScore);
@@ -815,7 +868,7 @@ void expectCandidateMatchesReference(const MatchContext& context,
                     const auto lse
                         = static_cast<double>(stats[static_cast<size_t>((bi * h + hi) * s + si)]);
                     // A row no key reaches has LSE -inf.
-                    const bool keyless = lastKey < 0;
+                    const bool keyless = lastKey < firstKey;
                     const bool negativeInfinity = std::isinf(lse) && lse < 0.0;
                     double lseError = std::abs(lse - (maxScore + std::log(sum)));
                     if(keyless)
@@ -832,12 +885,12 @@ void expectCandidateMatchesReference(const MatchContext& context,
                 for(int64_t e = 0; e < d; ++e)
                 {
                     double expected = 0.0;
-                    for(int64_t j = 0; j <= lastKey; ++j)
+                    for(int64_t j = firstKey; j <= lastKey; ++j)
                     {
                         expected += scores[static_cast<size_t>(j)]
                                     * at(v, kvStrides, vStart, bi, hi / group, j, e);
                     }
-                    expected = lastKey < 0 ? 0.0 : expected / sum;
+                    expected = lastKey < firstKey ? 0.0 : expected / sum;
                     const double error = std::abs(at(o, oStrides, 0, bi, hi, si, e) - expected);
                     if(error > worst)
                     {
@@ -1023,6 +1076,41 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesATopLeftBand)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesSlidingWindows)
+{
+    // Narrower than a KV tile, across a tile boundary, and wider than the keys; top-left
+    // and bottom-right; ragged lengths.
+    for(const int64_t left : {int64_t{0}, int64_t{37}, int64_t{64}, int64_t{200}, int64_t{4096}})
+    {
+        SCOPED_TRACE("left_bound " + std::to_string(left));
+        auto spec = cdnaSpec();
+        spec.seqLenQ = 333;
+        spec.seqLenKv = 333;
+        spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+        spec.leftBound = left;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        spec.seqLenQ = 96;
+        spec.seqLenKv = 700;
+        spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        spec.dataType = DataType::HALF;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesSlidingWindowsAtHeadDim64And256)
+{
+    for(const int64_t headDim : {int64_t{64}, int64_t{256}})
+    {
+        SCOPED_TRACE("head_dim " + std::to_string(headDim));
+        auto spec = cdnaSpec();
+        spec.headDim = headDim;
+        spec.seqLenQ = 300;
+        spec.seqLenKv = 300;
+        spec.mask = SdpaMask::SLIDING_WINDOW;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+}
+
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesNonCausalCrossAttentionAndDecode)
 {
     auto cross = cdnaSpec();
@@ -1060,7 +1148,6 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHalfAtHeadDim128)
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim256WhereShipped)
 {
-    // gfx950 only: gfx942's LDS cannot hold the 256-wide tile, so there it skips.
     auto spec = cdnaSpec();
     spec.headDim = 256;
     spec.seqLenQ = 200;

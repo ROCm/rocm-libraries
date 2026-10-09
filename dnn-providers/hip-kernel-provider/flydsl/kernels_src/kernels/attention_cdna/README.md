@@ -94,5 +94,13 @@ diff against upstream plus the modifications below.
     before their first accumulate. An upstream bug; unreachable upstream, whose gfx942
     launcher never builds `head_dim` 256.
 
+11. **Sliding window** (`flash_attn_generic.py`, `flash_attn_utils.py`). The generic
+    kernel takes a trailing `window_lo`: query row i sees no key j < i + window_lo. In
+    causal builds the KV loop starts at the KV-tile boundary at or below
+    `q_start + window_lo`, and a tile reaching below the block's last row's edge is
+    masked on that side too; fully masked rows were already floored to a finite max, so
+    they contribute nothing. Non-causal builds ignore it. The launchers pass
+    `_NO_WINDOW` (-2^30), no window.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

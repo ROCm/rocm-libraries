@@ -2536,6 +2536,7 @@ class GenericFlashAttnContext:
         lse_on=None,
         diag_offset=None,
         view_strides=None,
+        window_lo=None,
     ):
         self.traits = traits
         self.K = K
@@ -2553,6 +2554,9 @@ class GenericFlashAttnContext:
         # Runtime (batch, head) strides of Q, O and K/V, and O's token stride
         # (modification 6); None keeps the BSHD layout the token strides imply.
         self.view_strides = view_strides
+        # Sliding window (modification 11): query row i sees no key j < i + window_lo.
+        # None, or any value at or below -seq_len_kv, is no window.
+        self.window_lo = window_lo
 
     def init_types_and_pointers(self):
         traits = self.traits
@@ -2858,8 +2862,25 @@ class GenericFlashAttnContext:
             self.kv_upper = fx.Index(
                 (causal_end < self.seqlen_kv_b).select(causal_end, self.seqlen_kv_b)
             )
+            # The first KV tile any row of this block sees (modification 11): rows
+            # see no key j < i + window_lo, so the loop starts at the KV-tile boundary
+            # at or below q_start + window_lo.
+            if const_expr(self.window_lo is not None):
+                self.win_lo_i32 = fx.Int32(self.window_lo)
+                lower_raw_i32 = fx.Int32(self.q_start) + self.win_lo_i32
+                lower_i32 = fx.Int32(
+                    (lower_raw_i32 > fx.Int32(0)).select(lower_raw_i32, fx.Int32(0))
+                )
+                self.kv_lower = (
+                    fx.Index(lower_i32) // fx.Index(traits.BLOCK_N_OUT)
+                ) * fx.Index(traits.BLOCK_N_OUT)
+            else:
+                self.win_lo_i32 = None
+                self.kv_lower = fx.Index(0)
         else:
             self.kv_upper = self.seqlen_kv_b
+            self.win_lo_i32 = None
+            self.kv_lower = fx.Index(0)
 
     def global_idx_q(self, token_idx, col):
         traits = self.traits
@@ -3785,23 +3806,48 @@ class GenericSoftmaxHelper:
             tile_needs_mask = max_kv_col_i32 > q_start_i32
             col_base_i32, moff = self._kv_mask_lane_off(kv_start_i32)
             c_neg_inf = ctx.c_neg_inf
+            if const_expr(ctx.win_lo_i32 is not None):
+                # The window's lower edge (modification 11): a tile below the block's
+                # last row's edge needs the mask too.
+                q_window_lo_i32 = ctx.q_row_i32 + ctx.win_lo_i32
+                last_row_lo_i32 = (
+                    fx.Int32(ctx.q_start)
+                    + fx.Int32(traits.BLOCK_M - 1)
+                    + ctx.win_lo_i32
+                )
+                tile_needs_mask = tile_needs_mask | (kv_start_i32 < last_row_lo_i32)
 
             masked_lo = list(s_raw_lo)
             masked_hi = list(s_raw_hi)
             if tile_needs_mask:
-                masked_lo = [
-                    (col_base_i32 + fx.Int32(moff[r]) > q_mask_limit_i32).select(
-                        c_neg_inf, s_raw_lo[r]
-                    )
-                    for r in range(16)
-                ]
-                masked_hi = [
-                    (
-                        col_base_i32 + fx.Int32(moff[r]) + fx.Int32(traits.K_SUB_N)
-                        > q_mask_limit_i32
-                    ).select(c_neg_inf, s_raw_hi[r])
-                    for r in range(16)
-                ]
+                if const_expr(ctx.win_lo_i32 is None):
+                    masked_lo = [
+                        (col_base_i32 + fx.Int32(moff[r]) > q_mask_limit_i32).select(
+                            c_neg_inf, s_raw_lo[r]
+                        )
+                        for r in range(16)
+                    ]
+                    masked_hi = [
+                        (
+                            col_base_i32 + fx.Int32(moff[r]) + fx.Int32(traits.K_SUB_N)
+                            > q_mask_limit_i32
+                        ).select(c_neg_inf, s_raw_hi[r])
+                        for r in range(16)
+                    ]
+                else:
+                    masked_lo = []
+                    masked_hi = []
+                    for r in range_constexpr(16):
+                        col_lo = col_base_i32 + fx.Int32(moff[r])
+                        col_hi = col_lo + fx.Int32(traits.K_SUB_N)
+                        out_lo = (col_lo > q_mask_limit_i32) | (
+                            col_lo < q_window_lo_i32
+                        )
+                        out_hi = (col_hi > q_mask_limit_i32) | (
+                            col_hi < q_window_lo_i32
+                        )
+                        masked_lo.append(out_lo.select(c_neg_inf, s_raw_lo[r]))
+                        masked_hi.append(out_hi.select(c_neg_inf, s_raw_hi[r]))
             return masked_lo, masked_hi
 
         # Non-causal: mask physical KV columns outside seqlen so tail rows stay out of softmax.
