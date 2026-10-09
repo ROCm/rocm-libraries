@@ -4063,10 +4063,7 @@ class GlobalWriteBatchWriter:
       return None
     pairs = capture["pairs"]
     while len(pairs) <= pairIdx:
-      # Legacy single-gap slot ("gap"/"gapAnchor") is used by the un-folded woven
-      # store. The fold registers MULTIPLE gaps for one pair (a convert-gap + gap B)
-      # via the "gaps" list; the planner reads "gaps" when present, else the legacy slot.
-      pairs.append({"reads": [], "gap": None, "gapAnchor": None, "gaps": []})
+      pairs.append({"reads": [], "gap": None, "gapAnchor": None})
     return pairs[pairIdx]
 
   def _popSubtileAccVgprReads(self, elementIdx: int) -> Module:
@@ -4604,38 +4601,6 @@ class GlobalWriteBatchWriter:
     assert not any(isinstance(i, SBarrier) for i in module.flatitems()), \
       "PostLoopStoreInNll Phase2 must be barrier-free (no s_barrier in the MFMA-interleaved store)"
     return module
-
-  def _emitGuardedPairedNoRepack(self, storeCodeModule, sba0Idx: int, sba1Idx: int, prefixOffset: int, blockIdxN: int, forceSlc: bool = False):
-    """Non-repack guarded paired store for one (sba=0, sba=1) pair — the DPP-fold
-    fallback when not all 4 M-blocks are valid at runtime.  No N-group OOB guard here
-    (the caller already emitted it for the fold); only the both-blocks-valid check +
-    scalar fallback."""
-    tt0      = self.batchElements[sba1Idx][1]
-    addrCalc = self.ss.elementAddr[sba0Idx]
-    sIdx0    = self.ss.elementSumIdx[sba0Idx]
-    sIdx1    = self.ss.elementSumIdx[sba1Idx]
-    blockIdxM = tt0 - 1
-    guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
-    if guardMSgpr is not None:
-      afterL = Label(self.parentWriter.labels.getNameInc("subtile_after_paired"), f"after fb-paired tt0={tt0}")
-      fbL    = Label(self.parentWriter.labels.getNameInc("subtile_scalar_fallback"), f"fb scalar d0={tt0-1}")
-      storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0,
-                                     comment=f"fb-paired: both M-blocks valid? (MGuard > {tt0})"))
-      storeCodeModule.add(SCBranchSCC0(labelName=fbL.getLabelName(), comment=f"only d0={tt0-1} valid -> scalar"))
-      storeCodeModule.add(self._emit16bitSubtilePairedStore(addrCalc, sIdx0, sIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=forceSlc))
-      storeCodeModule.add(SBranch(labelName=afterL.getLabelName(), comment="skip scalar"))
-      storeCodeModule.add(fbL)
-      # Guard: sba=0 (M-block tt0-1) must be valid before writing the scalar orphan store.
-      # The paired guard above checked MGuard > tt0; if MGuard ≤ tt0-1 then even sba=0 is
-      # OOB and neither store should fire.  Without this guard the orphan store writes zeros
-      # to valid D addresses when the ValuC-slot reuse has clobbered the source registers.
-      storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0 - 1,
-                                     comment=f"fb-scalar: sba=0 valid? (MGuard > {tt0-1})"))
-      storeCodeModule.add(SCBranchSCC0(labelName=afterL.getLabelName(), comment=f"sba=0 OOB -> skip scalar store"))
-      storeCodeModule.add(self._emit16bitSubtileScalarStore(addrCalc, sIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=forceSlc))
-      storeCodeModule.add(afterL)
-    else:
-      storeCodeModule.add(self._emit16bitSubtilePairedStore(addrCalc, sIdx0, sIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=forceSlc))
 
   # -------------------------------------------------------------------------
   # SubtileBpermutePipelining (quest): split the paired-store transpose into an
