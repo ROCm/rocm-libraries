@@ -55,6 +55,11 @@ GlobalParameters:
     - ProblemSizes:
       - Exact: [512, 512, 1, 512]
       - Exact: [4103, 4103, 1, 1031]
+      # Few tiles, long K: the dynamic path only splits these when
+      # TENSILE_STREAMK_TILES/_SPLIT (and _FIXED_GRID) force partial tiles,
+      # which exercises the partial-tile fixup and the queue rank.
+      - Exact: [32, 32, 1, 262144]
+      - Exact: [96, 96, 1, 65536]
 
 BenchmarkProblems:
 

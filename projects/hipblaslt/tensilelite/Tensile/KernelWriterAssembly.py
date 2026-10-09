@@ -770,6 +770,24 @@ class KernelWriterAssembly(KernelWriter):
     tP["localReadStrideCoalesced"] = localReadStrideCoalesced
     tP["localReadInstruction"]     = instructions[lrInstPoolName][localReadInstructionIdx]
 
+  def _checkedOutRegs(self):
+    """{(pool, index): tag} of every sgpr/vgpr currently checked out."""
+    from rocisa.register import RegisterPool
+    regs = {}
+    for name, pool in (("s", self.sgprPool), ("v", self.vgprPool)):
+      for idx, reg in enumerate(pool.getPool()):
+        if reg.status == RegisterPool.Status.InUse:
+          regs[(name, idx)] = reg.tag
+    return regs
+
+  def _assertStillCheckedOut(self, regs, where):
+    """Assert the registers of a _checkedOutRegs() snapshot are all still
+    checked out under the same tag, i.e. none was checked in (and possibly
+    handed to new code) before ``where``."""
+    now = self._checkedOutRegs()
+    freed = sorted("%s%u(%s)" % (p, i, t) for (p, i), t in regs.items() if now.get((p, i)) != t)
+    assert not freed, "registers live across %s were checked in before it: %s" % (where, ", ".join(freed))
+
   def allocTmpSgpr(self, num: int, alignment=None, tag=None):
     def overflowListener(e):
       self.states.overflowedResources = 2
@@ -3207,13 +3225,15 @@ class KernelWriterAssembly(KernelWriter):
       # remapped PersistentWorkGroupIndex % numQueues skews the per-queue home-workgroup count
       # and the counter drifts off 0. We snapshot the raw id (== physical XCD
       # rank) into the persistent StreamKTileIdx SGPR -- an ALREADY-allocated
-      # slot that is provably dead in the [prologue, queue-read) window on both
-      # the SK4 and SK5 dynamic paths (its first real write is after the queue
-      # read in graWorkGroup; for SK5 it aliases PersistentIteration, whose only
-      # in-window writes live on the mutually-exclusive SK3-static path). Reusing
-      # it costs ZERO additional persistent SGPRs (unlike a dedicated StreamKQueue
-      # SGPR, which overflows the SGPR file on tuned high-register SKXCC kernels).
-      # The queue index reads it, masked % numQueues, in StreamK.graWorkGroup.
+      # slot that is dead between here and the WorkAssignment initialize() on
+      # both the SK4 and SK5 dynamic paths (for SK5 it aliases
+      # PersistentIteration, whose only writes there live on the
+      # mutually-exclusive SK3-static path). Reusing it costs ZERO additional
+      # persistent SGPRs (unlike a dedicated StreamKQueue SGPR, which overflows
+      # the SGPR file on tuned high-register SKXCC kernels). initialize() moves
+      # it into PersistentWorkGroupIndex (emitRawRankRestore) before the first
+      # work item overwrites StreamKTileIdx with a tile index; the queue index
+      # reads it from there, masked % numQueues, on every pop.
       # Once-per-workgroup setup only -- no steady-state instructions added.
       if Component.WorkAssignment.usesRawQueueRank(self, kernel):
         module.add(SMovB32(dst=sgpr("StreamKTileIdx"), src=sgpr("WorkGroup0"),
@@ -16708,6 +16728,15 @@ class KernelWriterAssembly(KernelWriter):
       # GSU0 temporarily selects the ordinary policy; resolve this store branch's
       # strategy rather than reusing the kernel's allocation capabilities.
       processingComponent = Component.TileProcessingStrategy.find(self) if isPersistent(kernel) else None
+      # With the dynamic StreamK fixup by last arrival, the last part jumps
+      # from writePartials back into the fixup emitted by storeBranches and
+      # runs the regular store. Every register checked out before
+      # storeBranches is then live across writePartials, so it must stay
+      # checked out until writePartials has been generated. Snapshot them
+      # here and check that before writePartials.
+      arrivalFixup = processingComponent is not None \
+        and getattr(processingComponent, "usesArrivalFixup", lambda w, k: False)(self, kernel)
+      liveAcrossPartials = self._checkedOutRegs() if arrivalFixup else None
       if processingComponent is not None:
         module.add(processingComponent.storeBranches(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct))
 
@@ -16854,11 +16883,21 @@ class KernelWriterAssembly(KernelWriter):
           self.states.deferredActivationModules = activationModules
         else:
           module.appendModule(activationModules)
-        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
-        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
+        # The activation call offsets are set before storeBranches; with the
+        # arrival fixup the partials path reaches the store too, so keep them
+        # out of writePartials' reach.
+        if not arrivalFixup:
+          self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
+          self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
 
       if processingComponent is not None:
+        if liveAcrossPartials is not None:
+          self._assertStillCheckedOut(liveAcrossPartials, "writePartials (StreamK arrival fixup)")
         module.add(processingComponent.writePartials(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct, endLabel))
+
+      if activationLabelList and arrivalFixup:
+        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
+        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
 
       # End label
       module.add(endLabel)

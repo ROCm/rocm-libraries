@@ -24,10 +24,19 @@ inspect emitted modules rather than matching source text, and reason about the
 *real* KernelWriter / KernelWriterAssembly source via the AST so the ordering and
 gating assertions track the actual code.
 
+The snapshot does not survive in ``StreamKTileIdx``: the first work item
+overwrites it with a tile index. ``initialize`` therefore moves it into
+``PersistentWorkGroupIndex`` (``emitRawRankRestore``; SK5 only on its dynamic
+sub-path), and every pop reads the queue from there.
+
 Invariants pinned (see per-test notes):
   * Both dynamic auto-WGM and SKXCC (WGMXCC>1) queue indices are
-    ``StreamKTileIdx & (numQueues-1)`` -- a single mask of the raw-rank carrier,
-    never the post-remap PersistentWorkGroupIndex shifts.
+    ``PersistentWorkGroupIndex & (numQueues-1)`` -- a single mask of the
+    restored raw rank, never the shift derivation, and never the
+    ``StreamKTileIdx`` carrier (which holds a tile index after the first pop).
+  * ``emitRawRankRestore`` moves the carrier into PersistentWorkGroupIndex
+    (unconditionally for SK4, selected on WorkAssignmentMode for SK5), and emits
+    nothing on the count-preserving paths.
   * Both SK4 and SK5 route their queue index through the shared ``emitQueueIndex``.
   * The raw-rank snapshot ``s_mov_b32 StreamKTileIdx, WorkGroup0`` is emitted
     BEFORE the wgmXCC workgroup remap.
@@ -49,6 +58,8 @@ from Tensile.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
 from rocisa.code import Module
 from rocisa.instruction import (
     SAndB32,
+    SCmpEQU32,
+    SCSelectB32,
     SLShiftLeftB32,
     SLShiftRightB32,
     SMovB32,
@@ -162,28 +173,28 @@ class TestRawRankQueueIndex:
 
     @pytest.mark.parametrize("streamk", [4, 5])
     @pytest.mark.parametrize("wgmXCC,skxcc", RAW_REGIMES)
-    def test_queue_index_masks_raw_rank_carrier(self, streamk, wgmXCC, skxcc):
+    def test_queue_index_masks_restored_raw_rank(self, streamk, wgmXCC, skxcc):
         # For every raw-rank regime (dynamic auto-WGM and SKXCC with WGMXCC > 1),
-        # the queue index must be a single mask of the raw-rank carrier, not the
-        # PersistentWorkGroupIndex shr/shl/sub derivation.
+        # the queue index must be a single mask of the raw rank that
+        # emitRawRankRestore left in PersistentWorkGroupIndex.
         items = _emit_queue_index(streamk, wgmXCC=wgmXCC, skxcc=skxcc)
         ands = [i for i in items if isinstance(i, SAndB32)]
         assert len(ands) == 1, "raw-rank queue index must be a single mask op"
-        assert _refs_sgpr(ands[0], _CARRIER), (
-            "the queue index must be derived from the raw-rank %s carrier" % _CARRIER
+        assert _refs_sgpr(ands[0], "PersistentWorkGroupIndex"), (
+            "the queue index must be derived from the restored raw rank"
         )
         # queue = rawWG & (numQueues-1); gfx942/gfx950 => 8 queues => mask 0x7.
         assert _imm_in(ands[0], 0x7), "expected the (numQueues-1) = 0x7 mask"
 
     @pytest.mark.parametrize("streamk", [4, 5])
     @pytest.mark.parametrize("wgmXCC,skxcc", RAW_REGIMES)
-    def test_queue_index_does_not_use_post_remap_streamkidx(self, streamk, wgmXCC, skxcc):
-        # On a raw-rank path the queue index must NOT come from the remapped
-        # PersistentWorkGroupIndex (PersistentWorkGroupIndex % numQueues), so neither PersistentWorkGroupIndex nor its
-        # shift/shift/sub derivation may appear.
+    def test_queue_index_does_not_read_tile_index_carrier(self, streamk, wgmXCC, skxcc):
+        # Regression: the queue index is computed on every pop, and from the
+        # second pop on StreamKTileIdx holds the previous item's tile index.
+        # Reading the carrier there sent every later pop to queue (tile & mask).
         items = _emit_queue_index(streamk, wgmXCC=wgmXCC, skxcc=skxcc)
-        assert not any(_refs_sgpr(i, "PersistentWorkGroupIndex") for i in items), (
-            "the raw-rank queue index must not reference the post-remap PersistentWorkGroupIndex"
+        assert not any(_refs_sgpr(i, _CARRIER) for i in items), (
+            "the queue index must not read %s, which holds a tile index after the first pop" % _CARRIER
         )
         assert not any(
             isinstance(i, (SLShiftRightB32, SLShiftLeftB32, SSubU32)) for i in items
@@ -198,6 +209,65 @@ class TestRawRankQueueIndex:
         assert not any(_refs_sgpr(i, "StreamKQueue") for i in items), (
             "no dedicated StreamKQueue SGPR; the carrier is the reused StreamKTileIdx"
         )
+
+
+# ===========================================================================
+# 1b. emitRawRankRestore: initialize() moves the prologue snapshot into
+#     PersistentWorkGroupIndex once per workgroup, before any work item is
+#     decoded. SK4 moves it unconditionally; SK5 selects it on
+#     WorkAssignmentMode so the static sub-path keeps its remapped CTA index.
+# ===========================================================================
+def _emit_restore(streamk: int, wgmXCC: int, skxcc: int = 0,
+                  workGroupIdFromTTM: bool = False) -> list:
+    inst = {4: DynamicWorkQueue, 5: Hybrid}[streamk]()
+    writer = _FakeWriter(workGroupIdFromTTM=workGroupIdFromTTM)
+    writer.states.kernel = {"TileProcessingStrategy": "StreamK",
+                            "WorkAssignment": "Hybrid" if streamk == 5 else "DynamicWorkQueue"}
+    kernel = _kernel(streamk=streamk, wgmXCC=wgmXCC, skxcc=skxcc)
+    return _flat(inst.emitRawRankRestore(writer, kernel, hybrid=(streamk == 5)))
+
+
+class TestRawRankRestore:
+    RAW_REGIMES = TestRawRankQueueIndex.RAW_REGIMES
+
+    @pytest.mark.parametrize("wgmXCC,skxcc", RAW_REGIMES)
+    def test_sk4_moves_carrier_into_launch_rank(self, wgmXCC, skxcc):
+        items = _emit_restore(4, wgmXCC, skxcc)
+        assert len(items) == 1 and isinstance(items[0], SMovB32)
+        params = _param_texts(items[0])
+        assert "sgprPersistentWorkGroupIndex" in params[0]
+        assert "sgpr" + _CARRIER in params[1]
+
+    @pytest.mark.parametrize("wgmXCC,skxcc", RAW_REGIMES)
+    def test_sk5_selects_carrier_on_dynamic_mode(self, wgmXCC, skxcc):
+        items = _emit_restore(5, wgmXCC, skxcc)
+        cmps = [i for i in items if isinstance(i, SCmpEQU32)]
+        sels = [i for i in items if isinstance(i, SCSelectB32)]
+        assert len(cmps) == 1 and _refs_sgpr(cmps[0], "WorkAssignmentMode")
+        assert len(sels) == 1
+        dst, src0, src1 = _param_texts(sels[0])[:3]
+        # SCC (mode == 0, static) keeps the remapped index; dynamic takes the raw rank.
+        assert "sgprPersistentWorkGroupIndex" in dst
+        assert "sgprPersistentWorkGroupIndex" in src0
+        assert "sgpr" + _CARRIER in src1
+
+    @pytest.mark.parametrize("streamk", [4, 5])
+    @pytest.mark.parametrize("wgmXCC,skxcc", [(1, 0), (2, 0), (1, 4)])
+    def test_count_preserving_paths_emit_nothing(self, streamk, wgmXCC, skxcc):
+        assert _emit_restore(streamk, wgmXCC, skxcc) == []
+
+    @pytest.mark.parametrize("streamk", [4, 5])
+    def test_gfx12_emits_nothing(self, streamk):
+        assert _emit_restore(streamk, -1, workGroupIdFromTTM=True) == []
+
+    @pytest.mark.parametrize("func", [DynamicWorkQueue.initialize, Hybrid.initialize])
+    def test_initialize_calls_restore(self, func):
+        assert "emitRawRankRestore" in _source_of(func)
+
+    def test_hybrid_restore_follows_extract_mode(self):
+        # The SK5 select reads WorkAssignmentMode, so it must come after extractMode.
+        src = _source_of(Hybrid.initialize)
+        assert src.index("extractMode(") < src.index("emitRawRankRestore(")
 
 
 # ===========================================================================
