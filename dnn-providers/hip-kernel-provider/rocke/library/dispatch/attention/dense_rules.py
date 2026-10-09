@@ -18,11 +18,20 @@ from typing import Callable, Iterable, Mapping, Optional, Tuple
 
 from rocke.dispatch.tuning.walk import one_knob_at_a_time
 
-from .axes import DENSE_PROBLEM_FIELDS, KnobAxis, axis_knob_names, tuning_axes
+from .axes import (
+    DENSE_ARCH_PROBLEM_FIELDS,
+    DENSE_PROBLEM_FIELDS,
+    KnobAxis,
+    axis_knob_names,
+    tuning_axes,
+)
 from .common import AttentionTuningSpec
 from .waves import WavesPerEuSpace, waves_per_eu_sweep_values
 
 DenseSupports = Callable[..., Tuple[bool, str]]
+_ALL_DENSE_PROBLEM_FIELDS = DENSE_PROBLEM_FIELDS.union(
+    *DENSE_ARCH_PROBLEM_FIELDS.values()
+)
 
 
 def _gfx950_dense_inert_knobs(spec) -> dict:
@@ -266,7 +275,7 @@ def _dense_defaults(base, recorded: frozenset) -> Tuple[Tuple[str, object], ...]
     return tuple(
         (f.name, getattr(base, f.name))
         for f in _dataclass_fields(base)
-        if f.name not in DENSE_PROBLEM_FIELDS and f.name not in recorded
+        if f.name not in _ALL_DENSE_PROBLEM_FIELDS and f.name not in recorded
     )
 
 

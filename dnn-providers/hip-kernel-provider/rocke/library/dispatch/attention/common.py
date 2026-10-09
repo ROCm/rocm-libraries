@@ -110,6 +110,15 @@ class AttentionRequest(OperatorRequest):
     mask_type: AttentionMaskType | int = AttentionMaskType.NO_MASK
     use_sinks: bool = False
     sliding_window: int = 0
+    # Right bound and diagonal alignment of the attention band, in the cuDNN / hipDNN
+    # vocabulary (``sliding_window`` is the left bound, 0 = unbounded). Consulted
+    # only for ``NO_MASK`` / ``SLIDING_WINDOW``: ``TOP_LEFT_CAUSAL`` /
+    # ``BOTTOM_RIGHT_CAUSAL`` fix the right bound at 0 and name their own alignment.
+    # ``right_bound``: -1 = unbounded (default), 0 = causal, R > 0 = R keys of
+    # lookahead. ``diagonal_alignment``: 0 = TOP_LEFT (default, as hipDNN), 1 =
+    # BOTTOM_RIGHT; it only matters when ``seqlen_q != seqlen_k``.
+    right_bound: int = -1
+    diagonal_alignment: int = 0
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
     num_cus: int = (
         0  # 0 => auto-resolve to the device CU count at dispatch (_resolve_num_cus)
@@ -164,12 +173,30 @@ class AttentionRequest(OperatorRequest):
             # Let _request_errors report the invalid ordinal. In particular, do
             # not silently classify an arbitrary nonzero value as causal.
             mask_type = None
-        if mask_type is not None and mask_type != AttentionMaskType.NO_MASK:
-            active.add("causal")
-        if mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and int(
-            self.seqlen_q
-        ) != int(self.seqlen_k):
-            active.add("causal_bottom_right")
+        band = None
+        if mask_type in (
+            AttentionMaskType.NO_MASK,
+            AttentionMaskType.SLIDING_WINDOW,
+        ) and _has_no_mask_kernel(self.arch):
+            try:
+                band = _attention_band(self)
+            except ValueError:
+                band = None  # _request_errors reports it
+        if band is not None:
+            top_left, right = band
+            if right == 0:
+                active.add("causal")
+                if not top_left and int(self.seqlen_q) != int(self.seqlen_k):
+                    active.add("causal_bottom_right")
+            elif int(self.sliding_window) > 0 or right > 0:
+                active.add("band")
+        else:
+            if mask_type is not None and mask_type != AttentionMaskType.NO_MASK:
+                active.add("causal")
+            if mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and int(
+                self.seqlen_q
+            ) != int(self.seqlen_k):
+                active.add("causal_bottom_right")
         if int(self.sliding_window) > 0:
             active.add("sliding_window")
         if bool(self.use_sinks):
@@ -190,8 +217,34 @@ ATTENTION_DIM_VOCABULARY = (
     "kv_block_size",
 )
 
+# The attention band. hipDNN / cuDNN describe the mask as (left_bound, right_bound,
+# diagonal_alignment): unset = unbounded, ``right_bound = 0`` is causal, and any
+# bounded trio that is neither full nor causal is what hipDNN classifies as
+# SLIDING_WINDOW. An AttentionRequest carries the same trio as (``sliding_window``,
+# ``right_bound``, ``diagonal_alignment``) plus a mask kind:
+#   * TOP_LEFT_CAUSAL / BOTTOM_RIGHT_CAUSAL -- right bound 0, alignment from the kind;
+#   * NO_MASK / SLIDING_WINDOW -- the trio is read as given, so NO_MASK with a window
+#     is a (non-causal) left-only band, exactly as in cuDNN. NO_MASK without bounds
+#     is full attention, the SDPA default. SLIDING_WINDOW names a band, so it needs
+#     at least one bound.
+# gfx950 implements the whole band in the unified kernels. The other arches' tiled
+# kernels are causal-only: they keep serving NO_MASK by their existing causal body
+# (KNOWN GAP -- it is the request default, so gating it would re-route every default
+# request to the scalar kernel) and reject any non-causal band.
+_BAND_NEEDS_BOUND_ERROR = (
+    "mask_type SLIDING_WINDOW names a band: set sliding_window > 0 and/or "
+    "right_bound >= 0 (or use NO_MASK for full attention)"
+)
+_BAND_GFX950_ONLY_ERROR = (
+    "a non-causal attention band (right_bound != 0 with NO_MASK / SLIDING_WINDOW) "
+    "is implemented on gfx950 only"
+)
+
+# ``band``: a non-causal band -- a right bound other than 0 together with a window or
+# a lookahead (``right_bound`` > 0). Plain full attention (NO_MASK, no window) is not
+# a band, and a causal window is ``causal`` + ``sliding_window``.
 ATTENTION_FEATURES = frozenset(
-    {"causal", "causal_bottom_right", "sliding_window", "sinks", "fp8"}
+    {"causal", "causal_bottom_right", "sliding_window", "band", "sinks", "fp8"}
 )
 
 
@@ -209,7 +262,7 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     if int(req.nhead_q) % int(req.nhead_k):
         errors.append("nhead_q must be divisible by nhead_k (GQA grouping)")
     try:
-        _parse_attention_mask_type(req.mask_type)
+        _attention_band(req)
     except ValueError as exc:
         errors.append(str(exc))
     try:
@@ -302,6 +355,55 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
     return 120
 
 
+def _has_no_mask_kernel(arch: str) -> bool:
+    """Arches whose unified kernels implement full attention (see ``mask_type``)."""
+    return arch.strip().lower() == "gfx950"
+
+
+def _attention_band(req: AttentionRequest) -> Tuple[bool, int]:
+    """``(causal_top_left, right_bound)`` the unified kernels must compute for ``req``.
+
+    Raises ``ValueError`` (with the reason) for a request that names no valid band.
+    The left bound is ``req.sliding_window``. At ``seqlen_q == seqlen_k`` the two
+    alignments coincide, so the existing (bottom-right) body is kept; with no bound
+    at all (full attention) alignment is moot as well.
+    """
+    mask_type = _parse_attention_mask_type(req.mask_type)
+    sq, sk = int(req.seqlen_q), int(req.seqlen_k)
+    right = int(req.right_bound)
+    alignment = int(req.diagonal_alignment)
+    if right < -1:
+        raise ValueError(f"right_bound must be >= -1 (-1 = unbounded), got {right}")
+    if alignment not in (0, 1):
+        raise ValueError(
+            f"diagonal_alignment must be 0 (TOP_LEFT) or 1 (BOTTOM_RIGHT), got {alignment}"
+        )
+    if mask_type in (
+        AttentionMaskType.TOP_LEFT_CAUSAL,
+        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+    ):
+        if right not in (-1, 0):
+            raise ValueError(
+                "right_bound applies only to NO_MASK / SLIDING_WINDOW; the causal "
+                "mask kinds fix it at 0"
+            )
+        top_left = mask_type == AttentionMaskType.TOP_LEFT_CAUSAL and sq != sk
+        return top_left, 0
+    # NO_MASK / SLIDING_WINDOW: the (sliding_window, right_bound, alignment) trio.
+    window = int(req.sliding_window)
+    if mask_type == AttentionMaskType.SLIDING_WINDOW and window <= 0 and right < 0:
+        raise ValueError(_BAND_NEEDS_BOUND_ERROR)
+    if not _has_no_mask_kernel(req.arch):
+        if mask_type == AttentionMaskType.NO_MASK and right == -1:
+            return False, 0  # KNOWN GAP: legacy causal body (see above)
+        if right != 0:
+            raise ValueError(_BAND_GFX950_ONLY_ERROR)
+    if right < 0 and window <= 0:
+        return False, -1  # full attention
+    top_left = alignment == 0 and sq != sk
+    return top_left, right
+
+
 def _problem_with_num_cus(
     req: AttentionRequest, num_cus: int
 ) -> UnifiedAttentionProblem:
@@ -323,6 +425,8 @@ def _problem_with_num_cus(
         num_cus=int(num_cus),
         target_ctas=int(req.target_ctas),
         clamp_arch=req.arch.lower(),
+        causal_top_left=_attention_band(req)[0],
+        right_bound=_attention_band(req)[1],
     )
 
 
@@ -374,6 +478,19 @@ class AttentionSpec:
     # ``attention_unified._d256_gfx950_spec_overrides``; the builder consumes them
     # via ``_tiled_spec_from_problem(problem, overrides=...)``.
     tiled_overrides: Tuple[Tuple[str, object], ...] = ()
+    # Band the kernel computes (see ``UnifiedAttentionProblem``): diagonal alignment
+    # and right bound. Top-left and a non-causal right bound are distinct kernel
+    # bodies, so they must not collapse onto the bottom-right kernel_name / cache key.
+    causal_top_left: bool = False
+    right_bound: int = 0
+    # Left bound. Only encoded in kernel_name() for a non-causal band (a new family
+    # of kernels): the causal-window names stay as they were, a known identity gap
+    # (the window length is not part of them) that this does not widen.
+    sliding_window: int = 0
+
+    @property
+    def causal(self) -> bool:
+        return self.right_bound == 0
 
     def kernel_name(self) -> str:
         if self.kernel_name_override:
@@ -390,6 +507,12 @@ class AttentionSpec:
         ]
         if self.use_fp8:
             parts.append("fp8fnuz" if self.fp8_fnuz else "fp8")
+        if self.causal_top_left:
+            parts.append("tl")
+        if self.right_bound != 0:
+            parts.append("rbu" if self.right_bound < 0 else f"rb{self.right_bound}")
+            if self.sliding_window > 0:
+                parts.append(f"sw{self.sliding_window}")
         return kernel_name_join(*parts)
 
 

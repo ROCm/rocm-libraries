@@ -143,6 +143,9 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
             num_kv_heads=problem.num_kv_heads,
             name="rocke_attention_gfx950_d256",
             tiled_overrides=tuple(sorted(_d256_gfx950_spec_overrides().items())),
+            causal_top_left=problem.causal_top_left,
+            right_bound=problem.right_bound,
+            sliding_window=problem.sliding_window,
         )
 
     candidate = KernelCandidate(

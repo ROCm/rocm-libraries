@@ -129,6 +129,8 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
             return False, why
         if problem.select_path() != "2d":
             return False, "problem routes to 3D, not 2D"
+        if not problem.default_mask:
+            return False, "gfx942 tiled 2D implements only bottom-right causal"
         from kernels.common.attention_unified import _enable_gfx942_fp16_flash
 
         if not _enable_gfx942_fp16_flash(problem):
@@ -167,7 +169,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
             ),
             # ``_enable_gfx942_fp16_flash`` is the real narrowing; fp8 is
             # unsupported, but the unified body already shifts causal masking.
-            supports_features=ATTENTION_FEATURES - {"fp8"},
+            supports_features=ATTENTION_FEATURES - {"fp8", "band"},
         ),
         _supports=support,
         select_spec=select,

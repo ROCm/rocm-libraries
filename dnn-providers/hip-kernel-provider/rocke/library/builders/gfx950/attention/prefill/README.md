@@ -223,10 +223,53 @@ For bottom-right masking, set `mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL`
 (exported by `dispatch.attention`). With unequal Q/K lengths, only the grid
 algorithm of this standalone gfx950 dense path admits it; the persistent
 candidates reject it. Equal lengths preserve the equivalent top-left path.
-`algorithm="auto"` still uses the existing unified 2D/3D paths or their eligible
-dense-pipe/D256 candidates: those kernels already shift the causal diagonal by
-each sequence's runtime KV/query length difference. The standalone gfx942 dense
-and gfx1250 WMMA candidates still reject a moving bottom-right diagonal.
+`TOP_LEFT_CAUSAL` (unshifted `key_pos <= query_pos`) is served on gfx950 for
+unequal Q/K lengths too, including non-tile-aligned (ragged) lengths in both
+directions (`seqlen_q < seqlen_k` and `seqlen_q > seqlen_k`).
+
+**The attention band.** `algorithm="auto"` uses the unified 2D/3D paths or their
+eligible dense-pipe/D256 candidates. On gfx950 those kernels compute the cuDNN /
+hipDNN band `(left, right, diagonal_alignment)`: key `k` is visible to the query at
+diagonal position `d` iff `d - k < left` (when set) and `k <= d + right`. An
+`AttentionRequest` spells it with `sliding_window` (left, 0 = unbounded),
+`right_bound` (-1 unbounded = default, 0 causal, R > 0 lookahead) and
+`diagonal_alignment` (0 TOP_LEFT = default, 1 BOTTOM_RIGHT; only matters when
+`seqlen_q != seqlen_k`):
+
+| mask_type | band |
+|---|---|
+| `NO_MASK` | the trio as given: no bounds = full attention (the SDPA default in cuDNN, FlashAttention, PyTorch); `sliding_window` alone = a left-only (non-causal) window; with `right_bound` = a two-sided window or a lookahead |
+| `SLIDING_WINDOW` | the same trio, but it must name a bound |
+| `TOP_LEFT_CAUSAL` / `BOTTOM_RIGHT_CAUSAL` | right bound 0, alignment from the kind (a causal window = these + `sliding_window`) |
+
+Kernel variants are distinct bodies and names: `_tl` (top-left), `_rbu` / `_rb<R>`
+(unbounded / R-key right bound, plus `_sw<W>` for a non-causal window); at equal
+length the alignments coincide, so the default body is kept. Window, right bound
+and the sinks / softcap options compose; ALiBi and QQ-bias are only defined for
+causal masks. At `seqlen_q == 1` top-left attends only key 0, which is the
+definition of top-left, not a bug. A row whose band holds no key outputs zeros (the
+same in the unified and dense kernels, and what PyTorch SDPA returns for a fully
+masked row).
+
+The standalone dense kernel (`algorithm="attention_dense_grid"` / `"attention_dense_persist"`) implements the same band
+on the top-left diagonal -- full attention (including ragged cross-attention
+`seqlen_q != seqlen_k`), left-only / two-sided windows and lookahead, in both the
+grid and persistent algorithms (kernel names `_full`, `_causal`, `_swa<W>`, `_rb<R>`).
+It does not implement a window or lookahead at bottom-right alignment with
+`seqlen_q != seqlen_k`; that request is rejected with a reason, and `algorithm="auto"`
+routes it to the unified kernels.
+
+Known gap: the gfx942 and gfx1250 tiled kernels are still causal-only. `NO_MASK` is
+the request default, so on those arches it keeps being served by the existing
+causal body (a window on it is a causal window, as before) instead of re-routing
+every default request to the slow scalar kernel; any other band is rejected with a
+reason, and a directly built non-default `UnifiedAttentionProblem` is rejected by
+their tiled gates. A caller that maps hipDNN `(left, right)` bounds onto this
+request is responsible for passing the right bound through (the ingestor pack
+declines any bound it cannot serve).
+
+The standalone gfx942 dense and gfx1250 WMMA candidates still
+reject a moving bottom-right diagonal.
 That rejection does not disable gfx942 dense sliding-window attention: top-left
 and equal-length bottom-right requests retain the windowed path on both grids.
 

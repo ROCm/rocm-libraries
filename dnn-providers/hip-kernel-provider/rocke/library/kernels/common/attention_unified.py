@@ -137,6 +137,34 @@ class UnifiedAttentionProblem:
     # clamp stops describing the kernel that actually gets built; unifying them
     # is tracked separately. ``None`` => fall back to the running-box arch.
     clamp_arch: Optional[str] = None
+    # Attention band, in the cuDNN / hipDNN vocabulary. A key ``k`` is visible to
+    # query ``p`` of a sequence iff ``k < kv_len`` and, with ``d = p + context_len``
+    # (the diagonal position):
+    #   * ``d - k < sliding_window``  (left bound; 0 = unbounded), and
+    #   * ``k <= d + right_bound``    (right bound; 0 = causal, -1 = unbounded).
+    # ``causal_top_left`` picks the diagonal alignment: False = bottom-right
+    # (``context_len = kv_len - q_len``, the paged diagonal the kernels have always
+    # implemented, hence the default), True = top-left (``context_len = 0``); at
+    # ``q_len == kv_len`` they coincide. The defaults are the existing causal body.
+    # Anything else (top-left, a right bound other than 0) is implemented on gfx950
+    # (tiled 2D/3D) and in the scalar kernels; other arches reject it.
+    causal_top_left: bool = False
+    right_bound: int = 0
+
+    def __post_init__(self):
+        if self.right_bound < -1:
+            raise ValueError(
+                f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
+            )
+
+    @property
+    def causal(self) -> bool:
+        return self.right_bound == 0
+
+    @property
+    def default_mask(self) -> bool:
+        """The bottom-right causal body every kernel family implements."""
+        return not self.causal_top_left and self.right_bound == 0
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -444,6 +472,39 @@ def _reject_fp8_format_arch_mismatch(
     return None
 
 
+def _mask_label(problem: UnifiedAttentionProblem) -> str:
+    align = "top-left" if problem.causal_top_left else "bottom-right"
+    right = {-1: "unbounded", 0: "causal"}.get(
+        problem.right_bound, f"right_bound={problem.right_bound}"
+    )
+    return f"{align}/{right}"
+
+
+def _reject_mask_semantics(
+    problem: UnifiedAttentionProblem,
+) -> Optional[Tuple[bool, str]]:
+    """Mask combinations no unified kernel defines, on any arch.
+
+    The ALiBi / QQ-bias offsets are defined on the causal diagonal (``key - context_len``
+    with the future masked); with a right bound other than 0 there is no standard
+    meaning for them, so reject instead of guessing.
+    """
+    if problem.right_bound != 0 and (problem.use_alibi or problem.use_qq_bias):
+        return False, "ALiBi / QQ-bias are only defined for causal masks"
+    return None
+
+
+def _reject_mask_on_arch(
+    problem: UnifiedAttentionProblem, arch: str
+) -> Optional[Tuple[bool, str]]:
+    """Only gfx950's tiled kernels implement non-default masks (see the fields)."""
+    if not problem.default_mask and arch != "gfx950":
+        return False, (
+            f"{arch} tiled attention does not implement {_mask_label(problem)} masks"
+        )
+    return None
+
+
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
     arch: Optional[str] = None,
@@ -485,6 +546,9 @@ def supports_native_unified_attention(
         return False, "ALiBi slopes are not enabled in CK DSL attention yet"
     if problem.use_qq_bias:
         return False, "QQ bias is not enabled in CK DSL attention yet"
+    rejected = _reject_mask_semantics(problem)
+    if rejected is not None:
+        return rejected
     return True, "supported by scalar CK DSL 2D attention backend"
 
 
@@ -493,6 +557,9 @@ def supports_native_unified_attention_tiled(
 ) -> Tuple[bool, str]:
     """Return whether the optimized tiled MFMA path can run this problem."""
     arch = _resolve_attention_arch()
+    rejected = _reject_mask_semantics(problem) or _reject_mask_on_arch(problem, arch)
+    if rejected is not None:
+        return rejected
     if arch == "gfx1250" and problem.softcap > 0:
         return False, "gfx1250 tiled 2D does not support softcap yet"
     _, _, supports_tiled_2d = _tiled_2d_impl(arch)
@@ -583,6 +650,9 @@ def supports_native_unified_attention_3d_tiled(
 ) -> Tuple[bool, str]:
     """Return whether the optimized tiled MFMA 3D split-KV path can run this."""
     arch = arch or _resolve_attention_arch()
+    rejected = _reject_mask_semantics(problem) or _reject_mask_on_arch(problem, arch)
+    if rejected is not None:
+        return rejected
     rejected = _reject_fp8_format_arch_mismatch(problem, arch)
     if rejected is not None:
         return rejected
@@ -606,6 +676,17 @@ _ATTN_TILED_CACHE: Dict[Tuple, bytes] = {}
 _ATTN_3D_TILED_CACHE: Dict[Tuple, Tuple[bytes, str, bytes, str]] = {}
 
 
+def _mask_key(problem: UnifiedAttentionProblem) -> Tuple:
+    """Cache-key suffix; empty for the default bottom-right mask so every
+    pre-existing key is unchanged."""
+    key: Tuple = ()
+    if problem.causal_top_left:
+        key += ("top-left",)
+    if problem.right_bound != 0:
+        key += ("right_bound", problem.right_bound)
+    return key
+
+
 def _cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     return (
         "scalar",
@@ -623,7 +704,7 @@ def _cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         bool(problem.use_sinks),
         bool(problem.softcap > 0),
         bool(problem.use_fp8),
-    )
+    ) + _mask_key(problem)
 
 
 def _enable_d128_small_tile(problem: UnifiedAttentionProblem) -> bool:
@@ -1552,7 +1633,7 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
             and not _enable_gfx942_flash_k_sliced_ring(problem)
             else None
         ),
-    )
+    ) + _mask_key(problem)
 
 
 def _select_2d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
@@ -3189,7 +3270,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_gfx942_3d_wide_kv_load(problem),
         _kv_storage_dtype(problem),
         _enable_i64_kv_addr(problem),
-    )
+    ) + _mask_key(problem)
     if _resolve_attention_arch() == "gfx1250":
         sp = _tiled_3d_spec_from_problem(problem)
         return base + (
@@ -3779,7 +3860,7 @@ def _cheap_2d_sig(problem) -> Tuple:
         bool(problem.use_qq_bias),
         bool(problem.use_fp8),
         int(problem.total_q),
-    )
+    ) + _mask_key(problem)
 
 
 def _run_2d_graphed(
@@ -4649,8 +4730,54 @@ class UnifiedAttention2DSpec:
                 "sw": p.sliding_window > 0,
                 "softcap": p.softcap > 0,
                 "fp8kv": p.use_fp8,
+                "tl": p.causal_top_left,
+                **_right_bound_flag(p),
             },
         )
+
+
+def _right_bound_flag(p: UnifiedAttentionProblem) -> dict:
+    """Kernel-name token for a non-causal right bound: ``rbu`` (unbounded) or ``rb<R>``."""
+    if p.right_bound == 0:
+        return {}
+    return {("rbu" if p.right_bound < 0 else f"rb{p.right_bound}"): True}
+
+
+def _scalar_context_len(b: IRBuilder, p: UnifiedAttentionProblem, kv_len, q_len):
+    """Diagonal offset: query ``q`` sits at ``context_len + q``.
+
+    bottom-right: ``kv_len - q_len``; top-left: 0.
+    """
+    if p.causal_top_left:
+        return b.const_i32(0)
+    return b.sub(kv_len, q_len)
+
+
+def _scalar_band_ok(
+    b: IRBuilder,
+    p: UnifiedAttentionProblem,
+    context_len,
+    query_pos,
+    kpos,
+    *,
+    window: bool = True,
+) -> Optional[Value]:
+    """Visibility of key ``kpos`` for the query: the right bound ``k <= d + right``
+    (``d = context_len + query_pos``) AND the left bound ``d - k < sliding_window``.
+    ``None`` when neither bounds anything (the loop range already limits to kv_len).
+    ``window=False`` skips the left bound.
+    """
+    ok = None
+    if p.right_bound >= 0:
+        upper = b.add(context_len, query_pos)
+        if p.right_bound > 0:
+            upper = b.add(upper, b.const_i32(p.right_bound))
+        ok = b.cmp_le(kpos, upper)
+    if window and p.sliding_window > 0:
+        dist = b.sub(b.add(context_len, query_pos), kpos)
+        sw_ok = b.cmp_lt(dist, b.const_i32(p.sliding_window))
+        ok = sw_ok if ok is None else b.land(ok, sw_ok)
+    return ok
 
 
 def build_unified_attention_2d(
@@ -4721,7 +4848,7 @@ def build_unified_attention_2d(
     q_len = b.sub(cu_stop, cu_start)
     query_pos = b.sub(q_tok, cu_start)
     kv_len = b.global_load_i32(seq_lens, seq_idx)
-    context_len = b.sub(kv_len, q_len)
+    context_len = _scalar_context_len(b, p, kv_len, q_len)
     kv_head = _magic_div(b, q_head, p.num_queries_per_kv)
 
     neg_inf = b.const_f32(float("-inf"))
@@ -4825,12 +4952,9 @@ def build_unified_attention_2d(
         if p.softcap > 0:
             score = b.fmul(_apply_softcap(b, score, softcap), rcp_ln2)
 
-        causal_ok = b.cmp_le(kpos, b.add(context_len, query_pos))
-        if p.sliding_window > 0:
-            dist = b.sub(b.add(context_len, query_pos), kpos)
-            sw_ok = b.cmp_lt(dist, b.const_i32(p.sliding_window))
-            causal_ok = b.land(causal_ok, sw_ok)
-        score = b.select(causal_ok, score, neg_inf)
+        band_ok = _scalar_band_ok(b, p, context_len, query_pos, kpos)
+        if band_ok is not None:
+            score = b.select(band_ok, score, neg_inf)
         new_m_raw = b.fmax(m_val, score)
         # If both running max and current score are -inf, the row is fully
         # masked; force m to 0 so the resulting alpha/prob are 0 instead of NaN
@@ -4855,6 +4979,11 @@ def build_unified_attention_2d(
         b.scf_yield(new_m, new_l, new_acc)
 
     out_val = b.fmul(loop.results[2], b.rcp(loop.results[1]))
+    if not p.default_mask:
+        # Rows can see no key at all (e.g. top-left rows past ``kv_len`` with a window
+        # or a right bound): emit 0 instead of acc * rcp(0) == NaN, like the tiled
+        # kernels. The default mask never produces such a row, so its IR is unchanged.
+        out_val = b.select(b.fcmp("ogt", loop.results[1], zero_f), out_val, zero_f)
     out_cast = b.cast_f32_to(out_val, dtype)
     out_off, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=dim)
     valid = b.land(active, b.cmp_lt(dim, b.const_i32(p.head_size)))
@@ -4881,6 +5010,13 @@ class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
             f"b{p.block_size}",
             f"seg{self.num_segments}",
             p.dtype,
+            flags={
+                "tl": p.causal_top_left,
+                **_right_bound_flag(p),
+                # The default-mask 3D scalar kernel never applied the window (its name
+                # and IR are pinned); every other mask does.
+                "sw": p.sliding_window > 0 and not p.default_mask,
+            },
         )
 
 
@@ -4939,7 +5075,7 @@ def build_unified_attention_3d(
     q_len = b.sub(cu_stop, cu_start)
     query_pos = b.sub(q_tok, cu_start)
     kv_len = b.global_load_i32(seq_lens, seq_idx)
-    context_len = b.sub(kv_len, q_len)
+    context_len = _scalar_context_len(b, p, kv_len, q_len)
     kv_head = _magic_div(b, q_head, p.num_queries_per_kv)
     tiles_per_segment = _magic_div(
         b,
@@ -4983,9 +5119,20 @@ def build_unified_attention_3d(
             scale,
             rcp_ln2,
         )
-        causal_ok = b.cmp_le(kpos, b.add(context_len, query_pos))
-        score = b.select(causal_ok, score, neg_inf)
+        # The scalar 3D segment kernel has never applied the left bound; keep that
+        # for the default mask (its IR is pinned) and honour it for every other mask.
+        band_ok = _scalar_band_ok(
+            b, p, context_len, query_pos, kpos, window=not p.default_mask
+        )
+        if band_ok is not None:
+            score = b.select(band_ok, score, neg_inf)
         new_m = b.fmax(m_val, score)
+        if not p.default_mask:
+            # Non-default masks can leave whole segments fully masked (top-left
+            # decode sees only key 0; a window or right bound skips others). Force m
+            # to 0 there so alpha/prob are 0 rather than NaN, which the reduce would
+            # propagate as NaN * 0. The default mask never hits this: IR unchanged.
+            new_m = b.select(b.fcmp("ogt", new_m, neg_inf), new_m, zero_f)
         alpha = b.exp2(b.fsub(m_val, new_m))
         prob = b.exp2(b.fsub(score, new_m))
         new_l = b.fadd(b.fmul(l_val, alpha), prob)

@@ -133,8 +133,20 @@ def ref_paged_attn(
     sinks: Optional[torch.Tensor] = None,
     alibi_slopes: Optional[torch.Tensor] = None,
     qq_bias: Optional[torch.Tensor] = None,
+    top_left: bool = False,
+    right_bound: int = 0,
 ) -> torch.Tensor:
     """Reference paged attention. Matches AITER's reference plus ALiBi/QQ-bias.
+
+    The mask is the cuDNN band ``(left = sliding_window, right = right_bound)``
+    around the diagonal ``d = query_pos + context_len``: key ``k`` is visible iff
+    ``d - k < sliding_window`` (when set) and ``k <= d + right_bound`` (``-1`` =
+    unbounded, ``0`` = causal). ``top_left=True`` replaces the bottom-right diagonal
+    (``context_len = kv_len - query_len``) with the unshifted one (``context_len =
+    0``); every ``context_len`` use below (mask, window, ALiBi, qq-bias) follows. Rows
+    left with no visible key (the band holds no key: e.g. ``q > kv`` at bottom-right, or
+    top-left rows past ``kv_len`` with a window) are 0, not NaN -- the kernels' contract.
+    ALiBi / QQ-bias require ``right_bound == 0`` (defined on the causal diagonal).
 
     ALiBi: `S += alibi_slope[h] * (key_pos - context_len)`.
     QQ-bias: `S += qq_bias[q_local, k_local - context_len]` over key positions
@@ -150,7 +162,7 @@ def ref_paged_attn(
     for i in range(num_seqs):
         query_len = query_lens[i]
         kv_len = int(kv_lens[i])
-        context_len = kv_len - query_len
+        context_len = 0 if top_left else kv_len - query_len
         q = query[start_idx : start_idx + query_len]
         q = q * scale
         num_kv_blocks = (kv_len + block_size - 1) // block_size
@@ -189,12 +201,14 @@ def ref_paged_attn(
                         qq_b[qp, kp] = qq_bias[qp, krp].float()
             attn = attn + qq_b.view(1, query_len, kv_len)
         empty_mask = torch.ones(query_len, kv_len, device=q.device)
-        mask = torch.triu(empty_mask, diagonal=kv_len - query_len + 1).bool()
+        if right_bound >= 0:
+            mask = torch.triu(empty_mask, diagonal=context_len + right_bound + 1).bool()
+        else:
+            assert alibi_slopes is None and qq_bias is None
+            mask = torch.zeros(query_len, kv_len, device=q.device, dtype=torch.bool)
         if sliding_window is not None:
             sw_mask = (
-                torch.triu(
-                    empty_mask, diagonal=kv_len - (query_len + sliding_window) + 1
-                )
+                torch.triu(empty_mask, diagonal=context_len - sliding_window + 1)
                 .bool()
                 .logical_not()
             )
@@ -203,7 +217,14 @@ def ref_paged_attn(
         if sinks is not None:
             s_aux = sinks[:, None, None].repeat_interleave(attn.shape[-2], dim=-2)
             attn = torch.cat((attn, s_aux), dim=-1)
-        attn = torch.softmax(attn, dim=-1).to(v.dtype)
+        attn = torch.softmax(attn, dim=-1)
+        # A row whose band holds no key has no defined softmax. The kernels' contract
+        # is an all-zero output row; set exactly those rows (not a blanket nan_to_num,
+        # which would also hide a real NaN from a bad kernel).
+        empty_rows = mask.all(dim=-1)
+        if empty_rows.any():
+            attn[:, empty_rows, :] = 0.0
+        attn = attn.to(v.dtype)
         if sinks is not None:
             attn = attn[..., :-1]
         out = torch.einsum("hqk,khd->qhd", attn, v)
@@ -233,6 +254,16 @@ class Scenario:
     use_alibi: bool = False
     use_qq_bias: bool = False
     qq_bias_stride_0: int = 0
+    # Band (see ``ref_paged_attn``): diagonal alignment and right bound
+    # (0 = causal, -1 = unbounded, R > 0 = lookahead); ``sliding_window`` is the left
+    # bound. Defaults are the paged bottom-right causal mask; the Triton lane only
+    # implements that one, so it is skipped for any other.
+    causal_top_left: bool = False
+    right_bound: int = 0
+
+    @property
+    def default_mask(self) -> bool:
+        return not self.causal_top_left and self.right_bound == 0
 
 
 def default_scenarios() -> List[Scenario]:
@@ -833,6 +864,227 @@ def fmha_scenarios() -> List[Scenario]:
     ]
 
 
+def topleft_scenarios() -> List[Scenario]:
+    """Unshifted (top-left) causal cohort: query p attends keys <= p per sequence.
+
+    Mixes ``q < kv``, ``q > kv`` and ``q == kv`` sequences in one batch. The
+    ``q > kv`` rows past ``kv_len`` see every key, so the in-prefix bound (not
+    the causal bound) ends their KV loop.
+    """
+    fp16, bf16 = torch.float16, torch.bfloat16
+
+    def tl(name, seq_lens, **kw):
+        base = dict(
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        )
+        base.update(kw)
+        return Scenario(
+            name=f"tl_{name}", seq_lens=seq_lens, causal_top_left=True, **base
+        )
+
+    lt = [(256, 1024), (100, 300), (1, 700)]
+    gt = [(1024, 256), (300, 100), (700, 1)]
+    mixed = [(512, 512), (700, 200), (200, 700), (64, 64)]
+    return [
+        tl("q_lt_kv", lt),
+        tl("q_gt_kv", gt),
+        tl("mixed", mixed),
+        tl("mixed_bf16_b64", mixed, dtype=bf16, block_size=64),
+        tl(
+            "gqa64x8_prefill",
+            [(2048, 4096), (1500, 700)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype=bf16,
+        ),
+        tl("d64", mixed, head_size=64, num_query_heads=8, num_kv_heads=1),
+        tl(
+            "d256_bf16",
+            [(1024, 2048), (900, 300)],
+            head_size=256,
+            dtype=bf16,
+            num_query_heads=64,
+            num_kv_heads=8,
+        ),
+        tl("sinks", mixed, use_sinks=True),
+        tl("softcap", mixed, softcap=30.0),
+        tl("sliding_window", [(300, 1024), (500, 200), (256, 256)], sliding_window=64),
+        tl("alibi", mixed, use_alibi=True),
+        tl("qq_bias", mixed, use_qq_bias=True, qq_bias_stride_0=1024),
+        # ALiBi + sliding window together is NOT covered: that combination already
+        # yields NaN/wrong rows at bottom-right on the unmodified 2D kernel.
+        tl("decode_q1", [(1, 1024), (1, 4096), (1, 33)]),
+        # D256 bf16 decode cohort (``attention_d256_decode`` candidate).
+        tl(
+            "d256_decode_q1",
+            [(1, 2048), (1, 4096), (1, 512)],
+            head_size=256,
+            dtype=bf16,
+        ),
+    ]
+
+
+def nomask_scenarios() -> List[Scenario]:
+    """No-mask cohort: every query attends every key (standard SDPA default).
+
+    The unified kernels were unconditionally causal, so this also covers equal
+    ``q == kv`` sequences, where the old (silently causal) kernel was wrong too.
+    """
+    fp16, bf16 = torch.float16, torch.bfloat16
+
+    def nm(name, seq_lens, **kw):
+        base = dict(
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        )
+        base.update(kw)
+        return Scenario(name=f"nm_{name}", seq_lens=seq_lens, right_bound=-1, **base)
+
+    mixed = [(512, 512), (700, 200), (200, 700), (64, 64)]
+    return [
+        nm("equal", [(512, 512), (257, 257), (64, 64)]),
+        nm("q_lt_kv", [(256, 1024), (100, 300), (1, 700)]),
+        nm("q_gt_kv", [(1024, 256), (300, 100), (700, 1)]),
+        nm("mixed", mixed),
+        nm("mixed_bf16_b64", mixed, dtype=bf16, block_size=64),
+        nm(
+            "gqa64x8_prefill",
+            [(2048, 4096), (1500, 700)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype=bf16,
+        ),
+        nm("d64", mixed, head_size=64, num_query_heads=8, num_kv_heads=1),
+        nm(
+            "d256_bf16",
+            [(1024, 2048), (900, 300)],
+            head_size=256,
+            dtype=bf16,
+            num_query_heads=64,
+            num_kv_heads=8,
+        ),
+        nm("sinks", mixed, use_sinks=True),
+        nm("softcap", mixed, softcap=30.0),
+        nm("decode_q1", [(1, 1024), (1, 4096), (1, 33)]),
+        nm(
+            "d256_decode_q1",
+            [(1, 2048), (1, 4096), (1, 512)],
+            head_size=256,
+            dtype=bf16,
+        ),
+    ]
+
+
+def band_scenarios() -> List[Scenario]:
+    """Non-causal sliding-window / lookahead bands: ``(sliding_window, right_bound)``
+    around the top-left or bottom-right diagonal, cuDNN-style.
+
+    ``right_bound=-1`` is a left-only window (the future is visible); ``R > 0`` a
+    two-sided window or a lookahead (``sliding_window == 0``). Sequences mix
+    ``q < kv``, ``q > kv`` and ``q == kv`` so both alignments differ, and ``q > kv``
+    top-left rows past ``kv_len`` exercise empty-band rows.
+    """
+    fp16, bf16 = torch.float16, torch.bfloat16
+
+    def bd(name, seq_lens, *, tl, window=0, right=-1, **kw):
+        base = dict(
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=fp16,
+        )
+        base.update(kw)
+        align = "tl" if tl else "br"
+        return Scenario(
+            name=f"bd_{align}_{name}",
+            seq_lens=seq_lens,
+            causal_top_left=tl,
+            right_bound=right,
+            sliding_window=window or None,
+            **base,
+        )
+
+    mixed = [(512, 512), (700, 200), (200, 700), (64, 64)]
+    out: List[Scenario] = []
+    for tl in (False, True):
+        out += [
+            bd("left_only_w64", mixed, tl=tl, window=64),
+            bd("two_sided_w64_r32", mixed, tl=tl, window=64, right=32),
+            bd("lookahead_r16", mixed, tl=tl, right=16),
+            # right=0 is a plain causal window; the mixed lengths include q > kv, whose
+            # rows past the band are empty (output 0).
+            bd("causal_w100", mixed, tl=tl, window=100, right=0),
+            bd("q_lt_kv_w128", [(256, 1024), (100, 300), (1, 700)], tl=tl, window=128),
+            bd(
+                "q_gt_kv_w128_r8",
+                [(1024, 256), (300, 100), (700, 1)],
+                tl=tl,
+                window=128,
+                right=8,
+            ),
+            bd(
+                "bf16_b64_w96_r48",
+                mixed,
+                tl=tl,
+                window=96,
+                right=48,
+                dtype=bf16,
+                block_size=64,
+            ),
+            bd(
+                "gqa64x8_w256",
+                [(2048, 4096), (1500, 700)],
+                tl=tl,
+                window=256,
+                num_query_heads=64,
+                num_kv_heads=8,
+                dtype=bf16,
+            ),
+            bd(
+                "gqa64x8_r64",
+                [(2048, 4096), (1500, 700)],
+                tl=tl,
+                right=64,
+                num_query_heads=64,
+                num_kv_heads=8,
+                dtype=bf16,
+            ),
+            bd(
+                "d64_w64_r32",
+                mixed,
+                tl=tl,
+                window=64,
+                right=32,
+                head_size=64,
+                num_query_heads=8,
+                num_kv_heads=1,
+            ),
+            bd(
+                "d256_bf16_w128_r16",
+                [(1024, 2048), (900, 300)],
+                tl=tl,
+                window=128,
+                right=16,
+                head_size=256,
+                dtype=bf16,
+                num_query_heads=64,
+                num_kv_heads=8,
+            ),
+            bd("sinks_w64_r32", mixed, tl=tl, window=64, right=32, use_sinks=True),
+            bd("softcap_w64", mixed, tl=tl, window=64, softcap=30.0),
+            bd("decode_q1_r8", [(1, 1024), (1, 4096), (1, 33)], tl=tl, right=8),
+        ]
+    return out
+
+
 def creative_scenarios() -> List[Scenario]:
     """Exploratory sweep: corners we don't hit in the default 11 scenarios.
 
@@ -1427,6 +1679,8 @@ def _run_rocke(
         num_cus=120,
         compile_backend=os.environ.get("ROCKE_ATTENTION_COMPILE_BACKEND") or None,
         waves_per_eu=force_wpe,
+        causal_top_left=s.causal_top_left,
+        right_bound=s.right_bound,
     )
 
     hip_stream = _bench_stream_handle()
@@ -1679,6 +1933,8 @@ def run_reference(s: Scenario, data) -> torch.Tensor:
         sinks=data["sinks"],
         alibi_slopes=data["alibi_slopes"],
         qq_bias=data["qq_bias"],
+        top_left=s.causal_top_left,
+        right_bound=s.right_bound,
     )
 
 
@@ -1837,7 +2093,7 @@ def _main_impl() -> int:
     )
     parser.add_argument(
         "--set",
-        choices=("default", "creative", "fmha", "all"),
+        choices=("default", "creative", "fmha", "topleft", "nomask", "band", "all"),
         default="default",
         help=(
             "Which scenario set to use. 'default' is the 11 production "
@@ -1895,6 +2151,12 @@ def _main_impl() -> int:
         scenarios = creative_scenarios()
     elif args.set == "fmha":
         scenarios = fmha_scenarios()
+    elif args.set == "topleft":
+        scenarios = topleft_scenarios()
+    elif args.set == "nomask":
+        scenarios = nomask_scenarios()
+    elif args.set == "band":
+        scenarios = band_scenarios()
     else:  # all
         scenarios = default_scenarios() + creative_scenarios()
 
@@ -1950,8 +2212,15 @@ def _main_impl() -> int:
             # Reference Triton "natural" path. This is what unified_attention()
             # picks via its own use_2d_kernel selector.
             t_auto = None
-            if args.skip_triton:
-                row["triton_auto_status"] = ("skip", "disabled by --skip-triton")
+            if args.skip_triton or not s.default_mask:
+                row["triton_auto_status"] = (
+                    "skip",
+                    (
+                        "disabled by --skip-triton"
+                        if args.skip_triton
+                        else "Triton lane is bottom-right causal only"
+                    ),
+                )
             else:
                 t_auto, err = _safe_run(
                     lambda: _run_triton(

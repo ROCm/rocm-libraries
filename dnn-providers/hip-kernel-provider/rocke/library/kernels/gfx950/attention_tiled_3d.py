@@ -143,8 +143,24 @@ class UnifiedAttention3DTiledSpec:
     # this when the cache is actually that large (see ``_enable_i64_kv_addr``),
     # so the default (small-cache) build is byte-identical to before.
     use_i64_kv_addr: bool = False
+    # Top-left causal (unshifted diagonal, ``context_len = 0``); see the 2D spec.
+    # At ``q_len == 1`` the single query row attends only key 0 and the cached
+    # context is ignored -- correct by definition, not a bug.
+    causal_top_left: bool = False
+    # Right bound of the attention band; see ``UnifiedAttention2DTiledSpec.right_bound``
+    # (0 = causal, R > 0 = R keys of lookahead, -1 = unbounded).
+    right_bound: int = 0
 
     def __post_init__(self):
+        if self.right_bound < -1:
+            raise ValueError(
+                f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
+            )
+        if self.right_bound != 0 and (self.use_alibi or self.use_qq_bias):
+            raise ValueError(
+                "right_bound != 0 is incompatible with use_alibi / use_qq_bias "
+                "(their offsets are defined on the causal diagonal)"
+            )
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
             raise ValueError(
                 f"kv_storage_dtype must be None or 'fp8e4m3' (got {self.kv_storage_dtype!r})"
@@ -193,6 +209,12 @@ class UnifiedAttention3DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            "tl" if self.causal_top_left else "",
+            (
+                ("rbu" if self.right_bound < 0 else f"rb{self.right_bound}")
+                if self.right_bound != 0
+                else ""
+            ),
         )
 
 
@@ -389,7 +411,24 @@ def build_unified_attention_3d_tiled(
     q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
     q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
     seq_len = b.global_load_i32(seq_lens, seq_idx)
-    context_len = b.sub(seq_len, cur_batch_q_len)
+    if spec.causal_top_left:
+        context_len = b.const_i32(0)
+    else:
+        context_len = b.sub(seq_len, cur_batch_q_len)
+
+    # Right bound of the band; identical to the causal IR when ``RIGHT == 0``.
+    RIGHT = spec.right_bound
+
+    def _upper_ok(col_abs, causal_lim):
+        if RIGHT < 0:
+            return None
+        lim = causal_lim if RIGHT == 0 else b.add(causal_lim, b.const_i32(RIGHT))
+        return b.cmp_le(col_abs, lim)
+
+    def _band_row_mask(row_ok, upper_ok, in_prefix):
+        if upper_ok is None:
+            return b.land(row_ok, in_prefix)
+        return b.land(b.land(row_ok, upper_ok), in_prefix)
 
     qb_start_pos = b.mul(q_block_local_idx, b.const_i32(BLOCK_Q))
     with b.scf_if(b.cmp_ge(qb_start_pos, cur_batch_q_len)):
@@ -526,8 +565,13 @@ def build_unified_attention_3d_tiled(
 
     # ---------------- Per-segment tile range ----------------
     bm1_div_nqk = (BLOCK_M - 1) // NQK
-    msp_raw = b.add(b.add(context_len, qb_start_pos), b.const_i32(bm1_div_nqk + 1))
-    max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
+    if RIGHT < 0:
+        max_seq_prefix_len = seq_len  # no upper bound: every key of the sequence
+    else:
+        msp_raw = b.add(
+            b.add(context_len, qb_start_pos), b.const_i32(bm1_div_nqk + 1 + RIGHT)
+        )
+        max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
     num_tiles = b.div(b.add(max_seq_prefix_len, b.const_i32(T - 1)), b.const_i32(T))
 
     # Segment bounds: [seg_idx * tps, min((seg_idx+1)*tps, num_tiles))
@@ -858,9 +902,9 @@ def build_unified_attention_3d_tiled(
                 col_abs = b.add(
                     b.add(tile_off, b.mul(b.const_i32(n), b.const_i32(16))), lane_col
                 )
-                causal_ok = b.cmp_le(col_abs, causal_lim)
+                causal_ok = _upper_ok(col_abs, causal_lim)
                 in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
+                m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
                 if SLIDING_WINDOW > 0:
                     dist = b.sub(causal_lim, col_abs)
                     m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))

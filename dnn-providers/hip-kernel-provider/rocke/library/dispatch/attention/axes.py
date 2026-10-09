@@ -147,6 +147,11 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "causal_bottom_right",
     }
 )
+# Problem fields only some arches' dense specs declare (the band's right bound).
+DENSE_ARCH_PROBLEM_FIELDS: Mapping[str, frozenset] = {
+    "gfx950": frozenset({"right_bound"}),
+    "gfx942": frozenset(),
+}
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"persistent", "wide_lds_dma"}),
     "gfx942": frozenset(),

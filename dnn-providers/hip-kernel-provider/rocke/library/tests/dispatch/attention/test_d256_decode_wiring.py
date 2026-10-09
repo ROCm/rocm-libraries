@@ -129,7 +129,8 @@ class TestD256DecodeSupportGates(unittest.TestCase):
         with _PinnedArch("gfx950"):
             ok, why = self._candidate().admits(_gfx950_d256_decode(sliding_window=64))
             self.assertFalse(ok)
-            self.assertIn("cannot serve features ['sliding_window']", why)
+            # NO_MASK + a window is a (non-causal) band on gfx950.
+            self.assertIn("cannot serve features ['band', 'sliding_window']", why)
 
     def test_rejects_sinks(self):
         with _PinnedArch("gfx950"):

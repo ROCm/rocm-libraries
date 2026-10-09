@@ -311,6 +311,8 @@ def _spec_gfx950_generic(problem: UnifiedAttentionProblem):
     _spec = UnifiedAttention2DTiledSpec(
         **_base_2d_generic_fields(problem),
         **_schedule_fields,
+        causal_top_left=problem.causal_top_left,
+        right_bound=problem.right_bound,
     )
     if _kau._d256_gfx950_fast(problem):
         # D256 gfx950 bf16 prefill fast route -- pins the 32x32 transposed + FA3
@@ -397,6 +399,10 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem):
         use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem),
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
+        # Only the gfx950 spec class declares these; the 3D tiled gate rejects any
+        # non-default mask on every other arch before a spec is built.
+        **({"causal_top_left": True} if problem.causal_top_left else {}),
+        **({"right_bound": problem.right_bound} if problem.right_bound != 0 else {}),
     )
 
 

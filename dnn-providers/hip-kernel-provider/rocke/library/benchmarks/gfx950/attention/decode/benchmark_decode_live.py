@@ -286,7 +286,11 @@ def _run_dsl(shape: DecodeShape, data: dict, num_cus: int, *, warmup: int, iters
     import torch
 
     try:
-        from dispatch.attention import AttentionRequest, dispatch_attention
+        from dispatch.attention import (
+            AttentionMaskType,
+            AttentionRequest,
+            dispatch_attention,
+        )
         from kernels import UnifiedAttentionProblem, run_unified_attention_torch  # type: ignore
         from kernels.common.attention_unified import _resolve_attention_arch
     except ImportError:
@@ -313,6 +317,10 @@ def _run_dsl(shape: DecodeShape, data: dict, num_cus: int, *, warmup: int, iters
             sliding_window=shape.sliding_window,
             use_fp8=shape.use_fp8,
             fp8_fnuz=shape.fp8_fnuz,
+            # The paged unified kernels (and this harness' reference) are bottom-right
+            # causal; AttentionRequest defaults to NO_MASK, which now means full
+            # attention on gfx950 and rejects a sliding window.
+            mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
         )
         result = dispatch_attention(req)
         path = result.spec.path  # "2d" or "3d"
