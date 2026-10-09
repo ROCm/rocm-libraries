@@ -2911,5 +2911,178 @@ TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSw
     }
 }
 
+// ---------------------------------------------------------------------------
+// HIPDNN_INGESTOR_CANDIDATE_LIMIT shortlists the ranked candidates
+// ---------------------------------------------------------------------------
+
+/// Clears both process-wide overrides, so the knob and the limit each case sets are the
+/// only things deciding its outcome.
+class TestIngestorGenericPlanBuilderCandidateLimit : public ::testing::Test
+{
+protected:
+    void setLimit(const std::string& value)
+    {
+        _limitGuard.setValue(value);
+    }
+
+private:
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _forceBenchmarkingGuard{
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME};
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _limitGuard{
+        hipdnn_plugin_sdk::INGESTOR_CANDIDATE_LIMIT_ENV_NAME};
+};
+
+TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, InitializeExecutionSettingsReadsTheLimit)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xF0));
+
+    KnobFilterSettings unset;
+    builder.initializeExecutionSettings(0, graph, engineConfig, unset);
+    EXPECT_EQ(unset.ingestorSettings.candidateLimit, std::nullopt)
+        << "no limit unless the variable asks for one";
+
+    setLimit("2");
+    KnobFilterSettings limited;
+    builder.initializeExecutionSettings(0, graph, engineConfig, limited);
+    EXPECT_EQ(limited.ingestorSettings.candidateLimit, std::optional<size_t>(2));
+    EXPECT_TRUE(limited.ingestorSettings.knobFilter.empty())
+        << "the limit is not a metadata filter entry";
+}
+
+/// Benchmarking under a limit of 1 measures the ranked front alone: the plan sizes for
+/// kernel_64 (64), not the 256 the unlimited three-candidate run reports.
+TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, BenchmarkingMeasuresOnlyTheShortlist)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xF1));
+    const TestHandle handle;
+
+    setLimit("1");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().getWorkspaceSize(handle), 64U);
+}
+
+/// With benchmarking off the limit applies too: kernel_64 cannot prepare, and with only
+/// one candidate allowed nothing falls back to kernel_128.
+TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, AppliesWithBenchmarkingOff)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const FailsToPrepareOneBlockSizeHandler handler(64);
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xF2));
+
+    setLimit("1");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    try
+    {
+        builder.buildPlan(0, graph, engineConfig, context);
+        FAIL() << "expected the one-candidate shortlist to be exhausted";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_NE(std::string(error.what()).find("1 applicable kernel(s)"), std::string::npos)
+            << error.what();
+    }
+
+    setLimit("2");
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 128);
+}
+
+/// A record benchmarked under a limit covers the shortlist only. Under the same limit the
+/// next build is served from it; without the limit it no longer covers the candidates and
+/// the whole set is benchmarked again. The timer makes kernel_64, the shortlist's front,
+/// fastest, so a served hit (64) and a re-benchmark (256) differ in workspace.
+TEST_F(TestIngestorGenericPlanBuilderCandidateLimit, ARecordTakenUnderTheLimitServesTheSameLimit)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeWorkspaceKeyedTimer({{64, 1.0}, {128, 2.0}, {256, 3.0}}));
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xF3));
+    const auto properties = testDeviceProperties();
+    const TestHandle handle;
+
+    setLimit("2");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    BenchmarkContext sampling;
+    sampling.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, sampling);
+    std::vector<std::byte> workspace(sampling.plan().getWorkspaceSize(handle));
+    sampling.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    const auto stored = manager->winnerFor(winnerKeyFor(graph, properties));
+    ASSERT_TRUE(stored.has_value());
+    ASSERT_EQ(stored->size(), 2U) << "only the shortlist was measured";
+    EXPECT_EQ(stored->front().kernelId, testId(0x70));
+
+    BenchmarkContext served;
+    served.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, served);
+    EXPECT_EQ(served.plan().getWorkspaceSize(handle), 64U)
+        << "the same limit must be served from the record, not benchmarked again";
+
+    setLimit("");
+    KnobFilterSettings unlimited;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, unlimited);
+    BenchmarkContext widened;
+    widened.setExecutionSettings(unlimited);
+    builder.buildPlan(handle, graph, engineConfig, widened);
+    EXPECT_EQ(widened.plan().getWorkspaceSize(handle), 256U)
+        << "a shortlist record does not cover the full candidate set";
+}
+
 } // namespace
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

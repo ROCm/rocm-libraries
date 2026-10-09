@@ -76,7 +76,7 @@ def mint_ids(config: IngestorConfig) -> dict:
     ids["udd"] = str(uuid.uuid4())
     for pack_index, pack in enumerate(config.packs):
         ids[("pack", pack_index)] = str(uuid.uuid4())
-        if config.is_multi_pack:
+        if config.has_operation_matchers:
             ids[("operation_umd", pack_index)] = str(uuid.uuid4())
         for kernel_index, _kernel in enumerate(pack.kernels):
             ids[("kernel", pack_index, kernel_index)] = str(uuid.uuid4())
@@ -388,7 +388,7 @@ def build_operation_umd(
     """UMD policy: emitted only for genuine per-pack narrowing, i.e. only when
     the engine has more than one pack. A single-pack engine gets zero
     graph-scoped UMDs."""
-    if not config.is_multi_pack:
+    if not config.has_operation_matchers:
         return None
     return {
         "version": "1.0",
@@ -458,7 +458,7 @@ def build_kdp(
     """
     pack_index = _pack_index(config, pack)
     matchers = [ids["kernel_match"]]
-    if config.is_multi_pack:
+    if config.has_operation_matchers:
         matchers.insert(0, ids[("operation_umd", pack_index)])
     # Generation expressions targeting one engine may overlap, so a shared
     # tuple has four outcomes: disjoint arch coverage is not a duplicate;
@@ -708,7 +708,7 @@ class IngestorGenerator:
         files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
         for pack in config.packs:
             files.append(f"{ddir}/{config.kdp_stem(pack)}.kdp.json")
-            if config.is_multi_pack:
+            if config.has_operation_matchers:
                 files.append(f"{ddir}/operation_is_{pack.discriminator}.umd.json")
         files.append(f"packs/{config.native_class_name}Native.cpp")
         files.append(f"tests/Test{config.engine.pascal_name}Packs.cpp")

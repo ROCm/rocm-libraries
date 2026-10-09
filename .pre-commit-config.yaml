@@ -100,7 +100,17 @@ repos:
           ^dnn-providers/hip-kernel-provider/\.clang-format$|
           ^dnn-providers/integration-tests/\.clang-format$
       - id: check-added-large-files
-        exclude: *opted_out_but_scanned
+        # The opted-out projects above, plus generated catalogs: the gfx950 conv AOT
+        # per-dtype instance lists (tools/enumerate_conv_aot_instances.py), the
+        # descriptor shards and census make_conv_aot_config.py and the
+        # IngestorGenerator emit from them. Each is regenerated, never edited by hand.
+        exclude: |
+          (?x)
+          projects/hipblaslt/.*|
+          shared/tensile/.*|
+          ^projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd_aot_(fp16|bf16)\.instances\.json$|
+          ^dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_conv_fwd_aot/gfx950_conv_fwd_aot_(fp16|bf16)_(mem_(plain|unroll|async)|compv[34]_(plain|unroll)|direct)\.kdp\.json$|
+          ^dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdAotPacks\.cpp$
 
   - repo: https://github.com/psf/black
     rev: 25.12.0

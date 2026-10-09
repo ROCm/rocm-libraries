@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "1de1b2c1-adc9-44c3-bd3a-194cbd44de08",
+  "name": "Gfx950ConvFwdAotSeed dispatch",
+  "dispatch_symbol": "hipkernel.gfx950_conv_fwd_aot.dispatch"
+}

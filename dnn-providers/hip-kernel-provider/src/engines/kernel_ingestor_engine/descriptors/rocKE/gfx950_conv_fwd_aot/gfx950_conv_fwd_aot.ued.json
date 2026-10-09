@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "id": "d6033042-074a-426b-b900-3fc9167871f2",
+  "name": "hipkernel:Gfx950ConvFwdAot",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.gfx950_conv_fwd_aot.graph_match"
+  },
+  "metadata": "a7f1a7a4-8e1d-4278-9d85-f94026809691",
+  "sort_kernel_catalog": {
+    "default": "dd7dd959-2a58-4d90-8544-622c89888663"
+  },
+  "knobs": [
+    "tile_k",
+    "kernel_family"
+  ]
+}

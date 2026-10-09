@@ -65,6 +65,19 @@ class TestIngestorConfigDerivation:
         config = make_minimal_config(engine=make_engine(name="hipkernel:ConvFwd"))
         assert config.native_symbol_namespace == "hipkernel.conv_fwd"
 
+    def test_native_symbols_from_names_another_engines_symbols(self):
+        config = make_minimal_config(
+            engine=make_engine(
+                name="hipkernel:ConvFwdSeed", native_symbols_from="hipkernel:ConvFwd"
+            )
+        )
+        assert config.native_symbol_namespace == "hipkernel.conv_fwd"
+        assert config.score_symbol == "hipkernel.conv_fwd.score"
+        assert config.dispatch_symbol == "hipkernel.conv_fwd.dispatch"
+        # Everything else stays the engine's own.
+        assert config.engine.slug == "conv_fwd_seed"
+        assert config.register_symbols_fn == "registerConvFwdSeedSymbols"
+
     def test_graph_match_symbol(self):
         config = make_minimal_config(engine=make_engine(name="hipkernel:ConvFwd"))
         assert config.graph_match_symbol == "hipkernel.conv_fwd.graph_match"

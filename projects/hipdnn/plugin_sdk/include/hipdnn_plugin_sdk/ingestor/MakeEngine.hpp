@@ -359,6 +359,25 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
         enginePredictionProvenance(set));
 }
 
+/// The engine for @p set over @p state, which other engines may already share: a fresh
+/// state manager (its own caches, no copy of any kernel) is wrapped around it, so the cost
+/// does not grow with the catalog. This is how a provider serves a descriptor set to every
+/// Container after loading it once. @p set supplies the UED, the engine identity and the
+/// engine-prediction bindings; its packs are not read.
+/// @throws std::invalid_argument @p state is null.
+template <typename THandle, typename TSettings, typename TContext>
+std::unique_ptr<IEngine<THandle, TSettings, TContext>>
+    makeEngine(const DescriptorSet& set,
+               std::shared_ptr<const KernelIngestorSharedState<THandle>> state,
+               const IDeviceResolver<THandle>& deviceResolver)
+{
+    auto stateManager = std::make_unique<KernelIngestorStateManager<THandle>>(
+        std::move(state),
+        KernelIngestorStateManager<THandle>::DEFAULT_CATALOG_CACHE_CAPACITY,
+        engineIdentity(set));
+    return makeEngine<THandle, TSettings, TContext>(set, std::move(stateManager), deviceResolver);
+}
+
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

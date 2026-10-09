@@ -61,8 +61,8 @@ class ConfigError(Exception):
 _MERGE_KEY = object()
 
 
-class _DuplicateKeySafeLoader(yaml.SafeLoader):
-    """``SafeLoader`` that refuses a mapping declaring the same key twice.
+class _RejectRepeatedKeys:
+    """Loader mixin that refuses a mapping declaring the same key twice.
 
     Stock construction keeps the last of two equal keys and drops the first
     without a word, so a key repeated while editing a long config silently
@@ -72,6 +72,9 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
     precedence within one ``<<`` sequence, stay stock behaviour. Keys are built
     by the stock constructor, so two spellings YAML resolves to one value (``0x10``
     and ``16``) collide, and ``"off"`` and ``off`` (a string and ``False``) do not.
+
+    Only construction is overridden, so the mixin works over either parser:
+    see `_DuplicateKeySafeLoader`.
     """
 
     def __init__(self, stream):
@@ -113,6 +116,23 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
                 )
 
 
+class _PyDuplicateKeySafeLoader(_RejectRepeatedKeys, yaml.SafeLoader):
+    """`_RejectRepeatedKeys` over PyYAML's pure-Python parser."""
+
+
+if getattr(yaml, "__with_libyaml__", False):
+
+    class _CDuplicateKeySafeLoader(_RejectRepeatedKeys, yaml.CSafeLoader):
+        """`_RejectRepeatedKeys` over libyaml's parser, which reads a large config
+        an order of magnitude faster. Construction, and so every value and every
+        refused key, is the pure-Python loader's; an error's marks carry the same
+        line and column but no source snippet."""
+
+    _DuplicateKeySafeLoader = _CDuplicateKeySafeLoader
+else:
+    _DuplicateKeySafeLoader = _PyDuplicateKeySafeLoader
+
+
 #: Private, never authored: an expanded kernel dict carries the
 #: ``(where, mapping)`` of the authored ``kernel_source`` it was built from, so
 #: the closed per-kind vocabulary is applied to the author's keys and reported
@@ -143,7 +163,7 @@ def read_yaml(path: Path) -> Any:
     """
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt") as f:
-        # _DuplicateKeySafeLoader subclasses yaml.SafeLoader; safe_load takes no Loader.
+        # _DuplicateKeySafeLoader is a (C)SafeLoader; safe_load takes no Loader.
         return yaml.load(f, Loader=_DuplicateKeySafeLoader)  # nosec B506
 
 
@@ -179,6 +199,7 @@ def load_config(path: Path) -> IngestorConfig:
         ),
         knobs=_require_sequence(engine_raw.get("knobs"), "engine.knobs"),
         heuristic=engine_raw.get("heuristic", "native"),
+        native_symbols_from=engine_raw.get("native_symbols_from", ""),
     )
 
     kmd_fields = []
@@ -956,6 +977,7 @@ _KNOWN_ENGINE = frozenset(
         "behavior_notes",
         "knobs",
         "heuristic",
+        "native_symbols_from",
     }
 )
 _KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value", "builder_default"})
@@ -1162,6 +1184,18 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
             f"collision two vendors would both pick -- the loader hashes it "
             f"(FNV-1a) into the global 64-bit engine-id space and requires "
             f"global uniqueness."
+        )
+    borrowed = config.engine.native_symbols_from
+    if borrowed and (
+        not isinstance(borrowed, str)
+        or not ENGINE_NAME_PATTERN.match(borrowed)
+        or borrowed == config.engine.name
+    ):
+        raise ConfigError(
+            f"engine.native_symbols_from {borrowed!r} must name ANOTHER engine, "
+            f"scoped 'namespace:local' like engine.name: the engine whose registered "
+            f"native symbols this engine's descriptors name. Omit it to name this "
+            f"engine's own."
         )
     if config.engine.heuristic not in ("native", "none"):
         raise ConfigError(
@@ -1774,19 +1808,21 @@ def _check_workspace_policy(config: IngestorConfig) -> None:
 
 
 def _check_pack_discriminators(config: IngestorConfig) -> None:
-    """A multi-pack engine needs a discriminator per pack to name its
-    operation-scoped matcher symbol; a single-pack engine must not declare
+    """A multi-pack engine either names an operation-scoped matcher symbol
+    per pack, each pack declaring its own discriminator, or declares none and
+    shards one catalog across its packs; a single-pack engine must not declare
     one (there is nothing to discriminate -- see the UMD policy)."""
     if config.is_multi_pack:
         missing = [p.name for p in config.packs if not p.discriminator]
-        if missing:
+        if missing and len(missing) != len(config.packs):
             raise ConfigError(
-                f"packs {missing} declare no 'discriminator', but this engine "
-                f"has {len(config.packs)} packs. Every pack needs a "
-                f"discriminator to name its own operation-scoped matcher "
-                f"symbol (e.g. 'add' -> '<engine>.add_match')."
+                f"packs {missing} declare no 'discriminator', but other packs "
+                f"of this engine do. Either every pack names its own "
+                f"operation-scoped matcher symbol (e.g. 'add' -> "
+                f"'<engine>.add_match'), or none does and the packs are shards "
+                f"of one catalog that the engine's graph_match admits alone."
             )
-        names = [p.discriminator for p in config.packs]
+        names = [p.discriminator for p in config.packs if p.discriminator]
         if len(names) != len(set(names)):
             raise ConfigError(f"packs declare duplicate discriminators: {names}.")
     else:

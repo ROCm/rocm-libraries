@@ -58,6 +58,16 @@ struct ResolvedMatcher
     KernelMatcherFn kernelFn = nullptr;
 };
 
+/// A kernel-scoped matcher's CandidateFilterFn, resolved once with the matcher, and the
+/// packs whose admitted kernels it refines as one set: every pack listing the matcher.
+struct ResolvedCandidateFilter
+{
+    DescriptorId matcherId;
+    std::string description;
+    CandidateFilterFn filter = nullptr;
+    std::unordered_set<DescriptorId, DescriptorIdHash> listingPacks;
+};
+
 /// A UDD plus the handler its dispatchSymbol resolved to at construction.
 template <typename THandle>
 struct ResolvedDispatch
@@ -103,6 +113,396 @@ struct MetadataTupleValuesHash
         }
         return seed;
     }
+};
+
+/// The part of an engine's kernel-ingestor state that never changes once built: its
+/// schema, resolved matchers and dispatches, packs, every kernel's precomputed
+/// definition, heuristic, and graph_match. Building it is O(kernels) -- every kernel's
+/// metadata is completed and its tuple checked for uniqueness -- so it is built once
+/// per descriptor set and shared, through `std::shared_ptr<const ...>`, by every
+/// KernelIngestorStateManager serving that set. Each manager keeps its own mutable
+/// caches beside it.
+///
+/// Thread safety: immutable after construction and read only through const members,
+/// so any number of managers on any number of threads may share one instance.
+template <typename THandle>
+class KernelIngestorSharedState
+{
+public:
+    /// @throws std::invalid_argument bad pack reference, or duplicate metadata tuple.
+    /// @throws std::runtime_error a UMD or the engine's graph_match names a symbol this
+    /// build does not ship.
+    /// @param describedBy Names the engine in the graph_match resolution failure.
+    KernelIngestorSharedState(MetadataSchema schema,
+                              std::vector<MatchDescriptor> matchers,
+                              std::vector<DispatchDescriptor> dispatches,
+                              std::vector<KernelDescriptorPack> packs,
+                              std::shared_ptr<IKernelHeuristic> heuristic,
+                              const std::string& graphMatchSymbol,
+                              const std::string& describedBy = {})
+        : _schema(std::move(schema))
+        , _packs(std::move(packs))
+        , _heuristic(std::move(heuristic))
+        , _graphMatchFn(graphMatchSymbol.empty()
+                            ? nullptr
+                            : GraphMatchRegistry::resolve(graphMatchSymbol, describedBy))
+    {
+        if(_heuristic == nullptr)
+        {
+            throw std::invalid_argument("kernel ingestor requires a heuristic");
+        }
+
+        for(auto& matcher : matchers)
+        {
+            const auto id = matcher.id;
+            const auto description = describeDescriptor("matcher", matcher.name, matcher.id);
+            ResolvedMatcher resolved{std::move(matcher), nullptr, nullptr};
+            if(resolved.descriptor.scope == MatchScope::GRAPH)
+            {
+                resolved.graphFn
+                    = GraphCriterionRegistry::resolve(resolved.descriptor.matchSymbol, description);
+            }
+            else
+            {
+                resolved.kernelFn
+                    = KernelMatcherRegistry::resolve(resolved.descriptor.matchSymbol, description);
+            }
+
+            if(const auto [it, inserted] = _matchers.emplace(id, std::move(resolved)); !inserted)
+            {
+                throw std::invalid_argument("duplicate match descriptor id '" + toString(id)
+                                            + "' collides with '" + it->second.descriptor.name
+                                            + "'");
+            }
+        }
+        for(auto& dispatch : dispatches)
+        {
+            const auto id = dispatch.id;
+            ResolvedDispatch<THandle> resolved{std::move(dispatch), nullptr};
+            resolved.handler = DispatchRegistry<THandle>::resolve(
+                resolved.descriptor.dispatchSymbol,
+                describeDescriptor("dispatch", resolved.descriptor.name, id));
+
+            if(const auto [it, inserted] = _dispatches.emplace(id, std::move(resolved)); !inserted)
+            {
+                throw std::invalid_argument("duplicate dispatch descriptor id '" + toString(id)
+                                            + "' collides with '" + it->second.descriptor.name
+                                            + "'");
+            }
+        }
+
+        validateAndIndexPacks();
+        resolveCandidateFilters();
+    }
+
+    KernelIngestorSharedState(const KernelIngestorSharedState&) = delete;
+    KernelIngestorSharedState& operator=(const KernelIngestorSharedState&) = delete;
+    KernelIngestorSharedState(KernelIngestorSharedState&&) = delete;
+    KernelIngestorSharedState& operator=(KernelIngestorSharedState&&) = delete;
+    ~KernelIngestorSharedState() = default;
+
+    const MetadataSchema& schema() const
+    {
+        return _schema;
+    }
+
+    const std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash>& matchers() const
+    {
+        return _matchers;
+    }
+
+    const std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash>&
+        dispatches() const
+    {
+        return _dispatches;
+    }
+
+    const std::vector<KernelDescriptorPack>& packs() const
+    {
+        return _packs;
+    }
+
+    /// One entry per pack, parallel to packs(): its kernels' context-independent
+    /// definitions, completed once at construction.
+    const std::vector<std::vector<KernelDefinition>>& definitions() const
+    {
+        return _definitions;
+    }
+
+    /// Per non-integer metadata field, its value set in index order (see knobOrdinal()).
+    const std::map<std::string, std::vector<MetadataValue>>& ordinalDomains() const
+    {
+        return _ordinalDomains;
+    }
+
+    const IKernelHeuristic& heuristic() const
+    {
+        return *_heuristic;
+    }
+
+    GraphMatchFn graphMatchFn() const
+    {
+        return _graphMatchFn;
+    }
+
+    /// Every kernel-scoped matcher whose symbol also names a CandidateFilterFn, in the
+    /// order the packs first list them. Resolved at construction, like the matchers: the
+    /// registry is immutable once the provider loaded, and absence means no refinement.
+    const std::vector<ResolvedCandidateFilter>& candidateFilters() const
+    {
+        return _candidateFilters;
+    }
+
+private:
+    void resolveCandidateFilters()
+    {
+        std::unordered_set<DescriptorId, DescriptorIdHash> visited;
+        for(const auto& pack : _packs)
+        {
+            for(const auto& matcherId : pack.matcherIds)
+            {
+                const auto& matcher = _matchers.at(matcherId);
+                if(matcher.descriptor.scope != MatchScope::KERNEL
+                   || !visited.insert(matcherId).second)
+                {
+                    continue;
+                }
+                const auto filter
+                    = CandidateFilterRegistry::tryResolve(matcher.descriptor.matchSymbol);
+                if(filter == nullptr)
+                {
+                    continue;
+                }
+                ResolvedCandidateFilter resolved{
+                    matcherId,
+                    describeDescriptor("matcher", matcher.descriptor.name, matcher.descriptor.id),
+                    filter,
+                    {}};
+                for(const auto& other : _packs)
+                {
+                    if(std::find(other.matcherIds.begin(), other.matcherIds.end(), matcherId)
+                       != other.matcherIds.end())
+                    {
+                        resolved.listingPacks.insert(other.id);
+                    }
+                }
+                _candidateFilters.push_back(std::move(resolved));
+            }
+        }
+    }
+
+    /// Validates every pack's references and builds the KernelDefinition for each of
+    /// its kernels. Every field of a definition is context-independent, so this is the
+    /// only place they are ever computed: buildCatalog copies them per query rather
+    /// than completing each kernel's metadata again on every graph.
+    void validateAndIndexPacks()
+    {
+        // Two kernels may share a tuple when no single device can see both -- that is
+        // exactly the per-arch shard layout. Uniqueness is therefore per overlapping-arch
+        // group, not per engine: the tuple is the catalog key, and a catalog is built for
+        // one device. Keyed by the tuple's values in a hash map rather than scanned, which
+        // would be quadratic.
+        size_t kernelCount = 0;
+        for(const auto& pack : _packs)
+        {
+            kernelCount += pack.kernels.size();
+        }
+        std::unordered_map<MetadataTupleValues,
+                           std::vector<std::vector<std::string>>,
+                           MetadataTupleValuesHash>
+            archesClaimingTuple;
+        archesClaimingTuple.reserve(kernelCount);
+        // Rankings and enumeration name a candidate by kernel id, so an id is unique per
+        // overlapping-arch group too.
+        std::unordered_map<DescriptorId, std::vector<std::vector<std::string>>, DescriptorIdHash>
+            archesClaimingId;
+        archesClaimingId.reserve(kernelCount);
+        // Records @p arch unless a claimant already reaches one of its devices.
+        const auto claim = [](std::vector<std::vector<std::string>>& claimants,
+                              const std::vector<std::string>& arch) {
+            const bool taken
+                = std::any_of(claimants.begin(), claimants.end(), [&arch](const auto& claimed) {
+                      return archOverlaps(claimed, arch);
+                  });
+            if(!taken)
+            {
+                claimants.push_back(arch);
+            }
+            return !taken;
+        };
+
+        _definitions.reserve(_packs.size());
+        for(const auto& pack : _packs)
+        {
+            for(const auto& matcherId : pack.matcherIds)
+            {
+                if(_matchers.find(matcherId) == _matchers.end())
+                {
+                    throw std::invalid_argument("pack '" + toString(pack.id)
+                                                + "' names unknown matcher '" + toString(matcherId)
+                                                + "'");
+                }
+            }
+            if(_dispatches.find(pack.dispatchId) == _dispatches.end())
+            {
+                throw std::invalid_argument("pack '" + toString(pack.id)
+                                            + "' names unknown dispatch descriptor '"
+                                            + toString(pack.dispatchId) + "'");
+            }
+
+            std::vector<KernelDefinition> packDefinitions;
+            packDefinitions.reserve(pack.kernels.size());
+            for(const auto& kernel : pack.kernels)
+            {
+                if(kernel.source.kind != KernelSourceKind::EMBEDDED_SOURCE
+                   && kernel.source.kind != KernelSourceKind::KPACK)
+                {
+                    // Dropped, not thrown: an unadaptable kernel costs only itself, so its
+                    // pack keeps serving whichever siblings this build can dispatch.
+                    HIPDNN_PLUGIN_LOG_ERROR(
+                        "ingestor: " << describeDescriptor("kernel", kernel.name, kernel.id)
+                                     << " declares a source kind this build has no adapter for;"
+                                        " only EMBEDDED_SOURCE and KPACK are implemented,"
+                                        " dropping it");
+                    continue;
+                }
+
+                auto key = completeMetadata(kernel);
+                // A kernel that declared no arch of its own runs wherever its pack does;
+                // one that declared a narrower list claims only that. Claiming by the
+                // kernel rather than the pack is what lets two kernels of ONE pack share a
+                // tuple under disjoint arch -- one implementation per capability -- while
+                // still catching two that a single device would see together.
+                std::vector<std::string> kernelArch = kernel.arch.empty() ? pack.arch : kernel.arch;
+                MetadataTupleValues tuple;
+                tuple.reserve(key.size());
+                for(const auto& entry : key)
+                {
+                    tuple.push_back(entry.second);
+                }
+                // try_emplace, not operator[], only because misc-const-correctness
+                // misreads the operator[] form here and demands a const map.
+                if(!claim(archesClaimingId.try_emplace(kernel.id).first->second, kernelArch))
+                {
+                    throw std::invalid_argument(
+                        "kernel '" + toString(kernel.id)
+                        + "' is declared twice on an arch both declarations reach; a kernel id "
+                        + "names one candidate and must be unique per device");
+                }
+                if(!claim(archesClaimingTuple.try_emplace(std::move(tuple)).first->second,
+                          kernelArch))
+                {
+                    throw std::invalid_argument(
+                        "kernel '" + toString(kernel.id)
+                        + "' duplicates the metadata tuple of another kernel under schema '"
+                        + _schema.name + "' on an arch both reach; the tuple is the catalog key "
+                        + "and must be unique per device");
+                }
+
+                packDefinitions.push_back(KernelDefinition{kernel.id,
+                                                           pack.id,
+                                                           pack.dispatchId,
+                                                           kernel.source,
+                                                           std::move(key),
+                                                           kernel.priority,
+                                                           std::move(kernelArch),
+                                                           kernel.originDirectory,
+                                                           kernel.name,
+                                                           kernel.treeRoot});
+            }
+            // Pushed even when every kernel was dropped: _definitions is indexed by pack
+            // position, so skipping one entry would bind every later pack's definitions to
+            // the wrong pack and run the last index out of range.
+            _definitions.push_back(std::move(packDefinitions));
+        }
+
+        buildOrdinalDomains();
+    }
+
+    /// Per non-integer metadata field, the sorted set of values its kernels carry.
+    void buildOrdinalDomains()
+    {
+        for(const auto& field : _schema.fields)
+        {
+            if(field.type == MetadataType::INT)
+            {
+                continue;
+            }
+
+            std::set<MetadataValue> observed;
+            for(const auto& packDefinitions : _definitions)
+            {
+                for(const auto& definition : packDefinitions)
+                {
+                    const auto it = definition.metadata.find(field.name);
+                    if(it != definition.metadata.end())
+                    {
+                        observed.insert(it->second);
+                    }
+                }
+            }
+            if(!observed.empty())
+            {
+                _ordinalDomains.emplace(
+                    field.name, std::vector<MetadataValue>(observed.begin(), observed.end()));
+            }
+        }
+    }
+
+    /// A kernel's metadata values with the KMD's defaults filled in; the completed
+    /// tuple, not the descriptor id, is the catalog key.
+    MetadataValues completeMetadata(const KernelDescriptor& kernel) const
+    {
+        MetadataValues complete;
+
+        for(const auto& field : _schema.fields)
+        {
+            auto it = kernel.metadata.find(field.name);
+
+            if(it == kernel.metadata.end())
+            {
+                if(!field.defaultValue.has_value())
+                {
+                    throw std::invalid_argument("kernel '" + toString(kernel.id)
+                                                + "' omits metadata field '" + field.name
+                                                + "', which declares no default");
+                }
+                complete.emplace(field.name, *field.defaultValue);
+                continue;
+            }
+
+            if(metadataTypeOf(it->second) != field.type)
+            {
+                throw std::invalid_argument("kernel '" + toString(kernel.id)
+                                            + "' supplies metadata field '" + field.name
+                                            + "' with a value of the wrong type");
+            }
+            complete.emplace(field.name, it->second);
+        }
+
+        for(const auto& [name, value] : kernel.metadata)
+        {
+            if(complete.find(name) == complete.end())
+            {
+                throw std::invalid_argument("kernel '" + toString(kernel.id)
+                                            + "' supplies metadata field '" + name
+                                            + "', which its engine's metadata schema does "
+                                              "not declare");
+            }
+        }
+
+        return complete;
+    }
+
+    MetadataSchema _schema;
+    std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
+    std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
+    std::vector<KernelDescriptorPack> _packs;
+    std::vector<std::vector<KernelDefinition>> _definitions;
+    std::map<std::string, std::vector<MetadataValue>> _ordinalDomains;
+    std::shared_ptr<IKernelHeuristic> _heuristic;
+    GraphMatchFn _graphMatchFn = nullptr;
+    std::vector<ResolvedCandidateFilter> _candidateFilters;
 };
 
 /// The engine's view of its own kernels: which apply to a graph, in what order, and
@@ -162,12 +562,40 @@ public:
                                size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
                                EngineIdentity engine = {},
                                size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
-        : _schema(std::move(schema))
-        , _packs(std::move(packs))
-        , _heuristic(std::move(heuristic))
-        , _graphMatchFn(graphMatchSymbol.empty()
-                            ? nullptr
-                            : GraphMatchRegistry::resolve(graphMatchSymbol, describedBy))
+        : KernelIngestorStateManager(
+              std::make_shared<const KernelIngestorSharedState<THandle>>(std::move(schema),
+                                                                         std::move(matchers),
+                                                                         std::move(dispatches),
+                                                                         std::move(packs),
+                                                                         std::move(heuristic),
+                                                                         graphMatchSymbol,
+                                                                         describedBy),
+              catalogCacheCapacity,
+              std::move(engine),
+              winnerCacheCapacity)
+    {
+    }
+
+    /// A manager over @p state, which another manager may already be serving: nothing is
+    /// resolved, completed or validated again, so this is O(1) in the number of kernels.
+    /// The caches (catalog, calibrated rankings, winner records, shard latches) are this
+    /// manager's own.
+    /// @param engine As above; an empty name disables the on-disk winner cache.
+    /// @throws std::invalid_argument @p state is null.
+    explicit KernelIngestorStateManager(
+        std::shared_ptr<const KernelIngestorSharedState<THandle>> state,
+        size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
+        EngineIdentity engine = {},
+        size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
+        : _state(requireState(std::move(state)))
+        , _schema(_state->schema())
+        , _matchers(_state->matchers())
+        , _dispatches(_state->dispatches())
+        , _packs(_state->packs())
+        , _definitions(_state->definitions())
+        , _ordinalDomains(_state->ordinalDomains())
+        , _heuristic(_state->heuristic())
+        , _graphMatchFn(_state->graphMatchFn())
         , _catalogCache(catalogCacheCapacity)
         // Same key and capacity as _catalogCache: both answer for (graph, device, engine
         // version). Kept outside `Catalog` because no matcher, scorer or formula reads it.
@@ -175,51 +603,20 @@ public:
         , _engine(std::move(engine))
         , _winnerCache(winnerCacheCapacity)
     {
-        if(_heuristic == nullptr)
-        {
-            throw std::invalid_argument("kernel ingestor requires a heuristic");
-        }
+    }
 
-        for(auto& matcher : matchers)
-        {
-            const auto id = matcher.id;
-            const auto description = describeDescriptor("matcher", matcher.name, matcher.id);
-            ResolvedMatcher resolved{std::move(matcher), nullptr, nullptr};
-            if(resolved.descriptor.scope == MatchScope::GRAPH)
-            {
-                resolved.graphFn
-                    = GraphCriterionRegistry::resolve(resolved.descriptor.matchSymbol, description);
-            }
-            else
-            {
-                resolved.kernelFn
-                    = KernelMatcherRegistry::resolve(resolved.descriptor.matchSymbol, description);
-            }
+    /// Not relocatable: the members above alias into *_state, and the engine's plan
+    /// builder holds a reference to this manager.
+    KernelIngestorStateManager(const KernelIngestorStateManager&) = delete;
+    KernelIngestorStateManager& operator=(const KernelIngestorStateManager&) = delete;
+    KernelIngestorStateManager(KernelIngestorStateManager&&) = delete;
+    KernelIngestorStateManager& operator=(KernelIngestorStateManager&&) = delete;
+    ~KernelIngestorStateManager() = default;
 
-            if(const auto [it, inserted] = _matchers.emplace(id, std::move(resolved)); !inserted)
-            {
-                throw std::invalid_argument("duplicate match descriptor id '" + toString(id)
-                                            + "' collides with '" + it->second.descriptor.name
-                                            + "'");
-            }
-        }
-        for(auto& dispatch : dispatches)
-        {
-            const auto id = dispatch.id;
-            ResolvedDispatch<THandle> resolved{std::move(dispatch), nullptr};
-            resolved.handler = DispatchRegistry<THandle>::resolve(
-                resolved.descriptor.dispatchSymbol,
-                describeDescriptor("dispatch", resolved.descriptor.name, id));
-
-            if(const auto [it, inserted] = _dispatches.emplace(id, std::move(resolved)); !inserted)
-            {
-                throw std::invalid_argument("duplicate dispatch descriptor id '" + toString(id)
-                                            + "' collides with '" + it->second.descriptor.name
-                                            + "'");
-            }
-        }
-
-        validateAndIndexPacks();
+    /// The immutable state this manager serves, for building another manager over it.
+    const std::shared_ptr<const KernelIngestorSharedState<THandle>>& sharedState() const
+    {
+        return _state;
     }
 
     const MetadataSchema& metadataSchema() const
@@ -258,7 +655,7 @@ public:
             }
         }
 
-        auto ranking = _heuristic->calibratedRanking(full, context, modelId);
+        auto ranking = _heuristic.calibratedRanking(full, context, modelId);
 
         if(key.has_value() && !ranking.empty())
         {
@@ -272,7 +669,7 @@ public:
     /// The model calibratedRanking() would use for @p metric on @p arch, from bindings alone.
     std::string calibratedModelId(const std::string& metric, const std::string& arch) const
     {
-        return _heuristic->calibratedModelId(metric, arch);
+        return _heuristic.calibratedModelId(metric, arch);
     }
 
     /// Every kernel that applies to the graph and device @p context names, unordered.
@@ -326,7 +723,7 @@ public:
             return catalog;
         }
 
-        catalog.entries = _heuristic->rank(catalog, context);
+        catalog.entries = _heuristic.rank(catalog, context);
         catalog.isSorted = true;
         if(const auto key = cacheKey(context); key.has_value())
         {
@@ -583,212 +980,14 @@ private:
         return restricted;
     }
 
-    /// Validates every pack's references and builds the KernelDefinition for each of
-    /// its kernels. Every field of a definition is context-independent, so this is the
-    /// only place they are ever computed: buildCatalog copies them per query rather
-    /// than completing each kernel's metadata again on every graph.
-    void validateAndIndexPacks()
+    static std::shared_ptr<const KernelIngestorSharedState<THandle>>
+        requireState(std::shared_ptr<const KernelIngestorSharedState<THandle>> state)
     {
-        // Two kernels may share a tuple when no single device can see both -- that is
-        // exactly the per-arch shard layout. Uniqueness is therefore per overlapping-arch
-        // group, not per engine: the tuple is the catalog key, and a catalog is built for
-        // one device. Keyed by the tuple's values in a hash map rather than scanned, which
-        // would be quadratic.
-        size_t kernelCount = 0;
-        for(const auto& pack : _packs)
+        if(state == nullptr)
         {
-            kernelCount += pack.kernels.size();
+            throw std::invalid_argument("kernel ingestor state manager requires a shared state");
         }
-        std::unordered_map<MetadataTupleValues,
-                           std::vector<std::vector<std::string>>,
-                           MetadataTupleValuesHash>
-            archesClaimingTuple;
-        archesClaimingTuple.reserve(kernelCount);
-        // Rankings and enumeration name a candidate by kernel id, so an id is unique per
-        // overlapping-arch group too.
-        std::unordered_map<DescriptorId, std::vector<std::vector<std::string>>, DescriptorIdHash>
-            archesClaimingId;
-        archesClaimingId.reserve(kernelCount);
-        // Records @p arch unless a claimant already reaches one of its devices.
-        const auto claim = [](std::vector<std::vector<std::string>>& claimants,
-                              const std::vector<std::string>& arch) {
-            const bool taken
-                = std::any_of(claimants.begin(), claimants.end(), [&arch](const auto& claimed) {
-                      return archOverlaps(claimed, arch);
-                  });
-            if(!taken)
-            {
-                claimants.push_back(arch);
-            }
-            return !taken;
-        };
-
-        _definitions.reserve(_packs.size());
-        for(const auto& pack : _packs)
-        {
-            for(const auto& matcherId : pack.matcherIds)
-            {
-                if(_matchers.find(matcherId) == _matchers.end())
-                {
-                    throw std::invalid_argument("pack '" + toString(pack.id)
-                                                + "' names unknown matcher '" + toString(matcherId)
-                                                + "'");
-                }
-            }
-            if(_dispatches.find(pack.dispatchId) == _dispatches.end())
-            {
-                throw std::invalid_argument("pack '" + toString(pack.id)
-                                            + "' names unknown dispatch descriptor '"
-                                            + toString(pack.dispatchId) + "'");
-            }
-
-            std::vector<KernelDefinition> packDefinitions;
-            packDefinitions.reserve(pack.kernels.size());
-            for(const auto& kernel : pack.kernels)
-            {
-                if(kernel.source.kind != KernelSourceKind::EMBEDDED_SOURCE
-                   && kernel.source.kind != KernelSourceKind::KPACK)
-                {
-                    // Dropped, not thrown: an unadaptable kernel costs only itself, so its
-                    // pack keeps serving whichever siblings this build can dispatch.
-                    HIPDNN_PLUGIN_LOG_ERROR(
-                        "ingestor: " << describeDescriptor("kernel", kernel.name, kernel.id)
-                                     << " declares a source kind this build has no adapter for;"
-                                        " only EMBEDDED_SOURCE and KPACK are implemented,"
-                                        " dropping it");
-                    continue;
-                }
-
-                auto key = completeMetadata(kernel);
-                // A kernel that declared no arch of its own runs wherever its pack does;
-                // one that declared a narrower list claims only that. Claiming by the
-                // kernel rather than the pack is what lets two kernels of ONE pack share a
-                // tuple under disjoint arch -- one implementation per capability -- while
-                // still catching two that a single device would see together.
-                std::vector<std::string> kernelArch = kernel.arch.empty() ? pack.arch : kernel.arch;
-                MetadataTupleValues tuple;
-                tuple.reserve(key.size());
-                for(const auto& entry : key)
-                {
-                    tuple.push_back(entry.second);
-                }
-                // try_emplace, not operator[], only because misc-const-correctness
-                // misreads the operator[] form here and demands a const map.
-                if(!claim(archesClaimingId.try_emplace(kernel.id).first->second, kernelArch))
-                {
-                    throw std::invalid_argument(
-                        "kernel '" + toString(kernel.id)
-                        + "' is declared twice on an arch both declarations reach; a kernel id "
-                        + "names one candidate and must be unique per device");
-                }
-                if(!claim(archesClaimingTuple.try_emplace(std::move(tuple)).first->second,
-                          kernelArch))
-                {
-                    throw std::invalid_argument(
-                        "kernel '" + toString(kernel.id)
-                        + "' duplicates the metadata tuple of another kernel under schema '"
-                        + _schema.name + "' on an arch both reach; the tuple is the catalog key "
-                        + "and must be unique per device");
-                }
-
-                packDefinitions.push_back(KernelDefinition{kernel.id,
-                                                           pack.id,
-                                                           pack.dispatchId,
-                                                           kernel.source,
-                                                           std::move(key),
-                                                           kernel.priority,
-                                                           std::move(kernelArch),
-                                                           kernel.originDirectory,
-                                                           kernel.name,
-                                                           kernel.treeRoot});
-            }
-            // Pushed even when every kernel was dropped: _definitions is indexed by pack
-            // position, so skipping one entry would bind every later pack's definitions to
-            // the wrong pack and run the last index out of range.
-            _definitions.push_back(std::move(packDefinitions));
-        }
-
-        buildOrdinalDomains();
-    }
-
-    /// The value set of every non-integer metadata field, in the order that numbers it
-    /// (RFC 0019 §13.2: a knob is an int64, so non-`INT` fields are addressed by index).
-    ///
-    /// Spans every pack, not one device's catalog, so an index means the same kernel on every
-    /// graph. Ordered by `std::variant`'s `<`; `uhd_gen/addressing.py` must derive the same
-    /// indices.
-    void buildOrdinalDomains()
-    {
-        for(const auto& field : _schema.fields)
-        {
-            if(field.type == MetadataType::INT)
-            {
-                continue;
-            }
-
-            std::set<MetadataValue> observed;
-            for(const auto& packDefinitions : _definitions)
-            {
-                for(const auto& definition : packDefinitions)
-                {
-                    const auto it = definition.metadata.find(field.name);
-                    if(it != definition.metadata.end())
-                    {
-                        observed.insert(it->second);
-                    }
-                }
-            }
-            if(!observed.empty())
-            {
-                _ordinalDomains.emplace(
-                    field.name, std::vector<MetadataValue>(observed.begin(), observed.end()));
-            }
-        }
-    }
-
-    /// A kernel's metadata values with the KMD's defaults filled in; the completed
-    /// tuple, not the descriptor id, is the catalog key.
-    MetadataValues completeMetadata(const KernelDescriptor& kernel) const
-    {
-        MetadataValues complete;
-
-        for(const auto& field : _schema.fields)
-        {
-            auto it = kernel.metadata.find(field.name);
-
-            if(it == kernel.metadata.end())
-            {
-                if(!field.defaultValue.has_value())
-                {
-                    throw std::invalid_argument("kernel '" + toString(kernel.id)
-                                                + "' omits metadata field '" + field.name
-                                                + "', which declares no default");
-                }
-                complete.emplace(field.name, *field.defaultValue);
-                continue;
-            }
-
-            if(metadataTypeOf(it->second) != field.type)
-            {
-                throw std::invalid_argument("kernel '" + toString(kernel.id)
-                                            + "' supplies metadata field '" + field.name
-                                            + "' with a value of the wrong type");
-            }
-            complete.emplace(field.name, it->second);
-        }
-
-        for(const auto& [name, value] : kernel.metadata)
-        {
-            if(complete.find(name) == complete.end())
-            {
-                throw std::invalid_argument("kernel '" + toString(kernel.id)
-                                            + "' supplies metadata field '" + name
-                                            + "', which its engine's metadata schema does "
-                                              "not declare");
-            }
-        }
-
-        return complete;
+        return state;
     }
 
     /// Device comes from the context, not a separate argument, so one device's catalog
@@ -946,10 +1145,80 @@ private:
                                                      << " kernel(s) after kernel-scoped matching");
         }
 
+        applyCandidateFilters(context, catalog);
+
         HIPDNN_PLUGIN_LOG_INFO("ingestor: catalog for device "
                                << context.deviceId << " holds " << catalog.entries.size()
                                << " kernel(s) from " << _packs.size() << " pack(s)");
         return catalog;
+    }
+
+    /// Each kernel-scoped matcher whose symbol also names a CandidateFilterFn narrows, as
+    /// one set, every kernel admitted from the packs listing it. Runs once every pack has
+    /// been matched, so a set sharded across packs is refined whole; what stays keeps its
+    /// order. The filters and their packs were resolved with the shared state.
+    void applyCandidateFilters(const MatchContext& context, Catalog& catalog) const
+    {
+        if(catalog.entries.empty())
+        {
+            return;
+        }
+        std::vector<bool> keep(catalog.entries.size(), true);
+        for(const auto& resolved : _state->candidateFilters())
+        {
+            std::vector<size_t> indices;
+            std::vector<const KernelDefinition*> candidates;
+            for(size_t i = 0; i < catalog.entries.size(); ++i)
+            {
+                if(keep[i] && resolved.listingPacks.count(catalog.entries[i].packId) != 0)
+                {
+                    indices.push_back(i);
+                    candidates.push_back(&catalog.entries[i]);
+                }
+            }
+            if(candidates.empty())
+            {
+                continue;
+            }
+
+            const auto kept = resolved.filter(context, catalog.bound, candidates);
+            if(kept.size() != candidates.size())
+            {
+                throw std::runtime_error("the candidate filter of " + resolved.description
+                                         + " returned " + std::to_string(kept.size())
+                                         + " flag(s) for " + std::to_string(candidates.size())
+                                         + " kernel(s)");
+            }
+            size_t survivors = 0;
+            for(size_t i = 0; i < kept.size(); ++i)
+            {
+                if(kept[i])
+                {
+                    ++survivors;
+                }
+                else
+                {
+                    keep[indices[i]] = false;
+                }
+            }
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: the candidate filter of "
+                                   << resolved.description << " kept " << survivors << " of "
+                                   << candidates.size() << " kernel(s)");
+        }
+
+        size_t next = 0;
+        for(size_t i = 0; i < catalog.entries.size(); ++i)
+        {
+            if(keep[i])
+            {
+                if(next != i)
+                {
+                    catalog.entries[next] = std::move(catalog.entries[i]);
+                }
+                ++next;
+            }
+        }
+        catalog.entries.resize(next);
     }
 
     bool graphLevelMatchersPass(const KernelDescriptorPack& pack,
@@ -1240,17 +1509,20 @@ private:
         }
     }
 
-    MetadataSchema _schema;
-    std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
-    std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
-    std::vector<KernelDescriptorPack> _packs;
+    /// Shared, immutable, and declared first: every alias below binds into it.
+    std::shared_ptr<const KernelIngestorSharedState<THandle>> _state;
+    const MetadataSchema& _schema;
+    const std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash>& _matchers;
+    const std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash>&
+        _dispatches;
+    const std::vector<KernelDescriptorPack>& _packs;
     /// One entry per pack, parallel to _packs: its kernels' context-independent
-    /// definitions, completed once at construction.
-    std::vector<std::vector<KernelDefinition>> _definitions;
+    /// definitions, completed once when the shared state was built.
+    const std::vector<std::vector<KernelDefinition>>& _definitions;
     /// Per non-integer metadata field, its value set in index order, so the field is
-    /// addressable by an int64 knob. Fixed at construction.
-    std::map<std::string, std::vector<MetadataValue>> _ordinalDomains;
-    std::shared_ptr<IKernelHeuristic> _heuristic;
+    /// addressable by an int64 knob. Fixed when the shared state was built.
+    const std::map<std::string, std::vector<MetadataValue>>& _ordinalDomains;
+    const IKernelHeuristic& _heuristic;
     GraphMatchFn _graphMatchFn = nullptr;
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;
     /// The full catalog's calibrated ranking; a knob-pinned request restricts it instead of

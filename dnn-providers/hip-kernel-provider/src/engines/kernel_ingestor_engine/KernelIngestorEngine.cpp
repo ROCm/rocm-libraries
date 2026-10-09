@@ -145,25 +145,25 @@ const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& descriptorCatalog()
 namespace
 {
 
-using StateManager = hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>;
+using SharedState = hipdnn_plugin_sdk::ingestor::KernelIngestorSharedState<Handle>;
 
-/// A validated state manager waiting for the first engine constructed from the set that has
-/// @p engineId. Carries the id itself, so a take never relies on a position in another vector.
-struct StateManagerSlot
+/// The immutable state validation built for the set that has @p engineId. Carries the id
+/// itself, so a lookup never relies on a position in another vector.
+struct SharedStateSlot
 {
     hipdnn_plugin_sdk::ingestor::DescriptorId engineId;
-    std::unique_ptr<StateManager> stateManager;
+    std::shared_ptr<const SharedState> state;
 };
 
 /// What one validation of descriptorCatalog() produced.
 struct Scan
 {
     std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> sets;
-    std::vector<StateManagerSlot> slots;
+    std::vector<SharedStateSlot> slots;
 };
 
-/// Validates descriptorCatalog(), splitting each validated set from the state manager
-/// validation built for it. Discovery and rediscoverStateManagersForTesting() both scan
+/// Validates descriptorCatalog(), splitting each validated set from the shared state
+/// validation built for it. Discovery and rediscoverSharedStatesForTesting() both scan
 /// through here.
 Scan scanDescriptorSets()
 {
@@ -179,14 +179,15 @@ Scan scanDescriptorSets()
     scan.slots.reserve(validated.size());
     for(auto& entry : validated)
     {
-        scan.slots.push_back({entry.set.engine.id, std::move(entry.stateManager)});
+        // Only the immutable state is kept; the manager validation wrapped around it is
+        // dropped here, so no engine inherits caches another code path could have touched.
+        scan.slots.push_back({entry.set.engine.id, entry.stateManager->sharedState()});
         scan.sets.push_back(std::move(entry.set));
     }
     return scan;
 }
 
-/// What discovery produced: the sets, and a slot holding the state manager validation built
-/// for each, waiting for the first engine constructed from that set.
+/// What discovery produced: the sets, and the shared state validation built for each.
 struct Discovery
 {
     Discovery()
@@ -197,14 +198,16 @@ struct Discovery
     }
 
     std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> sets;
-    std::vector<StateManagerSlot> slots;
+    /// Guarded by slotsMutex: rediscoverSharedStatesForTesting() replaces it.
+    std::vector<SharedStateSlot> slots;
     std::mutex slotsMutex;
 };
 
 Discovery& discovery()
 {
     // Memoized: Container's static engine-id enumeration and its constructor both call
-    // this and must agree on what shipped.
+    // this and must agree on what shipped. Also what makes the descriptor tree load once
+    // per process rather than once per Container.
     static Discovery s_discovery;
     return s_discovery;
 }
@@ -216,27 +219,27 @@ const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescripto
     return discovery().sets;
 }
 
-std::unique_ptr<StateManager>
-    takeDiscoveredStateManager(const hipdnn_plugin_sdk::ingestor::DescriptorId& engineId)
+std::shared_ptr<const SharedState>
+    discoveredSharedState(const hipdnn_plugin_sdk::ingestor::DescriptorId& engineId)
 {
     auto& found = discovery();
     const std::lock_guard<std::mutex> guard(found.slotsMutex);
-    for(auto& slot : found.slots)
+    for(const auto& slot : found.slots)
     {
         if(slot.engineId == engineId)
         {
-            return std::move(slot.stateManager);
+            return slot.state;
         }
     }
     return nullptr;
 }
 
-void rediscoverStateManagersForTesting()
+void rediscoverSharedStatesForTesting()
 {
     auto& found = discovery();
     auto rescan = scanDescriptorSets();
     // A rescan that finds different engines than discovery retained would hand a state
-    // manager built from other descriptors to an engine of a retained set.
+    // built from other descriptors to an engine of a retained set.
     const auto sameEngine
         = [](const auto& lhs, const auto& rhs) { return lhs.engine.id == rhs.engine.id; };
     if(!std::equal(rescan.sets.begin(),
@@ -246,7 +249,7 @@ void rediscoverStateManagersForTesting()
                    sameEngine))
     {
         throw std::logic_error("ingestor: rediscovery found different descriptor sets than "
-                               "discovery retained; the state-manager slots are unchanged");
+                               "discovery retained; the shared states are unchanged");
     }
     const std::lock_guard<std::mutex> guard(found.slotsMutex);
     found.slots = std::move(rescan.slots);

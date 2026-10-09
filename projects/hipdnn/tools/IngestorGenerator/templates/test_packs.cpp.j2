@@ -4,6 +4,8 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -61,24 +63,39 @@ struct ExpectedInventory
 /// cannot be filed under a concrete id.
 constexpr const char* ARCH_WILDCARD = "*";
 
+// The emitted inventory's names, one pair of arrays per architecture row. The rows
+// build their sets from these at run time: a braced std::set<std::string> initializer
+// constructs every name inside one function, which takes the compiler impractically
+// long for a catalog of tens of thousands of kernels.
+// clang-format off
+{% for arch, entry in emitted.arches.items() %}
+
+// "{{ arch | cpp_escape }}"
+constexpr std::array<const char*, {{ entry.pack_names | length }}> ARCH{{ loop.index0 }}_PACK_NAMES = {
+{% for stem in entry.pack_names %}
+    "{{ config.engine.namespace | cpp_escape }}:{{ stem | cpp_escape }}",
+{% endfor %}
+};
+constexpr std::array<const char*, {{ entry.descriptor_names | length }}> ARCH{{ loop.index0 }}_KERNEL_NAMES = {
+{% for name in entry.descriptor_names %}
+    "{{ name | cpp_escape }}",
+{% endfor %}
+};
+{% endfor %}
+// clang-format on
+
+template <std::size_t N>
+std::set<std::string> nameSet(const std::array<const char*, N>& names)
+{
+    return std::set<std::string>(names.begin(), names.end());
+}
+
 /// The emitted inventory, keyed by architecture.
 const std::map<std::string, ExpectedInventory>& expectedByArch()
 {
     static const std::map<std::string, ExpectedInventory> s_expected = {
 {% for arch, entry in emitted.arches.items() %}
-        {"{{ arch | cpp_escape }}",
-         ExpectedInventory{
-             {
-{% for stem in entry.pack_names %}
-                 "{{ config.engine.namespace | cpp_escape }}:{{ stem | cpp_escape }}",
-{% endfor %}
-             },
-             {
-{% for name in entry.descriptor_names %}
-                 "{{ name | cpp_escape }}",
-{% endfor %}
-             },
-         }},
+        {"{{ arch | cpp_escape }}", ExpectedInventory{nameSet(ARCH{{ loop.index0 }}_PACK_NAMES), nameSet(ARCH{{ loop.index0 }}_KERNEL_NAMES)}},
 {% endfor %}
     };
     return s_expected;
@@ -229,7 +246,7 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, ShipsNoHeuristicAndRegistersNoS
 }
 {% endif %}
 
-{% if config.is_multi_pack %}
+{% if config.has_operation_matchers %}
 /// UMD policy, this engine's shape: a MULTI-pack engine carries one graph-scoped
 /// operation matcher per pack, on top of the one shared kernel-scoped matcher.
 TEST_F(Test{{ config.engine.pascal_name }}Packs, CarriesOneGraphScopedMatcherPerPack)
@@ -241,9 +258,10 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, CarriesOneGraphScopedMatcherPer
     EXPECT_EQ(static_cast<size_t>(graphScoped), _expected->packNames.size());
 }
 {% else %}
-/// UMD policy, this engine's shape: a SINGLE-pack engine carries no graph-scoped
-/// criterion -- its own graph_match admits the node type and validates shape. Mirrors
-/// TestConvFwdPack.cpp's HasAGraphMatchAndOneKernelMatcher.
+/// UMD policy, this engine's shape: a SINGLE-pack engine, or one catalog sharded across
+/// packs that declare no discriminator, carries no graph-scoped criterion -- its own
+/// graph_match admits the node type and validates shape. Mirrors TestConvFwdPack.cpp's
+/// HasAGraphMatchAndOneKernelMatcher.
 TEST_F(Test{{ config.engine.pascal_name }}Packs, CarriesNoGraphScopedMatcher)
 {
     EXPECT_FALSE(_set->engine.graphMatchNativeSymbol.empty());

@@ -14,7 +14,8 @@
 
 /**
  * @file TestGlobalKnobDefines.cpp
- * @brief Unit tests for GlobalKnobDefines.hpp: HIPDNN_FORCE_BENCHMARKING parsing.
+ * @brief Unit tests for GlobalKnobDefines.hpp: HIPDNN_FORCE_BENCHMARKING and
+ *        HIPDNN_INGESTOR_CANDIDATE_LIMIT parsing.
  *
  * Deliberately outside tests/ingestor/ and NOT guarded on
  * HIPDNN_ENABLE_KERNEL_INGESTOR. The header under test is itself unguarded, because the
@@ -143,6 +144,8 @@ TEST(TestGlobalKnobDefines, KnobAndEnvironmentNamesAreStable)
     EXPECT_STREQ(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, "global.benchmarking");
     EXPECT_STREQ(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, "global.workspace_size_limit");
     EXPECT_STREQ(hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "HIPDNN_FORCE_BENCHMARKING");
+    EXPECT_STREQ(hipdnn_plugin_sdk::INGESTOR_CANDIDATE_LIMIT_ENV_NAME,
+                 "HIPDNN_INGESTOR_CANDIDATE_LIMIT");
 }
 
 /// An unset variable is the default path every non-benchmarking run takes.
@@ -164,5 +167,56 @@ TEST(TestGlobalKnobDefines, TheOverrideIsReReadOnEveryCall)
     guard.setValue("0");
     EXPECT_EQ(hipdnn_plugin_sdk::benchmarkingOverrideFromEnv(), std::optional<bool>(false));
 }
+
+struct CandidateLimitCase
+{
+    std::string envValue;
+    std::optional<size_t> expected;
+};
+
+class TestIngestorCandidateLimitVariants : public ::testing::TestWithParam<CandidateLimitCase>
+{
+};
+
+TEST_P(TestIngestorCandidateLimitVariants, ParsesAsExpected)
+{
+    const auto& testCase = GetParam();
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::INGESTOR_CANDIDATE_LIMIT_ENV_NAME, testCase.envValue);
+
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestorCandidateLimitFromEnv(), testCase.expected);
+}
+
+std::string candidateLimitCaseName(const ::testing::TestParamInfo<CandidateLimitCase>& info)
+{
+    std::string name = "Case" + std::to_string(info.index);
+    for(const char character : info.param.envValue)
+    {
+        if(std::isalnum(static_cast<unsigned char>(character)) != 0)
+        {
+            name += character;
+        }
+    }
+    return name;
+}
+
+// Positive integers are limits; everything else, a zero included, means no limit.
+INSTANTIATE_TEST_SUITE_P(PositiveIntegersAndRejects,
+                         TestIngestorCandidateLimitVariants,
+                         ::testing::Values(CandidateLimitCase{"1", size_t{1}},
+                                           CandidateLimitCase{"64", size_t{64}},
+                                           CandidateLimitCase{" 128 ", size_t{128}},
+                                           CandidateLimitCase{"007", size_t{7}},
+                                           CandidateLimitCase{"", std::nullopt},
+                                           CandidateLimitCase{"   ", std::nullopt},
+                                           CandidateLimitCase{"0", std::nullopt},
+                                           CandidateLimitCase{"-4", std::nullopt},
+                                           CandidateLimitCase{"+4", std::nullopt},
+                                           CandidateLimitCase{"4x", std::nullopt},
+                                           CandidateLimitCase{"1.5", std::nullopt},
+                                           CandidateLimitCase{"all", std::nullopt},
+                                           CandidateLimitCase{"99999999999999999999999",
+                                                              std::nullopt}),
+                         candidateLimitCaseName);
 
 } // namespace

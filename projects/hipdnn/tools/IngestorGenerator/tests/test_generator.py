@@ -15,8 +15,11 @@ from codegen.generator import (
     _dedup_key,
     build_kdp,
     build_kdp_documents,
+    build_kernel_match_umd,
     build_kmd,
+    build_udd,
     build_ued,
+    build_uhd,
     emitted_inventory,
     mint_ids,
 )
@@ -934,6 +937,74 @@ class TestAPackEmptiedByDeduplicationIsRefused:
         assert inventory["total_descriptor_count"] == 2
 
 
+class TestBorrowedNativeSymbols:
+    """An engine naming ``native_symbols_from`` points every descriptor at the other
+    engine's registered symbols, and keeps its own name, slug and document ids."""
+
+    def test_every_symbol_reference_names_the_other_engine(self):
+        config = make_minimal_config(
+            engine=make_engine(
+                name="hipkernel:TestSeed", native_symbols_from="hipkernel:Test"
+            )
+        )
+        ids = mint_ids(config)
+        assert build_ued(config, ids)["name"] == "hipkernel:TestSeed"
+        assert build_ued(config, ids)["graph_match"] == {
+            "native": "hipkernel.test.graph_match"
+        }
+        assert build_udd(config, ids)["dispatch_symbol"] == "hipkernel.test.dispatch"
+        assert build_uhd(config, ids)["payload"] == "hipkernel.test.score"
+        assert (
+            build_kernel_match_umd(config, ids)["match_symbol"]
+            == "hipkernel.test.kernel_match"
+        )
+
+
+class TestShardedCatalog:
+    """Packs that declare no discriminator are one catalog split across KDP files:
+    the engine's graph_match admits every pack, so none carries an operation-scoped
+    matcher and the native stub registers none."""
+
+    @staticmethod
+    def _sharded():
+        return make_minimal_config(
+            packs=[
+                make_pack(name="alpha", kernels=[make_kernel(name="on_alpha")]),
+                make_pack(
+                    name="beta",
+                    kernels=[
+                        make_kernel(
+                            name="on_beta",
+                            metadata={"block_size": 128, "dtype": "FLOAT"},
+                        )
+                    ],
+                ),
+            ]
+        )
+
+    def test_every_shard_is_its_own_kdp_naming_only_the_kernel_matcher(self):
+        config = self._sharded()
+        ids = mint_ids(config)
+        documents = build_kdp_documents(config, ids)
+        assert [config.kdp_stem(pack) for pack, _ in documents] == [
+            "test_alpha",
+            "test_beta",
+        ]
+        for _, document in documents:
+            assert document["matchers"] == [ids["kernel_match"]]
+        assert not any(
+            key[0] == "operation_umd" for key in ids if isinstance(key, tuple)
+        )
+
+    def test_the_stubs_register_and_expect_no_operation_matcher(self, generator):
+        config = self._sharded()
+        native = generator._render_template("native.cpp.j2", config)
+        assert "OperationMatches" not in native
+        census = generator._render_template("test_packs.cpp.j2", config)
+        assert "CarriesNoGraphScopedMatcher" in census
+        assert "CarriesOneGraphScopedMatcherPerPack" not in census
+
+
 class TestEmittedInventory:
     """The context's view of what SHIPS, not what was authored: a census rendered from
     the authored count reports a shortfall whenever generation expressions overlap."""
@@ -1102,15 +1173,29 @@ class TestEmittedInventory:
 
     @staticmethod
     def _census_row(rendered: str, arch: str) -> str:
-        """The body of ``arch``'s rendered ``ExpectedInventory``, scoped to the ONE row
-        the census selects and compares by set equality."""
+        """The bodies of the name arrays ``arch``'s rendered ``ExpectedInventory`` builds
+        its sets from, scoped to the ONE row the census selects and compares by set
+        equality."""
         match = re.search(
-            r'\{"' + re.escape(arch) + r'",\s*\n\s*ExpectedInventory\{(.*?)\n\s*\}\},',
+            r'\{"' + re.escape(arch) + r'",\s*ExpectedInventory\{'
+            r"nameSet\((\w+)\),\s*nameSet\((\w+)\)\}\},",
             rendered,
-            re.DOTALL,
         )
         assert match, f"no census row rendered for {arch}"
-        return match.group(1)
+        bodies = []
+        for array in match.groups():
+            body = re.search(
+                r"constexpr std::array<const char\*, (\d+)> "
+                + array
+                + r" = \{\n(.*?)^\};",
+                rendered,
+                re.DOTALL | re.MULTILINE,
+            )
+            assert body, f"census row {arch} names no array {array}"
+            # The declared size is the element count: one name per line.
+            assert int(body.group(1)) == body.group(2).count("\n"), array
+            bodies.append(body.group(2))
+        return "".join(bodies)
 
     @staticmethod
     def _assert_every_inventory_row_is_rendered(generator, config):

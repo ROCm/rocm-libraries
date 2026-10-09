@@ -304,6 +304,10 @@ class EngineSpec:
     #: "native" emits a UHD scoring on a symbol; "none" omits the UHD, which is
     #: legal for an engine with no ranking model.
     heuristic: str = "native"
+    #: Another engine whose native symbols this engine's descriptors name, e.g. a
+    #: test-only engine serving a subset of a shipped engine's catalog through the
+    #: shipped engine's registered code. Empty names this engine's own symbols.
+    native_symbols_from: str = ""
 
     @property
     def namespace(self) -> str:
@@ -369,6 +373,14 @@ class IngestorConfig:
         return len(self.packs) > 1
 
     @property
+    def has_operation_matchers(self) -> bool:
+        """Each pack narrows the engine's graph_match with its own operation-scoped
+        matcher, named by its ``discriminator``. A multi-pack engine whose packs
+        declare none is one catalog sharded across KDP files: every pack is
+        admitted by the engine's graph_match alone, like a single pack."""
+        return self.is_multi_pack and any(p.discriminator for p in self.packs)
+
+    @property
     def descriptor_dir(self) -> str:
         """Where this bundle's descriptor files go, relative to the output dir:
         ``direct_load`` under the authored set in ``test_descriptors/``,
@@ -415,9 +427,12 @@ class IngestorConfig:
     @property
     def native_symbol_namespace(self) -> str:
         """Dotted namespace native symbols live under: ``hipkernel:ConvFwd``
-        becomes ``hipkernel.conv_fwd``."""
-        local_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", self.engine.local_name).lower()
-        return f"{self.engine.namespace}.{local_snake}"
+        becomes ``hipkernel.conv_fwd``. An engine naming ``native_symbols_from``
+        takes that engine's namespace instead of its own."""
+        name = self.engine.native_symbols_from or self.engine.name
+        namespace, local_name = name.split(":", 1)
+        local_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
+        return f"{namespace}.{local_snake}"
 
     @property
     def graph_match_symbol(self) -> str:
@@ -438,7 +453,7 @@ class IngestorConfig:
 
     def operation_match_symbol(self, pack: PackSpec) -> str:
         """Per-pack operation-scoped matcher symbol, meaningful only when
-        ``is_multi_pack``; a single-pack engine emits none."""
+        ``has_operation_matchers``; any other engine emits none."""
         return f"{self.native_symbol_namespace}.{pack.discriminator}_match"
 
     @property

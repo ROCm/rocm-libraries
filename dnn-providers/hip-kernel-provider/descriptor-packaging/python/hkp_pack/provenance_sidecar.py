@@ -45,10 +45,14 @@ VERSION = "1.0"
 _READABLE_MAJOR = 1
 _READABLE_MINOR = 0
 
-# A ceiling on one sidecar's decompressed size, far above any real pack: a sidecar
-# holds a few kilobytes per UKD, and a gzip body can inflate a thousandfold, so an
-# uncapped read lets a small corrupt or hostile file exhaust memory.
+# A ceiling on one sidecar's decompressed size: a gzip body can inflate a
+# thousandfold, so an uncapped read lets a small corrupt or hostile file exhaust
+# memory. A sidecar holds a few kilobytes per UKD, so the ceiling grows with the
+# UKDs of the descriptor being attached -- MAX_DECOMPRESSED_BYTES_PER_UKD each,
+# far above any real entry -- and never drops below MAX_DECOMPRESSED_BYTES. A
+# fixed ceiling would refuse a catalog of tens of thousands of kernels.
 MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024
+MAX_DECOMPRESSED_BYTES_PER_UKD = 64 * 1024
 
 
 def sidecar_name(descriptor_name: str) -> str:
@@ -159,14 +163,19 @@ def detach(descriptor_name: str, doc: dict) -> tuple[str, bytes]:
     return sidecar_name(descriptor_name), encode(sidecar)
 
 
-def _inflate(data: bytes, path: Path) -> bytes:
-    """One gzip member, refused past MAX_DECOMPRESSED_BYTES or with trailing bytes."""
+def decompressed_limit(ukd_count: int = 0) -> int:
+    """The most bytes a sidecar for a descriptor of `ukd_count` UKDs may inflate to."""
+    return max(MAX_DECOMPRESSED_BYTES, ukd_count * MAX_DECOMPRESSED_BYTES_PER_UKD)
+
+
+def _inflate(data: bytes, path: Path, limit: int) -> bytes:
+    """One gzip member, refused past `limit` bytes or with trailing bytes."""
     inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
-    raw = inflater.decompress(data, MAX_DECOMPRESSED_BYTES + 1)
-    if len(raw) > MAX_DECOMPRESSED_BYTES:
+    raw = inflater.decompress(data, limit + 1)
+    if len(raw) > limit:
         raise HkpPackError(
-            f"provenance sidecar {path} inflates past "
-            f"{MAX_DECOMPRESSED_BYTES} bytes; no packed sidecar is that large"
+            f"provenance sidecar {path} inflates past {limit} bytes; no packed "
+            "sidecar for its descriptor is that large"
         )
     if not inflater.eof:
         raise HkpPackError(f"provenance sidecar {path} is truncated")
@@ -194,9 +203,12 @@ def _require_version(version, path: Path) -> None:
         )
 
 
-def load_sidecar(path) -> dict:
+def load_sidecar(path, ukd_count: int = 0) -> dict:
     """The validated sidecar document at `path`; an unreadable or malformed file,
-    or one of a version this reader does not read, is an HkpPackError."""
+    or one of a version this reader does not read, is an HkpPackError.
+
+    `ukd_count`, the UKDs of the descriptor the sidecar belongs to, sizes the
+    decompression ceiling (see `decompressed_limit`)."""
     path = Path(path)
     try:
         data = path.read_bytes()
@@ -205,7 +217,7 @@ def load_sidecar(path) -> dict:
     except OSError as exc:
         raise HkpPackError(f"cannot read provenance sidecar {path}: {exc}") from exc
     try:
-        sidecar = json.loads(_inflate(data, path))
+        sidecar = json.loads(_inflate(data, path, decompressed_limit(ukd_count)))
     except HkpPackError:
         raise
     except (zlib.error, ValueError, RecursionError) as exc:
@@ -286,7 +298,7 @@ def attach(
             f"{path}: packed descriptor has no provenance sidecar; expected "
             f"{side}.{hint}"
         )
-    sidecar = load_sidecar(side)
+    sidecar = load_sidecar(side, len(ukds))
     where = str(side)
     if sidecar.get("kdp_id") != kdp_id:
         raise HkpPackError(

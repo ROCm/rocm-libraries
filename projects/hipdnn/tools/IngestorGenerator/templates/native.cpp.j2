@@ -50,7 +50,7 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "{{ config.kernel_match_symbo
 constexpr std::string_view SCORE_SYMBOL = "{{ config.score_symbol | cpp_escape }}";
 {% endif %}
 constexpr std::string_view DISPATCH_SYMBOL = "{{ config.dispatch_symbol | cpp_escape }}";
-{% if config.is_multi_pack %}
+{% if config.has_operation_matchers %}
 {% for pack in config.packs %}
 constexpr std::string_view {{ pack.discriminator.upper() }}_MATCHER_SYMBOL = "{{ config.operation_match_symbol(pack) | cpp_escape }}";
 {% endfor %}
@@ -81,7 +81,7 @@ std::optional<BoundTokens> {{ config.engine.camel_name }}GraphMatches(const Matc
     // TODO - FILL THIS OUT
     return std::nullopt;
 }
-{% if config.is_multi_pack %}
+{% if config.has_operation_matchers %}
 {% for pack in config.packs %}
 
 /// Graph-scoped operation matcher for the '{{ pack.name }}' pack: refines the
@@ -208,7 +208,7 @@ void reset{{ config.engine.pascal_name }}ModuleCache()
 void {{ config.register_symbols_fn }}(SymbolScope<Handle>& scope)
 {
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &{{ config.engine.camel_name }}GraphMatches);
-{% if config.is_multi_pack %}
+{% if config.has_operation_matchers %}
 {% for pack in config.packs %}
     scope.add(std::string({{ pack.discriminator.upper() }}_MATCHER_SYMBOL), &{{ pack.discriminator }}OperationMatches);
 {% endfor %}

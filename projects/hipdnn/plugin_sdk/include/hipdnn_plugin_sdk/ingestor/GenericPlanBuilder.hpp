@@ -91,6 +91,10 @@ struct IngestorSettings
     KnobFilter knobFilter;
     bool benchmarkingEnabled = false;
     std::optional<int64_t> workspaceLimit;
+    /// How many of the best-ranked knob-filtered candidates buildPlan() considers; unset
+    /// considers all of them. Applied with benchmarking on or off, so a record benchmarked
+    /// under a limit covers the same candidates a later build under it walks.
+    std::optional<size_t> candidateLimit;
 };
 
 /// The one plan builder a descriptor-backed engine has: a catalog entry is a
@@ -210,6 +214,7 @@ public:
         settings.workspaceLimit = heuristics::workspaceLimit(engineConfig);
         settings.benchmarkingEnabled
             = benchmarkingOverrideFromEnv().value_or(readBenchmarkingEnabled(engineConfig));
+        executionSettings.ingestorSettings.candidateLimit = ingestorCandidateLimitFromEnv();
     }
 
     /// Kernel choice follows the engine configuration's ranking metric (RFC 0019 §11.4):
@@ -229,11 +234,12 @@ public:
             throwNoApplicableKernel();
         }
 
-        const auto filtered = applyConstraints(catalog, settings, context);
+        auto filtered = applyConstraints(catalog, settings, context);
         if(filtered.empty())
         {
             throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
         }
+        applyCandidateLimit(filtered, settings.candidateLimit);
 
         // Orderability is decided once, on the full catalog, in sortedCatalog(); `filtered` is
         // that measured order restricted. Re-asking against `filtered` would let a pin change
@@ -1074,6 +1080,24 @@ private:
             }
         }
         return filtered;
+    }
+
+    /// Keeps the first @p limit of the ranked @p candidates. Runs before the winner-record
+    /// lookup, so coverage is judged against the shortlist a benchmark under the same
+    /// limit measured, not against the whole catalog.
+    void applyCandidateLimit(std::vector<KernelDefinition>& candidates,
+                             const std::optional<size_t>& limit) const
+    {
+        if(!limit.has_value() || candidates.size() <= *limit)
+        {
+            return;
+        }
+
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' keeps the best-ranked "
+                                                    << *limit << " of " << candidates.size()
+                                                    << " candidate(s) ("
+                                                    << INGESTOR_CANDIDATE_LIMIT_ENV_NAME << ")");
+        candidates.resize(*limit);
     }
 
     [[noreturn]] void throwNoApplicableKernel() const

@@ -126,26 +126,26 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                      try
                      {
                          // Device facts are resolved per call from the handle, not from
-                         // the construction-time provider. The first engine for this set
-                         // takes the state manager discovery already built; a later one
-                         // builds its own.
-                         if(auto stateManager
-                            = kernel_ingestor_engine::takeDiscoveredStateManager(set.engine.id))
+                         // the construction-time provider. Every engine for this set shares
+                         // the immutable state discovery built, so a Container -- one per
+                         // handle -- copies no kernel and rebuilds no index.
+                         if(auto state
+                            = kernel_ingestor_engine::discoveredSharedState(set.engine.id))
                          {
-                             return hipdnn_plugin_sdk::ingestor::
-                                 makeEngine<Handle, Settings, Context>(
-                                     set,
-                                     std::move(stateManager),
-                                     kernel_ingestor_engine::deviceResolver());
+                             return hipdnn_plugin_sdk::ingestor::makeEngine<Handle,
+                                                                            Settings,
+                                                                            Context>(
+                                 set, std::move(state), kernel_ingestor_engine::deviceResolver());
                          }
+                         // Unreachable while every discovered set keeps its slot; kept so a
+                         // set without one still serves rather than vanishing.
                          return hipdnn_plugin_sdk::ingestor::makeEngine<Handle, Settings, Context>(
                              set, kernel_ingestor_engine::deviceResolver());
                      }
                      catch(const std::exception& error)
                      {
-                         // The loader validates each set, but a later Container rebuilds its
-                         // state manager from the set, and the engine wrapping either can
-                         // still throw, so that's convention, not a guarantee.
+                         // The loader validates each set, but the engine wrapping its state
+                         // can still throw, so that's convention, not a guarantee.
                          // Return null: throwing here would cost HIP_MLOPS and ASM_SDPA too.
                          HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
                                                  << set.engine.name
