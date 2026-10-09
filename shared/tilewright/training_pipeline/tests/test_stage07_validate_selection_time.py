@@ -447,6 +447,30 @@ def test_bench_runs_keep_the_variables_the_evaluation_drops(tmp_path, monkeypatc
     assert not [k for k in off if k.startswith("TILEWRIGHT_") or k in on]
 
 
+def test_bench_runs_ignore_the_callers_tilewright_settings(
+    tmp_path, deployed, monkeypatch
+):
+    pytest.importorskip("tilewright")
+    settings = {"TENSILE_TILEWRIGHT_BANK": "1", "TENSILE_TILEWRIGHT_PREPARE": "0"}
+    for name, value in settings.items():
+        monkeypatch.setenv(name, value)
+    out = tmp_path / "s7"
+    envs = {}
+    real = s7.run_bench
+
+    def spy(bench, yaml_path, log_path, device, env, **kw):
+        envs[log_path.relative_to(out).as_posix()] = env
+        return real(bench, yaml_path, log_path, device, env, **kw)
+
+    monkeypatch.setattr(s7, "run_bench", spy)
+    assert run_stage07(deployed, out, monkeypatch) == 0
+    ml_on = [p for p, e in envs.items() if e.get("TENSILE_USE_TILEWRIGHT") == "1"]
+    assert "work/parity/bench.log" in ml_on
+    assert "work/timing/rsn1/rep0_ml_on.log" in ml_on
+    assert "work/timing/rsn1/rep0_ml_off.log" in envs
+    assert not [p for p, e in envs.items() if set(settings) & set(e)]
+
+
 def test_timing_with_fake_bench(tmp_path, deployed, monkeypatch):
     monkeypatch.setenv("TENSILE_USE_TILEWRIGHT", "1")
     out = tmp_path / "s7"

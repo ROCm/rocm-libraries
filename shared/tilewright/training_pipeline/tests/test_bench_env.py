@@ -70,12 +70,32 @@ def test_tilewright_knobs_only_through_the_explicit_parameter(tilewright_environ
         bench_env_with(tilewright={"TENSILE_DB": "1"})
 
 
+def test_tensile_tilewright_settings_are_tilewright_variables(monkeypatch):
+    settings = {"TENSILE_TILEWRIGHT_BANK": "1", "TENSILE_TILEWRIGHT_PREPARE": "0"}
+    for name, value in settings.items():
+        monkeypatch.setenv(name, value)
+    for env in (
+        bench_env_with(),
+        bench_env_with(tilewright={"TENSILE_USE_TILEWRIGHT": "1"}),
+    ):
+        assert not set(settings) & set(env)
+    env = bench_env_with(
+        tilewright={"TENSILE_USE_TILEWRIGHT": "1", "TENSILE_TILEWRIGHT_BANK": "0"}
+    )
+    assert env["TENSILE_TILEWRIGHT_BANK"] == "0"
+    assert "TENSILE_TILEWRIGHT_PREPARE" not in env
+    with pytest.raises(ValueError, match="tilewright="):
+        bench_env_with({"TENSILE_TILEWRIGHT_BANK": "1"})
+
+
 @pytest.mark.parametrize(
     "name, expected",
     [
         ("TENSILE_USE_TILEWRIGHT", True),
         ("TILEWRIGHT_FORCE_CELL", True),
         ("TILEWRIGHT_BENCH_ROOT", True),
+        ("TENSILE_TILEWRIGHT_BANK", True),
+        ("TENSILE_TILEWRIGHT_PREPARE", True),
         ("TENSILE_PREDICTION_LIB", False),
         ("MY_TILEWRIGHT_X", False),
     ],

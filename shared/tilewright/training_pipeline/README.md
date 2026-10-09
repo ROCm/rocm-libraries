@@ -66,7 +66,12 @@ when a referenced variable is unset or empty.
 
 Benchmarks never inherit `HIPBLASLT_TENSILE_LIBPATH` (`run_pipeline.sh` also
 unsets it), so hipBLASLt loads the library subtree that matches the device's
-ASIC revision; stage 7 sets it to the deploy build's library.
+ASIC revision; stage 7 sets it to the deploy build's library. Nor do they
+inherit `TENSILE_USE_TILEWRIGHT` or any `TILEWRIGHT_*` or
+`TENSILE_TILEWRIGHT_*` variable: training benches run without tilewright, and
+stage 7 passes its ML-on runs the variables they need, so a value exported in
+the shell, such as `TENSILE_TILEWRIGHT_BANK`, does not change what stage 7
+measures.
 
 ### Modes
 
