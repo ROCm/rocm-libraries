@@ -1081,6 +1081,126 @@ class WaitcntBrackets {
     const WaitAluContext* ctx;
 };
 
+// Per-arch setup shared by the pass and WaitAluTracker. Idempotent.
+GfxArchID setupWaitAluContext(WaitAluContext& ctx, VGPRHalfKeyer& keyer,
+                              const PassContext& passCtx) {
+    auto arch = passCtx.getGemmTileConfig().arch;
+    const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+    const auto* archInfo = ArchHelper::getInstance().getArchInfo(archId);
+    const bool hasD16 = archInfo && archInfo->hasD16Writes32BitVgpr();
+    keyer = VGPRHalfKeyer(hasD16);
+    ctx.waitHide = &passCtx.getHWModel().waitHide;
+    ctx.xdlSinceCap = computeXdlSinceCap(*ctx.waitHide);
+    PASS_DEBUG(std::cerr << "[InsertWaitAlu] run arch=gfx" << arch[0] << arch[1] << arch[2]
+                         << " hasD16Writes32BitVgpr=" << hasD16 << "\n");
+    PASS_DEBUG(std::cerr << "[InsertWaitAlu] waitHide" << " forms=" << ctx.waitHide->forms.size()
+                         << " vmVsrcLds=" << waitHideStr(ctx.waitHide->vmVsrcLds)
+                         << " vmVsrcTex=" << waitHideStr(ctx.waitHide->vmVsrcTex)
+                         << " vmVsrcBridge=" << waitHideStr(ctx.waitHide->vmVsrcBridge)
+                         << " [xdlSinceCap=" << ctx.xdlSinceCap << "]\n");
+    PASS_DEBUG(std::cerr << "[InsertWaitAlu] sharedOrder"
+                         << " countFollowers=" << ctx.opts.sharedOrderCountFollowers
+                         << " xdlFromNextWmma=" << ctx.opts.xdlCountFromNextWmma << "\n");
+    return archId;
+}
+
+Wait computeWaitForInst(const StinkyInstruction& inst, const WaitcntBrackets& sb,
+                        const VGPRHalfKeyer& keyer) {
+    Wait wait;
+
+    // Step 1: scoreboard probes on every VGPR operand of `inst`.
+    sb.onConsumer(inst, keyer, wait);
+
+    // Step 2: skip VA_VDST for VALU consumers
+    if (isVectorALU(inst) || isTranscendental(inst) || isMatrixInstruction(inst)) {
+        if (!isNoWait(wait, CT_VA_VDST))
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     suppress va_vdst (VALU consumer, was "
+                                 << int(wait.get(CT_VA_VDST)) << ")\n");
+        setNoWait(wait, CT_VA_VDST);
+    }
+
+    // Step 3: eager EXEC guard. If this instruction modifies EXEC and any
+    // VA_VDST work is in flight, drain now — subsequent VALUs may be
+    // EXEC-skipped at runtime and therefore won't bump VA_VDST_hw, leaving
+    // any precomputed non-zero wait invalid. Must run AFTER Step 2 so that
+    // v_cmpx_* (VALU + writes EXEC) gets the va_vdst(0) drain rather than
+    // the VALU suppression.
+    if (writesExec(inst) && sb.getScoreRange(CT_VA_VDST) > 0) {
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu]     drain va_vdst (EXEC writer, in-flight="
+                             << sb.getScoreRange(CT_VA_VDST) << ")\n");
+        addWait(wait, CT_VA_VDST, 0);
+    }
+
+    return wait;
+}
+
+// How one instruction advances the walk, and what (if anything) is emitted for it.
+enum class StepKind { Skip, AbsorbWait, Call, Normal };
+struct Step {
+    StepKind kind = StepKind::Skip;
+    Wait wait;  // Normal: the s_wait_alu to emit before the instruction, if any
+};
+
+// Advance `sb` past `inst` exactly as the pass's walk does. The caller only emits: a Call
+// gets its drain after the instruction, a Normal step with wait.hasAny() gets an
+// s_wait_alu before it. Shared by the pass and WaitAluTracker so the two cannot diverge.
+Step stepInstruction(WaitcntBrackets& sb, const StinkyInstruction& inst,
+                     const VGPRHalfKeyer& keyer) {
+    Step step;
+    if (isPseudoInst(&inst)) return step;
+
+    // Pre-existing s_wait_alu: absorb its va_vdst/vm_vsrc into LB so the
+    // rest of the BB sees the post-wait state, and leave the instruction
+    // in place so the runtime drain actually happens. Today the only
+    // realistic source is hold_cnt-only survivors from RemoveWaitAluPass
+    // (their va_vdst/vm_vsrc are already kNoWait, so the absorb is a
+    // no-op); the emit branch merges fresh va_vdst/vm_vsrc into such a
+    // survivor when it's the immediately-preceding instruction.
+    if (isWaitAluInst(inst)) {
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu]   absorb existing s_wait_alu\n");
+        if (const auto* data = inst.getModifier<SWaitAluData>()) {
+            if (data->hasField(SWaitAluData::VA_VDST))
+                sb.applyWaitcnt(CT_VA_VDST, data->getField(SWaitAluData::VA_VDST));
+            if (data->hasField(SWaitAluData::VM_VSRC))
+                sb.applyWaitcnt(CT_VM_VSRC, data->getField(SWaitAluData::VM_VSRC));
+        }
+        step.kind = StepKind::AbsorbWait;
+        return step;
+    }
+
+    PASS_DEBUG(std::cerr << "[InsertWaitAlu]   visit " << inst.getHwInstDesc()->mnemonic << "\n");
+
+    // Function call (s_swappc): drain both counters right after the call, at the
+    // return-landing site. The callee may leave VALU/VMEM instructions outstanding on
+    // VA_VDST/VM_VSRC, so the drain is unconditional. The callee entry is drained
+    // separately (insertCalleeEntryDrain).
+    if (isCall(inst)) {
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu]   call — drain va_vdst(0)+vm_vsrc(0) "
+                                "after s_swappc (callee->caller bracket)\n");
+        sb.applyWaitcnt(CT_VA_VDST, 0);
+        sb.applyWaitcnt(CT_VM_VSRC, 0);
+        step.kind = StepKind::Call;
+        return step;
+    }
+
+    step.kind = StepKind::Normal;
+    step.wait = computeWaitForInst(inst, sb, keyer);
+    if (step.wait.hasAny()) {
+        PASS_DEBUG(
+            std::cerr << "[InsertWaitAlu]   emit s_wait_alu va_vdst="
+                      << (isNoWait(step.wait, CT_VA_VDST) ? -1 : int(step.wait.get(CT_VA_VDST)))
+                      << " vm_vsrc="
+                      << (isNoWait(step.wait, CT_VM_VSRC) ? -1 : int(step.wait.get(CT_VM_VSRC)))
+                      << "\n");
+        if (!isNoWait(step.wait, CT_VA_VDST))
+            sb.applyWaitcnt(CT_VA_VDST, step.wait.get(CT_VA_VDST));
+        if (!isNoWait(step.wait, CT_VM_VSRC))
+            sb.applyWaitcnt(CT_VM_VSRC, step.wait.get(CT_VM_VSRC));
+    }
+    if (auto ev = classifyEvent(inst)) sb.onProducer(*ev, inst, keyer);
+    return step;
+}
+
 // ---------------------------------------------------------------------------
 // The pass
 // ---------------------------------------------------------------------------
@@ -1139,35 +1259,6 @@ class InsertWaitAluPassImpl : public Pass {
         return hold_cnt;
     }
 
-    Wait computeWaitForInst(const StinkyInstruction& inst, const WaitcntBrackets& sb) const {
-        Wait wait;
-
-        // Step 1: scoreboard probes on every VGPR operand of `inst`.
-        sb.onConsumer(inst, keyer, wait);
-
-        // Step 2: skip VA_VDST for VALU consumers
-        if (isVectorALU(inst) || isTranscendental(inst) || isMatrixInstruction(inst)) {
-            if (!isNoWait(wait, CT_VA_VDST))
-                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     suppress va_vdst (VALU consumer, was "
-                                     << int(wait.get(CT_VA_VDST)) << ")\n");
-            setNoWait(wait, CT_VA_VDST);
-        }
-
-        // Step 3: eager EXEC guard. If this instruction modifies EXEC and any
-        // VA_VDST work is in flight, drain now — subsequent VALUs may be
-        // EXEC-skipped at runtime and therefore won't bump VA_VDST_hw, leaving
-        // any precomputed non-zero wait invalid. Must run AFTER Step 2 so that
-        // v_cmpx_* (VALU + writes EXEC) gets the va_vdst(0) drain rather than
-        // the VALU suppression.
-        if (writesExec(inst) && sb.getScoreRange(CT_VA_VDST) > 0) {
-            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     drain va_vdst (EXEC writer, in-flight="
-                                 << sb.getScoreRange(CT_VA_VDST) << ")\n");
-            addWait(wait, CT_VA_VDST, 0);
-        }
-
-        return wait;
-    }
-
     // Process one BB starting from its accumulated entry state.
     // emit=false → run scoreboard, return exit state for Phase 1 propagation.
     // emit=true → re-run with the converged entry state and insert s_wait_alu.
@@ -1184,41 +1275,10 @@ class InsertWaitAluPassImpl : public Pass {
                 ++it;
                 continue;
             }
-            if (isPseudoInst(inst)) {
-                ++it;
-                continue;
-            }
-
-            // Pre-existing s_wait_alu: absorb its va_vdst/vm_vsrc into LB so the
-            // rest of the BB sees the post-wait state, and leave the instruction
-            // in place so the runtime drain actually happens. Today the only
-            // realistic source is hold_cnt-only survivors from RemoveWaitAluPass
-            // (their va_vdst/vm_vsrc are already kNoWait, so the absorb is a
-            // no-op); the emit branch below merges fresh va_vdst/vm_vsrc into
-            // such a survivor when it's the immediately-preceding instruction.
-            if (isWaitAluInst(*inst)) {
-                PASS_DEBUG(std::cerr << "[InsertWaitAlu]   absorb existing s_wait_alu\n");
-                if (const auto* data = inst->getModifier<SWaitAluData>()) {
-                    if (data->hasField(SWaitAluData::VA_VDST))
-                        sb.applyWaitcnt(CT_VA_VDST, data->getField(SWaitAluData::VA_VDST));
-                    if (data->hasField(SWaitAluData::VM_VSRC))
-                        sb.applyWaitcnt(CT_VM_VSRC, data->getField(SWaitAluData::VM_VSRC));
-                }
-                ++it;
-                continue;
-            }
-
-            PASS_DEBUG(std::cerr << "[InsertWaitAlu]   visit " << inst->getHwInstDesc()->mnemonic
-                                 << "\n");
-
-            // Function call (s_swappc): drain both counters right after the call,
-            // at the return-landing site. The callee may leave VALU/VMEM
-            // instructions outstanding on VA_VDST/VM_VSRC, so the drain is
-            // unconditional. The callee entry is drained separately
-            // (insertCalleeEntryDrain).
-            if (isCall(*inst)) {
-                PASS_DEBUG(std::cerr << "[InsertWaitAlu]   call — drain va_vdst(0)+vm_vsrc(0) "
-                                        "after s_swappc (callee->caller bracket)\n");
+            // The walk itself lives in stepInstruction (shared with WaitAluTracker);
+            // here only the emission happens.
+            const Step step = stepInstruction(sb, *inst, keyer);
+            if (step.kind == StepKind::Call) {
                 // nextIt is the instruction after the call. The drain is inserted
                 // before it, so resuming at nextIt continues past the drain
                 // instead of re-visiting it.
@@ -1234,38 +1294,22 @@ class InsertWaitAluPassImpl : public Pass {
                     IRBase* insertBefore = (nextIt == bb.end()) ? nullptr : nextIt.getNodePtr();
                     emitWaitAlu(bb, insertBefore, drain);
                 }
-                sb.applyWaitcnt(CT_VA_VDST, 0);
-                sb.applyWaitcnt(CT_VM_VSRC, 0);
                 it = nextIt;
                 continue;
             }
-
-            Wait wait = computeWaitForInst(*inst, sb);
-            if (wait.hasAny()) {
-                PASS_DEBUG(std::cerr
-                           << "[InsertWaitAlu]   emit s_wait_alu va_vdst="
-                           << (isNoWait(wait, CT_VA_VDST) ? -1 : int(wait.get(CT_VA_VDST)))
-                           << " vm_vsrc="
-                           << (isNoWait(wait, CT_VM_VSRC) ? -1 : int(wait.get(CT_VM_VSRC)))
-                           << "\n");
-                if (emit) {
-                    // If the immediately-preceding instruction is a hold_cnt-only
-                    // s_wait_alu survivor, fold its hold_cnt into our new wait
-                    // so the constraint isn't lost and we don't emit two
-                    // adjacent waits.
-                    int holdCnt = extractAdjacentHoldCnt(bb, inst);
-                    if (holdCnt >= 0)
-                        PASS_DEBUG(std::cerr << "[InsertWaitAlu]     fold hold_cnt=" << holdCnt
-                                             << " from adjacent survivor\n");
-                    emitWaitAlu(bb, inst, wait, holdCnt);
-                    PASS_DEBUG(std::cerr << "[InsertWaitAlu]     inserted s_wait_alu before "
-                                         << inst->getHwInstDesc()->mnemonic << "\n");
-                }
-                if (!isNoWait(wait, CT_VA_VDST)) sb.applyWaitcnt(CT_VA_VDST, wait.get(CT_VA_VDST));
-                if (!isNoWait(wait, CT_VM_VSRC)) sb.applyWaitcnt(CT_VM_VSRC, wait.get(CT_VM_VSRC));
+            if (step.kind == StepKind::Normal && step.wait.hasAny() && emit) {
+                // If the immediately-preceding instruction is a hold_cnt-only
+                // s_wait_alu survivor, fold its hold_cnt into our new wait
+                // so the constraint isn't lost and we don't emit two
+                // adjacent waits.
+                int holdCnt = extractAdjacentHoldCnt(bb, inst);
+                if (holdCnt >= 0)
+                    PASS_DEBUG(std::cerr << "[InsertWaitAlu]     fold hold_cnt=" << holdCnt
+                                         << " from adjacent survivor\n");
+                emitWaitAlu(bb, inst, step.wait, holdCnt);
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     inserted s_wait_alu before "
+                                     << inst->getHwInstDesc()->mnemonic << "\n");
             }
-
-            if (auto ev = classifyEvent(*inst)) sb.onProducer(*ev, *inst, keyer);
 
             ++it;
         }
@@ -1449,24 +1493,7 @@ class InsertWaitAluPassImpl : public Pass {
 
     // Per-arch setup shared by every function run. Idempotent.
     void setupArch(PassContext& passCtx) {
-        auto arch = passCtx.getGemmTileConfig().arch;
-        archId = getGfxArchID(arch[0], arch[1], arch[2]);
-        const auto* archInfo = ArchHelper::getInstance().getArchInfo(archId);
-        const bool hasD16 = archInfo && archInfo->hasD16Writes32BitVgpr();
-        keyer = VGPRHalfKeyer(hasD16);
-        ctx_.waitHide = &passCtx.getHWModel().waitHide;
-        ctx_.xdlSinceCap = computeXdlSinceCap(*ctx_.waitHide);
-        PASS_DEBUG(std::cerr << "[InsertWaitAlu] run arch=gfx" << arch[0] << arch[1] << arch[2]
-                             << " hasD16Writes32BitVgpr=" << hasD16 << "\n");
-        PASS_DEBUG(std::cerr << "[InsertWaitAlu] waitHide"
-                             << " forms=" << ctx_.waitHide->forms.size()
-                             << " vmVsrcLds=" << waitHideStr(ctx_.waitHide->vmVsrcLds)
-                             << " vmVsrcTex=" << waitHideStr(ctx_.waitHide->vmVsrcTex)
-                             << " vmVsrcBridge=" << waitHideStr(ctx_.waitHide->vmVsrcBridge)
-                             << " [xdlSinceCap=" << ctx_.xdlSinceCap << "]\n");
-        PASS_DEBUG(std::cerr << "[InsertWaitAlu] sharedOrder"
-                             << " countFollowers=" << ctx_.opts.sharedOrderCountFollowers
-                             << " xdlFromNextWmma=" << ctx_.opts.xdlCountFromNextWmma << "\n");
+        archId = setupWaitAluContext(ctx_, keyer, passCtx);
     }
 
    public:
@@ -1524,6 +1551,34 @@ class InsertWaitAluModulePass : public ModulePass {
 }  // namespace
 
 namespace stinkytofu {
+struct WaitAluTracker::Impl {
+    WaitAluContext ctx;
+    VGPRHalfKeyer keyer;
+    WaitcntBrackets sb;
+    Impl(const PassContext& passCtx, InsertWaitAluOptions opts) : sb(ctx) {
+        ctx.opts = opts;
+        setupWaitAluContext(ctx, keyer, passCtx);
+    }
+};
+
+WaitAluTracker::WaitAluTracker(const PassContext& passCtx, InsertWaitAluOptions opts)
+    : impl_(std::make_unique<Impl>(passCtx, opts)) {}
+
+WaitAluTracker::~WaitAluTracker() = default;
+
+WaitAluNeed WaitAluTracker::query(const StinkyInstruction& inst) const {
+    WaitAluNeed need;
+    if (isPseudoInst(&inst) || isWaitAluInst(inst) || isCall(inst)) return need;
+    const Wait wait = computeWaitForInst(inst, impl_->sb, impl_->keyer);
+    if (!isNoWait(wait, CT_VA_VDST)) need.vaVdst = static_cast<int>(wait.get(CT_VA_VDST));
+    if (!isNoWait(wait, CT_VM_VSRC)) need.vmVsrc = static_cast<int>(wait.get(CT_VM_VSRC));
+    return need;
+}
+
+void WaitAluTracker::commit(const StinkyInstruction& inst) {
+    stepInstruction(impl_->sb, inst, impl_->keyer);
+}
+
 std::unique_ptr<Pass> createInsertWaitAluPass(InsertWaitAluOptions opts) {
     return std::make_unique<InsertWaitAluPassImpl>(opts);
 }

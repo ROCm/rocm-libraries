@@ -583,6 +583,8 @@ These cover SmoothQuant / RDQuant-style epilogues and the FP8 K/V cache dequant 
 
 `helpers/pipeline.py::SoftwarePipeline.run_ping_pong(...)` is the prologue / steady-state / epilogue construction helper for ping-pong async pipelines. It assumes the kernel author already chose the LDS layout, atom, and tile shape; it sequences the DMA + compute calls.
 
+`SoftwarePipeline.run_ping_pong_dynamic(b, k_extent=..., block_k=..., k_lo=None, k_zero_fill=None, mask_tail_state=False, buffers=[pair0, pair1], iter_args=..., issue_load_fn=..., compute_fn=..., schedule=None)` is the same ping-pong over a **runtime** reduction extent (an AOT kernel's `K` is a kernel argument). An LDS buffer cannot be picked by a runtime iteration index, so the body is unrolled twice and steps by `2 * block_k`; it takes exactly two buffer pairs. With an odd tile count the second phase of the last step addresses a tile at or past `k_extent`: at the end of the tensor that tile reads zero, and under split-K (`k_extent` a slice end) `k_zero_fill` redirects its prefetch to an offset that does. `mask_tail_state=True` additionally discards that phase's state update, for loop-carried state that depends on more than the tile data. `k_lo` is the slice base. C++: `rocke_software_pipeline_run_ping_pong_dynamic` (`helper_rocke.helpers.pipeline.h`).
+
 General rules:
 
 - use `b.sync()` at simple phase boundaries;

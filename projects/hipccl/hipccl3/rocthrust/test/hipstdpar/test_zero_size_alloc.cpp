@@ -37,12 +37,26 @@
 #include <cstdlib>
 #include <new>
 
+namespace
+{
+// Publishing a pointer keeps the optimizer from eliding the allocation that
+// produced it, which would remove the call before it can be interposed.
+void* volatile published{};
+
+template <class T>
+T* publish(T* p)
+{
+  published = p;
+  return p;
+}
+} // namespace
+
 int main()
 {
   try
   {
     // operator new(0) must succeed and return a valid, non-null pointer.
-    void* p = ::operator new(0);
+    void* p = publish(::operator new(0));
     if (!p)
     {
       return EXIT_FAILURE;
@@ -50,7 +64,7 @@ int main()
     ::operator delete(p);
 
     // new T[0] must succeed and return a valid, non-null pointer.
-    int* arr = new int[0];
+    int* arr = publish(new int[0]);
     if (!arr)
     {
       return EXIT_FAILURE;
@@ -59,10 +73,10 @@ int main()
 
     // malloc(0)/calloc(0, 0) are legally allowed to return nullptr, but must
     // never crash or abort the process.
-    void* m = std::malloc(0);
+    void* m = publish(std::malloc(0));
     std::free(m);
 
-    void* c = std::calloc(0, 0);
+    void* c = publish(std::calloc(0, 0));
     std::free(c);
   }
   catch (...)

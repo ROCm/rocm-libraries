@@ -3067,15 +3067,18 @@ class KernelWriterAssembly(KernelWriter):
                                comment="WorkGroup2 = (cluster_z * nwg_z) + wg_z"))
             moduleRegInit.add(label_calculate_workgroup_done)
 
-        # Guard the compute site like the apply sites: find() returns None
-        # unless TDMInst==3 + HasTDM match, so Multicast with TDMInst in {1,2}
-        # or a non-TDM arch would otherwise None-deref here.
-        clusterComp = ClusterLoadTDM.find(self)
-        if kernel["Multicast"] and clusterComp:
-          # Same SGPR operands allocated above (wg_x=sTmp+1, wg_y=sTmp+2,
-          # nwg_x=sTmp+3, scratch=sTmp+4) are passed through.
-          moduleRegInit.add(clusterComp.computeMasks(
-              self, kernel, sgprWgX=sTmp+1, sgprWgY=sTmp+2, sgprNWgX=sTmp+3, sTmp=sTmp))
+            # Guard the compute site like the apply sites: find() returns None
+            # unless TDMInst==3 + HasTDM match, so Multicast with TDMInst in {1,2}
+            # or a non-TDM arch would otherwise None-deref here.
+            clusterComp = ClusterLoadTDM.find(self)
+            if kernel["Multicast"] and clusterComp:
+              # Same SGPR operands allocated above (wg_x=sTmp+1, wg_y=sTmp+2,
+              # nwg_x=sTmp+3, scratch=sTmp+4) are passed through. Must run inside
+              # the tmpSgprInfo scope: computeMasks allocates its own scratch, which
+              # would otherwise be handed the freed sTmp slots and clobber wg_x
+              # (e.g. the magic-number ceil-divide by a non-power-of-2 MacroTile1).
+              moduleRegInit.add(clusterComp.computeMasks(
+                  self, kernel, sgprWgX=sTmp+1, sgprWgY=sTmp+2, sgprNWgX=sTmp+3, sTmp=sTmp))
       # SrdD can be used as temp sgprs for a bit
       if self.states.doShadowInit and kernel["BufferStore"]:
         self.addSgprVarToPool("SrdD")
@@ -17766,7 +17769,7 @@ class KernelWriterAssembly(KernelWriter):
       src = vgpr(srcAddrVgpr)
       ds = DSModifiers(offset=dsOffset)
       bpl = dataType.numBytes() * gwvw
-      memToken = MemTokenData([self.states.memTokenLdsBuffer0])
+      memToken = MemTokenData([self.states.memTokenEpilogue])
       if bpl <= 16:
         numRegs = max(1, bpl // 4)
         dst = vgpr(dstVgpr, numRegs) if numRegs > 1 else vgpr(dstVgpr)
@@ -18386,8 +18389,16 @@ class KernelWriterAssembly(KernelWriter):
       vectorDataTypes.scaleB.ldsOffset = subGroupOffset[0]
       storeModules.add(self.addVectorLocalStore(kernel, "ScaleB", offsetVgpr, scaleBShiftOffset, scaleBDataType, gwvw, tmpVgpr1Res, scaleBDstVgpr, subGroupOffset, 1, setToOne=True, comment="store scaleB"))
       subGroupOffset[0] += kernel["NumThreads"] * int(kernel["ProblemType"]["ComputeDataType"].numBytes()) * vectorDataTypes.scaleB.turn
-    # We move s_barrier before local load. Add barrier here to avoid race condition if lds offset starts from 0
-    if kernel["LdsOffsetBias"] == 0:
+    # Protect scratch read-to-write reuse separately from the write-to-read
+    # barrier emitted by GlobalWriteBatch before its first vector LDS load.
+    if kernel.get("_SeparateEpilogueLds", False):
+      # Only the scratch is being reused here. Drain LDS reads immediately
+      # before overwriting it; do not wait for tensor loads issued by PAP.
+      module.add(SWaitCnt(dscnt=0, comment="finish previous vector epilogue LDS reads"))
+      barrier = SBarrier(comment="reuse vector epilogue LDS scratch")
+      barrier.setMemToken(MemTokenData([self.states.memTokenEpilogue]))
+      module.add(barrier)
+    elif kernel["LdsOffsetBias"] == 0:
       module.add(SBarrier(comment="wait for all global loads."))
 
     # rearrange them and add waitcnt
@@ -18396,7 +18407,7 @@ class KernelWriterAssembly(KernelWriter):
       if isinstance(storeModule, Module):
         for item in storeModule.items():
           if isinstance(item, DSStoreInstruction):
-            item.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
+            item.setMemToken(MemTokenData([self.states.memTokenEpilogue]))
           if (not isAdded) and isinstance(item, (VCvtInstruction, DSStoreInstruction, VCndMaskB32, VLShiftLeftB32, VAndB32)):
             vlcnt = vlcnt - 1
             module.add(SWaitCnt(vlcnt=(vlcnt), comment="wait for global load"))
@@ -18409,7 +18420,7 @@ class KernelWriterAssembly(KernelWriter):
             isAdded = False
       else:
         if isinstance(storeModule, DSStoreInstruction):
-          storeModule.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
+          storeModule.setMemToken(MemTokenData([self.states.memTokenEpilogue]))
         module.add(storeModule)
 
     # Emit the epilogue vector-LDS drain barrier for multi-DU kernels only
@@ -20772,23 +20783,32 @@ class KernelWriterAssembly(KernelWriter):
       if tcA != "A":
         return mod
       tcShared, tcSep = tdmSharedSetOrder(kernel, tcA, tcB)
-      with self.allocTmpSgpr(1, tag="tdmApplyTileOffsetSharedScale_tmpSgprRes") as tmpSgprRes:
+      with self.allocTmpSgpr(2, tag="tdmApplyTileOffsetSharedScale_tmpSgprRes") as tmpSgprRes:
         tmpSgpr = tmpSgprRes.idx
         for group0, incs in ((f"tdm{tcShared}Group0", incSgprName),
                              (f"tdm{tcSep}Group0", sgpr(f"GlobalReadIncs{tcSep}"))):
           src1 = incs if isinstance(incs, RegisterContainer) else sgpr(incs)
+          mod.add(SMulHIU32(dst=sgpr(tmpSgpr+1), src0=sgpr("StreamKLocalStart"), src1=src1,
+                            comment="StreamK K-offset high word"))
           mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=src1,
                            comment=f"StreamK K-offset for {group0} = localStart * increment"))
           mod.add(SAddU32(dst=sgpr(f"{group0}+2"), src0=sgpr(f"{group0}+2"), src1=sgpr(tmpSgpr),
                            comment=f"Apply StreamK K-offset to TDM {group0}"))
+          mod.add(SAddCU32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=sgpr(tmpSgpr+1),
+                            comment="Apply K-offset high word and address carry"))
       return mod
 
-    with self.allocTmpSgpr(1, tag="tdmApplyTileOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
+    with self.allocTmpSgpr(2, tag="tdmApplyTileOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
       tmpSgpr = tmpSgprRes.idx
+      # Keep both the product high word and the carry from adding its low word.
+      mod.add(SMulHIU32(dst=sgpr(tmpSgpr+1), src0=sgpr("StreamKLocalStart"), src1=sgpr(incSgprName),
+                        comment="StreamK K-offset high word"))
       mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=sgpr(incSgprName),
                        comment="StreamK K-offset = localStart * increment"))
       mod.add(SAddU32(dst=sgpr(f"{group0Name}+2"), src0=sgpr(f"{group0Name}+2"), src1=sgpr(tmpSgpr),
                        comment="Apply StreamK K-offset to TDM global addr"))
+      mod.add(SAddCU32(dst=sgpr(f"{group0Name}+3"), src0=sgpr(f"{group0Name}+3"), src1=sgpr(tmpSgpr+1),
+                        comment="Apply K-offset high word and address carry"))
 
     return mod
 
@@ -20800,7 +20820,7 @@ class KernelWriterAssembly(KernelWriter):
     incSgprName = f"tdm{tcA}{tcB}Incs"
     group0Name = f"tdm{self._tdmPairedParityOrder(kernel, tPA, tPB)[0]['tensorChar']}Group0"
 
-    with self.allocTmpSgpr(1) as tmpSgprRes:
+    with self.allocTmpSgpr(2) as tmpSgprRes:
       tmpSgpr = tmpSgprRes.idx
       # DP-only: StreamKLocalEnd == ItersPerTile (every WG spans a full tile), so
       # the tail iteration index is (ItersPerTile - 1). StreamKLocalEnd is not
@@ -20816,10 +20836,15 @@ class KernelWriterAssembly(KernelWriter):
       else:
         mod.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalEnd"), src1=1,
                         comment="tail iteration index within current StreamK tile"))
+      # Calculate the high word before the low multiply overwrites the iteration index.
+      mod.add(SMulHIU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr), src1=sgpr(incSgprName),
+                       comment="StreamK tail K-offset high word"))
       mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=sgpr(incSgprName),
                       comment="StreamK tail K-offset = (localEnd - 1) * increment"))
       mod.add(SAddU32(dst=sgpr(f"{group0Name}+2"), src0=sgpr(f"{group0Name}+2"), src1=sgpr(tmpSgpr),
                       comment="Apply StreamK tail K-offset to TDM global addr"))
+      mod.add(SAddCU32(dst=sgpr(f"{group0Name}+3"), src0=sgpr(f"{group0Name}+3"), src1=sgpr(tmpSgpr+1),
+                       comment="Apply tail K-offset high word and address carry"))
 
     return mod
 
