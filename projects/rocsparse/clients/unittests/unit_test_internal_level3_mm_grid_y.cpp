@@ -77,6 +77,12 @@
 // A, coomm segmented atomic) use an odd batch stride and compare every entry of
 // every batch exactly.
 //
+// SEGMENTED BLOCKS. The coo_segmented cases use A with 300 rows (about 2,500
+// nonzeros), which spans three blocks of 1,024 nonzeros. With a single block
+// every row completes in the main kernel and coommnn_general_block_reduce has
+// nothing to add, so a defect in it, in its grid.x loop or in its reads of the
+// reduction buffers would go unnoticed.
+//
 // ARITHMETIC. All values are small integers, so the host reference is exact in
 // either precision and does not depend on the order in which atomics land. The
 // 16-bit tests use values small enough that every partial sum is exactly
@@ -199,9 +205,6 @@ namespace
 
     constexpr int32_t batch_counts[] = {1, 3};
 
-    constexpr int32_t mat_m = 37;
-    constexpr int32_t mat_k = 29;
-
     enum class Format
     {
         csr,
@@ -219,6 +222,10 @@ namespace
         rocsparse_order order = rocsparse_order_column;
         // Also clamp grid.x; only coo_segmented reads it.
         bool clamp_x = false;
+        // Size of A. The coo_segmented cases need more than 1024 nonzeros, so
+        // that A spans several blocks and the final reduction has work to do.
+        int32_t m = 37;
+        int32_t k = 29;
     };
 
     // ----- value helpers: one code path for real, complex and 16-bit types ---
@@ -275,7 +282,7 @@ namespace
         std::vector<int32_t> col_ind;
     };
 
-    Pattern make_pattern()
+    Pattern make_pattern(int32_t mat_m, int32_t mat_k)
     {
         Pattern p;
         p.row_ptr.push_back(0);
@@ -324,8 +331,10 @@ namespace
                     size_t           num_limits,
                     bool             odd_stride_C)
     {
-        const Pattern p   = make_pattern();
-        const int64_t nnz = static_cast<int64_t>(p.col_ind.size());
+        const Pattern p     = make_pattern(c.m, c.k);
+        const int32_t mat_m = c.m;
+        const int32_t mat_k = c.k;
+        const int64_t nnz   = static_cast<int64_t>(p.col_ind.size());
 
         // 16-bit output: keep every partial sum an exactly representable integer.
         constexpr bool narrow = (sizeof(TC) == 2);
@@ -812,24 +821,24 @@ TEST_F(MmGridY, coomm_atomic_complex_conjugate)
 // the grid.x limits shrink it to fewer blocks than the 43 columns.
 TEST_F(MmGridY, coomm_segmented_nn)
 {
-    check_all(handle, {Format::coo, coo_sg, op_n, op_n, 43, col_ord, true});
+    check_all(handle, {Format::coo, coo_sg, op_n, op_n, 43, col_ord, true, 300, 29});
 }
 
 TEST_F(MmGridY, coomm_segmented_nn_row_order)
 {
-    check_all(handle, {Format::coo, coo_sg, op_n, op_n, 43, row_ord, true});
+    check_all(handle, {Format::coo, coo_sg, op_n, op_n, 43, row_ord, true, 300, 29});
 }
 
 // coommnn_segmented_main_kernel<.., 8, .., true>.
 TEST_F(MmGridY, coomm_segmented_nt)
 {
-    check_all(handle, {Format::coo, coo_sg, op_n, op_t, 43, col_ord, true});
+    check_all(handle, {Format::coo, coo_sg, op_n, op_t, 43, col_ord, true, 300, 29});
 }
 
 TEST_F(MmGridY, coomm_segmented_complex_conjugate)
 {
-    check_all_complex(handle, {Format::coo, coo_sg, op_n, op_c, 43, col_ord, true});
-    check_all_complex(handle, {Format::coo, coo_sg, op_n, op_n, 43, row_ord, true});
+    check_all_complex(handle, {Format::coo, coo_sg, op_n, op_c, 43, col_ord, true, 300, 29});
+    check_all_complex(handle, {Format::coo, coo_sg, op_n, op_n, 43, row_ord, true, 300, 29});
 }
 
 // coommnn_segmented_atomic<.., COLS = 8, ..>: 40 / 8 = 5 panels, plus the 3
