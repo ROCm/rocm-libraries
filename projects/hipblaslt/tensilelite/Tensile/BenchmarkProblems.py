@@ -645,7 +645,11 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
     )
 
     enableTileSelection = benchmarkProcess.problemType["TileAwareSelection"]
-    groupName = "{}_{:02d}".format(str(benchmarkProcess.problemType), problemSizeGroupIdx)
+    # outerBenchmarkIdx keeps two BenchmarkProblems that share a problem type
+    # from writing the same directory. The second used to skip or overwrite
+    # the first, so exact-size custom kernels never reached library logic.
+    groupName = "{}_{:02d}_{:02d}".format(
+        str(benchmarkProcess.problemType), outerBenchmarkIdx, problemSizeGroupIdx)
     groupNamePath = benchmarkProblemsPath / groupName
     ensurePath(groupNamePath / "Data")
 
@@ -953,13 +957,15 @@ def main(
 
             # using a suffix to check the csv version (for later addFromCSV())
             csvSuffix = "_CSVWinner" if globalParameters["CSVExportWinner"] else ""
-            # results files will be named
-            newResultsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.csv" \
-                    .format(str(problemTypeObj), idx, csvSuffix) )
-            newSolutionsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.yaml" \
-                    .format(str(problemTypeObj), idx, csvSuffix) )
-            newGranularityFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.gsp" \
-                    .format(str(problemTypeObj), idx, csvSuffix) )
+            # results files will be named. outerIdx is part of the name so a
+            # later BenchmarkProblem with the same type does not skip the file
+            # written for an earlier exact-size custom kernel.
+            newResultsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}_{:02d}{}.csv" \
+                    .format(str(problemTypeObj), outerIdx, idx, csvSuffix) )
+            newSolutionsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}_{:02d}{}.yaml" \
+                    .format(str(problemTypeObj), outerIdx, idx, csvSuffix) )
+            newGranularityFileName = os.path.join(benchmarkDataPath, "{}_{:02d}_{:02d}{}.gsp" \
+                    .format(str(problemTypeObj), outerIdx, idx, csvSuffix) )
 
             # skip if possible
             if globalParameters["ForceRedoBenchmarkProblems"] \
@@ -1009,8 +1015,8 @@ def main(
                     if os.path.isfile(granularityFileName):
                         shutil.copy(granularityFileName, newGranularityFileName)
             else:
-                print1("# {}_{:02d} already benchmarked; skipping." \
-                        .format(str(problemTypeObj), idx) )
+                print1("# {}_{:02d}_{:02d} already benchmarked; skipping." \
+                        .format(str(problemTypeObj), outerIdx, idx) )
 
     if globalParameters["ExitOnFails"] and totalTestFails:
         sys.exit(1)

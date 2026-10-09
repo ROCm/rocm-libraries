@@ -949,6 +949,36 @@ def test_build_from_metadata_default_multidim_grid():
     assert ck["grid"] == ["TilesX", "TilesYGSU", "Batch"]
 
 
+@pytest.mark.parametrize("name", ["foreign_WGM", "foreign_WGM_"])
+def test_build_from_metadata_wgm_name_without_rocroller_args_stays_multidim(name):
+    ck = _buildCustomKernelFromMetadata(
+        name, _kernel_yaml([_D_ARG]), {"MatrixInstruction": [16, 16, 16, 1]}
+    )
+    assert ck["grid"] == ["TilesX", "TilesYGSU", "Batch"]
+
+
+def test_build_from_metadata_rocroller_wgm_args_flatten_workgroup_x():
+    wgm = {
+        "type": "CommandArgument",
+        "name": "WGM",
+        ".size": 4,
+        ".value_kind": "by_value",
+    }
+    magic = {
+        ".name": "MagicMultiple_22",
+        ".size": 4,
+        ".value_kind": "by_value",
+        ".variableType": {"dataType": "Int32"},
+        ".expression": {"type": "MagicMultiple", "arg": wgm},
+    }
+    ck = _buildCustomKernelFromMetadata(
+        "not_named_for_wgm",
+        _kernel_yaml([magic, _D_ARG]),
+        {"MatrixInstruction": [16, 16, 16, 1]},
+    )
+    assert ck["grid"] == ["TilesXY", "One", "Batch"]
+
+
 def test_build_from_metadata_macrotile_name_fallback():
     # No MatrixInstruction -> computed macrotile is 0, so it falls back to the
     # MTxxx token parsed out of the kernel name.
