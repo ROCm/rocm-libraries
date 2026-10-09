@@ -10,7 +10,8 @@ name: hipRAND rocJITsu Parity PoC
 #
 # The default run is ctest -L '^quick$', the same five hipRAND binaries the
 # hardware baseline selects with ctest -L '^standard$'. quick and standard are
-# the same set here. Set the workflow_dispatch gtest_filter to narrow it.
+# the same set here. Set the workflow_dispatch gtest_filter to narrow it, or
+# ctest_label to select another installed label such as ^ffm-quick$.
 
 on:
   pull_request:
@@ -36,6 +37,10 @@ on:
         description: "Optional extra rocJITsu flag, for example --cpu-thread-budget=1. Empty uses the config default."
         type: string
         default: ""
+      ctest_label:
+        description: "CTest label regex. Default ^quick$ runs all five binaries. ^ffm-quick$ runs kernel and linkage only."
+        type: string
+        default: "^quick$"
 
 permissions:
   contents: read
@@ -123,7 +128,7 @@ jobs:
       ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
       GTEST_FILTER: ${{ github.event.inputs.gtest_filter || '' }}
       ROCJITSU_ARG: ${{ github.event.inputs.rocjitsu_arg || '' }}
-      CTEST_LABEL: "^quick$"
+      CTEST_LABEL: ${{ github.event.inputs.ctest_label || '^quick$' }}
       BUILD_RUNS_ON: ${{ needs.gate.outputs.build_runs_on }}
       # develop on 2026-10-01, after the VM dispatch-overhead fix
       # (ROCm/rocm-systems#12515, merge bbd1525f37) and the lane-read fix
@@ -198,6 +203,7 @@ jobs:
           if [ -n "$ROCJITSU_ARG" ]; then
             common+=(--rocjitsu-arg "$ROCJITSU_ARG")
           fi
+          echo "ctest label: $CTEST_LABEL"
           if [ -n "$GTEST_FILTER" ]; then
             "${common[@]}" \
               --binary "$ROCM_ROOT/bin/test_hiprand_api" \
