@@ -3,13 +3,13 @@
 # SPDX-License-Identifier: MIT
 #
 # tests/parity/gfx1201_wmma_fmha_fwd_emit.py -- Python reference emitter for the
-# gfx1201 (RDNA4) WMMA FMHA forward instance parity harness. Same 8 sampled
+# gfx1201 (RDNA4) WMMA FMHA forward instance parity harness. Same 9 sampled
 # WmmaFmhaFwdSpec configs as the gfx1151 harness, but built and lowered at
 # arch='gfx1201' so the RDNA4 split-K WMMA attention path is byte-compared
 # C-vs-Python. Configs 0-5 cover the fp16 atom (wmma_gfx12_f32_16x16x16_f16,
-# <8 x half> fragments); configs 6-7 cover the bf16 atom
+# <8 x half> fragments); configs 6-8 cover the bf16 atom
 # (wmma_gfx12_f32_16x16x16_bf16, <8 x i16> fragments).
-# Selects a config by argv[1] (0..7).
+# Selects a config by argv[1] (0..8).
 from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec, build_wmma_fmha_fwd
 from _emit_common import run_emit
 
@@ -81,6 +81,15 @@ def _spec(idx: int) -> WmmaFmhaFwdSpec:
             mask_mode="causal",
             v_lds_stage=False,
         )
+    if idx == 8:
+        return WmmaFmhaFwdSpec(
+            head_size=64,
+            num_query_heads=4,
+            num_kv_heads=0,
+            dtype="bf16",
+            mask_mode="none",
+            v_lds_stage=True,
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -88,7 +97,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_wmma_fmha_fwd,
-        usage="usage: gfx1201_wmma_fmha_fwd_emit.py <config_index 0..7>\n",
+        usage="usage: gfx1201_wmma_fmha_fwd_emit.py <config_index 0..8>\n",
         arch="gfx1201",
     )
 

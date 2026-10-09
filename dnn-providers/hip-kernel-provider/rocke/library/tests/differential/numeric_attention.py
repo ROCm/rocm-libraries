@@ -144,6 +144,10 @@ class AttnCfg:
     head_size: int
     dtype: str = "f16"
     causal: bool = False
+    # WMMA lane only: stage the K-tile's V rows through LDS for the PV
+    # B-operand. The LDS allocation, stores and loads are typed by ``dtype``,
+    # so bf16 x v_lds_stage is its own code path and needs its own case.
+    v_lds_stage: bool = False
 
 
 ATTN_CONFIGS: List[AttnCfg] = [
@@ -186,6 +190,21 @@ WMMA_CONFIGS: List[AttnCfg] = [
         64,
         128,
         dtype="bf16",
+    ),
+    # bf16 crossed with staged V: the V-LDS tile is allocated, stored and
+    # loaded as the I/O type, so this is the one combination the other cases
+    # do not reach -- bf16 alone keeps the global-gather B-operand, and the
+    # fp16 staged-V parity config keeps the fp16 LDS type.
+    AttnCfg(
+        "wmma_mha_b2_h4_s64_d64_bf16_vlds",
+        2,
+        4,
+        4,
+        64,
+        64,
+        64,
+        dtype="bf16",
+        v_lds_stage=True,
     ),
 ]
 
@@ -272,12 +291,18 @@ def run_attn_config(cfg: AttnCfg, arch: str = "gfx950") -> NumericResult:
 
     B, Hq, Hk, D = cfg.batch, cfg.heads, cfg.kv_heads, cfg.head_size
     Sq, Sk = cfg.seqlen_q, cfg.seqlen_k
-    np_dtype = _np_dtype(tol_key)
     rng = np.random.default_rng(0xA11E)
-    Q = (rng.standard_normal((B, Sq, Hq, D)) * 0.3).astype(np_dtype)
-    K = (rng.standard_normal((B, Sk, Hk, D)) * 0.3).astype(np_dtype)
-    V = (rng.standard_normal((B, Sk, Hk, D)) * 0.3).astype(np_dtype)
-    Out = np.zeros((B, Sq, Hq, D), dtype=np_dtype)
+    # Route host tensors through _encode/_decode rather than .astype: for a
+    # dtype with no native numpy type (bf16, carried as raw uint16) .astype
+    # would convert the *values* to integers instead of reinterpreting the
+    # bits, and the kernel would be gated against garbage inputs.
+    Q = _encode((rng.standard_normal((B, Sq, Hq, D)) * 0.3).astype(np.float32), tol_key)
+    K = _encode((rng.standard_normal((B, Sk, Hk, D)) * 0.3).astype(np.float32), tol_key)
+    V = _encode((rng.standard_normal((B, Sk, Hk, D)) * 0.3).astype(np.float32), tol_key)
+    Out = np.zeros((B, Sq, Hq, D), dtype=Q.dtype)
+    # The reference consumes exactly what the device reads, so input rounding
+    # is not counted as kernel error.
+    Qf, Kf, Vf = (_decode(t, tol_key) for t in (Q, K, V))
 
     scale_log2 = float(1.0 / _m.sqrt(D) * _m.log2(_m.e))
     sig = (
@@ -351,11 +376,11 @@ def run_attn_config(cfg: AttnCfg, arch: str = "gfx950") -> NumericResult:
     for bi in range(B):
         if Hk != Hq:
             rep = Hq // Hk
-            Kb = np.repeat(K[bi], rep, axis=1)
-            Vb = np.repeat(V[bi], rep, axis=1)
+            Kb = np.repeat(Kf[bi], rep, axis=1)
+            Vb = np.repeat(Vf[bi], rep, axis=1)
         else:
-            Kb, Vb = K[bi], V[bi]
-        ref[bi] = dense_attention_reference(Q[bi], Kb, Vb, causal=cfg.causal)
+            Kb, Vb = Kf[bi], Vf[bi]
+        ref[bi] = dense_attention_reference(Qf[bi], Kb, Vb, causal=cfg.causal)
 
     max_abs, max_rel, margin = _compare(_decode(Out, tol_key), ref, tol)
     res.max_abs_diff = max_abs
@@ -410,6 +435,7 @@ def run_wmma_config(cfg: AttnCfg, arch: str = "gfx1151") -> NumericResult:
         num_kv_heads=cfg.kv_heads,
         dtype=cfg.dtype,
         mask_mode="causal" if cfg.causal else "none",
+        v_lds_stage=cfg.v_lds_stage,
         name=f"rocke_wmma_num_{cfg.name}",
     )
 
