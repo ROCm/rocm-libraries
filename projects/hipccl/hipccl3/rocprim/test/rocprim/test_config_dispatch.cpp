@@ -163,7 +163,7 @@ TEST(RocprimConfigDispatchTests, DeviceIdFromStream)
     ASSERT_EQ(result, device_id);
 
     // hipStreamLegacy support was added in ROCm 6.2.0
-    #if(HIP_VERSION_MAJOR > 6 || (HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR >= 2))
+    #if (HIP_VERSION_MAJOR > 6 || (HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR >= 2))
     HIP_CHECK(get_device_from_stream(hipStreamLegacy, result));
     ASSERT_EQ(result, device_id);
     #endif
@@ -207,8 +207,7 @@ struct test_config_params
     kernel_config_params kernel_config{};
 
     __host__ __device__
-    inline bool
-        operator==(test_config_params other) const
+    inline bool          operator==(test_config_params other) const
     {
         return (kernel_config.block_size == other.kernel_config.block_size)
                && (kernel_config.items_per_thread == other.kernel_config.items_per_thread);
@@ -226,9 +225,9 @@ struct TestSelector
     template<class Target>
     constexpr TestSelector(Target)
         : params(test_config_params{
-            {BlockSize, ItemsPerThread}
+              {BlockSize, ItemsPerThread}
     })
-    {}
+    { }
 };
 
 template<class TargetsInput>
@@ -312,7 +311,7 @@ struct TestSelector2
 
     template<class Target>
     constexpr TestSelector2(Target) : params(picker_helper<Target>())
-    {}
+    { }
 };
 
 } // namespace detail
@@ -465,6 +464,6 @@ TEST(RocprimConfigDispatchTests, ExecuteLaunchPlan)
     // Should have the same targets as most_common_config.
     ASSERT_EQ(most_common_config<Targets>(current_target), h_output);
 
-	// Clean up
-	HIP_CHECK(hipFree(d_output));
+    // Clean up
+    HIP_CHECK(hipFree(d_output));
 }
