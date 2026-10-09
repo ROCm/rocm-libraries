@@ -90,7 +90,8 @@ from ..Toolchain.Component import Assembler
 from ..Utilities.Decorators.Profile import profile
 from ..Utilities.Decorators.Timing import timing
 
-from .ParseArguments import parseArguments
+
+from .parse_arguments import parseArguments
 
 
 def libraryRoot(outputPath: Union[str, Path]) -> Path:

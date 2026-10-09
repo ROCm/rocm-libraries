@@ -666,7 +666,7 @@ def _emit(archName, stinkyArchName=""):
     from tensilelite.Common.GlobalParameters import globalParameters
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.tensilelite_create_library.run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -767,7 +767,7 @@ def _emit_streamk_srcs(stepping):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import (
+    from tensilelite.tensilelite_create_library.run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -1642,7 +1642,7 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=(), buildGfx1250v
     """
     from unittest.mock import MagicMock
 
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.tensilelite_create_library.run as RunModule
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
@@ -2004,7 +2004,7 @@ def _generateLogicData(monkeypatch, *architectureNames):
     from unittest.mock import MagicMock
 
     import tensilelite.LibraryIO as LibraryIO
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.tensilelite_create_library.run as RunModule
 
     libraries = {}
     parsed = []
@@ -2215,7 +2215,7 @@ def test_arch_names_by_isa_rejects_two_architectures_sharing_one_isa():
 def test_two_steppings_get_different_scratch_directories():
     """The collision this exists to prevent: same output directory, same kernel
     basenames, different machine code."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.tensilelite_create_library.run import buildTmpDir
 
     assert buildTmpDir("/out/Tensile", [GFX1250]) != buildTmpDir(
         "/out/Tensile", [GFX1250_STRICT]
@@ -2226,7 +2226,7 @@ def test_scratch_directory_ignores_order_and_qualifiers():
     """One run's scratch has to resolve to one directory however its
     architectures were spelled, or the cleanup would not find what the writer
     made."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.tensilelite_create_library.run import buildTmpDir
 
     assert buildTmpDir("/out/Tensile", ["gfx942", GFX1250]) == buildTmpDir(
         "/out/Tensile", [GFX1250, "gfx942"]
@@ -2239,7 +2239,7 @@ def test_scratch_directory_ignores_order_and_qualifiers():
 def test_scratch_stays_under_the_output_directory():
     """It is removed with rmtree, so the tag must not be able to steer that
     anywhere but inside build_tmp."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.tensilelite_create_library.run import buildTmpDir
 
     path = buildTmpDir("/out/Tensile", [GFX1250_STRICT])
 
@@ -2251,7 +2251,7 @@ def test_scratch_keeps_its_old_name_when_no_stepping_was_asked_for():
     """Every architecture set that could be built before steppings existed has to
     land where it always did, or upgrading orphans the scratch of every build in
     flight and every tool that reaches into it by path."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.tensilelite_create_library.run import buildTmpDir
 
     for archs in ([], ["gfx942"], ["gfx942", "gfx950", "gfx1200"], ["gfx942:xnack+"]):
         assert buildTmpDir("/out/Tensile", archs) == Path("/out/Tensile/build_tmp/TENSILE")
@@ -2261,7 +2261,7 @@ def test_only_the_stepping_side_of_a_shared_isa_is_renamed():
     """The two runs covering a shared ISA never occupy one group, so naming only
     the stepping's group apart is enough to separate them -- and it leaves the
     other run on the path it had."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.tensilelite_create_library.run import buildTmpDir
 
     assert buildTmpDir("/out/Tensile", [GFX1250]) == Path("/out/Tensile/build_tmp/TENSILE")
     assert buildTmpDir("/out/Tensile", [GFX1250_STRICT]) == (
@@ -2272,7 +2272,7 @@ def test_only_the_stepping_side_of_a_shared_isa_is_renamed():
 def test_scratch_name_survives_an_output_path_with_no_stem():
     """Path("/").stem is empty, and "<root>" / "" is "<root>" -- the run would
     take the shared parent as its own scratch and rmtree a sibling's work."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.tensilelite_create_library.run import buildTmpDir
 
     for outputPath in ("/", ""):
         path = buildTmpDir(outputPath, [GFX1250_STRICT])
@@ -2283,7 +2283,7 @@ def test_scratch_name_ignores_architectures_the_table_does_not_know():
     """An architecture spec is free text and gfxToIsa reads only the leading gfx
     digits, so "gfx1250/.." parses as a stepping. The name reaches rmtree, so
     only names the table vouches for may reach the name."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir
+    from tensilelite.tensilelite_create_library.run import buildTmpDir
 
     for hostile in ("gfx1250/..", "gfx1250-../..", "gfx1250 ", "../gfx1250-x"):
         path = buildTmpDir("/out/Tensile", [hostile])
@@ -2307,7 +2307,7 @@ def _scratch_tree(tmp_path, archs):
     """An output directory holding this run's scratch and a sibling's, both
     populated, so a cleanup that takes too much is visible as the sibling's
     file disappearing."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir, buildTmpRoot
+    from tensilelite.tensilelite_create_library.run import buildTmpDir, buildTmpRoot
 
     mine = buildTmpDir(tmp_path / "Tensile", archs)
     sibling = buildTmpRoot(tmp_path / "Tensile") / "SIBLING"
@@ -2320,7 +2320,7 @@ def _scratch_tree(tmp_path, archs):
 def test_a_solo_run_reclaims_the_whole_scratch_tree(tmp_path):
     """Nothing else is writing here, so the tree goes whole -- which is also what
     reclaims scratch an earlier build left under a name this run never uses."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpRoot, removeScratch
+    from tensilelite.tensilelite_create_library.run import buildTmpRoot, removeScratch
 
     mine, sibling = _scratch_tree(tmp_path, [GFX1250_STRICT])
 
@@ -2333,7 +2333,7 @@ def test_a_fanned_out_child_leaves_its_siblings_scratch_alone(monkeypatch, tmp_p
     """The whole reason the children are marked: a sibling group is assembling
     into the same parent right now, and kernel basenames come from the ISA, so
     taking the parent would delete files a live build is still writing."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.tensilelite_create_library import run as Run
 
     mine, sibling = _scratch_tree(tmp_path, [GFX1250_STRICT])
     monkeypatch.setenv(Run._GROUP_BUILD_ENV, "1")
@@ -2348,7 +2348,7 @@ def test_a_fanned_out_child_leaves_its_siblings_scratch_alone(monkeypatch, tmp_p
 def test_the_last_child_out_takes_the_shared_parent(monkeypatch, tmp_path):
     """Left behind by every child that is not last, the parent would otherwise
     survive every fan-out as an empty directory in the output tree."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.tensilelite_create_library import run as Run
 
     mine, sibling = _scratch_tree(tmp_path, [GFX1250_STRICT])
     shutil.rmtree(sibling)
@@ -2361,7 +2361,7 @@ def test_the_last_child_out_takes_the_shared_parent(monkeypatch, tmp_path):
 def test_a_run_that_wrote_no_scratch_says_so_rather_than_removing_something(tmp_path):
     """The caller reports the absence, so it has to be distinguishable from a
     successful removal rather than inferred from the directory being gone."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpDir, removeScratch
+    from tensilelite.tensilelite_create_library.run import buildTmpDir, removeScratch
 
     assert removeScratch(
         tmp_path / "Tensile", buildTmpDir(tmp_path / "Tensile", [GFX1250_STRICT])
@@ -2380,7 +2380,7 @@ _DIRECTIVE = '.amdgcn_target "amdgcn-amd-amdhsa--{}"'
 def test_the_target_id_is_rewritten_to_the_stepping(tmp_path):
     """Without this the assembler refuses the file outright: the base target id
     names a processor that is not valid for the stepping's subarch."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.tensilelite_create_library.run import _alignAmdgcnTargetToStepping
 
     asm = tmp_path / "k0.s"
     asm.write_text(f"{_DIRECTIVE.format(GFX1250)}\n  s_endpgm\n")
@@ -2397,7 +2397,7 @@ def test_an_ordinary_architectures_assembly_is_left_byte_identical(tmp_path):
     """Every architecture but a stepping already agrees with the ISA-derived
     name, so this must be provably inert for them -- it runs on every .s the
     build emits."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.tensilelite_create_library.run import _alignAmdgcnTargetToStepping
 
     isa = gfxToIsa("gfx942")
     asm = tmp_path / "k0.s"
@@ -2416,7 +2416,7 @@ def test_an_ordinary_architectures_assembly_is_left_byte_identical(tmp_path):
 def test_assembly_with_no_target_directive_is_left_alone(tmp_path):
     """The directive is rocisa's to emit, and a helper kernel that carries none
     must not acquire one -- nor make the rewrite an error."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.tensilelite_create_library.run import _alignAmdgcnTargetToStepping
 
     asm = tmp_path / "helper.s"
     asm.write_text("  s_endpgm\n")
@@ -2430,7 +2430,7 @@ def test_only_the_first_target_directive_is_rewritten(tmp_path):
     """One .s is one code object with one target. A second directive means the
     file is not what this rewrite assumes, and silently retargeting all of them
     would turn that into a code object claiming a target it was not built for."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.tensilelite_create_library.run import _alignAmdgcnTargetToStepping
 
     asm = tmp_path / "k0.s"
     asm.write_text(f"{_DIRECTIVE.format(GFX1250)}\n{_DIRECTIVE.format(GFX1250)}\n")
@@ -2467,7 +2467,7 @@ def test_the_two_retargets_compose_to_a_single_suffix(tmp_path):
     """The build runs both on each stepping kernel: this module's directive
     rewrite while writing it, then the assembler's before assembling it. Either
     alone is covered above; this is the order they actually run in."""
-    from tensilelite.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from tensilelite.tensilelite_create_library.run import _alignAmdgcnTargetToStepping
     from tensilelite.Toolchain.Component import Assembler
 
     asm = tmp_path / "k0.s"
@@ -2600,7 +2600,7 @@ def _spawnedCommands(monkeypatch, groups, argv=PARENT_ARGV, requestedJobs=-1):
     ``requestedJobs`` is the parsed ``CpuThreads``; -1 is its default, meaning
     "every CPU".
     """
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.tensilelite_create_library import run as Run
 
     spawned = []
 
@@ -2717,7 +2717,7 @@ def test_children_are_told_they_share_a_scratch_parent(monkeypatch):
     child may take only its own subdirectory, because a sibling is writing into
     the same parent. Every other run reclaims the whole tree, so the children
     have to be marked or a fan-out would delete a live sibling's scratch."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.tensilelite_create_library import run as Run
 
     spawned = _spawnedCommands(monkeypatch, [[GFX1250], [GFX1250_STRICT]])
 
@@ -2728,7 +2728,7 @@ def test_children_are_told_they_share_a_scratch_parent(monkeypatch):
 def test_a_failed_group_is_not_swallowed(monkeypatch):
     """A group that fails while the other succeeds has to fail the run: a zero
     exit here lets the build be stamped with one stepping's library missing."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.tensilelite_create_library import run as Run
 
     class _Proc:
         def __init__(self, rc):
@@ -2778,7 +2778,7 @@ def test_windows_caps_the_thread_count_it_shares_out(monkeypatch):
     """The count is split among the groups, so it has to start from what this
     process could actually wait on. The Windows scheduler bounds that at 61
     handles, which CPUThreadCount already respects."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.tensilelite_create_library import run as Run
 
     monkeypatch.setattr(Run.os, "name", "nt")
     monkeypatch.setattr(Run.os, "cpu_count", lambda: 128)
@@ -2790,7 +2790,7 @@ def test_a_child_still_running_is_stopped_when_a_spawn_fails(monkeypatch):
     """A spawn can fail for reasons that have nothing to do with the build (fork
     under memory pressure). The groups already started would otherwise keep
     writing into the output directory after the parent has given up."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.tensilelite_create_library import run as Run
 
     terminated = []
 
@@ -2855,7 +2855,7 @@ def _run_createlibrary_to_writes(
     """
     from unittest.mock import MagicMock
 
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.tensilelite_create_library.run as RunModule
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir(exist_ok=True)
@@ -3001,7 +3001,7 @@ def test_strict_build_hands_its_own_name_to_the_code_object_builders(
     command line verbatim and reads it back off the bundler's targets."""
     from unittest.mock import MagicMock
 
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.tensilelite_create_library.run as RunModule
 
     seen = {}
     srcSignature = inspect.signature(RunModule.buildSourceCodeObjectFiles)
@@ -3077,7 +3077,7 @@ def test_a_solo_build_clears_the_scratch_it_filled(
     through buildTmpDir, but the writer runs before the architecture list is
     narrowed to the supported subset -- narrowing drops the stepping, which would
     rename the directory and leave the real one behind."""
-    from tensilelite.TensileCreateLibrary.Run import buildTmpRoot
+    from tensilelite.tensilelite_create_library.run import buildTmpRoot
 
     captured = _run_createlibrary_to_writes(
         monkeypatch,
@@ -3110,7 +3110,7 @@ def test_a_fanned_out_build_clears_only_its_own_scratch(
     """End to end, through run() rather than the cleanup alone: this is the case
     where a sibling process is writing into the same parent, and a build that
     reclaimed the parent would delete the other stepping's kernels mid-build."""
-    from tensilelite.TensileCreateLibrary import Run
+    from tensilelite.tensilelite_create_library import run as Run
 
     sibling = Run.buildTmpRoot(tmp_path / "out") / "OUT"
     sibling.mkdir(parents=True)
@@ -3746,7 +3746,7 @@ def test_gfx1250v0_parses_strict_logic_under_the_gfx1250_name(
 ):
     from unittest.mock import MagicMock
 
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.tensilelite_create_library.run as RunModule
     from tensilelite import LibraryIO
     from tensilelite.SolutionStructs.Problem import ProblemType
 
