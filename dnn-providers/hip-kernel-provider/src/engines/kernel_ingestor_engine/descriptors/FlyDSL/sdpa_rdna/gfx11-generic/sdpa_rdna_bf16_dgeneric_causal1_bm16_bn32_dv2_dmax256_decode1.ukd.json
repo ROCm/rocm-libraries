@@ -28,7 +28,8 @@
     "head_dim_max": 256,
     "decode": 1,
     "merge_symbol": "flash_attn_decode_merge_rdna_kernel_1",
-    "hd_pair": 0
+    "hd_pair": 0,
+    "bias_q": 0
   },
   "priority": 140,
   "provenance": {
@@ -50,7 +51,8 @@
             "head_dim_max",
             "decode",
             "merge_symbol",
-            "hd_pair"
+            "hd_pair",
+            "bias_q"
           ],
           "bindings": {},
           "vocabulary": {}

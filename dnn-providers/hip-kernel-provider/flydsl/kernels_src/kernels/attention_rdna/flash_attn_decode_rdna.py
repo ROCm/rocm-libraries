@@ -30,9 +30,10 @@ kernel turns that around:
   kernel -- compiled into the same code object -- combines the splits by their LSEs.
 
 Masks, scale and strides follow the prefill kernel's runtime arguments; LSE has the same
-semantics (O = 0 and LSE = -inf for a row no key reaches). An additive f32 bias
-(``has_bias``, a compile-time variant) is read through its broadcast strides, one row per
-lane, and added to the scaled scores; an object without one ignores the bias arguments.
+semantics (O = 0 and LSE = -inf for a row no key reaches). An additive bias
+(``has_bias``, a compile-time variant; f32, or the query's dtype with
+``bias_query_dtype``, widened to f32 as it is read) is read through its broadcast strides,
+one row per lane, and added to the scaled scores; an object without one ignores the bias arguments.
 A generic object (``generic_head_dim``) is built for the largest head_dim it serves and
 reads the actual one at runtime, skipping the K and V columns past it.
 
@@ -70,6 +71,7 @@ def build_flash_attn_decode_module(
     has_bias=False,
     bias_early=None,
     generic_head_dim=False,
+    bias_query_dtype=False,
 ):
     WARP_SIZE = 32
     NW = num_waves
@@ -89,6 +91,9 @@ def build_flash_attn_decode_module(
     # An additive f32 bias, broadcast by strides, added to the scaled scores: per-score
     # loads in the inner loop, so a compile-time variant (COVERAGE.md §6).
     HAS_BIAS = bool(has_bias)
+    # The bias in the query's dtype rather than f32 (bias_query_dtype): read as such and
+    # widened to f32 as it is added.
+    BIAS_Q = bool(bias_query_dtype)
     # Row tiles (groups of more than 16 rows) on every object but the bias ones, which
     # already use the whole register file at 128 and up: the row index they would hold
     # through the KV loop spills there. A bias object serves up to 16 rows.
@@ -184,7 +189,11 @@ def build_flash_attn_decode_module(
         wso_ptr = _as_ptr(WS_O, fx.Float32)
         wsl_ptr = _as_ptr(WS_L, fx.Float32)
         lse_ptr = _as_ptr(LSE, fx.Float32)
-        bias_ptr = _as_ptr(BIAS, fx.Float32)
+        bias_ptr = _as_ptr(BIAS, elem if BIAS_Q else fx.Float32)
+
+        def bias_load(p):
+            v = fx.ptr_load(p)
+            return v.to(fx.Float32) if const_expr(BIAS_Q) else v
 
         def _buf(ptr, num_records_bytes):
             flags = (7 << 12) | (4 << 15) | (1 << 24) | (3 << 28)
@@ -393,7 +402,7 @@ def build_flash_attn_decode_module(
                     + (skv - fx.Int64(1)) * bias_skv
                     + fx.Int64(1)
                 )
-                * fx.Int64(4),
+                * fx.Int64(2 if BIAS_Q else 4),
             )
             bias_row_i32 = fx.Int32((hq - kvh * g) * bias_sh + qpos * bias_sq)
             bias_skv_i32 = fx.Int32(bias_skv)
@@ -449,7 +458,7 @@ def build_flash_attn_decode_module(
                     for i in range(16)
                 ]
                 if const_expr(BIAS_EARLY):
-                    bias_vals = [fx.ptr_load(bias_buf + off) for off in bias_offs]
+                    bias_vals = [bias_load(bias_buf + off) for off in bias_offs]
             elif const_expr(HAS_BIAS):
                 # Element i = 8 a + e is key kv0 + 16 a + 2 e + klane.
                 b_tile = bias_row_i32 + (fx.Int32(kv0) + fx.Int32(klane)) * bias_skv_i32
@@ -458,7 +467,7 @@ def build_flash_attn_decode_module(
                     for i in range(16)
                 ]
                 if const_expr(BIAS_EARLY):
-                    bias_vals = [fx.ptr_load(bias_buf + off) for off in bias_offs]
+                    bias_vals = [bias_load(bias_buf + off) for off in bias_offs]
 
             s_acc = [zero8, zero8]
             if active:
@@ -491,7 +500,7 @@ def build_flash_attn_decode_module(
             s_vals = [Vec(s_acc[a])[e] for a in range(2) for e in range(8)]
             if const_expr(HAS_BIAS):
                 if const_expr(not BIAS_EARLY):
-                    bias_vals = [fx.ptr_load(bias_buf + off) for off in bias_offs]
+                    bias_vals = [bias_load(bias_buf + off) for off in bias_offs]
                 for i in range_constexpr(16):
                     s_vals[i] = fx.math.fma(s_vals[i], c_scale, bias_vals[i])
 

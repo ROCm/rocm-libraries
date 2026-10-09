@@ -89,6 +89,8 @@ constexpr std::string_view DV_SPLIT_FIELD = "dv_split";
 /// 0 or 1: whether the object adds an additive bias to the scores. Baked, so a graph with
 /// a bias and one without each select their own object.
 constexpr std::string_view HAS_BIAS_FIELD = "has_bias";
+/// 0 for an object that reads an f32 bias, 1 for one that reads it in the query's dtype.
+constexpr std::string_view BIAS_Q_FIELD = "bias_q";
 /// The largest head_dim the object serves. Equal to head_dim for a specialized object; for
 /// a generic one (head_dim 0, read at runtime) it bounds the heads it takes.
 constexpr std::string_view HEAD_DIM_MAX_FIELD = "head_dim_max";
@@ -389,14 +391,16 @@ bool isServableStats(const data_objects::TensorAttributes& stats,
 
 /// The additive bias, right-aligned to `[B, H, Sq, Skv]` as the reference reads it (rank 1 to
 /// 4, a size-1 or absent axis broadcast), as the kernel's (batch, head, query, key) strides:
-/// 0 on a broadcast axis. nullopt when the kernel cannot read it: not f32, a dimension that
+/// 0 on a broadcast axis. nullopt when the kernel cannot read it: neither f32 nor the query's
+/// dtype (each has its own objects, `bias_q` 0 and 1), a dimension that
 /// is neither the target's nor 1, a non-positive stride on a real axis, a slice past the
 /// kernel's 32-bit offsets, or not a plain device tensor.
 std::optional<BiasStrides> servableBiasStrides(const data_objects::TensorAttributes& bias,
                                                int64_t batch,
                                                int64_t heads,
                                                int64_t seqLenQ,
-                                               int64_t seqLenKv)
+                                               int64_t seqLenKv,
+                                               data_objects::DataType queryType)
 {
     const auto* dims = bias.dims();
     const auto* strides = bias.strides();
@@ -405,8 +409,8 @@ std::optional<BiasStrides> servableBiasStrides(const data_objects::TensorAttribu
     {
         return std::nullopt;
     }
-    if(bias.data_type() != data_objects::DataType::FLOAT || bias.virtual_()
-       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&bias)
+    if((bias.data_type() != data_objects::DataType::FLOAT && bias.data_type() != queryType)
+       || bias.virtual_() || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&bias)
        || bias.ragged_offset_tensor_uid().has_value())
     {
         return std::nullopt;
@@ -615,8 +619,12 @@ std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext& contex
     {
         const auto* bias = findTensor(context, attributes.attn_mask_tensor_uid().value());
         if(bias == nullptr
-           || !servableBiasStrides(
-                   *bias, problem.batch, problem.numHeads, problem.seqLenQ, problem.seqLenKv)
+           || !servableBiasStrides(*bias,
+                                   problem.batch,
+                                   problem.numHeads,
+                                   problem.seqLenQ,
+                                   problem.seqLenKv,
+                                   problem.dataType)
                    .has_value())
         {
             return std::nullopt;
@@ -1027,6 +1035,18 @@ bool flydslSdpaRdnaKernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // A bias in the query's dtype runs on the `bias_q` objects, an f32 one on the others.
+    if(*bias != NO_BIAS)
+    {
+        const auto* biasTensor = findTensor(context, *bias);
+        const auto biasInQueryType
+            = biasTensor != nullptr && biasTensor->data_type() != data_objects::DataType::FLOAT;
+        if(biasTensor == nullptr
+           || integerMetadata(kernel, BIAS_Q_FIELD) != (biasInQueryType ? 1 : 0))
+        {
+            return false;
+        }
+    }
     if(*decode == 1 && *bias != NO_BIAS)
     {
         const auto* biasTensor = findTensor(context, *bias);
@@ -1035,7 +1055,8 @@ bool flydslSdpaRdnaKernelMatches(const MatchContext& context,
                                                                          problem.batch,
                                                                          problem.numHeads,
                                                                          problem.seqLenQ,
-                                                                         problem.seqLenKv);
+                                                                         problem.seqLenKv,
+                                                                         problem.dataType);
         if(!strides.has_value() || !decodeBiasFits(problem, *strides))
         {
             return false;
@@ -1419,7 +1440,8 @@ public:
                                                      problem.batch,
                                                      problem.numHeads,
                                                      problem.seqLenQ,
-                                                     problem.seqLenKv);
+                                                     problem.seqLenKv,
+                                                     problem.dataType);
             if(!strides.has_value())
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(

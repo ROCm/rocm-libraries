@@ -57,6 +57,7 @@ constexpr const char* FLYDSL_SDPA_RDNA_BLOCK_M_FIELD = "block_m";
 constexpr const char* FLYDSL_SDPA_RDNA_BLOCK_N_FIELD = "block_n";
 constexpr const char* FLYDSL_SDPA_RDNA_DV_SPLIT_FIELD = "dv_split";
 constexpr const char* FLYDSL_SDPA_RDNA_HAS_BIAS_FIELD = "has_bias";
+constexpr const char* FLYDSL_SDPA_RDNA_BIAS_Q_FIELD = "bias_q";
 constexpr const char* FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD = "head_dim_max";
 constexpr const char* FLYDSL_SDPA_RDNA_DECODE_FIELD = "decode";
 constexpr const char* FLYDSL_SDPA_RDNA_MERGE_SYMBOL_FIELD = "merge_symbol";

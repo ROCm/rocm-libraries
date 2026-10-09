@@ -74,7 +74,7 @@
 #      (q_resident), and the output columns are split across DV_SPLIT
 #      workgroups that each recompute QK^T (dv_split). Together they bring the
 #      register demand under 256 VGPRs; 128 and below are built as before.
-#  14. Additive bias (has_bias): an f32 tensor, broadcast through its (batch,
+#  14. Additive bias (has_bias): an f32 tensor (or see 19), broadcast through its (batch,
 #      head, query, key) element strides -- 0 on a broadcast axis -- added to
 #      the scaled scores before the mask, as the reference does. Its pointer
 #      and strides are appended after the LSE strides, so the arguments before
@@ -106,6 +106,10 @@
 #      thread count when block_m halves. The pair index is read from the first
 #      lane so the column offsets it feeds stay scalar. Above 128 this replaces
 #      most of dv_split's recomputation; objects without it build as before.
+#  19. A bias in the query's dtype (bias_query_dtype): the bias pointer is
+#      read as bf16/f16 rather than f32, its slice offsets halve, and each
+#      value is widened to f32 before it is added, so the scores see the same
+#      arithmetic as an f32 bias. Objects without it build as before.
 #
 # Upstream-first: prefer landing these changes in AITER/FlyDSL; this copy exists
 # so the provider is not blocked on that.
@@ -160,6 +164,7 @@ def build_flash_attn_func_module(
     has_bias=False,
     generic_head_dim=False,
     hd_pair=False,
+    bias_query_dtype=False,
 ):
     """Build the gfx11 Flash Attention launcher.
 
@@ -181,6 +186,9 @@ def build_flash_attn_func_module(
     # before the mask. Baked: it is per-score work in the inner loop, and its
     # per-tile values (16 VGPRs) tip a register-resident Q past the file at 128.
     HAS_BIAS = bool(has_bias)
+    # The bias in the query's dtype rather than f32 (bias_query_dtype): read as such and
+    # widened to f32 as it is added.
+    BIAS_Q = bool(bias_query_dtype)
     # head_dim is then the largest served; the actual one (a multiple of 8) is a
     # runtime argument. Columns at or past it are zeroed as Q and K are loaded --
     # both, since 0 * NaN read from a neighbouring row is still NaN -- and not
@@ -763,7 +771,10 @@ def build_flash_attn_func_module(
             c_scale_f = fx.Float32(scale)
             c_sm_scale_log2e = fx.Float32(_LOG2E)
             bias_f32_ptr = fx.recast_iter(
-                fx.PointerType.get(fx.Float32.ir_type, BIAS.address_space), BIAS
+                fx.PointerType.get(
+                    (elem_dtype if BIAS_Q else fx.Float32).ir_type, BIAS.address_space
+                ),
+                BIAS,
             )
             # One (batch, head) slice of the broadcast bias; a size-1 axis has
             # stride 0. Reads past it -- the kv tail -- come back as zero.
@@ -776,7 +787,7 @@ def build_flash_attn_func_module(
                 fx.add_offset(
                     bias_f32_ptr, fx.Int64(batch_idx * bias_sb + head_idx * bias_sh)
                 ),
-                fx.Int64(_bias_slice_elems) * fx.Int64(4),
+                fx.Int64(_bias_slice_elems) * fx.Int64(2 if BIAS_Q else 4),
             )
             bias_skv_i32 = fx.Int32(bias_skv)
             bias_row_i32 = fx.Int32(q_row_safe * bias_sq)
@@ -870,7 +881,10 @@ def build_flash_attn_func_module(
                     for r in range_constexpr(8):
                         _kv = st * 16 + (r if const_expr(WMMA_V8) else 2 * r)
                         _off = _bias_tile_i32 + fx.Int32(_kv) * bias_skv_i32
-                        bias_vals.append(fx.ptr_load(bias_buf_ptr + _off))
+                        _bv = fx.ptr_load(bias_buf_ptr + _off)
+                        bias_vals.append(
+                            _bv.to(fx.Float32) if const_expr(BIAS_Q) else _bv
+                        )
 
             if wave_needs_kv_tile:
                 if const_expr(not Q_RESIDENT):

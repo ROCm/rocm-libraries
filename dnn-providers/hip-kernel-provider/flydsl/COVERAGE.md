@@ -8,7 +8,7 @@ SPDX-License-Identifier:  MIT
 Two packs, built once for each of two LLVM generic targets -- `gfx11-generic`
 (RDNA3 / RDNA3.5: gfx1100–gfx1103, gfx1150–gfx1153) and `gfx12-generic` (RDNA4:
 gfx1200, gfx1201) -- and shipped to every member: **RMSNorm forward** (12 kernel
-objects per family, §1–§4) and **SDPA forward** (96 per family, §5). A third,
+objects per family, §1–§4) and **SDPA forward** (128 per family, §5). A third,
 **SDPA forward on CDNA** (§7), is a separate engine built per arch for gfx950 and
 gfx942 from FlyDSL's own CDNA kernels; it is a first, deliberately narrow object
 set that proves the path end to end. Every graph a pack accepts is
@@ -272,8 +272,9 @@ KV loop at the diagonal and skips fully masked tiles, and the non-causal one
 carries a V prefetch across iterations that the causal one drops for register
 pressure. Everything else about the mask is a runtime argument, served by both.
 
-**Decode** has its own forty objects (`decode` 1; bf16 and f16 × causal × `head_dim`
-64, 96, 128, 256 with and without a bias, plus two generic tiers), from a kernel
+**Decode** has its own fifty-six objects (`decode` 1; bf16 and f16 × causal × `head_dim`
+64, 96, 128, 256 without a bias, with an f32 one and with one in the query's dtype, plus
+two generic tiers), from a kernel
 written for it
 ([`flash_attn_decode_rdna.py`](kernels_src/kernels/attention_rdna/flash_attn_decode_rdna.py)).
 The prefill objects give a decode step 128 query rows of which one is used, and read
@@ -313,7 +314,7 @@ One SDPA-forward node, and:
 | Any `left_bound`/`right_bound` ≥ −1, either alignment, or the deprecated causal booleans (not both) | The kernel applies the reference's two-sided rule (`CpuFpReferenceSdpa` `isMasked`) directly. |
 | Scale: `attn_scale_value` (> 0), a pass-by-value scalar tensor, or absent | Absent is `1/√head_dim`, the reference's default. The running max is over unscaled scores, which orders them correctly only for a positive scale. |
 | Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor | The kernel writes the natural-log LSE of the scaled scores there. |
-| Bias (`attn_mask`), if present: an f32 device tensor of rank 1–4 whose dims, right-aligned to `[B, H, Sq, Skv]`, are each that extent or 1; positive strides on real axes; one (batch, head) slice under 2³⁰ elements | Added to the scaled scores before the mask, as the reference does; a size-1 or absent axis broadcasts. The kernel reads it through a 32-bit buffer descriptor with 32-bit offsets. |
+| Bias (`attn_mask`), if present: an f32 device tensor, or one in the query's dtype, of rank 1–4 whose dims, right-aligned to `[B, H, Sq, Skv]`, are each that extent or 1; positive strides on real axes; one (batch, head) slice under 2³⁰ elements | Added to the scaled scores before the mask, as the reference does; a size-1 or absent axis broadcasts. The kernel reads it through a 32-bit buffer descriptor with 32-bit offsets. |
 | `Sq`, `Skv` < 2²⁹; one (batch, kv head) slice of K or V under 2 GiB; grid under 2³¹ | int32 mask arithmetic, and 32-bit bounds-checked buffer descriptors. |
 
 Any sequence length is correct: K and V reads past `seq_len_kv` return zero and
@@ -338,7 +339,7 @@ queries than keys — gets O = 0 and LSE = −inf, as the reference defines it.
 | 11 | sliding window (`left_bound`) | **served** (and right-side bands) |
 | 12 | varlen / THD | missing (declined) |
 | 13 | decode (`Sq == 1`) | **served by a decode path** (ATT-13): GQA-packed rows and split-KV, for `(Hq / Hk) × Sq ≤ 128` (MQA, speculative steps) at `head_dim` 64/96/128/256 and every other multiple of 8 up to 256 |
-| 14 | additive bias | **served**: f32, broadcast over any of B, H, Sq, Skv; with every mask, the LSE output and every specialized head dim, on the prefill and the decode objects |
+| 14 | additive bias | **served**: f32 or the query's dtype, broadcast over any of B, H, Sq, Skv; with every mask, the LSE output and every specialized head dim, on the prefill and the decode objects |
 
 ### 5.4 What is still missing, and what closing it takes
 
@@ -347,7 +348,6 @@ at `check_support()`, never at `execute()`.
 
 | | Effort | What it takes |
 |---|---|---|
-| **fp16 / bf16 bias** | small | A second bias dtype axis (+16 objects); today a non-f32 bias declines. |
 | **Padding mask** (Tier 1) | medium | Two per-batch length pointers read once per workgroup. The diagonal offset is already computed in-kernel from the lengths for exactly this. hipDNN's CPU reference does not implement padding yet, so its semantics must be defined there first. |
 | **Varlen / THD** (Tier 1) | medium, after padding | Ragged offsets replace the batch stride; the grid stays over the longest sequence and tiles past a sequence's end exit early. |
 | Bias on a generic head_dim | small | A `has_bias` variant of the eight generic objects (+8). |
@@ -375,7 +375,7 @@ objects.
 
 | Claim | Checked by |
 |---|---|
-| The 96 objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — 96/96 byte-identical |
+| The 128 objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — 128/128 byte-identical |
 | Each decode object carries its merge kernel, with both argument layouts as declared | `gen_sdpa_rdna.py`, before the object is written; the 38-slot main layout by `TestFlydslSdpaRdnaPacks` |
 | Each object has the declared 36-argument layout and spills no registers | `gen_sdpa_rdna.py`, before the object is written |
 | The vendored kernel matches AITER but for its recorded modifications | `tools/diff_upstream.py --aiter` ([REGEN.md](REGEN.md) §5) |
@@ -449,10 +449,11 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA decode, `head_dim` 256 | dtype (2) × causal (2); output columns split across two workgroups (`dv_split` 2) | 4 | shipped, `gfx11-generic`; the 52 above rebuilt byte-identical with it in the source |
 | SDPA decode, additive f32 bias | one bias object beside each of the 16 above (`has_bias`) | 16 | shipped, `gfx11-generic`; the 16 plain decode objects compile to identical code with the bias arguments appended, the 40 prefill objects are unchanged |
 | SDPA decode, generic head_dim | dtype (2) × causal (2) × largest head {96, 256}; head_dim a runtime argument (appended to both kernels), K/V columns past it never fetched; no bias | 8 | shipped, `gfx11-generic`; the 32 decode objects above compile to identical code with the head_dim argument appended, the prefill objects are unchanged |
-| **Total, gfx11-generic** | | **108** | |
+| SDPA forward and decode, bias in the query's dtype | one object beside each of the 32 f32-bias objects above (`bias_q`), the bias read as bf16/f16 and widened to f32 (kernel modification 19) | 32 | shipped, `gfx11-generic`; the 108 above rebuilt byte-identical |
+| **Total, gfx11-generic** | | **140** | |
 | SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64, non-causal 128 without a bias and the generic tier up to 64, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 66 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
-| **gfx12-generic** | the same table, built from the same sources for RDNA4 | **108** | shipped; GPU suites pass on gfx1201 |
-| **Total, both families** | | **216** | |
+| **gfx12-generic** | the same table, built from the same sources for RDNA4 | **140** | shipped; GPU suites pass on gfx1201 |
+| **Total, both families** | | **280** | |
 | SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias` | 30 on gfx950, 12 on gfx942 | shipped; GPU suites pass on both |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime

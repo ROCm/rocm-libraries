@@ -1,0 +1,63 @@
+{
+  "version": "1.0",
+  "id": "d422a956-76f3-596b-b583-2b23fb66f212",
+  "name": "sdpa_rdna_f16_d96_causal1_bm128_bn32_bias1_biasq1",
+  "arch": [
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153"
+  ],
+  "kernel_source": {
+    "kind": "hsaco",
+    "file": "sdpa_rdna_f16_d96_causal1_bm128_bn32_bias1_biasq1.hsaco",
+    "symbol": "flash_attn_func_rdna_kernel_0"
+  },
+  "metadata": {
+    "dtype": "f16",
+    "head_dim": 96,
+    "causal": 1,
+    "block_m": 128,
+    "block_n": 32,
+    "dv_split": 1,
+    "has_bias": 1,
+    "head_dim_max": 96,
+    "decode": 0,
+    "merge_symbol": "",
+    "hd_pair": 0,
+    "bias_q": 1
+  },
+  "priority": 100,
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "a122a721-719a-5132-8cfe-97590e7485e7",
+          "kmd_id": "330ae779-3bb5-5a68-9a64-75bfdcbfd1fe",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "head_dim",
+            "causal",
+            "block_m",
+            "block_n",
+            "dv_split",
+            "has_bias",
+            "head_dim_max",
+            "decode",
+            "merge_symbol",
+            "hd_pair",
+            "bias_q"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  }
+}

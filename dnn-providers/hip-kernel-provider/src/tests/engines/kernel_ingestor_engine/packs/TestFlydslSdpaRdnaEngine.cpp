@@ -93,7 +93,8 @@ KernelDefinition makeFlydslSdpaRdnaKernel(const std::string& dtype,
                                           int64_t hasBias = 0,
                                           std::optional<int64_t> headDimMax = std::nullopt,
                                           int64_t decode = 0,
-                                          int64_t hdPair = 0)
+                                          int64_t hdPair = 0,
+                                          int64_t biasQ = 0)
 {
     KernelDefinition kernel;
     kernel.name = "sdpa_" + dtype + "_d" + std::to_string(headDim);
@@ -108,7 +109,8 @@ KernelDefinition makeFlydslSdpaRdnaKernel(const std::string& dtype,
                        {FLYDSL_SDPA_RDNA_DECODE_FIELD, decode},
                        {FLYDSL_SDPA_RDNA_MERGE_SYMBOL_FIELD,
                         std::string(decode != 0 ? "flash_attn_decode_merge_rdna_kernel_1" : "")},
-                       {FLYDSL_SDPA_RDNA_HD_PAIR_FIELD, hdPair}};
+                       {FLYDSL_SDPA_RDNA_HD_PAIR_FIELD, hdPair},
+                       {FLYDSL_SDPA_RDNA_BIAS_Q_FIELD, biasQ}};
     kernel.priority = 100;
     return kernel;
 }
@@ -173,6 +175,10 @@ INSTANTIATE_TEST_SUITE_P(
         AcceptedCase{"BiasRankTwo", accepted([](SdpaGraphSpec& s) {
                          s.withBias = true;
                          s.biasDims = {s.seqLenQ, s.seqLenKv};
+                     })},
+        AcceptedCase{"BiasInTheQueryDtype", accepted([](SdpaGraphSpec& s) {
+                         s.withBias = true;
+                         s.biasDataType = s.dataType;
                      })},
         AcceptedCase{"BiasOverKeysOnly", accepted([](SdpaGraphSpec& s) {
                          s.withBias = true;
@@ -266,10 +272,11 @@ INSTANTIATE_TEST_SUITE_P(
         // A bound below -1 has no meaning in the reference's convention.
         AcceptedCase{"LeftBoundBelowMinusOne",
                      accepted([](SdpaGraphSpec& s) { s.leftBound = -2; })},
-        // The kernel reads an f32 bias, and only one that broadcasts to [B, H, Sq, Skv].
-        AcceptedCase{"BiasNotF32", accepted([](SdpaGraphSpec& s) {
+        // The kernel reads a bias in f32 or the query's dtype, and only one that broadcasts
+        // to [B, H, Sq, Skv].
+        AcceptedCase{"BiasInAThirdDtype", accepted([](SdpaGraphSpec& s) {
                          s.withBias = true;
-                         s.biasDataType = DataType::BFLOAT16;
+                         s.biasDataType = DataType::HALF;
                      })},
         AcceptedCase{"BiasThatDoesNotBroadcast", accepted([](SdpaGraphSpec& s) {
                          s.withBias = true;
@@ -627,10 +634,19 @@ TEST(TestFlydslSdpaRdnaKernelMatch, PairsTheBiasVariantWithAGraphThatHasABias)
 
     const auto plain = makeFlydslSdpaRdnaKernel("bf16", 64, 0);
     const auto bias = makeFlydslSdpaRdnaKernel("bf16", 64, 0, 128, 32, 1, 1);
+    const auto biasQ = makeFlydslSdpaRdnaKernel("bf16", 64, 0, 128, 32, 1, 1, 64, 0, 0, 1);
     EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA, withBias.context(), bias, biasBound));
     EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, withBias.context(), plain, biasBound));
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, withBias.context(), biasQ, biasBound));
     EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA, without.context(), plain, plainBound));
     EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, without.context(), bias, plainBound));
+
+    // A bias in the query's dtype pairs with the `bias_q` object instead.
+    biased.biasDataType = biased.dataType;
+    const GraphFixture withBiasQ(buildFlydslSdpaRdnaGraph(biased));
+    const auto biasQBound = bindingsFor(biased);
+    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA, withBiasQ.context(), biasQ, biasQBound));
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, withBiasQ.context(), bias, biasQBound));
 }
 
 TEST(TestFlydslSdpaRdnaKernelMatch, DeclinesARecordMissingAFieldRatherThanThrowing)
@@ -713,8 +729,12 @@ DeviceProperties packedArchDeviceProperties()
 
 /// The staged candidate for (@p dtype, @p headDim, @p causal, @p hasBias), if this build
 /// packed one: the object built for that head_dim, else the narrowest generic one serving it.
-std::optional<KernelDefinition> findStagedKernel(
-    const std::string& dtype, int64_t headDim, int64_t causal, int64_t hasBias, int64_t decode = 0)
+std::optional<KernelDefinition> findStagedKernel(const std::string& dtype,
+                                                 int64_t headDim,
+                                                 int64_t causal,
+                                                 int64_t hasBias,
+                                                 int64_t decode = 0,
+                                                 int64_t biasQ = 0)
 {
     // A build for CDNA targets only stages no RDNA set at all.
     const auto* staged = findLoadedSet(FLYDSL_SDPA_RDNA.engineName);
@@ -749,9 +769,12 @@ std::optional<KernelDefinition> findStagedKernel(
                                                               FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD);
             const auto* isDecode
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_DECODE_FIELD);
+            const auto* inQueryType
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_BIAS_Q_FIELD);
             if(name == nullptr || dim == nullptr || isCausal == nullptr || bias == nullptr
-               || dimMax == nullptr || isDecode == nullptr || *name != dtype || *isCausal != causal
-               || *bias != hasBias || *isDecode != decode)
+               || dimMax == nullptr || isDecode == nullptr || inQueryType == nullptr
+               || *name != dtype || *isCausal != causal || *bias != hasBias || *isDecode != decode
+               || *inQueryType != biasQ)
             {
                 continue;
             }
@@ -892,8 +915,13 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
 
     const std::string dtype = spec.dataType == DataType::BFLOAT16 ? "bf16" : "f16";
     const bool causal = right >= 0;
-    const auto kernel = findStagedKernel(
-        dtype, spec.headDim, causal ? 1 : 0, spec.withBias ? 1 : 0, decode ? 1 : 0);
+    const auto kernel
+        = findStagedKernel(dtype,
+                           spec.headDim,
+                           causal ? 1 : 0,
+                           spec.withBias ? 1 : 0,
+                           decode ? 1 : 0,
+                           spec.withBias && spec.biasDataType != DataType::FLOAT ? 1 : 0);
     if(!kernel.has_value())
     {
         GTEST_SKIP() << "nothing packed for dtype=" << dtype << " head_dim=" << spec.headDim
@@ -980,7 +1008,13 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
             biasStrides4[target] = dims[axis] == 1 ? 0 : strides[axis];
         }
     }
+    // In f32, or in the query's dtype (the `bias_q` objects); one of the two is bound.
+    const bool biasInQueryType = spec.withBias && spec.biasDataType != DataType::FLOAT;
     const DeviceTensor<float> bias(biasDims4, biasStrides4, 6U, true);
+    const DeviceTensor<T> biasQ(biasDims4, biasStrides4, 6U, true);
+    const auto biasAt = [&](int64_t b, int64_t h, int64_t s, int64_t j) {
+        return biasInQueryType ? biasQ.at(b, h, s, j) : bias.at(b, h, s, j);
+    };
 
     float runtimeScale = spec.scale;
     std::vector<hipdnnPluginDeviceBuffer_t> buffers{{FLYDSL_SDPA_RDNA_Q_UID, qPtr},
@@ -993,7 +1027,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     }
     if(spec.withBias)
     {
-        buffers.push_back({FLYDSL_SDPA_RDNA_BIAS_UID, bias.device()});
+        buffers.push_back(
+            {FLYDSL_SDPA_RDNA_BIAS_UID, biasInQueryType ? biasQ.device() : bias.device()});
     }
     if(spec.scaleKind == SdpaScale::RUNTIME_TENSOR)
     {
@@ -1046,7 +1081,7 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                         dot += qAt(b, h, s, e) * kAt(b, kvHead, j, e);
                     }
                     scores[static_cast<size_t>(j)]
-                        = dot * scale + (spec.withBias ? bias.at(b, h, s, j) : 0.0);
+                        = dot * scale + (spec.withBias ? biasAt(b, h, s, j) : 0.0);
                     maxScore = std::max(maxScore, scores[static_cast<size_t>(j)]);
                 }
                 double sum = 0.0;
@@ -1310,6 +1345,30 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, AddsABiasBroadcastOverBatchAndHeads)
     spec.seqLenKv = 77;
     spec.stats = SdpaStats::LSE;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, AddsABiasInTheQueryDtype)
+{
+    SKIP_IF_NO_DEVICES();
+    // What PyTorch passes as a float attn_mask: the query's dtype. Prefill at head_dim 64 and
+    // 128, and a decode.
+    SdpaGraphSpec spec;
+    spec.withBias = true;
+    spec.biasDataType = DataType::BFLOAT16;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 77;
+    spec.seqLenKv = 99;
+    spec.biasDims = {1, spec.heads, spec.seqLenQ, spec.seqLenKv};
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+    spec.dataType = DataType::HALF;
+    spec.biasDataType = DataType::HALF;
+    spec.headDim = 128;
+    spec.biasDims = {spec.seqLenKv};
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 300;
+    spec.biasDims = {spec.seqLenKv};
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
 }
 
 TEST(TestGpuFlydslSdpaRdnaDispatch, AddsAPerHeadBiasAtHeadDim128)

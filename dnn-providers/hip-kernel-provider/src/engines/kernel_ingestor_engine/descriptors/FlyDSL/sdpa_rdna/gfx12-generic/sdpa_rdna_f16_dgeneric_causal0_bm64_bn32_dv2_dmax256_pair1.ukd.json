@@ -22,7 +22,8 @@
     "head_dim_max": 256,
     "decode": 0,
     "merge_symbol": "",
-    "hd_pair": 1
+    "hd_pair": 1,
+    "bias_q": 0
   },
   "priority": 10,
   "provenance": {
@@ -44,7 +45,8 @@
             "head_dim_max",
             "decode",
             "merge_symbol",
-            "hd_pair"
+            "hd_pair",
+            "bias_q"
           ],
           "bindings": {},
           "vocabulary": {}

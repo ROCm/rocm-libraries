@@ -256,6 +256,7 @@ def _build_decode(
         num_waves=_DECODE_WAVES,
         dv_split=knobs["dv_split"],
         has_bias=bool(knobs["has_bias"]),
+        bias_query_dtype=bool(knobs["bias_q"]),
         generic_head_dim=knobs["head_dim"] is None,
     )
     if launch.dv_split != knobs["dv_split"]:
@@ -298,6 +299,7 @@ def _build_one(
         block_n=knobs["block_n"],
         dv_split=knobs["dv_split"],
         has_bias=bool(knobs["has_bias"]),
+        bias_query_dtype=bool(knobs["bias_q"]),
         generic_head_dim=generic,
         hd_pair=bool(knobs["hd_pair"]),
     )

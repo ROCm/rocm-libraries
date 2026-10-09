@@ -46,6 +46,10 @@
     {
       "name": "hd_pair",
       "type": "int"
+    },
+    {
+      "name": "bias_q",
+      "type": "int"
     }
   ]
 }

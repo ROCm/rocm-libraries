@@ -67,12 +67,13 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
 {
     const auto& set = loadedSet(FLYDSL_SDPA_RDNA.engineName);
 
-    // dtype x head_dim x causal x has_bias x head_dim_max is the whole instance key (a
-    // generic object's head_dim is 0, read at runtime up to its max): everything else the
+    // dtype x head_dim x causal x has_bias x bias_q x head_dim_max is the whole instance key
+    // (a generic object's head_dim is 0, read at runtime up to its max; bias_q says the bias
+    // is in the query's dtype rather than f32): everything else the
     // kernel needs is a runtime argument. A missing class would decline silently -- the graph
     // would simply plan on another engine -- and a duplicate would make the choice
     // between two objects for one class an accident of descriptor ids.
-    std::set<std::tuple<std::string, int64_t, int64_t, int64_t, int64_t, int64_t>> classes;
+    std::set<std::tuple<std::string, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> classes;
     size_t kernels = 0;
     for(const auto& pack : set.packs)
     {
@@ -92,11 +93,14 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
             const auto* headDimMax = tryGetMetadataField<int64_t>(
                 kernel.metadata, FLYDSL_SDPA_RDNA_HEAD_DIM_MAX_FIELD);
             ASSERT_NE(hasBias, nullptr) << kernel.name;
+            const auto* biasQ
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_BIAS_Q_FIELD);
+            ASSERT_NE(biasQ, nullptr) << kernel.name;
             const auto* decode
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_DECODE_FIELD);
             ASSERT_NE(headDimMax, nullptr) << kernel.name;
             ASSERT_NE(decode, nullptr) << kernel.name;
-            classes.emplace(*dtype, *headDim, *causal, *hasBias, *headDimMax, *decode);
+            classes.emplace(*dtype, *headDim, *causal, *hasBias, *biasQ, *headDimMax, *decode);
             ++kernels;
 
             // Only ever kpack: pre-built flyDSL code objects with no source to fall back to.
@@ -114,11 +118,14 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
         {
             for(const int64_t causal : {0, 1})
             {
-                for(const int64_t hasBias : {0, 1})
+                // No bias, an f32 bias, and a bias in the query's dtype.
+                for(const auto& [hasBias, biasQ] :
+                    {std::pair<int64_t, int64_t>{0, 0}, {1, 0}, {1, 1}})
                 {
-                    EXPECT_EQ(classes.count({dtype, headDim, causal, hasBias, headDim, 0}), 1U)
+                    EXPECT_EQ(classes.count({dtype, headDim, causal, hasBias, biasQ, headDim, 0}),
+                              1U)
                         << dtype << " head_dim=" << headDim << " causal=" << causal
-                        << " has_bias=" << hasBias;
+                        << " has_bias=" << hasBias << " bias_q=" << biasQ;
                 }
             }
         }
@@ -127,7 +134,7 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
         {
             for(const int64_t causal : {0, 1})
             {
-                EXPECT_EQ(classes.count({dtype, 0, causal, 0, headDimMax, 0}), 1U)
+                EXPECT_EQ(classes.count({dtype, 0, causal, 0, 0, headDimMax, 0}), 1U)
                     << dtype << " generic head_dim up to " << headDimMax << " causal=" << causal;
             }
         }
@@ -136,11 +143,14 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
         {
             for(const int64_t causal : {0, 1})
             {
-                for(const int64_t hasBias : {0, 1})
+                // No bias, an f32 bias, and a bias in the query's dtype.
+                for(const auto& [hasBias, biasQ] :
+                    {std::pair<int64_t, int64_t>{0, 0}, {1, 0}, {1, 1}})
                 {
-                    EXPECT_EQ(classes.count({dtype, headDim, causal, hasBias, headDim, 1}), 1U)
+                    EXPECT_EQ(classes.count({dtype, headDim, causal, hasBias, biasQ, headDim, 1}),
+                              1U)
                         << dtype << " decode head_dim=" << headDim << " causal=" << causal
-                        << " has_bias=" << hasBias;
+                        << " has_bias=" << hasBias << " bias_q=" << biasQ;
                 }
             }
         }
@@ -149,7 +159,7 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
         {
             for(const int64_t causal : {0, 1})
             {
-                EXPECT_EQ(classes.count({dtype, 0, causal, 0, headDimMax, 1}), 1U)
+                EXPECT_EQ(classes.count({dtype, 0, causal, 0, 0, headDimMax, 1}), 1U)
                     << dtype << " generic decode up to " << headDimMax << " causal=" << causal;
             }
         }

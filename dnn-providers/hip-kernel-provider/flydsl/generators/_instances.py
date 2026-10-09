@@ -95,6 +95,7 @@ _ABBREV = {
     "any_diagonal": "anydiag",
     "waves_per_eu": "wpe",
     "setprio": "prio",
+    "bias_q": "biasq",
     "kv_gpfetch": "gpf",
 }
 
@@ -110,6 +111,7 @@ _NAME_OMITTED_WHEN = {
     "any_diagonal": lambda knobs: knobs["any_diagonal"] == 1,
     "waves_per_eu": lambda knobs: knobs["waves_per_eu"] == 0,
     "setprio": lambda knobs: knobs["setprio"] == 1,
+    "bias_q": lambda knobs: knobs["bias_q"] == 0,
     "kv_gpfetch": lambda knobs: knobs["kv_gpfetch"] == 1,
     # A pick rule, not a build choice: two objects never differ in it alone.
     "prefer_feature": lambda knobs: True,
@@ -294,6 +296,10 @@ SDPA_BLOCK_N = 32
 # head_dim, causal) class has a bias object beside its plain one, and the plain
 # objects compile to the same code as before bias existed (COVERAGE.md §6).
 SDPA_HAS_BIAS = (0, 1)
+# Which dtype the bias is in: f32 (`bias_q` 0), or the query's (1) -- the dtype
+# PyTorch requires of a float `attn_mask`, and Hugging Face builds its padding
+# masks in. A bias class ships both; the dtype is a load width, so baked.
+SDPA_BIAS_Q = (0, 1)
 
 
 def sdpa_instances() -> list[Instance]:
@@ -306,25 +312,27 @@ def sdpa_instances() -> list[Instance]:
                     block_m, dv_split, hd_pair = sdpa_prefill_schedule(
                         head_dim, causal, has_bias
                     )
-                    instances.append(
-                        Instance(
-                            op="sdpa_rdna",
-                            dtype=dtype,
-                            priority=PRIORITY_SPECIALIZED,
-                            knobs={
-                                "head_dim": head_dim,
-                                "causal": causal,
-                                "block_m": block_m,
-                                "block_n": SDPA_BLOCK_N,
-                                "dv_split": dv_split,
-                                "has_bias": has_bias,
-                                "head_dim_max": head_dim,
-                                "decode": 0,
-                                "merge_symbol": "",
-                                "hd_pair": hd_pair,
-                            },
+                    for bias_q in SDPA_BIAS_Q if has_bias else (0,):
+                        instances.append(
+                            Instance(
+                                op="sdpa_rdna",
+                                dtype=dtype,
+                                priority=PRIORITY_SPECIALIZED,
+                                knobs={
+                                    "head_dim": head_dim,
+                                    "causal": causal,
+                                    "block_m": block_m,
+                                    "block_n": SDPA_BLOCK_N,
+                                    "dv_split": dv_split,
+                                    "has_bias": has_bias,
+                                    "head_dim_max": head_dim,
+                                    "decode": 0,
+                                    "merge_symbol": "",
+                                    "hd_pair": hd_pair,
+                                    "bias_q": bias_q,
+                                },
+                            )
                         )
-                    )
         # Generic head_dim, without a bias: a bias on a head no specialized
         # object serves declines.
         for head_dim_max, schedule in SDPA_GENERIC_HEAD_DIM_MAX.items():
@@ -346,31 +354,34 @@ def sdpa_instances() -> list[Instance]:
                             "decode": 0,
                             "merge_symbol": "",
                             "hd_pair": hd_pair,
+                            "bias_q": 0,
                         },
                     )
                 )
         for head_dim in SDPA_DECODE_HEAD_DIMS:
             for causal in SDPA_CAUSAL:
                 for has_bias in SDPA_HAS_BIAS:
-                    instances.append(
-                        Instance(
-                            op="sdpa_rdna",
-                            dtype=dtype,
-                            priority=PRIORITY_SDPA_DECODE,
-                            knobs={
-                                "head_dim": head_dim,
-                                "causal": causal,
-                                "block_m": SDPA_DECODE_ROWS,
-                                "block_n": SDPA_BLOCK_N,
-                                "dv_split": sdpa_dv_split(head_dim),
-                                "has_bias": has_bias,
-                                "head_dim_max": head_dim,
-                                "decode": 1,
-                                "merge_symbol": SDPA_DECODE_MERGE_SYMBOL,
-                                "hd_pair": 0,
-                            },
+                    for bias_q in SDPA_BIAS_Q if has_bias else (0,):
+                        instances.append(
+                            Instance(
+                                op="sdpa_rdna",
+                                dtype=dtype,
+                                priority=PRIORITY_SDPA_DECODE,
+                                knobs={
+                                    "head_dim": head_dim,
+                                    "causal": causal,
+                                    "block_m": SDPA_DECODE_ROWS,
+                                    "block_n": SDPA_BLOCK_N,
+                                    "dv_split": sdpa_dv_split(head_dim),
+                                    "has_bias": has_bias,
+                                    "head_dim_max": head_dim,
+                                    "decode": 1,
+                                    "merge_symbol": SDPA_DECODE_MERGE_SYMBOL,
+                                    "hd_pair": 0,
+                                    "bias_q": bias_q,
+                                },
+                            )
                         )
-                    )
         for head_dim_max, dv_split in SDPA_DECODE_GENERIC_HEAD_DIM_MAX.items():
             for causal in SDPA_CAUSAL:
                 instances.append(
@@ -389,6 +400,7 @@ def sdpa_instances() -> list[Instance]:
                             "decode": 1,
                             "merge_symbol": SDPA_DECODE_MERGE_SYMBOL,
                             "hd_pair": 0,
+                            "bias_q": 0,
                         },
                     )
                 )
