@@ -193,6 +193,7 @@ Definitions:
   <<: *conversion_shared
   batch_count_A: [1, 4]
   batch_count_B: [4]
+  pad_A: [3]
 
 - &conversion_shared_spsort_mixed_index
   <<: *conversion_shared_spsort

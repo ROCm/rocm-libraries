@@ -287,13 +287,27 @@ void testing_spsort_csr(const Arguments& arg)
     // A matrix without rows has no row pointer.
     const int64_t offsets_size = (M > 0) ? static_cast<int64_t>(M) + 1 : 0;
 
-    // A is padded between batches to check that its strides are honoured, B is packed. Without
-    // a row pointer there is nothing to pad.
+    // The batches of a matrix are stored pad elements apart, and the unused elements between them
+    // must not be touched. A matrix with one batch has zero strides, which is also how a single
+    // source matrix is sorted into every batch. The batches may also share one row pointer, which
+    // gives an offsets stride of zero. Without a row pointer there is nothing to pad or share.
+    auto get_offsets_batch_stride
+        = [&](int64_t batch_count, bool offsets_batch_stride_zero, int64_t pad) {
+              return (batch_count > 1 && !offsets_batch_stride_zero && offsets_size > 0)
+                         ? offsets_size + pad
+                         : 0;
+          };
+    auto get_columns_values_batch_stride
+        = [&](int64_t batch_count, int64_t pad) { return (batch_count > 1) ? nnz + pad : 0; };
+
     const int64_t offsets_batch_stride_A
-        = (batch_count_A > 1 && offsets_size > 0) ? offsets_size + 2 : 0;
-    const int64_t offsets_batch_stride_B        = (batch_count_B > 1) ? offsets_size : 0;
-    const int64_t columns_values_batch_stride_A = (batch_count_A > 1) ? nnz + 3 : 0;
-    const int64_t columns_values_batch_stride_B = (batch_count_B > 1) ? nnz : 0;
+        = get_offsets_batch_stride(batch_count_A, arg.offsets_batch_stride_zero_A, arg.pad_A);
+    const int64_t offsets_batch_stride_B
+        = get_offsets_batch_stride(batch_count_B, arg.offsets_batch_stride_zero_B, arg.pad_B);
+    const int64_t columns_values_batch_stride_A
+        = get_columns_values_batch_stride(batch_count_A, arg.pad_A);
+    const int64_t columns_values_batch_stride_B
+        = get_columns_values_batch_stride(batch_count_B, arg.pad_B);
 
     const int64_t size_ptr_A = (batch_count_A - 1) * offsets_batch_stride_A + offsets_size;
     const int64_t size_ptr_B = (batch_count_B - 1) * offsets_batch_stride_B + offsets_size;
@@ -305,13 +319,21 @@ void testing_spsort_csr(const Arguments& arg)
     host_dense_vector<I> hA_ptr(size_ptr_A);
     host_dense_vector<J> hA_ind(size_A);
     host_dense_vector<T> hA_val(size_A);
-    host_dense_vector<I> hB_ptr_gold(size_ptr_B);
-    host_dense_vector<J> hB_ind_gold(size_B);
-    host_dense_vector<T> hB_val_gold(size_B);
+    host_dense_vector<I> hB_ptr_init(size_ptr_B);
+    host_dense_vector<J> hB_ind_init(size_B);
+    host_dense_vector<T> hB_val_init(size_B);
 
+    // The unused elements between the batches hold -1, and must still do so after the sort.
     std::fill(hA_ptr.data(), hA_ptr.data() + size_ptr_A, static_cast<I>(-1));
     std::fill(hA_ind.data(), hA_ind.data() + size_A, static_cast<J>(-1));
     std::fill(hA_val.data(), hA_val.data() + size_A, static_cast<T>(-1));
+    std::fill(hB_ptr_init.data(), hB_ptr_init.data() + size_ptr_B, static_cast<I>(-1));
+    std::fill(hB_ind_init.data(), hB_ind_init.data() + size_B, static_cast<J>(-1));
+    std::fill(hB_val_init.data(), hB_val_init.data() + size_B, static_cast<T>(-1));
+
+    host_dense_vector<I> hB_ptr_gold(hB_ptr_init);
+    host_dense_vector<J> hB_ind_gold(hB_ind_init);
+    host_dense_vector<T> hB_val_gold(hB_val_init);
 
     host_shuffle_csr(hA_single);
     for(int64_t batch = 0; batch < batch_count_B; ++batch)
@@ -366,9 +388,9 @@ void testing_spsort_csr(const Arguments& arg)
     device_dense_vector<I> dA_ptr(hA_ptr);
     device_dense_vector<J> dA_ind(hA_ind);
     device_dense_vector<T> dA_val(hA_val);
-    device_dense_vector<I> dB_ptr(size_ptr_B);
-    device_dense_vector<J> dB_ind(size_B);
-    device_dense_vector<T> dB_val(size_B);
+    device_dense_vector<I> dB_ptr(hB_ptr_init);
+    device_dense_vector<J> dB_ind(hB_ind_init);
+    device_dense_vector<T> dB_val(hB_val_init);
 
     rocsparse_local_spmat matA(M,
                                N,

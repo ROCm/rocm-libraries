@@ -136,6 +136,8 @@ struct Arguments
     rocsparse_int nmaxiter;
 
     int64_t       denseld;
+    int64_t       pad_A;
+    int64_t       pad_B;
     rocsparse_int batch_count;
     rocsparse_int batch_count_A;
     rocsparse_int batch_count_B;
@@ -161,6 +163,8 @@ struct Arguments
     bool call_stage_analysis;
     bool convert_to_int;
     bool integer_based_manufactured_solution;
+    bool offsets_batch_stride_zero_A;
+    bool offsets_batch_stride_zero_B;
     char filename[128];
     char function[64];
     char name[64];
@@ -294,6 +298,8 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(nfreeiter);
         ROCSPARSE_FORMAT_CHECK(nmaxiter);
         ROCSPARSE_FORMAT_CHECK(denseld);
+        ROCSPARSE_FORMAT_CHECK(pad_A);
+        ROCSPARSE_FORMAT_CHECK(pad_B);
         ROCSPARSE_FORMAT_CHECK(batch_count);
         ROCSPARSE_FORMAT_CHECK(batch_count_A);
         ROCSPARSE_FORMAT_CHECK(batch_count_B);
@@ -315,6 +321,8 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(call_stage_analysis);
         ROCSPARSE_FORMAT_CHECK(convert_to_int);
         ROCSPARSE_FORMAT_CHECK(integer_based_manufactured_solution);
+        ROCSPARSE_FORMAT_CHECK(offsets_batch_stride_zero_A);
+        ROCSPARSE_FORMAT_CHECK(offsets_batch_stride_zero_B);
         ROCSPARSE_FORMAT_CHECK(filename);
         ROCSPARSE_FORMAT_CHECK(function);
         ROCSPARSE_FORMAT_CHECK(name);
@@ -542,6 +550,8 @@ private:
         print("call_stage_analysis", arg.call_stage_analysis);
         print("convert_to_int", arg.convert_to_int);
         print("integer_based_manufactured_solution", arg.integer_based_manufactured_solution);
+        print("offsets_batch_stride_zero_A", arg.offsets_batch_stride_zero_A);
+        print("offsets_batch_stride_zero_B", arg.offsets_batch_stride_zero_B);
         print("name", arg.name);
         print("category", arg.category);
         print("hardware", arg.hardware);
@@ -555,6 +565,8 @@ private:
         print("nfreeiter", arg.nfreeiter);
         print("nmaxiter", arg.nmaxiter);
         print("denseld", arg.denseld);
+        print("pad_A", arg.pad_A);
+        print("pad_B", arg.pad_B);
         print("batch_count", arg.batch_count);
         print("batch_count_A", arg.batch_count_A);
         print("batch_count_B", arg.batch_count_B);

@@ -121,6 +121,8 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->nfreeiter                           = static_cast<rocsparse_int>(0);
         this->nmaxiter                            = static_cast<rocsparse_int>(0);
         this->denseld                             = static_cast<int64_t>(0);
+        this->pad_A                               = static_cast<int64_t>(0);
+        this->pad_B                               = static_cast<int64_t>(0);
         this->batch_count                         = static_cast<rocsparse_int>(0);
         this->batch_count_A                       = static_cast<rocsparse_int>(0);
         this->batch_count_B                       = static_cast<rocsparse_int>(0);
@@ -142,6 +144,8 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->call_stage_analysis                 = true;
         this->convert_to_int                      = false;
         this->integer_based_manufactured_solution = false;
+        this->offsets_batch_stride_zero_A         = false;
+        this->offsets_batch_stride_zero_B         = false;
         this->filename[0]                         = '\0';
         this->function[0]                         = '\0';
         this->name[0]                             = '\0';
@@ -430,6 +434,14 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      value<rocsparse_int>(&this->batch_stride)->default_value(128),
      "Indicates the batch stride for batched routines.")
 
+    ("pad_A",
+     value<int64_t>(&this->pad_A)->default_value(0),
+     "Indicates the number of unused elements between the batches of the sparse A matrix in rocsparse_spsort.")
+
+    ("pad_B",
+     value<int64_t>(&this->pad_B)->default_value(0),
+     "Indicates the number of unused elements between the batches of the sparse B matrix in rocsparse_spsort.")
+
 #ifdef ROCSPARSE_WITH_MEMSTAT
     ("memstat-report",
      value<std::string>(&this->b_memory_report_filename)->default_value("rocsparse_bench_memstat.json"),
@@ -464,7 +476,13 @@ void rocsparse_arguments_config::set_description(options_description& desc)
        "enable sparsity pattern statistics: min,max and median of the number of non-zeros per row and per column of the sparsity pattern of the matrix A will be part of benchmarking results.")
 
       ("no-stage-analysis",
-       "disable the stage analysis in algorithms where it applies.");
+       "disable the stage analysis in algorithms where it applies.")
+
+      ("offsets-batch-stride-zero-A",
+       "the batches of the sparse A matrix share one row or column pointer array in rocsparse_spsort.")
+
+      ("offsets-batch-stride-zero-B",
+       "the batches of the sparse B matrix share one row or column pointer array in rocsparse_spsort.");
     // clang-format on
 }
 
@@ -590,6 +608,16 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
     if(vm.count("no-stage-analysis"))
     {
         this->call_stage_analysis = false;
+    }
+
+    if(vm.count("offsets-batch-stride-zero-A"))
+    {
+        this->offsets_batch_stride_zero_A = true;
+    }
+
+    if(vm.count("offsets-batch-stride-zero-B"))
+    {
+        this->offsets_batch_stride_zero_B = true;
     }
 
     if(this->b_transA == 'N')
