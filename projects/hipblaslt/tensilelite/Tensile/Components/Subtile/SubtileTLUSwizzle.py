@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from typing import Optional
 import math
 
+from .SubtileGeometry import swizzleBitsForSubtile
+
 
 @dataclass(frozen=True)
 class TLUSwizzle:
@@ -154,6 +156,34 @@ def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
     stack = _stackOf(tileInfo)
     return _SWIZZLE_BY_STACK.get(stack) if stack is not None else None
 
+
+def selectTLU1B16SwizzleBits(tileInfo) -> int:
+    """Width of the bf16 TLU=1 m-block XOR for this tile; 0 when it is off.
+
+    THE single gate for that swizzle.  Both SubtileGREmit and SubtileLREmit must
+    call this and nothing else: the XOR is an involution, so GR permuting which
+    global rows a lane fetches and LR un-permuting on read compose to the
+    identity ONLY if both sides agree.  A one-sided swizzle assembles, runs, and
+    silently returns wrong A -- there is no assert that can catch it downstream,
+    which is why the decision lives in one function rather than in two matching
+    conditions.
+
+    Everything else in this module is fp4 chunk algebra and does not describe a
+    bf16 tile; this sits here to keep the TLU=1 swizzle decisions in one place.
+
+    Deliberately NOT gated on _sharedStrip, unlike the fp4 selectTLUSwizzle.
+    That gate exists because a cooperating wave fetches only a K slice, so its
+    chunk ramp yields k relative to the slice while the LR read reconstructs k
+    absolute.  The bf16 GR emit closes that gap directly: it sources the high k
+    bits from the fetch-group index (see _emitTLU1GRSwizzleB16), so k is
+    absolute for every wave and the involution holds.  Restoring the gate here
+    would cost the swizzle at every shape except MacroTile >= 256 with
+    MIWaveGroup [4, 1] -- one configuration out of nine -- and would leave
+    MT 64x64, where the LDS pressure is highest, unswizzled.
+    """
+    if float(tileInfo.bpe) != 2:
+        return 0
+    return swizzleBitsForSubtile(int(tileInfo.subtileShape[0]))
 
 
 # Stacks using column-scatter instead of a single-bit XOR.  On a shared strip
