@@ -196,7 +196,8 @@ struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMV2, Problem>
 template <typename Problem>
 struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMProducerConsumer, Problem>
 {
-    using pipeline = ck_tile::GemmPipelineAgBgCrCompTDMProducerConsumer<Problem>;
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompTDM<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompTDMProducerConsumer<Problem>;
 
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMProducerConsumer"; }
 };
@@ -281,53 +282,67 @@ class TestCkTileGemmPipeline : public ::testing::Test
         ck_tile::tuple_element_or_default_t<Tuple, 15, std::false_type>::value;
 
     protected:
+    // The kernel type the fixture instantiates for a given pad/preshuffle combination.
+    // Factored out of invoke_gemm so host-side argument-validation tests can reach
+    // Kernel::IsSupportedArgument without allocating device memory or launching.
     template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
-    void invoke_gemm(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& s)
+    struct KernelFor
     {
-        constexpr ck_tile::index_t M_Warp =
+        // CompTDMProducerConsumer stays at [2, 2, 1] (4 consumer + 2 producer waves).
+        //
+        // [4, 4, 1] was tried as the default and REVERTED: it passes SingleTile (64x64x32 and
+        // 128x128x64) on hardware and the host ring replay is sound at ring_spec<3, 2, 16> for
+        // every step count and interleaving, but LargeMatrix (2048x2048x2048) HANGS -- hard
+        // enough that killing the test left a queue the driver could not evict, which wedged
+        // the MES on a gpu_recovery=0 box. The host replay cannot see this because it models
+        // the barrier handshake, not the memory the handshake is supposed to order.
+        //
+        // So the 16-consumer-wave path is NOT merely untuned, it is unsafe at large shapes, and
+        // the cause is unknown. Do not restore it as the default, and do not add a pinned
+        // [4, 4, 1] type-list entry, until the large-shape hang is root-caused -- a gtest entry
+        // that hangs takes the whole device with it. The hang was observed while
+        // named_barrier.hpp was missing its release/acquire fences; those are restored now, so
+        // re-testing [4, 4, 1] against the fenced build is the first step in root-causing it.
+        static constexpr ck_tile::index_t M_Warp =
             PipelineType == GemmPipelineType::CompAsyncEightWaves ? 4 : 2;
-        constexpr ck_tile::index_t N_Warp = 2;
-        constexpr ck_tile::index_t K_Warp = 1;
+        static constexpr ck_tile::index_t N_Warp = 2;
+        static constexpr ck_tile::index_t K_Warp = 1;
 
-        // if cluster launch is enabled, set cluster dim to 2x2x1
-        constexpr ck_tile::index_t kClusterSizeM =
-            std::conditional_t<ClusterLaunch, ck_tile::number<2>, ck_tile::number<1>>{};
-        constexpr ck_tile::index_t kClusterSizeN =
-            std::conditional_t<ClusterLaunch, ck_tile::number<2>, ck_tile::number<1>>{};
-        constexpr ck_tile::index_t kClusterSizeK =
-            std::conditional_t<ClusterLaunch, ck_tile::number<1>, ck_tile::number<1>>{};
+        static constexpr ck_tile::index_t kClusterSizeM = ClusterLaunch ? 2 : 1;
+        static constexpr ck_tile::index_t kClusterSizeN = ClusterLaunch ? 2 : 1;
+        static constexpr ck_tile::index_t kClusterSizeK = 1;
 
-        constexpr bool kPadM      = PadM;
-        constexpr bool kPadN      = PadN;
-        constexpr bool kPadK      = PadK;
-        constexpr bool preshuffle = Preshuffle;
-
-        constexpr bool DoubleSmemBuffer = (PipelineType == GemmPipelineType::CompV4 ||
-                                           PipelineType == GemmPipelineType::CompAsync ||
-                                           PipelineType == GemmPipelineType::CompTDMV1 ||
-                                           PipelineType == GemmPipelineType::CompTDMV2);
+        // Must match what the tile engine emits (gemm_instance_builder.py,
+        // DOUBLE_SMEM_BUFFER_PIPELINES), or the gtest exercises a trait
+        // combination production never ships. CompTDMProducerConsumer does not
+        // read Problem::DoubleSmemBuffer -- it sizes LDS from its own NumSlots
+        // ring -- but CompTDMV1 and CompV4 both static_assert on it, so the two
+        // sides are kept in step deliberately rather than by accident.
+        //
+        // TransposeC below is the one deliberate exception: the tile engine pins
+        // comp_tdm_pc to false (verified ISA-identical on gfx1250, where every warp tile
+        // is 16x16 and gemm_universal C is RowMajor) to keep it directly comparable to
+        // comp_tdm_v2; the fixture keeps the generic gfx1250 rule.
+        static constexpr bool DoubleSmemBuffer =
+            (PipelineType == GemmPipelineType::CompV4 ||
+             PipelineType == GemmPipelineType::CompAsync ||
+             PipelineType == GemmPipelineType::CompTDMV1 ||
+             PipelineType == GemmPipelineType::CompTDMV2 ||
+             PipelineType == GemmPipelineType::CompTDMProducerConsumer);
 
 #if defined(CK_USE_GFX1250)
-        // gfx1250 only. Improve performance when C is RowMajor
-        // Note: TransposeC is not compatible with asymetric GEMM i.e. M_Warp_Tile != N_Warp_Tile
-        constexpr bool TransposeC =
+        static constexpr bool TransposeC =
             std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> &&
             M_Warp_Tile == N_Warp_Tile;
 #else
-        constexpr bool TransposeC = false;
+        static constexpr bool TransposeC = false;
 #endif
-        static constexpr bool StructuredSparsity = false;
-        static constexpr bool NumWaveGroup       = 1;
+        static constexpr bool StructuredSparsity       = false;
+        static constexpr ck_tile::index_t NumWaveGroup = 1;
 
-        // TODO: For now - but this should also be a test parameter
-
-        constexpr int kBlockPerCu                         = 1;
-        constexpr ck_tile::index_t TileParitionerGroupNum = 8;
-        constexpr ck_tile::index_t TileParitionerM01      = 4;
-
-        constexpr ck_tile::index_t VectorSize = 16;
-
-        // ===============================================
+        static constexpr ck_tile::index_t TileParitionerGroupNum = 8;
+        static constexpr ck_tile::index_t TileParitionerM01      = 4;
+        static constexpr ck_tile::index_t VectorSize             = 16;
 
         using GemmShape = std::conditional_t<
             ClusterLaunch,
@@ -348,9 +363,9 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                                                           TileParitionerM01>>;
 
         using GemmUniversalTraits =
-            ck_tile::TileGemmUniversalTraits<kPadM,
-                                             kPadN,
-                                             kPadK,
+            ck_tile::TileGemmUniversalTraits<PadM,
+                                             PadN,
+                                             PadK,
                                              DoubleSmemBuffer,
                                              ALayout,
                                              BLayout,
@@ -359,7 +374,7 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                              StructuredSparsity,
                                              Persistent,
                                              NumWaveGroup,
-                                             preshuffle,
+                                             Preshuffle,
                                              VectorSize,
                                              ck_tile::DataCachePrefetchKind::None,
                                              ck_tile::DataCachePrefetchKind::None,
@@ -407,6 +422,42 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                              BComputeDataType /*BComputeDataType_*/>>::epilogue;
 
         using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
+    };
+
+    public:
+    // Host-side argument validation without any allocation or launch. The pointers are
+    // never dereferenced: IsSupportedArgument only inspects extents and strides. This is
+    // the only way to exercise rejection paths whose trigger (a >2GB byte extent) cannot
+    // be allocated in a test.
+    template <bool PadM       = PipelineDefaultParams<PipelineType>::PadM,
+              bool PadN       = PipelineDefaultParams<PipelineType>::PadN,
+              bool PadK       = PipelineDefaultParams<PipelineType>::PadK,
+              bool Preshuffle = PipelineDefaultParams<PipelineType>::Preshuffle>
+    static bool IsArgSupported(const ck_tile::index_t M,
+                               const ck_tile::index_t N,
+                               const ck_tile::index_t K,
+                               const ck_tile::index_t stride_A,
+                               const ck_tile::index_t stride_B,
+                               const ck_tile::index_t stride_C,
+                               const ck_tile::index_t kbatch = 1)
+    {
+        using Kernel = typename KernelFor<PadM, PadN, PadK, Preshuffle>::Kernel;
+
+        ck_tile::GemmHostArgs args = {
+            nullptr, nullptr, nullptr, kbatch, M, N, K, stride_A, stride_B, stride_C};
+
+        return Kernel::IsSupportedArgument(Kernel::MakeKernelArgs(args));
+    }
+
+    protected:
+    template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
+    void invoke_gemm(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& s)
+    {
+        constexpr int kBlockPerCu = 1;
+
+        // ===============================================
+
+        using Kernel = typename KernelFor<PadM, PadN, PadK, Preshuffle>::Kernel;
         auto kargs   = Kernel::MakeKernelArgs(args);
 
         const dim3 blocks = Kernel::BlockSize();
