@@ -18,31 +18,29 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 /// @file DescriptorJsonRules.hpp
-/// @brief The error type and unknown-key rule every descriptor JSON reader shares: the
-///        descriptor loader and the `graph_match.nodes` pattern parser.
+/// @brief Error helper and unknown-key rule shared by the descriptor loader and the
+///        `graph_match.nodes` pattern parser.
 
 namespace hipdnn_plugin_sdk::ingestor::detail
 {
 
-/// Every parse violation leaves through here, so the caller catches one type. The message
-/// carries the file path only because `where` is the path: the caller logs it too, and the
-/// duplication is worth an exception that is readable on its own.
+/// Throws the one exception type every parse violation uses. `where` is the file path, so
+/// the message reads on its own even though the caller also logs the path.
 [[noreturn]] inline void fail(const std::string& message)
 {
     throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE, message);
 }
 
-/// Extension data has to look like extension data: a key starting `x-` or `_`, plus
-/// `provenance`, the one unprefixed block the descriptor packager emits. Those warn and
-/// are ignored, so a descriptor can carry tracking fields the loader has no use for.
+/// True for an extension key: one starting `x-` or `_`, or `provenance`, the one
+/// unprefixed block the descriptor packager emits. Extension keys log a warning and are
+/// ignored, so a descriptor can carry tracking fields the loader does not use.
 ///
-/// Anything else the struct does not spell fails the file, because the alternative is
-/// silent damage. A UED spelling `heuristik` has no heuristic key, and absence is legal:
-/// the engine loads and ranks by the fallback heuristic for the rest of its life. A KDP
-/// spelling `arh` is arch-independent and dispatches its kernels on every GPU. The
-/// default log level is `off` (LogLevel.hpp), so a warning about either reaches nobody.
-/// A producer that wants a key of its own prefixes it -- a one-line change there, against
-/// a descriptor tree that otherwise cannot be trusted to mean what it spells.
+/// Any other key the struct does not define fails the file, because a typo would otherwise
+/// do silent damage. A UED spelling `heuristik` has no heuristic, which is legal, so the
+/// engine ranks by the fallback heuristic forever. A KDP spelling `arh` becomes
+/// arch-independent and dispatches its kernels on every GPU. The default log level is
+/// `off` (LogLevel.hpp), so a warning would reach nobody. A producer that needs its own key
+/// gives it a prefix.
 inline bool isExtensionKey(std::string_view key)
 {
     return key.rfind("x-", 0) == 0 || key.rfind('_', 0) == 0 || key == "provenance";

@@ -4,10 +4,10 @@
 
 """Unit tests for gen_op_schema_registry.py's classification and emitters.
 
-Drives the Registry with hand-built reflection schemas, so no flatc invocation and no
-compilation is needed. What is pinned here is the generator's policy (RFC 0020 Appendix
-B.3): which fields become edges, which become attributes and with what value kind, and
-that every schema the registry cannot describe faithfully fails the run.
+Uses hand-built reflection schemas, so neither flatc nor a compiler is needed. The tests
+cover the generator's policy (RFC 0020 Appendix B.3): which fields become edges, which
+become attributes and with what value kind, and that any schema the registry cannot
+describe faithfully fails the run.
 """
 
 import json
@@ -113,7 +113,7 @@ def pointwise_like():
         [
             field("operation", "Byte", 0, index=MODE_ENUM),
             field("relu_lower_clip", "Float", 1, optional=True),
-            # Named like a uid but an axis index: no cache_uid, no flag.
+            # Named like a uid, but an axis index with no cache_uid and no flag.
             field("axis_tensor_uid", "Long", 2, optional=True),
             edge("in_0_tensor_uid", 3, "matcher_input_tensor", "in_0"),
             edge("in_1_tensor_uid", 4, "matcher_input_tensor", "in_1", optional=True),
@@ -145,7 +145,7 @@ class TestRegistryEntry(unittest.TestCase):
                 "results": [{"name": "out_0", "optional": False}],
                 "operand_lists": [],
                 "result_lists": [],
-                # Declaration order; the vector is skipped; the Node scalar comes last.
+                # Declaration order. The vector is skipped and the Node scalar comes last.
                 "attributes": [
                     {"name": "operation", "kind": "enum_name", "optional": False},
                     {"name": "relu_lower_clip", "kind": "float", "optional": True},
@@ -176,7 +176,7 @@ class TestRegistryEntry(unittest.TestCase):
             ]
         )
         op = json.loads(emit_json(registry))["ops"]["custom_op"]
-        # Declaration order, and the lists stay out of the bindable edges.
+        # Lists keep declaration order and never appear among the bindable edges.
         self.assertEqual(
             op["operand_lists"],
             [{"name": "input_tensor_uids"}, {"name": "aux_tensor_uids"}],
@@ -242,7 +242,7 @@ class TestBuildErrors(unittest.TestCase):
         self.assertFails([table("Op", [bad], "op")], r"Op\.x'.*integer")
 
     def test_a_cache_uid_vector_without_a_direction_flag_fails(self):
-        # Skipped like any other vector, it would hide the tensors the op produces.
+        # Skipping it like other vectors would hide the tensors it references.
         bad = field("xs", "Vector", 0, element="Long", cache_uid=True)
         self.assertFails([table("Op", [bad], "op")], r"Op\.xs'.*cache_uid.*edge list")
 

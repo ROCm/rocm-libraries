@@ -211,8 +211,8 @@ TEST(TestGraphPatternMatcher, DeclinesGraphRepeatingATensorUid)
 
 TEST(TestGraphPatternMatcher, DeclinesTensorTwoNodesProduce)
 {
-    // Neither pattern node reads the other's output, so no variable joins them; only the
-    // graph's one-producer rule sees both graph nodes writing uid 3.
+    // Neither pattern node reads the other's output, so no variable links them. Only the
+    // graph's one-producer rule catches both graph nodes writing uid 3.
     PatternGraphBuilder graph;
     graph.tensor(1).tensor(2).tensor(3);
     graph.node(pointwiseNode(PointwiseMode::ABS, 1, std::nullopt, 3));
@@ -226,8 +226,8 @@ TEST(TestGraphPatternMatcher, DeclinesNodeTypeTheRegistryDoesNotDescribe)
     const PatternTestGraph known(pointwiseGraphTaggedAs(NodeAttributes::PointwiseAttributes));
     ASSERT_TRUE(matchGraphPattern(*compiled, known.context()).has_value());
 
-    // The first discriminant past this build's union, as a graph from a newer schema
-    // carries; the verifier accepts it, so the matcher has to refuse it.
+    // One past the last discriminant in this build's union, as a graph from a newer schema
+    // might carry. The verifier accepts it, so the matcher must reject it.
     const auto newer = static_cast<NodeAttributes>(static_cast<uint8_t>(NodeAttributes::MAX) + 1);
     const PatternTestGraph unknown(pointwiseGraphTaggedAs(newer));
     EXPECT_FALSE(matchGraphPattern(*compiled, unknown.context()).has_value());
@@ -325,8 +325,8 @@ TEST(TestGraphPatternMatcher, DeclinesChainWhoseConsumerReadsAnotherTensor)
 
 TEST(TestGraphPatternMatcher, DeclinesGraphInputVariableProducedInsideTheGraph)
 {
-    // `$a` is not produced by any pattern node, so it must be a graph input; the graph
-    // computes it with the convolution instead.
+    // No pattern node produces `$a`, so it must be a graph input. Here the convolution
+    // computes it instead.
     const std::string disconnected = R"([
         {"kind": "op", "id": "conv", "op": "convolution_fwd",
          "operands": {"x": "$x", "w": "$w"}, "results": {"y": "$conv_out"}},
@@ -359,7 +359,7 @@ TEST(TestGraphPatternMatcher, CountsATensorACustomOpListProducesAsProduced)
     EXPECT_EQ(tryGetBoundInt(*sharedInput, "a"), 1);
 
     EXPECT_FALSE(match(customThenPointwise, graphWithPointwise(2, 3)).has_value());
-    // The pointwise result writes uid 2 as well, a second producer.
+    // The pointwise node also writes uid 2, giving it a second producer.
     EXPECT_FALSE(match(customThenPointwise, graphWithPointwise(1, 2)).has_value());
 }
 
@@ -436,9 +436,9 @@ TEST(TestGraphPatternMatcher, DeclinesAndWarnsWhenTheSearchExceedsItsBudget)
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
 
-    // Ten interchangeable unary nodes. A graph whose last node is binary leaves no
-    // complete assignment, and proving that means trying every order of the other nine,
-    // far more than the budget allows.
+    // Ten interchangeable unary nodes. If the last graph node is binary, no complete
+    // assignment exists. Proving that means trying every order of the other nine, which
+    // exceeds the search budget.
     constexpr int64_t NODE_COUNT = 10;
     nlohmann::json nodes = nlohmann::json::array();
     for(int64_t i = 0; i < NODE_COUNT; ++i)

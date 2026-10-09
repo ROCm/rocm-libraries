@@ -92,7 +92,7 @@ TEST(TestBindingPublication, OwnsCanonicalTensorFieldsAfterSerializedStorageDies
 TEST(TestBindingPublication, PublishesEveryScalarArmAndDtypeInterpretation)
 {
     expectScalar(scalar(DataType::FLOAT, Float32Value(-2.5f)), -2.5f);
-    // HALF/BFLOAT16 store float32 values here; do not round them to 16 bits.
+    // HALF and BFLOAT16 hold float32 values here, so they must not be rounded to 16 bits.
     expectScalar(scalar(DataType::HALF, Float16Value(1.0001f)), 1.0001f);
     expectScalar(scalar(DataType::BFLOAT16, BFloat16Value(1.0001f)), 1.0001f);
     expectScalar(scalar(DataType::UINT8, Float8Value(0xff)), 255.0f);

@@ -60,7 +60,7 @@ const Node& rootNode(const ::flatbuffers::DetachedBuffer& buffer)
     return finishNode(builder, NodeAttributes::CustomOpAttributes, attributes.Union());
 }
 
-// ADD of in_0 = 1 into out_0 = 2; the optional in_1 is absent.
+// ADD with in_0 = 1 and out_0 = 2. The optional in_1 is absent.
 ::flatbuffers::DetachedBuffer buildPointwiseAddNode()
 {
     ::flatbuffers::FlatBufferBuilder builder;

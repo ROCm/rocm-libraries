@@ -65,8 +65,8 @@ std::filesystem::path fixtureDirectory()
     return sharedDataDirectory() / "test_fixtures" / "ued";
 }
 
-/// Every `*.json` file in the corpus, sorted so the parameter order is stable. Empty if the
-/// directory is missing; FixtureCorpusHoldsBothVerdicts turns that into a failure.
+/// Every `*.json` file in the corpus, sorted so the parameter order is stable. Returns an empty
+/// list if the directory is missing. FixtureCorpusHoldsBothVerdicts reports that as a failure.
 std::vector<UedFixture> listFixtures()
 {
     std::vector<UedFixture> fixtures;
@@ -95,8 +95,8 @@ nlohmann::json readJson(const std::filesystem::path& path)
     return nlohmann::json::parse(file);
 }
 
-/// The text a fixture asks the loader to read: `ued_text` verbatim when present (a document
-/// plain JSON cannot hold, such as one repeating a key), otherwise `ued` serialized.
+/// The text the loader reads for a fixture. Uses `ued_text` verbatim when present, otherwise
+/// serializes `ued`. `ued_text` holds documents plain JSON cannot, such as a repeated key.
 std::string uedText(const nlohmann::json& fixture)
 {
     const auto text = fixture.find("ued_text");
@@ -147,7 +147,7 @@ const nlohmann::json& patternNodeSchema(const nlohmann::json& schema)
     return schema.at("properties").at("graph_match").at("properties").at("nodes").at("items");
 }
 
-/// The object arm of a node's `op` (`{"one_of": [...]}`); the other arm is a bare string.
+/// The `{"one_of": [...]}` arm of a node's `op`. The other arm is a bare string.
 const nlohmann::json& opcodeSetSchema(const nlohmann::json& schema)
 {
     for(const auto& arm : patternNodeSchema(schema).at("properties").at("op").at("oneOf"))
@@ -166,10 +166,9 @@ class TestUedFixtureParity : public ::testing::TestWithParam<UedFixture>
 
 } // namespace
 
-/// The loader is driven through its file entry point, so a fixture is judged exactly as an
-/// installed descriptor would be: duplicate-key rejection on the raw text, the version gate,
-/// the structural checks, and pattern compilation against the op-schema registry. Native
-/// symbols are not registered here, so a native fixture's verdict is structural only.
+/// Loads each fixture through the file entry point, so it gets every check an installed
+/// descriptor gets, from duplicate-key rejection through pattern compilation. No native
+/// symbols are registered, so native fixtures are checked for structure only.
 TEST_P(TestUedFixtureParity, RuntimeAgreesWithTheFixtureVerdict)
 {
     const auto fixture = readJson(GetParam().path);
@@ -196,8 +195,8 @@ INSTANTIATE_TEST_SUITE_P(Fixtures,
                              return info.param.name;
                          });
 
-/// A corpus that failed to install, or one holding only one verdict, would let the
-/// parameterized test above pass while comparing nothing.
+/// Guards against a missing corpus, or one with a single verdict, letting the parameterized
+/// test pass without comparing anything.
 TEST(TestUedFixtureParity, FixtureCorpusHoldsBothVerdicts)
 {
     size_t valid = 0;
@@ -225,8 +224,8 @@ TEST(TestUedFixtureParity, SchemaTopLevelKeysMatchTheLoader)
     EXPECT_EQ(stringsOf(schema.at("required")), setOf(UED_REQUIRED_KEYS));
 }
 
-/// The loader requires exactly one arm; the schema says so as a oneOf of single-key
-/// `required` arms rather than a `required` list of its own.
+/// The loader requires exactly one arm. The schema expresses this as a oneOf of single-key
+/// `required` arms, with no top-level `required` list.
 TEST(TestUedFixtureParity, SchemaGraphMatchArmsMatchTheLoader)
 {
     const auto schema = readSchema();
@@ -256,8 +255,8 @@ TEST(TestUedFixtureParity, SchemaPatternNodeKeysMatchTheParser)
     EXPECT_EQ(keysOf(opcodeSetSchema(schema).at("properties")), setOf(PATTERN_OPCODE_SET_KEYS));
 }
 
-/// Every object the runtime closes to unknown keys tolerates the same extension keys in the
-/// schema: those detail::isExtensionKey accepts, and no others.
+/// Each object the runtime closes to unknown keys allows, in the schema, exactly the
+/// extension keys that detail::isExtensionKey accepts.
 TEST(TestUedFixtureParity, SchemaExtensionKeysMatchTheLoader)
 {
     const auto schema = readSchema();

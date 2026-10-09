@@ -42,8 +42,8 @@
  * Three packs (add, mul, sub) share one applicability matcher -- node shape, binary,
  * one element, uniform dtype -- evaluated once per graph; each pack adds only an
  * operation check, so RFC 0017 §6 keeps them disjoint without duplicating that work.
- * The operation check also re-reads the binding's operand facts (token lookups, not
- * graph reads), because a declarative `graph_match` can replace the shared matcher.
+ * That check also re-reads the operand facts from the binding, because a declarative
+ * `graph_match` can replace the shared matcher.
  * Symbol names are restated here rather than shared via a header, since a descriptor
  * can't reference a C++ constant; the loader pre-flights every symbol a descriptor
  * names, so a mismatched string is caught without becoming a compile error.
@@ -98,8 +98,9 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
     return it == tensors.end() ? nullptr : it->second;
 }
 
-/// Packedness alone is not enough: require one element and a supported rank and layout.
-/// Use the shared stride order for singleton axes.
+/// Requires one element, a supported rank, and a channel-first or channel-last stride
+/// order. Every single-element tensor is packed, so layout comes from the published
+/// stride order, which uses the shared ordering rule for singleton axes.
 bool isSupportedOperand(const BoundTokens& bound, std::string_view root)
 {
     const auto rank = tryGetBoundInt(bound, tensorField(root, "rank"));
@@ -133,12 +134,11 @@ bool isSupportedOperand(const BoundTokens& bound, std::string_view root)
 }
 
 /**
- * @brief Every fact the dispatch relies on, read from the binding alone: one node, and
- *        three supported operands of one dtype.
+ * @brief Checks every binding fact the dispatch relies on: one node and three supported
+ *        operands of one dtype.
  *
- * Read from tokens rather than the graph so it holds whichever `graph_match` arm bound
- * them -- a declarative pattern can pair with this pack's dispatch, and its binding has
- * passed none of the native graph match's checks.
+ * Reads tokens instead of the graph because a declarative `graph_match` can bind them,
+ * and that binding skips the native graph match's checks.
  */
 bool isServableBinding(const BoundTokens& bound)
 {
@@ -194,7 +194,7 @@ bool publishPointwiseNode(BoundTokens& bound,
            && publishFloat("pointwise.softplus_beta", attributes.softplus_beta());
 }
 
-/// Return attributes for a single-node pointwise graph, or nullptr.
+/// Returns the node's attributes for a single-node pointwise graph, or nullptr.
 const data_objects::PointwiseAttributes* pointwiseNode(const MatchContext& context)
 {
     if(context.graph.nodeCount() != 1)
@@ -262,11 +262,10 @@ std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
  *
  * Listing this second matcher is the whole cost of a pack, and two packs claiming the
  * same operation would be the authoring mistake, not two packs sharing the graph check.
- * Every pack lists it, so it also re-checks the binding the dispatch relies on: a
- * declarative `graph_match` admits graphs the native one refuses. Operand roles are not
- * re-checked: the binding does not record which edge fed which root, and this criterion
- * reads the binding rather than the graph, so a pattern binding `input_a` to `in_1`
- * (a reversed SUB) is the pattern author's error to avoid.
+ * Every pack lists it, so it also re-checks the binding the dispatch relies on. A
+ * declarative `graph_match` can admit graphs the native one refuses. Operand roles are
+ * not checked because the binding does not record which edge fed which root. A pattern
+ * that binds `input_a` to `in_1`, reversing a SUB, is an authoring error.
  */
 bool pointwiseOperationMatches(const BoundTokens& bound, data_objects::PointwiseMode operation)
 {
@@ -290,7 +289,7 @@ bool pointwiseSubMatches(const MatchContext& /*context*/, const BoundTokens& bou
     return pointwiseOperationMatches(bound, data_objects::PointwiseMode::SUB);
 }
 
-/// Match each kernel using the published dtype.
+/// Accepts only kernels compiled for the binding's dtype.
 bool pointwiseKernelMatches(const MatchContext& /*context*/,
                             const BoundTokens& bound,
                             const KernelDefinition& kernel)

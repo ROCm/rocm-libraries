@@ -5,23 +5,23 @@
 
 For every table in the ``NodeAttributes`` union, the registry records the opcode a UED
 pattern names it by, its operand and result tensor edges, its operand and result edge
-lists (tensor-uid vectors), and its scalar attributes (RFC 0020 Appendix B). The policy
-comes from the ``matcher_opcode``, ``matcher_input_tensor``, ``matcher_output_tensor``, and
-``matcher_name`` schema annotations, read from the binary schema since flatc's C++ output
-doesn't expose them.
+lists (tensor-uid vectors), and its scalar attributes (RFC 0020 Appendix B). The
+``matcher_opcode``, ``matcher_input_tensor``, ``matcher_output_tensor``, and
+``matcher_name`` schema annotations define this. flatc's C++ output does not expose
+annotations, so they are read from the binary schema.
 
-Emits two files from one schema walk, so they cannot disagree:
+Writes two files from one schema walk, so they always agree:
 
 - ``op_schema_registry_generated.h``: the header-only registry the kernel ingestor
   compiles, with a typed accessor per edge and attribute.
 - ``op_schema_registry.json``: the same registry for build-time tools (hkp_pack).
 
-A schema the registry cannot describe faithfully fails the run with an ``ERROR:``
-naming the table and field, rather than emitting a wrong registry.
+If the registry cannot describe a schema faithfully, the run fails with an ``ERROR:``
+that names the table and field. No registry is written.
 
-Takes no arguments: it re-derives both files. Run manually, from the build via the
-custom target in flatbuffers_sdk/CMakeLists.txt, or through the
-``op-schema-registry-hipdnn`` pre-commit hook.
+Each run regenerates both files. Run it manually, from the build through the custom
+target in flatbuffers_sdk/CMakeLists.txt, or through the ``op-schema-registry-hipdnn``
+pre-commit hook.
 """
 
 import argparse
@@ -57,9 +57,9 @@ NAME_ATTRIBUTE = "matcher_name"
 FIELD_ATTRIBUTES = frozenset([INPUT_ATTRIBUTE, OUTPUT_ATTRIBUTE, NAME_ATTRIBUTE])
 ANNOTATION_PREFIX = "matcher_"
 
-# Owned by gen_cache_key.py: an integer or integer vector carrying it is a tensor
-# reference, which the registry must classify as an edge or edge list rather than
-# publish as an attribute or skip.
+# Defined by gen_cache_key.py. An integer or integer vector carrying cache_uid is a
+# tensor reference. The registry must classify it as an edge or edge list, never
+# publish it as an attribute or skip it.
 UID_ATTRIBUTE = "cache_uid"
 IGNORE_ATTRIBUTE = "cache_ignore"
 

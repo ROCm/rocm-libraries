@@ -151,8 +151,8 @@ repos:
         files: ^projects/hipdnn/flatbuffers_sdk/schemas/.*\.fbs$|^projects/hipdnn/scripts/gen_cache_key\.py$|^projects/hipdnn/cmake/default_flatc_version\.txt$
         pass_filenames: false
 
-      # Same shape as cache-key-hipdnn, for the op-schema registry header and JSON.
-      # Also fires on gen_cache_key.py, whose schema loader the generator imports.
+      # Regenerates the op-schema registry header and JSON, like cache-key-hipdnn.
+      # Also runs on gen_cache_key.py changes because the generator imports its schema loader.
       - id: op-schema-registry-hipdnn
         name: op-schema registry codegen (hipDNN)
         entry: python projects/hipdnn/scripts/gen_op_schema_registry.py

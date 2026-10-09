@@ -23,7 +23,7 @@ namespace hipdnn_plugin_sdk::ingestor
 
 /// Takes @p set by value so a caller building both an engine and its state manager
 /// builds the set once.
-/// @param graphMatch The engine's `graph_match`; std::monostate means the engine
+/// @param graphMatch The engine's `graph_match`. std::monostate means the engine
 ///        declares none and binds no tokens.
 /// @param describedBy Names the engine in a native graph_match resolution failure and in the
 ///        warning an engine shipping no heuristic gets. Defaulted from @p set, but a

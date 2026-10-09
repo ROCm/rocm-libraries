@@ -121,8 +121,9 @@ auto convertTensorValue(data_objects::DataType dataType,
     }
 }
 
-// Integer arithmetic preserves ties-to-even rounding and subnormals regardless
-// of the host's floating-point settings. Shifts must be in [1, 53].
+// Shifts value right by shift bits, rounding to nearest with ties to even. Integer arithmetic
+// keeps rounding and subnormals independent of the host floating-point mode.
+// shift must be in [1, 53].
 inline uint64_t roundRightToEven(uint64_t value, unsigned int shift)
 {
     const auto result = value >> shift;
@@ -239,9 +240,9 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributes* ten
                                       [](auto value) { return static_cast<TargetType>(value); });
 }
 
-/// Convert a stored scalar to finite float32 using round-to-nearest, ties-to-even.
-/// Check the dtype/union pair and double range before conversion.
-/// Stored runtime defaults are read too; callers decide whether to publish them.
+/// Converts a stored scalar to a finite float32, rounding to nearest with ties to even.
+/// Throws when the data type and union type disagree, or the value is not finite in float32.
+/// Reads stored runtime defaults too. Callers decide whether to publish them.
 inline float extractFiniteFloatFromTensorValue(const data_objects::TensorAttributesT& tensorAttr,
                                                const char* paramName)
 {

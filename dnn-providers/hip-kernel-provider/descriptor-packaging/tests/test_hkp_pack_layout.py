@@ -883,10 +883,10 @@ def test_example_tree_field_shape_matches_the_runtime_fixture():
 
 
 def _named_native_symbols(path, doc):
-    """The native symbols one descriptor names, by the field that names each.
+    """Return the native symbols a descriptor names, read from the naming fields.
 
-    A UED names one only on the `native` arm of `graph_match`; a `nodes`
-    pattern is resolved against the op-schema registry, not a native symbol.
+    A UED names one only in the `native` arm of `graph_match`. A `nodes` pattern
+    names no native symbol.
     """
     kind = path.name.split(".")[-2]
     if kind == "ued":
@@ -925,8 +925,8 @@ def test_example_tree_native_symbols_are_registered():
     for path in _descriptor_files(EXAMPLE_ROOT):
         for symbol in _named_native_symbols(path, _read(path)):
             named.setdefault(symbol, set()).add(path.name)
-    # Every example engine uses the native arm, so a graph_match the walk no
-    # longer reads would show up as no UED symbol at all.
+    # Every example engine uses the native arm, so no UED symbol at all means the
+    # walk is broken.
     assert any(
         name.endswith(".ued.json") for names in named.values() for name in names
     ), "no UED names a native graph_match; the walk is broken, not the tree"
@@ -1707,8 +1707,8 @@ def test_embedded_source_generics_are_identical_across_shards(
     authored = root / "pointwise"
     ued_path = authored / "solo.ued.json"
     ued = _read(ued_path)
-    # A declarative pattern packs like any other generic: validated, then
-    # shipped byte for byte.
+    # A declarative pattern is validated and shipped byte for byte, like any other
+    # generic.
     ued["graph_match"] = {
         "nodes": [
             {

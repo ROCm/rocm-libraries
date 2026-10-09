@@ -29,9 +29,9 @@ _SCALAR_TYPES = (str, int, float, bool)
 # the name-char class on both halves.
 _UED_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
 
-# The UED members the runtime loader accepts and the ones it requires (loader is
-# authoritative: DescriptorLoader.hpp parseEngineDescriptor). The JSON Schema in
-# projects/hipdnn/plugin_sdk/schemas declares the same sets.
+# UED members the runtime loader accepts, and the members it requires. The loader
+# (parseEngineDescriptor in DescriptorLoader.hpp) is authoritative. The JSON Schema
+# in projects/hipdnn/plugin_sdk/schemas declares the same sets.
 UED_KEYS = (
     "version",
     "id",
@@ -46,7 +46,7 @@ UED_KEYS = (
 )
 UED_REQUIRED_KEYS = ("version", "id", "name", "metadata")
 
-# The two `graph_match` arms; a UED carries exactly one.
+# A UED's `graph_match` carries exactly one of these arms.
 GRAPH_MATCH_ARMS = ("nodes", "native")
 
 
@@ -451,11 +451,11 @@ def _require_string(doc, key, where):
 
 
 def _validate_ued(desc, op_schema_registry=None):
-    """Validate a UED as the runtime loader parses it.
+    """Validate a UED with the rules the runtime loader applies.
 
-    A `nodes` pattern is resolved against the op-schema registry; see
-    graph_pattern.resolve_op_schema_registry for where op_schema_registry
-    defaults to. Native symbol registration is checked by the runtime alone.
+    A `nodes` pattern is resolved against the op-schema registry. See
+    graph_pattern.resolve_op_schema_registry for the default path. Only the
+    runtime checks that a native symbol is registered.
     """
     doc = desc.doc
     where = f"UED {desc.path.name}"
@@ -467,7 +467,7 @@ def _validate_ued(desc, op_schema_registry=None):
             f"{where} name '{name}' must be scoped 'namespace:local' "
             "matching ^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$"
         )
-    # The packer permits non-UUID IDs; the runtime requires UUIDs.
+    # The runtime requires a UUID id. The packer accepts any nonempty string.
     for key in ("id", "metadata"):
         _require_string(doc, key, where)
     if "heuristic" in doc:
@@ -611,12 +611,12 @@ def load_flat_input(
     dot-prefixed segment, or a dot-prefixed filename -- is warned and skipped
     the same way, so nothing the walk passes over is invisible. Raises
     HkpPackError on any malformed / missing-field / unknown-type /
-    dangling-reference descriptor that IS type-tagged, and on a duplicate JSON
-    key at any depth, which the runtime loader refuses too.
+    dangling-reference descriptor that IS type-tagged. A duplicate JSON key at
+    any depth also raises, as it does in the runtime loader.
 
-    op_schema_registry names the op-schema registry a UED's `graph_match.nodes`
-    pattern resolves against; graph_pattern.resolve_op_schema_registry gives
-    the default. It is read only when some UED carries a pattern.
+    `op_schema_registry` is the registry a UED's `graph_match.nodes` pattern
+    resolves against. graph_pattern.resolve_op_schema_registry supplies the
+    default. The registry is read only when a UED carries a pattern.
 
     `exclude_folders` names top-level child folders of the root that are not
     content in this build: nothing under one is read, validated or shipped.

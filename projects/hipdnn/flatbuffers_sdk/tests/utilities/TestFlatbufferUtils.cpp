@@ -254,7 +254,7 @@ TEST(TestFlatbufferUtils, ExtractSignedInt8BeforeWidening)
 TEST(TestFlatbufferUtils, ExtractFiniteFloatUsesNumericalPayloadForEveryUnionArm)
 {
     expectFiniteValue(makeStoredScalar(DataType::FLOAT, Float32Value(1.0001f)), 1.0001f);
-    // HALF/BFLOAT16 store float32 values here; do not round them to 16 bits.
+    // HALF and BFLOAT16 values are stored as float32 and must not be rounded to 16 bits.
     expectFiniteValue(makeStoredScalar(DataType::HALF, Float16Value(1.0001f)), 1.0001f);
     expectFiniteValue(makeStoredScalar(DataType::BFLOAT16, BFloat16Value(1.0001f)), 1.0001f);
     expectFiniteValue(makeStoredScalar(DataType::DOUBLE, Float64Value(16777217.0)), 16777216.0f);
@@ -383,7 +383,7 @@ TEST(TestFlatbufferUtils, ExtractFiniteFloatRejectsNonfiniteNumericalPayloads)
         expectInvalidFiniteValue(
             makeStoredScalar(DataType::DOUBLE, Float64Value(static_cast<double>(value))));
     }
-    // Generic scalar reads allow nonfinite values; publication rejects them.
+    // extractValueFromTensorValue accepts nonfinite values.
     expectGenericValue(
         makeStoredScalar(DataType::DOUBLE, Float64Value(std::numeric_limits<double>::infinity())),
         std::numeric_limits<double>::infinity());

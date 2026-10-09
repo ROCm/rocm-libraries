@@ -146,13 +146,12 @@ public:
     /// @throws std::runtime_error a UMD or the engine's native graph_match names a symbol
     /// this build does not ship.
     ///
-    /// Matcher, dispatch, and native graph_match symbols resolve here, eagerly, so a
-    /// missing one excludes this engine at construction instead of throwing later from
-    /// isApplicable(). A declarative graph_match arrives already compiled.
-    /// @param describedBy Names the engine in a native graph_match resolution failure,
-    ///        which is the only one of the three that has no descriptor of its own to
-    ///        name: the symbol lives on the UED, so without this the diagnostic would
-    ///        carry the symbol string alone.
+    /// Matcher, dispatch, and native graph_match symbols resolve here, so a missing symbol
+    /// excludes the engine at construction rather than throwing later from isApplicable().
+    /// A declarative graph_match arrives already compiled.
+    /// @param describedBy Names the engine when a native graph_match symbol fails to
+    ///        resolve. That symbol lives on the UED, so unlike matcher and dispatch symbols
+    ///        it has no descriptor of its own to name.
     /// @param engineName The engine's own scoped name (`EngineDescriptor::name`), used to
     ///        compose the on-disk winner-cache shard path -- not `describedBy`, which is
     ///        a diagnostic string, not a path component. Defaults to empty so existing
@@ -683,8 +682,8 @@ private:
     /// Runs @p context's graph_match once (lazily, on the first pack that clears the
     /// arch gate; absent means the engine binds nothing and always proceeds with an
     /// empty map) and every pack's UMDs: graph-scoped criteria (memoized across
-    /// packs), then kernel-scoped ones. The binding rides on the returned catalog, so
-    /// the (graph, device) catalog cache also caches the match.
+    /// packs), then kernel-scoped ones. The returned catalog holds the binding, so the
+    /// (graph, device) catalog cache also caches the match.
     Catalog buildCatalog(const MatchContext& context) const
     {
         Catalog catalog;

@@ -1,17 +1,17 @@
 """Pack-time validation of a UED's declarative `graph_match.nodes` pattern.
 
-Applies the rules the runtime applies when it loads the pattern (RFC 0020
-§4.3), so a pattern the runtime would refuse fails the pack instead of
-dropping the engine at load:
+Applies the checks the runtime runs when it loads a pattern (RFC 0020 §4.3).
+A pattern the runtime would refuse then fails the pack instead of dropping the
+engine at load. There are two stages:
 
-- Well-formedness (§4.3.2), checkable from the block alone. Mirrors
-  parseGraphPattern in GraphPattern.hpp.
-- Registry resolution (§4.3.3), against the op-schema registry generated from
-  the annotated FlatBuffers schemas. Mirrors compileGraphPattern in
+- Well-formedness, checked from the block alone. Mirrors parseGraphPattern in
+  GraphPattern.hpp.
+- Resolution against the op-schema registry, which is generated from the
+  annotated FlatBuffers schemas. Mirrors compileGraphPattern in
   CompiledGraphPattern.hpp.
 
-The runtime is authoritative; the limits and reserved names below are copies
-of its constants.
+The runtime is authoritative. The limits and reserved names below copy its
+constants.
 """
 
 import functools
@@ -28,23 +28,23 @@ MAX_PATTERN_NODES = 32
 MAX_PATTERN_EDGES_PER_NODE = 64
 MAX_PATTERN_OPCODE_SET = 32
 
-# Member names of one pattern node object, and the ones it must carry.
+# Keys a pattern node may carry, and the keys it must carry.
 NODE_KEYS = ("kind", "id", "op", "operands", "results")
 NODE_REQUIRED_KEYS = ("kind", "id", "op")
 
-# Symbol roots the runtime publishes itself; neither a node id nor a pattern
-# variable may take one (RFC 0020 §6.1).
+# Symbol roots the runtime publishes. Node ids and pattern variables cannot use
+# them (RFC 0020 §6.1).
 RESERVED_ROOTS = ("graph", "kernel", "device")
 
 _IDENT_PATTERN = r"[A-Za-z_][A-Za-z0-9_]*"
 _IDENT_RE = re.compile(rf"^{_IDENT_PATTERN}$")
 _BINDING_RE = re.compile(rf"^\$({_IDENT_PATTERN})(\?)?$")
 
-# Environment override for the registry location. CMake sets it for the test
-# entries; the pack step passes the path explicitly instead.
+# Environment override for the registry path. CMake sets it for tests and the
+# configure probe. The pack step passes the path as an argument.
 OP_SCHEMA_REGISTRY_ENV = "HKP_OP_SCHEMA_REGISTRY"
 
-# The committed registry, located through the repository layout:
+# The committed registry. This package sits at
 # <repo>/dnn-providers/hip-kernel-provider/descriptor-packaging/python/hkp_pack.
 DEFAULT_OP_SCHEMA_REGISTRY = (
     Path(__file__).resolve().parents[5]
@@ -57,7 +57,7 @@ DEFAULT_OP_SCHEMA_REGISTRY = (
 
 @dataclass(frozen=True)
 class OpSchema:
-    """One registry entry: each edge name maps to whether it is optional."""
+    """One registry entry. Each edge name maps to True if the edge is optional."""
 
     opcode: str
     operands: dict
@@ -80,7 +80,7 @@ class _Node:
 
 
 def resolve_op_schema_registry(path=None):
-    """The registry path: explicit argument, then environment, then the repo copy."""
+    """Return the registry path from the argument, the environment, or the repo copy."""
     if path is not None:
         return Path(path)
     env = os.environ.get(OP_SCHEMA_REGISTRY_ENV)
@@ -111,11 +111,10 @@ def _registry_edges(entries, path, opcode, direction):
 
 
 def _check_registry_edge_lists(entries, path, opcode, key):
-    """Validate an op's edge lists (tensor-uid vectors).
+    """Validate an op's edge lists, which are tensor-uid vectors.
 
-    The runtime counts a result list's uids as the node's results, but a pattern
-    never binds a list, so no name is kept: a pattern edge naming a list field
-    resolves as undeclared, exactly like any other unknown edge.
+    A pattern never binds a list, so no names are kept. A pattern edge that
+    names a list field resolves as undeclared, like any other unknown edge.
     """
     if not isinstance(entries, list) or not all(
         isinstance(entry, dict) and isinstance(entry.get("name"), str)
@@ -160,12 +159,12 @@ def _load_op_schema_registry(path):
 
 
 def load_op_schema_registry(path):
-    """Opcode -> OpSchema from the registry JSON at path, read once per path."""
+    """Return {opcode: OpSchema} from the registry at path. Each path is read once."""
     return _load_op_schema_registry(str(path))
 
 
 def _quote(value):
-    """A value as it appears in the document, for error messages."""
+    """Format a value as JSON for error messages."""
     return json.dumps(value)
 
 
@@ -203,7 +202,7 @@ def _parse_op(node, label):
 
 
 def _parse_edges(node, key, label):
-    """The `operands` or `results` map; `?` is legal only on an operand."""
+    """Parse the `operands` or `results` map. Only an operand may bind with `?`."""
     direction = key[:-1]
     edges_doc = node.get(key, {})
     if not isinstance(edges_doc, dict):
@@ -269,7 +268,12 @@ def _parse_node(index, node, seen_ids, where):
 
 
 def _check_variables(nodes, where):
-    """Each variable is bound by exactly one edge and names no node."""
+    """Check variable bindings across the whole pattern.
+
+    A variable cannot share a name with a node id, and at most one result binds
+    it. A variable no result binds is a graph input, so exactly one operand binds
+    it. An operand that binds a produced variable cannot be optional.
+    """
     node_ids = {node.id for node in nodes}
     producer = {}
     for node in nodes:
@@ -311,7 +315,7 @@ def _check_variables(nodes, where):
 
 
 def _resolve_edge(node, edge, direction, registry, label):
-    """The registry optionality of one bound edge, agreed by every opcode."""
+    """Return the registry optionality of an edge. Every opcode must agree on it."""
     optional_in = {}
     for opcode in node.opcodes:
         schema = registry[opcode]
@@ -359,11 +363,12 @@ def _resolve(nodes, registry, where):
 
 
 def validate_graph_pattern(nodes, where, registry_path=None):
-    """Check a `graph_match.nodes` block as the runtime loads it.
+    """Validate a `graph_match.nodes` block as the runtime loads it.
 
-    where names the UED. registry_path overrides the registry location (see
-    resolve_op_schema_registry); the registry is read only once well-formedness
-    passes, and an unreadable one is an error naming its path.
+    `where` names the UED in error messages. `registry_path` overrides the
+    registry location (see resolve_op_schema_registry). The registry is read
+    only after the well-formedness checks pass. An unreadable registry raises an
+    error that names its path.
     """
     if not isinstance(nodes, list) or not nodes:
         raise HkpPackError(f"{where} graph_match 'nodes' must be a nonempty array")

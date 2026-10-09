@@ -20,16 +20,16 @@
 
 /// @file CompiledGraphPattern.hpp
 /// @brief A `graph_match.nodes` pattern resolved against the op-schema registry (RFC 0020
-///        §4.3.3) into the form the matcher runs, plus the symbol table it publishes.
+///        §4.3.3), plus the symbol table it publishes.
 ///
-/// Compiling once at load means a graph is matched with no string lookups: every pattern
-/// edge already points at the registry accessor that reads its tensor uid.
+/// Patterns compile once at load. Each pattern edge then points at the registry accessor
+/// that reads its tensor uid, so matching a graph needs no string lookups.
 
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// The value a published symbol carries. TENSOR is a tensor root, whose fields follow the
-/// canonical BindingPublication contract.
+/// Kind of value a published symbol carries. A TENSOR symbol is a tensor root, with the
+/// fields publishTensor() in BindingPublication.hpp publishes.
 enum class SymbolKind
 {
     TENSOR,
@@ -39,13 +39,13 @@ enum class SymbolKind
     ENUM_NAME
 };
 
-/// One root the pattern publishes: a tensor variable (`x`), a graph field
+/// A root the pattern publishes. It is a tensor variable (`x`), a graph field
 /// (`graph.node_count`), or a node attribute (`<node id>.<attribute>`).
 struct PublishedSymbol
 {
     std::string name;
     SymbolKind kind;
-    /// A graph may match without this symbol being bound.
+    /// A match may leave this symbol unbound.
     bool optional;
 };
 
@@ -63,13 +63,13 @@ struct PatternEdgeRef
     EdgeDirection direction;
 };
 
-/// A pattern variable: the one edge that binds it and the edges that only read it.
+/// A pattern variable, with the edge that binds it and the edges that only read it.
 struct PatternVariable
 {
     std::string name;
     /// A node's result, or the single operand reading a graph input.
     PatternEdgeRef binding;
-    /// Bound with `?`: absent from the graph is a match that publishes nothing for it.
+    /// Bound with `?`. If the graph omits it, the match succeeds and publishes nothing for it.
     bool optional;
     /// Operand edges reading a variable a result binds, in authored order.
     std::vector<PatternEdgeRef> readers;
@@ -83,8 +83,8 @@ struct CompiledPatternCandidate
     std::vector<const hipdnn_flatbuffers_sdk::data_objects::op_schema::EdgeSchema*> operands;
     /// Index-aligned with CompiledPatternNode::resultVariables.
     std::vector<const hipdnn_flatbuffers_sdk::data_objects::op_schema::EdgeSchema*> results;
-    /// Optional operands and results the pattern does not name. A graph supplying one is
-    /// not the graph the pattern describes.
+    /// Optional edges the pattern does not name. A graph node that supplies one does not
+    /// match.
     std::vector<const hipdnn_flatbuffers_sdk::data_objects::op_schema::EdgeSchema*>
         unnamedOptionalEdges;
     /// Index-aligned with CompiledPatternNode::attributes.
@@ -109,20 +109,20 @@ struct CompiledPatternNode
     std::vector<size_t> resultVariables;
     /// Attributes every candidate declares with the same kind.
     std::vector<CompiledPatternAttribute> attributes;
-    /// Authored opcode order.
+    /// In authored opcode order.
     std::vector<CompiledPatternCandidate> candidates;
 };
 
 class CompiledGraphPattern;
 
-/// Resolves @p pattern against the op-schema registry (RFC 0020 §4.3.3). @p where names
-/// the UED in every error.
+/// Resolves @p pattern against the op-schema registry. @p where names the UED in every
+/// error.
 /// @throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE) naming the UED, the
 ///         node, and the unresolved name.
 inline std::shared_ptr<const CompiledGraphPattern> compileGraphPattern(const GraphPattern& pattern,
                                                                        const std::string& where);
 
-/// A resolved pattern. Immutable, so one instance is shared across threads.
+/// A resolved pattern. It is immutable, so threads can share one instance.
 class CompiledGraphPattern
 {
     struct ConstructionKey
@@ -158,15 +158,14 @@ public:
         return _nodes.size();
     }
 
-    /// Authored order.
+    /// Nodes in authored order.
     const std::vector<CompiledPatternNode>& nodes() const noexcept
     {
         return _nodes;
     }
 
-    /// Indices into nodes(), producers before the nodes reading their results; ties keep
-    /// authored order. A pattern with a dependency cycle lists the cycle in authored order
-    /// after everything else.
+    /// Indices into nodes(), with each producer before the nodes that read its results.
+    /// Ties keep authored order. Nodes in a dependency cycle come last, in authored order.
     const std::vector<size_t>& matchOrder() const noexcept
     {
         return _matchOrder;
@@ -189,8 +188,8 @@ public:
         return it != _variables.end() && it->name == name ? &*it : nullptr;
     }
 
-    /// Opcodes a graph's entry node may carry: the opcode sets of every node reading no
-    /// variable another node produces. Sorted, distinct.
+    /// Opcodes a graph's entry node may carry. This is the union of the opcode sets of the
+    /// nodes that read no variable another node produces. Sorted and distinct.
     const std::vector<std::string>& rootOpcodes() const noexcept
     {
         return _rootOpcodes;
@@ -245,8 +244,8 @@ inline const hipdnn_flatbuffers_sdk::data_objects::op_schema::EdgeSchema*
     return it == edges.end() ? nullptr : it;
 }
 
-/// Resolves one named edge on every candidate, enforcing direction, `?`, and opcode-set
-/// agreement.
+/// Resolves one named edge on every candidate. Checks the edge direction, the `?` marker,
+/// and that all `one_of` members agree.
 inline void resolvePatternEdge(const PatternNode& node,
                                const PatternEdge& edge,
                                EdgeDirection direction,
@@ -315,8 +314,8 @@ inline void resolvePatternEdge(const PatternNode& node,
     }
 }
 
-/// Attributes every candidate declares with the same kind; optional when any candidate
-/// declares it optional. Order follows the first candidate's declaration order.
+/// Collects the attributes every candidate declares with the same kind. An attribute is
+/// optional if any candidate declares it optional. Order follows the first candidate.
 inline void resolvePatternAttributes(const PatternNode& node, CompiledPatternNode& compiled)
 {
     const auto& firstSchema = *compiled.candidates.front().schema;
@@ -420,7 +419,7 @@ inline std::vector<PatternVariable> collectPatternVariables(const GraphPattern& 
     return sorted;
 }
 
-/// For each node, the nodes producing a variable it reads, excluding itself.
+/// Returns, for each node, the other nodes that produce a variable it reads.
 inline std::vector<std::vector<size_t>>
     patternProducers(const std::vector<CompiledPatternNode>& nodes,
                      const std::vector<PatternVariable>& variables)
@@ -469,7 +468,7 @@ inline std::vector<size_t> patternMatchOrder(const std::vector<std::vector<size_
         }
         if(next == count)
         {
-            // A dependency cycle: nothing is ready, so take the first unplaced node.
+            // Dependency cycle. No node is ready, so take the first unplaced one.
             next = static_cast<size_t>(std::find(placed.begin(), placed.end(), false)
                                        - placed.begin());
         }

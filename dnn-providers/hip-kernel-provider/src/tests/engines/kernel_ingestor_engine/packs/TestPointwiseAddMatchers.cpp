@@ -75,8 +75,7 @@ TEST(TestPointwiseAddGraphMatcher, RetainsSingletonStrideAndDtypeAdmission)
 
 TEST(TestPointwiseAddGraphMatcher, RejectsScalarAndVirtualStateOnEveryOperand)
 {
-    // Every state below mutates this baseline; were it refused, each refusal would be
-    // vacuous.
+    // The baseline must match, or the refusals below prove nothing.
     EXPECT_TRUE(matches(GraphFixture(buildPointwiseGraph()).context()));
 
     for(size_t operand = 0; operand < 3; ++operand)

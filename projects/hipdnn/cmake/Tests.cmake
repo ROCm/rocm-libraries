@@ -253,10 +253,9 @@ function(_create_cache_key_codegen_test_internal prefix_name)
     endif() # Python3_FOUND
 endfunction() # _create_cache_key_codegen_test_internal
 
-# Registers the op-schema registry generator's own unit tests as a ctest test: its
-# edge/attribute classification and the build errors that keep a wrong registry from
-# being emitted. Like the cache-key policy, it belongs to the schemas, so this runs
-# regardless of HIPDNN_ENABLE_KERNEL_INGESTOR.
+# Registers the op-schema registry generator's unit tests with ctest. Like the cache-key
+# policy, the registry derives from the schemas, so the test runs regardless of
+# HIPDNN_ENABLE_KERNEL_INGESTOR.
 function(_create_op_schema_registry_codegen_test_internal prefix_name)
     if(Python3_FOUND)
         add_test(

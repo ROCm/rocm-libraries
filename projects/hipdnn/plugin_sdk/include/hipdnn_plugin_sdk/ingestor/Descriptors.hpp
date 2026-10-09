@@ -145,20 +145,20 @@ struct HeuristicDescriptor
 
 class CompiledGraphPattern;
 
-/// The UED's `graph_match` arm by native symbol: a GraphMatchRegistry function that
-/// decides the graph topology and publishes the binding itself.
+/// The `native` arm of a UED's `graph_match`: a GraphMatchRegistry symbol. The function it
+/// names decides the graph topology and publishes the binding.
 struct NativeGraphMatch
 {
     std::string symbol;
 };
 
-/// How an engine binds a graph, as its UED's `graph_match` declares it.
-///  - std::monostate: no `graph_match`; the engine binds nothing and every graph
-///    proceeds to the UMDs with an empty binding.
+/// How an engine binds a graph, as declared by its UED's `graph_match`.
+///  - std::monostate: no `graph_match`. The engine binds nothing, and every graph reaches
+///    the UMDs with an empty binding.
 ///  - NativeGraphMatch: the `native` arm, resolved through GraphMatchRegistry.
-///  - CompiledGraphPattern: the declarative `nodes` arm, already resolved against the
-///    op-schema registry when the UED was read (see CompiledGraphPattern.hpp). Never
-///    null; immutable and shared by every copy of the descriptor.
+///  - CompiledGraphPattern: the declarative `nodes` arm, compiled against the op-schema
+///    registry when the UED is read (see CompiledGraphPattern.hpp). Never null. Immutable
+///    and shared by every copy of the descriptor.
 using GraphMatch
     = std::variant<std::monostate, NativeGraphMatch, std::shared_ptr<const CompiledGraphPattern>>;
 

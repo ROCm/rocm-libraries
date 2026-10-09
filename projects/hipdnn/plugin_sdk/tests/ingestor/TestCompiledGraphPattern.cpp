@@ -129,7 +129,7 @@ TEST(TestCompiledGraphPattern, RejectsOpcodeSetDisagreeingOnEdgeOptionality)
 
 TEST(TestCompiledGraphPattern, RejectsOpcodeSetMemberMissingAnEdge)
 {
-    // layernorm produces `mean`; rms_norm has no such result.
+    // layernorm has a `mean` result and rms_norm does not.
     EXPECT_EQ(compileError(NORM_SET_PREFIX + R"("results": {"mean": "$mean"}}])"),
               "node 'norm' in test.ued.json: opcode 'rms_norm' declares no result 'mean'");
 }

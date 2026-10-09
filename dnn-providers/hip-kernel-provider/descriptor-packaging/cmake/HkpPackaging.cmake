@@ -345,8 +345,8 @@ endfunction()
 #   hkp_verify_embedded_sources() and hkp_register_census_tests().
 #
 #   Every root resolves UED graph patterns against
-#   HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY (set by hkp_add_packaging), and a change
-#   to that file repacks.
+#   HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY, which hkp_add_packaging sets. Changing
+#   that file repacks every root.
 # ---------------------------------------------------------------------------
 function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
@@ -1197,9 +1197,8 @@ endfunction()
 #   packer's own reason. Callers then wire the root, so the pack reports what is wrong
 #   with it.
 #
-#   Every descriptor under <root> the packer reads, and the op-schema registry its UED
-#   graph patterns resolve against, is a configure dependency, since the answer turns on
-#   their contents.
+#   Every descriptor under <root> the packer reads is a configure dependency, as is
+#   the op-schema registry, since the answer depends on their contents.
 # ---------------------------------------------------------------------------
 # cmake-lint: disable=R0913
 function(_hkp_root_probe out_shipped out_offered out_ok root arches exclude_folders
@@ -1637,8 +1636,8 @@ function(hkp_add_packaging)
     _hkp_resolve_production_root(_source_root)
 
     # The op-schema registry is generated from the hipDNN graph schemas and
-    # committed beside them, so a full checkout always carries it. A checkout
-    # without projects/hipdnn points this at the copy hipDNN installs under
+    # committed beside them, so a full checkout always has it. When projects/hipdnn
+    # is absent, set this to the copy hipDNN installs under
     # <prefix>/share/hipdnn_flatbuffers_sdk/.
     get_filename_component(_default_op_schema_registry
         "${HKP_PKG_DIR}/../../../projects/hipdnn/flatbuffers_sdk/op_schema_registry.json"

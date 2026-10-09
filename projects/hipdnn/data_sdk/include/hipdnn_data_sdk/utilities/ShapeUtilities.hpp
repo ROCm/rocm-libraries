@@ -291,9 +291,9 @@ inline std::vector<int64_t>
     return generateStrides(targetDims, strideOrder);
 }
 
-// Check for dense, non-overlapping storage in any axis order.
-// Ignore strides on size-one axes. Other strides and all sizes must be positive,
-// and the element count must fit in int64_t. Empty shapes are packed.
+// Returns true when the tensor fills a dense, non-overlapping block in some axis order.
+// Strides on size-one axes are ignored. All sizes and all other strides must be positive,
+// and the element count must fit in int64_t. A rank-0 tensor (empty dims) is packed.
 inline bool isTensorPacked(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
 {
     if(dims.size() != strides.size())

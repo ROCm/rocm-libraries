@@ -34,13 +34,13 @@
 ///  - no optional edge the pattern leaves unnamed is present;
 ///  - a variable no pattern node produces has no producer in the graph.
 /// Distinct variables may name the same tensor. A tensor-uid list field (OpSchema's
-/// resultLists) is never bound, but its uids are that node's results: a tensor a list
-/// produces is no graph input, and has no second producer.
+/// resultLists) is never bound, but its uids count as that node's results. A tensor a list
+/// produces is therefore not a graph input and cannot have a second producer.
 ///
-/// The search is deterministic: pattern nodes in CompiledGraphPattern::matchOrder(),
-/// candidate graph nodes in graph order, first complete assignment wins. It reads the raw
-/// flatbuffer graph rather than IGraph's lazily built wrappers, which are not safe to
-/// build from two threads at once.
+/// The search is deterministic. It visits pattern nodes in CompiledGraphPattern::matchOrder()
+/// and graph nodes in graph order, and the first complete assignment wins. It reads the raw
+/// flatbuffer graph, not IGraph's lazily built wrappers, because those are not safe to build
+/// from two threads at once.
 
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -48,13 +48,12 @@ namespace hipdnn_plugin_sdk::ingestor
 namespace detail
 {
 
-/// One graph, indexed once per match: tensors by uid, each uid's producing node, and each
-/// uid's consuming nodes.
+/// One graph, indexed once per match: tensors by uid, plus each uid's producer and
+/// consumers.
 ///
 /// Producers include result-list fields, so the graph-input rule sees every producer.
-/// Consumers exist only to narrow the search, from a bound variable to the graph nodes
-/// a pattern operand could read it through; a pattern edge is always a scalar field, so
-/// operand-list readers are left out rather than offered as candidates bindNode refuses.
+/// Consumers only narrow the search from a bound variable to the graph nodes that read it.
+/// A pattern edge is always a scalar field, so readers through operand lists are left out.
 struct PatternGraphIndex
 {
     std::vector<const hipdnn_flatbuffers_sdk::data_objects::Node*> nodes;
@@ -62,14 +61,13 @@ struct PatternGraphIndex
     std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
         tensors;
     std::unordered_map<int64_t, size_t> producers;
-    /// Graph node indices reading the uid through a scalar operand field, ascending and
-    /// distinct.
+    /// Graph node indices that read the uid through a scalar operand field. Ascending, no
+    /// duplicates.
     std::unordered_map<int64_t, std::vector<size_t>> consumers;
 };
 
-/// nullopt when the graph is malformed for matching: missing node or tensor vectors, a
-/// node no op-schema describes or with no attribute table, a repeated tensor uid, or a
-/// uid produced twice through result or result-list fields.
+/// Returns nullopt when the graph cannot be matched: missing node or tensor vectors, a node
+/// with no op-schema or no attribute table, a repeated tensor uid, or a uid produced twice.
 inline std::optional<PatternGraphIndex>
     indexPatternGraph(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph)
 {
@@ -210,9 +208,8 @@ private:
         const auto patternNode = _pattern.matchOrder()[depth];
         const auto& compiled = _pattern.nodes()[patternNode];
 
-        // An operand whose variable is already bound pins the image to that uid's
-        // consumers. Those lists are in graph order, so the narrowed walk visits the same
-        // viable graph nodes in the same order as a walk over every node.
+        // An operand whose variable is already bound limits the candidates to that uid's
+        // consumers. Consumer lists are in graph order, so the search order is unchanged.
         const std::vector<size_t>* consumers = nullptr;
         for(const auto variable : compiled.operandVariables)
         {
@@ -326,8 +323,8 @@ private:
         const auto& declared = _pattern.variables()[variable];
         if(!uid.has_value())
         {
-            // Only a `?` graph input may be absent, and parseGraphPattern() leaves it
-            // exactly one binding edge, so it is unset here.
+            // Only a `?` graph input may be absent. parseGraphPattern() gives it exactly one
+            // binding edge, so it is still unset here.
             if(!declared.optional)
             {
                 return false;
@@ -343,9 +340,9 @@ private:
         {
             return _uid[variable] == *uid;
         }
-        // A graph input must not be computed inside the graph. A produced variable needs no
-        // check here: its producer's image reads the uid from its own result field, which
-        // the index records as that node's output, and every other edge must agree.
+        // A graph input must not be produced inside the graph. A produced variable needs no
+        // check: its producer's result field supplies the uid, and every other edge must
+        // agree with it.
         if(declared.binding.direction == EdgeDirection::OPERAND
            && _graph.producers.count(*uid) != 0)
         {
@@ -495,8 +492,8 @@ inline std::optional<BoundTokens> matchGraphPatternOrThrow(const CompiledGraphPa
 
 /// Matches @p context's graph against @p pattern and publishes the binding: graph fields,
 /// every present variable's tensor fields, and every compiled attribute the matched node
-/// carries. nullopt declines the graph. Never throws: an unexpected failure is logged and
-/// declines.
+/// carries. nullopt declines the graph. Never throws. An unexpected failure is logged and
+/// declines the graph.
 inline std::optional<BoundTokens> matchGraphPattern(const CompiledGraphPattern& pattern,
                                                     const MatchContext& context)
 {

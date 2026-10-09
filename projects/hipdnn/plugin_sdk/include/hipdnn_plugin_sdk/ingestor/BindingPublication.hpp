@@ -22,19 +22,20 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// Use one root identifier: `input_a.dtype` and `input_a.dims[0]`.
+/// Builds a tensor field token such as `input_a.dtype`.
 inline std::string tensorField(std::string_view root, std::string_view field)
 {
     return std::string(root) + "." + std::string(field);
 }
 
+/// Builds an indexed tensor field token such as `input_a.dims[0]`.
 inline std::string tensorElement(std::string_view root, std::string_view field, size_t index)
 {
     return tensorField(root, field) + "[" + std::to_string(index) + "]";
 }
 
-/// Validate a tensor, then add its fields to the owned binding.
-/// Publish each root once; discard the whole binding if this returns false.
+/// Validates @p tensor and publishes its fields under @p root. Publish each root
+/// once. If this returns false, discard the whole binding.
 inline bool publishTensor(BoundTokens& bound,
                           std::string_view root,
                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensor)

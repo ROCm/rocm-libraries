@@ -20,31 +20,29 @@
 #include <hipdnn_plugin_sdk/ingestor/DescriptorJsonRules.hpp>
 
 /// @file GraphPattern.hpp
-/// @brief The declarative `graph_match.nodes` pattern of RFC 0020 §4.3, as parsed data.
+/// @brief Parsed form of the declarative `graph_match.nodes` pattern (RFC 0020 §4.3).
 ///
-/// parseGraphPattern() checks the §4.3.1 grammar and the §4.3.2 well-formedness rules,
-/// which need nothing but the block itself. Resolving opcodes and edge names against the
-/// op-schema registry (§4.3.3) is compileGraphPattern()'s job (CompiledGraphPattern.hpp).
+/// parseGraphPattern() checks the grammar and well-formedness rules, which need only the
+/// block itself. compileGraphPattern() in CompiledGraphPattern.hpp resolves opcodes and
+/// edge names against the op-schema registry.
 
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// Bounds a pattern so a hostile or broken UED cannot make compile or match unbounded.
+/// Maximum nodes in one pattern. These limits keep a broken or hostile UED from making
+/// compile or match unbounded.
 inline constexpr size_t MAX_PATTERN_NODES = 32;
-/// Operand plus result bindings on one node.
+/// Maximum operand plus result bindings on one node.
 inline constexpr size_t MAX_PATTERN_EDGES_PER_NODE = 64;
-/// Members of one `one_of` opcode set.
+/// Maximum members of one `one_of` opcode set.
 inline constexpr size_t MAX_PATTERN_OPCODE_SET = 32;
-/// Candidate assignments the matcher tries for one graph before it declines (RFC 0020
-/// §4.3). A step is one pattern node tried on one free graph node: at most
-/// MAX_PATTERN_OPCODE_SET opcode compares, then one field read and one hash lookup per
-/// edge the op declares, a few hundred operations at worst. The budget therefore caps one
-/// search near twenty million operations, paid once per graph and device because the
-/// catalog cache keeps a decline like any other result. A search that never backtracks
-/// needs at most N(N+1)/2 steps for N pattern nodes, 528 at MAX_PATTERN_NODES, so only a
-/// graph forcing a hundredfold backtracking reaches the budget: one with many
-/// interchangeable nodes, whose search grows factorially with their number and which no
-/// feasible budget would finish.
+/// Maximum candidate assignments the matcher tries for one graph before it declines.
+/// One step tries one pattern node on one free graph node and costs a few hundred
+/// operations at most, so the budget caps a search near twenty million operations. The
+/// catalog cache keeps a decline, so this cost is paid once per graph and device.
+/// A search without backtracking needs at most N(N+1)/2 steps for N pattern nodes, which
+/// is 528 at MAX_PATTERN_NODES. Only graphs with many interchangeable nodes reach the
+/// budget. Their search grows factorially, so no practical budget would finish it.
 inline constexpr size_t MAX_PATTERN_MATCH_STEPS = 65536;
 
 /// Keys a pattern node object may carry, besides extension keys.
@@ -54,22 +52,22 @@ inline constexpr std::array<std::string_view, 5> PATTERN_NODE_KEYS{
 inline constexpr std::array<std::string_view, 3> PATTERN_NODE_REQUIRED_KEYS{"kind", "id", "op"};
 /// Keys an opcode-set object (`"op": {"one_of": [...]}`) may carry, besides extension keys.
 inline constexpr std::array<std::string_view, 1> PATTERN_OPCODE_SET_KEYS{"one_of"};
-/// Token roots the binding owns (RFC 0020 §6.1); neither a node id nor a variable may use one.
+/// Token roots the binding owns (RFC 0020 §6.1). Node ids and variables cannot use them.
 inline constexpr std::array<std::string_view, 3> PATTERN_RESERVED_ROOTS{
     "graph", "kernel", "device"};
 
-/// One edge's binding: `"$x?"` is `{"x", true}`.
+/// One edge's binding. `"$x?"` parses to `{"x", true}`.
 struct PatternBinding
 {
     std::string variable;
-    /// The pattern still matches a graph omitting this operand. Operands only.
+    /// The pattern also matches a graph that omits this operand. Operands only.
     bool optional = false;
 };
 
 /// One named edge of a pattern node.
 struct PatternEdge
 {
-    /// The operand or result name, as the op-schema registry spells it.
+    /// Operand or result name, spelled as in the op-schema registry.
     std::string name;
     PatternBinding binding;
 };
@@ -77,11 +75,11 @@ struct PatternEdge
 /// One `{"kind": "op", ...}` object.
 struct PatternNode
 {
-    /// Unique within the pattern; the root this node's attributes publish under.
+    /// Unique within the pattern. Also the root this node's attributes publish under.
     std::string id;
-    /// Authored order; one entry for a bare-string `op`.
+    /// Opcodes in authored order. A bare-string `op` gives one entry.
     std::vector<std::string> opcodes;
-    /// Authored as `{"one_of": [...]}`.
+    /// True when authored as `{"one_of": [...]}`.
     bool opcodeSet = false;
     /// Sorted by edge name.
     std::vector<PatternEdge> operands;
@@ -91,8 +89,8 @@ struct PatternNode
 
 class GraphPattern;
 
-/// Parses @p nodes, the value of `graph_match.nodes`, and checks the RFC 0020 §4.3.1
-/// grammar and §4.3.2 well-formedness. @p where names the UED in every error.
+/// Parses @p nodes, the value of `graph_match.nodes`, and checks its grammar and
+/// well-formedness. @p where names the UED in every error.
 /// @throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE) naming the UED, the
 ///         node, and the offending name or value.
 inline GraphPattern parseGraphPattern(const nlohmann::json& nodes, const std::string& where);
@@ -144,7 +142,7 @@ inline std::string patternNodeLocator(const std::string& id, const std::string& 
     return "node '" + id + "' in " + where;
 }
 
-/// `"$name"` or, when @p allowOptional, `"$name?"`.
+/// Parses `"$name"`, or `"$name?"` when @p allowOptional is true.
 inline PatternBinding parsePatternBinding(const nlohmann::json& value,
                                           bool allowOptional,
                                           const std::string& edgeLocator)
@@ -175,8 +173,8 @@ inline PatternBinding parsePatternBinding(const nlohmann::json& value,
     return binding;
 }
 
-/// An `operands` or `results` object. nlohmann::json keeps object members in a std::map,
-/// so the edges come out sorted by name.
+/// Parses an `operands` or `results` object. nlohmann::json stores object members in a
+/// std::map, so the edges come out sorted by name.
 inline std::vector<PatternEdge> parsePatternEdges(const nlohmann::json& node,
                                                   std::string_view key,
                                                   bool operands,
@@ -311,7 +309,8 @@ inline PatternNode
     return node;
 }
 
-/// The cross-node §4.3.2 rules: unique ids, variable names, and bound-once.
+/// Checks the cross-node rules: unique node ids, legal variable names, and each variable
+/// bound once.
 inline void checkPatternVariables(const std::vector<PatternNode>& nodes, const std::string& where)
 {
     std::set<std::string_view> ids;
@@ -323,8 +322,8 @@ inline void checkPatternVariables(const std::vector<PatternNode>& nodes, const s
         }
     }
 
-    // The single edge each variable is bound by: its producing result, or else the one
-    // operand reading it.
+    // The edge that binds a variable. This is its producing result, or for a graph input,
+    // the single operand that reads it.
     struct EdgeSite
     {
         const PatternNode* node;

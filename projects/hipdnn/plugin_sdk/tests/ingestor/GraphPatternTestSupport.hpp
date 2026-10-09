@@ -63,7 +63,7 @@ inline std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
     return node;
 }
 
-/// `out = in0 <operation> in1`; @p in1 absent makes a unary node.
+/// Builds `out = in0 <operation> in1`. Omit @p in1 for a unary node.
 inline std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
     pointwiseNode(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                   int64_t in0,
@@ -112,7 +112,7 @@ inline std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
     return node;
 }
 
-/// Layer normalization of @p x into @p y; @p mean is its optional statistics result.
+/// Layer normalization of @p x into @p y. @p mean is the optional mean output.
 inline std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT> layernormNode(
     int64_t x, int64_t scale, int64_t bias, int64_t epsilon, int64_t y, std::optional<int64_t> mean)
 {
@@ -165,7 +165,7 @@ public:
     {
     }
 
-    // The wrapper points into the builder's buffer; neither may move independently.
+    // The wrapper points into the builder's buffer, so the object cannot be copied or moved.
     PatternTestGraph(const PatternTestGraph&) = delete;
     PatternTestGraph& operator=(const PatternTestGraph&) = delete;
     PatternTestGraph(PatternTestGraph&&) = delete;

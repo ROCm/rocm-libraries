@@ -1502,7 +1502,7 @@ def run_pipeline(
     both are pruned at load (load_flat_input) exactly as arch pruning prunes, so
     nothing downstream sees them.
 
-    op_schema_registry names the registry a UED's `graph_match.nodes` pattern
+    `op_schema_registry` is the registry a UED's `graph_match.nodes` pattern
     resolves against (see load_flat_input).
     """
     out_root = Path(out_root)

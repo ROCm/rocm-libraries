@@ -108,18 +108,18 @@
  * it announces itself as extension data (see requireKnownKeys). The KDP's
  * `kernelDescriptors` key is camelCase, the RFCs' own inconsistency, kept as-is rather
  * than silently "fixed". A key repeated within one JSON object, at any depth, fails the
- * file (see parseDescriptorDocument), except in a KDP: its single-pass scan keeps the last
- * occurrence, as a DOM parse does (see PackScan).
+ * file (see parseDescriptorDocument). A KDP is the exception: its single-pass scan keeps
+ * the last occurrence, as a DOM parse does (see PackScan).
  *
- * A UED's `graph_match` carries exactly one of its two RFC 0020 arms. `native` is held as
- * the symbol and resolved through GraphMatchRegistry when the set is validated. `nodes` is
- * parsed and compiled against the op-schema registry here, while the file is read, so a
- * pattern failing an RFC 0020 §4.3.2 or §4.3.3 check fails its file like any other format
- * error and registers no engine.
+ * A UED's `graph_match` carries exactly one of two arms. `native` is stored as a symbol and
+ * resolved through GraphMatchRegistry when the set is validated. `nodes` is parsed and
+ * compiled against the op-schema registry while the file is read. A pattern that fails an
+ * RFC 0020 §4.3.2 or §4.3.3 check fails its file like any other format error, and no
+ * engine is registered.
  *
- * Only fields Descriptors.hpp models are parsed; the RFCs describe more (a declarative
- * `criteria` beside `nodes`, `features_signature`) that arrive with follow-up RFCs. This
- * loader mirrors the structs exactly, so a new field is a change in both places and
+ * Only fields Descriptors.hpp models are parsed. The RFCs describe more, such as
+ * `criteria` beside `nodes` and `features_signature`, which arrive with follow-up RFCs.
+ * This loader mirrors the structs exactly, so a new field is a change in both places and
  * nowhere else.
  *
  * Nothing here throws to its caller: a malformed file, unresolved cross-reference, or
@@ -177,9 +177,9 @@ struct DescriptorCatalog
     KernelMap kernels;
 };
 
-/// Every top-level key a UED may carry besides extension keys: RFC 0020 §4.2's members
-/// plus `sdk_version` (see parseEngineDescriptor()). The UED JSON Schema's `properties`
-/// spell the same set.
+/// Every top-level key a UED may carry, excluding extension keys. This is RFC 0020 §4.2's
+/// members plus `sdk_version` (see parseEngineDescriptor()). The UED JSON Schema's
+/// `properties` list the same set.
 inline constexpr std::array<std::string_view, 10> UED_KEYS{"version",
                                                            "id",
                                                            "name",
@@ -191,12 +191,12 @@ inline constexpr std::array<std::string_view, 10> UED_KEYS{"version",
                                                            "numerical_notes",
                                                            "graph_match"};
 
-/// The UED keys a file must carry; every other member of UED_KEYS is optional.
+/// The UED keys a file must carry. The rest of UED_KEYS are optional.
 inline constexpr std::array<std::string_view, 4> UED_REQUIRED_KEYS{
     "version", "id", "name", "metadata"};
 
-/// The two arms of a UED's `graph_match`, of which an object carries exactly one: the
-/// declarative pattern (see GraphPattern.hpp) or a GraphMatchRegistry symbol.
+/// The two arms of a UED's `graph_match`. An object carries exactly one: the declarative
+/// pattern (see GraphPattern.hpp) or a GraphMatchRegistry symbol.
 inline constexpr std::array<std::string_view, 2> GRAPH_MATCH_KEYS{"nodes", "native"};
 
 namespace detail
@@ -718,11 +718,12 @@ inline std::vector<std::string> requireArchList(const nlohmann::json& object,
     return values;
 }
 
-/// A UED's `graph_match` object: exactly one arm, `nodes` compiled here against the
-/// op-schema registry, `native` held as its symbol until the set is validated.
-/// @param where Locates the object, for the structural errors.
-/// @param engine Names the UED, for the pattern errors: RFC 0020 §15 asks a pattern
-///        error to name the UED and the node.
+/// Parses a UED's `graph_match` object, which must carry exactly one arm. `nodes` is
+/// compiled here against the op-schema registry. `native` stays a symbol until the set is
+/// validated.
+/// @param where Locates the object in structural errors.
+/// @param engine Names the UED in pattern errors. RFC 0020 §15 requires a pattern error to
+///        name the UED and the node.
 inline GraphMatch parseGraphMatch(const nlohmann::json& object,
                                   const std::string& where,
                                   const std::string& engine)
@@ -805,8 +806,8 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
         }
     }
 
-    // Absent, the engine binds nothing and its packs' UMDs alone decide applicability.
-    // Parsed last, so a pattern error can name the engine it belongs to.
+    // Without `graph_match`, the engine binds nothing and its packs' UMDs alone decide
+    // whether it applies. Parsed last so a pattern error can name the engine.
     if(const auto it = root.find("graph_match"); it != root.end())
     {
         const auto described
@@ -1891,18 +1892,18 @@ inline void settleCatalog(DescriptorCatalog& catalog, const std::filesystem::pat
 
 /// Parses one descriptor file's text.
 ///
-/// Comments only, no trailing commas: RFC 0020 §4.3's authored form strips `//` and
-/// `/* */` before validation, narrower than what "JSONC" commonly implies (VS Code,
-/// tsconfig) -- a trailing comma is still a hard nlohmann parse_error.101. Only the parser
-/// ever sees the comments -- `insertCatalogEntry` compares the parsed documents, so a
-/// comment cannot make two copies of one descriptor look like a collision.
+/// Comments are allowed, trailing commas are not. RFC 0020 §4.3's authored form strips `//`
+/// and `/* */` comments before validation. That is narrower than common "JSONC" (VS Code,
+/// tsconfig), so a trailing comma is still an nlohmann parse_error.101. Only the parser
+/// sees comments. `insertCatalogEntry` compares parsed documents, so a comment cannot make
+/// two copies of one descriptor look like a collision.
 ///
-/// A key repeated within one object fails the parse, naming the key and @p where.
-/// nlohmann keeps the last occurrence without a word, so `{"native": "a", "native": "b"}`
-/// would load as `b` while a reviewer reads `a`.
+/// A key repeated within one object fails the parse, naming the key and @p where. nlohmann
+/// silently keeps the last occurrence, so `{"native": "a", "native": "b"}` would load as
+/// `b` while a reviewer reads `a`.
 inline nlohmann::json parseDescriptorDocument(std::istream& input, const std::string& where)
 {
-    // One key set per open object, innermost last. Arrays open no set: a key always
+    // One key set per open object, innermost last. Arrays open no set because a key always
     // belongs to the nearest enclosing object.
     std::vector<std::unordered_set<std::string>> openObjects;
     const nlohmann::json::parser_callback_t rejectDuplicateKeys

@@ -801,8 +801,7 @@ TEST(TestShapeUtils, IsTensorPackedCustomPackedLayout)
 
 TEST(TestShapeUtils, IsTensorPackedRejectsEqualSpanOverlap)
 {
-    // The span and element count are both eight, but offsets 1 and 6 overlap;
-    // offsets 3 and 4 are unused.
+    // Span and element count are both 8, but offsets 1 and 6 repeat and 3 and 4 are unused.
     EXPECT_FALSE(isTensorPacked({2, 2, 2}, {1, 1, 5}));
     EXPECT_FALSE(isTensorPacked({2, 2, 2}, {5, 1, 1}));
 }

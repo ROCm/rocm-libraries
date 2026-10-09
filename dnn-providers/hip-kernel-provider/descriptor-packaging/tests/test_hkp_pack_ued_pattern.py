@@ -1,6 +1,6 @@
 """Packager side of the UED `graph_match` contract shared with the runtime loader.
 
-The fixture corpus and the JSON Schema live in the hipDNN plugin SDK; the
+The fixture corpus and the JSON Schema live in the hipDNN plugin SDK. The
 runtime's gtests read the same files, so the packer and the loader agree on
 every fixture and on the schema's member lists.
 """
@@ -31,8 +31,8 @@ SCHEMA_PATH = _PLUGIN_SDK / "schemas" / "universal_engine_descriptor.schema.json
 _FIXTURES = sorted(FIXTURE_DIR.glob("*.json"))
 assert _FIXTURES, f"no UED fixtures under {FIXTURE_DIR}"
 
-# The rule each invalid fixture exists to exercise. Matching on it keeps an
-# invalid fixture from passing because of an unrelated defect.
+# The error each invalid fixture must raise. Matching on it stops an invalid
+# fixture from passing because of an unrelated defect.
 _EXPECTED_ERROR = {
     "bad_kind": "is not 'op'",
     "both_arms": "exactly one of 'nodes' or 'native'",
@@ -180,8 +180,8 @@ def test_native_ued_loads_without_a_registry(tmp_path):
     [("operands", "input_tensor_uids"), ("results", "output_tensor_uids")],
 )
 def test_an_edge_naming_a_registry_edge_list_is_undeclared(tmp_path, key, field):
-    # custom_op's uid vectors are edge lists: the runtime indexes them, a pattern
-    # never binds them.
+    # custom_op's uid vectors are edge lists. The runtime indexes them, but a
+    # pattern never binds them.
     node = {"kind": "op", "id": "custom", "op": "custom_op", key: {field: "$uids"}}
     ued = dict(_NODES_UED, graph_match={"nodes": [node]})
     root = _ued_root(tmp_path, json.dumps(ued), ued["metadata"])

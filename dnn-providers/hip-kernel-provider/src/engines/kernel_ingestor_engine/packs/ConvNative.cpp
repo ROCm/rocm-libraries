@@ -110,8 +110,8 @@ bool allEqual(const flatbuffers::Vector<int64_t>* values, size_t expectedSize, i
     return true;
 }
 
-/// The kernel has no stride arguments, so require exact row-major strides,
-/// even on size-one axes. Packedness alone is not enough.
+/// The kernel takes no stride arguments, so require exact row-major strides. A packed
+/// check is not enough because it ignores strides on size-one axes.
 bool isSupportedOperand(const BoundTokens& bound, std::string_view root)
 {
     if(tryGetBoundInt(bound, tensorField(root, "rank")) != SUPPORTED_RANK)
@@ -183,9 +183,9 @@ const data_objects::ConvolutionFwdAttributes* convFwdNode(const MatchContext& co
     return &node.attributesAs<data_objects::ConvolutionFwdAttributes>();
 }
 
-/// Stride 1, dilation 1, no padding: the only shape the in-kernel p = h - r + 1 /
-/// q = width - s + 1 formula is correct for. The binding carries none of these vectors,
-/// so they are read from the node itself.
+/// The in-kernel formulas p = h - r + 1 and q = width - s + 1 hold only for stride 1,
+/// dilation 1, and no padding. The binding does not carry these vectors, so read them
+/// from the node.
 bool isSupportedGeometry(const data_objects::ConvolutionFwdAttributes& attributes)
 {
     return allEqual(attributes.stride(), SUPPORTED_SPATIAL_RANK, 1)
@@ -195,13 +195,12 @@ bool isSupportedGeometry(const data_objects::ConvolutionFwdAttributes& attribute
 }
 
 /**
- * @brief Every fact the dispatch relies on that the binding carries: one node,
- *        cross-correlation, three exactly row-major operands of one supported dtype whose
- *        extents fit an int, and the shapes the kernel computes y from.
+ * @brief Checks every binding fact the dispatch relies on.
  *
- * Read from tokens rather than the graph so it holds whichever `graph_match` arm bound
- * them -- a declarative pattern can pair with this pack's dispatch, and its binding has
- * passed none of the native graph match's checks.
+ * Requires one cross-correlation node and three row-major operands of one supported
+ * dtype, with extents that fit an int and a y shape the kernel can compute. It reads
+ * tokens instead of the graph because a declarative `graph_match` can bind them, and
+ * that binding skips the native graph match's checks.
  */
 bool isServableBinding(const BoundTokens& bound)
 {
@@ -231,17 +230,14 @@ bool isServableBinding(const BoundTokens& bound)
     const auto wR = dimension(bound, W_TOKEN, 2);
     const auto wS = dimension(bound, W_TOKEN, 3);
 
-    // Filter channels vs. input channels -- this also refuses grouped conv, which is
-    // encoded purely as a smaller w channel count; the kernel has no notion of groups
-    // and indexes w using c from x alone, so a filter with fewer channels would read
-    // past the end.
+    // The kernel has no groups and indexes w with c from x. A grouped conv has fewer
+    // w channels, so it would read past the end of w.
     //
-    // r <= h and s <= width, or p = h - r + 1 / q = width - s + 1 go non-positive,
-    // which the kernel's flat-index unravel (ConvFwd.cpp) never expects.
+    // r > h or s > width makes p or q non-positive, which the kernel's flat-index
+    // unravel (ConvFwd.cpp) does not handle.
     //
-    // y must be exactly the shape the kernel computes: total = n*k*p*q comes from x
-    // and w alone, and the kernel writes every index < total into y, so a smaller y
-    // overflows.
+    // The kernel writes all n*k*p*q outputs, computed from x and w, so y must have
+    // exactly that shape.
     return dimension(bound, W_TOKEN, 1) == xC && wR <= xH && wS <= xW
            && dimension(bound, Y_TOKEN, 0) == dimension(bound, X_TOKEN, 0)
            && dimension(bound, Y_TOKEN, 1) == wK && dimension(bound, Y_TOKEN, 2) == xH - wR + 1
@@ -297,11 +293,10 @@ std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
  *        Evaluated once per candidate kernel; without it an f32 graph could reach an
  *        f16 binary and return wrong numbers rather than failing.
  *
- * This pack's only criterion, so it is also where the dispatch's preconditions are
- * re-checked: a declarative `graph_match` admits graphs the native one refuses, and a
- * pack whose criteria pass is one whose dispatch must serve the graph. That includes
- * the roles: a pattern binding `$x` to the node's `w` edge can pass every shape check
- * (n == k, h == r, width == s) and launch with x and w exchanged.
+ * This is the pack's only criterion, so it also re-checks the dispatch preconditions.
+ * A declarative `graph_match` can admit graphs the native one refuses. It also checks
+ * operand roles: a pattern that binds `$x` to the node's `w` edge can pass every shape
+ * check (n == k, h == r, width == s) and launch with x and w swapped.
  */
 bool convFwdKernelMatches(const MatchContext& context,
                           const BoundTokens& bound,
@@ -520,7 +515,7 @@ public:
         const auto binding = convFwdBinding(bound);
 
         const auto& xTensor = requireTensor(context, binding.x);
-        // Read dimensions from the cached binding; keep xTensor for compile options.
+        // Dimensions come from the binding. xTensor supplies the compile options.
         const auto n = static_cast<int>(dimension(bound, X_TOKEN, 0));
         const auto c = static_cast<int>(dimension(bound, X_TOKEN, 1));
         const auto h = static_cast<int>(dimension(bound, X_TOKEN, 2));

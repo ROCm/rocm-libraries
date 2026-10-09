@@ -217,11 +217,11 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         )
         add_dependencies(hipdnn_flatbuffers_sdk generate_hipdnn_cache_key)
 
-        # The op-schema registry (RFC 0020 Appendix B): the header the kernel ingestor
-        # compiles and the JSON hkp_pack validates against, both re-derived by one
-        # generator run from the `matcher_*` annotations, which are likewise invisible to
-        # flatc's C++ output. Same schema DEPENDS and flatc as the cache-key header; the
-        # generator imports gen_cache_key.py, so that script is a dependency too.
+        # Generate the op-schema registry (RFC 0020 Appendix B) from the `matcher_*` schema
+        # annotations. flatc's C++ output does not expose them, so a script reads them. One run
+        # writes the header the kernel ingestor compiles and the JSON that hkp_pack validates
+        # against. It uses the same schema dependencies and flatc as the cache-key header, and
+        # depends on gen_cache_key.py because the generator imports it.
         set(_op_schema_registry_header
             "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects/op_schema_registry_generated.h"
         )
@@ -306,8 +306,8 @@ install(
     COMPONENT Development
 )
 
-# The op-schema registry for build-time tools (hkp_pack). The header half installs
-# with the include directory above.
+# The op-schema registry JSON for build-time tools (hkp_pack). The header installs with the
+# include directory above.
 install(
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/op_schema_registry.json"
     DESTINATION ${CMAKE_INSTALL_DATADIR}/hipdnn_flatbuffers_sdk

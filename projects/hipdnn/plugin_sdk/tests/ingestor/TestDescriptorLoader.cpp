@@ -393,7 +393,7 @@ size_t countLogsContaining(const hipdnn_test_sdk::utilities::SharedLogRecorder& 
     }));
 }
 
-/// A `graph_match.nodes` block the op-schema registry resolves: one binary pointwise node.
+/// A `graph_match.nodes` block with one binary pointwise node the op-schema registry resolves.
 nlohmann::json pointwisePatternNodes()
 {
     return nlohmann::json::array({{{"kind", "op"},
@@ -1190,14 +1190,14 @@ INSTANTIATE_TEST_SUITE_P(
                       [](Documents& documents) {
                           documentOfType(documents, ".ued.json")["graph_match"] = {{"native", 7}};
                       }},
-        // Both arms are well formed on their own, so only the exactly-one rule rejects.
+        // Each arm is valid alone, so only the exactly-one-arm rule rejects this.
         ViolationCase{"graph_match_names_both_arms",
                       [](Documents& documents) {
                           documentOfType(documents, ".ued.json")["graph_match"]
                               = {{"native", GRAPH_SYMBOL}, {"nodes", pointwisePatternNodes()}};
                       }},
-        // A pattern is compiled against the op-schema registry while its file is read, so
-        // an opcode the registry does not declare fails the file like any format error.
+        // The loader compiles patterns against the op-schema registry, so an unknown opcode
+        // fails the file like any format error.
         ViolationCase{"graph_match_pattern_names_an_unknown_opcode",
                       [](Documents& documents) {
                           auto nodes = pointwisePatternNodes();
@@ -1320,8 +1320,8 @@ INSTANTIATE_TEST_SUITE_P(
                       }}),
     [](const ::testing::TestParamInfo<ViolationCase>& info) { return info.param.name; });
 
-/// The declarative arm end to end through validation: the pattern compiles while the
-/// file is read, and the state manager probe accepts the compiled form.
+/// The pattern compiles while the file is read, and the state manager probe accepts the
+/// compiled form.
 TEST(TestDescriptorLoader, LoadsAnEngineWhoseGraphMatchIsADeclarativePattern)
 {
     const ScopedSymbols symbols;
@@ -1356,10 +1356,9 @@ TEST(TestDescriptorLoader, CarriesTheNativeGraphMatchSymbol)
     EXPECT_EQ(native->symbol, "descriptorloader.native");
 }
 
-/// nlohmann keeps the last of two equal keys without a word, so this operand map would
-/// otherwise load as a valid pattern binding `in_0` to `$input_a`. The repeat sits in an
-/// operands map inside a node inside `graph_match`, so a check confined to the top level
-/// would let it through.
+/// nlohmann silently keeps the last of two equal keys, so without this check the operand map
+/// would load as a valid pattern binding `in_0` to `$input_a`. The repeat is nested inside
+/// `graph_match`, so a top-level-only check would miss it.
 TEST(TestDescriptorLoader, RejectsAKeyRepeatedAnywhereInTheDocument)
 {
     auto recorder

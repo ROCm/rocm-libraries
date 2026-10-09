@@ -176,10 +176,10 @@ TEST(TestPackedDescriptorLoad, EveryPackedDescriptorInTheShardIsLoaded)
     }
 }
 
-/// Validate every packaged engine against the registered native symbols.
+/// Every packaged engine passes validation against the registered native symbols.
 ///
-/// The emptiness guard comes first: on a shard with no UED, "every engine was admitted"
-/// holds vacuously, so a packer that dropped every engine file would otherwise pass.
+/// The emptiness check runs first. On a shard with no UED the count check passes
+/// vacuously, so a packer that dropped every engine file would go unnoticed.
 TEST(TestPackedDescriptorLoad, PackedDescriptorsPassNativeAdmission)
 {
     REQUIRE_PACKED_SHARDS(shards);

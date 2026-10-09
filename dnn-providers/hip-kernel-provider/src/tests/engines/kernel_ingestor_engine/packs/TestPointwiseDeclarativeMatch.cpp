@@ -37,13 +37,13 @@
 
 /**
  * @file TestPointwiseDeclarativeMatch.cpp
- * @brief The pointwise engine described with a declarative `graph_match.nodes` pattern
- *        instead of its native graph match, loaded from real descriptor files.
+ * @brief Tests the pointwise engine with a declarative `graph_match.nodes` pattern in
+ *        place of its native graph match, loaded from descriptor files on disk.
  *
- * The descriptor set mirrors the unit pointwise set's ADD pack -- its KMD, UHD, UMDs, UDD
- * and native symbols -- under its own engine name and ids, so the only difference from
- * the shipped engine is which arm of `graph_match` binds the graph. Matching needs no
- * device: the engine runs against a fixed device identity.
+ * The descriptor set copies the unit pointwise set's ADD pack (KMD, UHD, UMDs, UDD and
+ * native symbols) under its own engine name and ids. It differs from the shipped engine
+ * only in which `graph_match` arm binds the graph. Matching needs no device, so the
+ * engine runs against a fixed device identity.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -74,8 +74,8 @@ constexpr const char* KERNEL_MATCHER_ID = "f4c1a8e2-3b70-4d96-8e15-a2d97c6b0e38"
 constexpr const char* DISPATCH_ID = "8d27b6f5-0e43-4c18-b9a7-35f1e8d2c604";
 constexpr const char* PACK_ID = "1e6f3a90-c82d-4b57-a4e1-6d0b9f2c7385";
 
-/// The contract's pointwise pattern: one binary pointwise node, its inputs and output
-/// bound to the roots the native match publishes.
+/// One binary pointwise node. Its inputs and output bind to the roots the native match
+/// publishes.
 nlohmann::json pointwisePattern()
 {
     return nlohmann::json::array({{{"kind", "op"},
@@ -103,7 +103,7 @@ void writeJson(const std::filesystem::path& path, const nlohmann::json& body)
     std::ofstream(path, std::ios::binary) << body.dump(2) << '\n';
 }
 
-/// One descriptor file per type, as the unit pointwise set ships them, with the UED's
+/// Writes one descriptor file per type, like the unit pointwise set, with the UED's
 /// `graph_match` on the declarative arm.
 void writeDeclarativeSet(const std::filesystem::path& root)
 {
@@ -162,8 +162,8 @@ void writeDeclarativeSet(const std::filesystem::path& root)
                      embeddedAddKernel("a93d1e75-2c40-4f8b-b6e9-07d5f8c1a246", 256)})}});
 }
 
-/// The declarative set, loaded and validated the way the provider loads its own:
-/// native symbols registered first, then every file read from disk.
+/// Loads and validates the set the way the provider does: register native symbols, then
+/// read every file from disk.
 std::vector<ValidatedSet<Handle>> loadDeclarativeSets(const ScopedDirectory& scratch)
 {
     registerNativeIngestorSymbols();
@@ -171,7 +171,7 @@ std::vector<ValidatedSet<Handle>> loadDeclarativeSets(const ScopedDirectory& scr
     return loadValidatedDescriptorSets<Handle>(scratch.path());
 }
 
-/// A fixed, device-less machine identity: matching reads the arch and nothing else.
+/// A fixed device identity. Matching reads only the arch, so no device is needed.
 class FixedDeviceResolver : public IDeviceResolver<Handle>
 {
 public:
@@ -234,9 +234,8 @@ void expectNativeParity(flatbuffers::FlatBufferBuilder builder)
     }
 }
 
-/// A binary add with every optional pointwise attribute set, and a node compute type that
-/// differs from its tensors' dtype so a publication reading the wrong one is a value
-/// mismatch.
+/// A binary add with every optional pointwise attribute set. The node compute type differs
+/// from the tensor dtype to catch a publication that reads the wrong one.
 flatbuffers::FlatBufferBuilder buildFullyAttributedPointwiseGraph()
 {
     return transformGraph(buildPointwiseGraph(), [](auto& graph) {
@@ -254,8 +253,8 @@ flatbuffers::FlatBufferBuilder buildFullyAttributedPointwiseGraph()
 
 } // namespace
 
-/// The pattern compiles at load, so the set validates like the native one and the engine
-/// it builds answers applicability through the compiled pattern.
+/// The pattern compiles at load, the set validates, and the engine answers applicability
+/// through the compiled pattern.
 TEST_P(TestPointwiseDeclarativeMatch, EngineApplicabilityFollowsThePattern)
 {
     const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
@@ -277,10 +276,10 @@ INSTANTIATE_TEST_SUITE_P(
     TestPointwiseDeclarativeMatch,
     ::testing::Values(
         ApplicabilityCase{"BinaryAdd", [] { return buildPointwiseGraph(); }, true},
-        // Full coverage: a pattern of one node matches only a graph of one node.
+        // Full coverage: a one-node pattern matches only a one-node graph.
         ApplicabilityCase{"TwoPointwiseNodes", [] { return buildTwoNodePointwiseGraph(); }, false},
-        // `in_2` is optional and the pattern leaves it unnamed, so a graph supplying it
-        // is a ternary op the pattern does not describe.
+        // The pattern leaves the optional `in_2` unnamed, so it does not describe a
+        // ternary op.
         ApplicabilityCase{"TernaryPointwise",
                           [] {
                               return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
@@ -294,9 +293,8 @@ INSTANTIATE_TEST_SUITE_P(
                           },
                           false},
         ApplicabilityCase{"ConvolutionForward", [] { return buildConvFwdGraph(); }, false},
-        // The pattern admits both and the pack's native criterion and dispatch serve
-        // neither: the kernel writes one element, and its layout needs rank 4 or 5. The
-        // criterion re-checking the binding is what declines them.
+        // The pattern admits these two, but the kernel writes one element and its layout
+        // needs rank 4 or 5. The pack's criterion re-checks the binding and declines them.
         ApplicabilityCase{"MultiElementTensors",
                           [] {
                               return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
@@ -313,20 +311,19 @@ INSTANTIATE_TEST_SUITE_P(
                           false}),
     [](const ::testing::TestParamInfo<ApplicabilityCase>& info) { return info.param.name; });
 
-/// The declarative pattern binds exactly what the native pointwise match binds on a graph
-/// both accept, so every UMD and dispatch formula written against the native binding reads
-/// the same tokens under either arm.
+/// On a graph both arms accept, the pattern binds the same tokens and values as the native
+/// match, so UMDs and dispatch formulas work under either arm.
 TEST(TestPointwiseDeclarativeMatchBinding, PublishesTheNativeBindingTokenForToken)
 {
     expectNativeParity(buildPointwiseGraph());
 }
 
-/// The same claim for every optional node attribute: the native match publishes them by
-/// hand and the declarative arm from the op-schema registry, so a key or value drifting
-/// between the two shows up here and nowhere else.
+/// Parity for every optional node attribute. The native match publishes them by hand and
+/// the declarative arm uses the op-schema registry. Only this test catches drift between
+/// the two.
 TEST(TestPointwiseDeclarativeMatchBinding, PublishesEveryOptionalAttributeTokenForToken)
 {
-    // Parity over absent keys would prove nothing: the native binding carries them all.
+    // Parity over absent keys proves nothing, so confirm the native binding has them all.
     const GraphFixture fixture(buildFullyAttributedPointwiseGraph());
     const auto native = matchesGraph(POINTWISE_ADD, fixture.context());
     ASSERT_TRUE(native.has_value());

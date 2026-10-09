@@ -84,9 +84,8 @@ endif()
 clang_tidy_check(hipdnn_plugin_sdk_tests)
 add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
 
-# TestUedFixtureParity reads the UED fixture corpus and the published UED schema from
-# share/hipdnn_plugin_sdk beside the binary's bin/ directory, the layout an install produces,
-# so the build tree is staged the same way.
+# TestUedFixtureParity loads the UED fixtures and schema from share/hipdnn_plugin_sdk next to
+# the binary's bin/ directory. Stage the build tree with the same layout an install produces.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_ued_data_dir "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk")
     set(_ued_schema "${CMAKE_CURRENT_SOURCE_DIR}/../schemas/universal_engine_descriptor.schema.json")
