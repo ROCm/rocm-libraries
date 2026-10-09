@@ -53,9 +53,9 @@ engine; all share `kernel_family` 1 and the same forward ABI:
 
 That is 5,298 identities per dtype. `make_conv_aot_config.py` accepts every one of them
 (`PACKAGED_DIRECT_ALGORITHMS`, checked by the direct sweep's own round trip
-`direct_job_for_identity`). The exact-shape engine's direct launch runs only `std` and
-`spatial`, and the shipped catalog holds only those two so far (see
-[The shipped catalog](#the-shipped-catalog)).
+`direct_job_for_identity`), and the shipped catalog holds all of them (see
+[The shipped catalog](#the-shipped-catalog)). The exact-shape engine's direct launch
+runs only `std` and `spatial`.
 
 A direct binary bakes the filter, stride, padding and dilation, plus its variant's block
 knobs, and for `grouped` the channels per group. Batch, image extents and the group count
@@ -204,13 +204,14 @@ policy is a property of the candidate set. The plugin SDK lets a pack refine a
 kernel-scoped matcher with a set-level stage for this: a `CandidateFilterFn`
 (`NativeRegistry.hpp`), registered under the symbol of a kernel-scoped matcher the pack
 already declares. Once every pack is matched, it sees every kernel that matcher admitted
-for the graph, across all packs listing it (both dtype shards here), and keeps a subset.
+for the graph, across all packs listing it (every shard here), and keeps a subset.
 No descriptor changes: a matcher with no filter registered keeps what it admitted.
 `hipkernel:Gfx950ConvFwdAot` registers `aotCandidateFilter` under its kernel matcher's
 symbol; the policy itself is `conv::widestVectorSelection` in
-`Gfx950ConvFwdAotSelection.hpp`. Direct depthwise instances are all kept: rocKE's direct
-benchmark (`direct_plans` in `benchmarks/common/direct_kernel_sweep.py`) runs every
-direct kernel that serves, with no cross-candidate rule.
+`Gfx950ConvFwdAotSelection.hpp`. Direct instances of every variant are all kept:
+rocKE's direct benchmark (`direct_plans` in `benchmarks/common/direct_kernel_sweep.py`)
+runs every direct kernel that serves, with no cross-candidate rule. A graph's direct
+candidates therefore add to its selected implicit-GEMM ones.
 
 The selected instances are the engine's catalog for the graph, so everything after it
 applies to them alone, in this order: the knob filter (a forced `tile_k` or
@@ -233,19 +234,23 @@ together:
 
 ## The shipped catalog
 
-`hipkernel:Gfx950ConvFwdAot` ships rocKE's full forward sweep for gfx950 with no
-selection of ours. The only limits are the sweeps' own validity checks and, for
-direct kernels, which algorithms the packaged launch runs. The catalog is listed
-per dtype in `projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd_aot_<dtype>.instances.json`:
+`hipkernel:Gfx950ConvFwdAot` ships rocKE's full forward sweeps for gfx950 with no
+selection of ours: the only limits are the sweeps' own validity checks. The catalog is
+listed per dtype in
+`projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd_aot_<dtype>.instances.json`:
 
 | Family | fp16 | bf16 |
 |---|---:|---:|
 | Implicit GEMM | 78,940 | 78,940 |
 | Direct depthwise, `std` | 54 | 54 |
 | Direct depthwise, `spatial` | 30 | 30 |
-| **Total** | **79,024** | **79,024** |
+| Direct depthwise, `tiled` | 1,536 | 1,536 |
+| Direct depthwise, `col` | 540 | 540 |
+| Direct, `grouped` | 80 | 80 |
+| Direct, `nongrouped` | 3,058 | 3,058 |
+| **Total** | **84,238** | **84,238** |
 
-158,048 instances in all. `tools/enumerate_conv_aot_instances.py` writes the lists.
+168,476 instances in all. `tools/enumerate_conv_aot_instances.py` writes the lists.
 
 **Implicit GEMM** is every valid identity of the AOT sweep's gfx950 forward grid
 (`kernel_sweep.py`): its 620 tile and warp geometries, the `mem`, `compv3` and
@@ -256,14 +261,15 @@ enumeration rather than be dropped. Identities whose kernels compile to the same
 still separate instances, each with its own `instance_id`: 69,402 of the 78,940 per
 dtype have distinct IR.
 
-**Direct** is every forward identity of the direct sweep (`direct_kernel_sweep.py`)
-that `make_conv_aot_config.py` accepts. Today that is the 54 `std` and 30 `spatial`
-depthwise identities per dtype. The sweep's other forward direct algorithms (tiled and
-column depthwise, grouped and non-grouped; 5,214 identities per dtype) have no packaged
-launch yet, and the tool reports them by algorithm with the converter's reason. Once
-the converter accepts them, rerunning the tool adds them with no change to the tool.
+**Direct** is every forward identity of the direct sweep (`direct_kernel_sweep.py`):
+the converter accepts all six algorithms, so nothing is refused. Were it to refuse one,
+the tool would report it by algorithm with the converter's reason and leave it out.
+Every entry of both lists is checked against `kernel_sweep` and `direct_kernel_sweep`
+by `stable_hash`.
 
-Which instances serve a given problem is decided at runtime, not by the catalog.
+Which instances serve a given problem, and which of those run, is decided at runtime,
+not by the catalog: see [Serves and selected](#serves-and-selected) and
+[Selecting among thousands of candidates](#selecting-among-thousands-of-candidates).
 
 The lists are compact: one identity per line, holding only the fields that have no
 plain default or that differ from it. `KernelIdentity.from_dict` restores the rest, and
@@ -283,12 +289,13 @@ for the direct instances (`make_conv_aot_config.py --sharding k-loop`, the defau
 | `gfx950_conv_fwd_aot_<dtype>_mem_async` | 12,160 |
 | `gfx950_conv_fwd_aot_<dtype>_compv3_plain`, `_compv3_unroll` | 11,130 each |
 | `gfx950_conv_fwd_aot_<dtype>_compv4_plain`, `_compv4_unroll` | 11,130 each |
-| `gfx950_conv_fwd_aot_<dtype>_direct` | 84 |
+| `gfx950_conv_fwd_aot_<dtype>_direct` | 5,298 |
 
 The packs declare no `discriminator`, so they are shards of one catalog: the engine's
 graph matcher and the one shared kernel matcher admit all of them, and there is no
 operation-scoped matcher (the IngestorGenerator README, "UMD policy"). Each authored
-implicit-GEMM shard is about 19 to 20 MB, and each instance list about 31 MB. The census
+implicit-GEMM shard is about 18.5 to 20 MB, each direct shard about 14 MB, and each
+instance list about 34 MB, the largest committed file. The census
 `TestGfx950ConvFwdAotPacks.cpp` lists every pack and kernel name exactly, at about
 12 MB. The test-only seed keeps one pack per dtype (`--sharding dtype`).
 
@@ -346,22 +353,25 @@ current sources.
 
 ### Build and package cost
 
-The product pack compiles every instance, about 159,000 variants with the other
+The product pack compiles every instance, about 169,400 variants with the other
 product bundles. On one host with 96 pack workers
 (`-DHIPKERNELPROVIDER_PRODUCT_PACK_JOBS=96`):
 
 | Artifact | Size |
 |---|---:|
-| Instance list, each dtype (committed) | about 31 MB |
-| Authored implicit-GEMM KDP shard, each (committed) | about 19 to 20 MB |
-| Authored direct KDP shard, each (committed) | about 0.2 MB |
+| Instance list, each dtype (committed) | about 34 MB |
+| Authored implicit-GEMM KDP shard, each (committed) | about 18.5 to 20 MB |
+| Authored direct KDP shard, each (committed) | about 14 MB |
 | Census `TestGfx950ConvFwdAotPacks.cpp` (committed) | about 12 MB |
-| gfx950 kpack archive (build output, all product bundles) | about 1.3 GB |
+| gfx950 kpack archive (build output, all product bundles) | about 1.33 GB |
 | Packed implicit-GEMM KDP shard, each (build output) | about 40 to 44 MB |
-| Provenance sidecar, each implicit-GEMM shard (build output) | about 4.2 to 4.6 MB, 110 to 120 MB inflated |
+| Packed direct KDP shard, each (build output) | about 12.5 MB |
+| All packed KDP shards of the engine (build output) | about 570 MB |
+| Provenance sidecar, each implicit-GEMM shard (build tree) | about 4.6 to 5.1 MB, 148 to 162 MB inflated |
+| Provenance sidecar, each direct shard (build tree) | about 2.3 MB, 72 MB inflated |
 
-Packing all product bundles takes about 7 minutes with a warm comgr cache and about
-23 minutes with an empty one; the comgr cache grows to about 14 GB. The packer holds
+A build with the pack stamps removed takes about 20 to 25 minutes on that host, almost
+all of it packing; the comgr cache grows to about 14 GB. The packer holds
 every code object in memory before it writes the archive, so it peaks at about 16 GB
 of resident memory. `HIPKERNELPROVIDER_PRODUCT_PACK_JOBS` sets the worker count of the
 production pack alone (empty, the default, lets the packer size its pool to the
@@ -379,7 +389,10 @@ Size limits the catalog stays within:
   read under the per-UKD allowance (`MAX_DECOMPRESSED_BYTES_PER_UKD`, 64 KiB per UKD of
   its descriptor), which leaves a wide margin.
 - **Plugin load.** Loading the product root parses every packed KDP, about 570 MB of
-  JSON for this engine, once per process.
+  JSON for this engine, once per process. The first `hipdnnCreate` takes about 11 to
+  12 s and leaves the process at about 5.1 GB resident; most of it is the parsed
+  descriptors and the per-kernel definitions the engine keeps. The first kernel loaded
+  then reads the kpack archive into memory (above), about 1.5 GB more, once.
 
 ### Selecting among thousands of candidates
 
@@ -393,6 +406,37 @@ filtering, before the winner-record lookup, with benchmarking on or off. A recor
 benchmarked under a limit therefore covers exactly the candidates a later build under
 the same limit walks. Unset, or any value that is not a positive integer, means no
 limit.
+
+In the GPU suite's synthetic graphs, a dense 3x3 graph selects 3,260 of its 78,940
+serving implicit-GEMM instances, plus up to a few hundred direct ones (146 for the
+default `Smoke` graph); a depthwise graph selects 7,440 implicit-GEMM instances (only
+width 1 serves one channel per group) and about 110 direct ones.
+
+### Plan-build cost
+
+Each (graph, device) is matched once: every kernel of the engine goes through the
+kernel matcher, then the candidate filter narrows what it admitted, and the result is
+cached. Two plugin SDK mechanisms keep that cheap at this catalog size:
+
+- **Catalog views.** A cached catalog is a `CatalogView`: pointers into the engine's
+  shared, immutable kernel definitions, handed out as `shared_ptr<const CatalogView>`.
+  No plugin call copies the catalog, and a plan copies only the definition it launches.
+  The cache keeps the 256 most recent (graph, device) catalogs at 8 bytes per selected
+  kernel, so it is bounded at a few MB.
+- **Prepared kernels.** `aotPrepare`, a `KernelPrepareFn` registered under the AOT
+  kernel matcher's symbol, decodes each kernel's dtype, epilogue and instance once, when
+  the engine loads. The kernel matcher, score and candidate filter read that instead of
+  about fifty metadata fields per kernel, and read the matched problem from what the
+  graph match bound instead of walking the graph per kernel.
+
+Matching and filtering all 168,476 kernels for one graph takes about 20 to 80 ms. An
+unbenchmarked plan, through the frontend (`create_execution_plan_ext`,
+`check_support`, `build_plans`), takes about 35 to 40 ms on a warm process. Before these
+changes it took about 2 s, and resident memory grew by up to about 125 MB per new graph
+until the catalog cache filled. Now it is flat: over 600 distinct graphs it grew by
+about 11 MB while the cache filled, then not at all. A benchmarked plan adds the
+candidates' code-object loads and timed runs, which
+`HIPDNN_INGESTOR_CANDIDATE_LIMIT` bounds.
 
 ## The seed engine and the GPU tests
 
@@ -431,8 +475,9 @@ with the converter's `--engine-name hipkernel:Gfx950ConvFwdAotSeed`. Its config,
 `configs/gfx950_conv_fwd_aot_seed.yaml`, is committed as a worked example. Its census,
 `TestGfx950ConvFwdAotSeedPacks`, reads the integration root's gfx950 shard.
 
-`IntegrationGpuGfx950ConvFwd.cpp` runs one table of 24 graphs per dtype against both
-engines, 9 of them depthwise over several group counts, batches and images. The seed
+`IntegrationGpuGfx950ConvFwd.cpp` runs one table of 25 graphs per dtype against both
+engines, 9 of them depthwise over several group counts, batches and images. Between
+them they select every direct variant of the shipped catalog. The seed
 also runs a second table, `aotSeedDirectGraphs()`, of 56 graphs for its tiled, col,
 grouped and non-grouped instances: odd images, batches and group counts with tails,
 images narrower than a block, "valid" and "same" padding for col, filters up to 31x31
@@ -465,9 +510,7 @@ integration root packs it for gfx950, the product's where the product root offer
 
 ## Current limits
 
-- Forward only. The launch runs every forward direct kernel of rocKE's sweep, but the
-  shipped catalog packages the std and spatial ones only; the others are exercised by
-  the seed.
+- Forward only. The shipped catalog is every forward kernel of rocKE's gfx950 sweeps.
 - One score heuristic, as described above. It is a placeholder until rocKE's
   dispatcher ranks instances. Benchmarking every selected instance grows with the
   number of configurations in the catalog; `HIPDNN_INGESTOR_CANDIDATE_LIMIT` bounds it
