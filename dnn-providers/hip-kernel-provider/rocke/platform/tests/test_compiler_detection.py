@@ -121,12 +121,12 @@ def test_auto_lowering_recovers_then_retains_success(monkeypatch):
     builder = IRBuilder("compiler_recovery")
     builder.kernel.attrs["max_workgroup_size"] = 64
     builder.const_i32(1)
-    first = lower_llvm.lower_kernel_to_llvm(builder.kernel)
+    first = lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950")
     assert lower_llvm._datalayout_for_flavor("llvm22") in first
-    second = lower_llvm.lower_kernel_to_llvm(builder.kernel)
+    second = lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950")
     assert lower_llvm._datalayout_for_flavor("llvm23") in second
     info = comgr.loaded_compiler_info()
-    assert lower_llvm.lower_kernel_to_llvm(builder.kernel) == second
+    assert lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950") == second
     assert comgr.loaded_compiler_info() is info
     assert load.call_count == 2
     library.LLVMGetVersion.assert_called_once()
@@ -158,7 +158,7 @@ def test_explicit_lowering_bypasses_library_load(monkeypatch, source):
     kwargs = {"llvm_flavor": "llvm23"} if source == "api" else {}
     if source == "environment":
         monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm23")
-    ir = lower_llvm.lower_kernel_to_llvm(builder.kernel, **kwargs)
+    ir = lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950", **kwargs)
     assert lower_llvm._datalayout_for_flavor("llvm23") in ir
     load.assert_not_called()
 
