@@ -136,8 +136,12 @@ bool rocke_i_is_vector(const rocke_type_t* t, const char* elem_name, int count);
  * `v.type.elem if isinstance(...,VectorType) else v.type`). */
 const rocke_type_t* rocke_i_elem_of(const rocke_type_t* t);
 
-/* Throw ckc::TypeError when `t` is a packed-only scalar (i4, u4), a vector of one
- * or an LDS tile of one: the twin of core/ir.py::_refuse_packed_only_value,
+/* Whether `t`'s elements are packed-only (i4, u4): `t` is such a scalar, a vector
+ * of one or an LDS tile of one. The twin of core/ir.py::is_packed_only. NULL is
+ * not. */
+bool rocke_i_is_packed_only(const rocke_type_t* t);
+
+/* Throw ckc::TypeError when rocke_i_is_packed_only(t): the twin of core/ir.py::_refuse_packed_only_value,
  * which states the rule and the message. rocke_i_op calls it for every result
  * and rocke_b_param for every parameter, so no builder makes such a value.
  * NULL-safe. */
@@ -158,6 +162,19 @@ void rocke_i_refuse_unsigned_operands(const rocke_op_t* op, const char* instead)
 
 /* Lane count of a vector type, or 1 for a scalar. */
 int rocke_i_count_of(const rocke_type_t* t);
+
+/* VectorType(elem, count) allocated in `arena`, for callers that hold an arena
+ * but no builder (the lowerers). `elem` must be non-NULL; NULL on OOM. The
+ * name is the one rocke_vector_type gives the same type. */
+const rocke_type_t*
+    rocke_i_vector_type_in_arena(rocke_arena_t* arena, const rocke_type_t* elem, int count);
+
+/* The logical IR type of `dtype` (any accepted spelling), as
+ * rocke_dtype_to_ir_type returns it (Python core/ir.py::dtype_to_ir_type).
+ * Throws ckc::ValueError "unknown dtype '<dtype>'" for an unknown name and
+ * "no logical IR type for dtype '<canonical name>'" for an encoding with no
+ * IR type. */
+const rocke_type_t* rocke_require_ir_type(const char* dtype);
 
 /* The number of bits a value of type `t` occupies (Python core/ir.py::type_bits):
  * a scalar's format width, a vector's element width times its count, a

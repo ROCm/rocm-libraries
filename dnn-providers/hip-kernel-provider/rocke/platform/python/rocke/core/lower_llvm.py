@@ -68,6 +68,11 @@ from .ir import (
     require_streaming_arch,
     split_loc,
 )
+from .mma_operand import (
+    MmaOperandRole,
+    mma_operand_needs_reinterpret,
+    mma_operand_value,
+)
 
 
 # Datalayout / triple. Copied verbatim from clang's output for the same
@@ -1578,6 +1583,13 @@ _BF16_MAX_FINITE = 0x7F7F
 _BF16_SIGN_BIT = -0x8000
 
 
+def _mma_op_id(op: Op) -> str:
+    """The op_id of an MMA op; MMA ops reach their handlers as ``tile.<op_id>``."""
+    if not op.name.startswith("tile."):
+        raise ValueError(f"{op.name!r} is not an MMA op named 'tile.<op_id>'")
+    return op.name.removeprefix("tile.")
+
+
 class _Lowerer:
     def __init__(
         self,
@@ -1677,6 +1689,33 @@ class _Lowerer:
 
     def _operand_with_type(self, v: Value) -> str:
         return f"{_llvm_type(v.type)} {self._operand(v)}"
+
+    def _reinterpret(self, v: Value, register_type: Type) -> str:
+        """Emit one ``bitcast`` of ``v`` to ``register_type``; return its name.
+
+        Only renders: the caller has established that the bit widths match
+        (:func:`~rocke.core.mma_operand.mma_operand_needs_reinterpret`).
+        """
+        reinterpreted = self._fresh("reg")
+        self._current().emit(
+            f"  {reinterpreted} = bitcast {self._operand_with_type(v)} "
+            f"to {_llvm_type(register_type)}"
+        )
+        return reinterpreted
+
+    def _mma_operand(self, op: Op, role: MmaOperandRole, register_type: Type) -> str:
+        """Return MMA operand ``role`` of ``op`` as the instruction's register type.
+
+        The operand passes through unchanged, or is reinterpreted with one
+        ``bitcast``, as :func:`~rocke.core.mma_operand.mma_operand_needs_reinterpret`
+        decides; that rule also raises for an operand it refuses.
+        """
+        value = mma_operand_value(op, role)
+        if mma_operand_needs_reinterpret(
+            _mma_op_id(op), role, value.type, register_type, self._backend.arch
+        ):
+            return self._reinterpret(value, register_type)
+        return self._operand(value)
 
     @staticmethod
     def _composed_constant(value: int | float, ty: Type, ity: str) -> Value:
@@ -3825,23 +3864,27 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
-        a, b, c = op.operands
+        c = op.operands[2]
         self._need("mfma.f32.16x16x4f32")
+        a_arg = self._mma_operand(op, "a", F32)
+        b_arg = self._mma_operand(op, "b", F32)
         self._current().emit(
             f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
-            f"float {self._operand(a)}, "
-            f"float {self._operand(b)}, "
+            f"float {a_arg}, "
+            f"float {b_arg}, "
             f"<4 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
 
     def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
-        a, b, c = op.operands
+        c = op.operands[2]
         self._need("mfma.f32.32x32x2f32")
+        a_arg = self._mma_operand(op, "a", F32)
+        b_arg = self._mma_operand(op, "b", F32)
         self._current().emit(
             f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x2f32("
-            f"float {self._operand(a)}, "
-            f"float {self._operand(b)}, "
+            f"float {a_arg}, "
+            f"float {b_arg}, "
             f"<16 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )

@@ -646,16 +646,23 @@ int rocke_i_count_of(const rocke_type_t* t)
     return 1;
 }
 
+static const rocke_type_t* packed_only_candidate(const rocke_type_t* t)
+{
+    return (t != NULL && t->kind == ROCKE_TYPE_SMEM) ? t->elem : rocke_i_elem_of(t);
+}
+
+bool rocke_i_is_packed_only(const rocke_type_t* t)
+{
+    const rocke_type_t* elem = packed_only_candidate(t);
+    return elem != NULL && elem->kind == ROCKE_TYPE_SCALAR
+           && (elem->scalar == ROCKE_SCALAR_I4 || elem->scalar == ROCKE_SCALAR_U4);
+}
+
 void rocke_i_refuse_packed_only_value(const char* op_name, const rocke_type_t* t)
 {
-    const rocke_type_t* elem
-        = (t != NULL && t->kind == ROCKE_TYPE_SMEM) ? t->elem : rocke_i_elem_of(t);
-    if(elem == NULL || elem->kind != ROCKE_TYPE_SCALAR)
+    if(rocke_i_is_packed_only(t))
     {
-        return;
-    }
-    if(elem->scalar == ROCKE_SCALAR_I4 || elem->scalar == ROCKE_SCALAR_U4)
-    {
+        const rocke_type_t* elem = packed_only_candidate(t);
         throw ckc::TypeError(
             ckc::format_error("%s: %s values travel packed in 32-bit words and have no scalar or "
                               "vector form -- keep them in i32 storage and unpack explicitly",

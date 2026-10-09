@@ -613,6 +613,25 @@ static int test_scalar_widths()
     return 0;
 }
 
+/* A dtype's logical IR type, as core/ir.py::dtype_to_ir_type gives it: any
+ * accepted spelling resolves, and an unknown name is refused with
+ * core/dtypes.py's text. */
+static int test_ir_type_of_dtype()
+{
+    CHECK(rocke_require_ir_type("half") == rocke_f16());
+    CHECK(rocke_require_ir_type("fp8") == rocke_fp8e4m3());
+    try
+    {
+        rocke_require_ir_type("custom_format");
+        CHECK(false);
+    }
+    catch(const ckc::ValueError& error)
+    {
+        CHECK(strcmp(error.what(), "unknown dtype 'custom_format'") == 0);
+    }
+    return 0;
+}
+
 /* Every IR scalar type by name: one per rocke_scalar_kind_t, which the
  * static_assert and test_scalar_kinds_are_covered hold to. Widths are not
  * listed: they come from the engine. */
@@ -662,6 +681,7 @@ int main(int argc, char** argv)
     CHECK(test_smem_vector_elements() == 0);
     CHECK(test_bitcast_width() == 0);
     CHECK(test_scalar_widths() == 0);
+    CHECK(test_ir_type_of_dtype() == 0);
     CHECK(test_scalar_kinds_are_covered() == 0);
     printf("rocke_ir_types: ok\n");
     return 0;

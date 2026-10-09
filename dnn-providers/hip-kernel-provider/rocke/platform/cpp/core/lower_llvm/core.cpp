@@ -944,6 +944,20 @@ const char* rocke_ll_operand_with_type(rocke_lower_t* L, const rocke_value_t* v)
     return rocke_arena_printf(&L->arena, "%s %s", ty, op);
 }
 
+const char* rocke_ll_reinterpret(rocke_lower_t* L,
+                                 const rocke_value_t* v,
+                                 const rocke_type_t* register_type)
+{
+    /* The fresh name is taken before the operand is rendered, as in Python. */
+    const char* reinterpreted = rocke_ll_fresh(L, "reg");
+    rocke_ll_emitf(L,
+                   "  %s = bitcast %s to %s",
+                   reinterpreted,
+                   rocke_ll_operand_with_type(L, v),
+                   rocke_ll_llvm_type(L, register_type));
+    return reinterpreted;
+}
+
 /* ====================================================================== */
 /* Shared binary-op helpers (Python _binop / _vector_binop)               */
 /* ====================================================================== */

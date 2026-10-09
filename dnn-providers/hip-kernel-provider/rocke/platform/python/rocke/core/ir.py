@@ -300,12 +300,19 @@ def _check_flag_ptr(op_name: str, ptr: "Value") -> None:
 _PACKED_ONLY_SCALARS = ("i4", "u4")
 
 
+def is_packed_only(t: "Type") -> bool:
+    """Whether ``t``'s elements are packed-only (i4, u4): ``t`` is such a
+    scalar, a vector of one, or an LDS tile of one. An untyped placeholder
+    (``None``) has no elements and is not."""
+    elem = t.elem if isinstance(t, (VectorType, SmemType)) else t
+    return elem is not None and elem.name in _PACKED_ONLY_SCALARS
+
+
 def _refuse_packed_only_value(op_name: str, t: "Type") -> None:
     """Refuse an ``op_name`` result or parameter of type ``t`` whose elements
-    are packed-only: a scalar, a vector of one, or an LDS tile of one. An
-    untyped placeholder (``None``) has no elements and passes."""
-    elem = t.elem if isinstance(t, (VectorType, SmemType)) else t
-    if elem is not None and elem.name in _PACKED_ONLY_SCALARS:
+    are packed-only (:func:`is_packed_only`)."""
+    if is_packed_only(t):
+        elem = t.elem if isinstance(t, (VectorType, SmemType)) else t
         raise TypeError(
             f"{op_name}: {elem.name} values travel packed in 32-bit words and have "
             "no scalar or vector form -- keep them in i32 storage and unpack "
