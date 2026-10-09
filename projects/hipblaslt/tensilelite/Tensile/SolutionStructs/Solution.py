@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from ..ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy, usesStreamKArrivalFixup
+from ..ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy, usesStreamKArrivalFixup, usesStreamKDynamicParallel
 
 import collections
 import copy
@@ -7134,6 +7134,12 @@ class Solution(collections.abc.Mapping):
         and usesStreamKArrivalFixup(state["DebugStreamK"],
                                     isaInfoMap[isa].asmCaps["HasSAtomic"],
                                     state["_PrefetchAcrossPersistentEnabled"]))
+    # Same for the dynamic sub-path's parallel reduction
+    # (StreamKHybrid.usesDynamicParallel).
+    state["InternalSupportParams"]["SupportStreamKDynamicParallel"] = bool(
+        isStreamK(state) and hasHybridAssignment(state) and not isCustomKernelConfig(state)
+        and usesStreamKDynamicParallel(state["DebugStreamK"], state["StreamKAtomic"],
+                                       state["_PrefetchAcrossPersistentEnabled"]))
     state["AssignedDerivedParameters"] = True
 
     # Set E

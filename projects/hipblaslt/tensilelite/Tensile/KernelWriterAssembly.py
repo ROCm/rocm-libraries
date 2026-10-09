@@ -14528,6 +14528,15 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SMovB32(dst=sgpr(sgprLog2BpeD), src=log2(self.states.bpeCexternalGSU1)))
 
         bpeDoneLabel = Label(label=self.labels.getNameInc("BPEDone"), comment="")
+        # SK5 dynamic parallel reduction keeps AddressFlags for its work queues;
+        # it takes the parallel BPE on its own mode test. Emits nothing for
+        # other kernels.
+        processingComponent = Component.TileProcessingStrategy.find(self)
+        dynamicParallel = getattr(processingComponent, "usesDynamicParallel", lambda w, k: False)(self, kernel)
+        if dynamicParallel:
+          bpeParallelLabel = Label(label=self.labels.getNameInc("BPEParallel"), comment="")
+          processingComponent.emitDynamicParallelBranch(self, kernel, module, bpeParallelLabel,
+                                                        "dynamic parallel reduction: workspace BPE")
 
         module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
         module.add(SCBranchSCC0(labelName=bpeDoneLabel.getLabelName(), comment="If synchronizer, use regular output BPE"))
@@ -14537,6 +14546,8 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SCmpEQU32(src0=sgpr(sSkt), src1=1, comment="split == 1 ?"))
         self.releasePersistentConstSgpr(sSkt)
         module.add(SCBranchSCC1(labelName=bpeDoneLabel.getLabelName(), comment="If split == 1, use reguler output BPE"))
+        if dynamicParallel:
+          module.add(bpeParallelLabel)
 
         # BPE for parallel reduction
         module.add(SMovB32(dst=sgpr(sgprLog2BpeC), src=log2(int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()))))
@@ -16077,6 +16088,9 @@ class KernelWriterAssembly(KernelWriter):
     gsu0ReturnLabel = None
 
     gsuLimit = 1 if noGSUBranch or self.debugConfig.splitGSU else 2
+    # SK5 dynamic sub-path with parallel reduction (set below for StreamK
+    # Hybrid kernels that support it).
+    dynamicParallel = False
     if gsuLimit > 1:
       gsuLabel = Label(label=self.labels.getNameInc("GSU"), comment="")
       if isPersistent(kernel):
@@ -16091,6 +16105,15 @@ class KernelWriterAssembly(KernelWriter):
           gsu0DeferredLabel = Label(label=self.labels.getNameInc("GW_B0_Deferred"), comment="")
           gsu0ReturnLabel = Label(label=self.labels.getNameInc("GW_B0_Deferred_Return"), comment="")
         # Keep original GSU check unchanged — falls through to GSU0, branches to gsuLabel for GSU1
+        # SK5 dynamic parallel reduction keeps AddressFlags for its work queues;
+        # it takes the GSU (workspace partial) store on its own mode test.
+        # Emits nothing for other kernels.
+        skProcessing = Component.TileProcessingStrategy.find(self)
+        dynamicParallel = getattr(skProcessing, "usesDynamicParallel", lambda w, k: False)(self, kernel)
+        if dynamicParallel:
+          gsu0StoreLabel = Label(label=self.labels.getNameInc("GW_DynamicParallel"), comment="")
+          skProcessing.emitDynamicParallelBranch(self, kernel, module, gsu0StoreLabel,
+                                                 "dynamic parallel reduction: workspace partial store")
         module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
         module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="Branch to stream-k store code"))
         sSkt = self.acquirePersistentConstSgpr(kernel, "skTiles")
@@ -16100,6 +16123,8 @@ class KernelWriterAssembly(KernelWriter):
         self.releasePersistentConstSgpr(sSkt)
         # TODO May need long branch??
         module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if split == 1"))
+        if dynamicParallel:
+          module.add(gsu0StoreLabel)
       else:
         with self.allocTmpSgpr(1, tag="globalWriteElements_tmpSgprGSU") as tmpSgprGSU:
           module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
@@ -16915,6 +16940,12 @@ class KernelWriterAssembly(KernelWriter):
       if cvtVgpr is not None:
         self.vgprPool.checkIn(cvtVgpr)
       if gsuLimit > 1 and gsuLimitIdx == 0:
+        if dynamicParallel:
+          # Static parallel reduction gives each workgroup one partial tile, so
+          # its GSU store ends the kernel. A dynamic work item goes back to its
+          # queue for the next one instead.
+          skProcessing.emitDynamicParallelLongBranch(
+            self, kernel, module, Label("PersistentLoopClose", ""), "dynamic parallel: next work item")
         if deferGSU0:
           # GSU0 store code is done. Append it to deferredGSU0 (placed after persistent loop),
           # then restore `module` to savedModule (the inline stub region) so subsequent code

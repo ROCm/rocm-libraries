@@ -107,6 +107,31 @@ def usesStreamKArrivalFixup(debugStreamK, hasSAtomic, prefetchAcrossPersistent):
     return debugStreamK == 0 and bool(hasSAtomic) and not prefetchAcrossPersistent
 
 
+def usesStreamKDynamicParallel(debugStreamK, streamKAtomic, prefetchAcrossPersistent):
+    """Whether a StreamK Hybrid kernel can run the parallel (PostGSU)
+    reduction on its dynamic sub-path.
+
+    With the mode bit set (bit 29 of the SKTiles kernel argument on the
+    dynamic sub-path) every work item is one part of a split tile and stores
+    its unscaled partial to the M x N workspace slot of its part, through the
+    same GSU store branch the static parallel reduction uses; the PostGSU
+    kernel then sums the slots and applies alpha/beta/bias. That needs the
+    non-atomic StreamK store paths. PAP is excluded because its next-tile
+    prefetch tells parallel reduction apart by AddressFlags == 0, which the
+    dynamic queues keep non-zero, and DebugStreamK keeps its debug fixups.
+    StreamKHybrid.usesDynamicParallel() (codegen) and the
+    SupportStreamKDynamicParallel capability (host) both come from here.
+
+    Unlike the arrival fixup it does not need scalar atomics: the reduction
+    is plain stores plus the PostGSU kernel, and the work queues fetch with
+    s_atomic_inc or, without HasSAtomic (e.g. gfx1250), a lane-0
+    global_atomic_inc_u32 (fetchNextWorkItem). No shipped logic has SK5
+    Hybrid kernels for such targets (only gfx950); the gfx1250 test kernels
+    assemble with it but it has not run on gfx1250 hardware.
+    """
+    return debugStreamK == 0 and not streamKAtomic and not prefetchAcrossPersistent
+
+
 def requiresPartialReduction(state):
     return isStreamK(state) and not state.get("StreamKAtomic", 0)
 
