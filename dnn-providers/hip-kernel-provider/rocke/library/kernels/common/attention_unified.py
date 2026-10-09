@@ -661,6 +661,10 @@ def _enable_d128_small_tile(problem: UnifiedAttentionProblem) -> bool:
     DISABLES the lever, restoring the prior routing (T=64, nw=2/4). Any other
     value (or unset) -> default-ON for the cohort.
     """
+    # Shape checks first: the cache key asks on every launch, and most problems
+    # fail them before the env knob or the cohort walk would matter.
+    if problem.head_size != 128 or problem.use_fp8:
+        return False
     env = (
         __import__("os")
         .environ.get("HIPDNN_GFX950_D128_SMALL_TILE", "")
@@ -669,11 +673,7 @@ def _enable_d128_small_tile(problem: UnifiedAttentionProblem) -> bool:
     )
     if env in ("0", "false", "no", "off"):
         return False
-    return (
-        problem.head_size == 128
-        and not problem.use_fp8
-        and _enable_single_batch_combo(problem)
-    )
+    return _enable_single_batch_combo(problem)
 
 
 def _enable_k_single_buffer(
@@ -853,6 +853,9 @@ def _enable_softmax_mfma_interleave(problem: UnifiedAttentionProblem) -> bool:
     ESCAPE HATCH: ``HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE=0`` (or off/no/false)
     force-DISABLES the lever, restoring the prior nw=2 / no-interleave routing.
     """
+    # Shape checks first, as in _enable_d128_small_tile.
+    if problem.head_size != 128 or problem.use_fp8:
+        return False
     env = (
         __import__("os")
         .environ.get("HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE", "")
@@ -861,11 +864,7 @@ def _enable_softmax_mfma_interleave(problem: UnifiedAttentionProblem) -> bool:
     )
     if env in ("0", "false", "no", "off"):
         return False
-    return (
-        problem.head_size == 128
-        and not problem.use_fp8
-        and _enable_single_batch_combo(problem)
-    )
+    return _enable_single_batch_combo(problem)
 
 
 @dataclass(frozen=True)
@@ -1878,9 +1877,10 @@ def _enable_sched_barrier(problem: UnifiedAttentionProblem) -> bool:
     short single-batch combo uses num_warps==4 (BLOCK_M=128, ample ILP), where
     the fence is the over-constrained num_warps>=2 regime, so leave it OFF.
     """
-    if not _enable_v_double_buffer(problem):
+    # Head size first: it is a field read, the V-schedule walk is not.
+    if problem.head_size != 128:
         return False
-    return problem.head_size == 128
+    return _enable_v_double_buffer(problem)
 
 
 def _enable_early_v_schedule(problem: UnifiedAttentionProblem) -> bool:
