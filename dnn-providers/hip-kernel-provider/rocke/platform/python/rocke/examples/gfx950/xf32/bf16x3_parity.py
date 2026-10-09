@@ -32,6 +32,11 @@ Usage::
 
     PYTHONPATH=python python python/rocke/examples/gfx950/xf32/bf16x3_parity.py
 
+Device I/O goes through ``DeviceMem`` + ``Runtime.memcpy_*`` over numpy host
+arrays, so the gate needs nothing beyond rocke's own hard dependency. torch is
+not installed on every gfx950 node, and a numeric gate that skips on the one
+machine that can run it is not a gate.
+
 Exits non-zero if any check fails, so it doubles as a CI gate. On a host with
 no gfx950 device it prints ``SKIPPED`` and exits 0 -- the emulated atoms are
 gfx950-only, and a skip must not be mistaken for a pass. The test suite runs it
@@ -146,12 +151,31 @@ def _handwritten_kernel(phys, terms) -> KernelDef:
     return b.kernel
 
 
-def _split(x):
-    """The host mirror of the lowering's split, in torch (RNE, as the ISA is)."""
-    import torch
+def _to_bf16(x: np.ndarray) -> np.ndarray:
+    """fp32 -> bf16 bit patterns (``uint16``), round-to-nearest-even.
 
-    big = x.to(torch.bfloat16)
-    small = (x - big.to(torch.float32)).to(torch.bfloat16)
+    Hand-rolled because stock numpy has no ``bfloat16`` and this path is
+    deliberately torch- and ``ml_dtypes``-free (see ``runtime/host_buffers``).
+    RNE is what the ISA's fp32->bf16 conversion does, so the host split must
+    match it or the differential would compare two different recipes. The
+    carry into the exponent is handled by the add, which is why this is a
+    bias-and-shift rather than a truncate. Infinities and NaNs are out of
+    scope -- every operand here is finite by construction.
+    """
+    u = np.ascontiguousarray(x, dtype=np.float32).view(np.uint32)
+    bias = np.uint32(0x7FFF) + ((u >> np.uint32(16)) & np.uint32(1))
+    return ((u + bias) >> np.uint32(16)).astype(np.uint16)
+
+
+def _from_bf16(u16: np.ndarray) -> np.ndarray:
+    """bf16 bit patterns back to fp32 -- exact, bf16 being a truncated fp32."""
+    return (u16.astype(np.uint32) << np.uint32(16)).view(np.float32)
+
+
+def _split(x: np.ndarray):
+    """The host mirror of the lowering's Dekker split, as bf16 bit patterns."""
+    big = _to_bf16(x)
+    small = _to_bf16(x - _from_bf16(big))
     return big, small
 
 
@@ -175,44 +199,55 @@ def _launch(kernel: KernelDef, values, *, wave_size: int):
 
 def _run_atom(op_id: str) -> list[str]:
     """Every failure found for one emulated atom, as human-readable lines."""
-    import torch
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.host_buffers import as_u8_buffer
+    from rocke.runtime.launcher import DeviceMem
 
     target = ArchTarget.from_gfx(_ARCH)
     atom = target.mma.by_op_id(op_id)
     phys = target.mma.by_op_id(atom.emulation.physical_op_id)
     failures: list[str] = []
+    rt = Runtime()
+    # Every device buffer stays alive until the readback: DeviceMem frees on
+    # collection, and the kernel is still reading it at launch time.
+    owned: list[DeviceMem] = []
 
-    def out_buffer():
-        return torch.zeros(
-            atom.wave_size * atom.c_frag_len, dtype=torch.float32, device="cuda"
-        )
+    def upload(host: np.ndarray) -> DeviceMem:
+        dev = DeviceMem(host.nbytes)
+        rt.memcpy_h2d(dev.ptr(), as_u8_buffer(host), host.nbytes)
+        owned.append(dev)
+        return dev
+
+    def run(kernel, values, *, wave_size: int) -> np.ndarray:
+        """Launch over uploaded operands and return the accumulator, as fp32."""
+        out = np.zeros(atom.wave_size * atom.c_frag_len, dtype=np.float32)
+        out_dev = DeviceMem(out.nbytes)
+        rt.memset(out_dev.ptr(), 0, out.nbytes)
+        _launch(kernel, dict(values, out=out_dev), wave_size=wave_size)
+        rt.memcpy_d2h(as_u8_buffer(out), out_dev.ptr(), out.nbytes)
+        return out
 
     def emulated(a_f32, b_f32):
-        out = out_buffer()
-        _launch(
+        return run(
             _emulated_kernel(atom),
-            {"a": a_f32, "b": b_f32, "out": out},
+            {"a": upload(a_f32), "b": upload(b_f32)},
             wave_size=atom.wave_size,
         )
-        return out
 
     def handwritten(a_f32, b_f32, terms):
         """The same recipe spelled out, over operands split on the host."""
         a_big, a_small = _split(a_f32)
         b_big, b_small = _split(b_f32)
-        out = out_buffer()
-        _launch(
+        return run(
             _handwritten_kernel(phys, terms),
             {
-                "a_big": a_big,
-                "a_small": a_small,
-                "b_big": b_big,
-                "b_small": b_small,
-                "out": out,
+                "a_big": upload(a_big),
+                "a_small": upload(a_small),
+                "b_big": upload(b_big),
+                "b_small": upload(b_small),
             },
             wave_size=phys.wave_size,
         )
-        return out
 
     a_len = atom.wave_size * atom.a_frag_len
     b_len = atom.wave_size * atom.b_frag_len
@@ -221,23 +256,23 @@ def _run_atom(op_id: str) -> list[str]:
     # kernels issue the same three MFMAs over the same bits in the same
     # order, so anything other than equality is a real difference in what
     # the lowering built.
-    torch.manual_seed(2208)
-    a = torch.randn(a_len, dtype=torch.float32, device="cuda")
-    b = torch.randn(b_len, dtype=torch.float32, device="cuda")
-    mismatched = int((emulated(a, b) != handwritten(a, b, _TERMS)).sum().item())
+    rng = np.random.default_rng(2208)
+    a = rng.standard_normal(a_len, dtype=np.float32)
+    b = rng.standard_normal(b_len, dtype=np.float32)
+    mismatched = int(np.count_nonzero(emulated(a, b) != handwritten(a, b, _TERMS)))
     print(f"  [{op_id}] expansion vs hand-written BF16x3: {mismatched} slots differ")
     if mismatched:
         failures.append(f"{op_id}: expansion does not match the hand-written recipe")
 
     # (2) Accuracy, on constant operands, where the truth is K*alpha*beta at
     # every output position regardless of layout.
-    a = torch.full((a_len,), _ALPHA, dtype=torch.float32, device="cuda")
-    b = torch.full((b_len,), _BETA, dtype=torch.float32, device="cuda")
+    a = np.full(a_len, _ALPHA, dtype=np.float32)
+    b = np.full(b_len, _BETA, dtype=np.float32)
     got = emulated(a, b)
     bf16_only = handwritten(a, b, (("a_big", "b_big"),))
     truth = float(atom.k) * _ALPHA * _BETA
-    emulated_err = float((got.double() - truth).abs().max().item()) / abs(truth)
-    bf16_err = float((bf16_only.double() - truth).abs().max().item()) / abs(truth)
+    emulated_err = float(np.abs(got.astype(np.float64) - truth).max()) / abs(truth)
+    bf16_err = float(np.abs(bf16_only.astype(np.float64) - truth).max()) / abs(truth)
     print(
         f"  [{op_id}] vs K*alpha*beta: emulated rel={emulated_err:.3e} "
         f"bf16-only rel={bf16_err:.3e}"

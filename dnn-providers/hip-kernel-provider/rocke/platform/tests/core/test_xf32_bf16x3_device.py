@@ -9,10 +9,10 @@ accuracy against ``K * alpha * beta``. As an examples-only ``__main__`` script
 neither pytest nor ``tests/run_all.py`` would ever invoke it, so the device
 assertions would not run even on a gfx950 host. This test runs it there.
 
-Elsewhere it skips: the emulated rows are gfx950-only. The harness allocates
-through torch, so a host without torch skips too. Set ``ROCKE_REQUIRE_GFX950=1``
-on a gfx950 validation node to turn either skip into a failure, so a node that
-lost its device or its torch cannot report green.
+Elsewhere it skips: the emulated rows are gfx950-only, so the only reason to
+skip is the absence of such a device. Set ``ROCKE_REQUIRE_GFX950=1`` on a
+gfx950 validation node to turn that skip into a failure, so a node that lost
+its device cannot report green.
 
 The device probe and the harness each run in a subprocess, which keeps HIP
 initialisation out of the pytest process and bounds a hung device.
@@ -20,7 +20,6 @@ initialisation out of the pytest process and bounds a hung device.
 
 from __future__ import annotations
 
-import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -64,12 +63,9 @@ class TestBf16x3OnDevice(unittest.TestCase):
     def setUpClass(cls):
         cls.env = _env()
         arch = _device_arch(cls.env)
-        if arch != _ARCH:
-            reason = f"needs HIP device 0 to be {_ARCH}; found {arch}"
-        elif importlib.util.find_spec("torch") is None:
-            reason = "the device harness allocates through torch, which is absent"
-        else:
+        if arch == _ARCH:
             return
+        reason = f"needs HIP device 0 to be {_ARCH}; found {arch}"
         if cls.env.get(_REQUIRE_ENV) == "1":
             raise AssertionError(f"{_REQUIRE_ENV}=1, but {reason}")
         raise unittest.SkipTest(reason)
