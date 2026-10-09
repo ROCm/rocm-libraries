@@ -99,7 +99,7 @@ zero_vec(elem, n)          # f32 / f16 / bf16
 
 ```text
 add, sub, mul, div, mod                    # integer arithmetic
-fadd, fsub, fmul, fdiv, fneg               # f32 arithmetic
+fadd, fsub, fmul, fdiv, fneg               # f64/f32/f16/bf16 arithmetic
 fmax, fmin                                 # llvm.maxnum / llvm.minnum (f64/f32/f16/bf16)
 fcmp(pred, a, b)                           # pred in {olt,ole,ogt,oge,oeq,one,ord,uno}
 cmp_lt, cmp_le, cmp_gt, cmp_ge, cmp_eq, cmp_ne   # integer compare (-> i1)
@@ -126,7 +126,7 @@ cvt_f32_to_i8_sat(v)     # round + saturate to i8
 
 ### Math intrinsics
 
-LLVM target intrinsics; lowering is f32-centric. `exp2`, `sqrt`, `rsqrt` and `tanh` accept only f32 and reject f64 inputs; `rcp` is a plain `fdiv` and accepts f64.
+LLVM target intrinsics; lowering is f32-centric. `exp2`, `exp2_fast`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `tanh`, `fabs`, `fma`, `fmax3`, `fmin3` and `vector_fma` have no f64 lowering and reject f64 inputs in both the LLVM and HIP lowerings; `rcp` is a plain `fdiv` and accepts f64.
 
 ```text
 exp2(v)        # llvm.exp2.f32

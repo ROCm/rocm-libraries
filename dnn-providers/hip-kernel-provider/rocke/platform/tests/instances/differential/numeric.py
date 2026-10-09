@@ -555,9 +555,11 @@ ELEM_CONFIGS: List[ElemCfg] = [
     ElemCfg("tanh_bf16_128k", 2048 * 64, "tanh", "bf16"),
     # f64: native f64 ops only, vec=2 (256*2 = 512 elems/block).
     ElemCfg("add_f64_128k", 2048 * 64, "add", "f64", vec=2),
+    ElemCfg("sub_f64_128k", 2048 * 64, "sub", "f64", vec=2),
     ElemCfg("mul_f64_128k", 2048 * 64, "mul", "f64", vec=2),
     ElemCfg("min_f64_128k", 2048 * 64, "min", "f64", vec=2),
     ElemCfg("relu_f64_128k", 2048 * 64, "relu", "f64", vec=2),
+    ElemCfg("abs_f64_128k", 2048 * 64, "abs", "f64", vec=2),
 ]
 
 # map spec dtype -> TOL-table key

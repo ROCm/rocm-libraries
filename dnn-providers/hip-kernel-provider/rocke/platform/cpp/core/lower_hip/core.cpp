@@ -416,6 +416,20 @@ const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
     return rocke_h_vec_prefix(ir_scalar_name, full_map);
 }
 
+/* Python _reject_f64(op, tname):
+ *   if tname == "f64":
+ *       raise NotImplementedError(f"{op.name} does not support f64") */
+void rocke_h_reject_f64(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* tname)
+{
+    if(tname && strcmp(tname, "f64") == 0)
+    {
+        rocke_h_fail(lw,
+                     ROCKE_ERR_NOTIMPL,
+                     "%s does not support f64",
+                     op->name ? op->name : rocke_opcode_name(op->opcode));
+    }
+}
+
 /* Python _type_to_hip(t). Returns an arena-owned string; throws on an unmappable
  * HIP type (KeyError parity), including logical types without direct HIP lowering. */
 const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)

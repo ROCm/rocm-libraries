@@ -219,6 +219,12 @@ def _vec_prefix(elem_name: str, op_desc: str) -> str:
         ) from None
 
 
+def _reject_f64(op: Op, tname: str) -> None:
+    """Reject an f64 operand for an op that has no f64 lowering."""
+    if tname == "f64":
+        raise NotImplementedError(f"{op.name} does not support f64")
+
+
 def _f32_literal(val: float) -> str:
     """Format a Python float for C++ float literal context.
 
@@ -1305,6 +1311,7 @@ class _Lowerer:
     def _op_arith_fabs(self, op: Op) -> None:
         (v,) = op.operands
         ty = _type_to_hip(op.result.type)
+        _reject_f64(op, op.result.type.name)
         # `__builtin_fabsf` lowers to a free `abs` modifier on AMDGPU
         # (exactly what the LLVM `llvm.fabs.f32` intrinsic produces);
         # for f16/bf16 the matching builtin yields the same modifier.
@@ -1318,6 +1325,7 @@ class _Lowerer:
     def _op_arith_fma(self, op: Op) -> None:
         a, b, c = op.operands
         ty = _type_to_hip(op.result.type)
+        _reject_f64(op, op.result.type.name)
         # `fmaf(a, b, c)` lowers to `v_fma_f32` on AMDGPU for f32; for
         # f16/bf16 we promote to f32, fma, and demote — semantically
         # identical to the IR-level `arith.fma` and matches the
@@ -1330,6 +1338,7 @@ class _Lowerer:
     def _op_arith_fmax3(self, op: Op) -> None:
         a, b, c = op.operands
         ty = _type_to_hip(op.result.type)
+        _reject_f64(op, op.result.type.name)
         # Two ternary ops in one statement; on AMDGPU the chain folds
         # into a single `v_max3_f32`.
         self._emit(
@@ -1344,6 +1353,7 @@ class _Lowerer:
     def _op_arith_fmin3(self, op: Op) -> None:
         a, b, c = op.operands
         ty = _type_to_hip(op.result.type)
+        _reject_f64(op, op.result.type.name)
         self._emit(
             f"{ty} {_name(op.result)} = "
             f"(({_name(b)} < {_name(c)}) ? {_name(b)} : {_name(c)});"
@@ -1422,6 +1432,7 @@ class _Lowerer:
         (v,) = op.operands
         tname = op.result.type.name
         cpp_t = _type_to_hip(op.result.type)
+        _reject_f64(op, tname)
         # ``__builtin_amdgcn_*`` only takes float. For non-f32 types,
         # round-trip via float so the math runs at f32 precision.
         if tname == "f32":
@@ -1466,6 +1477,7 @@ class _Lowerer:
         (v,) = op.operands
         tname = op.result.type.name
         cpp_t = _type_to_hip(op.result.type)
+        _reject_f64(op, tname)
         if tname == "f32":
             self._emit(
                 f"{cpp_t} {_name(op.result)} = __builtin_amdgcn_rcpf({_name(v)});"
@@ -1484,6 +1496,7 @@ class _Lowerer:
         (v,) = op.operands
         tname = op.result.type.name
         cpp_t = _type_to_hip(op.result.type)
+        _reject_f64(op, tname)
         if tname == "f32":
             self._emit(
                 f"{cpp_t} {_name(op.result)} = __builtin_amdgcn_rsqf({_name(v)});"
@@ -2430,6 +2443,7 @@ class _Lowerer:
         a, bb, cc = op.operands
         n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
         res_t = _type_to_hip(op.result.type)
+        _reject_f64(op, op.result.type.elem.name)
         nice = _name(op.result)
         self._emit(f"{res_t} {nice};")
         for i in range(n):

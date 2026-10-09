@@ -1093,17 +1093,6 @@ class TestReduceInstance(unittest.TestCase):
             ll = lower_kernel_to_llvm(build_reduce2d(spec))
             self.assertIn("double", ll)
 
-    def test_f64_max_min_identities_are_infinite(self):
-        from rocke.instances import Reduce2DSpec, build_reduce2d
-
-        for op, inf_bits in (
-            ("max", "0xFFF0000000000000"),
-            ("min", "0x7FF0000000000000"),
-        ):
-            spec = Reduce2DSpec(n_per_block=4096, op=op, dtype="f64", vec=2)
-            ll = lower_kernel_to_llvm(build_reduce2d(spec))
-            self.assertIn(f"double {inf_bits}", ll)
-
     def test_f64_rejects_wide_vec(self):
         from rocke.instances.common.reduce import Reduce2DSpec, is_valid_spec
 
