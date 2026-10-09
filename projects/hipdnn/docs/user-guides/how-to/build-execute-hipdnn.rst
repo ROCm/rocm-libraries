@@ -149,12 +149,10 @@ Autotune and ingestor benchmarking discard a stalled pass on timeout or a valid
 unstalled sample, then rerun every candidate unstalled once. Each new comparison
 attempts device-only timing again. A finite negative elapsed reading during a timed
 run is instead treated as a transient invalid sample: it is replaced with a fresh
-measurement without disturbing the requested sample count or the convergence window.
-Autotune allows up to two extra attempts per candidate; a third negative reading for
-the same candidate exhausts that budget, even if valid readings occurred between
-negatives. Ingestor benchmarking allows up to two extra attempts per candidate in each
-sampling pass, so a candidate sampled stalled and then rerun unstalled has the budget in
-both passes; a third negative reading within one pass scores the candidate unusable.
+measurement, up to two extra attempts per candidate in each pass, without disturbing
+the requested sample count or the convergence window. A third negative reading for
+the same candidate within one pass exhausts that budget, even if valid readings
+occurred between negatives.
 
 See :ref:`backend-api-attribute` for the low-level profiling attributes and
 backend context reuse.

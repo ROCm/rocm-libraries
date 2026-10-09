@@ -241,18 +241,22 @@ struct BenchmarkTestHandle
     }
 };
 
+#ifdef _WIN32
 /// Bytes of same-stream scratch a real-GPU-work FakePlan memsets per execute(), so the
 /// default timer's events bracket real device work. Large so that reaching
 /// GPU_WORK_MIN_SPAN takes few memsets, which keeps the queue behind an armed stall gate
 /// short.
 constexpr size_t GPU_WORK_SCRATCH_BYTES = size_t{64} * 1024 * 1024;
 
-#ifdef _WIN32
 /// HIP on Windows misreports event spans in both directions (ROCm/rocm-systems#12925),
 /// and a span shorter than its error reads negative. BenchmarkPlan repeats such a sample
 /// and, past MAX_NEGATIVE_SAMPLE_RETRIES, drops the candidate, so the exact launch counts
 /// and rankings asserted below would not hold.
 constexpr std::chrono::milliseconds GPU_WORK_MIN_SPAN{50};
+#else
+/// Bytes of same-stream scratch a real-GPU-work FakePlan memsets per execute(), so the
+/// default timer's events bracket real device work.
+constexpr size_t GPU_WORK_SCRATCH_BYTES = size_t{4} * 1024 * 1024;
 #endif
 
 /// How many GPU_WORK_SCRATCH_BYTES memsets of @p scratch one execute() enqueues: one, or on
