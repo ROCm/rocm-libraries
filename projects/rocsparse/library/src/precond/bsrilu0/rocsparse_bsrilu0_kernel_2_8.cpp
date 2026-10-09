@@ -82,8 +82,7 @@ namespace rocsparse
                 // Load row j into shared memory
                 sdata2[threadIdx.y][threadIdx.x]
                     = (threadIdx.x < block_dim && threadIdx.y < block_dim)
-                          ? rocsparse::load_done_row_data(
-                              &bsr_val[BSR_IND(j, threadIdx.x, threadIdx.y, dir)])
+                          ? bsr_val[BSR_IND(j, threadIdx.x, threadIdx.y, dir)]
                           : static_cast<T>(0);
 
                 // Process all lower matrix BSR blocks
@@ -149,12 +148,12 @@ namespace rocsparse
                     __threadfence_block();
                 }
 
-                // Write row j back to global memory
+                // Write row j back to global memory. Dependent rows only read the diagonal and
+                // upper blocks of this row, so only those are exchanged with device scope accesses.
                 if(threadIdx.x < block_dim && threadIdx.y < block_dim)
                 {
-                    rocsparse::store_done_row_data(
-                        &bsr_val[BSR_IND(j, threadIdx.x, threadIdx.y, dir)],
-                        sdata2[threadIdx.y][threadIdx.x]);
+                    bsr_val[BSR_IND(j, threadIdx.x, threadIdx.y, dir)]
+                        = sdata2[threadIdx.y][threadIdx.x];
                 }
 
                 // Loop over upper offset pointer and do linear combination for nnz entry
@@ -204,11 +203,7 @@ namespace rocsparse
                         if(threadIdx.x < block_dim && threadIdx.y < block_dim)
                         {
                             // Do not pre-cache row m as we read/write only once
-                            rocsparse::store_done_row_data(
-                                &bsr_val[BSR_IND(m, threadIdx.x, threadIdx.y, dir)],
-                                rocsparse::load_done_row_data(
-                                    &bsr_val[BSR_IND(m, threadIdx.x, threadIdx.y, dir)])
-                                    - sum);
+                            bsr_val[BSR_IND(m, threadIdx.x, threadIdx.y, dir)] -= sum;
                         }
                     }
 
@@ -222,8 +217,7 @@ namespace rocsparse
                 // Load diagonal BSR block into shared memory
                 sdata1[threadIdx.y][threadIdx.x]
                     = (threadIdx.x < block_dim && threadIdx.y < block_dim)
-                          ? rocsparse::load_done_row_data(
-                              &bsr_val[BSR_IND(row_diag, threadIdx.x, threadIdx.y, dir)])
+                          ? bsr_val[BSR_IND(row_diag, threadIdx.x, threadIdx.y, dir)]
                           : static_cast<T>(0);
 
                 __threadfence_block();
@@ -302,8 +296,7 @@ namespace rocsparse
                 // Load row j into shared memory
                 sdata2[threadIdx.y][threadIdx.x]
                     = (threadIdx.x < block_dim && threadIdx.y < block_dim)
-                          ? rocsparse::load_done_row_data(
-                              &bsr_val[BSR_IND(j, threadIdx.x, threadIdx.y, dir)])
+                          ? bsr_val[BSR_IND(j, threadIdx.x, threadIdx.y, dir)]
                           : static_cast<T>(0);
 
                 __threadfence_block();
