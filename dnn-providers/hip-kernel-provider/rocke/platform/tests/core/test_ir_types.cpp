@@ -34,6 +34,11 @@
  *       tests/core/test_bitcast_width.py); print "ok", or
  *       "error: <Python exception class>: <message>" when the builder refuses
  *       it, since a refusal is a TypeError or a ValueError.
+ *
+ *   --mma <op_id>
+ *       build one target-neutral MMA of op_id on i32 zero operands; print its
+ *       result type, or "error: <message>" when the builder refuses the call
+ *       (tests/core/test_mma_frag_tables.py runs it for every op_id).
  */
 #include "rocke/ir.h"
 
@@ -632,6 +637,64 @@ static int test_ir_type_of_dtype()
     return 0;
 }
 
+/* One target-neutral MMA of `op_id` on i32 zero operands (the operands of
+ * test_mma_frag_tables.py's twin). The builder types the result from the op_id
+ * alone, so ordinary op_ids build; XF32 and scaled MFMA op_ids refuse these
+ * operands, and an unknown op_id is refused. */
+static build_outcome build_mma(const char* op_id, std::string* result_type)
+{
+    build_outcome outcome = {false, "", 0};
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "mma_case") != ROCKE_OK)
+    {
+        outcome.error = "builder init failed";
+        return outcome;
+    }
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    const int ops_before = b.kernel->body->num_ops;
+    try
+    {
+        const rocke_value_t* result = rocke_b_mma(&b, op_id, zero, zero, zero, NULL, 0);
+        *result_type = result->type->name;
+        outcome.accepted = true;
+    }
+    catch(const ckc::Error& error)
+    {
+        outcome.error = error.what();
+    }
+    /* Counted after a refusal too: a refused call must leave no op behind. */
+    outcome.ops_added = b.kernel->body->num_ops - ops_before;
+    rocke_ir_builder_free(&b);
+    return outcome;
+}
+
+static int print_mma(const char* op_id)
+{
+    std::string result_type;
+    const build_outcome outcome = build_mma(op_id, &result_type);
+    if(outcome.accepted)
+        printf("%s\n", result_type.c_str());
+    else
+        printf("error: %s\n", outcome.error.c_str());
+    return 0;
+}
+
+/* The operands are checked before the op_id, as in IRBuilder.mma: an XF32 op_id
+ * on the wrong operands names the operands, and a refusal builds no op. */
+static int test_mma_refusals()
+{
+    std::string result_type;
+    const build_outcome built = build_mma("wmma_i32_16x16x16_iu8", &result_type);
+    CHECK(built.accepted && built.ops_added == 1 && result_type == "vec<i32x8>");
+    const build_outcome xf32 = build_mma("mfma_f32_16x16x8_xf32", &result_type);
+    CHECK(!xf32.accepted && xf32.ops_added == 0);
+    CHECK(xf32.error == "XF32 MMA requires two vec<tf32x2> operands and its FP32 accumulator");
+    const build_outcome unknown = build_mma("not_an_op_id", &result_type);
+    CHECK(!unknown.accepted && unknown.ops_added == 0);
+    CHECK(unknown.error.rfind("unknown MMA op_id 'not_an_op_id'; ", 0) == 0);
+    return 0;
+}
+
 /* Every IR scalar type by name: one per rocke_scalar_kind_t, which the
  * static_assert and test_scalar_kinds_are_covered hold to. Widths are not
  * listed: they come from the engine. */
@@ -675,6 +738,8 @@ int main(int argc, char** argv)
         return print_scalar_bits();
     if(argc == 3 && strcmp(argv[1], "--bitcast") == 0)
         return print_bitcast(argv[2]);
+    if(argc == 3 && strcmp(argv[1], "--mma") == 0)
+        return print_mma(argv[2]);
     CHECK(argc == 1);
     CHECK(test_unsigned_ops() == 0);
     CHECK(test_packed_only_values() == 0);
@@ -682,6 +747,7 @@ int main(int argc, char** argv)
     CHECK(test_bitcast_width() == 0);
     CHECK(test_scalar_widths() == 0);
     CHECK(test_ir_type_of_dtype() == 0);
+    CHECK(test_mma_refusals() == 0);
     CHECK(test_scalar_kinds_are_covered() == 0);
     printf("rocke_ir_types: ok\n");
     return 0;

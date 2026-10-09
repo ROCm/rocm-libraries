@@ -61,12 +61,13 @@ static int rocke_mma_c_frag_len(const char* op_id)
     return rocke_arch_mma_c_frag_len(op_id);
 }
 
-/* True when op_id accumulates in i32 (integer WMMA), from the arch catalog SSOT
- * (target._op_id_c_dtype()[op_id] == "i32"). */
-static bool rocke_mma_is_int_acc(const char* op_id)
+/* The accumulator dtype of op_id, from the arch catalog SSOT
+ * (target._op_id_c_dtype). Op_ids absent from the catalog accumulate in fp32.
+ * Mirrors Python _mma_c_dtype. */
+static const char* rocke_mma_c_dtype(const char* op_id)
 {
     const char* c_dtype = rocke_arch_mma_op_id_c_dtype(op_id);
-    return c_dtype != NULL && strcmp(c_dtype, ROCKE_DTYPE_I32) == 0;
+    return c_dtype != NULL ? c_dtype : "fp32";
 }
 
 static const char* rocke_mma_result_hint(const char* op_id)
@@ -611,8 +612,6 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
                            int num_extra)
 {
     int c_frag_len;
-    bool is_int_acc;
-    const rocke_type_t* c_elem;
     const rocke_type_t* vt;
     const char* hint;
     rocke_attr_map_t attrs;
@@ -627,25 +626,6 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
     {
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "mma op_id is NULL");
     }
-    /* C has no MmaOp object; op_id is always a bare string, so the frag length
-     * and accumulator element are resolved from the arch SSOT (the Python
-     * bare-string code path). A <= 0 frag length means the op_id is unknown to
-     * the SSOT (the zero-length _frag_info fallback). */
-    c_frag_len = rocke_mma_c_frag_len(op_id);
-    if(c_frag_len <= 0)
-    {
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "unknown MMA op_id '%s'; pass a known mfma_*/wmma_* op_id", op_id);
-    }
-    is_int_acc = rocke_mma_is_int_acc(op_id);
-    c_elem = is_int_acc ? rocke_i32() : rocke_f32();
-    vt = rocke_vector_type(b, c_elem, c_frag_len);
-    if(!vt)
-    {
-        return NULL;
-    }
-    hint = rocke_mma_result_hint(op_id);
-
     if(num_extra < 0)
     {
         num_extra = 0;
@@ -663,12 +643,32 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
     {
         ops[3 + i] = extra[i];
     }
-    const char* tf32_error = rocke_tf32_mma_error(op_id, ops, nops);
-    if(tf32_error)
-        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", tf32_error);
+    /* Operands first, then the op_id, in IRBuilder.mma's order, so both engines
+     * report the same refusal for the same call. */
     const char* mx_error = rocke_scaled_mfma_error(op_id, ops, nops);
     if(mx_error)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", mx_error);
+    const char* tf32_error = rocke_tf32_mma_error(op_id, ops, nops);
+    if(tf32_error)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", tf32_error);
+    /* C has no MmaOp object; op_id is always a bare string, so the frag length
+     * and accumulator element are resolved from the arch SSOT (the Python
+     * bare-string code path). A <= 0 frag length means the op_id is unknown to
+     * the SSOT (the zero-length _frag_info fallback). */
+    c_frag_len = rocke_mma_c_frag_len(op_id);
+    if(c_frag_len <= 0)
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "unknown MMA op_id '%s'; pass a known mfma_*/wmma_* op_id", op_id);
+    }
+    /* The result element is the instruction's accumulator dtype. C has no MmaOp
+     * argument, so Python's "the MmaOp's own c_dtype" case has no twin here. */
+    vt = rocke_vector_type(b, rocke_require_ir_type(rocke_mma_c_dtype(op_id)), c_frag_len);
+    if(!vt)
+    {
+        return NULL;
+    }
+    hint = rocke_mma_result_hint(op_id);
     attrs = rocke_i_attrs(b);
     rocke_attr_set_str(b, &attrs, "op_id", op_id);
     return rocke_i_op1(b, ROCKE_OP_TILE_MMA, ops, nops, vt, &attrs, hint);
