@@ -137,7 +137,7 @@ def is_negative(status: str) -> bool:
 
     ``arch_absent`` only. ``name_absent`` is also definite, but it is a
     column-wide fact, so ``tools/check_ir_validity.py`` already catches any
-    reachable one with the compiler's own diagnostic. Excluded on AICK-2273,
+    reachable one with the compiler's own diagnostic. Excluded deliberately,
     not by oversight; this function is the one place to revisit it.
     """
     return status == STATUS_ARCH_ABSENT

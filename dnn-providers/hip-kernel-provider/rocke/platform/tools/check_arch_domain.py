@@ -56,9 +56,9 @@ def _bootstrap_sys_path() -> None:
 
 
 # Every (declaration key, target, flavor) the corpus is currently allowed to
-# demand against a target the artifact says cannot lower it, with the reason and
-# the owning ticket (AICK-2273 requires naming one -- an entry nobody owns
-# cannot burn down).
+# demand against a target the artifact says cannot lower it, with the reason.
+# Name the defect, not a tracker ID: the tracking reference belongs in the
+# commit that adds the entry, and an entry nobody owns cannot burn down.
 #
 # Same rule as KNOWN_BAD in check_ir_validity.py and KNOWN_VIOLATIONS in
 # library/tests/test_library_layering.py: **this list only ever SHRINKS**. An
@@ -69,10 +69,11 @@ EXPECTED_WARNINGS: dict[tuple[str, str, str], str] = {}
 for _flavor in ("llvm20", "llvm22", "llvm23"):
     for _key in ("ds.read.tr16.b64", "mfma.f32.16x16x32.bf16", "mfma.f32.16x16x32.f16"):
         EXPECTED_WARNINGS[(_key, "gfx942", _flavor)] = (
-            "AICK-2053 / AICK-2275 -- attention 3d d128/b64 requests a CDNA4 "
-            "path on a CDNA3 target; the same two cases check_ir_validity.py "
-            "lists in KNOWN_BAD, found here at declaration-demand time with "
-            "the intrinsic named"
+            "attention 3d d128/b64: the parity harness builds the gfx950 3D "
+            "kernel for these gfx942 cases, so they demand CDNA4 intrinsics on "
+            "a CDNA3 target; the same two cases check_ir_validity.py lists in "
+            "KNOWN_BAD, found here at declaration-demand time with the "
+            "intrinsic named"
         )
 del _flavor, _key
 

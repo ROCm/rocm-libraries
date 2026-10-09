@@ -204,8 +204,8 @@ class ArchDomainWarning(UserWarning):
 
 
 # ``warn`` (the default) reports an unavailable intrinsic and keeps going;
-# ``off`` disables the lookup entirely. AICK-2274 adds ``error``, which is why
-# this is a mode rather than a boolean.
+# ``off`` disables the lookup entirely. A mode rather than a boolean so the lane
+# can later be promoted to a hard error without a second variable.
 _ARCH_DOMAIN_ENV = "ROCKE_ARCH_DOMAIN"
 _ARCH_DOMAIN_WARN = "warn"
 _ARCH_DOMAIN_OFF = "off"
