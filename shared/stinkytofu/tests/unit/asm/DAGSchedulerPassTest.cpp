@@ -3821,3 +3821,41 @@ TEST_F(QueueHysteresisAndShiftTest, ShiftKeepsThePairSpread) {
     EXPECT_EQ(wmmasBefore(beforeSignal), bSig - 1);
     EXPECT_EQ(wmmasBefore(beforeWait), bWait - 1);
 }
+
+// DsCapTdmBurst (experiment): inside the TDM window the cap is lifted, so ds_loads burst there
+// even though the normal cap is 1 per span.
+TEST_F(DsCapTdmTest, BurstLiftsTheCapInsideTheWindow) {
+    auto runBurst = [&](bool burst) {
+        SetUp();
+        for (int i = 0; i < 24; i++) createMovableDsLoad(i * 4, 80, i + 1);
+        for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(200 + 8 * i, 300 + 8 * i);
+        createMovableTensorLoad(bb, 220, 224, 40);
+        runWithDsCapMode(PassFeatureConfig::DsIssueCapMode::Sliding, [&](PassFeatureConfig& p) {
+            p.dagFeatures.dsReadPerCap = 1;
+            p.dagFeatures.dsIssueCapSpanCycles = 8;
+            p.dagFeatures.dsReadQueueDepth = 32;
+            p.dagFeatures.dsReadThrottleLatency = 1;
+            p.dagFeatures.dsCapTdmPerCap = 1;
+            p.dagFeatures.dsCapTdmBeginCycles = 0;
+            p.dagFeatures.dsCapTdmEndCycles = 64;
+            p.dagFeatures.dsCapTdmBurst = burst;
+        });
+        std::string shape;
+        for (const std::string& m : mnemonicSequence(*bb)) {
+            if (m.find("wmma") != std::string::npos)
+                shape += 'W';
+            else if (m == "ds_load_b128")
+                shape += 'd';
+            else if (m == "tensor_load_to_lds")
+                shape += 't';
+            else
+                shape += '?';
+        }
+        return shape;
+    };
+    const std::string capped = runBurst(false);
+    const std::string burst = runBurst(true);
+    EXPECT_FALSE(hasBurst(dsCapTdmSlice(capped, 0, 64))) << capped;
+    EXPECT_TRUE(hasBurst(dsCapTdmSlice(burst, 0, 64))) << burst;
+    EXPECT_EQ(std::count(burst.begin(), burst.end(), 'd'), 24);
+}

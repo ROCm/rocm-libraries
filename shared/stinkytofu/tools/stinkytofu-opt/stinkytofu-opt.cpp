@@ -196,7 +196,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-cap-tdm-begin-cycles=") ||
                 arg.starts_with("--ds-cap-tdm-end-cycles=") ||
                 arg.starts_with("--ds-cap-tdm-per-cap=") || arg == "--ds-pace-tdm" ||
-                arg.starts_with("--ds-pace-lead-loads=") ||
+                arg == "--ds-cap-tdm-burst" || arg.starts_with("--ds-pace-lead-loads=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
                 arg.starts_with("--merge-barrier-threshold=") ||
@@ -602,6 +602,8 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--ds-pace-lead-loads=")) {
             passFeatureConfig.dagFeatures.dsPaceLeadLoads =
                 std::stoi(a.substr(std::string("--ds-pace-lead-loads=").size()));
+        } else if (a == "--ds-cap-tdm-burst") {
+            passFeatureConfig.dagFeatures.dsCapTdmBurst = true;
         } else if (a == "--ds-pace-tdm") {
             passFeatureConfig.dagFeatures.dsPaceTdm = true;
         } else if (a.starts_with("--ds-cap-tdm-per-cap=")) {
