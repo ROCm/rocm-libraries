@@ -125,6 +125,10 @@ jobs:
             echo "ROCJITSU_TARGET=${target}"
             echo "MIRAGE_PROFILE=${profile}"
             echo "PYTEST_WORKERS=${workers}"
+            # The client's CPU reference asks OpenMP for 64 threads per process;
+            # the limit holds it to the same per-worker share as the emulator.
+            echo "OMP_NUM_THREADS=${budget}"
+            echo "OMP_THREAD_LIMIT=${budget}"
             echo "TENSILELITE_ROOT=${tensilelite_root}"
             echo "TENSILELITE_CLIENT=${client}"
             echo "LD_LIBRARY_PATH=${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${llvm_lib_path}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
@@ -134,7 +138,7 @@ jobs:
           echo "${ROCM_PATH}/lib/llvm/bin" >> "${GITHUB_PATH}"
 
           echo "target=${target} profile=${profile} config=${config}"
-          echo "host_cores=${cores} xdist_workers=${workers} cpu_thread_budget=${budget}"
+          echo "host_cores=${cores} xdist_workers=${workers} cpu_thread_budget=${budget} omp_thread_limit=${budget}"
           "${ROCM_PATH}/bin/mirage" --version
           grep -a -oE 'git (revision|commit): [^[:cntrl:]]+' "${ROCM_PATH}/lib/librocjitsu.so" | sort -u || true
           python -c 'import sys; print(sys.version)'
