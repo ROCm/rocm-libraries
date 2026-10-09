@@ -31,9 +31,15 @@ _CASES = [
 class _Writer(KernelWriterAssembly):
     """Real emission methods with only allocation and cached constants supplied."""
 
-    def __init__(self, cached_constants=False):
+    def __init__(self, cached_constants=False, constant_incs=()):
         self.cached_constants = cached_constants
-        self.states = SimpleNamespace(persistentConstVgprs={"ItersPerTile": 0})
+
+        def incs(tc):
+            return SimpleNamespace(useConstSgprGlobalReadIncs=tc in constant_incs)
+
+        self.states = SimpleNamespace(persistentConstVgprs={"ItersPerTile": 0}, unrollIdx=0,
+                                      a=incs("A"), b=incs("B"), mxsa=incs("MXSA"),
+                                      mxsb=incs("MXSB"))
 
     @contextmanager
     def allocTmpSgpr(self, num, alignment=None, tag=None):
@@ -212,4 +218,65 @@ def test_data_parallel_initial_offset_needs_no_streamk_registers(fuse, pair):
     module = _Writer().tdmApplyTileKOffsetWaveSeparated(
         _kernel(fuse, data_parallel=True), *({"tensorChar": tc} for tc in pair)
     )
+    assert _execute(module, {}) == {}
+
+
+def _single_wave_kernel(data_parallel=False, sparse=0):
+    kernel = _kernel(data_parallel=data_parallel)
+    kernel["NumWaves"] = 1
+    if sparse:
+        kernel["enableTDMMetadata"] = True
+        kernel["ProblemType"] = {**kernel["ProblemType"], "Sparse": sparse}
+    return kernel
+
+
+def _single_wave_registers(writer, index, increments, addresses):
+    registers = {str(sgpr("StreamKLocalStart")): index}
+    for tc, increment in increments.items():
+        registers[str(writer.globalReadIncsOperand(tc, 0))] = increment
+        _set_address(registers, "tdm%sGroup0" % tc, addresses[tc])
+    return registers
+
+
+@pytest.mark.parametrize("base,index,increment", _CASES)
+@pytest.mark.parametrize("constant_incs", [(), ("A",), ("A", "B")],
+                         ids=["sgpr-incs", "constant-a", "constant-ab"])
+def test_single_wave_k_offset(base, index, increment, constant_incs):
+    """A single wave owns both descriptors; each advances by its own increment."""
+    writer = _Writer(constant_incs=constant_incs)
+    increments = {"A": increment, "B": increment + 256}
+    addresses = {"A": base, "B": base + (1 << 32)}
+    registers = _single_wave_registers(writer, index, increments, addresses)
+    module = writer.tdmApplyTileKOffset(
+        _single_wave_kernel(), {"tensorChar": "A"}, {"tensorChar": "B"})
+    text = str(module)
+    for tc in constant_incs:
+        # A folded increment has no SGPR; the literal must be used directly.
+        assert "sgprGlobalReadIncs" + tc not in text
+    result = _execute(module, registers)
+    for tc, increment in increments.items():
+        assert _get_address(result, "tdm%sGroup0" % tc) == \
+            _IMAGE_TYPE | (addresses[tc] + index * increment)
+
+
+@pytest.mark.parametrize("sparse", [1, 2])
+def test_single_wave_k_offset_moves_sparse_metadata(sparse):
+    writer = _Writer()
+    increments = {"A": 128, "B": 192}
+    addresses = {"A": 0x1000, "B": 0x4000}
+    registers = _single_wave_registers(writer, 5, increments, addresses)
+    registers[str(sgpr("GlobalReadIncsMetadata"))] = 64
+    _set_address(registers, "tdmMetadataGroup0", 0xFFFFFF00)
+    module = writer.tdmApplyTileKOffset(
+        _single_wave_kernel(sparse=sparse), {"tensorChar": "A"}, {"tensorChar": "B"})
+    result = _execute(module, registers)
+    assert _get_address(result, "tdmAGroup0") == _IMAGE_TYPE | (0x1000 + 5 * 128)
+    assert _get_address(result, "tdmBGroup0") == _IMAGE_TYPE | (0x4000 + 5 * 192)
+    assert _get_address(result, "tdmMetadataGroup0") == _IMAGE_TYPE | (0xFFFFFF00 + 5 * 64)
+
+
+def test_single_wave_data_parallel_needs_no_streamk_registers():
+    module = _Writer().tdmApplyTileKOffset(
+        _single_wave_kernel(data_parallel=True, sparse=1),
+        {"tensorChar": "A"}, {"tensorChar": "B"})
     assert _execute(module, {}) == {}
