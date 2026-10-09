@@ -1,7 +1,5 @@
-################################################################################
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
 # DESIGNED gfx950 MXF4 MT320x256 last-K PLSIN Weave config.
 #
 # MIWT [10,8] is the transpose of MT256x320 last-K Weave. The tile product is

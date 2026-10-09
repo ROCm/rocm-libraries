@@ -1,3 +1,5 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 ########################################
 # MXFP4 MT320x256 last-K PLSIN Weave numeric check.
 #
@@ -5,8 +7,7 @@
 # last-K MFMAs into the store after lending K=0 A/B. The fused arm uses
 # v_permlane16_swap; the plain-NLL / edge store keeps ds_bpermute.
 #
-# Pin HIP_VISIBLE_DEVICES to an idle GPU (this machine: 6 or 7) before running.
-# Tensile Device: 0 is the first *visible* device after that pin.
+# Device below selects the GPU; point it at an idle one before running.
 ########################################
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]

@@ -1,7 +1,5 @@
-################################################################################
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
 """The PostLoopStoreInNll eligibility gate.
 
 ``assignPostLoopStoreInNll`` decides, for every solution in the library, whether

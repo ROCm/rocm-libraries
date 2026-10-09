@@ -1,7 +1,5 @@
-################################################################################
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
 """gfx950 MXF4->bf16 subtile characterization: PostLoopStoreInNll + block scheduling.
 
 Drives ``data/_designed/gfx950/mxf4_bf16_subtile.yaml`` through the config-driven

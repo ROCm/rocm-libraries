@@ -1,7 +1,5 @@
-################################################################################
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
 """MT320x256 last-K PLSIN Weave: fused arm uses permlane16, plain keeps ds_bpermute.
 
 MIWT [10,8] has a tile product of 80, past the 64 ``spillFree`` admits, so this
