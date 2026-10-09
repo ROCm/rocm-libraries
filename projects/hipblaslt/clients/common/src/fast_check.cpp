@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "fast_check.hpp"
+#include "d_vector.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -9,11 +10,19 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <sstream>
 #include <type_traits>
 #include <vector>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace
 {
@@ -288,6 +297,50 @@ namespace
         return trans ? View{base, m.type, m.ld, 1} : View{base, m.type, 1, m.ld};
     }
 
+    // Calls f(r, c, |m(r, c)|) for every element, each row r from one thread only, in an order
+    // that walks memory contiguously.
+    template <typename F>
+    void for_each_abs_by_row(const View& m, int64_t rows, int64_t cols, F&& f)
+    {
+        if(std::llabs(m.rs) <= std::llabs(m.cs))
+        {
+            constexpr int64_t block = 256;
+#pragma omp parallel for schedule(dynamic)
+            for(int64_t r0 = 0; r0 < rows; r0 += block)
+                for(int64_t c = 0; c < cols; c++)
+                    for(int64_t r = r0; r < std::min(rows, r0 + block); r++)
+                        f(r, c, std::fabs(m.at(r, c)));
+        }
+        else
+        {
+#pragma omp parallel for schedule(dynamic)
+            for(int64_t r = 0; r < rows; r++)
+                for(int64_t c = 0; c < cols; c++)
+                    f(r, c, std::fabs(m.at(r, c)));
+        }
+    }
+
+    // out[r] = max over c of |m(r, c)|.
+    std::vector<double> abs_row_max(const View& m, int64_t rows, int64_t cols)
+    {
+        std::vector<double> out(size_t(rows), 0);
+        for_each_abs_by_row(m, rows, cols, [&](int64_t r, int64_t, double x) {
+            out[size_t(r)] = std::max(out[size_t(r)], x);
+        });
+        return out;
+    }
+
+    // out[r] = sum over c of |m(r, c)| * v[c], with v[c] >= 0.
+    std::vector<double>
+        abs_mul_right(const View& m, int64_t rows, int64_t cols, const std::vector<double>& v)
+    {
+        std::vector<double> out(size_t(rows), 0);
+        for_each_abs_by_row(m, rows, cols, [&](int64_t r, int64_t c, double x) {
+            out[size_t(r)] += x * v[size_t(c)];
+        });
+        return out;
+    }
+
     // out[r] = sum over c of m(r, c) * v[c], modulo P. Sets non_integer when an element is not an
     // exact integer.
     void mul_right(const View&                  m,
@@ -359,6 +412,7 @@ namespace
         View                        opB; // K x N
         View                        C; // M x N
         const std::vector<int64_t>& scale;
+        const std::vector<int64_t>& col_scale;
         const std::vector<int64_t>& bias;
         int64_t                     K;
         int64_t                     alpha;
@@ -371,7 +425,9 @@ namespace
             __int128 acc = 0;
             for(int64_t k = 0; k < K; k++)
                 acc = mul_add(int64_t(opA.at(i, k)), int64_t(opB.at(k, j)), acc);
-            __int128 v = mul_add(mul_add(alpha, scale[size_t(i)], 0), acc, bias[size_t(i)]);
+            const __int128 factor
+                = mul_add(mul_add(alpha, scale[size_t(i)], 0), col_scale[size_t(j)], 0);
+            __int128 v = mul_add(factor, acc, bias[size_t(i)]);
             if(beta != 0)
                 v = mul_add(beta, int64_t(C.at(i, j)), v);
             return int64_t(std::clamp<__int128>(v, INT64_MIN, INT64_MAX));
@@ -396,10 +452,11 @@ namespace
                 batch_view(p.B, b, p.transB),
                 batch_view(p.C, b, false),
                 e.scale,
+                e.col_scale,
                 e.bias[size_t(b)],
                 p.K,
-                int64_t(p.alpha),
-                int64_t(p.beta)};
+                e.alpha,
+                e.beta};
     }
 
     std::string format_offset(const FastCheckProblem& p, const BadElement& e)
@@ -616,6 +673,8 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
         fail("fast_check does not support compute type " + std::to_string(int(p.compute_type)));
     if(!is_exact_integer(p.alpha) || !is_exact_integer(p.beta))
         fail("fast_check requires integer alpha and beta");
+    if(!is_exact_integer(p.scale_c) || !is_exact_integer(p.scale_d))
+        fail("fast_check requires integer scaleC and scaleD");
     if(!e.status.passed)
         return finish();
 
@@ -624,6 +683,32 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
         return finish();
 
     const int64_t M = p.M, N = p.N, K = p.K;
+    // Multiplies two integer factors, failing rather than overflowing: a combined factor of 2^61
+    // or more is far outside every compute type's exact range anyway.
+    auto times = [](int64_t a, int64_t b, int64_t& out) {
+        if(std::fabs(double(a) * double(b)) >= 0x1p61)
+            return false;
+        out = a * b;
+        return true;
+    };
+    const char* too_large = "fast_check requires alpha, beta, the scales and the bias to combine "
+                            "to values below 2^61";
+    if(!times(int64_t(p.alpha), int64_t(p.scale_d), e.alpha)
+       || !times(int64_t(p.beta), int64_t(p.scale_c), e.beta)
+       || !times(e.beta, int64_t(p.scale_d), e.beta))
+    {
+        fail(too_large);
+        return finish();
+    }
+
+    // Loads entry i of a scale that is one value or a vector, and requires an integer.
+    auto load_scale = [&](const void* v, bool vector, int64_t i, int64_t& out) {
+        double x = load(v, p.scale_ab_type, vector ? size_t(i) : 0);
+        if(!is_exact_integer(x))
+            return false;
+        out = int64_t(x);
+        return true;
+    };
 
     e.scale.assign(size_t(M), 1);
     if(p.scale_alpha_vec)
@@ -637,15 +722,43 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
             }
             e.scale[size_t(i)] = int64_t(s);
         }
+    if(p.scale_a)
+        for(int64_t i = 0; i < M; i++)
+        {
+            int64_t a = 0;
+            if(!load_scale(p.scale_a, p.scale_a_vector, i, a))
+            {
+                fail("fast_check requires integer scaleA entries");
+                return finish();
+            }
+            if(!times(e.scale[size_t(i)], a, e.scale[size_t(i)]))
+            {
+                fail(too_large);
+                return finish();
+            }
+        }
+    e.col_scale.assign(size_t(N), 1);
+    if(p.scale_b)
+        for(int64_t j = 0; j < N; j++)
+            if(!load_scale(p.scale_b, p.scale_b_vector, j, e.col_scale[size_t(j)]))
+            {
+                fail("fast_check requires integer scaleB entries");
+                return finish();
+            }
+    double col_scale_max = 0;
+    for(int64_t c : e.col_scale)
+        col_scale_max = std::max(col_scale_max, std::fabs(double(c)));
 
-    // Row probe r (length N) and column probe t (length M).
+    // Row probe r (length N) and column probe t (length M). rs = r .* scale_b.
     e.row_probe.resize(size_t(N));
     e.col_probe.resize(size_t(M));
-    uint64_t sum_r = 0;
+    uint64_t              sum_r = 0;
+    std::vector<uint64_t> rs(static_cast<size_t>(N));
     for(int64_t j = 0; j < N; j++)
     {
         e.row_probe[size_t(j)] = fast_check_probe(2 * p.seed, uint64_t(j));
         sum_r                  = mod_add(sum_r, e.row_probe[size_t(j)]);
+        rs[size_t(j)]          = mod_mul(e.row_probe[size_t(j)], to_mod(e.col_scale[size_t(j)]));
     }
     std::vector<uint64_t> ts(static_cast<size_t>(M));
     for(int64_t i = 0; i < M; i++)
@@ -654,7 +767,7 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
         ts[size_t(i)]          = mod_mul(e.col_probe[size_t(i)], to_mod(e.scale[size_t(i)]));
     }
 
-    const uint64_t    alpha_m = to_mod(int64_t(p.alpha)), beta_m = to_mod(int64_t(p.beta));
+    const uint64_t    alpha_m = to_mod(e.alpha), beta_m = to_mod(e.beta);
     const bool        use_c = p.beta != 0;
     std::atomic<bool> non_integer_input{false};
 
@@ -677,7 +790,11 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
                     fail("fast_check requires integer bias entries");
                     return finish();
                 }
-                bias[size_t(i)] = int64_t(v);
+                if(!times(int64_t(v), int64_t(p.scale_d), bias[size_t(i)]))
+                {
+                    fail(too_large);
+                    return finish();
+                }
             }
         }
 
@@ -685,10 +802,28 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
         const View opB = batch_view(p.B, b, p.transB); // K x N
         const View C   = batch_view(p.C, b, false); // M x N
 
-        // Expected D*r = alpha * diag(scale) * opA * (opB * r) + beta * C * r + bias * sum(r)
-        // and t^T*D = alpha * ((t .* scale)^T * opA) * opB + beta * t^T * C + (t^T * bias) * 1^T.
+        // |any partial sum of row i| <= sum over k of |A(i, k)| * max over j of |B(k, j)|.
+        {
+            const std::vector<double> b_max = abs_row_max(opB, K, N);
+            const std::vector<double> s     = abs_mul_right(opA, M, K, b_max);
+            const std::vector<double> c_max
+                = use_c ? abs_row_max(C, M, N) : std::vector<double>(size_t(M), 0);
+            for(int64_t i = 0; i < M; i++)
+            {
+                const double scaled = std::fabs(double(e.alpha) * double(e.scale[size_t(i)]))
+                                      * col_scale_max * s[size_t(i)];
+                e.max_partial = std::max({e.max_partial, s[size_t(i)], scaled});
+                e.max_result  = std::max(e.max_result,
+                                        scaled + std::fabs(double(e.beta)) * c_max[size_t(i)]
+                                            + std::fabs(double(bias[size_t(i)])));
+            }
+        }
+
+        // Expected D*r = alpha * diag(scale) * opA * (opB * (r .* col_scale)) + beta * C * r
+        // + bias * sum(r), and t^T*D = alpha * (((t .* scale)^T * opA) * opB) .* col_scale
+        // + beta * t^T * C + (t^T * bias) * 1^T, with alpha, beta and bias already scaled.
         std::vector<uint64_t> y, z, cr, u, w, ct;
-        mul_right(opB, K, N, e.row_probe, y, non_integer_input);
+        mul_right(opB, K, N, rs, y, non_integer_input);
         mul_right(opA, M, K, y, z, non_integer_input);
         mul_right(opA.transposed(), K, M, ts, u, non_integer_input);
         mul_right(opB.transposed(), N, K, u, w, non_integer_input);
@@ -699,8 +834,24 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
         }
         if(non_integer_input)
         {
-            fail("fast_check found a non-integer value in A, B or C; it requires integer_exact "
-                 "initialization");
+            std::string where;
+            auto        find = [&](const View& m, int64_t rows, int64_t cols, const char* name) {
+                for(int64_t c = 0; c < cols && where.empty(); c++)
+                    for(int64_t r = 0; r < rows && where.empty(); r++)
+                        if(!is_exact_integer(m.at(r, c)))
+                        {
+                            std::ostringstream s;
+                            s << " (first: batch " << b << ", " << name << "(" << r << ", " << c
+                              << ") = " << m.at(r, c) << ")";
+                            where = s.str();
+                        }
+            };
+            find(opA, M, K, "op(A)");
+            find(opB, K, N, "op(B)");
+            if(use_c)
+                find(C, M, N, "C");
+            fail("fast_check found a non-integer value in A, B or C" + where
+                 + "; it requires integer_exact initialization");
             return finish();
         }
 
@@ -722,11 +873,24 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
         cols.resize(size_t(N));
         for(int64_t j = 0; j < N; j++)
         {
-            uint64_t v = mod_add(mod_mul(alpha_m, w[size_t(j)]), sum_t_bias);
+            uint64_t v
+                = mod_add(mod_mul(mod_mul(alpha_m, to_mod(e.col_scale[size_t(j)])), w[size_t(j)]),
+                          sum_t_bias);
             if(use_c)
                 v = mod_add(v, mod_mul(beta_m, ct[size_t(j)]));
             cols[size_t(j)] = v;
         }
+    }
+
+    const double acc_limit = exact_limit(p.compute_type);
+    if(e.max_partial >= acc_limit || e.max_result >= acc_limit)
+    {
+        std::ostringstream s;
+        s << "fast_check refuses this configuration: a partial sum can reach " << e.max_partial
+          << " and a result " << e.max_result << ", but the compute type holds integers exactly "
+          << "only below " << acc_limit << ", so D would depend on summation order. Reduce K, "
+          << "alpha or the scale factors, or use integer_exact_pattern ternary or sparse_k.";
+        fail(s.str());
     }
     return finish();
 }
@@ -1668,4 +1832,222 @@ hipError_t fast_check_corrupt_element_device(
     if(err == hipSuccess)
         err = hipStreamSynchronize(stream);
     return err;
+}
+
+double fast_check_load(const void* data, hipDataType type, size_t i)
+{
+    return load(data, type, i);
+}
+
+namespace
+{
+    // The rows x cols x batch region of a device matrix, copied to contiguous host memory.
+    std::vector<char> host_region(const FastCheckMatrix& m, int64_t batch_count, hipStream_t stream)
+    {
+        std::vector<char> h(size_t(m.rows * m.cols * batch_count) * element_size(m.type));
+        if(fast_check_copy_region_to_host(h.data(), m, batch_count, stream) != hipSuccess)
+            h.clear();
+        return h;
+    }
+}
+
+FastCheckResult fast_check_activation_device(const FastCheckMatrix& d,
+                                             const FastCheckMatrix& e,
+                                             int64_t                batch_count,
+                                             double                 scale_d,
+                                             double                 scale_e,
+                                             FastCheckActivation    act,
+                                             double                 arg1,
+                                             double                 arg2,
+                                             hipStream_t            stream,
+                                             double*                amax)
+{
+    FastCheckResult   result;
+    if(amax)
+        *amax = std::numeric_limits<double>::quiet_NaN();
+    std::vector<char> hd = host_region(d, batch_count, stream);
+    std::vector<char> he = host_region(e, batch_count, stream);
+    if(hd.empty() || he.empty())
+    {
+        result.passed  = false;
+        result.message = "fast_check could not copy D and E to the host\n";
+        return result;
+    }
+    if(scale_e == 0)
+    {
+        result.passed  = false;
+        result.message = "E is scaled by 0, so it does not give the pre-activation values and the "
+                         "activation cannot be checked from it\n";
+        if(amax)
+            *amax = std::numeric_limits<double>::quiet_NaN();
+        return result;
+    }
+    const int64_t      count   = d.rows * d.cols * batch_count;
+    const double       e_limit = exact_limit(e.type);
+    int64_t            bad = 0, inexact = 0;
+    double             top = 0;
+    std::ostringstream msg;
+    for(int64_t idx = 0; idx < count; idx++)
+    {
+        const double stored_e = load(he.data(), e.type, size_t(idx));
+        // E is verified against its rounded value, so at or past this limit the pre-activation it
+        // gives may not be the one D was computed from.
+        if(!(std::fabs(stored_e) < e_limit))
+        {
+            ++inexact;
+            continue;
+        }
+        double pre = stored_e / scale_e;
+        double a   = pre;
+        if(act == FastCheckActivation::relu)
+            a = std::max(pre, 0.0);
+        else if(act == FastCheckActivation::clamp)
+            a = std::max(arg1, std::min(pre, arg2));
+        top             = std::max(top, std::fabs(a));
+        double expected = round_to_type(a * scale_d, d.type);
+        double got      = load(hd.data(), d.type, size_t(idx));
+        if(!(expected == got) && bad++ < int64_t(kMaxReported))
+        {
+            int64_t b = idx / (d.rows * d.cols), rem = idx % (d.rows * d.cols);
+            msg << "\n  batch " << b << ", row " << rem % d.rows << ", col " << rem / d.rows
+                << ": E gives " << pre << ", expected D " << expected << ", got " << got;
+        }
+    }
+    if(bad > 0)
+    {
+        result.passed  = false;
+        result.message = std::to_string(bad)
+                         + " elements of D do not match the activation applied to the verified E:"
+                         + msg.str() + "\n";
+    }
+    if(inexact > 0)
+    {
+        result.passed = false;
+        result.message += std::to_string(inexact)
+                          + " elements of E are outside the range its type stores exactly, so the "
+                            "activation cannot be checked from them. Use a wider aux_type, or "
+                            "smaller inputs or scales.\n";
+    }
+    if(amax)
+        *amax = inexact > 0 ? std::numeric_limits<double>::quiet_NaN() : top;
+    return result;
+}
+
+double fast_check_amax_device(const FastCheckMatrix& d,
+                              int64_t                batch_count,
+                              double                 scale_d,
+                              hipStream_t            stream)
+{
+    std::vector<char> hd    = host_region(d, batch_count, stream);
+    const double      limit = exact_limit(d.type);
+    double            top   = 0;
+    // A failed copy would otherwise look like amaxD 0.
+    if(hd.empty() && d.rows * d.cols * batch_count > 0)
+        return std::numeric_limits<double>::quiet_NaN();
+    for(int64_t idx = 0; idx < d.rows * d.cols * batch_count && !hd.empty(); idx++)
+        top = std::max(top, std::fabs(load(hd.data(), d.type, size_t(idx))));
+    // A rounded D, or one scaled by 0, no longer gives the pre-scale value amaxD is computed from.
+    if(!(top < limit) || scale_d == 0)
+        return std::numeric_limits<double>::quiet_NaN();
+    return top / std::fabs(scale_d);
+}
+
+FastCheckResult fast_check_bias_gradient(const FastCheckProblem& p,
+                                         char                    source,
+                                         const void*             bias,
+                                         hipDataType             bias_type)
+{
+    const View           opA = batch_view(p.A, 0, p.transA); // M x K
+    const View           opB = batch_view(p.B, 0, p.transB); // K x N
+    std::vector<int64_t> expected(size_t(source == 'a' ? p.M : p.N), 0);
+    for(size_t x = 0; x < expected.size(); x++)
+    {
+        double bound = 0;
+        for(int64_t k = 0; k < p.K; k++)
+        {
+            const double value = source == 'a' ? opA.at(int64_t(x), k) : opB.at(k, int64_t(x));
+            bound += std::fabs(value);
+            // The GEMM bound includes the other operand, which may be zero.
+            // Bound this reduction separately before accumulating into int64_t.
+            if(!is_exact_integer(value) || !(bound < exact_limit(p.compute_type)))
+                return {false,
+                        "the bias gradient cannot be checked exactly: its inputs must be "
+                        "integers and every partial sum must fit the compute type\n"};
+            expected[x] += int64_t(value);
+        }
+    }
+
+    FastCheckResult    result;
+    std::ostringstream msg;
+    int64_t            bad = 0;
+    for(size_t i = 0; i < expected.size(); i++)
+    {
+        double want = round_to_type(double(expected[i]), bias_type);
+        double got  = load(bias, bias_type, i);
+        if(!(want == got) && bad++ < int64_t(kMaxReported))
+            msg << "\n  element " << i << ": expected " << want << ", got " << got;
+    }
+    if(bad > 0)
+    {
+        result.passed  = false;
+        result.message = std::to_string(bad) + " elements of the bias gradient (source "
+                         + std::string(1, source) + ") are wrong:" + msg.str() + "\n";
+    }
+    return result;
+}
+
+namespace
+{
+    // Host memory the operating system reports as available, or 0 when it cannot tell.
+    size_t available_host_bytes()
+    {
+#ifdef _WIN32
+        MEMORYSTATUSEX status = {};
+        status.dwLength       = sizeof(status);
+        return GlobalMemoryStatusEx(&status) ? size_t(status.ullAvailPhys) : 0;
+#else
+        std::ifstream meminfo("/proc/meminfo");
+        std::string   key;
+        size_t        kib = 0;
+        while(meminfo >> key >> kib)
+        {
+            if(key == "MemAvailable:")
+                return kib * 1024;
+            meminfo.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+        }
+        return 0;
+#endif
+    }
+}
+
+std::string fast_check_memory_shortfall(size_t device_bytes, size_t host_bytes)
+{
+    auto gib = [](size_t bytes) {
+        std::ostringstream s;
+        s.precision(3);
+        s << double(bytes) / double(size_t(1) << 30) << " GiB";
+        return s.str();
+    };
+    auto shortfall = [&]() -> std::string {
+        size_t free_bytes = 0, total_bytes = 0;
+        if(hipMemGetInfo(&free_bytes, &total_bytes) == hipSuccess && device_bytes > free_bytes)
+            return "this case needs " + gib(device_bytes) + " of device memory and "
+                   + gib(free_bytes) + " is free";
+
+        const size_t available = available_host_bytes();
+        if(available > 0 && host_bytes > available)
+            return "this case needs " + gib(host_bytes) + " of host memory and " + gib(available)
+                   + " is available";
+        return {};
+    };
+    std::string why = shortfall();
+    if(!why.empty())
+    {
+        // A previous large case can retain most of the free memory in these pools. The
+        // allocator could reuse or release it, but a preflight skip never reaches allocation.
+        memory_pool<d_memory>::ReleaseCached();
+        memory_pool<h_memory>::ReleaseCached();
+        why = shortfall();
+    }
+    return why;
 }

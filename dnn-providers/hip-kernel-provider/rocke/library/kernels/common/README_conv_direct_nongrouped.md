@@ -300,8 +300,8 @@ accumulator file, or an estimated live set (`nongrouped_live_regs`:
 accumulators, carried prefetch, one step's operand fragments) above 80% of the
 registers a wave gets once the block's waves share the SIMDs. On the gfx950
 grid this cuts 924 kernels to 658 and, with `waves_per_eu` unset, leaves no
-spilling binary; the spilling ones were also the slowest to compile (up to
-~90 s each). It is a heuristic, not a validity rule: the per-shape
+spilling binary; the spilling ones were also the slowest to compile. It is a
+heuristic, not a validity rule: the per-shape
 `nongrouped_specs` sweep still offers those tiles.
 
 ## Tests and gates
@@ -310,7 +310,7 @@ spilling binary; the spilling ones were also the slowest to compile (up to
 |------|----------------|---------|
 | C++ ↔ Python byte-identity | the C++ port emits identical `.ll` for 15 configs covering every atom, dtype, stride, filter size, partial tile, uneven staging pass, DB/SB, swizzle on/off, iglp, waves_per_eu, gfx942/gfx950 | `python platform/tools/check_byte_identity.py --only conv_direct_grouped` (also with `ROCKE_LLVM_FLAVOR=llvm22`) |
 | Emitters | the two sides of that gate; shared with the grouped direct-conv family, non-grouped configs are indices 42+ (dilated: 63+) | `tests/parity/conv_direct_grouped_emit.{py,c}` |
-| IR golden | Python lowering is byte-stable (5 cases, all llvm flavors) | `conv_direct_nongrouped/*` in `platform/tests/instances/rocke_ir_parity_harness.py` |
+| IR golden | Python lowering is byte-stable (7 cases, all llvm flavors) | `conv_direct_nongrouped/*` in `platform/tests/instances/rocke_ir_parity_harness.py` |
 | On-silicon numerics | output vs `torch.nn.functional.conv2d` (fp32 reference), rel. tol 5e-2 fp16 / 1e-1 bf16; includes one binary launched on four unrelated shapes | `pytest tests/test_direct_conv_correctness.py -k Nongrouped` |
 | AOT ABI / shape invariance | kernarg order matches `conv_direct_arg_names("fwd")`; emitted IR independent of `N`/`H`/`W`/`C`/`K` | `pytest tests/test_conv_abi.py -k nongrouped` |
 | AOT cache | runtime channels, width filtering, `groups == 1` only, plans pack against the signature | `pytest tests/test_direct_kernel_cache.py` |

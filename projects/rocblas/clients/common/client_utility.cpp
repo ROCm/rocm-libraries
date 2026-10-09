@@ -571,7 +571,7 @@ rocblas_local_handle::~rocblas_local_handle()
         setenv("ROCBLAS_USE_HIPBLASLT", m_hipblaslt_saved_status.c_str(), true);
     }
 
-    rocblas_destroy_handle(m_handle);
+    PRINT_IF_ROCBLAS_ERROR(rocblas_destroy_handle(m_handle));
 
     if(m_stream_order_env_set)
     {

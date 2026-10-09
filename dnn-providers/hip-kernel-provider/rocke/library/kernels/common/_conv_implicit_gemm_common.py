@@ -614,6 +614,42 @@ def coalesced_load_reason(
     return None
 
 
+# One global load/store per lane moves at most 16 bytes (dwordx4): 8 x 16-bit
+# or 4 x fp32 -- the top rung of every default_vector_sizes ladder.
+MAX_VECTOR_BYTES = 16
+
+# Per-dtype element size for the vector-width check. Keyed explicitly (rather
+# than a fp32-vs-everything-else ternary) so a future 1- or 8-byte dtype is a
+# one-line table edit here and in the C++ twin's rocke_conv_vector_width_elem_bytes,
+# instead of a silent fallthrough to the 2-byte default.
+_VECTOR_WIDTH_DTYPE_BYTES = {"fp16": 2, "bf16": 2, "fp32": 4}
+
+
+def vector_width_reason(
+    widths: Sequence[Tuple[str, Optional[int], str]],
+) -> Optional[str]:
+    """Why an explicit ``vector_size_*`` is wider than one 16-byte access, or
+    ``None`` if every width fits.
+
+    ``widths`` holds ``(operand, vector_size, dtype)`` triples. An unset width
+    (``None``) is derived from ``default_vector_sizes``, whose per-dtype
+    ladder already stops at 16 bytes; an explicit one is used verbatim, so an
+    fp32 operand at width 8 (32 bytes) would otherwise pass and the AOT sweep
+    would compile it next to the 16-byte kernels. C++ twin:
+    ``rocke_conv_vector_width_ok``.
+    """
+    for operand, vec, dtype in widths:
+        if vec is None:
+            continue
+        nbytes = vec * _VECTOR_WIDTH_DTYPE_BYTES.get(dtype, 2)
+        if nbytes > MAX_VECTOR_BYTES:
+            return (
+                f"vector_size_{operand}={vec} x {dtype} is {nbytes} bytes "
+                f"> {MAX_VECTOR_BYTES}-byte max per-lane access"
+            )
+    return None
+
+
 # ---------------------------------------------------------------------
 # Wavelet pipeline helpers (gfx1250/WMMA load/math wave specialization)
 # ---------------------------------------------------------------------

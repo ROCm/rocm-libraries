@@ -53,6 +53,7 @@
 //     launcher routes par.{p,q,h,w} via SizeView<Direction::Dgrad>.
 
 #include "config.hpp"
+#include "config_desc.h"
 #include "grouped_conv_kernel.h"
 #include "types.h"
 #include "mathutil.h"
@@ -1952,6 +1953,8 @@ public:
             launch.dynamic_shared_bytes += 16;
         return launch;
     }
+
+    KVDescriptor config_descriptor() const override { return config_fields(cfg_); }
 
 protected:
     int group_channels() const override { return cfg_.group_size; }

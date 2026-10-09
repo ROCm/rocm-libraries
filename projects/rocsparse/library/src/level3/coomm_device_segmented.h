@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -481,16 +481,14 @@ namespace rocsparse
 
     // Do the final block reduction of the block reduction buffers back into global memory
     template <uint32_t BLOCKSIZE, typename T, typename I, typename C>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void coommnn_general_block_reduce(I n,
-                                      I nblocks,
-                                      const I* __restrict__ row_block_red,
-                                      const T* __restrict__ val_block_red,
-                                      C*              dense_C,
-                                      int64_t         ldc,
-                                      int64_t         batch_stride_C,
-                                      rocsparse_order order_C,
-                                      int64_t         batch_count)
+    ROCSPARSE_DEVICE_ILF void
+        coommnn_general_block_reduce_device(I n,
+                                            I nblocks,
+                                            const I* __restrict__ row_block_red,
+                                            const T* __restrict__ val_block_red,
+                                            C*              dense_C,
+                                            int64_t         ldc,
+                                            rocsparse_order order_C)
     {
         const int tid = hipThreadIdx_x;
 
@@ -498,17 +496,16 @@ namespace rocsparse
         __shared__ I shared_row[BLOCKSIZE];
         __shared__ T shared_val[BLOCKSIZE];
 
-        const I col = hipBlockIdx_x;
-
-        for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+        // Grid-stride loop over the dense column dimension (grid x) so a clamped
+        // grid still covers all n columns.
+        for(int64_t col = hipBlockIdx_x; col < n; col += hipGridDim_x)
         {
             for(I i = 0; i < nblocks; i += BLOCKSIZE)
             {
                 // Copy data to reduction buffers
-                shared_row[tid]
-                    = (tid + i < nblocks) ? row_block_red[tid + i + nblocks * batch] : -1;
+                shared_row[tid] = (tid + i < nblocks) ? row_block_red[tid + i] : -1;
                 shared_val[tid] = (tid + i < nblocks)
-                                      ? val_block_red[tid + i + nblocks * col + nblocks * n * batch]
+                                      ? val_block_red[tid + i + static_cast<int64_t>(nblocks) * col]
                                       : static_cast<T>(0);
 
                 __syncthreads();
@@ -524,16 +521,41 @@ namespace rocsparse
                 {
                     if(order_C == rocsparse_order_column)
                     {
-                        dense_C[row + ldc * col + batch_stride_C * batch] += shared_val[tid];
+                        dense_C[row + ldc * col] += shared_val[tid];
                     }
                     else
                     {
-                        dense_C[col + ldc * row + batch_stride_C * batch] += shared_val[tid];
+                        dense_C[col + ldc * row] += shared_val[tid];
                     }
                 }
 
                 __syncthreads();
             }
+        }
+    }
+
+    template <uint32_t BLOCKSIZE, typename T, typename I, typename C>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void coommnn_general_block_reduce(I n,
+                                      I nblocks,
+                                      const I* __restrict__ row_block_red,
+                                      const T* __restrict__ val_block_red,
+                                      C*              dense_C,
+                                      int64_t         ldc,
+                                      int64_t         batch_stride_C,
+                                      rocsparse_order order_C,
+                                      int64_t         batch_count)
+    {
+        for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+        {
+            rocsparse::coommnn_general_block_reduce_device<BLOCKSIZE>(
+                n,
+                nblocks,
+                load_pointer(row_block_red, batch, nblocks),
+                load_pointer(val_block_red, batch, static_cast<int64_t>(nblocks) * n),
+                load_pointer(dense_C, batch, batch_stride_C),
+                ldc,
+                order_C);
         }
     }
 }

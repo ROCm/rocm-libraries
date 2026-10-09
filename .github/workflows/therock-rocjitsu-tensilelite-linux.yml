@@ -249,7 +249,7 @@ jobs:
             --report-dir "${REPORT_DIR}" --timeout "${SUITE_TIMEOUT_SECONDS}" -- \
             mirage run --profile "${MIRAGE_PROFILE}" --in-process \
               --config "${REPORT_DIR}/rocjitsu-config.json" -- \
-            python -m pytest "${TENSILELITE_ROOT}/Tensile/Tests/common/test_config.py" \
+            python -m pytest "${TENSILELITE_ROOT}/tensilelite/Tests/common/test_config.py" \
               -p rocjitsu_pytest --rocjitsu-report-dir="${REPORT_DIR}" \
               --rocjitsu-durations="${SCRIPTS_DIR}/rocjitsu_tensilelite_durations.json" \
               --rocjitsu-stall-dump-after="$(( PER_TEST_TIMEOUT - 300 ))" \

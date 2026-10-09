@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "bsrmm_device_general.h"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -125,7 +126,10 @@ namespace rocsparse
         hipStream_t stream = handle->stream;
         rocsparse_host_assert(block_dim > 32, "This function is designed for block_dim > 32.");
 
-        const dim3 bsrmm_blocks((mb - 1) / 1 + 1, (n - 1) / 32 + 1);
+        // grid.x and grid.y are clamped to the device limits; the kernel
+        // grid-strides over both (see bsrmm_general_blockdim_device).
+        const dim3 bsrmm_blocks(rocsparse::get_grid_size_x(handle, mb, 32),
+                                rocsparse::get_grid_size_y(handle, (n - 1) / 32 + 1));
         const dim3 bsrmm_threads(32, 32, 1);
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrmm_general_blockdim_kernel<32, 32>),
                                            bsrmm_blocks,

@@ -38,6 +38,7 @@
 // its delta is fp32 too and every staged byte count doubles.
 
 #include "config.hpp"
+#include "config_desc.h"
 #include "grouped/reduction.hpp"
 #include "grouped_conv_kernel.h"
 #include "types.h"
@@ -570,6 +571,8 @@ public:
         launch.dynamic_shared_bytes = cfg_.waves_per_wg * per_wave;
         return launch;
     }
+
+    KVDescriptor config_descriptor() const override { return config_fields(cfg_); }
 
 protected:
     // Unused (is_applicable is overridden above), but the base class requires it.

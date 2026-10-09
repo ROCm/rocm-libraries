@@ -9,6 +9,13 @@ hipconv_autoshard(ARCH         cdna5
                   NUM_SHARDS   ${HIPCONV_NUM_SHARDS}
                   EXTRA_HIP_FLAGS "-mllvm=--amdgpu-enable-delay-alu=0")
 hipconv_autoshard(ARCH         cdna5
+                  NAMESPACE    direct_wgrad
+                  KERNEL_CLASS Direct_WgradConvKernel
+                  CONFIG_TABLE direct_wgrad/config_table.hpp
+                  KERNEL       direct_wgrad/kernel.hpp
+                  NUM_SHARDS   ${HIPCONV_NUM_SHARDS}
+                  EXTRA_HIP_FLAGS "-mllvm=--amdgpu-enable-delay-alu=0")
+hipconv_autoshard(ARCH         cdna5
                   NAMESPACE    grouped_multi_g
                   KERNEL_CLASS Grouped_MultiG_ConvKernel
                   CONFIG_TABLE grouped/grouped_multi_g/config_table.hpp

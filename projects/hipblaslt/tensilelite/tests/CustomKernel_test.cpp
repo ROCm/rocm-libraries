@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <cstring>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -202,4 +203,51 @@ TEST(CustomKernelTest, ScalarsFillTheDeclaredThirtyTwoBitSlot)
                 .size(),
             sizeof(float));
     }
+}
+
+namespace
+{
+    // Grid x and ComputeUnits kernarg of a persistent probe kernel.
+    std::pair<size_t, int32_t> computeUnitsLaunch(int smCountTarget, int persistentMaxCUs)
+    {
+        ContractionSolution solution;
+        configureProbeKernel(solution, {CustomArgType::int32, CustomArgSemantic::ComputeUnits});
+        solution.customKernel.grid
+            = {CustomGridSize::ComputeUnits, CustomGridSize::One, CustomGridSize::One};
+
+        auto problem = dummyProblem();
+        problem.setParams().setSmCountTarget(smCountTarget);
+        auto device             = probeDevice();
+        device.persistentMaxCUs = persistentMaxCUs;
+        ContractionInputs inputs;
+        StreamKSettings   sk;
+
+        auto invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
+
+        EXPECT_EQ(invocation.numWorkGroups.y, 1u);
+        EXPECT_EQ(invocation.numWorkGroups.z, 1u);
+        EXPECT_EQ(invocation.args.size(), sizeof(int32_t));
+        int32_t cuCount = 0;
+        std::memcpy(&cuCount, invocation.args.data(), sizeof(cuCount));
+        return {invocation.numWorkGroups.x, cuCount};
+    }
+}
+
+// Persistent skinny-GEMM kernels stride by CU count; the launch grid and the
+// ComputeUnits kernarg have to be the same value.
+TEST(CustomKernelTest, ComputeUnitsGridAndArgFollowHardware)
+{
+    constexpr int cus = TensileLite::testing::_SPX_CU;
+    EXPECT_EQ(computeUnitsLaunch(0, 0), std::make_pair(size_t{cus}, int32_t{cus}));
+}
+
+// The SM-count target and persistentMaxCUs cap that value as they cap Tensile's
+// persistent grids, and the tighter cap wins.
+TEST(CustomKernelTest, ComputeUnitsHonorTheCuBudget)
+{
+    constexpr int cus = TensileLite::testing::_SPX_CU;
+    EXPECT_EQ(computeUnitsLaunch(64, 0), std::make_pair(size_t{64}, int32_t{64}));
+    EXPECT_EQ(computeUnitsLaunch(64, 48), std::make_pair(size_t{48}, int32_t{48}));
+    EXPECT_EQ(computeUnitsLaunch(0, 96), std::make_pair(size_t{96}, int32_t{96}));
+    EXPECT_EQ(computeUnitsLaunch(4 * cus, 0), std::make_pair(size_t{cus}, int32_t{cus}));
 }
