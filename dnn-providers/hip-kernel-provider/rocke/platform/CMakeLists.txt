@@ -325,118 +325,8 @@ if(ROCKE_INSTALL_TESTS)
                 PATTERN "__pycache__" EXCLUDE
                 REGEX "\\.pyc$" EXCLUDE)
       endforeach()
-      # Validating/extracting reference archives requires a host interpreter.
-      # Keep Python optional when reference installation is disabled, and explain
-      # the opt-out before entering the operation/architecture loops.
-      if(ROCKE_INSTALL_TEST_GPU_REFERENCES AND NOT Python3_Interpreter_FOUND)
-        message(FATAL_ERROR
-                "ROCKE_INSTALL_TEST_GPU_REFERENCES requires a Python3 interpreter. "
-                "Install Python3 or configure with ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF.")
-      endif()
-      # Publication enrollment is independent of supported qualification
-      # cohorts. Each operation/architecture retains its own archive and lock.
-      file(READ "${_ROCKE_LIBRARY_DIR}/tests/reference_common/published_bundles.json"
-           _ROCKE_PUBLISHED_BUNDLES)
-      string(JSON _operation_count LENGTH "${_ROCKE_PUBLISHED_BUNDLES}")
-      set(_ROCKE_REFERENCE_OPERATIONS "")
-      if(_operation_count GREATER 0)
-        math(EXPR _operation_last "${_operation_count} - 1")
-        foreach(_index RANGE 0 ${_operation_last} 1)
-          string(JSON _operation MEMBER "${_ROCKE_PUBLISHED_BUNDLES}" ${_index})
-          list(APPEND _ROCKE_REFERENCE_OPERATIONS "${_operation}")
-        endforeach()
-      endif()
-      foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
-        string(TOUPPER "${_operation}" _operation_upper)
-        file(READ "${_ROCKE_LIBRARY_DIR}/tests/${_operation}_reference/architectures/registry.json"
-             _ROCKE_${_operation_upper}_REGISTRY)
-        string(JSON _ROCKE_${_operation_upper}_COUNT LENGTH "${_ROCKE_${_operation_upper}_REGISTRY}")
-        set(_ROCKE_${_operation_upper}_ARCHITECTURES "")
-        set(_ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES "")
-        if(_ROCKE_${_operation_upper}_COUNT GREATER 0)
-          math(EXPR _ROCKE_${_operation_upper}_LAST "${_ROCKE_${_operation_upper}_COUNT} - 1")
-          foreach(_index RANGE 0 ${_ROCKE_${_operation_upper}_LAST} 1)
-            string(JSON _arch GET "${_ROCKE_${_operation_upper}_REGISTRY}" ${_index})
-            list(APPEND _ROCKE_${_operation_upper}_ARCHITECTURES "${_arch}")
-          endforeach()
-        endif()
-        set(_published_architectures "")
-        string(JSON _published_count LENGTH "${_ROCKE_PUBLISHED_BUNDLES}" "${_operation}")
-        if(_published_count GREATER 0)
-          math(EXPR _published_last "${_published_count} - 1")
-          foreach(_index RANGE 0 ${_published_last} 1)
-            string(JSON _arch GET "${_ROCKE_PUBLISHED_BUNDLES}" "${_operation}" ${_index})
-            if(NOT _arch IN_LIST _ROCKE_${_operation_upper}_ARCHITECTURES)
-              message(FATAL_ERROR "Published ${_operation}/${_arch} has no qualification cohort")
-            endif()
-            list(APPEND _published_architectures "${_arch}")
-          endforeach()
-        endif()
-        foreach(_arch IN LISTS _ROCKE_${_operation_upper}_ARCHITECTURES)
-          set(ROCKE_TEST_${_operation_upper}_REFERENCE_INSTALL_SOURCE_${_arch} "" CACHE PATH
-              "Optional extracted ${_operation_upper} test reference directory to install for ${_arch}")
-          set(ROCKE_TEST_${_operation_upper}_REFERENCE_INSTALL_LOCK_${_arch} "" CACHE FILEPATH
-              "Explicit reviewed ${_operation} lock for local qualification validation")
-          if(NOT ROCKE_INSTALL_TEST_GPU_REFERENCES)
-            continue()
-          endif()
-          set(_bundle "${ROCKE_TEST_${_operation_upper}_REFERENCE_INSTALL_SOURCE_${_arch}}")
-          set(_lock_override "${ROCKE_TEST_${_operation_upper}_REFERENCE_INSTALL_LOCK_${_arch}}")
-          if(_lock_override AND NOT _bundle)
-            message(FATAL_ERROR "Local ${_operation}/${_arch} lock requires an install-source override")
-          endif()
-          if(NOT _arch IN_LIST _published_architectures AND NOT _bundle)
-            continue()
-          endif()
-          set(_lock "${_ROCKE_LIBRARY_DIR}/tests/${_operation}_reference/architectures/${_arch}/baseline_lock.json")
-          if(_lock_override)
-            set(_lock "${_lock_override}")
-          endif()
-          if(NOT EXISTS "${_lock}")
-            message(FATAL_ERROR "No qualified ${_operation} baseline lock for ${_arch}")
-          endif()
-          if(NOT _bundle)
-            set(_archive "${_ROCKE_LIBRARY_DIR}/tests/reference_bundles/${_operation}/${_arch}.tar.gz")
-            if(NOT EXISTS "${_archive}")
-              message(FATAL_ERROR
-                      "${_operation_upper} reference archive missing. Run dvc pull for "
-                      "dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/${_operation}/${_arch}.tar.gz.dvc "
-                      "or configure with ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF.")
-            endif()
-            file(SHA256 "${_archive}" _archive_sha256)
-            set(_bundle "${CMAKE_CURRENT_BINARY_DIR}/${_operation}-reference/${_arch}/${_archive_sha256}")
-            execute_process(
-              COMMAND "${Python3_EXECUTABLE}" -I
-                      "${_ROCKE_LIBRARY_DIR}/tests/reference_common/artifact.py" unpack
-                      --operation "${_operation}"
-                      --archive "${_archive}" --bundle "${_bundle}" --lock "${_lock}"
-              RESULT_VARIABLE _result ERROR_VARIABLE _error)
-            if(NOT _result EQUAL 0)
-              message(FATAL_ERROR "${_operation_upper} reference staging failed for ${_arch}: ${_error}")
-            endif()
-          endif()
-          if(_bundle)
-            execute_process(
-              COMMAND "${Python3_EXECUTABLE}" -I
-                      "${_ROCKE_LIBRARY_DIR}/tests/reference_common/artifact.py" validate
-                      --operation "${_operation}"
-                      --bundle "${_bundle}" --lock "${_lock}"
-              RESULT_VARIABLE _result ERROR_VARIABLE _error)
-            if(NOT _result EQUAL 0)
-              message(FATAL_ERROR "${_operation_upper} reference validation failed for ${_arch}: ${_error}")
-            endif()
-            # TheRock captures test_arch_content in the test component; its kpack
-            # handler requires engines/ above it to split the bundle per GPU arch.
-            install(DIRECTORY "${_bundle}/"
-                    DESTINATION "${ROCKE_TEST_INSTALL_DIR}/engines/test_arch_content/rocke/${_operation}/${_arch}"
-                    PATTERN "__pycache__" EXCLUDE REGEX "\\.pyc$" EXCLUDE)
-            set(_ROCKE_${_operation_upper}_REFERENCE_LOCK_${_arch} "${_lock}")
-            list(APPEND _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES "${_arch}")
-            set(_ROCKE_HAS_${_operation_upper}_REFERENCE ON)
-          endif()
-        endforeach()
-
-      endforeach()
+      # Only published bundles participate in installation and CTest enrollment.
+      include(cmake/InstallGpuReferences.cmake)
 
       # Install the library test tree for the library pytest entries below.
       # cmake-lint: disable=E1122
@@ -448,18 +338,6 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "reference_bundles" EXCLUDE
               PATTERN "check_torch_reference.py" EXCLUDE
               PATTERN "run_all.py" EXCLUDE)
-      # Install selected trust anchors after the source test tree so an explicit
-      # reviewed lock cannot be overwritten by the source's older baseline lock.
-      foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
-        string(TOUPPER "${_operation}" _operation_upper)
-        if(_ROCKE_HAS_${_operation_upper}_REFERENCE)
-          foreach(_arch IN LISTS _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES)
-            install(FILES "${_ROCKE_${_operation_upper}_REFERENCE_LOCK_${_arch}}"
-                    DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/${_operation}_reference/architectures/${_arch}"
-                    RENAME baseline_lock.json)
-          endforeach()
-        endif()
-      endforeach()
     else()
       message(WARNING
               "rocKE: library tree not found at ${_ROCKE_LIBRARY_DIR}; the installed "
@@ -498,7 +376,9 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_engine_linkage.py" EXCLUDE
               PATTERN "test_wavescope_sidecar.py" EXCLUDE
               PATTERN "test_lds_analyzer.py" EXCLUDE
-              PATTERN "test_arch_domain_artifact.py" EXCLUDE)
+              PATTERN "test_arch_domain_artifact.py" EXCLUDE
+              # Configures source CMake modules; not an installed runtime test.
+              PATTERN "test_gpu_references.py" EXCLUDE)
 
     endblock()
 
@@ -578,51 +458,34 @@ if(ROCKE_INSTALL_TESTS)
             "  TIMEOUT 180)\n")
 
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_reference_common_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_artifact.py\" -v -rs --timeout=30)\n")
+           "add_test(rocke_reference_common_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_reference_common_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;host\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
 
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_sdpa_reference_unit_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_sdpa_reference_contract.py\" -v -rs --timeout=30)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_sdpa_reference_unit_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;sdpa\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  TIMEOUT 180)\n")
+    foreach(_operation sdpa conv)
+      string(TOUPPER "${_operation}" _operation_upper)
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_${_operation}_reference_unit_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_reference_contract.py\" -v -rs --timeout=30)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_${_operation}_reference_unit_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;${_operation}\\;host\\;quick\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+             "  TIMEOUT 180)\n")
 
-    # Register a separate result and explicit cohort for each installed SDPA target.
-    foreach(_arch IN LISTS _ROCKE_SDPA_INSTALLED_ARCHITECTURES)
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_sdpa_gpu_${_arch}_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_sdpa_pinned_reference.py\" --rocke-reference-operation sdpa --rocke-reference-arch ${_arch} -v -rs)\n")
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_sdpa_gpu_${_arch}_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;sdpa\\;gpu\\;quick\"\n"
-             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library;ROCKE_TEST_REQUIRE_SDPA_GPU=1\"\n"
-             "  SKIP_RETURN_CODE 77\n"
-             "  TIMEOUT 300)\n")
-    endforeach()
-
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_conv_reference_unit_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_conv_reference_contract.py\" -v -rs --timeout=30)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_conv_reference_unit_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  TIMEOUT 180)\n")
-
-    # Register a separate result and explicit cohort for each installed CONV target.
-    foreach(_arch IN LISTS _ROCKE_CONV_INSTALLED_ARCHITECTURES)
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_conv_gpu_${_arch}_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_conv_pinned_reference.py\" --rocke-reference-operation conv --rocke-reference-arch ${_arch} -v -rs)\n")
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_conv_gpu_${_arch}_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;conv\\;gpu\\;quick\"\n"
-             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library;ROCKE_TEST_REQUIRE_CONV_GPU=1\"\n"
-             "  SKIP_RETURN_CODE 77\n"
-             "  TIMEOUT 300)\n")
+      # Each installed architecture retains its own GPU CTest result.
+      foreach(_arch IN LISTS _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES)
+        string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+               "add_test(rocke_${_operation}_gpu_${_arch}_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs)\n")
+        string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+               "set_tests_properties(rocke_${_operation}_gpu_${_arch}_pytest PROPERTIES\n"
+               "  LABELS \"ckc\\;python\\;${_operation}\\;gpu\\;quick\"\n"
+               "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+               "  SKIP_RETURN_CODE 77\n"
+               "  TIMEOUT 300)\n")
+      endforeach()
     endforeach()
 
     # Library GPU numeric suites: convolution, attention, KDA, and GDN.

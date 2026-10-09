@@ -3,7 +3,7 @@
 """Launch gfx1250 block-scaled GEMM and compare with an independent reference.
 
 The default invocation keeps the K=64 FP8/BF8 WMMA + FP32-scale verifier.
-Native ``--matrix-path wmma_scale`` / ``wmma_scale16`` use homogeneous FP8, FP6, or FP4 and
+Native ``--matrix-path wmma_scale`` / ``wmma_scale16`` use independent FP8/BF8, FP6/BF6, or FP4 operands and
 E8M0 scales with K=32 / K=16 groups. Native fixtures cover K=128 or 256 and use
 bounded dyadic values, permitting exact comparison after output-type rounding.
 Numerical equality treats positive and negative zero as equal; output zero-sign
@@ -364,7 +364,7 @@ def run_cases(
                 dtype_c=spec.dtype_c,
             )
             label = (
-                f"{spec.resolved_matrix_path()}/{spec.dtype_a}/{compile_route}/{case} "
+                f"{spec.resolved_matrix_path()}/{spec.dtype_a}x{spec.dtype_b}/{compile_route}/{case} "
                 f"{spec.M}x{spec.N}x{spec.K} bk{spec.block_k}"
             )
             got = _launch(rt, fn, spec, inputs)

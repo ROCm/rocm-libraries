@@ -1917,6 +1917,10 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
     {
         rocke_strbuf_append(out, "\n!3 = !{!\"agent\"}\n");
     }
+    if(L->needs_nontemporal_md)
+    {
+        rocke_strbuf_append(out, "\n!5 = !{i32 1}\n");
+    }
     if(L->debug)
     {
         rocke_ll_debug_render(L, L->debug, out);
@@ -2052,6 +2056,7 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     L.unroll_elide_sync_op = NULL;
     L.needs_fp_atomic_md = false;
     L.needs_av_scope_md = false;
+    L.needs_nontemporal_md = false;
     rocke_vec_init(&L.blocks);
     rocke_vec_init(&L.needs);
     rocke_vec_init(&L.dyn_decls);

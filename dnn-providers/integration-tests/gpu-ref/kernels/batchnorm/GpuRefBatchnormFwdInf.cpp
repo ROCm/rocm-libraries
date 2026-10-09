@@ -79,7 +79,7 @@ __forceinline__ __device__ float rsqrt(float x)
 }
 __forceinline__ __device__ _Float16 rsqrt(_Float16 x)
 {
-    return __ocml_rsqrt_f16(x);
+    return hrsqrt(__half(x));
 }
 __forceinline__ __device__ __bf16 rsqrt(__bf16 x)
 {

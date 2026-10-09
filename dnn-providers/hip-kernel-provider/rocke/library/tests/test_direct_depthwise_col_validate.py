@@ -154,6 +154,11 @@ _REJECTIONS = [
         ["PAD 1000000"],
         _ARCH,
     ),
+    # --- dilation ----------------------------------------------------------
+    # The tap indexing has no dilation term, so a dilated spec would emit the
+    # undilated convolution; zero is refused too rather than read as 1.
+    ("dilated", dict(dil_h=2), ["2x1"], _ARCH),
+    ("dilation_zero", dict(dil_w=0), ["1x0"], _ARCH),
     # --- wave --------------------------------------------------------------
     # wave_size feeds the per-lane channel index; 0 divides by zero and a
     # mismatch silently maps lanes to the wrong channel.
@@ -337,3 +342,45 @@ def test_benchmark_defers_tap_policy_to_the_validator():
     ).read_text()
     assert "_DW_MAX_PRELOAD_TAPS" not in src
     assert "is_valid_depthwise_spec" in src
+
+
+# ---------------------------------------------------------------------------
+# The output-stationary sibling: degenerate output extents.
+# ---------------------------------------------------------------------------
+
+
+def _tiled_spec(*, block_w=8, block_h=2, **pkw):
+    from kernels.common.conv_direct_grouped import DirectDepthwiseTiledSpec
+
+    problem = DirectConvProblem(**{**_BASE_PROBLEM, **pkw})
+    return DirectDepthwiseTiledSpec(
+        problem=problem, name="validate_dwt", block_w=block_w, block_h=block_h
+    )
+
+
+@pytest.mark.parametrize(
+    "pkw, wants",
+    [
+        # A filter larger than the padded input: a negative launch grid.
+        (dict(H=4, W=4, KH=31, KW=31, PAD=0), ["Ho=-26", "Wo=-26"]),
+        # H + 2*PAD - KH = -1 at stride 2: Ho floors to 0 (truncation gives 1).
+        (dict(H=4, W=16, KH=5, KW=5, PAD=0, stride=2), ["Ho=0", "Wo=6"]),
+    ],
+)
+def test_tiled_spec_rejects_empty_output(pkw, wants):
+    from kernels.common.conv_direct_grouped import (
+        build_direct_depthwise_tiled,
+        is_valid_depthwise_tiled_spec,
+    )
+
+    spec = _tiled_spec(**pkw)
+    ok, reason = is_valid_depthwise_tiled_spec(spec, _ARCH)
+    assert not ok
+    for want in wants:
+        assert want in reason, reason
+    with pytest.raises(ValueError):
+        build_direct_depthwise_tiled(spec, arch=_ARCH)
+    # Positive control: the same filter over an input it fits.
+    fits = _tiled_spec(**{**pkw, "H": 40, "W": 40})
+    ok, reason = is_valid_depthwise_tiled_spec(fits, _ARCH)
+    assert ok, reason

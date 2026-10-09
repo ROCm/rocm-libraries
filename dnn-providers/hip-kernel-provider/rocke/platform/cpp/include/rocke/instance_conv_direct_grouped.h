@@ -101,6 +101,8 @@ typedef struct rocke_direct_conv_problem
                         * to "fp16".  Zero-initialising the struct leaves dtype
                         * NULL, which silently selects fp16 and will silently
                         * drop a bf16 request. */
+    int dil_h; /* default 1; filter dilation, honoured by the non-grouped */
+    int dil_w; /* forward kernel only (every other variant rejects it)   */
 } rocke_direct_conv_problem_t;
 
 /* DirectConvProblem with dataclass defaults (KH=KW=3, PAD=1, stride=1) and the
@@ -435,6 +437,58 @@ rocke_status_t rocke_direct_depthwise_spatial_validate(
     const rocke_direct_depthwise_spatial_spec_t* spec, char* reason, size_t reason_cap);
 
 /* ===================================================================== *
+ *  DirectDepthwiseTiledSpec  (cpg = kpg = 1, output-stationary)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectDepthwiseTiledSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_depthwise_tiled"
+ *      block_w: int = 8
+ *      block_h: int = 4
+ *      block_waves: int = 1
+ *      unroll_rows: bool = False
+ *      wave_size: int = 64
+ *
+ *  A block owns a block_h x block_w output tile of block_ch channels; a
+ *  runtime loop walks the filter rows with one weight row and a sliding
+ *  window of input rows in registers.
+ *  Grid: (ceil(Wo / block_w), ceil(C / block_ch), N * ceil(Ho / block_h)).
+ * ===================================================================== */
+typedef struct rocke_direct_depthwise_tiled_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_depthwise_tiled" */
+    int block_w; /* default 8  */
+    int block_h; /* default 4  */
+    int block_waves; /* default 1  */
+    bool unroll_rows; /* default false */
+    int wave_size; /* default 64 */
+} rocke_direct_depthwise_tiled_spec_t;
+
+/* Register budget and unrolled-FMA cap (Python: _DW_TILED_REG_BUDGET /
+ * _DW_TILED_UNROLL_MAX_FMAS). */
+#define ROCKE_DCONV_DW_TILED_REG_BUDGET 256
+#define ROCKE_DCONV_DW_TILED_UNROLL_MAX_FMAS 6144
+
+rocke_direct_depthwise_tiled_spec_t rocke_direct_depthwise_tiled_spec_default(void);
+int rocke_direct_depthwise_tiled_threads_per_block(const rocke_direct_depthwise_tiled_spec_t* spec);
+int rocke_direct_depthwise_tiled_block_ch(const rocke_direct_depthwise_tiled_spec_t* spec);
+/* @property n_cols -> (block_w - 1) * stride + KW */
+int rocke_direct_depthwise_tiled_n_cols(const rocke_direct_depthwise_tiled_spec_t* spec);
+/* @property live_regs -> block_h * block_w + block_h * n_cols + 2 * KW */
+int rocke_direct_depthwise_tiled_live_regs(const rocke_direct_depthwise_tiled_spec_t* spec);
+/* @property unrolled_fmas -> KH * block_h * block_w * KW */
+int rocke_direct_depthwise_tiled_unrolled_fmas(const rocke_direct_depthwise_tiled_spec_t* spec);
+rocke_status_t rocke_direct_depthwise_tiled_kernel_name(
+    const rocke_direct_depthwise_tiled_spec_t* spec, char* out, size_t out_cap);
+rocke_status_t rocke_direct_depthwise_tiled_validate(
+    const rocke_direct_depthwise_tiled_spec_t* spec, char* reason, size_t reason_cap);
+bool rocke_direct_depthwise_tiled_is_valid_spec(const rocke_direct_depthwise_tiled_spec_t* spec,
+                                                const char* arch,
+                                                char* reason,
+                                                size_t reason_cap);
+
+/* ===================================================================== *
  *  DirectConvDgradSpec  (grouped dgrad: scalar FMA, any cpg/kpg, stride>=1)
  *
  *  @dataclass(frozen=True)
@@ -675,6 +729,13 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     rocke_ir_builder_t* b, const rocke_direct_depthwise_spatial_spec_t* spec, const char* arch);
 rocke_kernel_def_t* rocke_build_direct_depthwise_spatial_new(
     rocke_ir_builder_t* b, const rocke_direct_depthwise_spatial_spec_t* spec, const char* arch);
+
+/* build_direct_depthwise_tiled(spec, arch). Output-stationary depthwise kernel
+ * (cpg=kpg=1): runtime filter-row loop, one weight row in registers. */
+rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_tiled_spec_t* spec, const char* arch);
+rocke_kernel_def_t* rocke_build_direct_depthwise_tiled_new(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_tiled_spec_t* spec, const char* arch);
 
 /* build_direct_conv_dgrad(spec, arch). Grouped dgrad scalar FMA kernel.
  * Computes dX[n,hi,wi,c] = sum_{r,s,k} dY[n,ho,wo,k] * W[k,r,s,c].

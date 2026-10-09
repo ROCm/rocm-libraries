@@ -61,9 +61,11 @@ function(hipconv_add_arch_lib name)
     # host helper .cpp.
     file(GLOB variant_sources CONFIGURE_DEPENDS
         "grouped/*.cpp"
+        "grouped/*/*.cpp"
         "depthwise/*.cpp"
         "depthwise/*/*.cpp"
         "direct/*.cpp"
+        "direct_wgrad/*.cpp"
         "direct/direct_l1/*.cpp"
         "direct/direct/*.cpp"
         "direct/direct_wgrad/*.cpp"

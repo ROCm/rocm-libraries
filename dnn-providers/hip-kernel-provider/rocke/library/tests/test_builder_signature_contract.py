@@ -286,6 +286,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_direct_grouped.DirectDepthwiseSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectDepthwiseColSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectDepthwiseSpatialSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseTiledSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectConvSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectConvDgradSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectDepthwiseDgradSpec": ("problem",),

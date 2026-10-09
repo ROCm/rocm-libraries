@@ -17,6 +17,7 @@ from hkp_pack.rocke_compile import (
     compile_rocke_variant,
     rocke_variant_key,
 )
+from pack_helpers import read_shipped
 
 ARCH = "gfx950"
 
@@ -547,7 +548,8 @@ def test_rocke_compiles_and_packs(
     tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available, rocke_ukd
 ):
     _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir)
-    ukd = _read(tmp_path / "out" / ARCH / "attention.kdp.json")["kernelDescriptors"][0]
+    shipped = read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
+    ukd = shipped["kernelDescriptors"][0]
     ks = ukd["kernel_source"]
     assert ks["kind"] == "kpack"
     assert ks["library"] == f"kpack/hip_kernel_provider_{ARCH}.kpack"
@@ -615,7 +617,8 @@ def test_rocke_arch_scoping(
     _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942", ARCH])
     # gfx950 shard has the packed rocke UKD.
     assert (tmp_path / "out" / ARCH / "attention.kdp.json").exists()
-    ukd = _read(tmp_path / "out" / ARCH / "attention.kdp.json")["kernelDescriptors"][0]
+    shipped = read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
+    ukd = shipped["kernelDescriptors"][0]
     assert ukd["provenance"]["origin_kind"] == "rocke"
     # gfx942 has no applicable UKD: the shard is skipped entirely.
     assert not (tmp_path / "out" / "gfx942").exists()

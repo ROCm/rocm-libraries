@@ -11,9 +11,13 @@
 #include "device/ScopedDevice.hpp"
 #include "utilities/Digest.hpp"
 
+#include <atomic>
+#include <cstddef>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -51,6 +55,191 @@ private:
 };
 
 using CachedKpackModule = std::shared_ptr<const KpackModule>;
+
+/// An open archive and the architecture list read from it once, shared by every load that
+/// names the same path.
+struct OpenKpackArchive
+{
+    KpackArchive archive;
+    std::vector<std::string> arches;
+};
+
+/// The kpack archives loads have opened, by path, kept open while at least one lease() is
+/// alive. Each plugin Container holds a lease, so the archives close when the last hipDNN
+/// handle on this provider goes. Retaining saves a kpack_open per module-cache miss (for a
+/// zstd archive, a read of the whole compressed blob), and kpack_get_kernel is thread-safe
+/// on one handle. With no lease alive, open() returns a handle nothing else keeps.
+///
+/// A failed open is not kept. A handle whose archive fails to yield an intact entry is
+/// evicted, so a damaged or replaced archive is re-read on the next load. Each path has its
+/// own open slot, so opens of different archives run in parallel and concurrent first opens
+/// of one archive share a single handle.
+class SharedKpackArchives
+{
+public:
+    /// Keeps archives open until every lease is released. A load already holding a handle
+    /// keeps it.
+    static std::shared_ptr<void> lease()
+    {
+        std::shared_ptr<State> shared = state();
+        {
+            const std::lock_guard<std::mutex> guard(shared->mutex);
+            ++shared->leases;
+        }
+        // The deleter owns the state, so a lease released during static destruction still
+        // finds it.
+        State* const token = shared.get();
+        return {token, [owner = std::move(shared)](void*) { release(*owner); }};
+    }
+
+    /// @throws KpackModuleLoadFailure at OPEN_ARCHIVE or ARCH_LOOKUP.
+    static std::shared_ptr<const OpenKpackArchive> open(const std::string& archivePath)
+    {
+        auto& shared = *state();
+        std::shared_ptr<Slot> slot;
+        {
+            const std::lock_guard<std::mutex> guard(shared.mutex);
+            if(shared.leases != 0)
+            {
+                auto& entry = shared.slots[archivePath];
+                if(entry == nullptr)
+                {
+                    entry = std::make_shared<Slot>();
+                }
+                slot = entry;
+            }
+        }
+        if(slot == nullptr)
+        {
+            return openUnretained(archivePath);
+        }
+
+        // A slot dropped from the map meanwhile (last lease released, reset) is harmless:
+        // whatever it retains goes when the last caller holding the slot returns.
+        const std::lock_guard<std::mutex> guard(slot->mutex);
+        if(slot->archive == nullptr)
+        {
+            slot->archive = openUnretained(archivePath);
+        }
+        return slot->archive;
+    }
+
+    /// Stops retaining @p handle for @p archivePath, so the next open() reads the archive
+    /// from disk again. A no-op when the path's slot holds a different handle -- one a
+    /// concurrent load already reopened -- or none.
+    static void evict(const std::string& archivePath,
+                      const std::shared_ptr<const OpenKpackArchive>& handle)
+    {
+        auto& shared = *state();
+        std::shared_ptr<Slot> slot;
+        {
+            const std::lock_guard<std::mutex> guard(shared.mutex);
+            const auto found = shared.slots.find(archivePath);
+            if(found == shared.slots.end())
+            {
+                return;
+            }
+            slot = found->second;
+        }
+
+        // The caller still holds @p handle, so dropping the slot's reference never closes
+        // the archive under this lock.
+        const std::lock_guard<std::mutex> guard(slot->mutex);
+        if(slot->archive == handle)
+        {
+            slot->archive.reset();
+        }
+    }
+
+    /// Tests only: closes every retained archive, so the next load reopens it from disk.
+    /// Leases stay held, so later opens are retained again.
+    static void resetForTesting()
+    {
+        auto& shared = *state();
+        Slots closed;
+        {
+            const std::lock_guard<std::mutex> guard(shared.mutex);
+            closed.swap(shared.slots);
+        }
+    }
+
+    /// Tests only: how many archive opens this process has attempted, failed ones included.
+    static std::size_t opensForTesting()
+    {
+        return state()->opens.load(std::memory_order_relaxed);
+    }
+
+private:
+    /// One path's retained handle. Its mutex serializes opens of that path only.
+    struct Slot
+    {
+        std::mutex mutex;
+        std::shared_ptr<const OpenKpackArchive> archive;
+    };
+
+    using Slots = std::unordered_map<std::string, std::shared_ptr<Slot>>;
+
+    /// `mutex` guards `leases` and the map, never an open: a slot's own mutex does that.
+    struct State
+    {
+        std::mutex mutex;
+        std::size_t leases = 0;
+        Slots slots;
+        std::atomic<std::size_t> opens{0}; ///< read by opensForTesting(); needs no lock
+    };
+
+    static const std::shared_ptr<State>& state()
+    {
+        static const std::shared_ptr<State> s_state = std::make_shared<State>();
+        return s_state;
+    }
+
+    static void release(State& shared)
+    {
+        // Swapped out under the lock and destroyed after it, so closing archives does not
+        // hold up a concurrent lease() or open().
+        Slots closed;
+        const std::lock_guard<std::mutex> guard(shared.mutex);
+        if(--shared.leases == 0)
+        {
+            closed.swap(shared.slots);
+        }
+    }
+
+    /// @throws KpackModuleLoadFailure at OPEN_ARCHIVE or ARCH_LOOKUP.
+    static std::shared_ptr<const OpenKpackArchive> openUnretained(const std::string& archivePath)
+    {
+        state()->opens.fetch_add(1, std::memory_order_relaxed);
+        auto opened = std::make_shared<OpenKpackArchive>();
+        KpackError error;
+        if(!opened->archive.open(archivePath, error))
+        {
+            if(error.archiveAbsent)
+            {
+                throw KpackModuleLoadFailure(error.stage,
+                                             "kpack archive '" + archivePath + "' does not exist ("
+                                                 + error.codeName + ")");
+            }
+            throw KpackModuleLoadFailure(error.stage,
+                                         "kpack archive '" + archivePath + "' could not be read ("
+                                             + error.codeName + ")");
+        }
+        if(!opened->archive.architectures(opened->arches, error))
+        {
+            throw KpackModuleLoadFailure(error.stage,
+                                         "cannot read the architecture list of kpack archive '"
+                                             + archivePath + "' (" + error.codeName + ")");
+        }
+        if(opened->arches.empty())
+        {
+            throw KpackModuleLoadFailure(KpackLoadStage::ARCH_LOOKUP,
+                                         "kpack archive '" + archivePath
+                                             + "' declares no architectures; its gfx_arches "
+                                               "entry is absent or malformed");
+        }
+        return opened;
+    }
+};
 
 /// One hipModule_t per (archive path, toc_key, device arch, device ordinal, declared
 /// sha256), loaded lazily and shared.
@@ -110,37 +299,9 @@ public:
                                   int deviceOrdinal,
                                   const std::string& expectedSha256)
     {
-        KpackArchive archive;
+        const auto opened = SharedKpackArchives::open(archivePath);
+        const auto& arches = opened->arches;
         KpackError error;
-
-        if(!archive.open(archivePath, error))
-        {
-            if(error.archiveAbsent)
-            {
-                throw KpackModuleLoadFailure(error.stage,
-                                             "kpack archive '" + archivePath + "' does not exist ("
-                                                 + error.codeName + ")");
-            }
-            throw KpackModuleLoadFailure(error.stage,
-                                         "kpack archive '" + archivePath + "' could not be read ("
-                                             + error.codeName + ")");
-        }
-
-        std::vector<std::string> arches;
-        if(!archive.architectures(arches, error))
-        {
-            throw KpackModuleLoadFailure(error.stage,
-                                         "cannot read the architecture list of kpack archive '"
-                                             + archivePath + "' (" + error.codeName + ")");
-        }
-
-        if(arches.empty())
-        {
-            throw KpackModuleLoadFailure(KpackLoadStage::ARCH_LOOKUP,
-                                         "kpack archive '" + archivePath
-                                             + "' declares no architectures; its gfx_arches "
-                                               "entry is absent or malformed");
-        }
 
         // Deliberate pre-check rather than letting kpack_get_kernel fail: a bare
         // KERNEL_NOT_FOUND cannot distinguish "wrong GPU" from "wrong toc_key", and
@@ -169,7 +330,7 @@ public:
         }
 
         KpackCodeObject codeObject;
-        if(!archive.codeObject(tocKey, *matched, codeObject, error))
+        if(!opened->archive.codeObject(tocKey, *matched, codeObject, error))
         {
             if(error.stage == KpackLoadStage::ENTRY_LOOKUP)
             {
@@ -180,6 +341,11 @@ public:
                                                  + "); this usually means the packer and the "
                                                    "descriptor disagree");
             }
+            // The archive failed to yield an entry its TOC lists, so the next miss re-reads it.
+            // A missing entry or arch keeps the handle: both are answered from the TOC read at
+            // open, and with discovery memoized a reopen would only repeat the miss. Revisit
+            // if discovery ever rescans.
+            SharedKpackArchives::evict(archivePath, opened);
             throw KpackModuleLoadFailure(error.stage,
                                          "cannot decompress toc_key '" + tocKey + "' at arch '"
                                              + *matched + "' from kpack archive '" + archivePath
@@ -192,6 +358,7 @@ public:
         const std::string actualSha256 = utilities::sha256Hex(codeObject.data(), codeObject.size());
         if(actualSha256 != expectedSha256)
         {
+            SharedKpackArchives::evict(archivePath, opened);
             throw KpackModuleLoadFailure(KpackLoadStage::DIGEST_MISMATCH,
                                          "the code object for toc_key '" + tocKey + "' at arch '"
                                              + *matched + "' in kpack archive '" + archivePath

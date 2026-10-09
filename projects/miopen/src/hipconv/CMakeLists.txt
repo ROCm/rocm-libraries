@@ -151,6 +151,8 @@ hipconv_make_arch_registry("${_arch_targets}" "${_arch_registry}")
 set(_hipconv_srcs
     src/conv_params.cpp
     src/conv_kernel.cpp
+    src/data_type_field.cpp
+    src/direction_field.cpp
     src/kv_descriptor.cpp
     src/registry.cpp
     src/tolerance.cpp
@@ -166,8 +168,23 @@ if(HIPCONV_ENABLE_EXPLICIT_GEMM)
     )
 endif()
 
+# hipconv::version(), regenerated at build time so a new commit needs no reconfigure;
+# cmake/write_version.cmake says where the version comes from.
+set(_version_cpp "${CMAKE_CURRENT_BINARY_DIR}/version.cpp")
+add_custom_target(hipconv_version
+    COMMAND "${CMAKE_COMMAND}"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEMPLATE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.cpp.in"
+            "-DOUTPUT=${_version_cpp}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/write_version.cmake"
+    BYPRODUCTS "${_version_cpp}"
+    VERBATIM)
+list(APPEND _hipconv_srcs "${_version_cpp}")
+
 add_library(hipconv STATIC ${_hipconv_srcs} "${_reg_gen}")
 set_source_files_properties(${_hipconv_srcs} "${_reg_gen}" PROPERTIES LANGUAGE HIP)
+set_source_files_properties("${_version_cpp}" PROPERTIES GENERATED TRUE)
+add_dependencies(hipconv hipconv_version)
 foreach(_target IN LISTS _arch_targets)
     target_sources(hipconv PRIVATE $<TARGET_OBJECTS:${_target}>)
 endforeach()

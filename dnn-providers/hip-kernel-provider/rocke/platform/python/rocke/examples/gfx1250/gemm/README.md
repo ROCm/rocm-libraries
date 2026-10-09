@@ -14,6 +14,7 @@ LLVM 23 ROCm libraries, NumPy, and `ml_dtypes`. Torch is optional.
 | `mxfp8_gemm` | FP8 E4M3 (`fp8`) or BF8 E5M2 (`bf8`) on both operands | E8M0 |
 | `mxfp6_gemm` | Packed FP6 E2M3 or E3M2 on both operands | E8M0 |
 | `mxfp4_gemm` | Packed FP4 E2M1 on both operands | E8M0 |
+| [`mixed_scaled_gemm`](mixed_scaled_gemm.py) | Different A/B formats from FP8, BF8, FP6, BF6, and FP4 | E8M0 |
 
 ```sh
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp8_gemm
@@ -53,6 +54,17 @@ homogeneous cases. Use `--dtype fp8` or `--dtype bf8` to run one encoding,
 or `--dtype both` explicitly. Both operands use the selected format with E8M0
 scales. `mxfp6_gemm` similarly defaults to both homogeneous FP6 encodings;
 use `--dtype fp6` or `--dtype bf6` to select one. Mixed matrix formats are outside these examples.
+
+[`mixed_scaled_gemm`](mixed_scaled_gemm.py) defaults to FP8 E4M3 x FP4 E2M1.
+Use `--dtype-a` and `--dtype-b` to select either operand independently; equal
+normalized formats are rejected with guidance to the homogeneous examples.
+All 20 ordered mixed pairs have SCALE and SCALE16 catalog entries. The builder
+uses each operand's atom-selected layout and shared packed-storage helpers.
+
+```sh
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mixed_scaled_gemm --case all
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mixed_scaled_gemm --dtype-a fp6 --dtype-b fp4 --matrix-path wmma_scale16 --compile-route hip
+```
 
 The target-independent aliases in `core/dtypes.py` normalize logical format
 names. Recognition does not imply that a target supports an atom; use its
