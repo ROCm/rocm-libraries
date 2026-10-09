@@ -15,7 +15,7 @@ LLVM 23 ROCm libraries, NumPy, and `ml_dtypes`. Torch is optional.
 | `mxfp6_gemm` | Packed FP6 E2M3 or E3M2 on both operands | E8M0 |
 | `mxfp4_gemm` | Packed FP4 E2M1 on both operands | E8M0 |
 | [`mixed_scaled_gemm`](mixed_scaled_gemm.py) | Different A/B formats from FP8, BF8, FP6, BF6, and FP4 | E8M0 |
-| [`scale_formats_gemm`](scale_formats_gemm.py) | FP4 alone or mixed with FP8/BF8/FP6/BF6 | E8M0, E4M3, or E5M3, subject to operand legality |
+| [`scale_formats_gemm`](scale_formats_gemm.py) | Any A/B pair drawn from FP8/BF8/FP6/BF6/FP4 | Independent E8M0, E4M3, or E5M3 scales for each operand |
 
 ```sh
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp8_gemm

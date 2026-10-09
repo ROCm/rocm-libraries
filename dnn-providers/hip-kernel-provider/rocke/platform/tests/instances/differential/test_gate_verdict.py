@@ -33,6 +33,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import run_diff  # noqa: E402 -- after sys.path shim
+import ir_artifact_diff  # noqa: E402
 from run_diff import (  # noqa: E402
     DRIFT_VERDICTS,
     GATE_FAIL,
@@ -340,17 +341,103 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
             self.assertEqual(self.drive_main(None, Path(d)), 1)
 
 
+class TestConfigEnumeration(unittest.TestCase):
+    """Both differential paths must visit the expanded catalog and its end."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+
+        source = (
+            Path(__file__).resolve().parents[1] / "parity" / "gfx1250_lowering_emit.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "gfx1250_lowering_configs", source
+        )
+        emitter = importlib.util.module_from_spec(spec)
+        with mock.patch.object(sys, "path", [str(source.parent), *sys.path]):
+            spec.loader.exec_module(emitter)
+        cls.config_count = len(emitter.CONFIGS)
+
+    def drive_family(self, driver, mismatch=None):
+        def emit(idx, mode, native=False):
+            if idx >= self.config_count:
+                return 1, b"", "unknown config index"
+            prefix = "ir" if mode == "ir" else "ll"
+            if native and idx == mismatch:
+                prefix = "different"
+            return 0, f"{prefix}-{idx}".encode(), ""
+
+        if driver == "builders":
+            with (
+                mock.patch.object(
+                    run_diff, "compile_c", return_value=(Path("emit"), "")
+                ),
+                mock.patch.object(
+                    run_diff,
+                    "run_c",
+                    side_effect=lambda binary, idx, mode: emit(idx, mode, True),
+                ),
+                mock.patch.object(
+                    run_diff,
+                    "run_py",
+                    side_effect=lambda family, idx, mode, **kw: emit(idx, mode),
+                ) as py,
+            ):
+                result = run_diff.run_family("gfx1250_lowering", Path("archive"), "ll")
+            return (
+                result["configs"],
+                result["status"],
+                [c.args[1] for c in py.call_args_list],
+            )
+
+        def lower(cli, family, ir, ref):
+            idx = int(ir.split(b"-")[1])
+            out = b"different" if idx == mismatch else ref
+            return 0, out, "", "gfx1250"
+
+        with (
+            mock.patch.object(
+                ir_artifact_diff,
+                "run_py",
+                side_effect=lambda family, idx, mode: emit(idx, mode),
+            ) as py,
+            mock.patch.object(ir_artifact_diff, "lower_artifact", side_effect=lower),
+        ):
+            rows = ir_artifact_diff.run_family(Path("cli"), "gfx1250_lowering")
+        indices = [c.args[1] for c in py.call_args_list if c.args[2] == "ll"]
+        return rows, ir_artifact_diff.family_status(rows)[0], indices
+
+    def test_both_drivers_visit_all_configs_and_stop_at_end(self):
+        self.assertEqual(self.config_count, 472)
+        for driver, status in (("builders", "GREEN"), ("artifacts", "IDENTICAL")):
+            with self.subTest(driver=driver):
+                rows, actual_status, indices = self.drive_family(driver)
+                self.assertEqual(len(rows), self.config_count)
+                self.assertEqual(indices, list(range(self.config_count + 1)))
+                self.assertEqual(actual_status, status)
+
+    def test_both_drivers_detect_drift_beyond_default_cap(self):
+        late = run_diff.MAX_CFG
+        for driver in ("builders", "artifacts"):
+            with self.subTest(driver=driver):
+                rows, status, _ = self.drive_family(driver, mismatch=late)
+                self.assertEqual(status, "DRIFT")
+                self.assertIn(rows[late]["verdict"], ("MISMATCH", "DRIFT"))
+
+    def test_default_cap_would_miss_late_drift(self):
+        self.assertEqual(run_diff.config_limit("gemm"), 128)
+        for driver, status in (("builders", "GREEN"), ("artifacts", "IDENTICAL")):
+            with (
+                self.subTest(driver=driver),
+                mock.patch.object(run_diff, "FAMILY_MAX_CFG", {}),
+            ):
+                rows, actual_status, _ = self.drive_family(
+                    driver, mismatch=run_diff.MAX_CFG
+                )
+                self.assertEqual(len(rows), run_diff.MAX_CFG)
+                self.assertEqual(actual_status, status)
+
+
 if __name__ == "__main__":
     unittest.main()
-
-
-def test_gfx1250_scale_catalog_configs_are_not_truncated():
-    import importlib.util
-
-    source = Path(__file__).resolve().parents[1] / "parity" / "gfx1250_lowering_emit.py"
-    spec = importlib.util.spec_from_file_location("gfx1250_lowering_configs", source)
-    emitter = importlib.util.module_from_spec(spec)
-    with mock.patch.object(sys, "path", [str(source.parent), *sys.path]):
-        spec.loader.exec_module(emitter)
-    assert len(emitter.CONFIGS) == 472
-    assert run_diff.FAMILY_MAX_CFG["gfx1250_lowering"] > len(emitter.CONFIGS)
