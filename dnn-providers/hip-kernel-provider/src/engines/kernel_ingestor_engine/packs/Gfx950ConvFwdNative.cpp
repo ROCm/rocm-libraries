@@ -54,6 +54,9 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_conv_fwd.dispatch
 constexpr std::string_view X_TOKEN = "gfx950_conv_fwd.x.uid";
 constexpr std::string_view W_TOKEN = "gfx950_conv_fwd.w.uid";
 constexpr std::string_view Y_TOKEN = "gfx950_conv_fwd.y.uid";
+/// The whole matched problem, so a kernel matcher reads it from what graph_match bound
+/// instead of walking the graph again for every kernel: problemTokenValues() order.
+constexpr std::string_view PROBLEM_TOKEN = "gfx950_conv_fwd.problem";
 
 struct Binding
 {
@@ -216,6 +219,57 @@ std::optional<MatchedProblem> matchProblem(const MatchContext& context)
     return MatchedProblem{binding, problem, *geometry, x->data_type()};
 }
 
+/// PROBLEM_TOKEN's value: the binding, the problem in conv::Problem's field order, then
+/// the dtype. The geometry is derived from the problem again on reading.
+std::vector<int64_t> problemTokenValues(const MatchedProblem& matched)
+{
+    const auto& p = matched.problem;
+    return {matched.binding.x,
+            matched.binding.w,
+            matched.binding.y,
+            p.n,
+            p.c,
+            p.k,
+            p.hi,
+            p.wi,
+            p.y,
+            p.x,
+            p.strideH,
+            p.strideW,
+            p.padH,
+            p.padW,
+            p.dilationH,
+            p.dilationW,
+            p.groups,
+            static_cast<int64_t>(matched.dtype)};
+}
+
+/// The problem graphMatches resolved for @p context, read back from @p bound: the SDK
+/// passes every kernel matcher what graph_match bound for that same context. Falls back
+/// to matching the graph when the token is absent, as for a caller with no graph match.
+std::optional<MatchedProblem> matchedFromBound(const MatchContext& context,
+                                               const BoundTokens& bound)
+{
+    static const std::string s_problemToken(PROBLEM_TOKEN);
+    const auto it = bound.find(s_problemToken);
+    const auto* values
+        = it == bound.end() ? nullptr : std::get_if<std::vector<int64_t>>(&it->second);
+    if(values == nullptr || values->size() != 18)
+    {
+        return matchProblem(context);
+    }
+    const auto& v = *values;
+    const conv::Problem problem{
+        v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11], v[12], v[13], v[14], v[15], v[16]};
+    const auto geometry = conv::deriveGeometry(problem);
+    if(!geometry)
+    {
+        return std::nullopt;
+    }
+    return MatchedProblem{
+        Binding{v[0], v[1], v[2]}, problem, *geometry, static_cast<data_objects::DataType>(v[17])};
+}
+
 std::optional<BoundTokens> graphMatches(const MatchContext& context)
 {
     const auto matched = matchProblem(context);
@@ -225,7 +279,8 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     }
     return BoundTokens{{std::string(X_TOKEN), matched->binding.x},
                        {std::string(W_TOKEN), matched->binding.w},
-                       {std::string(Y_TOKEN), matched->binding.y}};
+                       {std::string(Y_TOKEN), matched->binding.y},
+                       {std::string(PROBLEM_TOKEN), problemTokenValues(*matched)}};
 }
 
 template <typename T>
@@ -840,6 +895,45 @@ std::optional<AotKernel> aotInstance(const KernelDefinition& kernel)
     return aotImplicitGemmInstance(kernel);
 }
 
+/// What hipkernel:Gfx950ConvFwdAot reads of one kernel on every graph, decoded from its
+/// metadata once: its dtype and epilogue, and its instance (nullopt for metadata no
+/// reviewed launch contract describes).
+struct AotPrepared
+{
+    std::string dtype;
+    std::optional<std::string> epilogue;
+    std::optional<AotKernel> instance;
+};
+
+AotPrepared decodeAot(const KernelDefinition& kernel)
+{
+    const auto* dtype = stringMetadata(kernel, "dtype");
+    const auto* epilogue = stringMetadata(kernel, "epilogue");
+    return AotPrepared{dtype == nullptr ? std::string() : *dtype,
+                       epilogue == nullptr ? std::nullopt : std::optional<std::string>(*epilogue),
+                       aotInstance(kernel)};
+}
+
+/// The KernelPrepareFn registered under the AOT kernel matcher's symbol: the SDK runs it
+/// once per kernel when the engine loads, so matching a graph reads AotPrepared instead
+/// of parsing about fifty metadata fields per kernel.
+std::shared_ptr<const void> aotPrepare(const KernelDefinition& kernel)
+{
+    return std::make_shared<const AotPrepared>(decodeAot(kernel));
+}
+
+/// @p kernel's AotPrepared: the one aotPrepare stored, or one decoded into @p scratch for
+/// a definition that carries none (one built outside the engine's shared state).
+const AotPrepared& preparedOf(const KernelDefinition& kernel, AotPrepared& scratch)
+{
+    if(kernel.preparedBy == &aotPrepare && kernel.prepared != nullptr)
+    {
+        return *static_cast<const AotPrepared*>(kernel.prepared.get());
+    }
+    scratch = decodeAot(kernel);
+    return scratch;
+}
+
 /// The launch of @p instance on @p matched, through the family's own capability check
 /// and ABI (conv::aotInstanceLaunch or conv::directInstanceLaunch).
 std::optional<ConvLaunch> aotInstanceLaunch(const MatchedProblem& matched,
@@ -869,26 +963,26 @@ std::optional<ConvLaunch> aotInstanceLaunch(const MatchedProblem& matched,
 std::optional<ConvLaunch> aotKernelFits(const MatchedProblem& matched,
                                         const KernelDefinition& kernel)
 {
-    const std::string dtype = matched.dtype == data_objects::DataType::HALF ? "fp16" : "bf16";
-    const auto instance = aotInstance(kernel);
-    if(!instance || !metadataEquals(kernel, "dtype", dtype))
+    const char* dtype = matched.dtype == data_objects::DataType::HALF ? "fp16" : "bf16";
+    AotPrepared scratch;
+    const auto& prepared = preparedOf(kernel, scratch);
+    if(prepared.dtype != dtype || !prepared.instance)
     {
         return std::nullopt;
     }
-    return aotInstanceLaunch(matched, *instance);
+    return aotInstanceLaunch(matched, *prepared.instance);
 }
 
 bool aotKernelMatches(const MatchContext& context,
-                      const BoundTokens& /*bound*/,
+                      const BoundTokens& bound,
                       const KernelDefinition& kernel)
 {
-    const auto matched = matchProblem(context);
+    const auto matched = matchedFromBound(context, bound);
     return matched && aotKernelFits(*matched, kernel).has_value();
 }
 
-double aotScore(const MatchContext& context,
-                const BoundTokens& /*bound*/,
-                const KernelDefinition& kernel)
+double
+    aotScore(const MatchContext& context, const BoundTokens& bound, const KernelDefinition& kernel)
 {
     // Deterministic fallback only. Only kernels the kernel matcher admitted are scored,
     // so a refusal here is a contract violation, ranked last (-1). As in score(), a
@@ -903,8 +997,9 @@ double aotScore(const MatchContext& context,
     // implicit-GEMM instance (and above a refusal): an unbenchmarked plan keeps serving
     // implicit GEMM wherever it can, and the direct kernels are chosen by benchmarking,
     // a recorded winner, the kernel_family knob, or where nothing else serves.
-    const auto matched = matchProblem(context);
-    const auto instance = aotInstance(kernel);
+    const auto matched = matchedFromBound(context, bound);
+    AotPrepared scratch;
+    const auto& instance = preparedOf(kernel, scratch).instance;
     const auto launch = matched && instance ? aotInstanceLaunch(*matched, *instance) : std::nullopt;
     if(!launch)
     {
@@ -939,15 +1034,16 @@ std::vector<bool> aotCandidateFilter(const MatchContext& /*context*/,
     std::vector<bool> keep(candidates.size(), true);
     std::vector<size_t> implicitGemm;
     std::vector<conv::AotSelectionKey> keys;
+    AotPrepared scratch;
     for(size_t i = 0; i < candidates.size(); ++i)
     {
-        const auto instance = aotInstance(*candidates[i]);
-        const auto* gemm = instance ? std::get_if<conv::AotInstance>(&*instance) : nullptr;
-        const auto* epilogue = stringMetadata(*candidates[i], "epilogue");
-        if(gemm != nullptr && epilogue != nullptr)
+        const auto& prepared = preparedOf(*candidates[i], scratch);
+        const auto* gemm
+            = prepared.instance ? std::get_if<conv::AotInstance>(&*prepared.instance) : nullptr;
+        if(gemm != nullptr && prepared.epilogue)
         {
             implicitGemm.push_back(i);
-            keys.push_back({*epilogue, gemm->vectorA, gemm->vectorB, gemm->vectorC});
+            keys.push_back({*prepared.epilogue, gemm->vectorA, gemm->vectorB, gemm->vectorC});
         }
     }
     const auto selected = conv::widestVectorSelection(keys);
@@ -1230,6 +1326,7 @@ void registerGfx950ConvFwdAotSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(AOT_GRAPH_MATCHER_SYMBOL), &graphMatches);
     scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotKernelMatches);
     scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotCandidateFilter);
+    scope.add(std::string(AOT_KERNEL_MATCHER_SYMBOL), &aotPrepare);
     scope.add(std::string(AOT_SCORE_SYMBOL), &aotScore);
     scope.add(std::string(AOT_DISPATCH_SYMBOL), &aotDispatchHandler());
 }

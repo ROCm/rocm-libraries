@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -344,6 +345,78 @@ TEST(TestGfx950ConvFwdAotSelection, KeepsEveryServingDirectInstance)
     serveAndSelect(fixture.context(), kernels, selected);
     // Row r of aotSample() is kernel r + 1 here.
     EXPECT_EQ(selected, (std::vector<size_t>{0, 16, 36}));
+}
+
+std::shared_ptr<const void> foreignPayload(const KernelDefinition& /*kernel*/)
+{
+    return std::make_shared<const int>(0);
+}
+
+TEST(TestGfx950ConvFwdAotSelection, PreparedKernelsAndTheBoundProblemDecideAsTheGraphAndMetadataDo)
+{
+    hip_kernel_provider::kernel_ingestor_engine::registerNativeIngestorSymbols();
+    const auto graphMatch = GraphMatchRegistry::resolve(AOT_GRAPH_MATCHER);
+    const auto matcher = KernelMatcherRegistry::resolve(AOT_KERNEL_MATCHER);
+    const auto filter = CandidateFilterRegistry::resolve(AOT_KERNEL_MATCHER);
+    const auto score = ScoreRegistry::resolve("hipkernel.gfx950_conv_fwd_aot.score");
+    const auto prepare = KernelPrepareRegistry::resolve(AOT_KERNEL_MATCHER);
+
+    // The sample, a direct instance, a bf16 instance, and metadata no launch contract
+    // describes.
+    std::vector<KernelDefinition> plain{directSampleKernel()};
+    for(const auto& sample : aotSample())
+    {
+        plain.push_back(sampleKernel(sample));
+    }
+    plain.push_back(sampleKernel(aotSample().front()));
+    plain.back().metadata["dtype"] = std::string("bf16");
+    plain.push_back(sampleKernel(aotSample().front()));
+    plain.back().metadata["layout"] = std::string("NCHW");
+
+    // What the engine's shared state carries, and a definition whose payload some other
+    // preparer made, which the pack must not trust.
+    auto prepared = plain;
+    auto foreign = plain;
+    for(size_t i = 0; i < plain.size(); ++i)
+    {
+        prepared[i].prepared = prepare(prepared[i]);
+        prepared[i].preparedBy = prepare;
+        ASSERT_NE(prepared[i].prepared, nullptr);
+        foreign[i].prepared = foreignPayload(foreign[i]);
+        foreign[i].preparedBy = &foreignPayload;
+    }
+
+    auto problems = selectionCases();
+    problems.push_back({{2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, {}});
+    for(const auto& [problem, expected] : problems)
+    {
+        SCOPED_TRACE(::testing::PrintToString(problem));
+        const GraphFixture fixture(convGraph(problem), gfx950());
+        const auto& context = fixture.context();
+        const auto bound = graphMatch(context);
+        ASSERT_TRUE(bound.has_value());
+
+        std::vector<const KernelDefinition*> plainServing;
+        std::vector<const KernelDefinition*> preparedServing;
+        for(size_t i = 0; i < plain.size(); ++i)
+        {
+            // An empty bound makes the matcher read the graph itself.
+            const bool served = matcher(context, BoundTokens{}, plain[i]);
+            EXPECT_EQ(matcher(context, *bound, plain[i]), served) << i;
+            EXPECT_EQ(matcher(context, *bound, prepared[i]), served) << i;
+            EXPECT_EQ(matcher(context, *bound, foreign[i]), served) << i;
+            EXPECT_EQ(score(context, *bound, prepared[i]), score(context, BoundTokens{}, plain[i]))
+                << i;
+            if(served)
+            {
+                plainServing.push_back(&plain[i]);
+                preparedServing.push_back(&prepared[i]);
+            }
+        }
+        EXPECT_FALSE(plainServing.empty());
+        EXPECT_EQ(filter(context, *bound, preparedServing),
+                  filter(context, BoundTokens{}, plainServing));
+    }
 }
 
 TEST(TestGfx950ConvFwdAotSelection, PolicyKeepsTheWidestCombinationPerEpilogue)
