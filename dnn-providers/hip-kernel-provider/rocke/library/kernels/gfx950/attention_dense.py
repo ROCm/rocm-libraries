@@ -879,7 +879,12 @@ def build_attention_dense(
                 # of the row loop (was per-row: ~ROWS_PER_WAVE x fewer indirection
                 # loads + div/mask). Per-row cost is then just a mod + add.
                 _wg0 = b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE)))
-                _wpage = b.div(_wg0, b.const_i32(spec.block_size))
+                # _wg0 is a sum of non-negative terms (tile_key0, wave, row index),
+                # so page = _wg0 // block_size is safe as a logical shift; block_size
+                # is enforced power-of-two at spec construction (attention_dense_spec.py),
+                # so shift = log2(block_size) is a compile-time constant. This drops the
+                # sdiv sign-bias fixup for a bare lshr.
+                _wpage = b.lshr(_wg0, b.const_i32(spec.block_size.bit_length() - 1))
                 _wphys = b.masked_global_load(
                     block_tables,
                     b.add(_pg_seq_base, _wpage),
@@ -908,8 +913,12 @@ def build_attention_dense(
                 gkey = b.add(tile_key0, row)
                 gcol = b.mul(lane, b.const_i32(2))
                 if spec.paged:
+                    # gkey = tile_key0 + row is non-negative by construction, so
+                    # gkey % block_size is safe as a bitmask (block_size is pow2):
+                    # drops the srem sign-bias fixup for a single `and`.
                     kv_row = b.add(
-                        _wphys_base, b.mod(gkey, b.const_i32(spec.block_size))
+                        _wphys_base,
+                        b.land(gkey, b.const_i32(spec.block_size - 1)),
                     )
                 else:
                     kv_row = gkey
