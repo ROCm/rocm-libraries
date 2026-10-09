@@ -4,6 +4,7 @@
 """API tests for Graph configuration (mostly no GPU required)."""
 
 import math
+import sys
 
 import numpy as np
 import pytest
@@ -195,6 +196,13 @@ class TestGraphExecuteTimedExt:
         err, timing = graph.execute_timed_ext(handle, variant_pack, ws_ptr)
         assert err.is_good(), err.get_message()
         assert not timing.timed_out
+        if sys.platform == "win32" and timing.quality == hipdnn.TimingQuality.INVALID:
+            # On Windows, hipEventElapsedTime can return a negative value for a short
+            # span (https://github.com/ROCm/rocm-systems/issues/12925). The binding
+            # reports that as INVALID with no elapsed time, which is its documented
+            # contract. Remove this when the runtime fix ships.
+            assert timing.elapsed_ms is None
+            return
         assert timing.elapsed_ms is not None
         assert math.isfinite(timing.elapsed_ms)
         assert timing.elapsed_ms >= 0.0

@@ -151,6 +151,17 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # dispatch_grid_stride_x variant selection in rocsparse_grid.hpp (append-only leaf)
   unit_test_internal_grid_dispatch.cpp
   unit_test_internal_collectives_boost.cpp
+  # --- Dense element-count grids of the shared common helpers [AISPARSE-699] -
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # the sibling unit-test branches above. Needs rocsparse_common.cpp compiled in
+  # (appended to ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below).
+  unit_test_internal_common_dense_grids.cpp
+  # --- Block-index arithmetic of the remaining common launches [AISPARSE-700] -
+  # Appended after the AISPARSE-699 leaf above, same reasoning. Needs
+  # rocsparse_valset.cpp (already listed), rocsparse_singularity.cpp and the two
+  # rocsparse_dense_transpose*.cpp compiled in (appended to
+  # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below).
+  unit_test_internal_common_large_grids.cpp
   unit_test_internal_infostructs.cpp
   #10156: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_precond_direct.cpp
@@ -208,11 +219,15 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_host_extra_geam.cpp
   unit_test_internal_level3_sddmm.cpp
   unit_test_internal_level3_bsrmm.cpp
+  # bsrmm grid.x/grid.y and coomm block reduce forced clamp [AISPARSE-665/704]
+  unit_test_internal_level3_bsrmm_grids.cpp
   #10158: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_level3.cpp
   unit_test_internal_level2_extras.cpp
   # csrmv LRB / adaptive partial_scale_y forced grid.x clamp [AISPARSE-662]
   unit_test_internal_level2_csrmv_lrb_grids.cpp
+  # csrmv adaptive row-block count vs. the dispatch limit (append-only leaf)
+  unit_test_internal_level2_csrmv_adaptive_limit.cpp
   # --- Level 2 (SpMV/gebsrmv) public C-API host tests [AISPARSE-642] --------
   # Distinct anchor (end of the level-2 group) so this leaf does not conflict
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
@@ -270,6 +285,17 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_blas_rocblas.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_debug.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_envariables.cpp
+  # Added at this leaf for unit_test_internal_common_dense_grids.cpp
+  # [AISPARSE-699]: the valset_2d / scale_array / scale_2d_array /
+  # axpby_array_batched template instantiations are hidden in librocsparse
+  # (CXX_VISIBILITY_PRESET "hidden"), so the defining TU is compiled in.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_common.cpp
+  # Added at this leaf for unit_test_internal_common_large_grids.cpp
+  # [AISPARSE-700], same hidden-visibility reason. rocsparse_valset.cpp is
+  # already listed above.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_singularity.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_dense_transpose.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_dense_transpose_back.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_argdescr.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/auxiliary/rocsparse_error.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/auxiliary/rocsparse_auxiliary.cpp
