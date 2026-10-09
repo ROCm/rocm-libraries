@@ -174,10 +174,9 @@ jobs:
           done
 
           # Each xdist worker's clients run their own in-process emulator, so
-          # split the host between workers instead of oversubscribing it. On 96
-          # cores, 12 workers of 8 threads ran tests 1.5x faster than 16 of 6.
+          # split the host between workers instead of oversubscribing it.
           cores="$(nproc)"
-          workers=$(( cores >= 16 ? cores / 8 : 1 ))
+          workers=$(( cores < 16 ? cores : 16 ))
           budget=$(( cores / workers ))
           mkdir -p "${REPORT_DIR}/junit"
           python - "${config}" \
