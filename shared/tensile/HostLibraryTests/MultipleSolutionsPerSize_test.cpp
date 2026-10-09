@@ -35,6 +35,7 @@
 #include <Tensile/Distance.hpp>
 #include <Tensile/MatchingLibrary.hpp>
 
+#include <limits>
 #include <memory>
 #include <random>
 
@@ -128,4 +129,91 @@ TEST(MultipleSolutionsPerSize, ArithmeticUnit)
     EXPECT_EQ(theSolution2, SolutionVALU);
     auto theSolution3 = lib.findBestSolution(Problem_Size9, gpu);
     EXPECT_EQ(theSolution3, SolutionVALU);
+}
+
+class EqualityMatchingTest : public ::testing::Test
+{
+protected:
+    using Key      = std::array<int64_t, 3>;
+    using Solution = std::shared_ptr<Tensile::ContractionSolution>;
+    using Table    = Tensile::Matching::DistanceMatchingTable<Key,
+                                                              Tensile::ContractionProblem,
+                                                              Solution,
+                                                              Solution,
+                                                              Tensile::Matching::Equality<Key>>;
+
+    Table    table;
+    Solution first  = std::make_shared<Tensile::ContractionSolution>();
+    Solution second = std::make_shared<Tensile::ContractionSolution>();
+};
+
+TEST_F(EqualityMatchingTest, EmptyTable)
+{
+    auto result = table.findBestKeyMatch({4, 4, 4}, [](Solution solution) {
+        ADD_FAILURE() << "An empty table must not transform a solution";
+        return solution;
+    });
+    EXPECT_EQ(std::get<0>(result), nullptr);
+    EXPECT_EQ(std::get<1>(result), std::numeric_limits<double>::max());
+}
+
+TEST_F(EqualityMatchingTest, MissingKey)
+{
+    table.table = {{{4, 4, 4}, first, 2.0}, {{8, 8, 8}, second, 1.0}};
+    for(auto size : {3, 6, 9})
+    {
+        auto result = table.findBestKeyMatch({size, size, size}, [](Solution solution) {
+            ADD_FAILURE() << "A missing key must not transform a solution";
+            return solution;
+        });
+        EXPECT_EQ(std::get<0>(result), nullptr);
+        EXPECT_EQ(std::get<1>(result), std::numeric_limits<double>::max());
+    }
+}
+
+TEST_F(EqualityMatchingTest, FirstAndLastKey)
+{
+    table.table     = {{{4, 4, 4}, first, 2.0}, {{8, 8, 8}, second, 1.0}};
+    auto transform  = [](Solution solution) { return solution; };
+    auto firstMatch = table.findBestKeyMatch({4, 4, 4}, transform);
+    auto lastMatch  = table.findBestKeyMatch({8, 8, 8}, transform);
+    EXPECT_EQ(std::get<0>(firstMatch), first);
+    EXPECT_EQ(std::get<0>(lastMatch), second);
+    EXPECT_EQ(std::get<1>(firstMatch), 0.0);
+    EXPECT_EQ(std::get<1>(lastMatch), 0.0);
+}
+
+TEST_F(EqualityMatchingTest, SkipsRejectedDuplicate)
+{
+    table.table = {{{4, 4, 4}, first, 2.0}, {{4, 4, 4}, second, 1.0}};
+    auto result = table.findBestKeyMatch(
+        {4, 4, 4}, [this](Solution solution) { return solution == second ? solution : nullptr; });
+    EXPECT_EQ(std::get<0>(result), second);
+    EXPECT_EQ(std::get<1>(result), 0.0);
+}
+
+TEST_F(EqualityMatchingTest, StopsAtFirstAcceptedDuplicate)
+{
+    table.table = {{{4, 4, 4}, first, 2.0}, {{4, 4, 4}, second, 1.0}};
+    int  calls  = 0;
+    auto result = table.findBestKeyMatch({4, 4, 4}, [&calls](Solution solution) {
+        ++calls;
+        return solution;
+    });
+    EXPECT_EQ(std::get<0>(result), first);
+    EXPECT_EQ(std::get<1>(result), 0.0);
+    EXPECT_EQ(calls, 1);
+}
+
+TEST_F(EqualityMatchingTest, RejectsAllDuplicatesWithoutUsingAnotherKey)
+{
+    table.table = {{{4, 4, 4}, first, 2.0}, {{4, 4, 4}, first, 1.0}, {{8, 8, 8}, second, 1.0}};
+    int  calls  = 0;
+    auto result = table.findBestKeyMatch({4, 4, 4}, [this, &calls](Solution solution) {
+        ++calls;
+        return solution == second ? solution : nullptr;
+    });
+    EXPECT_EQ(std::get<0>(result), nullptr);
+    EXPECT_EQ(std::get<1>(result), std::numeric_limits<double>::max());
+    EXPECT_EQ(calls, 2);
 }
