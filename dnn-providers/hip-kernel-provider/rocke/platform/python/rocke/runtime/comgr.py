@@ -356,6 +356,16 @@ _do_action = _bind(
     "amd_comgr_do_action", ctypes.c_int, ctypes.c_int, _ActionInfo, _DataSet, _DataSet
 )
 
+_get_isa_count = _bind(
+    "amd_comgr_get_isa_count", ctypes.c_int, ctypes.POINTER(ctypes.c_size_t)
+)
+_get_isa_name = _bind(
+    "amd_comgr_get_isa_name",
+    ctypes.c_int,
+    ctypes.c_size_t,
+    ctypes.POINTER(ctypes.c_char_p),
+)
+
 
 def _check(s: int, where: str) -> None:
     if s != AMD_COMGR_STATUS_SUCCESS:
@@ -364,6 +374,24 @@ def _check(s: int, where: str) -> None:
         raise ComgrError(
             f"{where}: status={s} ({msg.value.decode() if msg.value else ''})"
         )
+
+
+def supported_isas() -> List[str]:
+    """Every ISA name the loaded comgr can target, e.g. ``amdgcn-amd-amdhsa--gfx950``.
+
+    :func:`build_hsaco_from_llvm_ir` raises the same :class:`ComgrError` for a
+    target comgr does not know and for IR that fails to compile; asking first
+    is how a caller tells the two apart. Raises :class:`ComgrError` when the
+    library cannot be loaded.
+    """
+    count = ctypes.c_size_t(0)
+    _check(_get_isa_count(ctypes.byref(count)), "get_isa_count")
+    names = []
+    for i in range(count.value):
+        name = ctypes.c_char_p()
+        _check(_get_isa_name(i, ctypes.byref(name)), "get_isa_name")
+        names.append(name.value.decode("utf-8"))
+    return names
 
 
 @dataclass

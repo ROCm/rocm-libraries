@@ -79,15 +79,32 @@ backend choice with no bearing on the numerics; which opcode it picks is not.
 ## Where it skips
 
 No GPU is needed — comgr compiles for a named ISA, it does not run anything —
-so this gate is a plain host test. It skips, rather than fails, when comgr is
-absent, when the loaded comgr cannot target gfx950, or when `llvm-objdump` is
-unavailable. ROCm installs `llvm-objdump` outside the default `PATH`, so
+so this gate is a plain host test. Whether to skip is decided *before*
+compiling, and only on the environment:
+
+- comgr cannot be imported or loaded, or
+- the loaded comgr does not list `amdgcn-amd-amdhsa--gfx950` among its targets
+  (`rocke.runtime.comgr.supported_isas`, over `amd_comgr_get_isa_name`).
+
+Past that check a `ComgrError` is the IR failing to build, and it **fails** the
+test. An earlier version caught `ComgrError` from the compile itself and
+skipped, which hid exactly the codegen regression this gate exists for: comgr
+reports an unknown target and rejected IR with the same exception type, so the
+target has to be asked about separately.
+
+`llvm-objdump` is needed only by the two disassembly checks, which skip without
+it; the compile check still runs, since it needs nothing but the code object.
+ROCm installs `llvm-objdump` outside the default `PATH`, so
 `$ROCM_PATH/llvm/bin` is checked as a fallback before giving up.
 
 ## Verification
 
 - `tests/core/test_xf32_comgr_compile.py` — 3 tests, 6 subtests, green against
   the dev image's comgr (which the lowerer resolves to the `llvm23` flavor).
+- After review, each skip/fail path was driven by injecting the fault: IR that
+  comgr rejects → 6 errors, no skips; comgr not listing gfx950, or not
+  loading → all skip; no `llvm-objdump` → only the 4 disassembly subtests skip
+  and the compile check passes.
 - `tests/core` — 412 passed, 19 skipped, 757 subtests.
 - No emission changed in this step, so the byte-identity result from
   [steps 5+6](step-05-bf16x3-lowering.md) still stands.
