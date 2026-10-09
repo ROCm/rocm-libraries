@@ -150,6 +150,10 @@ struct PassFeatureConfig {
         int dsCapTdmBeginCycles = -1;
         int dsCapTdmEndCycles = -1;
         int dsCapTdmPerCap = 0;
+        /// Experimental: plan release times for a region's ds_loads (DsPacePlan.hpp) instead of
+        /// issuing them ASAP under the cap: spread evenly, thinned to dsCapTdmPerCap inside the TDM
+        /// landing window, count kept. Needs the DsCapTdm window. Off by default.
+        bool dsPaceTdm = false;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
         /// WMMA windows by the region's matrix latency. 0 disables the extra
