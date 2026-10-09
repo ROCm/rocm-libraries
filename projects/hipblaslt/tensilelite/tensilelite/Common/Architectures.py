@@ -592,9 +592,12 @@ def _detectArchNames(detectionTool) -> List[str]:
     their target from here, so a strict part built and tuned as base, and the
     only sign was the arch in the artifact path.
     """
-    return restore_steppings(_fromEnumerator(detectionTool)) or _supportedArchNames(
-        detect_gpu_archs()
-    )
+    tools = detectionTool if isinstance(detectionTool, (list, tuple)) else (detectionTool,)
+    for tool in tools:
+        archs = restore_steppings(_fromEnumerator(tool))
+        if archs:
+            return archs
+    return _supportedArchNames(detect_gpu_archs())
 
 
 def _fromEnumerator(detectionTool) -> List[str]:
@@ -659,7 +662,7 @@ def _detectGlobalCurrentISA(detectionTool, deviceId: int):
     return gfxToIsa(arch) if isinstance(arch, str) else arch
 
 
-def detectGlobalCurrentArch(deviceId: int, enumerator: str) -> str:
+def detectGlobalCurrentArch(deviceId: int, enumerator: str | tuple[str, ...]) -> str:
     """The architecture name of a given device.
 
     Prefer this over ``detectGlobalCurrentISA`` wherever the answer names an
@@ -679,7 +682,7 @@ def detectGlobalCurrentArch(deviceId: int, enumerator: str) -> str:
     return result
 
 
-def detectGlobalCurrentISA(deviceId: int, enumerator: str):
+def detectGlobalCurrentISA(deviceId: int, enumerator: str | tuple[str, ...]):
     """Returns the ISA version for a given device.
 
     The ISA tuple (X, Y, Z) of the architecture ``detectGlobalCurrentArch``
@@ -703,11 +706,12 @@ def detectHostGfxArchs() -> List[str]:
     """Enumerate the supported GPU architectures physically present on this host.
 
     Asks the same sources in the same order as per-device detection -- the
-    toolchain's enumerator, then amdgpu-arch and rocminfo -- and de-duplicates the
-    answer, which per-device detection must not. Names keep the spelling the tool
-    reported, stripped of target features (``:xnack±``) and checked against the
-    known architectures, so CPU agents (``gfx000``) and unsupported devices are
-    dropped.
+    toolchain's enumerators in fallback order (``offload-arch`` followed by
+    compatibility fallbacks), then amdgpu-arch and rocminfo -- and de-duplicates
+    the answer, which per-device detection must not. Names keep the spelling the
+    tool reported, stripped of target features (``:xnack±``) and checked against
+    the known architectures, so CPU agents (``gfx000``) and unsupported devices
+    are dropped.
 
     The name is not rebuilt from the ISA: gfx1250 and gfx1250-strict share
     (12,5,0), so a round trip through it would report gfx1250 for either and tell
@@ -723,9 +727,12 @@ def detectHostGfxArchs() -> List[str]:
     # Nothing here is worth failing a benchmark-capability question over, so any
     # failure reaching this point is answered the documented way.
     try:
-        from ..Toolchain.Validators import ToolchainDefaults, validateToolchain
+        from ..Toolchain.Validators import deviceEnumeratorCandidates
 
-        archs = _fromEnumerator(validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR))
+        archs = next(
+            (found for found in map(_fromEnumerator, deviceEnumeratorCandidates()) if found),
+            [],
+        )
     except Exception:
         archs = []
 
