@@ -340,7 +340,12 @@ def lower_kernel_via_backend(
     if chosen == BACKEND_PYTHON:
         return python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
 
-    _arch = arch or "gfx950"
+    if arch is None:
+        raise ValueError(
+            "lowering requires an explicit gfx target; "
+            "pass arch=... (there is no default)"
+        )
+    _arch = arch
     name = getattr(kernel, "name", "?")
 
     # The serialized artifact is the family-agnostic hand-off to the C++ engine.
@@ -349,12 +354,21 @@ def lower_kernel_via_backend(
     if chosen == BACKEND_CPP:
         try:
             ir_text = serialize(kernel)
-            return _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
+            out = _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
         except BaseException as e:  # noqa: BLE001 -- includes BackendError
             if _cpp_strict():
                 raise
             _record_fallback(name, f"{type(e).__name__}: {e}")
+            # No post-pass: the fallback runs the Python lowerer, whose `_need`
+            # already runs the lane. Adding one here would warn twice.
             return python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
+        # The arch-domain lane lives in `_Lowerer._need`, so a successful C++
+        # lowering is the only exit here that never runs it -- and it is the
+        # default path.
+        from .lower_llvm import check_arch_domain_in_ir
+
+        check_arch_domain_in_ir(out, _arch, llvm_flavor)
+        return out
 
     # both: differential gate, and the one mode that never falls back. Handing
     # back ``py_ll`` when the C++ engine failed would report a kernel nothing
