@@ -241,3 +241,78 @@ class TestReviewFollowups(unittest.TestCase):
                 )
         finally:
             au._RESOLVED_ATTENTION_ARCH = old
+
+
+class TestFp8DenseGuards(unittest.TestCase):
+    """CPU guards for the fp8 dense review fixes (scale forwarding + rejections)."""
+
+    def _fp8_req(self, **kw):
+        base = dict(
+            arch="gfx950",
+            nhead_q=16,
+            nhead_k=4,
+            seqlen_q=2048,
+            seqlen_k=2048,
+            hdim_q=64,
+            hdim_v=64,
+            use_fp8=True,
+        )
+        base.update(kw)
+        return _req(**base)
+
+    def _fp8_grid_spec(self):
+        req = self._fp8_req()
+        return req, attention_tuning_spec(req, "gfx950_dense_grid")
+
+    def test_binding_forwards_kv_scales_to_the_runner(self):
+        # Regression: the dense binding dropped k_scale/v_scale, so every fp8
+        # launch through dispatch dequantized at unit scale (silently wrong).
+        req, spec = self._fp8_grid_spec()
+        captured = {}
+        fp8 = SimpleNamespace(dtype="torch.float8_e4m3fn")
+        with mock.patch(
+            "dispatch.attention.bindings._dense_runner",
+            return_value=lambda **call: captured.update(call),
+        ):
+            binding = bind_dense_attention_torch(
+                req, spec, {"q": None, "k": fp8, "v": fp8, "out": None}
+            )
+            binding.launch(k_scale=0.5, v_scale=0.25)
+        self.assertEqual(captured.get("k_scale"), 0.5)
+        self.assertEqual(captured.get("v_scale"), 0.25)
+
+    def test_binding_rejects_bf16_kv_for_an_fp8_spec(self):
+        req, spec = self._fp8_grid_spec()
+        bf16 = SimpleNamespace(dtype="torch.bfloat16")
+        with mock.patch(
+            "dispatch.attention.bindings._dense_runner",
+            return_value=lambda **_call: None,
+        ):
+            with self.assertRaisesRegex(ValueError, "fp8"):
+                bind_dense_attention_torch(
+                    req, spec, {"q": None, "k": bf16, "v": bf16, "out": None}
+                )
+
+    def test_supports_rejects_fp8_with_sinks_or_non_bf16(self):
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        ks = self._fp8_grid_spec()[1].kernel_spec
+        self.assertTrue(supports_attention_dense(ks, arch="gfx950")[0])
+        self.assertFalse(
+            supports_attention_dense(replace(ks, use_sinks=True), arch="gfx950")[0]
+        )
+        self.assertFalse(
+            supports_attention_dense(replace(ks, dtype="fp16"), arch="gfx950")[0]
+        )
+
+    def test_gfx942_dense_rejects_fp8_storage(self):
+        from kernels.gfx942.attention_dense import supports_attention_dense
+
+        ks = self._fp8_grid_spec()[1].kernel_spec
+        ok, reason = supports_attention_dense(ks, arch="gfx942")
+        self.assertFalse(ok)
+        self.assertIn("fp8", reason.lower())
+
+    def test_fnuz_fp8_request_is_rejected_on_gfx950(self):
+        with self.assertRaisesRegex(ValueError, "OCP|FNUZ"):
+            attention_tuning_spec(self._fp8_req(fp8_fnuz=True), "gfx950_dense_grid")

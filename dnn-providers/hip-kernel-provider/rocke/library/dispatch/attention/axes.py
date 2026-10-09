@@ -145,6 +145,7 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "num_kv_blocks",
         "use_sinks",
         "causal_bottom_right",
+        "kv_storage_dtype",
     }
 )
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
@@ -154,8 +155,11 @@ DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
 DENSE_LOOP_FIELDS = frozenset({"waves_per_eu"})
 # Knobs with nothing to sweep: the validator accepts a single value, or (gfx942
 # ``lazy_rescale``) the body never reads the field and only the name changes.
+# ``fp8_two_phase`` is the opt-in fp8 loader toggle: it is legal only on an fp8
+# spec (the validator rejects it otherwise), and fp8 is a problem input the dense
+# sweep does not enumerate, so it is held out rather than swept.
 DENSE_UNTUNABLE_KNOBS: Mapping[str, frozenset] = {
-    "gfx950": frozenset({"lds_num_buffers"}),
+    "gfx950": frozenset({"lds_num_buffers", "fp8_two_phase"}),
     "gfx942": frozenset({"lds_num_buffers", "lazy_rescale"}),
 }
 # Axes whose values are relative to the base spec (request or policy derived),
