@@ -27,6 +27,7 @@ import argparse
 import contextlib
 import hashlib
 import json
+import math
 import os
 import pathlib
 import sys
@@ -252,15 +253,31 @@ def contribution_digest(
 
     The same measurements get the same id whatever they are called, and different measurements
     never share one. What can change without the measurements changing (`label`, `purpose`,
-    `corpus_id`, `origin`) is not part of it.
+    `corpus_id`, `origin`) is not part of it. Values are compared as Parquet returns them --
+    an integral float as the integer, NaN as missing -- so rows exported and added again keep
+    their id.
     """
-    payload = {
-        "binding": {key: entry.get(key) for key in SHARED},
-        "rows": [
-            [str(source), rows_by_source[source]]
-            for source in sorted(rows_by_source, key=str)
-        ],
-    }
+
+    def canonical(value: Any) -> Any:
+        if isinstance(value, float):
+            if math.isnan(value):
+                return None
+            return int(value) if value.is_integer() else value
+        if isinstance(value, dict):
+            return {str(key): canonical(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [canonical(item) for item in value]
+        return value
+
+    payload = canonical(
+        {
+            "binding": {key: entry.get(key) for key in SHARED},
+            "rows": [
+                [str(source), rows_by_source[source]]
+                for source in sorted(rows_by_source, key=str)
+            ],
+        }
+    )
     text = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:ID_LENGTH]
 
