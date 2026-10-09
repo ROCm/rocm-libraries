@@ -41,11 +41,16 @@ Stack space for callables
 
 The submit-to-scheduler model also determines how much stack a ``hip::wthread`` callable has available, which is a design consideration when deciding what a callable keeps in local variables.
 
-For an ordinary HIP kernel, the compiler sees every function the kernel calls, adds up the local variables along the deepest call path, and records the total in the kernel. The runtime then allocates exactly that much stack per thread. The scheduler kernel is compiled once, ahead of time, and runs whichever callable is submitted to it later, so it invokes the callable indirectly through a function pointer. Because the callable is not known at that call site when the kernel is compiled, there is no frame size to compute, and the runtime instead applies the HIP stack limit ``hipLimitStackSize`` to the whole call chain. This limit defaults to 1024 bytes per thread.
+For an ordinary HIP kernel, the compiler sees every function the kernel calls, adds up the local variables along the deepest call path, and records the total in the kernel. The runtime then allocates exactly that much stack per thread.
+The persistent scheduler kernel is compiled once, ahead of time, and runs whichever callable is submitted to it later, so it invokes the callable indirectly through a function pointer.
+Because the callable is not known at that call site when the kernel is compiled, there is no frame size to compute, and the runtime instead applies the HIP stack limit ``hipLimitStackSize`` to the whole call chain.
+This limit defaults to 1024 bytes per thread.
 
-That budget covers every local variable in the callable and in anything it calls. Objects with inline storage dominate it, and what matters is the storage class rather than the container type: a ``hip::std::inplace_vector`` and a plain array of the same element count occupy the same stack space. A callable that spawns child threads and keeps their handles in a local array is a common case, since ``sizeof(hip::wthread)`` is 16 bytes on the device, so roughly 63 handles fit in the default budget, independently of ``hip::wthread::hardware_concurrency()``.
+That budget covers every local variable in the callable and in anything it calls.
+Objects with inline storage dominate it, and what matters is the storage class rather than the container type: a ``hip::std::inplace_vector`` and a plain array of the same element count occupy the same stack space.
+A callable that spawns child threads and keeps their handles in a local array is a common case, since ``sizeof(hip::wthread)`` is 16 bytes on the device, so roughly 63 handles fit in the default budget, independently of ``hip::wthread::hardware_concurrency()``.
 
-There are two ways to design around this. The first is to keep large objects off the stack by allocating them on the device heap, so the callable's own stack usage stays constant no matter how much data it manages. The device heap is sized by ``hipLimitMallocHeapSize``, which defaults to 8 MB.
+There are two ways to design around this. The first is to keep large objects off the stack by allocating them on the device heap, so the callable's own stack usage stays constant no matter how much data it manages.
 
 .. code-block:: cpp
 
@@ -59,7 +64,9 @@ There are two ways to design around this. The first is to keep large objects off
        delete[] workers;
    });
 
-The second is to raise ``hipLimitStackSize``. Set it before constructing the first ``hip::wthread``, because that construction is what launches the scheduler kernel, and the limit is applied at launch. Size the value against actual usage: the budget applies per thread, so raising it increases the scratch memory reserved for the scheduler. Raising it to 2 KB, for example, only moves the handle ceiling above from roughly 63 to roughly 127.
+The second is to raise ``hipLimitStackSize``. Set it before constructing the first ``hip::wthread``, because that construction is what launches the scheduler kernel, and the limit is applied at launch.
+Size the value against actual usage: the budget applies per thread, so raising it increases the scratch memory reserved for the scheduler.
+Raising it to 2 KB, for example, only moves the handle ceiling above from roughly 63 to roughly 127.
 
 .. code-block:: cpp
 
@@ -69,4 +76,7 @@ The second is to raise ``hipLimitStackSize``. Set it before constructing the fir
 
 .. note::
 
-  Exceeding the budget is undefined behavior with no dedicated diagnostic, and the symptom depends on how much scratch memory the runtime reserved, which varies with occupancy and GPU architecture. It can appear as an abort with ``HSA_STATUS_ERROR_EXCEPTION`` (surfacing as ``an illegal memory access was encountered`` or ``unspecified launch failure``), or as a workload that runs correctly for a while and then hangs or produces wrong results after corrupting another thread's scratch memory. The latter is easy to mistake for a scheduling problem, but it is unrelated to scheduler capacity: a workload can exhaust its stack budget while running far below ``hardware_concurrency()``. Re-running with a substantially larger ``hipLimitStackSize`` confirms which one it is.
+  Exceeding the budget is undefined behavior with no dedicated diagnostic, and the symptom depends on how much scratch memory the runtime reserved, which varies with occupancy and GPU architecture.
+  It can appear as an abort with ``HSA_STATUS_ERROR_EXCEPTION`` (surfacing as ``an illegal memory access was encountered`` or ``unspecified launch failure``), or as a workload that runs correctly for a while and then hangs or produces wrong results after corrupting another thread's scratch memory.
+  The latter is easy to mistake for a scheduling problem, but it is unrelated to scheduler capacity: a workload can exhaust its stack budget while running far below ``hardware_concurrency()``.
+  Re-running with a substantially larger ``hipLimitStackSize`` confirms which one it is.
