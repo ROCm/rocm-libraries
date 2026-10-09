@@ -271,7 +271,7 @@ void testing_spsort_csc(const Arguments& arg)
     J                    M    = arg.M;
     J                    N    = arg.N;
     rocsparse_index_base base = arg.baseA;
-    rocsparse_spsort_alg alg  = static_cast<rocsparse_spsort_alg>(arg.algo);
+    rocsparse_spsort_alg alg  = arg.spsort_alg;
 
     // A batch count of one for A sorts the single matrix A into every batch of B.
     const int64_t batch_count_A = std::max<int64_t>(arg.batch_count_A, 1);
