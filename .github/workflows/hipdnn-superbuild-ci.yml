@@ -507,6 +507,9 @@ jobs:
       # --output-junit is relative to --test-dir: this writes build/ctest-junit.xml.
       - name: Run tests
         id: run-tests
+        env:
+          # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
+          ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
         run: ctest --test-dir build --output-on-failure --output-junit ctest-junit.xml
 
       # ctest counts a disabled or not-run test as success. Read the junit
