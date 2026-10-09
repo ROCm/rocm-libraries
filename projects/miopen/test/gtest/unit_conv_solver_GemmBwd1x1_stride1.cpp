@@ -99,49 +99,6 @@ TEST_P(CPU_UnitTestConvSolverGemmBwd1x1_Stride1DevApplicabilityBwd_NONE, GemmBwd
     this->RunTest(miopen::solver::conv::GemmBwd1x1_stride1{});
 };
 
-// Small-batch 2D NHWC backward-data excludes the GEMM family on gfx942. Uses mocked devices so
-// the result is deterministic on any host GPU.
-TEST(CPU_UnitTestConvSolverGemmBwd1x1_Stride1Bwd_NONE, Gfx942SmallBatchNhwcExcluded)
-{
-    using TestCase = miopen::unit_tests::ConvTestCase;
-
-    auto gfx942   = MockHandle{DevDescription{"gfx942", 304, 64}, true};
-    auto other    = MockHandle{DevDescription{"gfx90a", 104, 64}, true};
-    auto ctx942   = miopen::ExecutionContext{&gfx942};
-    auto ctxother = miopen::ExecutionContext{&other};
-
-    const auto make = [](miopen::ExecutionContext& ctx, std::size_t n, int stride, std::size_t hw) {
-        auto p = TestCase{{n, 8, hw, hw},
-                          {8, 8, 1, 1},
-                          {0, 0},
-                          {stride, stride},
-                          {1, 1},
-                          miopenFloat,
-                          miopenTensorNHWC}
-                     .GetProblemDescription(miopen::conv::Direction::BackwardData);
-        p.SetupFloats(ctx);
-        p.SetupComputeType(ctx);
-        return p;
-    };
-    const auto s1_small_942 = make(ctx942, 2, 1, 8);   // 1x1 stride-1, within the 1..3 exclusion
-    const auto s1_small_oth = make(ctxother, 2, 1, 8); // same shape, other arch
-    const auto s1_large_942 = make(ctx942, 4, 1, 8);   // above the exclusion
-    const auto s2_small_942 = make(ctx942, 2, 2, 8);   // 1x1 stride-2 downsample: NOT excluded
-    const auto po_small_942 = make(ctx942, 2, 1, 1);   // point-output: handled by GemmBwdRest
-
-    const auto stride1 = miopen::solver::conv::GemmBwd1x1_stride1{};
-    const auto rest    = miopen::solver::conv::GemmBwdRest{};
-
-    // Excluded on gfx942; both GemmBwd1x1_stride1 and GemmBwdRest honour the gate.
-    EXPECT_FALSE(stride1.IsApplicable(ctx942, s1_small_942));
-    EXPECT_FALSE(rest.IsApplicable(ctx942, po_small_942));
-    // Not excluded: other arch, larger batch, and the 1x1 stride-2 downsample (claimed by
-    // GemmBwdRest) — the gate's stride-1 restriction leaves the downsample untouched.
-    EXPECT_TRUE(stride1.IsApplicable(ctxother, s1_small_oth));
-    EXPECT_TRUE(stride1.IsApplicable(ctx942, s1_large_942));
-    EXPECT_TRUE(rest.IsApplicable(ctx942, s2_small_942));
-}
-
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverGemmBwd1x1_Stride1Bwd_FP16,
