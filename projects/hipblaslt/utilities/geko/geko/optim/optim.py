@@ -18,6 +18,7 @@ Integrates with hipBLASLt for benchmarking and TensileLite for kernel compilatio
 """
 
 import os
+import sys
 import subprocess
 import re
 import shutil
@@ -127,7 +128,7 @@ def configure(
     backend: str = "ductile",
     search_space: str | None = None,
 ) -> dict:
-    """Generate tuning YAML configs for one or more GEMM types.
+    """Generate TensileLite tuning YAML configs for one or more GEMM types.
 
     Builds a config dict from gemm_configs (each a GemmConfig with its
     GemmType and size list), applies ARCH-specific defaults via
@@ -213,7 +214,7 @@ def run(
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation. Used both
-            for the TensileLite binary and to add tensilelite to PYTHONPATH.
+            for the staged TensileLite ROCm root and installed package command.
         tuning_dir (str | Path): Directory containing per-GEMM optimization
             YAML configs (see configure).
         devices (Sequence[int], optional): GPU device IDs used by the load
@@ -310,19 +311,20 @@ def run(
             self.build_dir.mkdir(parents=True, exist_ok=True)
             (self.build_dir / ".running").write_text(f"device={self.device}\nslot={self.slot_id}\n")
 
-            env = {"PYTHONPATH": str(hipblaslt_path / "tensilelite")}
+            env = os.environ.copy()
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
                     [
-                        hipblaslt_path / "tensilelite/tensilelite/bin/Tensile",
+                        sys.executable,
+                        "-m",
+                        "tensilelite",
+                        "run",
                         self.config,
                         self.build_dir,
-                        "--prebuilt-client",
-                        client_build_dir / "tensilelite/client/tensilelite-client",
                         "--client-lock",
                         (tuning_dir / f"gpulock_{self.device}").resolve(),
                     ],
-                    env=os.environ | env,
+                    env=env,
                     stdout=f,
                     stderr=subprocess.STDOUT,
                     start_new_session=(os.name != "nt"),

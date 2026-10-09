@@ -344,8 +344,7 @@ function(create_device_library)
     list(FILTER _codegen_sources EXCLUDE REGEX "/tensilelite/Tests/")
     list(APPEND _codegen_dependencies
          ${_logic_files}
-         ${_codegen_sources}
-         "${_codegen_dir}/tensilelite/bin/TensileLogic")
+         ${_codegen_sources})
 
     # ninja only compares mtimes of inputs that still exist, so a *removed* file
     # leaves the stamp clean (nothing is newer), as does a file added with an
