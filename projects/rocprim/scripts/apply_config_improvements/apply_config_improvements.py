@@ -85,8 +85,6 @@ def get_gen_from_architecture(arch):
             | "target_arch::gfx1151"
             | "target_arch::gfx1152"
             | "target_arch::gfx1153"
-            | "target_arch::gfx1170"
-            | "target_arch::gfx1171"
         ):
             return "gen::rdna3"
         case "target_arch::gfx1200" | "target_arch::gfx1201":
