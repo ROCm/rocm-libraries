@@ -304,7 +304,7 @@
     tailLoopOptA: true
     tailLoopOptB: true
 - [2, 3, 0, 1]
-- - - [64, 16, 1, 64, 16, 16, 16, 16]
+- - - [8, 1, 1, 8]
     - [0, 0.0]
 - null
 - null

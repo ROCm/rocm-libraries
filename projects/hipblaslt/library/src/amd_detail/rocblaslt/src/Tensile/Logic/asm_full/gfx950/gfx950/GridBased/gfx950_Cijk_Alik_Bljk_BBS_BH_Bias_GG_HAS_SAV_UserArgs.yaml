@@ -77,7 +77,7 @@
     ActivationAlt: false
     ActivationFuncCall: false
     ActivationFused: true
-    AssertFree0ElementMultiple: 8
+    AssertFree0ElementMultiple: 1
     AssertFree1ElementMultiple: 1
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
@@ -257,7 +257,7 @@
     _WorkspaceSizePerElemC: 4
     _staggerStrideShift: 2
 - [2, 3, 0, 1]
-- - - [16, 64, 1, 16, 64, 64, 64, 64]
+- - - [8, 1, 1, 8]
     - [0, 0.0]
 - null
 - null
