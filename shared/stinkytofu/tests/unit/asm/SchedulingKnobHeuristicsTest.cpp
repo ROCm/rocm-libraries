@@ -356,3 +356,77 @@ TEST(SchedulingKnobHeuristics, LogResolvedSchedulingKnobsIfDebugHonorsDebugOnly)
     }
     PassManagerDebugConfig::clearDebugOnly();
 }
+
+// ds cap window: TDM kernels get [8,40) x1 from the policy; non-TDM kernels keep it off;
+// any explicit user value (including PerCap 0 = off) wins.
+TEST(SchedulingKnobHeuristics, DsCapWindowPolicyOnForTdmKernels) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingFeatures tdm = makeFeatures(384, 200, 8, 3072, 3, 4);
+    tdm.stats.tensorLoadCount = 3;
+    const ResolvedSchedulingKnobs on = resolveSchedulingKnobs(tdm, {}, policy);
+    EXPECT_EQ(on.dsCapWindow1Begin, kPolicyDsCapWindowBegin);
+    EXPECT_EQ(on.dsCapWindow1End, kPolicyDsCapWindowEnd);
+    EXPECT_EQ(on.dsCapWindowPerCap, kPolicyDsCapWindowPerCap);
+    EXPECT_EQ(on.dsCapWindowSource, SchedulingKnobSource::Policy);
+
+    PassFeatureConfig config;
+    applyResolvedSchedulingKnobs(config, on);
+    EXPECT_EQ(config.dagFeatures.dsCapWindow1Begin, 8);
+    EXPECT_EQ(config.dagFeatures.dsCapWindow1End, 40);
+    EXPECT_EQ(config.dagFeatures.dsCapWindowPerCap, 1);
+}
+
+TEST(SchedulingKnobHeuristics, DsCapWindowOffWithoutTdmOrDegenerateOrShortLoop) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingFeatures noTdm = makeFeatures(384, 200, 8, 3072, 3, 4);  // tensorLoadCount = 0
+    SchedulingFeatures shortLoop = makeFeatures(64, 40, 8, 512, 3, 4);
+    shortLoop.stats.tensorLoadCount = 3;
+    SchedulingFeatures degenerate = makeFeatures(0, 0);
+    degenerate.stats.tensorLoadCount = 3;
+    for (const auto& f : {noTdm, shortLoop, degenerate}) {
+        const ResolvedSchedulingKnobs r = resolveSchedulingKnobs(f, {}, policy);
+        EXPECT_EQ(r.dsCapWindowPerCap, 0);
+        EXPECT_EQ(r.dsCapWindow1Begin, -1);
+    }
+}
+
+TEST(SchedulingKnobHeuristics, DsCapWindowUserOverrideWins) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingFeatures tdm = makeFeatures(384, 200, 8, 3072, 3, 4);
+    tdm.stats.tensorLoadCount = 3;
+
+    SchedulingKnobOverrides off;
+    off.dsCapWindow = SchedulingKnobOverrides::DsCapWindow{-1, -1, 0};  // explicit off
+    ResolvedSchedulingKnobs r = resolveSchedulingKnobs(tdm, off, policy);
+    EXPECT_EQ(r.dsCapWindowPerCap, 0);
+    EXPECT_EQ(r.dsCapWindowSource, SchedulingKnobSource::User);
+
+    SchedulingKnobOverrides custom;
+    custom.dsCapWindow = SchedulingKnobOverrides::DsCapWindow{16, 32, 2};
+    r = resolveSchedulingKnobs(tdm, custom, policy);
+    EXPECT_EQ(r.dsCapWindow1Begin, 16);
+    EXPECT_EQ(r.dsCapWindow1End, 32);
+    EXPECT_EQ(r.dsCapWindowPerCap, 2);
+    EXPECT_EQ(r.dsCapWindowSource, SchedulingKnobSource::User);
+}
+
+TEST(SchedulingKnobHeuristics, DsCapWindowModuleOptionSentinels) {
+    StinkyAsmModule::ModuleOptions opts{};
+    EXPECT_EQ(opts.DsCapWindowPerCap, -1);  // unset -> policy
+    EXPECT_EQ(opts.DsCapWindow1Begin, -1);
+    EXPECT_FALSE(schedulingKnobOverridesFromModuleOptions(opts).dsCapWindow.has_value());
+
+    opts.DsCapWindowPerCap = 0;  // explicit off
+    auto off = schedulingKnobOverridesFromModuleOptions(opts);
+    ASSERT_TRUE(off.dsCapWindow.has_value());
+    EXPECT_EQ(off.dsCapWindow->perCap, 0);
+
+    opts.DsCapWindowPerCap = 1;
+    opts.DsCapWindow1Begin = 8;
+    opts.DsCapWindow1End = 40;
+    auto on = schedulingKnobOverridesFromModuleOptions(opts);
+    ASSERT_TRUE(on.dsCapWindow.has_value());
+    EXPECT_EQ(on.dsCapWindow->begin, 8);
+    EXPECT_EQ(on.dsCapWindow->end, 40);
+    EXPECT_EQ(on.dsCapWindow->perCap, 1);
+}

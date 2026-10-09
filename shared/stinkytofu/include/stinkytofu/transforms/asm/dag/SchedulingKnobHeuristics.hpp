@@ -39,6 +39,13 @@ inline constexpr std::string_view kMainLoopGroupName = "loopWithPrefetch";
 inline constexpr int kStaticDefaultDsReadPerCap = 3;
 /// Historical ModuleOptions / InsertClusterBarrierPass default.
 inline constexpr int kStaticDefaultClusterBarrierRule3SignalLeadCycles = 100;
+/// Policy default ds cap window (region WMMA index, half-open) for TDM kernels: ds_loads are
+/// capped to one per span inside [8, 40), keeping them out of the TDM LDS-write window.
+inline constexpr int kPolicyDsCapWindowBegin = 8;
+inline constexpr int kPolicyDsCapWindowEnd = 40;
+inline constexpr int kPolicyDsCapWindowPerCap = 1;
+/// The policy window is only proposed when the main loop has at least this many WMMAs.
+inline constexpr int kPolicyDsCapWindowMinWmmas = 128;
 
 enum class SchedulingKnobSource : uint8_t {
     User,           ///< Explicit ModuleOptions override
@@ -49,6 +56,8 @@ enum class SchedulingKnobSource : uint8_t {
 struct SchedulingIRStats {
     int wmmaCount = 0;
     int dsLoadCount = 0;
+    /// tensor_load (TDM) instructions in the main loop; 0 for non-TDM kernels.
+    int tensorLoadCount = 0;
     /// Sum of `latencyCycles` over main-loop matrix instructions.
     int sumWmmaLatencyCycles = 0;
     /// `latencyCycles` of the first main-loop matrix instruction (0 if none).
@@ -83,11 +92,16 @@ struct ResolvedSchedulingKnobs {
     int dsReadThrottleLatency = 0;
     int dsReadPerCap = kStaticDefaultDsReadPerCap;
     int clusterBarrierRule3SignalLeadCycles = kStaticDefaultClusterBarrierRule3SignalLeadCycles;
+    /// ds cap window [Begin, End); Begin < 0 or PerCap <= 0 = off.
+    int dsCapWindow1Begin = -1;
+    int dsCapWindow1End = -1;
+    int dsCapWindowPerCap = 0;
 
     SchedulingKnobSource dsReadThrottleLatencySource = SchedulingKnobSource::StaticDefault;
     SchedulingKnobSource dsReadPerCapSource = SchedulingKnobSource::StaticDefault;
     SchedulingKnobSource clusterBarrierRule3SignalLeadCyclesSource =
         SchedulingKnobSource::StaticDefault;
+    SchedulingKnobSource dsCapWindowSource = SchedulingKnobSource::StaticDefault;
 
     /// Latency-budget throttle estimate. Diagnostic only: `applyResolvedSchedulingKnobs`
     /// does not copy it, and it is not combined with `dsReadThrottleLatency`.
@@ -100,6 +114,14 @@ struct SchedulingKnobOverrides {
     std::optional<int> dsReadThrottleLatency;
     std::optional<int> dsReadPerCap;
     std::optional<int> clusterBarrierRule3SignalLeadCycles;
+    /// Set when the user touched any DsCapWindow1*/PerCap option; carries the values as given
+    /// (PerCap 0 = explicit off).
+    struct DsCapWindow {
+        int begin = -1;
+        int end = -1;
+        int perCap = 0;
+    };
+    std::optional<DsCapWindow> dsCapWindow;
 };
 
 struct SchedulingKnobPolicy {
@@ -128,6 +150,8 @@ STINKYTOFU_EXPORT SchedulingIRStats countMainLoopSchedulingIRStats(const StinkyA
 ///   DsReadThrottleLatency <= 0                    → unset
 ///   DsReadPerCap < 0                             → unset
 ///   ClusterBarrierRule3SignalLeadCycles < 0       → unset
+///   DsCapWindowPerCap < 0 and DsCapWindow1Begin < 0 → unset (policy: TDM kernels get [8,40) x1);
+///   DsCapWindowPerCap == 0 is an explicit "off"
 STINKYTOFU_EXPORT SchedulingKnobOverrides
 schedulingKnobOverridesFromModuleOptions(const StinkyAsmModule::ModuleOptions& opts);
 

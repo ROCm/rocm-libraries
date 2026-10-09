@@ -73,6 +73,20 @@ class InFlightQueue {
         return depth_ > 0 && (int)expiries_.size() >= depth_;
     }
 
+    // full()/minResidual() against a caller-chosen limit instead of depth_ (entries are
+    // time-ordered, so the (size-limit)th oldest expiry is when occupancy drops below limit).
+    bool fullAt(int limit) const {
+        evict();
+        return limit > 0 && (int)expiries_.size() >= limit;
+    }
+
+    int minResidualAt(int limit) const {
+        evict();
+        const int n = (int)expiries_.size();
+        if (limit <= 0 || n < limit) return 0;
+        return std::max(0, expiries_[n - limit] - currentTime_);
+    }
+
     bool empty() const {
         evict();
         return expiries_.empty();

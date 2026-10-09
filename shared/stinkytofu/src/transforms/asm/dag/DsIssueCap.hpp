@@ -80,6 +80,20 @@ class DsIssueCap {
         return std::max(0, periodEnd_ - now_);
     }
 
+    // The same queries against a per-pick limit (<= 0 means depth()). The history is kept
+    // as issued, so a tighter limit just waits until enough of it has expired.
+    bool full(int limit) const {
+        if (limit <= 0) return full();
+        if (mode_ == Mode::Sliding) return sliding_.fullAt(limit);
+        return count_ >= limit && now_ < periodEnd_;
+    }
+
+    int minResidual(int limit) const {
+        if (limit <= 0) return minResidual();
+        if (mode_ == Mode::Sliding) return sliding_.minResidualAt(limit);
+        return std::max(0, periodEnd_ - now_);
+    }
+
     int depth() const {
         return depth_;
     }

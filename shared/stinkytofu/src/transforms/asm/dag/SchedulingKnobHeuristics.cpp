@@ -115,6 +115,8 @@ SchedulingIRStats countMainLoopSchedulingIRStats(const StinkyAsmModule& module) 
         } else if (isDSRead(*inst)) {
             if (stats.dsLoadCount == 0) stats.firstDsLoadLatencyCycles = inst->latencyCycles;
             ++stats.dsLoadCount;
+        } else if (isTensorLoad(*inst)) {
+            ++stats.tensorLoadCount;
         }
     }
     return stats;
@@ -137,6 +139,11 @@ SchedulingKnobOverrides schedulingKnobOverridesFromModuleOptions(
     // Rule3 lead: <0 unset; 0 means co-locate signal and wait.
     if (opts.ClusterBarrierRule3SignalLeadCycles >= 0)
         out.clusterBarrierRule3SignalLeadCycles = opts.ClusterBarrierRule3SignalLeadCycles;
+    // ds cap window: any explicit window/PerCap value is taken verbatim (PerCap < 0 -> off).
+    if (opts.DsCapWindowPerCap >= 0 || opts.DsCapWindow1Begin >= 0) {
+        out.dsCapWindow = SchedulingKnobOverrides::DsCapWindow{
+            opts.DsCapWindow1Begin, opts.DsCapWindow1End, std::max(0, opts.DsCapWindowPerCap)};
+    }
     return out;
 }
 
@@ -198,6 +205,15 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     out.clusterBarrierRule3SignalLeadCycles = features.stats.sumWmmaLatencyCycles > 500 ? 200 : 100;
     out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::Policy;
 
+    // TDM kernels: keep ds_loads out of the TDM LDS-write window (measured: ds->ds stalls peak
+    // ~600-800 cycles after tensor_load issue). Non-TDM kernels keep the cap window off.
+    if (features.stats.tensorLoadCount > 0 && wmma >= kPolicyDsCapWindowMinWmmas) {
+        out.dsCapWindow1Begin = kPolicyDsCapWindowBegin;
+        out.dsCapWindow1End = kPolicyDsCapWindowEnd;
+        out.dsCapWindowPerCap = kPolicyDsCapWindowPerCap;
+    }
+    out.dsCapWindowSource = SchedulingKnobSource::Policy;
+
     return out;
 }
 
@@ -247,6 +263,20 @@ ResolvedSchedulingKnobs resolveSchedulingKnobs(const SchedulingFeatures& feature
         out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::StaticDefault;
     }
 
+    if (overrides.dsCapWindow.has_value()) {
+        out.dsCapWindow1Begin = overrides.dsCapWindow->begin;
+        out.dsCapWindow1End = overrides.dsCapWindow->end;
+        out.dsCapWindowPerCap = overrides.dsCapWindow->perCap;
+        out.dsCapWindowSource = SchedulingKnobSource::User;
+    } else if (!features.stats.degenerate()) {
+        out.dsCapWindow1Begin = proposed.dsCapWindow1Begin;
+        out.dsCapWindow1End = proposed.dsCapWindow1End;
+        out.dsCapWindowPerCap = proposed.dsCapWindowPerCap;
+        out.dsCapWindowSource = SchedulingKnobSource::Policy;
+    } else {
+        out.dsCapWindowSource = SchedulingKnobSource::StaticDefault;
+    }
+
     // Diagnostic. Stays -1 when propose() did not run.
     if (!features.stats.degenerate()) {
         out.optimisticDsReadThrottleLatency = proposed.optimisticDsReadThrottleLatency;
@@ -271,6 +301,9 @@ void applyResolvedSchedulingKnobs(PassFeatureConfig& config,
                                   const ResolvedSchedulingKnobs& resolved) {
     config.dagFeatures.dsReadThrottleLatency = resolved.dsReadThrottleLatency;
     config.dagFeatures.dsReadPerCap = resolved.dsReadPerCap;
+    config.dagFeatures.dsCapWindow1Begin = resolved.dsCapWindow1Begin;
+    config.dagFeatures.dsCapWindow1End = resolved.dsCapWindow1End;
+    config.dagFeatures.dsCapWindowPerCap = resolved.dsCapWindowPerCap;
 }
 
 const char* schedulingKnobSourceName(SchedulingKnobSource source) {
@@ -298,7 +331,11 @@ void logResolvedSchedulingKnobs(std::ostream& os, std::string_view moduleName,
        << " dsReadPerCap=" << resolved.dsReadPerCap << "("
        << schedulingKnobSourceName(resolved.dsReadPerCapSource) << ")"
        << " rule3SignalLeadCycles=" << resolved.clusterBarrierRule3SignalLeadCycles << "("
-       << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")";
+       << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")"
+       << " tensorLoad=" << features.stats.tensorLoadCount << " dsCapWindow=["
+       << resolved.dsCapWindow1Begin << "," << resolved.dsCapWindow1End << ")x"
+       << resolved.dsCapWindowPerCap << "(" << schedulingKnobSourceName(resolved.dsCapWindowSource)
+       << ")";
     // optimisticDsReadThrottleLatency is this logger's heuristic recompute.
     // policyOptimisticDsReadThrottleLatency is whatever propose() stored.
     // A custom policy can disagree; applyResolvedSchedulingKnobs ignores both.

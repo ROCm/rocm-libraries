@@ -551,12 +551,13 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
     }
 
     // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
-    void runPass(int rule3SignalLeadCycles = 100, bool splitWaveLoop = false) {
+    void runPass(int rule3SignalLeadCycles = 100, bool splitWaveLoop = false,
+                 int waitHideWmmas = 0) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         auto pass = createInsertClusterBarrierPass(
             /*streamKMulticast=*/false, /*pgrValue=*/1, rule3SignalLeadCycles,
-            /*splitWaveLoop=*/splitWaveLoop);
+            /*splitWaveLoop=*/splitWaveLoop, waitHideWmmas);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (before InsertClusterBarrierPass):" << blockListing(*bb)
                       << "\n";
@@ -2887,4 +2888,162 @@ TEST_F(InsertClusterBarrierPassTest, LaterUnrollLoopCopiesSkipClusterHandshake) 
     const auto [signals, waits] = clusterBarrierCounts();
     EXPECT_EQ(signals, 3) << blockListing(*bb);
     EXPECT_EQ(waits, 3) << blockListing(*bb);
+}
+
+// ClusterBarrierWaitHideWmmas: the scheduler leaves a CLUSTER_WAIT_SLOT N WMMAs above the
+// Rule 3 trigger; the pass puts the real wait there and measures the signal lead from it.
+class ClusterWaitSlotPassTest : public InsertClusterBarrierPassTest {
+   protected:
+    // The slot the scheduler would leave: planted at the trigger, then \p wmmasAbove WMMAs up.
+    StinkyInstruction* plantSlot(StinkyInstruction* trigger, int wmmasAbove) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* slot = builder.createClusterWaitSlot(trigger);
+        int seen = 0;
+        for (auto it = BasicBlock::iterator(slot); it != bb->begin();) {
+            --it;
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst == nullptr || !isMatrixInstruction(*inst) || ++seen < wmmasAbove) continue;
+            slot->remove();
+            bb->insertIR(it, slot);
+            break;
+        }
+        return slot;
+    }
+
+    // A loop body with the stage handshake after 40 WMMAs, with the slot 10 WMMAs above it.
+    StinkyInstruction* buildStage(bool withSlot) {
+        appendGsu1Preheader();
+        openLoop();
+        for (int i = 0; i < 30; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+        for (int i = 0; i < 10; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+        StinkyInstruction* trigger = appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+        for (int i = 0; i < 10; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+        closeLoop();
+        if (withSlot) plantSlot(trigger, /*wmmasAbove=*/10);
+        return trigger;
+    }
+
+    bool anySlot() const {
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst != nullptr && isClusterWaitSlot(*inst)) return true;
+        }
+        return false;
+    }
+
+    // Loop-body cluster wait: the first one below the loop head.
+    StinkyInstruction* bodyClusterWait() const {
+        bool inLoop = false;
+        for (IRBase& ir : *bb) {
+            auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (isLabel(*inst))
+                inLoop = inLoop || inst->getModifier<LabelData>()->label == "label_TestLoop";
+            if (inLoop && isClusterBarrierWithLiteral(*inst, /*wantSignal=*/false)) return inst;
+        }
+        return nullptr;
+    }
+
+    int wmmasBetween(const StinkyInstruction* from, const StinkyInstruction* to) const {
+        int count = 0;
+        bool started = false;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == to) return started ? count : -1;
+            if (started && isMatrixInstruction(*inst)) ++count;
+            if (inst == from) started = true;
+        }
+        return -1;
+    }
+
+    // Opcode and cluster-barrier kind per instruction: skip-label names are random.
+    std::vector<int> shape() const {
+        std::vector<int> out;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            out.push_back(static_cast<int>(inst->getUnifiedOpcode()) * 4 +
+                          (clusterBarrierKind(*inst) + 1));
+        }
+        return out;
+    }
+};
+
+TEST_F(ClusterWaitSlotPassTest, WaitLandsAtTheSlotAndSignalLeadIsMeasuredFromIt) {
+    StinkyInstruction* trigger = buildStage(/*withSlot=*/true);
+
+    runPass(/*rule3SignalLeadCycles=*/100, /*splitWaveLoop=*/false, /*waitHideWmmas=*/10);
+
+    EXPECT_FALSE(anySlot()) << "the placeholder must not outlive the pass:" << blockListing(*bb);
+    StinkyInstruction* wait = bodyClusterWait();
+    ASSERT_NE(wait, nullptr) << blockListing(*bb);
+    EXPECT_FALSE(isImmediatelyPrecededByClusterBarrierWait(trigger)) << blockListing(*bb);
+    EXPECT_EQ(wmmasBetween(wait, trigger), 10) << blockListing(*bb);
+
+    StinkyInstruction* signal = findLastClusterSignalBefore(indexOf(wait));
+    ASSERT_NE(signal, nullptr) << blockListing(*bb);
+    // The lead (100 cycles) is measured from the wait: nearly the same WMMA count between
+    // signal and wait as the lead needs, not 10 more because the trigger sits below.
+    int cycles = 0;
+    bool started = false;
+    for (const IRBase& ir : *bb) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (inst == wait) break;
+        if (started) cycles += isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles;
+        if (inst == signal) started = true;
+    }
+    constexpr int wmmaCycles = 8;  // one WMMA's latency
+    EXPECT_GE(cycles, 100) << blockListing(*bb);
+    EXPECT_LT(cycles, 100 + 3 * wmmaCycles) << blockListing(*bb);
+    expectClusterTokensBalanceOnEveryPath();
+}
+
+TEST_F(ClusterWaitSlotPassTest, OptionOffIgnoresTheSlotAndMatchesTheOriginalOutput) {
+    buildStage(/*withSlot=*/false);
+    runPass();
+    const std::vector<int> original = shape();
+
+    // Analyses are cached per Function address, which the new Function may reuse.
+    SetUp();
+    am = AnalysisManager{};
+    registerAllAnalyses(am);
+    StinkyInstruction* trigger = buildStage(/*withSlot=*/true);
+    runPass(/*rule3SignalLeadCycles=*/100, /*splitWaveLoop=*/false, /*waitHideWmmas=*/0);
+
+    EXPECT_FALSE(anySlot()) << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(trigger)) << blockListing(*bb);
+    const std::vector<int> now = shape();
+    ASSERT_EQ(now.size(), original.size());
+    for (size_t i = 0; i < now.size(); ++i)
+        EXPECT_EQ(now[i], original[i]) << "index " << i << blockListing(*bb);
+}
+
+TEST_F(ClusterWaitSlotPassTest, SecondRunKeepsTheHoistedWaitAndAddsNothing) {
+    buildStage(/*withSlot=*/true);
+    runPass(100, false, /*waitHideWmmas=*/10);
+    const std::vector<int> first = shape();
+
+    runPass(100, false, /*waitHideWmmas=*/10);
+
+    EXPECT_EQ(shape(), first) << "a wait that is no longer next to its trigger still counts:"
+                              << blockListing(*bb);
+}
+
+TEST_F(ClusterWaitSlotPassTest, SlotAboveAnEarlierWorkgroupBarrierFallsBackToTheTrigger) {
+    appendGsu1Preheader();
+    openLoop();
+    for (int i = 0; i < 20; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    for (int i = 0; i < 20; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* second = appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
+    closeLoop();
+    // 30 WMMAs up crosses the first stage's barrier pair: that slot cannot hold the wait.
+    plantSlot(second, /*wmmasAbove=*/30);
+
+    runPass(100, false, /*waitHideWmmas=*/30);
+
+    EXPECT_FALSE(anySlot()) << blockListing(*bb);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(second)) << blockListing(*bb);
 }

@@ -309,6 +309,35 @@ static void applyClusterBarrierSccRule(
     }
 }
 
+// ClusterBarrierWaitHideWmmas: plant a CLUSTER_WAIT_SLOT before each Rule 3 trigger (the
+// workgroup `s_barrier_signal -1` ahead of a tensor_load) in a loop body, so the DAG can
+// schedule it N WMMAs before the trigger. InsertClusterBarrierPass swaps it for the real wait.
+// A signal that is a region boundary is skipped: the slot would not share its region.
+static void insertClusterWaitSlots(BasicBlock& bb, AsmIRBuilder& builder) {
+    bool hasWmma = false;
+    for (const IRBase& ir : bb) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        hasWmma = hasWmma || (inst != nullptr && isMatrixInstruction(*inst));
+    }
+    if (!hasWmma) return;
+
+    std::vector<StinkyInstruction*> triggers;
+    StinkyInstruction* signal = nullptr;
+    for (IRBase& ir : bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (isLabel(*inst) || isBranch(*inst) || isCall(*inst)) {
+            signal = nullptr;
+        } else if (isBarrierSignal(*inst) && isSplitBarrierAllWave(*inst)) {
+            signal = inst;
+        } else if (isTensorLoad(*inst) && signal != nullptr) {
+            if (!hasSideEffect(*signal)) triggers.push_back(signal);
+            signal = nullptr;
+        }
+    }
+    for (StinkyInstruction* trigger : triggers) builder.createClusterWaitSlot(trigger);
+}
+
 // --- Region scheduler (does NOT move fences) ---
 //
 // Build a DAG within a region and perform a stable topological schedule.
@@ -875,9 +904,12 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                          passCtx.getGemmTileConfig().arch[2]);
         const uint32_t wavefrontSize = passCtx.getWavefrontSize();
 
-        auto scheduleBlock = [&](BasicBlock* bb, ReadyQueue& rq) {
+        auto scheduleBlock = [&](BasicBlock* bb, ReadyQueue& rq, bool inLoop) {
             AsmIRBuilder builder(*bb, archId);
             collapseExecMaskedRegions(*bb, builder, wavefrontSize);
+            if (inLoop &&
+                passCtx.getPassFeatureConfig().dagFeatures.clusterBarrierWaitHideWmmas > 0)
+                insertClusterWaitSlots(*bb, builder);
             scheduleInDAG(*bb, rq, wmmaIndex);
             expandExecMaskedGroups(*bb);
             auto candidates = rq.takeLayer2BarrierOverlapCandidates();
@@ -898,11 +930,11 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                     rq->setLoopContext(loop);
                 }
                 rq->setAnalysisCache(&analysisCache);
-                scheduleBlock(bb, *rq);
+                scheduleBlock(bb, *rq, /*inLoop=*/true);
             } else {
                 auto rq = chooseReadyQueue(passCtx);
                 rq->setAnalysisCache(&analysisCache);
-                scheduleBlock(bb, *rq);
+                scheduleBlock(bb, *rq, /*inLoop=*/false);
             }
         }
         AM.getResult<Layer2BarrierOverlapAnalysis>(func) =
