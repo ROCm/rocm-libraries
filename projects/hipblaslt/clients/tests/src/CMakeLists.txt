@@ -51,9 +51,12 @@ if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
     )
 endif()
 
+# The registration tests run their DISABLED_ workers in child processes,
+# because registered kernels are process-global.
 if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_library_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_register_test.cpp
     )
 endif()
 
