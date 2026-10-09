@@ -7232,6 +7232,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       stinky_module_options["PrefetchLeadWmmas"] = \
         4 if not kernel["HalfPLR"] else \
         25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 40
+      # LDS bytes the TDM writes per stage: the A tile (MT0 x DepthU) plus the B tile
+      # (MT1 x DepthU). StinkyTofu derives the TDM-landing ds window from it (MX scale tensors
+      # are not counted).
+      stinky_module_options["TdmStageBytes"] = int(
+        (kernel["MacroTile0"] * kernel["ProblemType"]["DataTypeA"].numBytes() +
+         kernel["MacroTile1"] * kernel["ProblemType"]["DataTypeB"].numBytes()) * kernel["DepthU"])
       # ds_load issue cap shape (see GlobalParameters); 0/0 keeps the scheduler defaults.
       stinky_module_options["DsIssueCapMode"] = int(globalParameters.get("StinkyTofuDsIssueCapMode") or 0)
       stinky_module_options["DsIssueCapSpanCycles"] = int(globalParameters.get("StinkyTofuDsIssueCapSpanCycles") or 0)

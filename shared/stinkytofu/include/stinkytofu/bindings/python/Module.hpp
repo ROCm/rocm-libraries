@@ -150,7 +150,9 @@
       -1) /* ds cap window: tensor_load age [Begin,End) cycles; -1 unset */                       \
     X(DsCapTdmEndCycles, int, -1)                                                                 \
     X(DsCapTdmPerCap, int, -1) /* >0: ds cap per span in the TDM window; 0 = off; -1 = unset      \
-                                  (TDM kernels: policy 576-840 cycles x1) */
+                                  (TDM kernels: policy 576-840 cycles x1) */                      \
+    X(TdmStageBytes, int,                                                                         \
+      -1) /* LDS bytes TDM writes per stage; -1 = unknown (policy uses 576-840) */
 
 namespace stinkytofu {
 /**
