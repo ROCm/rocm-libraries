@@ -223,8 +223,8 @@ def test_e5m2_is_not_a_scale_dtype_alias(dtype, field):
 def test_scaled_catalog_identity_and_backend_contract():
     catalog = ArchTarget.from_gfx("gfx1250").mma
     rows = [row for row in catalog.ops if row.family == "wmma_scaled"]
-    assert len(rows) == 86
-    assert len({row.op_id for row in rows}) == 86
+    assert len(rows) == 450
+    assert len({row.op_id for row in rows}) == 450
     for row in rows:
         tokens = {
             "fp8e4m3": "fp8",

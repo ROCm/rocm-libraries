@@ -15,18 +15,16 @@ paths. See [packed FP6](FP6.md) and [packed FP4](FP4_SCALE.md) for matrix storag
 `scale_dtype_b` override it independently. All native scale buffers contain
 encoded bytes; choosing a format does not quantize or convert the buffer.
 
-| A data | A scale | B data | B scale |
-| --- | --- | --- | --- |
-| FP8 / FP6 / FP4 | E8M0 | FP8 / FP6 / FP4 | E8M0 |
-| FP8 / FP6 | E8M0 | FP4 | E5M3 or E4M3 |
-| FP4 | E5M3 or E4M3 | FP8 / FP6 | E8M0 |
-| FP4 | E5M3 | FP4 | E5M3 |
-| FP4 | E4M3 | FP4 | E4M3 |
+| Matrix operand (A or B) | Scale dtype (independent for A and B) |
+| --- | --- |
+| FP8 / BF8 / FP6 / BF6 / FP4 | E8M0, E5M3, or E4M3 |
 
 Here FP8 and FP6 each include both exponent/mantissa formats. E8M0 has selector
 0, E5M3 selector 1, and E4M3 selector 2. The reference decoder interprets E5M3
 as an unsigned eight-bit scale format with bias 15, distinct from E5M2.
-The implementation requires matching scale formats for FP4 x FP4.
+A and B may use different scale formats, including FP4 x FP4.
+Standard MXFP formats use E8M0 scales over K32 blocks; E4M3/E5M3
+and K16 variants are broader block-scaled contracts.
 The `i8` scale spelling remains an alias for E8M0 for existing callers.
 
 ```python
@@ -38,7 +36,7 @@ spec = BlockScaledGemmSpec(
     name="mixed_fp6_fp4", M=32, N=48, K=256,
     dtype_a="fp6e2m3", dtype_b="fp4",
     matrix_path="wmma_scale16", block_k=16,
-    scale_dtype="e8m0", scale_dtype_b="e4m3",
+    scale_dtype="e8m0", scale_dtype_a="e5m3", scale_dtype_b="e4m3",
 )
 kernel = build_block_scaled_gemm(spec)
 ```
@@ -60,6 +58,8 @@ and block sizes, but does not enumerate E5M3 scale decoding or the complete
 scale legality table. LLVM's `WMMA::MatrixScaleFmt` defines the selector names
 and values used here. The table above describes this implementation's accepted
 combinations; compiler acceptance alone does not establish numerical behavior.
+The expanded FP6/FP8 alternate-scale and mixed-scale combinations have host
+admission/lowering coverage; their new on-device numerical campaign is pending.
 
 Existing mixed-format fixtures cover bounded finite values and compare against
 an independent host calculation. They do not establish arbitrary-input rounding,

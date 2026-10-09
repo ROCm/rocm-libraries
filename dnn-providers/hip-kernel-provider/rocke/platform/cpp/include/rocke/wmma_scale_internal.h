@@ -123,13 +123,8 @@ static inline rocke_scaled_wmma_op_t rocke_scaled_wmma_contract(const rocke_mma_
             spec.scale_formats[i] = 2;
         else
             ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA scale format");
-        if(spec.matrix_formats[i] != 4 && spec.scale_formats[i] != 0)
-            ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA backend contract");
         spec.matrix_words[i] = words[i];
     }
-    if(spec.matrix_formats[0] == 4 && spec.matrix_formats[1] == 4
-       && spec.scale_formats[0] != spec.scale_formats[1])
-        ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA backend contract");
     if((atom->scale_block_k != 16 && atom->scale_block_k != 32)
        || strcmp(atom->c_dtype, "fp32") != 0 || atom->m != 16 || atom->n != 16 || atom->k != 128)
         ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA backend contract");

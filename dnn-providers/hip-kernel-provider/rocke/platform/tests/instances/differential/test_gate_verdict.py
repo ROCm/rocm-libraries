@@ -342,3 +342,15 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_gfx1250_scale_catalog_configs_are_not_truncated():
+    import importlib.util
+
+    source = Path(__file__).resolve().parents[1] / "parity" / "gfx1250_lowering_emit.py"
+    spec = importlib.util.spec_from_file_location("gfx1250_lowering_configs", source)
+    emitter = importlib.util.module_from_spec(spec)
+    with mock.patch.object(sys, "path", [str(source.parent), *sys.path]):
+        spec.loader.exec_module(emitter)
+    assert len(emitter.CONFIGS) == 472
+    assert run_diff.FAMILY_MAX_CFG["gfx1250_lowering"] > len(emitter.CONFIGS)

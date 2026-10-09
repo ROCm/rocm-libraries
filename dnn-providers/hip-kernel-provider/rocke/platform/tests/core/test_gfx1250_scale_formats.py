@@ -30,11 +30,11 @@ from rocke.instances.gfx1250.block_scaled_gemm import (
 
 FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4")
 SCALES = ("e8m0", "e5m3", "e4m3")
-PAIRS = (
-    [(d, "fp4", "e8m0", s) for d in FORMATS[:-1] for s in SCALES[1:]]
-    + [("fp4", d, s, "e8m0") for d in FORMATS[:-1] for s in SCALES[1:]]
-    + [("fp4", "fp4", s, s) for s in SCALES[1:]]
-)
+PAIRS = [
+    (a, b, sa, sb)
+    for a, b, sa, sb in product(FORMATS, FORMATS, SCALES, SCALES)
+    if (sa, sb) != ("e8m0", "e8m0")
+]
 
 
 def spec_for(a="fp4", b="fp4", sa="e4m3", sb="e4m3", block_k=32, **kwargs):
@@ -57,11 +57,6 @@ def spec_for(a="fp4", b="fp4", sa="e4m3", sb="e4m3", block_k=32, **kwargs):
 @pytest.mark.parametrize("a,b,sa,sb", list(product(FORMATS, FORMATS, SCALES, SCALES)))
 @pytest.mark.parametrize("block_k", [32, 16])
 def test_catalog_and_builder_agree_on_legal_scale_combinations(a, b, sa, sb, block_k):
-    expected = (
-        (sa == "e8m0" or a == "fp4")
-        and (sb == "e8m0" or b == "fp4")
-        and (a != "fp4" or b != "fp4" or sa == sb)
-    )
     atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
         family="wmma_scaled",
         a_dtype=a,
@@ -72,8 +67,8 @@ def test_catalog_and_builder_agree_on_legal_scale_combinations(a, b, sa, sb, blo
         k=128,
         scales=(sa, sb, block_k),
     )
-    assert (atom is not None) == expected
-    assert is_valid_spec(spec_for(a, b, sa, sb, block_k))[0] == expected
+    assert atom is not None
+    assert is_valid_spec(spec_for(a, b, sa, sb, block_k))[0]
 
 
 @pytest.mark.parametrize("a,b,sa,sb", PAIRS)
@@ -215,25 +210,23 @@ def test_scale_formats_golden(case, expected_sha):
     assert hashlib.sha256(llvm.encode()).hexdigest() == expected_sha
 
 
-@pytest.mark.parametrize(
-    "a,b,sa,sb", [("fp8", "fp4", "e4m3", "e8m0"), ("fp4", "fp4", "e4m3", "e5m3")]
-)
+@pytest.mark.parametrize("field,value", [("k", 64), ("c_dtype", "fp16")])
 def test_backend_rejects_invalid_contract_even_if_catalog_injected(
-    monkeypatch, a, b, sa, sb
+    monkeypatch, field, value
 ):
     from rocke.core.arch.target import MmaCatalog
 
     atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
         family="wmma_scaled",
-        a_dtype=a,
-        b_dtype=b,
+        a_dtype="fp6",
+        b_dtype="fp8",
         c_dtype="fp32",
         m=16,
         n=16,
         k=128,
-        scales=("e8m0", "e8m0", 32),
+        scales=("e4m3", "e5m3", 32),
     )
-    invalid = replace(atom, a_scale_dtype=sa, b_scale_dtype=sb)
+    invalid = replace(atom, **{field: value})
     monkeypatch.setattr(MmaCatalog, "by_op_id", lambda self, op_id: invalid)
     with pytest.raises(ValueError, match="unsupported scaled WMMA backend contract"):
         gfx1250_scaled_wmma(atom.op_id)

@@ -92,8 +92,8 @@ alone does not establish support for other operand contracts.
 
 The [scale-format example](SCALE_FORMATS.md) defaults to FP4 x FP4 with E4M3
 scales. `--scale-dtype-a` and `--scale-dtype-b` select the input encodings;
-non-E8M0 scales require an FP4 operand, and FP4 x FP4 requires matching scale
-formats. The shared verifier decodes each scale buffer independently.
+each operand independently accepts E8M0, E4M3, or E5M3 scales across
+FP8/BF8, FP6/BF6, and FP4 matrix formats. The shared verifier decodes each scale buffer independently.
 
 ```sh
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.scale_formats_gemm --case all

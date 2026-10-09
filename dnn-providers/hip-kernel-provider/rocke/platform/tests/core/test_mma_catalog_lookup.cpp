@@ -2,17 +2,18 @@
 // SPDX-License-Identifier: MIT
 /* Exercise public catalog queries against stored keys, without normalizing
  * away malformed table entries. Alias queries must find the same atom. */
+#include <stdio.h>
+#include <string.h>
+
+#include <atomic>
+#include <initializer_list>
+#include <thread>
+
 #include "mma_family_index.h"
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
 #include "rocke/helper_rocke.core.arch.h"
 #include "rocke/wmma_scale_internal.h"
-
-#include <atomic>
-#include <initializer_list>
-#include <stdio.h>
-#include <string.h>
-#include <thread>
 
 static const char* short_dtype(const char* dtype)
 {
@@ -173,7 +174,7 @@ static int test_scale_contracts()
     for(int input = 0; input < 2; ++input)
     {
         auto unsupported = *base;
-        (input == 0 ? unsupported.a_scale_dtype : unsupported.b_scale_dtype) = "e4m3";
+        (input == 0 ? unsupported.a_scale_dtype : unsupported.b_scale_dtype) = "e5m2";
         CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&unsupported); }));
     }
     int count = 1;
@@ -304,22 +305,16 @@ static int test_scale_contracts()
                      op.scale_block_k);
             CHECK(strcmp(id, op.op_id) == 0);
             CHECK(rocke_mma_catalog_by_op_id(&arch->mma, id) == &op);
-            if(strcmp(op.a_dtype, "fp4e2m1") != 0)
-            {
-                auto invalid = op;
-                invalid.a_scale_dtype = "e4m3";
-                CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&invalid); }));
-            }
-            if(strcmp(op.a_dtype, "fp4e2m1") == 0 && strcmp(op.b_dtype, "fp4e2m1") == 0)
-            {
-                auto invalid = op;
-                invalid.b_scale_dtype = strcmp(op.a_scale_dtype, "e4m3") == 0 ? "e5m3" : "e4m3";
-                CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&invalid); }));
-            }
+            const auto contract = rocke_scaled_wmma_contract(&op);
+            CHECK(contract.scale_formats[0] >= 0 && contract.scale_formats[0] <= 2);
+            CHECK(contract.scale_formats[1] >= 0 && contract.scale_formats[1] <= 2);
+            auto invalid = op;
+            invalid.k = 64;
+            CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&invalid); }));
             ++scaled_rows;
         }
     }
-    CHECK(packed_rows == 4 && scaled_rows == 86);
+    CHECK(packed_rows == 4 && scaled_rows == 450);
     return 0;
 }
 
@@ -388,7 +383,7 @@ static int test_scale_layouts_and_families()
             }
         }
     }
-    CHECK(scaled == 86);
+    CHECK(scaled == 450);
     return 0;
 }
 

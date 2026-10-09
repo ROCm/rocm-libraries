@@ -107,19 +107,13 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
         MmaScaleDType.E5M3: 1,
         MmaScaleDType.E4M3: 2,
     }
-    # Alternative scales require FP4; FP4 x FP4 requires matching formats.
-    # Keep these restrictions here, independently of the catalog query model.
+    # Matrix and scale formats are independent selectors for each operand.
+    # Validate the backend contract independently of the catalog query model.
     if (
         atom.a_dtype not in formats
         or atom.b_dtype not in formats
         or atom.a_scale_dtype not in scale_selectors
         or atom.b_scale_dtype not in scale_selectors
-        or (atom.a_dtype != "fp4e2m1" and atom.a_scale_dtype != MmaScaleDType.E8M0)
-        or (atom.b_dtype != "fp4e2m1" and atom.b_scale_dtype != MmaScaleDType.E8M0)
-        or (
-            atom.a_dtype == atom.b_dtype == "fp4e2m1"
-            and atom.a_scale_dtype != atom.b_scale_dtype
-        )
         or atom.scale_block_k not in (16, 32)
         or atom.c_dtype != "fp32"
         or atom.shape != (16, 16, 128)

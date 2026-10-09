@@ -1,8 +1,7 @@
 # gfx1250 scale-format discrimination experiment
 
-Status: planned; this experiment has not been implemented or run. Complete the
-FP6 / scale-format PR split before executing it. Existing mixed-format fixtures
-are separate evidence and do not count as execution of this plan.
+Status: the expanded matrix/scale campaign is planned and has not been run
+on the current source. Existing mixed-format fixtures are separate evidence.
 
 ## Contents
 
@@ -82,6 +81,10 @@ as an expected pass value in the main finite-value test.
 - Run FP4 x FP4 with matching selectors on A and B. Keep the untested operand's
   scale at that selector's unity encoding. Since unity bytes differ between
   selectors, report this as a separate control from the fixed-buffer experiment.
+- Repeat the selector sweep with FP8/BF8, FP6/BF6, and FP4 as the tested
+  matrix operand. Cover both A/B positions, homogeneous and mixed matrix pairs,
+  and independent scale selections, including FP4 x FP4 with differing scales.
+  Keep the raw matrices and tested scale bytes fixed within each selector triplet.
 - Validate with COMGR and Python-generated HIP, using the same literal inputs.
   Require Python/C++ LLVM identity where the C++ backend is available. Do not
   infer C++ HIP compilation from Python HIP success.

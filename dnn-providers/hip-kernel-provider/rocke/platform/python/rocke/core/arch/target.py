@@ -1027,19 +1027,11 @@ _MMA_FRAGMENT_INFO.update(
             f"wmma_gfx1250_f32_16x16x128_{a}_{b}_scale_e8m0_e8m0_k{block_k}"
         ]
         for block_k in (32, 16)
-        for a, b, sa, sb in (
-            [
-                (d, "fp4", "e8m0", scale)
-                for d in ("fp8", "bf8", "fp6", "bf6")
-                for scale in ("e5m3", "e4m3")
-            ]
-            + [
-                ("fp4", d, scale, "e8m0")
-                for d in ("fp8", "bf8", "fp6", "bf6")
-                for scale in ("e5m3", "e4m3")
-            ]
-            + [("fp4", "fp4", scale, scale) for scale in ("e5m3", "e4m3")]
-        )
+        for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        for sa in ("e8m0", "e5m3", "e4m3")
+        for sb in ("e8m0", "e5m3", "e4m3")
+        if (sa, sb) != ("e8m0", "e8m0")
     }
 )
 
