@@ -434,3 +434,39 @@ TEST(SchedulingKnobHeuristics, DsCapTdmModuleOptionSentinels) {
     EXPECT_EQ(*on.dsCapTdmEndCycles, 840);
     EXPECT_EQ(*on.dsCapTdmPerCap, 1);
 }
+
+// The TDM window follows the stage size: tEnd = 330 + bytes/256, window [tEnd-240, tEnd+160).
+TEST(SchedulingKnobHeuristics, DsCapTdmWindowFromStageBytes) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingFeatures f = makeFeatures(384, 200, 8, 3072, 3, 4);
+    f.stats.tensorLoadCount = 3;
+
+    f.tdmStageBytes = 128 * 1024;  // henry fp8 256x256x256: tEnd = 842
+    ResolvedSchedulingKnobs r = resolveSchedulingKnobs(f, {}, policy);
+    EXPECT_EQ(r.dsCapTdmBeginCycles, 602);
+    EXPECT_EQ(r.dsCapTdmEndCycles, 1002);
+    EXPECT_EQ(r.dsCapTdmPerCap, kPolicyDsCapTdmPerCap);
+
+    f.tdmStageBytes = 64 * 1024;  // fp4: tEnd = 586
+    r = resolveSchedulingKnobs(f, {}, policy);
+    EXPECT_EQ(r.dsCapTdmBeginCycles, 346);
+    EXPECT_EQ(r.dsCapTdmEndCycles, 746);
+
+    f.tdmStageBytes = 0;  // unknown -> fixed fallback window
+    r = resolveSchedulingKnobs(f, {}, policy);
+    EXPECT_EQ(r.dsCapTdmBeginCycles, kPolicyDsCapTdmBeginCycles);
+    EXPECT_EQ(r.dsCapTdmEndCycles, kPolicyDsCapTdmEndCycles);
+
+    // A user value still wins per field over the computed one.
+    f.tdmStageBytes = 128 * 1024;
+    SchedulingKnobOverrides o;
+    o.dsCapTdmEndCycles = 900;
+    r = resolveSchedulingKnobs(f, o, policy);
+    EXPECT_EQ(r.dsCapTdmBeginCycles, 602);
+    EXPECT_EQ(r.dsCapTdmEndCycles, 900);
+}
+
+TEST(SchedulingKnobHeuristics, TdmStageBytesModuleOptionDefaultsToUnknown) {
+    StinkyAsmModule::ModuleOptions opts{};
+    EXPECT_EQ(opts.TdmStageBytes, -1);
+}

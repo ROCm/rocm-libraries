@@ -40,9 +40,18 @@ inline constexpr int kStaticDefaultDsReadPerCap = 3;
 /// Historical ModuleOptions / InsertClusterBarrierPass default.
 inline constexpr int kStaticDefaultClusterBarrierRule3SignalLeadCycles = 100;
 /// Policy default TDM-anchored ds cap for kernels with tensor_load in the main loop: while the
-/// age of the latest tensor_load issue is in [576, 840) scheduler cycles, ds_loads are capped to
-/// one per span, keeping them out of the TDM LDS-write window (ds->ds stalls peak ~600-800
-/// cycles after issue; on henry fp8 this matches region WMMAs [~8, ~40)).
+/// age of the latest tensor_load issue is in the TDM landing window, ds_loads are capped to one
+/// per span, keeping them out of the TDM LDS-write window.
+/// Landing model (sched_test, gfx1250): the TDM engine moves ~256 B/clk shared by the issuing
+/// waves after ~330 cycles of fixed latency, so a stage's last byte lands at
+///   tEnd = kTdmLatencyCycles + stageBytes / kTdmBytesPerCycle
+/// and ds->ds stalls cluster in [tEnd - kTdmWindowPreCycles, tEnd + kTdmWindowPostCycles).
+/// henry fp8 (128 KB per stage): tEnd = 842, window [602, 1002).
+inline constexpr int kTdmLatencyCycles = 330;
+inline constexpr int kTdmBytesPerCycle = 256;
+inline constexpr int kTdmWindowPreCycles = 240;
+inline constexpr int kTdmWindowPostCycles = 160;
+/// Window used when the stage size is unknown (ModuleOptions::TdmStageBytes < 0).
 inline constexpr int kPolicyDsCapTdmBeginCycles = 576;
 inline constexpr int kPolicyDsCapTdmEndCycles = 840;
 inline constexpr int kPolicyDsCapTdmPerCap = 1;
@@ -88,6 +97,8 @@ struct SchedulingFeatures {
     /// Tensile `KernelWriter.states.unrollLoopCopies`: how many unrolled loop
     /// bodies are emitted. HalfPLR sets this to 3. 0 = not provided.
     int unrollLoopCopies = 0;
+    /// LDS bytes the TDM writes per stage (A + B tiles); <= 0 = unknown.
+    int tdmStageBytes = 0;
 };
 
 struct ResolvedSchedulingKnobs {
