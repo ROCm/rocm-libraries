@@ -201,24 +201,32 @@ def _emitLRLDSSwap_1x2(tag, tile, ti, writer, kernel):
 # Legacy LR emit functions (moved from SubtileBasedKernel.py)
 ################################################################################
 
+def lrReadLayoutTLU0(tileInfo):
+  """Per-lane K layout of one MMA tile as read by _computeLROffset (TLU=0).
+
+  Returns (regsPerRead, numReads, colsPerRead).  Each ds_load_b128 fills
+  regsPerRead VGPRs with loadWidthLR contiguous K bytes.  Tiles with more VGPRs
+  (e.g. 8-VGPR wave32 BF16 or wave64 FP8) need numReads reads, and read r of lane group g
+  covers K column g + r * colsPerRead (columns of loadWidthLR bytes), so the
+  entries within one MMA tile cover equal, interleaved K sub-portions.
+  """
+  loadWidth = tileInfo.loadWidthLR
+  numMFMACols = int(tileInfo.mmaTileShape[1] * tileInfo.bpe) // loadWidth  # TN case only
+  regsPerRead = loadWidth // 4
+  numReads = tileInfo.geometry.lr.mmaLayout.vgprs // regsPerRead
+  return regsPerRead, numReads, numMFMACols // numReads
+
 def _computeLROffset(module, tileInfo, colOffset, rowOffset, swizzled):
   tc = tileInfo.tc
   subIterKBytes = tileInfo.subIterKBytes
   loadWidth = tileInfo.loadWidthLR
-  numMFMACols = int(tileInfo.mmaTileShape[1] * tileInfo.bpe) // loadWidth  # TN case only
   # Without LDS swizzling (e.g. TDM), the full DepthU tile is contiguous in LDS,
   # so the K-row is depthUBytes wide.  With swizzling, GR writes individual
   # subtile K-groups, so the effective K-row is subIterKBytes.
   ldsKBytes = subIterKBytes if swizzled else tileInfo.depthUBytes
   blockSize = ldsKBytes // loadWidth
 
-  # Each ds_load_b128 fills REGS_PER_DS_READ VGPRs.  Tiles with more VGPRs
-  # (e.g. 8-VGPR wave32 BF16 or wave64 FP8) need multiple reads.  Consecutive
-  # LR offset entries advance by colsPerRead = numMFMACols / numReadsForTile
-  # so entries within the same MMA tile cover equal K sub-portions.
-  REGS_PER_DS_READ = loadWidth // 4
-  numReadsForTile = tileInfo.geometry.lr.mmaLayout.vgprs // REGS_PER_DS_READ
-  colsPerRead = numMFMACols // numReadsForTile
+  _, _, colsPerRead = lrReadLayoutTLU0(tileInfo)
 
   module.add(VMovB32(dst=vgpr(tileInfo.sharedVgprLROffset[0]), src=vgpr(colOffset), comment="%s: laneId"%tc))
   for vgprId in range(1, len(tileInfo.sharedVgprLROffset)):
