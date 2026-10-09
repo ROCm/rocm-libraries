@@ -86,7 +86,7 @@ does not read the block.
 ## `integration/rocKE/gfx950_conv_fwd_aot_seed/`
 
 The descriptors for the engine `hipkernel:Gfx950ConvFwdAotSeed`: a small seed catalog of
-rocKE AOT forward-convolution instances, 8 implicit-GEMM and 4 direct depthwise per dtype,
+rocKE AOT forward-convolution instances, 12 implicit-GEMM and 4 direct depthwise per dtype,
 one KDP per dtype. The shipped engine `hipkernel:Gfx950ConvFwdAot` carries the full
 catalog, where one graph is served by thousands of instances. The integration binary pins
 every instance that serves a graph and checks it against the CPU reference, which only a

@@ -955,7 +955,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdServing, EveryServingKernelMatchesCpuReference
 // hipkernel:Gfx950ConvFwdAot ships every AOT instance of rocKE's sweep that the packaged
 // launch runs, each built once against rocKE's probe problem and matched to a graph by
 // capability. hipkernel:Gfx950ConvFwdAotSeed runs the same native code over a small seed
-// of them, 8 implicit-GEMM and 4 direct depthwise instances per dtype
+// of them, 12 implicit-GEMM and 4 direct depthwise instances per dtype
 // (test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed). Both run the graphs
 // below, in both dtypes.
 
@@ -985,13 +985,13 @@ struct AotGraph
 const std::vector<AotGraph>& aotGraphs()
 {
     static const std::vector<AotGraph> s_graphs{
-        {"Smoke", {}, 0, 8, 0, 16828},
-        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 8, 0, 16828},
+        {"Smoke", {}, 0, 12, 0, 16828},
+        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 12, 0, 16828},
         // An instance is built against a 3x3 probe, so it is never the pointwise GEMM.
-        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 8, 0, 16828},
-        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 0, 8, 0, 16828},
-        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 8, 0, 16828},
-        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 8, 0, 16828},
+        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 12, 0, 16828},
+        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 0, 12, 0, 16828},
+        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 12, 0, 16828},
+        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 12, 0, 16828},
         // Three channels per group: only instances 1 wide along C/groups and K/groups.
         {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 1826},
         {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 2, 1, 9, 1826},
@@ -1006,9 +1006,9 @@ const std::vector<AotGraph>& aotGraphs()
         // Outside the direct guard: implicit GEMM alone.
         {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 0, 1, 0, 1826},
         // C = 12 admits load widths up to 4 and K = 20 store widths up to 4.
-        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 3, 0, 7779},
-        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 8, 0, 16828},
-        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 8, 0, 16828},
+        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 7, 0, 7779},
+        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 12, 0, 16828},
+        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 12, 0, 16828},
     };
     return s_graphs;
 }
