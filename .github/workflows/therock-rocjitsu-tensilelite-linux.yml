@@ -20,6 +20,11 @@ on:
       amdgpu_families:
         type: string
         required: true
+      # Per-PR runs leave out configs marked emu_full, which cannot finish
+      # within their timeout there; full runs include them with a longer one.
+      full_suite:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -47,7 +52,8 @@ jobs:
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       SCRIPTS_DIR: ${{ github.workspace }}/rocm-libraries/.github/scripts
       REPORT_DIR: ${{ github.workspace }}/rocjitsu-tensilelite-reports
-      PER_TEST_TIMEOUT: "2700"
+      FULL_SUITE: ${{ inputs.full_suite }}
+      PER_TEST_TIMEOUT: ${{ inputs.full_suite && '7200' || '2700' }}
       # Leave time within the 345-minute step for cleanup and report generation.
       SUITE_TIMEOUT_SECONDS: "19800"
       # TEMPORARY: build rocjitsu at this rocm-systems develop commit (has #13122, mixed-format
@@ -158,8 +164,12 @@ jobs:
           done
           [[ -n "${llvm_lib_path:-}" ]] || { echo "::error::libomp.so not found under ${llvm_lib}"; exit 1; }
 
+          markers="${target}"
+          [[ "${FULL_SUITE}" == "true" ]] || markers="${target} and not emu_full"
+
           {
             echo "ROCJITSU_TARGET=${target}"
+            echo "ROCJITSU_MARKERS=${markers}"
             echo "MIRAGE_PROFILE=${profile}"
             echo "PYTEST_WORKERS=${workers}"
             # The client's CPU reference asks OpenMP for 64 threads per process;
@@ -174,7 +184,7 @@ jobs:
           echo "${ROCM_PATH}/bin" >> "${GITHUB_PATH}"
           echo "${ROCM_PATH}/lib/llvm/bin" >> "${GITHUB_PATH}"
 
-          echo "target=${target} profile=${profile} config=${config}"
+          echo "target=${target} profile=${profile} config=${config} markers='${markers}'"
           echo "host_cores=${cores} xdist_workers=${workers} cpu_thread_budget=${budget} omp_thread_limit=${budget}"
           "${ROCM_PATH}/bin/mirage" --version
           echo "rocjitsu library: ${rocjitsu_lib}"
@@ -202,7 +212,7 @@ jobs:
             python -m pytest "${TENSILELITE_ROOT}/Tensile/Tests/common/test_config.py" \
               -p rocjitsu_pytest --rocjitsu-report-dir="${REPORT_DIR}" \
               --rocjitsu-durations="${SCRIPTS_DIR}/rocjitsu_tensilelite_durations.json" \
-              -m "${ROCJITSU_TARGET}" --gpu-targets="${ROCJITSU_TARGET}" \
+              -m "${ROCJITSU_MARKERS}" --gpu-targets="${ROCJITSU_TARGET}" \
               -v -s -n "${PYTEST_WORKERS}" --client-lock-scope=worker \
               --timeout="${PER_TEST_TIMEOUT}" \
               --junit-xml="${REPORT_DIR}/junit/tensilelite.xml" \

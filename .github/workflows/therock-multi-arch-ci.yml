@@ -394,6 +394,7 @@ jobs:
       therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
       build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
       amdgpu_families: gfx125X-dcgpu
+      full_suite: ${{ github.event_name != 'pull_request' }}
 
   rocjitsu_tensilelite_gfx94x:
     name: rocjitsu tensilelite (gfx94X-dcgpu)
@@ -406,6 +407,7 @@ jobs:
       therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
       build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
       amdgpu_families: gfx94X-dcgpu
+      full_suite: ${{ github.event_name != 'pull_request' }}
 
   multi_arch_ci_summary:
     name: Multi-Arch CI Summary
