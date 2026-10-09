@@ -205,13 +205,14 @@ policy is a property of the candidate set. The plugin SDK lets a pack refine a
 kernel-scoped matcher with a set-level stage for this: a `CandidateFilterFn`
 (`NativeRegistry.hpp`), registered under the symbol of a kernel-scoped matcher the pack
 already declares. Once every pack is matched, it sees every kernel that matcher admitted
-for the graph, across all packs listing it (both dtype shards here), and keeps a subset.
+for the graph, across all packs listing it (every shard here), and keeps a subset.
 No descriptor changes: a matcher with no filter registered keeps what it admitted.
 `hipkernel:Gfx950ConvFwdAot` registers `aotCandidateFilter` under its kernel matcher's
 symbol; the policy itself is `conv::widestVectorSelection` in
-`Gfx950ConvFwdAotSelection.hpp`. Direct depthwise instances are all kept: rocKE's direct
-benchmark (`direct_plans` in `benchmarks/common/direct_kernel_sweep.py`) runs every
-direct kernel that serves, with no cross-candidate rule.
+`Gfx950ConvFwdAotSelection.hpp`. Direct instances of every variant are all kept:
+rocKE's direct benchmark (`direct_plans` in `benchmarks/common/direct_kernel_sweep.py`)
+runs every direct kernel that serves, with no cross-candidate rule. A graph's direct
+candidates therefore add to its selected implicit-GEMM ones.
 
 The selected instances are the engine's catalog for the graph, so everything after it
 applies to them alone, in this order: the knob filter (a forced `tile_k` or
@@ -411,6 +412,37 @@ filtering, before the winner-record lookup, with benchmarking on or off. A recor
 benchmarked under a limit therefore covers exactly the candidates a later build under
 the same limit walks. Unset, or any value that is not a positive integer, means no
 limit.
+
+In the GPU suite's synthetic graphs, a dense 3x3 graph selects 3,260 of its 78,940
+serving implicit-GEMM instances, plus up to a few hundred direct ones (146 for the
+default `Smoke` graph); a depthwise graph selects 7,440 implicit-GEMM instances (only
+width 1 serves one channel per group) and about 110 direct ones.
+
+### Plan-build cost
+
+Each (graph, device) is matched once: every kernel of the engine goes through the
+kernel matcher, then the candidate filter narrows what it admitted, and the result is
+cached. Two plugin SDK mechanisms keep that cheap at this catalog size:
+
+- **Catalog views.** A cached catalog is a `CatalogView`: pointers into the engine's
+  shared, immutable kernel definitions, handed out as `shared_ptr<const CatalogView>`.
+  No plugin call copies the catalog, and a plan copies only the definition it launches.
+  The cache keeps the 256 most recent (graph, device) catalogs at 8 bytes per selected
+  kernel, so it is bounded at a few MB.
+- **Prepared kernels.** `aotPrepare`, a `KernelPrepareFn` registered under the AOT
+  kernel matcher's symbol, decodes each kernel's dtype, epilogue and instance once, when
+  the engine loads. The kernel matcher, score and candidate filter read that instead of
+  about fifty metadata fields per kernel, and read the matched problem from what the
+  graph match bound instead of walking the graph per kernel.
+
+Matching and filtering all 168,476 kernels for one graph takes about 20 to 80 ms. An
+unbenchmarked plan, through the frontend (`create_execution_plan_ext`,
+`check_support`, `build_plans`), takes about 35 to 40 ms on a warm process. Before these
+changes it took about 2 s, and resident memory grew by up to about 125 MB per new graph
+until the catalog cache filled. Now it is flat: over 600 distinct graphs it grew by
+about 11 MB while the cache filled, then not at all. A benchmarked plan adds the
+candidates' code-object loads and timed runs, which
+`HIPDNN_INGESTOR_CANDIDATE_LIMIT` bounds.
 
 ## The seed engine and the GPU tests
 
