@@ -4444,7 +4444,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, "11wait for global read"))
       if not kernel["NoLdsWriteCode"]:
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 1, 0, -1, "1wait for local write"))
-      module.add(self._syncThreads(kernel, "4sync for global read, PGR->LW needs sync"))
+      if self.do["Sync"] and self._needsSingleWaveTensorLoopBarrier(kernel):
+        module.add(SBarrier(comment="4sync for global read, single-wave PGR1 TDM needs sync"))
+      else:
+        module.add(self._syncThreads(kernel, "4sync for global read, PGR->LW needs sync"))
     elif kernel["PrefetchGlobalRead"] and kernel["enableTDMA"] and kernel["enableTDMB"]:
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for tensor load to finish"))
       module.add(self._syncThreads(kernel, "wait for tensor load to finish, PGR->LW needs sync"))
@@ -7146,6 +7149,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
                                "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
                                "EnableWaitCntInsertion": enableWaitCntInsertion,
+                               "EnableLoopCarriedTokenDeps": self._needsLoopCarriedTensorTokenDeps(kernel),
                                # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
                                "EnableESM2": kernel["EnableStinkyTofuESM2"],
                                "EnableESM2TrackValuVsrc": kernel["EnableESM2TrackValuVsrc"],
@@ -7310,6 +7314,24 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     else:
       print2(f"Using Original Rocisa Assembly")
       return (error, str(moduleKernelBody))
+
+  def _needsLoopCarriedTensorTokenDeps(self, kernel):
+    # StinkyTofu only carries tensor-token dependencies around a loop back-edge
+    # through a workgroup barrier, and one wave emits none. Local-read prefetch
+    # reads the next buffer after a wait on the prologue's last tensor load,
+    # which also orders later trips; without it the loop-top reads of the
+    # buffer the previous trip loaded would get no s_wait_tensorcnt.
+    return kernel["NumThreads"] <= kernel["WavefrontSize"] \
+      and (kernel["enableTDMA"] or kernel["enableTDMB"]) \
+      and self.states.numItersPLR == 0
+
+  def _needsSingleWaveTensorLoopBarrier(self, kernel):
+    # A single PGR1 loop copy alternates LDS buffers under fixed memory tokens:
+    # its reads carry the prologue load's token, its tensor loads the other one.
+    # Only an untagged barrier makes StinkyTofu drain the previous trip's load.
+    return self._needsLoopCarriedTensorTokenDeps(kernel) \
+      and kernel["PrefetchGlobalRead"] == 1 \
+      and not kernel["ExpandPointerSwap"]
 
   ##############################################################################
   # Init Kernel
