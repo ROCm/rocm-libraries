@@ -41,6 +41,8 @@ if str(_TESTROOT) not in sys.path:
 
 def pytest_addoption(parser):
     parser.addoption("--rocke-reference-arch", default=None)
+    parser.addoption("--rocke-reference-bundle", type=Path, default=None)
+    parser.addoption("--rocke-reference-lock", type=Path, default=None)
     parser.addoption(
         "--rocke-reference-operation", choices=("sdpa", "conv"), default=None
     )

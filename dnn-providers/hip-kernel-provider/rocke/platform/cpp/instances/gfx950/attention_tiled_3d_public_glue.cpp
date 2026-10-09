@@ -848,8 +848,10 @@ bool rocke_gfx950_attention_tiled_3d_ctx_init(
  *  max_workgroup_size / waves_per_eu kernel attrs are set here (Python lines
  *  303-305) before the param declarations.
  * ===================================================================== */
-rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx950(
-    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
+static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
+                                                const rocke_unified_attention_3d_tiled_spec_t* spec,
+                                                const char* arch,
+                                                bool strided_kv)
 {
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         rocke_gfx950_attention_tiled_3d_build_ctx_t ctx;
@@ -869,6 +871,16 @@ rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx950(
             return NULL;
         }
 
+        if(strided_kv
+           && (spec->kv_storage_dtype != NULL || spec->use_i64_kv_addr || spec->use_wide_kv_load))
+        {
+            rocke_i_set_err(
+                b,
+                ROCKE_ERR_VALUE,
+                "strided KV requires fp16/bf16 async loads without paged i64 addressing");
+            return NULL;
+        }
+
         /* Name the kernel from spec.kernel_name() (Python b = IRBuilder(
          * spec.kernel_name())). The C entry reuses a caller-supplied builder. */
         if(b->kernel != NULL)
@@ -883,6 +895,16 @@ rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx950(
                     "build_unified_attention_3d_tiled_gfx950: kernel_name encode failed");
                 return NULL;
             }
+            if(strided_kv)
+            {
+                const size_t len = strlen(name);
+                if(len + sizeof("_stridedkv") > sizeof(name))
+                {
+                    rocke_i_set_err(b, ROCKE_ERR_VALUE, "strided KV kernel name too long");
+                    return NULL;
+                }
+                memcpy(name + len, "_stridedkv", sizeof("_stridedkv"));
+            }
             b->kernel->name = rocke_arena_strdup(&b->arena, name);
             if(b->kernel->name == NULL)
             {
@@ -896,6 +918,8 @@ rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx950(
         {
             return NULL;
         }
+
+        ctx.strided_kv = strided_kv;
 
         /* b.kernel.attrs["max_workgroup_size"] = THREADS (line 303). */
         if(b->kernel != NULL)
@@ -927,6 +951,18 @@ rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx950(
         }
         return b->kernel; /* return b.kernel (line 950) */
     });
+}
+
+rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx950(
+    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
+{
+    return build_segment_gfx950(b, spec, arch, false);
+}
+
+rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_strided_gfx950(
+    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
+{
+    return build_segment_gfx950(b, spec, arch, true);
 }
 
 /* ===================================================================== *
