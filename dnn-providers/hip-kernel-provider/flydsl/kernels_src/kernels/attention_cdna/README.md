@@ -85,5 +85,14 @@ diff against upstream plus the modifications below.
    At `head_dim` 256 the padded tiles need 67,072 bytes of LDS, past gfx942's 64 KiB;
    unpadded they need exactly 64 KiB. Unset, upstream's padding.
 
+10. **Rescale every O chunk on the non-fused PV path** (`flash_attn_utils.py`,
+    `GenericGemmHelper.gemm2_pv`). Without hardware transpose (gfx942) the O chunks
+    after the first are rescaled lazily, one per PV step of the first chunk -- which
+    reaches only `PV_K_STEPS` of them. At `head_dim` 256 (eight chunks, four steps) the
+    last three were never rescaled when the running max moved, and f16 (which takes
+    this path; bf16 takes the fused one) gave wrong results. The rest are now rescaled
+    before their first accumulate. An upstream bug; unreachable upstream, whose gfx942
+    launcher never builds `head_dim` 256.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

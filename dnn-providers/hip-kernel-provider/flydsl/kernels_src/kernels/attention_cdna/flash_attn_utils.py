@@ -3723,6 +3723,12 @@ class GenericGemmHelper:
         traits = self.ctx.traits
         steps = kv_lds_to_vgpr._pv_steps
         total = kv_lds_to_vgpr.total_pv
+        if const_expr(not traits.USE_HW_TR):
+            # The loop below rescales chunks 1..PV_K_STEPS lazily, one per dc == 0 step;
+            # any past those (head_dim 256: 8 chunks, 4 steps) are rescaled here, before
+            # their first accumulate (modification 10).
+            for dc in range_constexpr(traits.PV_K_STEPS + 1, traits.D_CHUNKS):
+                o_accs[dc] = Vec(o_accs[dc]) * corr_vec
         v_lo_cur, v_hi_cur = kv_lds_to_vgpr.read_v_pack(0, v_base)
         for si in range_constexpr(total):
             dc, pks = steps[si]

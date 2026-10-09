@@ -630,10 +630,13 @@ the harness's own bias. The measurements are kept outside the repository.
    or a schedule that recovers it.
 6. *gfx942 `head_dim` 256.* Correct on every corpus shape, but its throughput is well
    below gfx942's `head_dim` 128 -- further below than gfx950's 256 is below its 128.
-   Its tile runs one wave per SIMD with all 64 KiB of LDS and unpadded K/V rows. A
-   smaller KV tile, a head-dim split as the RDNA kernel does at 256, or a V layout that
-   avoids the transposed scalar stores are the candidates. Nothing else in hipDNN
-   serves this class on gfx942, so it ships as it is.
+   Its tile runs one wave per SIMD with all 64 KiB of LDS and unpadded K/V rows, and
+   the unpadded transposed-V tile is most of it: measured at `head_dim` 128, where both
+   fit, dropping V's padding alone makes the object roughly half as fast (bank
+   conflicts on the V^T reads), dropping K's a few percent. An XOR swizzle on V^T in
+   place of the padding (as K has), a smaller KV tile, or a head-dim split as the RDNA
+   kernel does at 256 are the candidates. Nothing else in hipDNN serves this class on
+   gfx942, so it ships as it is.
 
 ### 7.6 How the instance set was chosen
 
