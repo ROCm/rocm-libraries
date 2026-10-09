@@ -198,7 +198,7 @@ jobs:
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
           # Common GEMM tests run against the prebuilt client. Per-test cap 5400s (90 min).
           # Preserve the detected stepping; gfx1250v0 is no longer a valid target.
-          TL_TARGET="$(TENSILE_ROCM_PATH="$ROCM" python -c 'from Tensile.Tests.gpu_detection import get_available_archs; print(";".join(get_available_archs()))')"
+          TL_TARGET="$(TENSILE_ROCM_PATH="$ROCM" python -c 'from tensilelite.Tests.gpu_detection import get_available_archs; print(";".join(get_available_archs()))')"
           case "$TL_TARGET" in
             gfx1250|gfx1250-strict) ;;
             *) echo "::error::Expected one gfx1250 architecture, got $TL_TARGET"; exit 1 ;;
