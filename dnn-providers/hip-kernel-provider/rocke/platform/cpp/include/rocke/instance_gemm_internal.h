@@ -71,6 +71,9 @@ extern "C" {
  * 64 covers every legal tile. */
 #define ROCKE_GEMM_MAX_DTL_PASSES 64
 
+/* Maximum TDM ring depth. Mirrors Python _TDM_MAX_DEPTH = 4. */
+#define ROCKE_GEMM_TDM_MAX_DEPTH 4
+
 /* ===================================================================== *
  *  rocke_gemm_build_ctx_t
  *
@@ -230,6 +233,19 @@ typedef struct rocke_gemm_build_ctx
     rocke_value_t* dtl_c_halves_per_chunk; /* const_i32(dtl_halves)        */
     rocke_value_t* dtl_c_block_size; /* const_i32(block_size)        */
 
+    /* ---- TDM plumbing (spec.trait.tdm) ---- */
+    int tdm_ring;         /* _tdm_ring_depth: ring size when >= 3, 0 otherwise */
+    int tdm_elem_bytes;   /* bytes per A/B element                    */
+    int tdm_pad_enable;   /* from tdm_padding_for_tile                */
+    int tdm_pad_interval; /* from tdm_padding_for_tile                */
+    int tdm_pad_amount;   /* from tdm_padding_for_tile                */
+    rocke_value_t* tdm_a_lds_base; /* smem_addr_of(A_smem)          */
+    rocke_value_t* tdm_b_lds_base; /* smem_addr_of(B_smem)          */
+    int tdm_a_buf_bytes;  /* block_m * lds_k * tdm_elem_bytes         */
+    int tdm_b_buf_bytes;  /* block_n * lds_k * tdm_elem_bytes         */
+    int tdm_waves;        /* warp_m * warp_n * warp_k                 */
+    rocke_value_t* tdm_wave_id; /* readfirstlane(tid/wave_size) or 0  */
+
     /* ---- active-tile gate (batched && active_tile_skip) -- */
     rocke_value_t* do_work_cond; /* NULL when the gate is off        */
 
@@ -286,6 +302,18 @@ rocke_value_t* rocke_gemm_emit_zero_acc(rocke_ir_builder_t* b,
 /* _ab_dtype_bytes(spec) -> bytes per A/B element (2 for f16/bf16, 1 for
  * fp8/bf8). Defined in gemm_universal.cpp. */
 int rocke_gemm_ab_dtype_bytes(const rocke_gemm_universal_spec_t* spec);
+
+/* _dtype_bytes(dtype_str) -> bytes per element for a named dtype string.
+ * Mirrors Python _dtype_bytes. */
+int rocke_gemm_dtype_bytes(const char* dtype);
+
+/* _tdm_pipelined(trait) -> true when tdm=true and tdm_depth >= 2.
+ * Mirrors Python _tdm_pipelined. */
+bool rocke_gemm_tdm_pipelined(const rocke_gemm_trait_spec_t* trait);
+
+/* _tdm_ring_depth(trait) -> ring size when >= 3, else 0.
+ * Mirrors Python _tdm_ring_depth. */
+int rocke_gemm_tdm_ring_depth(const rocke_gemm_trait_spec_t* trait);
 
 /* _choose_load_vec(spec) -> width in elements. Thin adapter over
  * rocke_choose_load_vec; resolves the element width from dtype_a unless
@@ -381,6 +409,9 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx);
 /* _emit_kloop_prefetch(ctx): DTLA ping-pong software-pipelined K-loop (falls
  * back to _simple when loads_per_tile > 63). */
 void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx);
+
+/* _emit_kloop_tdm_ring(ctx): TDM depth >= 3 modular-ring K-loop. */
+void rocke_gemm_emit_kloop_tdm_ring(rocke_gemm_build_ctx_t* ctx);
 
 /* _emit_epilogue(ctx): dispatch to the cshuffle or default epilogue using
  * ctx->for_results and the captured warp/lane/offset Values. */

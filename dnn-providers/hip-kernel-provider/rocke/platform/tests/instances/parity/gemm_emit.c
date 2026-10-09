@@ -323,6 +323,59 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->block_size = 128;
         spec->batched = false;
         break;
+    /* gfx1250 TDM load path, one config per K-loop shape (configs 14-17).
+     * Appended last so inserting earlier does not renumber existing configs.
+     * Mirrors gemm_emit.py _TDM_CONFIGS. */
+    case 14: /* depth 1: single-buffer loop, multi-wave */
+    case 15: /* depth 2: ping-pong, multi-wave */
+    case 16: /* depth 3: modular ring, multi-wave */
+    case 17: /* depth 4: modular ring, single wave, unpadded */
+    {
+        static const int depths[] = {1, 2, 3, 4};
+        static const char* names[] = {
+            "test_tdm_d1", "test_tdm_d2", "test_tdm_d3_ring", "test_tdm_d4_ring_1wave"};
+        static const int pads[] = {8, 8, 8, 0};
+        int i = idx - 14;
+        bool single_wave = (i == 3);
+        spec->name = names[i];
+        if(single_wave)
+        {
+            spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 64,
+                                                  .tile_n = 64,
+                                                  .tile_k = 64,
+                                                  .warp_m = 1,
+                                                  .warp_n = 1,
+                                                  .warp_k = 1,
+                                                  .warp_tile_m = 16,
+                                                  .warp_tile_n = 16,
+                                                  .warp_tile_k = 32};
+        }
+        else
+        {
+            spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 128,
+                                                  .tile_n = 128,
+                                                  .tile_k = 32,
+                                                  .warp_m = 2,
+                                                  .warp_n = 2,
+                                                  .warp_k = 1,
+                                                  .warp_tile_m = 16,
+                                                  .warp_tile_n = 16,
+                                                  .warp_tile_k = 32};
+        }
+        spec->trait.pipeline = "mem";
+        spec->trait.epilogue = "default";
+        spec->trait.tdm = true;
+        spec->trait.tdm_depth = depths[i];
+        spec->trait.lds_k_pad = pads[i];
+        spec->data.dtype_a = "bf16";
+        spec->data.dtype_b = "bf16";
+        spec->data.dtype_c = "bf16";
+        spec->data.dtype_acc = "fp32";
+        spec->wave_size = 32;
+        spec->block_size = single_wave ? 32 : 128;
+        spec->batched = false;
+        break;
+    }
     default:
         return -1;
     }
@@ -330,7 +383,7 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     return 0;
 }
 
-/* Config 9 exercises gfx942; configs 11-13 gfx1250; the rest use the
+/* Config 9 exercises gfx942; configs 11-17 gfx1250; the rest use the
  * gfx950 baseline. */
 static const char* arch_for(int idx)
 {
@@ -338,7 +391,7 @@ static const char* arch_for(int idx)
     {
         return "gfx942";
     }
-    if(idx == 11 || idx == 12 || idx == 13)
+    if(idx >= 11 && idx <= 17)
     {
         return "gfx1250";
     }
@@ -349,7 +402,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..13>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..17>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

@@ -25,6 +25,7 @@
 
 #include "rocke/instance_gemm_internal.h"
 #include "rocke/instance_gemm_universal.h"
+#include "rocke/tdm.h" /* rocke_tdm_padding_for_tile */
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
@@ -167,6 +168,25 @@ int rocke_gemm_ab_dtype_bytes(const rocke_gemm_universal_spec_t* spec)
 {
     const rocke_dtype_info_t* info = rocke_dtype_info(spec->data.dtype_a);
     return (info != NULL) ? (info->encoded_bits / 8) : 2;
+}
+
+/* Mirrors Python _dtype_bytes(dtype). */
+int rocke_gemm_dtype_bytes(const char* dtype)
+{
+    const rocke_dtype_info_t* info = rocke_dtype_info(dtype);
+    return (info != NULL) ? (info->encoded_bits / 8) : 2;
+}
+
+/* Mirrors Python _tdm_pipelined(trait). */
+bool rocke_gemm_tdm_pipelined(const rocke_gemm_trait_spec_t* trait)
+{
+    return trait->tdm && trait->tdm_depth >= 2;
+}
+
+/* Mirrors Python _tdm_ring_depth(trait). */
+int rocke_gemm_tdm_ring_depth(const rocke_gemm_trait_spec_t* trait)
+{
+    return (trait->tdm && trait->tdm_depth >= 3) ? trait->tdm_depth : 0;
 }
 
 /* _ilog2(x): bit_length()-1 for powers of two, else -1 (Python returns None). */
@@ -1270,8 +1290,8 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     }
 
     /* ---- AB LDS double-buffer plan (_ab_lds_plan) -- */
-    ctx.prefetch = spec->trait.dtl_prefetch;
-    if(ctx.prefetch && !spec->trait.direct_to_lds)
+    ctx.prefetch = spec->trait.dtl_prefetch || rocke_gemm_tdm_pipelined(&spec->trait);
+    if(spec->trait.dtl_prefetch && !spec->trait.direct_to_lds)
     {
         /* "dtl_prefetch requires direct_to_lds=True" -- ValueError path. */
         return NULL;
@@ -1305,12 +1325,17 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         db = spec->trait.pipeline != NULL && strcmp(spec->trait.pipeline, "compv4") == 0
              && spec->trait.epilogue != NULL && strcmp(spec->trait.epilogue, "cshuffle") != 0
              && !spec->trait.direct_to_lds && db_fits_2wg;
-        two_buf = (spec->trait.dtl_prefetch ? true : false) || db;
+        two_buf = (spec->trait.dtl_prefetch ? true : false) || db
+                  || rocke_gemm_tdm_pipelined(&spec->trait);
         ctx.db = db;
         ctx.two_buf = two_buf;
     }
-    ctx.A_LDS_M = (ctx.two_buf ? 2 : 1) * ctx.block_m;
-    ctx.B_LDS_N = (ctx.two_buf ? 2 : 1) * ctx.block_n;
+    ctx.tdm_ring = rocke_gemm_tdm_ring_depth(&spec->trait);
+    {
+        int nbuf = ctx.tdm_ring ? ctx.tdm_ring : (ctx.two_buf ? 2 : 1);
+        ctx.A_LDS_M = nbuf * ctx.block_m;
+        ctx.B_LDS_N = nbuf * ctx.block_n;
+    }
     ctx.lds_pad = spec->trait.direct_to_lds ? 0 : spec->trait.lds_k_pad;
     ctx.lds_k = ctx.block_k + ctx.lds_pad;
     {
@@ -1460,6 +1485,34 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.dtl_c_chunks_per_row = rocke_b_const_i32(b, ctx.dtl_chunks_per_row);
         ctx.dtl_c_halves_per_chunk = rocke_b_const_i32(b, ctx.dtl_halves);
         ctx.dtl_c_block_size = rocke_b_const_i32(b, spec->block_size);
+    }
+
+    /* ---- TDM plumbing. Mirrors Python's `if spec.trait.tdm:` prologue. ---- */
+    if(spec->trait.tdm)
+    {
+        ctx.tdm_elem_bytes = rocke_gemm_dtype_bytes(spec->data.dtype_a);
+        rocke_tdm_padding_for_tile(ctx.tdm_elem_bytes,
+                                   ctx.block_k,
+                                   spec->trait.lds_k_pad,
+                                   &ctx.tdm_pad_enable,
+                                   &ctx.tdm_pad_interval,
+                                   &ctx.tdm_pad_amount,
+                                   NULL,
+                                   0);
+        ctx.tdm_a_lds_base = rocke_b_smem_addr_of(b, ctx.A_smem);
+        ctx.tdm_b_lds_base = rocke_b_smem_addr_of(b, ctx.B_smem);
+        ctx.tdm_a_buf_bytes = ctx.block_m * ctx.lds_k * ctx.tdm_elem_bytes;
+        ctx.tdm_b_buf_bytes = ctx.block_n * ctx.lds_k * ctx.tdm_elem_bytes;
+        ctx.tdm_waves = spec->tile.warp_m * spec->tile.warp_n * spec->tile.warp_k;
+        if(ctx.tdm_waves > 1)
+        {
+            ctx.tdm_wave_id = rocke_b_readfirstlane(
+                b, rocke_b_div(b, ctx.tid, ctx.c_wave));
+        }
+        else
+        {
+            ctx.tdm_wave_id = rocke_b_const_i32(b, 0);
+        }
     }
 
     /* ---- active-tile gate (batched && active_tile_skip) -- */

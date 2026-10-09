@@ -29,6 +29,8 @@
  */
 
 #include "rocke/instance_gemm_universal.h"
+#include "rocke/instance_gemm_internal.h" /* ROCKE_GEMM_TDM_MAX_DEPTH, helpers */
+#include "rocke/tdm.h"                    /* rocke_tdm_encode_padding           */
 
 #include <stdio.h>
 #include <string.h>
@@ -197,6 +199,8 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.dtl_prefetch = false;
     s.trait.active_tile_skip = false;
     s.trait.lds_k_pad = 0;
+    s.trait.tdm = false;
+    s.trait.tdm_depth = 1;
     s.trait.lds_swizzle = false;
     s.trait.emit_sched_hints_set = false; /* Python None (arch-resolved) */
     s.trait.emit_sched_hints = false;
@@ -552,7 +556,8 @@ static void ck_gemm_ab_lds_plan(const rocke_gemm_universal_spec_t* spec,
     }
     if(out_two_buf != NULL)
     {
-        *out_two_buf = (spec->trait.dtl_prefetch ? true : false) || db;
+        *out_two_buf = (spec->trait.dtl_prefetch ? true : false) || db
+                       || rocke_gemm_tdm_pipelined(&spec->trait);
     }
 }
 
@@ -748,6 +753,49 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         {
             CK_GEMM_REJECT("WMMA path does not support chiplet_swizzle on %s", arch);
         }
+        /* TDM emits tensor_load_to_lds / s_wait_tensorcnt, which exist only on
+         * gfx1250 (GFX12 tensor-DMA hardware). Gated on the arch capability bit. */
+        if(spec->trait.tdm && !target->memory.has_tdm)
+        {
+            CK_GEMM_REJECT("tdm requires the Tensor Data Mover, which %s lacks", arch);
+        }
+    }
+
+    if(spec->trait.tdm)
+    {
+        if(spec->trait.direct_to_lds)
+        {
+            CK_GEMM_REJECT("tdm and direct_to_lds are alternative load paths");
+        }
+        {
+            int row_bytes = t->tile_k * rocke_gemm_dtype_bytes(spec->data.dtype_a);
+            if(spec->trait.lds_k_pad)
+            {
+                char why[256] = {0};
+                int pi = 0, pa = 0;
+                int pad_bytes = spec->trait.lds_k_pad
+                                * rocke_gemm_dtype_bytes(spec->data.dtype_a);
+                if(rocke_tdm_encode_padding(row_bytes, pad_bytes, &pi, &pa, why, sizeof(why))
+                   != ROCKE_OK)
+                {
+                    CK_GEMM_REJECT("tdm cannot encode lds_k_pad: %s", why);
+                }
+            }
+            else if((row_bytes % 4) != 0 || row_bytes < 8)
+            {
+                CK_GEMM_REJECT("tdm needs a dword-multiple tile row (got %dB)", row_bytes);
+            }
+        }
+        if(spec->trait.tdm_depth < 1 || spec->trait.tdm_depth > ROCKE_GEMM_TDM_MAX_DEPTH)
+        {
+            CK_GEMM_REJECT("tdm_depth must be in 1..%d (got %d)",
+                           ROCKE_GEMM_TDM_MAX_DEPTH,
+                           spec->trait.tdm_depth);
+        }
+    }
+    if(spec->trait.tdm_depth != 1 && !spec->trait.tdm)
+    {
+        CK_GEMM_REJECT("tdm_depth is only meaningful with tdm=True");
     }
 
     /* Geometry divisibility. */
@@ -774,7 +822,10 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
 
     /* LDS budget. */
     ck_gemm_ab_lds_plan(spec, target, &ab_single, NULL, &ab_dbl);
-    ab_bytes = ab_single * (ab_dbl ? 2 : 1);
+    {
+        int ring = rocke_gemm_tdm_ring_depth(&spec->trait);
+        ab_bytes = ab_single * (ring ? ring : (ab_dbl ? 2 : 1));
+    }
     c_bytes = (strcmp(spec->trait.epilogue, "cshuffle") == 0) ? (t->tile_m * t->tile_n * 2) : 0;
     bytes_lds = ab_bytes + c_bytes;
     if(!rocke_archtarget_fits_lds(target, (long)bytes_lds))

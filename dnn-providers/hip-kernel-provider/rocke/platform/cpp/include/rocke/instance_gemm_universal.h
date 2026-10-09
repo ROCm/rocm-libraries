@@ -100,6 +100,11 @@ typedef struct rocke_gemm_trait_spec
     bool dtl_prefetch;
     bool active_tile_skip;
     int lds_k_pad; /* default 0 */
+    /* TDM (Tensor Data Mover): replace per-lane coalesced stores with a single
+     * tensor_load_to_lds descriptor per operand. gfx1250 only; mutually
+     * exclusive with direct_to_lds. Python TraitSpec.tdm / TraitSpec.tdm_depth. */
+    bool tdm;        /* default false */
+    int tdm_depth;   /* buffer count; 1 = unpipelined, >=2 = ring; default 1 */
     bool lds_swizzle;
     /* compv4/compv3 schedule-hint policy. Python: Optional[bool] = None.
      * emit_sched_hints_set==false mirrors Python None (arch-resolved: hints

@@ -38,6 +38,7 @@
 
 #include "rocke/helper_rocke.helpers.grid.h" /* rocke_chiplet_aware_super_tile_dynamic */
 #include "rocke/instance_gemm_internal.h"
+#include "rocke/tdm.h" /* rocke_tdm_build_descriptor_2d */
 
 /* Widest global A/B load vector, in elements: the 4-dword buffer_load limit is
  * 16 bytes, so a 1-byte operand tops out at 16 elements. The pad_k gather
@@ -191,9 +192,9 @@ void rocke_gemm_build_populate_ctx(rocke_gemm_build_ctx_t* ctx)
             = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_block_id_x(b), ctx->c_block_n));
     }
 
-    /* AB LDS double-buffer plan. _prefetch = bool(trait.dtl_prefetch). */
-    ctx->prefetch = spec->trait.dtl_prefetch;
-    if(ctx->prefetch && !spec->trait.direct_to_lds)
+    /* AB LDS double-buffer plan. Mirrors Python _prefetch = dtl_prefetch || _tdm_pipelined. */
+    ctx->prefetch = spec->trait.dtl_prefetch || rocke_gemm_tdm_pipelined(&spec->trait);
+    if(spec->trait.dtl_prefetch && !spec->trait.direct_to_lds)
     {
         /* raise ValueError("dtl_prefetch requires direct_to_lds=True") */
         ctx->b->status = ROCKE_ERR_VALUE;
@@ -214,10 +215,16 @@ void rocke_gemm_build_populate_ctx(rocke_gemm_build_ctx_t* ctx)
                   && (strcmp(spec->trait.epilogue, "cshuffle") != 0) && !spec->trait.direct_to_lds
                   && db_fits_2wg;
         ctx->db = db;
-        ctx->two_buf = spec->trait.dtl_prefetch || db;
+        ctx->two_buf = spec->trait.dtl_prefetch || db
+                       || rocke_gemm_tdm_pipelined(&spec->trait);
     }
-    ctx->A_LDS_M = ctx->two_buf ? 2 * ctx->block_m : ctx->block_m;
-    ctx->B_LDS_N = ctx->two_buf ? 2 * ctx->block_n : ctx->block_n;
+    /* A deep TDM ring (depth >= 3) allocates one buffer per stage. */
+    ctx->tdm_ring = rocke_gemm_tdm_ring_depth(&spec->trait);
+    {
+        int nbuf = ctx->tdm_ring ? ctx->tdm_ring : (ctx->two_buf ? 2 : 1);
+        ctx->A_LDS_M = nbuf * ctx->block_m;
+        ctx->B_LDS_N = nbuf * ctx->block_n;
+    }
     /* _lds_pad = trait.lds_k_pad if not direct_to_lds else 0; _lds_k = block_k + pad */
     ctx->lds_pad = spec->trait.direct_to_lds ? 0 : spec->trait.lds_k_pad;
     ctx->lds_k = ctx->block_k + ctx->lds_pad;
@@ -390,6 +397,44 @@ rocke_value_t*
  *  lds_parity is int|Value: parity_v != NULL => runtime Value form; else
  *  parity_imm carries the compile-time 0/1 parity.
  * ===================================================================== */
+/* _issue: one TDM descriptor moving a [rows, block_k] tile of `ptr` whose
+ * first row is `row_off` into LDS at `lds_base`. Mirrors Python _issue
+ * closure inside emit_load_phase. */
+static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
+                                 rocke_value_t* ptr,
+                                 rocke_value_t* row_off,
+                                 int rows,
+                                 rocke_value_t* lds_base,
+                                 rocke_value_t* batch_off,
+                                 rocke_value_t* k_off,
+                                 rocke_value_t* k_remaining)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* origin
+        = rocke_b_add(b, batch_off, rocke_b_add(b, rocke_b_mul(b, row_off, ctx->K), k_off));
+    rocke_tdm_descriptor_2d_args_t args;
+    rocke_value_t* groups[5];
+    memset(&args, 0, sizeof(args));
+    args.global_addr = rocke_b_global_addr_of(b, ptr, origin);
+    args.lds_addr = lds_base;
+    args.elem_bytes = ctx->tdm_elem_bytes;
+    args.tensor_dim0 = k_remaining;
+    args.tensor_dim1 = rocke_b_const_i32(b, rows);
+    args.tile_dim0 = ctx->block_k;
+    args.tile_dim1 = rows;
+    /* dim0_stride_value = K (runtime row pitch). Mirrors Python: dim0_stride=K. */
+    args.dim0_stride_value = ctx->K;
+    args.dim1_stride = 1;
+    args.pad_enable = ctx->tdm_pad_enable;
+    args.pad_interval = ctx->tdm_pad_interval;
+    args.pad_amount = ctx->tdm_pad_amount;
+    if(rocke_tdm_build_descriptor_2d(b, &args, groups) != ROCKE_OK)
+    {
+        return;
+    }
+    rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
+}
+
 void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                 rocke_value_t* A_dst,
                                 rocke_value_t* B_dst,
@@ -403,6 +448,94 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
     const rocke_type_t* I64 = rocke_i64();
     (void)A_dst; /* Python emit_load_phase's A_dst/B_dst args are unused in body. */
     (void)B_dst;
+
+    /* ----------------------- TDM path ----------------------- *
+     * Mirrors Python's `if spec.trait.tdm:` branch at the top of emit_load_phase.
+     * One descriptor per operand moves the whole tile; returns early. */
+    if(spec->trait.tdm)
+    {
+        rocke_value_t* zero = rocke_b_const_i32(b, 0);
+        rocke_value_t* a_lds;
+        rocke_value_t* b_lds;
+        rocke_value_t* k_remaining;
+        /* Every builder call gets its own statement. C leaves the evaluation
+         * order of function arguments unspecified (see tdm.cpp). */
+        if(parity_v != NULL)
+        {
+            rocke_value_t* a_off = rocke_b_zext(
+                b, rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->tdm_a_buf_bytes)), I64);
+            a_lds = rocke_b_smem_ptr_add(b, ctx->tdm_a_lds_base, a_off);
+            rocke_value_t* b_off = rocke_b_zext(
+                b, rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->tdm_b_buf_bytes)), I64);
+            b_lds = rocke_b_smem_ptr_add(b, ctx->tdm_b_lds_base, b_off);
+        }
+        else if(parity_imm)
+        {
+            rocke_value_t* a_off = rocke_b_zext(
+                b, rocke_b_const_i32(b, parity_imm * ctx->tdm_a_buf_bytes), I64);
+            a_lds = rocke_b_smem_ptr_add(b, ctx->tdm_a_lds_base, a_off);
+            rocke_value_t* b_off = rocke_b_zext(
+                b, rocke_b_const_i32(b, parity_imm * ctx->tdm_b_buf_bytes), I64);
+            b_lds = rocke_b_smem_ptr_add(b, ctx->tdm_b_lds_base, b_off);
+        }
+        else
+        {
+            a_lds = ctx->tdm_a_lds_base;
+            b_lds = ctx->tdm_b_lds_base;
+        }
+
+        k_remaining = rocke_b_smax(b, rocke_b_sub(b, ctx->K, k_off), zero);
+
+        /* tensor_load_to_lds is wave-level; one wave owns each operand. */
+        if(ctx->tdm_waves > 1)
+        {
+            rocke_if_t a_gate
+                = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tdm_wave_id, zero));
+            rocke_b_region_enter(b, a_gate.then_region);
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->A,
+                                 ctx->block_m_off,
+                                 ctx->block_m,
+                                 a_lds,
+                                 ctx->batch_off_a,
+                                 k_off,
+                                 k_remaining);
+            rocke_b_region_leave(b);
+            rocke_value_t* one = rocke_b_const_i32(b, 1);
+            rocke_if_t b_gate
+                = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tdm_wave_id, one));
+            rocke_b_region_enter(b, b_gate.then_region);
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->Bp,
+                                 ctx->block_n_off,
+                                 ctx->block_n,
+                                 b_lds,
+                                 ctx->batch_off_b,
+                                 k_off,
+                                 k_remaining);
+            rocke_b_region_leave(b);
+        }
+        else
+        {
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->A,
+                                 ctx->block_m_off,
+                                 ctx->block_m,
+                                 a_lds,
+                                 ctx->batch_off_a,
+                                 k_off,
+                                 k_remaining);
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->Bp,
+                                 ctx->block_n_off,
+                                 ctx->block_n,
+                                 b_lds,
+                                 ctx->batch_off_b,
+                                 k_off,
+                                 k_remaining);
+        }
+        return;
+    }
 
     /* ----------------------- DirectToLDS path ----------------------- */
     if(spec->trait.direct_to_lds)

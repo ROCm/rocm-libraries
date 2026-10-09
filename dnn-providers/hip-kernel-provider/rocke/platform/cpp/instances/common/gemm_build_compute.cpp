@@ -23,6 +23,15 @@
 
 #include "rocke/instance_gemm_internal.h"
 
+/* Forward declaration. is_tdm is passed explicitly rather than re-read from
+ * ctx->spec->trait.tdm: after the function-entry branch on tdm, the compiler
+ * can propagate its cached value and fold the drain's re-check to false even
+ * when tdm is true. Passing it as a parameter breaks that folding. */
+static void rocke_gemm_drain_sync(rocke_ir_builder_t* b, bool is_tdm);
+/* Wrapper that reads trait.tdm from ctx; safe to call from functions that do
+ * not have an entry-branch optimization hazard (e.g. emit_kloop_simple). */
+static void rocke_gemm_drain_prefetch_and_sync(rocke_gemm_build_ctx_t* ctx);
+
 /* ===================================================================== *
  *  emit_mfma_phase
  *
@@ -260,8 +269,7 @@ void rocke_gemm_emit_kloop_db(rocke_gemm_build_ctx_t* ctx)
         rocke_value_t* new_accs[ROCKE_GEMM_MAX_ACCS];
         rocke_value_t* yield_vals[1 + ROCKE_GEMM_MAX_ACCS];
 
-        /* Start-of-iter barrier (RAW-safe read of half(parity), WAR-safe
-         * overwrite of half(next)). */
+        /* Start-of-iter barrier (compv4 non-TDM path; TDM never reaches kloop_db). */
         rocke_b_sync(b);
         /* Issue next-tile global->VGPR->LDS copy into the other half. */
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_next, 0, next_parity);
@@ -325,7 +333,7 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx)
         /* Single-buffer load-then-compute pipeline. parity is compile-time 0
          * (Python passes no lds_parity -> default 0). */
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, for_op.iv, 0, NULL);
-        rocke_b_sync(b);
+        rocke_gemm_drain_prefetch_and_sync(ctx); /* re-reads trait.tdm each iter: no CSE risk here */
 
         rocke_gemm_emit_mfma_phase(ctx,
                                    ctx->A_smem,
@@ -346,6 +354,119 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx)
     ctx->num_for_results = for_op.op->num_results;
 }
 
+/* Mirrors Python _sync_after_load / _drain_prefetch_and_sync.
+ * is_tdm is passed explicitly rather than read from ctx->spec->trait.tdm
+ * so the compiler cannot constant-fold the branch away (see forward decl). */
+static void rocke_gemm_drain_sync(rocke_ir_builder_t* b, bool is_tdm)
+{
+    if(is_tdm)
+    {
+        rocke_b_s_wait_tensorcnt(b, 0);
+        rocke_b_sync_lds_only(b);
+    }
+    else
+    {
+        rocke_b_sync(b);
+    }
+}
+
+static void rocke_gemm_drain_prefetch_and_sync(rocke_gemm_build_ctx_t* ctx)
+{
+    rocke_gemm_drain_sync(ctx->b, ctx->spec->trait.tdm);
+}
+
+/* ===================================================================== *
+ *  _emit_kloop_tdm_ring: TDM K-loop over D = tdm_depth >= 3 buffer LDS ring.
+ *  Mirrors Python _emit_kloop_tdm_ring in gemm_universal.py.
+ * ===================================================================== */
+void rocke_gemm_emit_kloop_tdm_ring(rocke_gemm_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int D = ctx->spec->trait.tdm_depth;
+    const int per_tile = (ctx->tdm_waves > 1) ? 1 : 2;
+    const int allowed = (D - 2) * per_tile;
+    const int ahead_k = (D - 1) * ctx->block_k;
+    rocke_value_t* k_span = rocke_b_sub(b, ctx->k_upper, ctx->k_lo);
+    rocke_value_t* c_one_k = rocke_b_const_i32(b, 1);
+    rocke_value_t* last_tile
+        = rocke_b_div(b, rocke_b_sub(b, k_span, c_one_k), ctx->c_block_k);
+    rocke_value_t* last_origin
+        = rocke_b_add(b, ctx->k_lo, rocke_b_mul(b, last_tile, ctx->c_block_k));
+    rocke_value_t* c_ring;
+    rocke_value_t* c_ahead;
+    rocke_value_t* c_one;
+    rocke_iter_arg_t loop_args[1 + ROCKE_GEMM_MAX_ACCS];
+    rocke_for_t for_op;
+    int i;
+
+    /* Prologue: fill ring slots 0 .. D-2. Emitted BEFORE the three ring
+     * constants below, matching Python's statement order: every builder call
+     * allocates an SSA name, so hoisting the constants would shift every
+     * later number and break byte-identity. */
+    for(int j = 0; j < D - 1; ++j)
+    {
+        rocke_value_t* k_off = rocke_b_smin(
+            b, rocke_b_add(b, ctx->k_lo, rocke_b_const_i32(b, j * ctx->block_k)),
+            last_origin);
+        rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_off, j, NULL);
+    }
+
+    c_ring = rocke_b_const_i32(b, D);
+    c_ahead = rocke_b_const_i32(b, D - 1);
+    c_one = rocke_b_const_i32(b, 1);
+    loop_args[0].name = "ring";
+    loop_args[0].init = ctx->c0;
+    for(i = 0; i < ctx->num_accs; ++i)
+    {
+        loop_args[1 + i].name = ctx->acc_names[i];
+        loop_args[1 + i].init = ctx->acc_inits[i];
+    }
+
+    for_op = rocke_b_scf_for_iter(b,
+                                  ctx->k_lo,
+                                  ctx->k_upper,
+                                  ctx->c_block_k,
+                                  loop_args,
+                                  1 + ctx->num_accs,
+                                  "k0",
+                                  /*unroll=*/false,
+                                  /*elide_trailing_barrier=*/true);
+
+    rocke_b_region_enter(b, for_op.body);
+    {
+        rocke_value_t* ring = for_op.iter_vars[0];
+        rocke_value_t* const* acc_iter = &for_op.iter_vars[1];
+        int num_acc_iter = for_op.num_iter_vars - 1;
+        rocke_value_t* new_accs[ROCKE_GEMM_MAX_ACCS];
+        rocke_value_t* yield_vals[1 + ROCKE_GEMM_MAX_ACCS];
+        rocke_value_t* k_ahead;
+        rocke_value_t* slot_ahead;
+
+        rocke_b_s_wait_tensorcnt(b, allowed);
+        rocke_b_sync_lds_only(b);
+        k_ahead = rocke_b_smin(
+            b, rocke_b_add(b, for_op.iv, rocke_b_const_i32(b, ahead_k)), last_origin);
+        slot_ahead = rocke_b_mod(b, rocke_b_add(b, ring, c_ahead), c_ring);
+        rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_ahead, 0, slot_ahead);
+        rocke_gemm_emit_mfma_phase(
+            ctx, ctx->A_smem, ctx->B_smem, acc_iter, num_acc_iter, 0, ring, new_accs);
+
+        yield_vals[0] = rocke_b_mod(b, rocke_b_add(b, ring, c_one), c_ring);
+        for(i = 0; i < num_acc_iter; ++i)
+            yield_vals[1 + i] = new_accs[i];
+        rocke_b_scf_yield(b, yield_vals, 1 + num_acc_iter);
+    }
+    rocke_b_region_leave(b);
+
+    /* Drain the in-flight fills so downstream code (cshuffle epilogue, persistent
+     * prologue) can safely reuse LDS. */
+    rocke_b_s_wait_tensorcnt(b, 0);
+
+    for(i = 0; i < for_op.op->num_results - 1; ++i)
+        ctx->for_results[i] = for_op.op->results[1 + i];
+    ctx->num_for_results = for_op.op->num_results - 1;
+}
+
 /* ===================================================================== *
  *  _emit_kloop_prefetch: DTLA ping-pong software-pipelined K-loop. Falls
  *  back to _simple when loads_per_tile > 63 (vmcnt is 6 bits on gfx950).
@@ -354,6 +475,10 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
     int loads_per_tile;
+    /* Capture is_tdm once at function entry into a local bool so the compiler
+     * cannot constant-fold it away inside the loop based on the entry branch
+     * (see the comment on rocke_gemm_drain_sync). */
+    const bool is_tdm = ctx->spec->trait.tdm;
     rocke_value_t* K_minus_one_tile;
     rocke_value_t* c1_i32;
     rocke_iter_arg_t loop_args[1 + ROCKE_GEMM_MAX_ACCS];
@@ -361,10 +486,20 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
     rocke_for_t for_op;
     int i;
 
-    loads_per_tile = ctx->dtl_a_passes + ctx->dtl_b_passes;
-    if(loads_per_tile > 63)
+    loads_per_tile = is_tdm ? 2 : (ctx->dtl_a_passes + ctx->dtl_b_passes);
+    /* vmcnt is 6 bits on gfx950 (max 63); saturates at 63 and loses the prefetch. */
+    if(strcmp(ctx->arch, "gfx1250") != 0 && loads_per_tile > 63)
     {
         rocke_gemm_emit_kloop_simple(ctx);
+        return;
+    }
+
+    /* A deep TDM ring (depth >= 3) is its own loop shape. It is a separate
+     * branch so that depths 1 and 2 keep emitting exactly what they did
+     * before this knob existed. */
+    if(ctx->tdm_ring)
+    {
+        rocke_gemm_emit_kloop_tdm_ring(ctx);
         return;
     }
 
@@ -403,9 +538,9 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
         rocke_value_t* new_accs[ROCKE_GEMM_MAX_ACCS];
         rocke_value_t* yield_vals[1 + ROCKE_GEMM_MAX_ACCS];
 
-        /* Single-barrier software pipeline: ONE s_waitcnt + ONE WG barrier. */
-        rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
-        rocke_b_s_barrier_bare(b);
+        /* Single-barrier software pipeline: ONE s_waitcnt + ONE WG barrier (non-TDM);
+         * or s_wait_tensorcnt(0) + sync_lds_only (TDM depth=2 ping-pong). */
+        rocke_gemm_drain_sync(b, is_tdm);
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_next, 0, next_parity);
         rocke_gemm_emit_mfma_phase(
             ctx, ctx->A_smem, ctx->B_smem, acc_iter, num_acc_iter, 0, parity, new_accs);
@@ -424,8 +559,7 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
         int num_tail = for_op.op->num_results - 1;
         rocke_value_t* epi_accs[ROCKE_GEMM_MAX_ACCS];
 
-        rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
-        rocke_b_s_barrier_bare(b);
+        rocke_gemm_drain_sync(b, is_tdm);
         rocke_gemm_emit_mfma_phase(
             ctx, ctx->A_smem, ctx->B_smem, tail_accs, num_tail, 0, final_parity, epi_accs);
 
