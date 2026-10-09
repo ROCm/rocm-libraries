@@ -48,7 +48,24 @@
             "dilation_h",
             "dilation_w",
             "block_w",
-            "block_waves"
+            "block_waves",
+            "block_h",
+            "unroll_rows",
+            "block_q",
+            "block_groups",
+            "double_buffer",
+            "cpg",
+            "kpg",
+            "tile_h",
+            "tile_w",
+            "tile_k_out",
+            "ck",
+            "waves_m",
+            "waves_n",
+            "atom",
+            "swizzle_wgm",
+            "iglp",
+            "waves_per_eu"
           ],
           "matcher_only_fields": [],
           "bindings": {
@@ -153,6 +170,57 @@
             },
             "block_waves": {
               "field": "block_waves"
+            },
+            "block_h": {
+              "field": "block_h"
+            },
+            "unroll_rows": {
+              "field": "unroll_rows"
+            },
+            "block_q": {
+              "field": "block_q"
+            },
+            "block_groups": {
+              "field": "block_groups"
+            },
+            "double_buffer": {
+              "field": "double_buffer"
+            },
+            "cpg": {
+              "field": "cpg"
+            },
+            "kpg": {
+              "field": "kpg"
+            },
+            "tile_h": {
+              "field": "tile_h"
+            },
+            "tile_w": {
+              "field": "tile_w"
+            },
+            "tile_k_out": {
+              "field": "tile_k_out"
+            },
+            "ck": {
+              "field": "ck"
+            },
+            "waves_m": {
+              "field": "waves_m"
+            },
+            "waves_n": {
+              "field": "waves_n"
+            },
+            "atom": {
+              "field": "atom"
+            },
+            "swizzle_wgm": {
+              "field": "swizzle_wgm"
+            },
+            "iglp": {
+              "field": "iglp"
+            },
+            "waves_per_eu": {
+              "field": "waves_per_eu"
             }
           },
           "vocabulary": {}
