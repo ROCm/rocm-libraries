@@ -931,14 +931,17 @@ TEST_P(IntegrationGpuGfx950ConvFwdServing, EveryServingKernelMatchesCpuReference
 namespace
 {
 
-/// One graph and how many instances of each family serve it in each catalog, as
-/// gfx950_conv_fwd_aot_serves in convolution_forward.py counts them over
+/// One graph and how many instances of each family each catalog selects for it, as
+/// gfx950_conv_fwd_aot_runtime_candidates in convolution_forward.py counts them over
 /// gfx950_conv_fwd_aot_seed.instances.json and the full catalog's per-dtype lists,
-/// gfx950_conv_fwd_aot_{fp16,bf16}.instances.json. The seed and the direct family are
-/// the same in both dtypes; the full catalog's implicit-GEMM count is stated per dtype,
-/// since each dtype's list is rocKE's sweep for that dtype. The engines' native matcher
-/// is checked against those counts, and test_make_conv_aot_config.py recomputes this
-/// table from the lists: keep one row per line.
+/// gfx950_conv_fwd_aot_{fp16,bf16}.instances.json. Selected is rocKE's runtime selection
+/// among the instances that serve the graph (only the widest vector widths present), so
+/// it is the engine's candidate list, not its serving set. The seed and the direct family
+/// are the same in both dtypes; the full catalog's implicit-GEMM count is stated per
+/// dtype, since each dtype's list is rocKE's sweep for that dtype. The engines' kernel
+/// matcher and candidate filter are checked against those counts, and
+/// test_make_conv_aot_config.py recomputes this table from the lists: keep one row per
+/// line.
 struct AotGraph
 {
     std::string name;
@@ -957,13 +960,13 @@ struct AotGraph
 const std::vector<AotGraph>& aotGraphs()
 {
     static const std::vector<AotGraph> s_graphs{
-        {"Smoke", {}, 0, 12, 0, 78940, 78940},
-        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 12, 0, 78940, 78940},
+        {"Smoke", {}, 0, 4, 0, 2539, 2539},
+        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 4, 0, 2539, 2539},
         // An instance is built against a 3x3 probe, so it is never the pointwise GEMM.
-        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 12, 0, 78940, 78940},
-        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 0, 12, 0, 78940, 78940},
-        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 12, 0, 78940, 78940},
-        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 12, 0, 78940, 78940},
+        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 4, 0, 2539, 2539},
+        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 0, 4, 0, 2539, 2539},
+        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 4, 0, 2539, 2539},
+        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 4, 0, 2539, 2539},
         // Three channels per group: only instances 1 wide along C/groups and K/groups.
         {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 11160, 11160},
         {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 2, 1, 9, 7440, 7440},
@@ -978,15 +981,22 @@ const std::vector<AotGraph>& aotGraphs()
         // Outside the direct guard: implicit GEMM alone.
         {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 0, 1, 0, 7440, 7440},
         // C = 12 admits load widths up to 4 and K = 20 store widths up to 4.
-        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 7, 0, 43152, 43152},
-        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 12, 0, 78940, 78940},
-        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 12, 0, 78940, 78940},
+        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 3105, 3105},
+        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 4, 0, 2539, 2539},
+        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 4, 0, 2539, 2539},
+        // Each selects a seed width pair that no row above selects:
+        // 2/2/2, 4/4/2, 8/8/4, 1/1/4, and the default epilogue's 4/4/1 with cshuffle 2/2/1.
+        {"C6K10", {2, 6, 10, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 3132, 3132},
+        {"C12K6", {2, 12, 6, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 3132, 3132},
+        {"C16K12", {2, 16, 12, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 3105, 3105},
+        {"C3K8", {2, 3, 8, 15, 15, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 1, 0, 2682, 2682},
+        {"C12K5", {2, 12, 5, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 2, 0, 3187, 3185},
     };
     return s_graphs;
 }
 // clang-format on
 
-/// aotGraphs() in both dtypes, with the seed's serving counts or the full catalog's.
+/// aotGraphs() in both dtypes, with the seed's selected counts or the full catalog's.
 std::vector<Variant> aotVariants(bool fullCatalog)
 {
     std::vector<Variant> variants;
@@ -1012,10 +1022,11 @@ std::vector<Variant> aotVariants(bool fullCatalog)
 
 #ifdef HKP_TEST_GFX950_CONV_FWD_AOT_SEED
 
-// ---- hipkernel:Gfx950ConvFwdAotSeed: every serving AOT instance, pinned ----
+// ---- hipkernel:Gfx950ConvFwdAotSeed: every selected AOT instance, pinned ----
 //
-// The seed is small enough that every instance serving a graph is pinned and checked
+// The seed is small enough that every instance selected for a graph is pinned and checked
 // against the reference, which the full catalog's thousands per graph do not afford.
+// Every seed instance is selected for at least one graph of aotGraphs().
 
 namespace
 {
@@ -1033,7 +1044,7 @@ protected:
     }
 };
 
-TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, EveryServingInstanceMatchesCpuReference)
+TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, EverySelectedInstanceMatchesCpuReference)
 {
     verifyEveryServingKernel(31, 37);
 }
@@ -1098,11 +1109,11 @@ TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, KernelFamilyKnobSelectsEachFamilysIns
 
 // ---- hipkernel:Gfx950ConvFwdAot: the shipped catalog ----
 //
-// At full size most graphs are served by every implicit-GEMM instance of their dtype, so
-// pinning each one is out of reach; the seed suite above does that. Each graph here runs
-// (a) an unbenchmarked plan, which also checks the serving count of each family,
-// (b) a fixed sample of serving instances, each pinned: the best few by score, then more
-// drawn by a seeded shuffle of the dtype's whole catalog, and (c) a benchmarked plan under
+// At full size thousands of instances are selected for each graph, so pinning each one is
+// out of reach; the seed suite above does that. Each graph here runs (a) an unbenchmarked
+// plan, which also checks the selected count of each family, (b) a fixed sample of
+// selected instances, each pinned: the best few by score, then more drawn by a seeded
+// shuffle of the dtype's whole catalog, and (c) a benchmarked plan under
 // HIPDNN_INGESTOR_CANDIDATE_LIMIT.
 
 namespace
@@ -1247,7 +1258,7 @@ protected:
         hipdnn_plugin_sdk::INGESTOR_CANDIDATE_LIMIT_ENV_NAME, ""};
 };
 
-// (a), and the serving count of each family at full size.
+// (a), and the selected count of each family at full size.
 TEST_P(IntegrationGpuGfx950ConvFwdAot, UnbenchmarkedPlanServesFromTheWholeCatalog)
 {
     const auto& variant = GetParam();
@@ -1283,8 +1294,8 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, UnbenchmarkedPlanServesFromTheWholeCatalo
 }
 
 // (b): the best TOP_BY_SCORE instances by score, then SHUFFLED_SAMPLES drawn from every
-// serving instance, each served alone from a record and checked against the reference.
-TEST_P(IntegrationGpuGfx950ConvFwdAot, SampledServingInstancesMatchCpuReference)
+// selected instance, each served alone from a record and checked against the reference.
+TEST_P(IntegrationGpuGfx950ConvFwdAot, SampledSelectedInstancesMatchCpuReference)
 {
     const auto& variant = GetParam();
     const auto catalog = variant.directArms + variant.implicitArms;
@@ -1322,8 +1333,8 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, SampledServingInstancesMatchCpuReference)
     }
 
     // A record ordering every kernel of the dtype's shards covers every candidate, so it
-    // serves the first instance in its order that serves the graph: in a seeded shuffle,
-    // a random serving instance. Instances already served move to the back.
+    // serves the first instance in its order that is selected for the graph: in a seeded
+    // shuffle, a random selected instance. Instances already served move to the back.
     _candidateLimit.setValue("");
     auto shard = shippedCatalog(variant.dtype);
     ASSERT_GE(shard.size(), catalog) << "the shipped gfx950 shards for this dtype were not found";

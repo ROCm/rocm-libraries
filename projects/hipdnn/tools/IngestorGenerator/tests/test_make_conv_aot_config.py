@@ -526,7 +526,7 @@ def test_dumped_config_has_one_line_per_shape_and_loads_back(seed_specs):
     assert len(rows) == len(seed_specs)
 
 
-# ---- The GPU suites' serving counts ----
+# ---- The GPU suites' selected counts ----
 
 _GPU_SUITE = (
     _REPO
@@ -545,17 +545,22 @@ _GRAPH_ROW = re.compile(
 _DEFAULT_PROBLEM = (2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1)
 
 
-def _serving_counts(specs, problem, dtype):
-    from builders.common.convolution_forward import (
-        Gfx950ConvFwdSpec,
-        gfx950_conv_fwd_aot_serves,
-    )
+def _runtime_problem(problem, dtype):
+    from builders.common.convolution_forward import Gfx950ConvFwdSpec
 
     n, c, k, hi, wi, y, x, sh, sw, ph, pw, dh, dw, groups = problem
-    runtime = Gfx950ConvFwdSpec(
+    return Gfx950ConvFwdSpec(
         N=n, C=c, K=k, Hi=hi, Wi=wi, Y=y, X=x, sH=sh, sW=sw, pH=ph, pW=pw,
         dH=dh, dW=dw, groups=groups, dtype=dtype,
     )  # fmt: skip
+
+
+def _serving_counts(specs, problem, dtype):
+    """How many instances of each family (direct, implicit GEMM) serve the problem:
+    the capability, gfx950_conv_fwd_aot_serves."""
+    from builders.common.convolution_forward import gfx950_conv_fwd_aot_serves
+
+    runtime = _runtime_problem(problem, dtype)
     counts = [0, 0]
     for spec in specs:
         if spec.dtype == dtype and gfx950_conv_fwd_aot_serves(spec, runtime)[0]:
@@ -563,25 +568,119 @@ def _serving_counts(specs, problem, dtype):
     return tuple(counts)
 
 
-def test_gpu_suite_serving_counts_are_the_python_serves_counts(catalogs):
-    """IntegrationGpuGfx950ConvFwd.cpp states, per graph, how many instances of each
-    family serve it in the seed and in the full catalog; the native matcher is checked
-    against those numbers on the GPU, so they must be what the Python serves function
-    counts over the committed lists, in both dtypes. Every graph is served by both."""
+def _selected(specs, problem, dtype):
+    """The instances the engine selects for the problem: rocKE's runtime selection among
+    those that serve it, gfx950_conv_fwd_aot_runtime_candidates."""
+    from builders.common.convolution_forward import (
+        gfx950_conv_fwd_aot_runtime_candidates,
+    )
+
+    return gfx950_conv_fwd_aot_runtime_candidates(
+        _runtime_problem(problem, dtype), [s for s in specs if s.dtype == dtype]
+    )
+
+
+def _selected_counts(specs, problem, dtype):
+    selected = _selected(specs, problem, dtype)
+    direct = sum(spec.is_direct for spec in selected)
+    return direct, len(selected) - direct
+
+
+def _gpu_suite_graphs():
     rows = _GRAPH_ROW.findall(_GPU_SUITE.read_text())
     assert len(rows) >= 19, "aotGraphs() rows not found; keep one row per line"
     for name, problem, *row in rows:
         values = tuple(int(v) for v in problem.split(",")) if problem else ()
         if len(values) == 13:
             values += (1,)
-        values = values or _DEFAULT_PROBLEM
-        seed_direct, seed_implicit, direct, fp16, bf16 = (int(v) for v in row)
+        yield name, values or _DEFAULT_PROBLEM, tuple(int(v) for v in row)
+
+
+def test_gpu_suite_selected_counts_are_the_python_runtime_candidates(catalogs):
+    """IntegrationGpuGfx950ConvFwd.cpp states, per graph, how many instances of each
+    family the seed and the full catalog select; the engine's kernel matcher and
+    candidate filter are checked against those numbers on the GPU, so they must be what
+    the Python runtime selection counts over the committed lists, in both dtypes. Every
+    graph has a selected instance in both, and selection only narrows what serves."""
+    for name, problem, row in _gpu_suite_graphs():
+        seed_direct, seed_implicit, direct, fp16, bf16 = row
         for dtype, implicit in (("fp16", fp16), ("bf16", bf16)):
             stated = (seed_direct, seed_implicit, direct, implicit)
-            counted = _serving_counts(catalogs["seed"], values, dtype)
-            counted += _serving_counts(catalogs["product"], values, dtype)
+            counted = _selected_counts(catalogs["seed"], problem, dtype)
+            counted += _selected_counts(catalogs["product"], problem, dtype)
             assert counted == stated, (name, dtype)
             assert sum(counted[:2]) > 0 and sum(counted[2:]) > 0, (name, dtype)
+            serving = _serving_counts(catalogs["seed"], problem, dtype)
+            serving += _serving_counts(catalogs["product"], problem, dtype)
+            assert all(c <= s for c, s in zip(counted, serving)), (name, dtype)
+            # rocKE's direct benchmark runs every direct kernel that serves.
+            assert (counted[0], counted[2]) == (serving[0], serving[2]), (name, dtype)
+
+
+def test_gpu_suite_selects_every_seed_instance_for_some_graph(catalogs):
+    """The seed suite pins every selected instance of each graph, so every seed
+    instance has to be selected for at least one of them to be checked on the GPU."""
+    graphs = [problem for _, problem, _ in _gpu_suite_graphs()]
+    for dtype in ("fp16", "bf16"):
+        selected = {
+            spec.instance_id
+            for problem in graphs
+            for spec in _selected(catalogs["seed"], problem, dtype)
+        }
+        missing = [
+            spec
+            for spec in catalogs["seed"]
+            if spec.dtype == dtype and spec.instance_id not in selected
+        ]
+        assert not missing, (dtype, missing)
+
+
+# ---- The unit suite's selection sample ----
+
+_SELECTION_SUITE = (
+    _PROVIDER.parent.parent
+    / "tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdAotSelection.cpp"
+)
+_SAMPLE_ROW = re.compile(
+    r'^\s*\{"(\w+)", \{([\d, ]+)\}, "(\w+)", \{([\d, ]+)\}\},$', re.MULTILINE
+)
+_CASE_ROW = re.compile(r"^\s*\{\{([\d, ]+)\}, \{([\d, ]*)\}\},$", re.MULTILINE)
+
+
+def test_unit_suite_selection_cases_are_the_python_runtime_candidates():
+    """TestGfx950ConvFwdAotSelection.cpp checks the native selection over a sample of
+    sweep identities against stated row indices; they must be what the Python runtime
+    selection picks from the same sample (rocKE's own selection, per the rocKE test)."""
+    from builders.common.convolution_forward import (
+        Gfx950ConvFwdAotSpec,
+        gfx950_conv_fwd_aot_runtime_candidates,
+    )
+
+    text = _SELECTION_SUITE.read_text()
+    specs = []
+    for row, (epilogue, values, pipeline, loop) in enumerate(_SAMPLE_ROW.findall(text)):
+        a, b, c, tm, tn, tk, wm, wn, wtm, wtn, wtk = (int(v) for v in values.split(","))
+        unroll, async_dma, chunk_a, chunk_b = (int(v) for v in loop.split(","))
+        specs.append(
+            Gfx950ConvFwdAotSpec(
+                dtype="fp16", tile_m=tm, tile_n=tn, tile_k=tk, warp_m=wm, warp_n=wn,
+                warp_tile_m=wtm, warp_tile_n=wtn, warp_tile_k=wtk, wave_size=64,
+                pipeline=pipeline, epilogue=epilogue, vector_size_a=a,
+                vector_size_b=b, vector_size_c=c, unroll_k=unroll, async_dma=async_dma,
+                async_chunk_a=chunk_a, async_chunk_b=chunk_b, grouped=1,
+                instance_id=f"{row:040x}",
+            )  # fmt: skip
+        )
+    cases = _CASE_ROW.findall(text)
+    assert (
+        len(specs) >= 40 and len(cases) >= 10
+    ), "keep one sample row and case per line"
+    for problem, stated in cases:
+        values = tuple(int(v) for v in problem.split(","))
+        selected = _selected(specs, values, "fp16")
+        assert [int(s.instance_id, 16) for s in selected] == [
+            int(v) for v in stated.split(",")
+        ], values
 
 
 #: One graph per problem class the product catalog must serve, in the field order of
