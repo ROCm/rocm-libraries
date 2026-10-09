@@ -81,6 +81,7 @@ auto create_args(int argc, char* argv[])
                 "now)")
         .insert("vlayout", "r", "r for row-major(seqlen*hdim), c for col-major(hdim*seqlen)")
         .insert("lse", "0", "0 not store lse, 1 store lse")
+        .insert("max", "0", "0 not store max logit, 1 store the per-row max logit (needs lse=1)")
         .insert("kname", "0", "if set to 1 will print kernel name")
         .insert("init",
                 "uf",
@@ -152,6 +153,7 @@ auto run(const ck_tile::ArgParser& arg_parser)
     float logits_soft_cap            = arg_parser.get_float("logits_soft_cap");
     bool is_v_rowmajor               = arg_parser.get_str("vlayout") == "r";
     bool lse                         = arg_parser.get_bool("lse");
+    bool store_max                   = arg_parser.get_bool("max");
     ck_tile::index_t page_block_size = arg_parser.get_int("page_block_size");
     bool use_cache_batch_idx         = arg_parser.get_bool("cache_batch_idx");
     std::string bias_str             = arg_parser.get_str("bias");
@@ -216,7 +218,9 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         init_sink_value,
                                         pack_gqa,
                                         stream_config,
-                                        json);
+                                        json,
+                                        nullptr,
+                                        store_max);
 }
 
 int main(int argc, char* argv[])

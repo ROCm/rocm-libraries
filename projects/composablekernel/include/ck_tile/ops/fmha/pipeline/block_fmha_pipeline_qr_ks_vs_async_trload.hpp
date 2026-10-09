@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_fmha_lse_max.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async_trload_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
@@ -70,6 +71,12 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
     static constexpr bool kStoreLSE         = Problem::kStoreLSE;
     static constexpr bool kHasUnevenSplits  = true;
     static constexpr bool kHasSink          = Problem::kHasSink;
+
+    // also stores the exact row max of the scores next to the LSE (max_ptr)
+    static constexpr bool kStoreRowMax = Problem::kStoreRowMax;
+    static_assert(!kStoreRowMax || (kStoreLSE && BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+                                    !kHasLogitsSoftCap),
+                  "the row max is stored next to the LSE, for scores without bias or soft cap");
 
     static_assert((CK_TILE_FMHA_FWD_FAST_EXP2 &&
                    (kHasLogitsSoftCap && Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
@@ -262,6 +269,10 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
             set_tile(m, -numeric<SMPLComputeDataType>::infinity());
             clear_tile(l);
         }
+        // Exact running row max of the scores, stored as the max logit. Unlike m it is never held
+        // back by the rescale skip below, and it does not include the sink.
+        auto m_exact = MLBlockTileType{};
+        set_tile(m_exact, -numeric<SMPLComputeDataType>::infinity());
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
         const auto [logical_seqlen_k_start, logical_seqlen_k_end] =
@@ -289,6 +300,14 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                     }
 
                     store_tile(lse_acc_dram_window_tmp, lse_acc);
+
+                    if constexpr(kStoreRowMax)
+                    {
+                        auto row_max =
+                            make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
+                        set_tile(row_max, -numeric<LSEDataType>::infinity());
+                        store_row_max(lse_acc_dram_window_tmp, row_max);
+                    }
                 }
 
                 // Note: here occ are all cleard, return it
@@ -540,6 +559,12 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
             const auto m_old = m; // m{j-1}
             tile_elementwise_inout(
                 [](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); }, m, m_old, m_local); // m{j}
+            // Exact running row max, updated before the rescale skip below can reset m to m_old.
+            if constexpr(kStoreRowMax)
+            {
+                tile_elementwise_inout(
+                    [](auto& e0, auto e1) { e0 = max(e0, e1); }, m_exact, m_local);
+            }
 
             auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
                 s_new.get_tile_distribution()); // Pcompute{j}
@@ -724,6 +749,19 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
             });
 
             store_tile(lse_acc_dram_window_tmp, lse_acc);
+
+            // max logit: the LSE conversion without the log(l) term
+            if constexpr(kStoreRowMax)
+            {
+                auto row_max =
+                    make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
+                sweep_tile_span(lse_acc_spans[I0], [&](auto idx0) {
+                    constexpr auto i_idx   = make_tuple(idx0);
+                    constexpr auto r_log2e = static_cast<SMPLComputeDataType>(1.0 / C_LOG2E);
+                    row_max(i_idx)         = m_exact[i_idx] * scale_s * r_log2e;
+                });
+                store_row_max(lse_acc_dram_window_tmp, row_max);
+            }
         }
 
         // finally, O
@@ -833,6 +871,10 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
             set_tile(m, -numeric<SMPLComputeDataType>::infinity());
             clear_tile(l);
         }
+        // Exact running row max of the scores, stored as the max logit. Unlike m it is never held
+        // back by the rescale skip below, and it does not include the sink.
+        auto m_exact = MLBlockTileType{};
+        set_tile(m_exact, -numeric<SMPLComputeDataType>::infinity());
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
         const auto [logical_seqlen_k_start, logical_seqlen_k_end] =
@@ -860,6 +902,14 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                     }
 
                     store_tile(lse_acc_dram_window_tmp, lse_acc);
+
+                    if constexpr(kStoreRowMax)
+                    {
+                        auto row_max =
+                            make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
+                        set_tile(row_max, -numeric<LSEDataType>::infinity());
+                        store_row_max(lse_acc_dram_window_tmp, row_max);
+                    }
                 }
 
                 // Note: here occ are all cleard, return it
@@ -1116,6 +1166,12 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
             const auto m_old = m; // m{j-1}
             tile_elementwise_inout(
                 [](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); }, m, m_old, m_local); // m{j}
+            // Exact running row max, updated before the rescale skip below can reset m to m_old.
+            if constexpr(kStoreRowMax)
+            {
+                tile_elementwise_inout(
+                    [](auto& e0, auto e1) { e0 = max(e0, e1); }, m_exact, m_local);
+            }
 
             auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
                 s_new.get_tile_distribution()); // Pcompute{j}
@@ -1333,6 +1389,19 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
             });
 
             store_tile(lse_acc_dram_window_tmp, lse_acc);
+
+            // max logit: the LSE conversion without the log(l) term
+            if constexpr(kStoreRowMax)
+            {
+                auto row_max =
+                    make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
+                sweep_tile_span(lse_acc_spans[I0], [&](auto idx0) {
+                    constexpr auto i_idx   = make_tuple(idx0);
+                    constexpr auto r_log2e = static_cast<SMPLComputeDataType>(1.0 / C_LOG2E);
+                    row_max(i_idx)         = m_exact[i_idx] * scale_s * r_log2e;
+                });
+                store_row_max(lse_acc_dram_window_tmp, row_max);
+            }
         }
 
         // finally, O
@@ -1393,6 +1462,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I1],
                       "wrong!");
+        static_assert(!kStoreRowMax, "the hdim 256 path does not store the row max");
         ignore = bias_dram_block_window_tmp;
         ignore = position_encoding;
         // Block GEMM

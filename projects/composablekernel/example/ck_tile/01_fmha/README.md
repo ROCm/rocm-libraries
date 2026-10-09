@@ -83,6 +83,7 @@ args:
                 'g:y,x', generic attention mask coordinate with y/x size (only debug purpose for now)
     -vlayout    r for row-major(seqlen*hdim), c for col-major(hdim*seqlen) (default:r)
         -lse    0 not store lse, 1 store lse (default:0)
+        -max    0 not store max logit, 1 store the per-row max logit (needs lse=1) (default:0)
       -kname    if set to 1 will print kernel name (default:0)
        -init    init method. ui, uniform random int, ni, normalized random int (default:uf)
                 uf, uniform random float, nf, normalized random float, tf, trig float, uf:q, quantization
@@ -132,6 +133,9 @@ alibi is supported
 
 ### lse
 For training kernels, "log sum exp" need to store out in forward and used in backward. We support this by setting `-lse=1`
+
+### max logit
+With `-max=1` (needs `-lse=1`) the kernel also stores the exact per-row max of `scale_s * q.k`, e.g. for QK-clip. It is fp32 with the same layout as the LSE, leaves the sink out, and is -inf for rows with no unmasked key. Receipts 0 and 700 generate such instances on gfx9 for the fp16/bf16 LSE instances of the qr, qr_async and qr_async_trload pipelines (except the trload hdim 256 ones) without bias, dropout, skip, sink, logits soft cap or quant scale; for any other combination `fmha_fwd()` returns -1.
 
 ### vlayout
 We support v matrix in both row-major(`seqlen*hdim`) and col-major(`hdim*seqlen`). Since the accumulate(reduce) dimension for V is along `seqlen`, for current AMD's mfma layout which expect each thread to have contiguous register holding pixels along reduce dimension, it's easier to support col-major V layout. However, the performance of col-major is not necessarily faster than row-major, there are many factors that may affect the overall performance. We still provide the `-vlayout=r/c` here to switch/test between different layouts.
