@@ -67,6 +67,14 @@ public:
         recordUndo(&ScoreRegistry::unregisterSymbol, symbol);
     }
 
+    /// Registered under the symbol of a kernel-scoped matcher; see CandidateFilterFn.
+    /// @throws std::runtime_error if @p symbol is already registered.
+    void add(const std::string& symbol, CandidateFilterFn filter)
+    {
+        CandidateFilterRegistry::registerSymbol(symbol, filter);
+        recordUndo(&CandidateFilterRegistry::unregisterSymbol, symbol);
+    }
+
     /// @p handler must outlive every plan built from it; packs use a
     /// process-lifetime static.
     /// @throws std::runtime_error if @p symbol is already registered.
