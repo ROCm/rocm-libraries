@@ -484,9 +484,8 @@ namespace TensileLite
         // kernels (e.g. rejecting them for small K).
         bool useSubtileImpl = false;
 
-        // SourceSwap: MFMA output is mapped so that M is the fast (stride-1)
-        // store axis in D.  Enabled for all non-sparse kernels; plumbed into
-        // the Origami epilogue model to select the correct store-pattern cost.
+        // SourceSwap: MFMA operands are swapped so consecutive lanes run along M
+        // in D.  Either way each lane stores StoreVectorWidth contiguous M elements.
         bool SourceSwap = false;
 
         int NonTemporalD = 0;
@@ -502,6 +501,10 @@ namespace TensileLite
         int LocalSplitU = 1;
         bool DirectToLdsA = false;
         bool DirectToLdsB = false;
+        int  UnrollMajorLDSA = -1;
+        int  UnrollMajorLDSB = -1;
+        bool enableLDSTrA    = false;
+        bool enableLDSTrB    = false;
 
         int expertSchedulingMode = 0;
 

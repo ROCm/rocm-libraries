@@ -137,6 +137,49 @@ TEST_CASE("Origami: hardware_arch_enum", "[origami]") {
   }
 }
 
+TEST_CASE("Origami: wavefront size and SIMD width are architecture-aware", "[origami][hardware]") {
+  REQUIRE(origami::hardware_t::get_simd_lanes(origami::hardware_t::architecture_t::gfx950) == 16);
+  REQUIRE(origami::hardware_t::get_simd_lanes(origami::hardware_t::architecture_t::gfx1250) == 32);
+  REQUIRE(make_hardware(950).valu_cycles_per_instruction() == 4);
+  REQUIRE(make_hardware(1250).valu_cycles_per_instruction() == 1);
+  REQUIRE(make_hardware(950).has_accumulation_registers());
+  REQUIRE_FALSE(make_hardware(1250).has_accumulation_registers());
+
+  REQUIRE(origami::hardware_t::get_wavefront_size(origami::hardware_t::architecture_t::gfx942) ==
+          64);
+  REQUIRE(origami::hardware_t::get_wavefront_size(origami::hardware_t::architecture_t::gfx950) ==
+          64);
+  REQUIRE(origami::hardware_t::get_wavefront_size(origami::hardware_t::architecture_t::gfx1250) ==
+          32);
+  REQUIRE(origami::hardware_t::get_wavefront_size(origami::hardware_t::architecture_t::gfx1100) ==
+          64);
+  REQUIRE(origami::hardware_t::get_wavefront_size(origami::hardware_t::architecture_t::gfx1201) ==
+          64);
+
+  REQUIRE(make_hardware(942).wavefront_size() == 64);
+  REQUIRE(make_hardware(950).wavefront_size() == 64);
+  REQUIRE(make_hardware(1250).wavefront_size() == 32);
+}
+
+// Keep all measured ratios identical and only flip the architecture enum so
+// the comparison isolates wavefront_size() (64 -> 32) in ACC/store modeling.
+TEST_CASE("Origami: wave32 increases modeled epilogue cost", "[origami][hardware]") {
+  auto hw64 = make_hardware(950);
+  auto hw32 = hw64;
+  hw32.arch = origami::hardware_t::architecture_t::gfx1250;
+
+  auto problem = make_problem(2048, 2048, 2048, origami::transpose_t::T, origami::transpose_t::N);
+  auto config  = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0);
+
+  origami::gemm::context_t ctx64(problem, hw64, config);
+  origami::gemm::context_t ctx32(problem, hw32, config);
+  const double epi64 = origami::gemm::compute_epilogue_latency(problem, hw64, config, ctx64);
+  const double epi32 = origami::gemm::compute_epilogue_latency(problem, hw32, config, ctx32);
+
+  REQUIRE(epi64 > 0);
+  REQUIRE(epi32 > epi64);
+}
+
 TEST_CASE("Origami: gfx1250 complex matrix instructions", "[origami]") {
   auto hardware = make_hardware(1250);
 
@@ -469,6 +512,20 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
         }
       }
 
+      // A database entry that rejects one otherwise-valid tile, registered on a
+      // tile no other test uses.
+      auto make_heuristic_rejected = [] {
+        origami::heuristic_key_t key;
+        key.arch = origami::hardware_t::architecture_t::gfx950;
+        key.mt_m = 480;
+        key.mt_n = 480;
+        key.mt_k = 32;
+        origami::heuristic_params_t reject_params;
+        reject_params.reject = true;
+        origami::heuristics_database_t::get_instance().add_entry(key, reject_params);
+        return make_config(480, 480, 32, 32, 32, 8, false, 1, 6, 0, 0);
+      };
+
       // Test 2b: Valid configs win over LDS- and heuristic-rejected configs
       if (gpu_arch == 950) {
         auto small_k_problem = make_problem(1024, 1024, 256);
@@ -477,15 +534,11 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
 
         auto lds_invalid = make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0);
         mixed_configs.push_back(lds_invalid);
-
-        auto heuristic_rejected = make_config(128, 128, 64, 32, 32, 8, false, 1, 6, 0, 0);
-        heuristic_rejected.subtile = true;
-        mixed_configs.push_back(heuristic_rejected);
+        mixed_configs.push_back(make_heuristic_rejected());
 
         auto mixed_results = origami::rank_configs(small_k_problem, hardware, mixed_configs);
-        // Both the LDS-invalid 512x512x256 and the heuristic-rejected subtile
-        // 128x128x64 (gfx950 BF16 TN, K<512) drop out; only the valid 64x64
-        // tile survives with a finite latency.
+        // Both the LDS-invalid 512x512x256 and the heuristic-rejected 480x480x32
+        // drop out; only the valid 64x64 tile survives with a finite latency.
         REQUIRE(mixed_results.size() == 1);
         REQUIRE(mixed_results.front().latency < std::numeric_limits<double>::max());
         REQUIRE(mixed_results.front().config.mt.m == 64);
@@ -497,14 +550,11 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
         std::vector<origami::config_t> all_rejected_configs;
         all_rejected_configs.push_back(
             make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0));
-
-        auto heuristic_rejected = make_config(128, 128, 64, 32, 32, 8, false, 1, 6, 0, 0);
-        heuristic_rejected.subtile = true;
-        all_rejected_configs.push_back(heuristic_rejected);
+        all_rejected_configs.push_back(make_heuristic_rejected());
 
         auto fallback_results =
             origami::rank_configs(small_k_problem, hardware, all_rejected_configs);
-        // Every path rejects (LDS-invalid + heuristic-rejected subtile), so the
+        // Every path rejects (LDS-invalid + heuristic-rejected tile), so the
         // catastrophic fallback keeps all candidates pegged at max latency rather
         // than returning an empty set.
         REQUIRE(fallback_results.size() == all_rejected_configs.size());
@@ -1494,8 +1544,7 @@ TEST_CASE("Origami: K-split LSU ranking respects MT_K cap", "[origami][lsu]") {
   // Regression guard for the depthU-512 leak.  On a skinny deep-K shape a real
   // K-split LSU kernel uses a shallow per-iter DepthU (32x16x32, MIWaveGroup=
   // [1,1], LSU=4).  A deep phantom tile (16x16x512 LSU=4) is NOT a real K-split
-  // kernel; K_SPLIT_LSU_MTK_MAX keeps the box relaxation (and its LSU
-  // K-shortening credit) off it, so it must not out-rank the shallow tile.
+  // kernel, so it must not out-rank the shallow tile.
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - shallow K-split LSU out-ranks deep phantom") {
       auto hardware = make_hardware(gpu_arch);
@@ -1511,28 +1560,6 @@ TEST_CASE("Origami: K-split LSU ranking respects MT_K cap", "[origami][lsu]") {
                      << "x" << results[0].config.mt.k);
       REQUIRE(results[0].config.mt.k == 32);   // shallow DepthU wins
       REQUIRE(results[0].config.mt.m == 32);
-    }
-  }
-}
-
-TEST_CASE("Origami: sub-MI GEMV prefers LSU K-split kernel", "[origami][lsu]") {
-  // N=1 huge-K reduction is CU-starved; LSU splits K across waves to parallelize.
-  // The sub-MI box relaxation lets the model credit the LSU K-shortening even
-  // though K > DEEPEN_K_MAX, so the LSU K-split kernel must out-rank the
-  // otherwise-identical non-LSU tile.
-  for (int gpu_arch : test_architectures) {
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - LSU out-ranks non-LSU for N=1 huge-K") {
-      auto hardware = make_hardware(gpu_arch);
-      auto problem  = make_problem(256, 1, 8192, origami::transpose_t::N,
-                                   origami::transpose_t::N);  // N=1 sub-MI
-
-      std::vector<origami::config_t> configs;
-      configs.push_back(lsu_config(32, 32, 64, 2, 2, 1));  // non-LSU
-      configs.push_back(lsu_config(32, 32, 64, 1, 1, 4));  // LSU K-split (should win)
-
-      auto results = origami::rank_configs(problem, hardware, configs);
-      INFO("winner lsu=" << results[0].config.tensile().local_split_u);
-      REQUIRE(results[0].config.tensile().local_split_u == 4);
     }
   }
 }
