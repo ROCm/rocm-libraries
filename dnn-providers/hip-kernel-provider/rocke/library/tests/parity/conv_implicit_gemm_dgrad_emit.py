@@ -16,9 +16,22 @@ from kernels.common._conv_implicit_gemm_common import ConvProblem
 from _emit_common import run_emit
 
 
-def _cp(N, Hi, Wi, C, K, Y, X, sH=1, sW=1, pH=0, pW=0, dH=1, dW=1):
+def _cp(N, Hi, Wi, C, K, Y, X, sH=1, sW=1, pH=0, pW=0, dH=1, dW=1, groups=1):
     return ConvProblem(
-        N=N, Hi=Hi, Wi=Wi, C=C, K=K, Y=Y, X=X, sH=sH, sW=sW, pH=pH, pW=pW, dH=dH, dW=dW
+        N=N,
+        Hi=Hi,
+        Wi=Wi,
+        C=C,
+        K=K,
+        Y=Y,
+        X=X,
+        sH=sH,
+        sW=sW,
+        pH=pH,
+        pW=pW,
+        dH=dH,
+        dW=dW,
+        groups=groups,
     )
 
 
@@ -483,6 +496,303 @@ def _spec(idx: int):
                 uniform_k_decode=True,
             ),
             "gfx1250",
+        )
+
+    # Configs 21-33: grouped convolution (groups > 1). The conv group rides
+    # blockIdx.y; the reduction decodes by kpg, the dY/W channel is offset by
+    # g*kpg, W's channel stride is cpg and dX's channel is offset by g*cpg.
+    # Every epilogue leaf, the uniform_k_decode loop and the per-group vector
+    # widths are covered, plus the two grouped rejections. All use fp16
+    # operands: the C++ tile loader stages through f16-typed LDS stores, so a
+    # bf16 operand differs from Python in that IR type alone, grouped or not.
+
+    if idx == 21:
+        # Grouped stride 1, direct epilogue.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=4)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+            ),
+            "gfx950",
+        )
+
+    if idx == 22:
+        # Grouped stride 1 with uniform_k_decode: the decode divides by kpg,
+        # and both per-tile offsets carry the group's output-channel base.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=4)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                uniform_k_decode=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 23:
+        # Grouped cshuffle with cpg = kpg = 6: the load and store widths
+        # follow the per-group channel run (2), not the dense C (8).
+        p = _cp(N=4, Hi=28, Wi=28, C=24, K=24, Y=3, X=3, pH=1, pW=1, groups=4)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+            ),
+            "gfx950",
+        )
+
+    if idx == 24:
+        # Grouped uniform_k_decode with the K-outer B tile and cshuffle.
+        p = _cp(N=8, Hi=28, Wi=28, C=128, K=128, Y=3, X=3, pH=1, pW=1, groups=4)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=128,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+                uniform_k_decode=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 25:
+        # Grouped stride 2: the tilde path with the direct tilde epilogue.
+        p = _cp(
+            N=4, Hi=28, Wi=28, C=64, K=64, Y=3, X=3, sH=2, sW=2, pH=1, pW=1, groups=4
+        )
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+            ),
+            "gfx950",
+        )
+
+    if idx == 26:
+        # Grouped stride 2 with uniform_k_decode and the tilde cshuffle
+        # epilogue. cpg = 12, so the tilde store is 4 wide: it follows the
+        # per-group channel run like the stride-1 cshuffle, not a fixed 8.
+        p = _cp(
+            N=4, Hi=28, Wi=28, C=24, K=24, Y=3, X=3, sH=2, sW=2, pH=1, pW=1, groups=2
+        )
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=128,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="compv3",
+                epilogue="cshuffle",
+                uniform_k_decode=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 27:
+        # Grouped split-K with uniform_k_decode: the packed fp16 atomic
+        # epilogue on the absolute dX channel.
+        p = _cp(N=8, Hi=28, Wi=28, C=128, K=128, Y=3, X=3, pH=1, pW=1, groups=2)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                split_k=2,
+                uniform_k_decode=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 28:
+        # Grouped split-K on the strided tilde path (packed fp16 atomics).
+        p = _cp(
+            N=4, Hi=28, Wi=28, C=64, K=64, Y=3, X=3, sH=2, sW=2, pH=1, pW=1, groups=4
+        )
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                split_k=2,
+            ),
+            "gfx950",
+        )
+
+    if idx == 29:
+        # Grouped 1x1 with uniform_k_decode: a grouped problem never takes
+        # the ungrouped pointwise fast path.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=1, X=1, groups=4)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                uniform_k_decode=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 30:
+        # Grouped WMMA wave32 stride 1 with uniform_k_decode (the WMMA direct
+        # epilogue).
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=4)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                wave_size=32,
+                pipeline="mem",
+                epilogue="default",
+                uniform_k_decode=True,
+            ),
+            "gfx1201",
+        )
+
+    if idx == 31:
+        # Grouped WMMA wave32 stride 2 (the WMMA tilde direct epilogue).
+        p = _cp(
+            N=4, Hi=28, Wi=28, C=64, K=64, Y=3, X=3, sH=2, sW=2, pH=1, pW=1, groups=4
+        )
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                wave_size=32,
+                pipeline="mem",
+                epilogue="default",
+            ),
+            "gfx1201",
+        )
+
+    if idx == 32:
+        # Rejected by both validators: depthwise (channels-per-group == 1) is
+        # not an implicit-GEMM grouped problem.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=64)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+            ),
+            "gfx950",
+        )
+
+    if idx == 33:
+        # Rejected by both validators: packed fp16 split-K atomics need an even
+        # channels-per-group (C = 12 is even, cpg = 3 is not).
+        p = _cp(N=8, Hi=56, Wi=56, C=12, K=12, Y=3, X=3, pH=1, pW=1, groups=4)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                split_k=2,
+            ),
+            "gfx950",
         )
 
     raise SystemExit(f"unknown config index {idx}")

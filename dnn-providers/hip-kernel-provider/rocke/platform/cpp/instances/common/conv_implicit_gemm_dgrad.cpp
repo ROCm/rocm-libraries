@@ -7,8 +7,8 @@
  *
  * GEMM orientation (dgrad):
  *   M     = N*Hi*Wi       (input spatial positions)
- *   N_dg  = C             (input channels per group)
- *   K_dg  = Y*X*K         (filter spatial x output channels, reduction)
+ *   N_dg  = cpg           (input channels per group; C when ungrouped)
+ *   K_dg  = Y*X*kpg       (filter spatial x output channels per group, reduction)
  *
  * Operand roles:
  *   A = dY (NHWK, output gradient)
@@ -151,14 +151,16 @@ int rocke_dgrad_conv_spec_dg_M(const rocke_dgrad_conv_spec_t* s)
     return s->problem.N * s->problem.Hi * s->problem.Wi;
 }
 
+/* Per group, as Python _dg_N / _dg_K: a grouped CTA reduces over its own
+ * group's kpg output channels and writes its group's cpg input channels. */
 int rocke_dgrad_conv_spec_dg_N(const rocke_dgrad_conv_spec_t* s)
 {
-    return s->problem.C;
+    return rocke_conv_problem_cpg(&s->problem);
 }
 
 int rocke_dgrad_conv_spec_dg_K(const rocke_dgrad_conv_spec_t* s)
 {
-    return s->problem.Y * s->problem.X * s->problem.K;
+    return s->problem.Y * s->problem.X * rocke_conv_problem_kpg(&s->problem);
 }
 
 int rocke_dgrad_conv_spec_dg_K_padded(const rocke_dgrad_conv_spec_t* s)
@@ -249,6 +251,26 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
 
     const rocke_conv_problem_t* p = &s->problem;
 
+    /* Python's ConvProblem.__post_init__ rejects these at construction, so a
+     * Python spec can never carry them; the C struct has no constructor, so
+     * the validator is the first place to stop a group count that does not
+     * divide the channels (cpg / kpg would silently truncate). */
+    if(p->groups < 1)
+    {
+        snprintf(reason, reason_cap, "groups must be >= 1, got %d", p->groups);
+        return false;
+    }
+    if(p->C % p->groups != 0 || p->K % p->groups != 0)
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "C=%d and K=%d must both be divisible by groups=%d",
+                 p->C,
+                 p->K,
+                 p->groups);
+        return false;
+    }
+
     if(p->is_3d)
     {
         snprintf(reason, reason_cap, "dgrad only supports 2-D convolution currently");
@@ -276,6 +298,14 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                      s->max_sub_gemms);
             return false;
         }
+    }
+    if(p->groups > 1 && rocke_conv_problem_cpg(p) == 1)
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "depthwise dgrad (channels-per-group == 1) is not supported by the "
+                 "implicit-GEMM grouped path");
+        return false;
     }
 
     if(s->tile_m % (s->warp_m * s->warp_tile_m))
@@ -364,15 +394,20 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                 reason, reason_cap, "split_k > 1 requires dtype_d in fp32/bf16/fp16 (got %s)", dd);
             return false;
         }
-        /* Even-C constraint for packed bf16/fp16 atomics. */
+        /* Packed bf16/fp16 atomics write <2 x dtype> pairs on the innermost
+         * NHWC dimension, and a pair must stay within one group's slab: the
+         * channel run that has to be even is cpg (C when ungrouped). */
         int packed = (strcmp(dd, "bf16") == 0 || strcmp(dd, "fp16") == 0);
-        if(packed && p->C % 2 != 0)
+        int cpg = rocke_conv_problem_cpg(p);
+        if(packed && cpg % 2 != 0)
         {
             snprintf(reason,
                      reason_cap,
-                     "split_k > 1 with dtype_d=%s requires even C (got C=%d)",
+                     "split_k > 1 with dtype_d=%s requires even channels-per-group "
+                     "(packed <2 x dtype> atomic pairs on the innermost NHWC dimension "
+                     "must stay within one group's slab); got cpg=%d",
                      dd,
-                     p->C);
+                     cpg);
             return false;
         }
     }
@@ -684,8 +719,10 @@ int rocke_enumerate_sub_gemms(const rocke_conv_problem_t* p,
     int sW = p->sW > 0 ? p->sW : 1;
     int dH = p->dH > 0 ? p->dH : 1;
     int dW = p->dW > 0 ? p->dW : 1;
-    int cpg = p->C;
-    int kpg = p->K;
+    /* Per group (Python compute_sub_gemms): every group shares one record
+     * table, its own group rides blockIdx.y. */
+    int cpg = rocke_conv_problem_cpg(p);
+    int kpg = rocke_conv_problem_kpg(p);
 
     for(int i_yt = 0; i_yt < tilde->y_tilde; i_yt++)
     {
@@ -982,7 +1019,26 @@ static const rocke_mmaop_t*
 struct dgrad_dx_addr_ctx
 {
     rocke_tensor_descriptor_t* desc;
+    /* g*cpg, the conv group's first dX channel; NULL when ungrouped. */
+    rocke_value_t* c_group_base;
 };
+
+/* Max dX store width -- mirrors Python _dgrad_store_vec. An explicit
+ * vector_size_c is used as given; otherwise the widest of 8/4/2/1 (4/2/1 for
+ * an fp32 dX) dividing the per-group channel run cpg (C when ungrouped), the
+ * stride-1 run a store may cover without crossing into the next group. */
+static int _dgrad_store_vec(const rocke_dgrad_conv_spec_t* spec)
+{
+    if(spec->has_vector_size_c)
+        return spec->vector_size_c;
+    const int cpg = rocke_conv_problem_cpg(&spec->problem);
+    const bool is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
+    const int cand[] = {is_fp32_d ? 4 : 8, 4, 2, 1};
+    for(int v : cand)
+        if(cpg % v == 0)
+            return v;
+    return 1;
+}
 
 static rocke_value_t* _dgrad_dx_addr_fn(rocke_ir_builder_t* b,
                                         rocke_value_t* m_global,
@@ -991,8 +1047,12 @@ static rocke_value_t* _dgrad_dx_addr_fn(rocke_ir_builder_t* b,
                                         void* user)
 {
     struct dgrad_dx_addr_ctx* ctx = (struct dgrad_dx_addr_ctx*)user;
+    /* n_global is the group-local input channel (< cpg); the absolute NHWC
+     * channel is g*cpg + n_global. Ungrouped: no add, c = n_global. */
+    rocke_value_t* c_abs
+        = ctx->c_group_base ? rocke_b_add(b, n_global, ctx->c_group_base) : n_global;
     const char* names[] = {"m", "c"};
-    rocke_value_t* vals[] = {m_global, n_global};
+    rocke_value_t* vals[] = {m_global, c_abs};
     rocke_value_t* off = NULL;
     rocke_value_t* valid = NULL;
     rocke_transforms_descriptor_offset(b, ctx->desc, names, vals, 2, &off, &valid);
@@ -1007,7 +1067,8 @@ static void _emit_dgrad_direct_epilogue(rocke_ir_builder_t* b,
                                         rocke_value_t* const* accs,
                                         int num_accs,
                                         const rocke_warp_grid_t* grid,
-                                        rocke_value_t* dx_rsrc)
+                                        rocke_value_t* dx_rsrc,
+                                        rocke_value_t* c_group_base)
 {
     rocke_dynamic_tensor_descriptor_t* dX_desc = _dgrad_make_dx_descriptor_dynamic(b, params);
     if(!dX_desc)
@@ -1015,6 +1076,7 @@ static void _emit_dgrad_direct_epilogue(rocke_ir_builder_t* b,
 
     struct dgrad_dx_addr_ctx addr_ctx;
     addr_ctx.desc = &dX_desc->base;
+    addr_ctx.c_group_base = c_group_base;
 
     rocke_direct_epilogue_t epi;
     epi.atom
@@ -1040,27 +1102,18 @@ static void _emit_dgrad_cshuffle_epilogue(rocke_ir_builder_t* b,
                                           rocke_value_t* const* accs,
                                           int num_accs,
                                           const rocke_warp_grid_t* grid,
-                                          rocke_value_t* dx_rsrc)
+                                          rocke_value_t* dx_rsrc,
+                                          rocke_value_t* c_group_base)
 {
-    const rocke_conv_problem_t* p = &spec->problem;
     rocke_dynamic_tensor_descriptor_t* dX_desc = _dgrad_make_dx_descriptor_dynamic(b, params);
     if(!dX_desc)
         return;
 
     struct dgrad_dx_addr_ctx addr_ctx;
     addr_ctx.desc = &dX_desc->base;
+    addr_ctx.c_group_base = c_group_base;
 
-    // Deduce max_store_vec from C (last dim of dX NHWC) — mirrors _dgrad_store_vec().
-    bool is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
-    int vec_candidates[] = {is_fp32_d ? 4 : 8, 4, 2, 1};
-    int vec_c = 1;
-    for(int v : vec_candidates)
-        if(p->C % v == 0)
-        {
-            vec_c = v;
-            break;
-        }
-    int max_store_vec = spec->has_vector_size_c ? spec->vector_size_c : vec_c;
+    int max_store_vec = _dgrad_store_vec(spec);
 
     const rocke_mfma_atom_t* atom
         = rocke_mfma_atom(spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
@@ -1091,7 +1144,8 @@ static void _emit_dgrad_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                              rocke_value_t* block_m_off,
                                              rocke_value_t* block_n_off,
                                              rocke_value_t* dx_rsrc,
-                                             rocke_value_t* c0)
+                                             rocke_value_t* c0,
+                                             rocke_value_t* c_group_base)
 {
     (void)num_accs;
     int mfmas_m = rocke_dgrad_conv_spec_mfmas_per_warp_m(spec);
@@ -1141,8 +1195,10 @@ static void _emit_dgrad_direct_epilogue_wmma(rocke_ir_builder_t* b,
                 rocke_value_t* ok = rocke_b_land(b, m_ok, n_ok);
 
                 rocke_value_t* v_f32 = rocke_b_vec_extract(b, acc, i);
+                /* Absolute NHWC channel g*cpg + n_val; the bound stays local. */
+                rocke_value_t* c_abs = c_group_base ? rocke_b_add(b, n_val, c_group_base) : n_val;
                 const char* dx_names[] = {"m", "c"};
-                rocke_value_t* dx_vals[] = {m_val, n_val};
+                rocke_value_t* dx_vals[] = {m_val, c_abs};
                 rocke_value_t* dx_off_elems = NULL;
                 rocke_value_t* dx_valid = NULL;
                 rocke_transforms_descriptor_offset(
@@ -1258,7 +1314,8 @@ static void _emit_dgrad_tilde_atomic_epilogue(rocke_ir_builder_t* b,
                                               rocke_value_t* d_w_offset,
                                               rocke_value_t* c_Hi,
                                               rocke_value_t* c_Wi,
-                                              rocke_value_t* c_C)
+                                              rocke_value_t* c_C,
+                                              rocke_value_t* c_group_base)
 {
     (void)num_accs;
     int mfmas_m = rocke_dgrad_conv_spec_mfmas_per_warp_m(spec);
@@ -1315,6 +1372,10 @@ static void _emit_dgrad_tilde_atomic_epilogue(rocke_ir_builder_t* b,
             {
                 rocke_value_t* c_m = rocke_b_add(b, atom_m_base, rows[i]);
                 rocke_value_t* c_n = rocke_b_add(b, atom_n_base, cols[i]);
+                /* Absolute dX channel = g*cpg + c_n (the group base is even, so
+                 * the packed <2 x dtype> pair parity below is unchanged); the
+                 * bound uses the group-local c_n (< gemm_n = cpg). */
+                rocke_value_t* c_n_off = c_group_base ? rocke_b_add(b, c_n, c_group_base) : c_n;
 
                 // Decompose c_m -> (n, htl, wtl)
                 rocke_value_t* n_val = rocke_b_div(b, c_m, hw_tilde);
@@ -1345,7 +1406,7 @@ static void _emit_dgrad_tilde_atomic_epilogue(rocke_ir_builder_t* b,
                 rocke_value_t* _nhwc2 = rocke_b_mul(b, _nhwc1, c_Wi);
                 rocke_value_t* _nhwc3 = rocke_b_add(b, _nhwc2, wi);
                 rocke_value_t* _nhwc4 = rocke_b_mul(b, _nhwc3, c_C);
-                rocke_value_t* dx_offset = rocke_b_add(b, _nhwc4, c_n);
+                rocke_value_t* dx_offset = rocke_b_add(b, _nhwc4, c_n_off);
 
                 rocke_value_t* val_f32 = rocke_b_vec_extract(b, acc, i);
                 rocke_if_t if_ok = rocke_b_scf_if(b, ok);
@@ -1362,10 +1423,11 @@ static void _emit_dgrad_tilde_atomic_epilogue(rocke_ir_builder_t* b,
                         rocke_value_t* zero_f32 = rocke_b_const_f32(b, 0.0f);
                         rocke_value_t* zero_cvt = is_bf16 ? rocke_b_trunc_f32_to_bf16(b, zero_f32)
                                                           : rocke_b_trunc_f32_to_f16(b, zero_f32);
-                        rocke_value_t* c_n_is_odd = rocke_b_mod(b, c_n, rocke_b_const_i32(b, 2));
+                        rocke_value_t* c_n_is_odd
+                            = rocke_b_mod(b, c_n_off, rocke_b_const_i32(b, 2));
                         rocke_value_t* is_odd
                             = rocke_b_cmp_ne(b, c_n_is_odd, rocke_b_const_i32(b, 0));
-                        rocke_value_t* c_n_even = rocke_b_sub(b, c_n, c_n_is_odd);
+                        rocke_value_t* c_n_even = rocke_b_sub(b, c_n_off, c_n_is_odd);
                         rocke_value_t* _oe0 = rocke_b_mul(b, n_val, c_Hi);
                         rocke_value_t* _oe1 = rocke_b_add(b, _oe0, hi);
                         rocke_value_t* _oe2 = rocke_b_mul(b, _oe1, c_Wi);
@@ -1409,7 +1471,12 @@ struct tilde_dy_ctx_t
     rocke_value_t* rec_a_embed_w_coeff;
     rocke_value_t* c_Ho;
     rocke_value_t* c_Wo;
-    rocke_value_t* c_K; // K_conv — innermost divisor in k_dg decomposition
+    rocke_value_t* c_K; // total K -- the NHWK row stride
+    /* Innermost divisor of the k_dg decode: kpg when grouped (the reduction is
+     * per group), c_K otherwise. */
+    rocke_value_t* c_kdiv;
+    /* g*kpg, the conv group's first output channel; NULL when ungrouped. */
+    rocke_value_t* k_out_group_base;
     rocke_value_t* c0;
     /* Pointwise (Y=X=1, stride 1, pad 0, ungrouped) fast path -- mirrors the
      * Python dy_descriptor. dg_M is N*Ho*Wo, materialised inside the descriptor
@@ -1445,12 +1512,16 @@ static rocke_value_t* _tilde_dy_descriptor(rocke_ir_builder_t* b_,
         return pw_off;
     }
 
-    // k_out innermost (CK-compatible): k_sub = ydot*xdot_slice*K + xdot*K + k_out
+    // k_out innermost (CK-compatible): k_sub = ydot*xdot_slice*kpg + xdot*kpg + k_out.
+    // The reduction is per group, so the decode divisor is kpg (K when ungrouped)
+    // and k_out is group-local in [0, kpg); the absolute NHWK channel is g*kpg + k_out.
     // Consecutive k_sub → consecutive k_out → contiguous in dY (NHWK, last dim K).
-    rocke_value_t* k_out = rocke_b_mod(b_, k_sub, ctx->c_K);
-    rocke_value_t* yx_rem = rocke_b_div(b_, k_sub, ctx->c_K);
+    rocke_value_t* k_out = rocke_b_mod(b_, k_sub, ctx->c_kdiv);
+    rocke_value_t* yx_rem = rocke_b_div(b_, k_sub, ctx->c_kdiv);
     rocke_value_t* ydot = rocke_b_div(b_, yx_rem, ctx->rec_x_dot_slice);
     rocke_value_t* xdot = rocke_b_mod(b_, yx_rem, ctx->rec_x_dot_slice);
+    rocke_value_t* k_out_abs
+        = ctx->k_out_group_base ? rocke_b_add(b_, k_out, ctx->k_out_group_base) : k_out;
 
     rocke_value_t* n_val = rocke_b_div(b_, m_sub, ctx->hw_tilde);
     rocke_value_t* m_rem = rocke_b_mod(b_, m_sub, ctx->hw_tilde);
@@ -1470,13 +1541,14 @@ static rocke_value_t* _tilde_dy_descriptor(rocke_ir_builder_t* b_,
     rocke_value_t* wo_ge = rocke_b_cmp_ge(b_, wo, ctx->c0);
     rocke_value_t* wo_lt = rocke_b_cmp_lt(b_, wo, ctx->c_Wo);
     rocke_value_t* wo_ok = rocke_b_land(b_, wo_ge, wo_lt);
-    rocke_value_t* k_ok = rocke_b_cmp_lt(b_, k_out, ctx->c_K);
+    rocke_value_t* k_ok = rocke_b_cmp_lt(b_, k_out, ctx->c_kdiv);
     rocke_value_t* valid = rocke_b_land(b_, rocke_b_land(b_, ho_ok, wo_ok), k_ok);
 
+    /* The K stride stays total K; only the channel index carries g*kpg. */
     rocke_value_t* n_ho = rocke_b_add(b_, rocke_b_mul(b_, n_val, ctx->c_Ho), ho);
     rocke_value_t* wo_k = rocke_b_mul(b_, ctx->c_Wo, ctx->c_K);
     rocke_value_t* hi_part = rocke_b_mul(b_, n_ho, wo_k);
-    rocke_value_t* wo_part = rocke_b_add(b_, rocke_b_mul(b_, wo, ctx->c_K), k_out);
+    rocke_value_t* wo_part = rocke_b_add(b_, rocke_b_mul(b_, wo, ctx->c_K), k_out_abs);
     rocke_value_t* offset = rocke_b_add(b_, hi_part, wo_part);
     rocke_value_t* safe_offset = rocke_b_select(b_, valid, offset, rocke_b_const_i32(b_, 0));
 
@@ -1498,6 +1570,13 @@ struct tilde_w_ctx_t
     rocke_value_t* c_X;
     rocke_value_t* c_K;
     rocke_value_t* c_C;
+    /* Decode divisor (kpg when grouped, c_K otherwise), as tilde_dy_ctx_t. */
+    rocke_value_t* c_kdiv;
+    /* g*kpg; NULL when ungrouped. */
+    rocke_value_t* k_out_group_base;
+    /* Innermost KYXC stride: cpg when grouped (W is stored per-group packed,
+     * [K, Y, X, cpg]), c_C otherwise. */
+    rocke_value_t* c_cstride;
     rocke_value_t* c0;
     /* Pointwise fast path -- mirrors the Python w_descriptor. */
     bool is_pointwise;
@@ -1529,10 +1608,12 @@ static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
 
     // Same k_out-innermost decomposition as _tilde_dy_descriptor (must match).
     // c (row axis) is stride-1 in KYXC; vectorised loads along c use vector_axis_row=true.
-    rocke_value_t* k_out = rocke_b_mod(b_, k_sub, ctx->c_K);
-    rocke_value_t* yx_rem = rocke_b_div(b_, k_sub, ctx->c_K);
+    rocke_value_t* k_out = rocke_b_mod(b_, k_sub, ctx->c_kdiv);
+    rocke_value_t* yx_rem = rocke_b_div(b_, k_sub, ctx->c_kdiv);
     rocke_value_t* ydot = rocke_b_div(b_, yx_rem, ctx->rec_x_dot_slice);
     rocke_value_t* xdot = rocke_b_mod(b_, yx_rem, ctx->rec_x_dot_slice);
+    rocke_value_t* k_out_abs
+        = ctx->k_out_group_base ? rocke_b_add(b_, k_out, ctx->k_out_group_base) : k_out;
 
     rocke_value_t* y_mul = rocke_b_mul(b_, ydot, ctx->rec_b_y_stride);
     rocke_value_t* y = rocke_b_add(b_, y_mul, ctx->rec_b_y_offset);
@@ -1542,12 +1623,15 @@ static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
     rocke_value_t* y_lt = rocke_b_cmp_lt(b_, y, ctx->c_Y);
     rocke_value_t* x_lt = rocke_b_cmp_lt(b_, x, ctx->c_X);
     rocke_value_t* yx_ok = rocke_b_land(b_, y_lt, x_lt);
-    rocke_value_t* k_ok = rocke_b_cmp_lt(b_, k_out, ctx->c_K);
+    rocke_value_t* k_ok = rocke_b_cmp_lt(b_, k_out, ctx->c_kdiv);
     rocke_value_t* valid = rocke_b_land(b_, yx_ok, k_ok);
 
-    rocke_value_t* k_y = rocke_b_add(b_, rocke_b_mul(b_, k_out, ctx->c_Y), y);
+    /* W is per-group packed [K, Y, X, cpg]: the group is carried entirely by
+     * the absolute output channel k_out_abs, the input channel c_val is
+     * group-local and the innermost stride is cpg (C when ungrouped). */
+    rocke_value_t* k_y = rocke_b_add(b_, rocke_b_mul(b_, k_out_abs, ctx->c_Y), y);
     rocke_value_t* k_y_x = rocke_b_add(b_, rocke_b_mul(b_, k_y, ctx->c_X), x);
-    rocke_value_t* offset = rocke_b_add(b_, rocke_b_mul(b_, k_y_x, ctx->c_C), c_val);
+    rocke_value_t* offset = rocke_b_add(b_, rocke_b_mul(b_, k_y_x, ctx->c_cstride), c_val);
     rocke_value_t* safe_offset = rocke_b_select(b_, valid, offset, rocke_b_const_i32(b_, 0));
 
     if(out_valid)
@@ -1631,7 +1715,7 @@ static rocke_value_t* _uk_dy_descriptor(rocke_ir_builder_t* b_,
 struct uk_w_ctx_t
 {
     rocke_value_t* block_n_off;
-    rocke_value_t* b_step_k; /* Y*X*C */
+    rocke_value_t* b_step_k; /* Y*X*Cs (Cs = cpg when grouped, C otherwise) */
     rocke_value_t* c0;
     /* per-tile uniforms */
     rocke_value_t* b_off;
@@ -1690,7 +1774,8 @@ static void _emit_dgrad_tilde_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                                    rocke_value_t* d_w_offset,
                                                    rocke_value_t* c_Hi,
                                                    rocke_value_t* c_Wi,
-                                                   rocke_value_t* c_C)
+                                                   rocke_value_t* c_C,
+                                                   rocke_value_t* c_group_base)
 {
     (void)num_accs;
     int mfmas_m = rocke_dgrad_conv_spec_mfmas_per_warp_m(spec);
@@ -1706,18 +1791,23 @@ static void _emit_dgrad_tilde_direct_epilogue_wmma(rocke_ir_builder_t* b,
 
     const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
 
+    /* Wherever two operands of one builder call would both emit ops, they are
+     * sequenced into temporaries: C leaves argument evaluation order
+     * unspecified while Python evaluates left to right, so an inline nest can
+     * emit the same ops in a different order. */
     int flat = 0;
     for(int mi = 0; mi < mfmas_m; mi++)
     {
-        rocke_value_t* atom_m_off = rocke_b_add(b,
-                                                rocke_b_add(b, block_m_off, warp_m_off),
-                                                rocke_b_const_i32(b, mi * spec->warp_tile_m));
         for(int ni = 0; ni < mfmas_n; ni++)
         {
             rocke_value_t* acc = accs[flat++];
-            rocke_value_t* atom_n_off = rocke_b_add(b,
-                                                    rocke_b_add(b, block_n_off, warp_n_off),
-                                                    rocke_b_const_i32(b, ni * spec->warp_tile_n));
+            /* Both atom offsets per (mi, ni), as Python computes them. */
+            rocke_value_t* _bwm = rocke_b_add(b, block_m_off, warp_m_off);
+            rocke_value_t* atom_m_off
+                = rocke_b_add(b, _bwm, rocke_b_const_i32(b, mi * spec->warp_tile_m));
+            rocke_value_t* _bwn = rocke_b_add(b, block_n_off, warp_n_off);
+            rocke_value_t* atom_n_off
+                = rocke_b_add(b, _bwn, rocke_b_const_i32(b, ni * spec->warp_tile_n));
 
             for(int i = 0; i < op->c_frag_len; i++)
             {
@@ -1738,20 +1828,26 @@ static void _emit_dgrad_tilde_direct_epilogue_wmma(rocke_ir_builder_t* b,
 
                 rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, bounds_m);
                 rocke_value_t* n_ok = rocke_b_cmp_lt(b, n_val, bounds_n);
-                rocke_value_t* hi_ok
-                    = rocke_b_land(b, rocke_b_cmp_ge(b, hi, c0), rocke_b_cmp_lt(b, hi, c_Hi));
-                rocke_value_t* wi_ok
-                    = rocke_b_land(b, rocke_b_cmp_ge(b, wi, c0), rocke_b_cmp_lt(b, wi, c_Wi));
-                rocke_value_t* ok
-                    = rocke_b_land(b, rocke_b_land(b, m_ok, n_ok), rocke_b_land(b, hi_ok, wi_ok));
+                rocke_value_t* hi_ge = rocke_b_cmp_ge(b, hi, c0);
+                rocke_value_t* hi_lt = rocke_b_cmp_lt(b, hi, c_Hi);
+                rocke_value_t* hi_ok = rocke_b_land(b, hi_ge, hi_lt);
+                rocke_value_t* wi_ge = rocke_b_cmp_ge(b, wi, c0);
+                rocke_value_t* wi_lt = rocke_b_cmp_lt(b, wi, c_Wi);
+                rocke_value_t* wi_ok = rocke_b_land(b, wi_ge, wi_lt);
+                rocke_value_t* mn_ok = rocke_b_land(b, m_ok, n_ok);
+                rocke_value_t* hw_ok = rocke_b_land(b, hi_ok, wi_ok);
+                rocke_value_t* ok = rocke_b_land(b, mn_ok, hw_ok);
 
-                // NHWC offset: ((n_batch*Hi + hi)*Wi + wi)*C + c
+                // NHWC offset: ((n_batch*Hi + hi)*Wi + wi)*C + c_abs, where the
+                // absolute channel c_abs = g*cpg + n_val is formed first, as in
+                // Python.
+                rocke_value_t* c_abs = c_group_base ? rocke_b_add(b, n_val, c_group_base) : n_val;
                 rocke_value_t* _o0 = rocke_b_mul(b, n_batch, c_Hi);
                 rocke_value_t* _o1 = rocke_b_add(b, _o0, hi);
                 rocke_value_t* _o2 = rocke_b_mul(b, _o1, c_Wi);
                 rocke_value_t* _o3 = rocke_b_add(b, _o2, wi);
                 rocke_value_t* _o4 = rocke_b_mul(b, _o3, c_C);
-                rocke_value_t* off_elems = rocke_b_add(b, _o4, n_val);
+                rocke_value_t* off_elems = rocke_b_add(b, _o4, c_abs);
                 rocke_value_t* off_bytes
                     = rocke_b_mul(b, off_elems, rocke_b_const_i32(b, elem_bytes));
                 rocke_value_t* safe_off
@@ -1800,6 +1896,7 @@ struct tilde_dx_ctx_t
     rocke_value_t* c_Hi;
     rocke_value_t* c_Wi;
     rocke_value_t* c_C;
+    rocke_value_t* c_group_base; /* g*cpg; NULL when ungrouped */
     // c0 is NOT stored here: it is created locally inside _tilde_dx_addr_fn,
     // matching Python's closure which does c0 = b.const_i32(0) inside the fn.
 };
@@ -1812,7 +1909,8 @@ static tilde_dx_ctx_t _make_tilde_dx_ctx(rocke_value_t* hw_tilde,
                                          rocke_value_t* d_w_offset,
                                          rocke_value_t* c_Hi,
                                          rocke_value_t* c_Wi,
-                                         rocke_value_t* c_C)
+                                         rocke_value_t* c_C,
+                                         rocke_value_t* c_group_base)
 {
     tilde_dx_ctx_t ctx;
     ctx.hw_tilde = hw_tilde;
@@ -1824,6 +1922,7 @@ static tilde_dx_ctx_t _make_tilde_dx_ctx(rocke_value_t* hw_tilde,
     ctx.c_Hi = c_Hi;
     ctx.c_Wi = c_Wi;
     ctx.c_C = c_C;
+    ctx.c_group_base = c_group_base;
     /* c0 not stored — created locally inside _tilde_dx_addr_fn */
     return ctx;
 }
@@ -1862,13 +1961,16 @@ static rocke_value_t* _tilde_dx_addr_fn(rocke_ir_builder_t* b,
     if(out_valid)
         *out_valid = hw_ok;
 
-    // NHWC element offset: ((n_val * Hi + hi) * Wi + wi) * C + n_global
+    // NHWC element offset: ((n_val * Hi + hi) * Wi + wi) * C + c_abs, with the
+    // absolute channel c_abs = g*cpg + n_global (n_global when ungrouped).
     rocke_value_t* _o0 = rocke_b_mul(b, n_val, ctx->c_Hi);
     rocke_value_t* _o1 = rocke_b_add(b, _o0, hi);
     rocke_value_t* _o2 = rocke_b_mul(b, _o1, ctx->c_Wi);
     rocke_value_t* _o3 = rocke_b_add(b, _o2, wi);
     rocke_value_t* _o4 = rocke_b_mul(b, _o3, ctx->c_C);
-    rocke_value_t* offset = rocke_b_add(b, _o4, n_global);
+    rocke_value_t* c_abs
+        = ctx->c_group_base ? rocke_b_add(b, n_global, ctx->c_group_base) : n_global;
+    rocke_value_t* offset = rocke_b_add(b, _o4, c_abs);
 
     // Return raw element offset (no sentinel select here).
     // DirectEpilogue/CShuffleEpilogue apply the sentinel via the out_valid flag,
@@ -1894,10 +1996,19 @@ static void _emit_dgrad_tilde_direct_epilogue(rocke_ir_builder_t* b,
                                               rocke_value_t* d_w_offset,
                                               rocke_value_t* c_Hi,
                                               rocke_value_t* c_Wi,
-                                              rocke_value_t* c_C)
+                                              rocke_value_t* c_C,
+                                              rocke_value_t* c_group_base)
 {
-    tilde_dx_ctx_t ctx = _make_tilde_dx_ctx(
-        hw_tilde, w_tilde_slice, d_h_stride, d_h_offset, d_w_stride, d_w_offset, c_Hi, c_Wi, c_C);
+    tilde_dx_ctx_t ctx = _make_tilde_dx_ctx(hw_tilde,
+                                            w_tilde_slice,
+                                            d_h_stride,
+                                            d_h_offset,
+                                            d_w_stride,
+                                            d_w_offset,
+                                            c_Hi,
+                                            c_Wi,
+                                            c_C,
+                                            c_group_base);
     rocke_direct_epilogue_t epi;
     epi.atom = atom;
     epi.grid = *grid;
@@ -1926,12 +2037,23 @@ static void _emit_dgrad_tilde_cshuffle_epilogue(rocke_ir_builder_t* b,
                                                 rocke_value_t* d_w_offset,
                                                 rocke_value_t* c_Hi,
                                                 rocke_value_t* c_Wi,
-                                                rocke_value_t* c_C)
+                                                rocke_value_t* c_C,
+                                                rocke_value_t* c_group_base)
 {
-    tilde_dx_ctx_t ctx = _make_tilde_dx_ctx(
-        hw_tilde, w_tilde_slice, d_h_stride, d_h_offset, d_w_stride, d_w_offset, c_Hi, c_Wi, c_C);
-    int max_store_vec
-        = (spec->has_vector_size_c && spec->vector_size_c > 1) ? spec->vector_size_c : 8;
+    tilde_dx_ctx_t ctx = _make_tilde_dx_ctx(hw_tilde,
+                                            w_tilde_slice,
+                                            d_h_stride,
+                                            d_h_offset,
+                                            d_w_stride,
+                                            d_w_offset,
+                                            c_Hi,
+                                            c_Wi,
+                                            c_C,
+                                            c_group_base);
+    /* Same width rule as the stride-1 cshuffle (Python _dgrad_store_vec): the
+     * per-group channel run, not a fixed 8 -- a store wider than cpg would
+     * straddle two groups' dX slabs. */
+    int max_store_vec = _dgrad_store_vec(spec);
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
     epi.out_dtype = spec->dtype_d;
     rocke_cshuffle_epilogue_store(
@@ -2254,8 +2376,33 @@ static rocke_kernel_def_t*
     /* dY row count N*Ho*Wo, used by the pointwise fast path's bounds check. */
     rocke_value_t* c_dY_rows = rocke_b_mul(b, rocke_b_mul(b, ctx.p_N, ctx.p_Ho), ctx.p_Wo);
 
-    // k_out-innermost: k_sub = ydot*xdot_slice*K + xdot*K + k_out
-    // (c_K is the innermost divisor; ydot_times_xdot no longer needed in descriptors)
+    /* Grouped conv (groups > 1): the conv group rides blockIdx.y. blockIdx.z
+     * is split_k and blockIdx.x the flat tilde-tile index, so y is free (the
+     * WarpGrid block_m offset read from it above is overridden). Each CTA
+     * handles one group: its reduction is confined to that group's kpg output
+     * channels and it writes that group's cpg input-channel slab of dX. The
+     * group offsets the absolute output channel (g*kpg + local) on dY and W
+     * and the absolute input channel (g*cpg + local) on dX, and the k_sub
+     * decode divides by kpg rather than the total K. For groups == 1 nothing
+     * is emitted, so the ungrouped IR is unchanged. Mirrors Python. */
+    const bool grouped = p->groups > 1;
+    rocke_value_t* c_kpg = NULL;
+    rocke_value_t* k_out_group_base = NULL;
+    rocke_value_t* c_group_base = NULL;
+    if(grouped)
+    {
+        rocke_value_t* group_idx = rocke_b_block_id_y(b);
+        c_kpg = ctx.p_kpg;
+        k_out_group_base = rocke_b_mul(b, group_idx, c_kpg);
+        c_group_base = rocke_b_mul(b, group_idx, ctx.p_cpg);
+    }
+    /* Decode divisor of the reduction index (kpg when grouped, K otherwise)
+     * and the innermost KYXC stride (cpg when grouped, C otherwise). */
+    rocke_value_t* c_kdiv = grouped ? c_kpg : c_K;
+    rocke_value_t* c_cstride = grouped ? c_dg_N : c_C;
+
+    // k_out-innermost: k_sub = ydot*xdot_slice*kpg + xdot*kpg + k_out
+    // (c_kdiv is the innermost divisor; ydot_times_xdot no longer needed in descriptors)
     rocke_value_t* hw_tilde = rocke_b_mul(b, rec_h_tilde_slice, rec_w_tilde_slice);
 
     // ---- LDS ----
@@ -2302,8 +2449,14 @@ static rocke_kernel_def_t*
     // k_off_capture is managed via the tilde descriptor context structs
 
     int threads = block_size;
+    /* Per-group vector widths: dY (NHWK) vectorises along the per-group output
+     * channel run kpg and W (KYXC) along the per-group input channel run cpg
+     * (K and C when ungrouped), so a grouped load never straddles two groups.
+     * Mirrors Python default_vector_sizes(p.cpg, p.kpg, ...). */
+    const int cpg = rocke_conv_problem_cpg(p);
+    const int kpg = rocke_conv_problem_kpg(p);
     // load_vec_a: k_out innermost -> consecutive k_sub -> consecutive k_out
-    // -> contiguous in dY (NHWK, last dim K).  Condition: K % load_vec_a == 0.
+    // -> contiguous in dY (NHWK, last dim K).  Condition: kpg % load_vec_a == 0.
     // For split_k > 1 the slice boundary may not be K-aligned; use 1 there.
     int load_vec_a = 1;
     if(spec->split_k <= 1)
@@ -2312,7 +2465,7 @@ static rocke_kernel_def_t*
         int max_from_K = 1;
         int kand[] = {is_fp32_a ? 4 : 8, 4, 2, 1};
         for(int v : kand)
-            if(p->K % v == 0)
+            if(kpg % v == 0)
             {
                 max_from_K = v;
                 break;
@@ -2324,7 +2477,8 @@ static rocke_kernel_def_t*
     // load_vec_b: B (W, KYXC) — the GEMM row axis is N_dg = c (input channels), which
     // is the stride-1 axis of KYXC.  Vectorise along the free (row) axis and transpose
     // into the row-major (N, K) LDS tile on store (vector_axis_row=true),
-    // exactly as wgrad does for its B (X, NHWC) operand.  Condition: C % load_vec_b == 0.
+    // exactly as wgrad does for its B (X, NHWC) operand.  Condition: cpg % load_vec_b
+    // == 0 (cpg == C when ungrouped); the group base g*cpg is a multiple of cpg.
     int load_vec_b = 1;
     bool axis_b_row = false;
     {
@@ -2332,7 +2486,7 @@ static rocke_kernel_def_t*
         int cand[] = {is_fp32_b ? 4 : 8, 4, 2, 1};
         int max_from_C = 1;
         for(int v : cand)
-            if(p->C % v == 0)
+            if(cpg % v == 0)
             {
                 max_from_C = v;
                 break;
@@ -2473,6 +2627,8 @@ static rocke_kernel_def_t*
     dy_tctx.c_Ho = c_Ho;
     dy_tctx.c_Wo = c_Wo;
     dy_tctx.c_K = c_K;
+    dy_tctx.c_kdiv = c_kdiv;
+    dy_tctx.k_out_group_base = k_out_group_base;
     dy_tctx.c0 = c0;
     dy_tctx.is_pointwise = rocke_conv_problem_is_pointwise(p) && p->groups <= 1;
     dy_tctx.dg_M = c_dY_rows;
@@ -2489,6 +2645,9 @@ static rocke_kernel_def_t*
     w_tctx.c_X = c_X;
     w_tctx.c_K = c_K;
     w_tctx.c_C = c_C;
+    w_tctx.c_kdiv = c_kdiv;
+    w_tctx.k_out_group_base = k_out_group_base;
+    w_tctx.c_cstride = c_cstride;
     w_tctx.c0 = c0;
     w_tctx.is_pointwise = rocke_conv_problem_is_pointwise(p) && p->groups <= 1;
 
@@ -2601,7 +2760,8 @@ static rocke_kernel_def_t*
             {
                 bool use_cshuffle_ = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
                 if(use_cshuffle_)
-                    _emit_dgrad_direct_epilogue(b, spec, &ctx, epi_accs_, n_epi, &grid, dx_rsrc);
+                    _emit_dgrad_direct_epilogue(
+                        b, spec, &ctx, epi_accs_, n_epi, &grid, dx_rsrc, c_group_base);
                 else
                     _emit_dgrad_direct_epilogue_wmma(b,
                                                      spec,
@@ -2615,15 +2775,18 @@ static rocke_kernel_def_t*
                                                      block_m_off_v,
                                                      block_n_off_v,
                                                      dx_rsrc,
-                                                     c0);
+                                                     c0,
+                                                     c_group_base);
             }
             else
             {
                 bool use_cshuffle_ = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
                 if(use_cshuffle_)
-                    _emit_dgrad_cshuffle_epilogue(b, spec, &ctx, epi_accs_, n_epi, &grid, dx_rsrc);
+                    _emit_dgrad_cshuffle_epilogue(
+                        b, spec, &ctx, epi_accs_, n_epi, &grid, dx_rsrc, c_group_base);
                 else
-                    _emit_dgrad_direct_epilogue(b, spec, &ctx, epi_accs_, n_epi, &grid, dx_rsrc);
+                    _emit_dgrad_direct_epilogue(
+                        b, spec, &ctx, epi_accs_, n_epi, &grid, dx_rsrc, c_group_base);
             }
         }
         else if(!is_split_k_atomic_ && is_wmma)
@@ -2650,7 +2813,8 @@ static rocke_kernel_def_t*
                                                    rec_d_w_offset,
                                                    c_Hi,
                                                    c_Wi,
-                                                   c_C);
+                                                   c_C,
+                                                   c_group_base);
         }
         else if(!is_split_k_atomic_ && !is_wmma && atom)
         {
@@ -2673,7 +2837,8 @@ static rocke_kernel_def_t*
                                                     rec_d_w_offset,
                                                     c_Hi,
                                                     c_Wi,
-                                                    c_C);
+                                                    c_C,
+                                                    c_group_base);
             else
                 _emit_dgrad_tilde_direct_epilogue(b,
                                                   spec,
@@ -2692,7 +2857,8 @@ static rocke_kernel_def_t*
                                                   rec_d_w_offset,
                                                   c_Hi,
                                                   c_Wi,
-                                                  c_C);
+                                                  c_C,
+                                                  c_group_base);
         }
         else
         {
@@ -2718,7 +2884,8 @@ static rocke_kernel_def_t*
                                               rec_d_w_offset,
                                               c_Hi,
                                               c_Wi,
-                                              c_C);
+                                              c_C,
+                                              c_group_base);
         }
     };
 
@@ -2950,10 +3117,12 @@ static rocke_kernel_def_t*
     if(spec->uniform_k_decode)
     {
         /* Python _emit_uniform_k_decode_loops. Loop 1 carries the K tile's
-         * decoded (k_out, xdot, ydot) and runs when K is a multiple of tile_k;
-         * loop 2 is the plain loop and runs otherwise. Exactly one has a
-         * non-empty range. Ungrouped only, like the rest of this builder. */
-        rocke_value_t* c_kd = c_K;
+         * decoded (k_out, xdot, ydot) and runs when kpg (K when ungrouped) is
+         * a multiple of tile_k; loop 2 is the plain loop and runs otherwise.
+         * Exactly one has a non-empty range. k_out is group-local, exactly as
+         * in the plain descriptors; the group's output-channel base is added
+         * into both per-tile offsets. */
+        rocke_value_t* c_kd = c_kdiv;
         rocke_value_t* c_xs = rec_x_dot_slice;
         rocke_value_t* c1 = rocke_b_const_i32(b, 1);
         rocke_value_t* kd_rem = rocke_b_mod(b, c_kd, c_block_k);
@@ -2967,8 +3136,9 @@ static rocke_kernel_def_t*
         rocke_value_t* wo_k = rocke_b_mul(b, c_Wo, c_K);
         rocke_value_t* a_step_y = rocke_b_mul(b, rec_a_embed_h_coeff, wo_k);
         rocke_value_t* a_step_x = rocke_b_mul(b, rec_a_embed_w_coeff, c_K);
-        /* W (KYXC): offset = k*Y*X*C + y*X*C + x*C + c. */
-        rocke_value_t* c_cs = c_C;
+        /* W (KYXC, per-group packed): offset = k*Y*X*Cs + y*X*Cs + x*Cs + c,
+         * Cs = cpg when grouped, C otherwise. */
+        rocke_value_t* c_cs = c_cstride;
         rocke_value_t* b_step_y = rocke_b_mul(b, c_X, c_cs);
         rocke_value_t* b_step_k = rocke_b_mul(b, c_Y, b_step_y);
         rocke_value_t* uk_hi = rocke_b_select(b, uk_ok, k_hi, k_lo);
@@ -3018,9 +3188,12 @@ static rocke_kernel_def_t*
             rocke_value_t* a_k = rocke_b_add(b, ko, ay);
             rocke_value_t* ax = rocke_b_mul(b, xd, a_step_x);
             uk_dy.a_off = rocke_b_add(b, a_k, ax);
+            if(grouped)
+                uk_dy.a_off = rocke_b_add(b, uk_dy.a_off, k_out_group_base);
             rocke_value_t* y = rocke_b_add(b, rocke_b_mul(b, yd, rec_b_y_stride), rec_b_y_offset);
             rocke_value_t* x = rocke_b_add(b, rocke_b_mul(b, xd, rec_b_x_stride), rec_b_x_offset);
-            rocke_value_t* bk = rocke_b_mul(b, ko, b_step_k);
+            rocke_value_t* k_abs = grouped ? rocke_b_add(b, ko, k_out_group_base) : ko;
+            rocke_value_t* bk = rocke_b_mul(b, k_abs, b_step_k);
             rocke_value_t* by = rocke_b_mul(b, y, b_step_y);
             rocke_value_t* bx = rocke_b_mul(b, x, c_cs);
             rocke_value_t* byx = rocke_b_add(b, by, bx);

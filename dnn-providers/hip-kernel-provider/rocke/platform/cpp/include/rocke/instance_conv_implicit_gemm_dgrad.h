@@ -8,9 +8,13 @@
  * GEMM orientation (dgrad):
  *
  *   M     = N*Hi*Wi       (input spatial positions)
- *   N_dg  = C             (input channels)
- *   K_dg  = Y*X*K         (filter spatial x output channels -- reduction)
- *   A: dY (NHWK), B: W (KYXC), D: dX (NHWC)
+ *   N_dg  = cpg           (input channels per group; C when ungrouped)
+ *   K_dg  = Y*X*kpg       (filter spatial x output channels per group -- reduction)
+ *   A: dY (NHWK), B: W (KYXC, per-group packed [K, Y, X, cpg]), D: dX (NHWC)
+ *
+ * Grouped convolution (problem.groups > 1, channels-per-group > 1) runs
+ * grid-per-group with the conv group on blockIdx.y, as the Python builder
+ * does; depthwise (cpg == 1) is rejected.
  *
  * For stride=1 a single GEMM is used (compile-time descriptor transforms).
  * For stride>1 a tilde decomposition splits the problem into up to 64+
@@ -143,8 +147,9 @@ typedef struct rocke_dgrad_conv_spec
     /* uniform_k_decode: decode the reduction index once per K tile, in uniform
      * registers. Adds a K loop that carries the tile's (k_out, xdot, ydot) and
      * splits every load offset into a loop-invariant per-element part and a
-     * uniform per-tile part; it runs when K is a multiple of tile_k (checked at
-     * run time), and the plain K loop -- also emitted -- runs otherwise.
+     * uniform per-tile part; it runs when kpg (K when ungrouped) is a multiple
+     * of tile_k (checked at run time), and the plain K loop -- also emitted --
+     * runs otherwise.
      * Rejected with pipeline="wavelet". Mirrors DgradConvSpec.uniform_k_decode.
      * Appended last so existing aggregate initialisers keep their layout.
      * Default false: every existing config emits byte-identical IR. */

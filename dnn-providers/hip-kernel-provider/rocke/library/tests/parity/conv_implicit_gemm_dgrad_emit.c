@@ -236,6 +236,129 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         spec->uniform_k_decode = true;
         *arch = "gfx1250";
         return 0;
+    /* Configs 21-33: grouped convolution (groups > 1). The conv group rides
+     * blockIdx.y; the reduction decodes by kpg, the dY/W channel is offset by
+     * g*kpg, W's channel stride is cpg and dX's channel is offset by g*cpg.
+     * Every epilogue leaf, the uniform_k_decode loop and the per-group vector
+     * widths are covered, plus the two grouped rejections. All use fp16
+     * operands: the C++ tile loader stages through f16-typed LDS stores, so a
+     * bf16 operand differs from Python in that IR type alone, grouped or not. */
+    case 21:
+        /* Grouped stride 1, direct epilogue. */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        *arch = "gfx950";
+        return 0;
+    case 22:
+        /* Grouped stride 1 with uniform_k_decode: the decode divides by kpg,
+         * and both per-tile offsets carry the group's output-channel base. */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->uniform_k_decode = true;
+        *arch = "gfx950";
+        return 0;
+    case 23:
+        /* Grouped cshuffle with cpg = kpg = 6: the load and store widths
+         * follow the per-group channel run (2), not the dense C (8). */
+        spec->problem = rocke_conv_problem_make(4, 28, 28, 24, 24, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->epilogue = "cshuffle";
+        *arch = "gfx950";
+        return 0;
+    case 24:
+        /* Grouped uniform_k_decode with the K-outer B tile and cshuffle. */
+        spec->problem = rocke_conv_problem_make(8, 28, 28, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->uniform_k_decode = true;
+        *arch = "gfx950";
+        return 0;
+    case 25:
+        /* Grouped stride 2: the tilde path with the direct tilde epilogue. */
+        spec->problem = rocke_conv_problem_make(4, 28, 28, 64, 64, 3, 3, 2, 2, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        *arch = "gfx950";
+        return 0;
+    case 26:
+        /* Grouped stride 2 with uniform_k_decode and the tilde cshuffle
+         * epilogue. cpg = 12, so the tilde store is 4 wide: it follows the
+         * per-group channel run like the stride-1 cshuffle, not a fixed 8. */
+        spec->problem = rocke_conv_problem_make(4, 28, 28, 24, 24, 3, 3, 2, 2, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->pipeline = "compv3";
+        spec->epilogue = "cshuffle";
+        spec->uniform_k_decode = true;
+        *arch = "gfx950";
+        return 0;
+    case 27:
+        /* Grouped split-K with uniform_k_decode: the packed fp16 atomic
+         * epilogue on the absolute dX channel. */
+        spec->problem = rocke_conv_problem_make(8, 28, 28, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+        spec->tile_k = 32;
+        spec->split_k = 2;
+        spec->uniform_k_decode = true;
+        *arch = "gfx950";
+        return 0;
+    case 28:
+        /* Grouped split-K on the strided tilde path (packed fp16 atomics). */
+        spec->problem = rocke_conv_problem_make(4, 28, 28, 64, 64, 3, 3, 2, 2, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->tile_k = 32;
+        spec->split_k = 2;
+        *arch = "gfx950";
+        return 0;
+    case 29:
+        /* Grouped 1x1 with uniform_k_decode: a grouped problem never takes the
+         * ungrouped pointwise fast path. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 1, 1);
+        spec->problem.groups = 4;
+        spec->uniform_k_decode = true;
+        *arch = "gfx950";
+        return 0;
+    case 30:
+        /* Grouped WMMA wave32 stride 1 with uniform_k_decode (the WMMA direct
+         * epilogue). */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->wave_size = 32;
+        spec->uniform_k_decode = true;
+        *arch = "gfx1201";
+        return 0;
+    case 31:
+        /* Grouped WMMA wave32 stride 2 (the WMMA tilde direct epilogue). */
+        spec->problem = rocke_conv_problem_make(4, 28, 28, 64, 64, 3, 3, 2, 2, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->wave_size = 32;
+        *arch = "gfx1201";
+        return 0;
+    case 32:
+        /* Rejected by both validators: depthwise (channels-per-group == 1) is
+         * not an implicit-GEMM grouped problem. */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 64;
+        *arch = "gfx950";
+        return 0;
+    case 33:
+        /* Rejected by both validators: packed fp16 split-K atomics need an even
+         * channels-per-group (C = 12 is even, cpg = 3 is not). */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        spec->tile_k = 32;
+        spec->split_k = 2;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }
