@@ -210,13 +210,13 @@ rocke_status_t
      * using it to offset into out, and check every append the same way. */
     if(n < 0 || (size_t)n >= out_cap)
         return ROCKE_ERR_VALUE;
-#define ROCKE_DGRAD_NAME_APPEND(...)                                       \
-    do                                                                     \
-    {                                                                      \
-        int w_ = snprintf(out + n, out_cap - (size_t)n, __VA_ARGS__);      \
-        if(w_ < 0 || (size_t)w_ >= out_cap - (size_t)n)                    \
-            return ROCKE_ERR_VALUE;                                        \
-        n += w_;                                                           \
+#define ROCKE_DGRAD_NAME_APPEND(...)                                  \
+    do                                                                \
+    {                                                                 \
+        int w_ = snprintf(out + n, out_cap - (size_t)n, __VA_ARGS__); \
+        if(w_ < 0 || (size_t)w_ >= out_cap - (size_t)n)               \
+            return ROCKE_ERR_VALUE;                                   \
+        n += w_;                                                      \
     } while(0)
     /* Flag order must match Python's kernel_name_join flags dict:
      * async, kouter, spk. C previously emitted spk before async, which only
