@@ -29,6 +29,9 @@ Assertion ids:
                        <arch>.kpack is absent
     kpack-empty        that archive has size 0
     no-kdp             no *.kdp.json under <out>/<arch>/, or one is not valid JSON
+    provenance-sidecar a KDP's provenance sidecar is missing, unreadable, or does not
+                       match its UKDs (a packed UKD carries its provenance there, and
+                       the checks below read it from it)
     ukd-count          the number of shipped UKDs found in the --expect list differs
                        from its length (or is 0), or a shipped UKD is not in the list
     ukd-kind           a UKD's shipped kernel_source.kind is not what its expected
@@ -60,6 +63,15 @@ import sys
 from pathlib import Path
 
 from hkp_probe_kinds import KINDS
+
+# tools/ holds hkp_pack.py, which must never resolve as the `hkp_pack` package.
+_PKG_ROOT = str(Path(__file__).resolve().parent.parent / "python")
+while _PKG_ROOT in sys.path:
+    sys.path.remove(_PKG_ROOT)
+sys.path.insert(0, _PKG_ROOT)
+
+from hkp_pack import provenance_sidecar  # noqa: E402
+from hkp_pack.errors import HkpPackError  # noqa: E402
 
 _PREFIX = "hkp_probe_assert"
 
@@ -328,6 +340,11 @@ def _check_descriptors(args, arch_dir, archive, failures):
             continue
         if not isinstance(kdp, dict):
             failures.add("no-kdp", f"{name} is not a JSON object")
+            continue
+        try:
+            provenance_sidecar.attach(kdp_path, kdp)
+        except HkpPackError as exc:
+            failures.add("provenance-sidecar", f"{name}: {exc}")
             continue
         if "arch" in kdp and kdp["arch"] != [args.arch]:
             failures.add("arch-field", f"{name} arch is {kdp['arch']!r}")

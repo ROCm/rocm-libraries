@@ -19,6 +19,9 @@ _PROBES_TESTS_DIR = Path(__file__).resolve().parent
 _PKG_DIR = _PROBES_TESTS_DIR.parent.parent
 _HKP_DIR = _PKG_DIR.parent
 
+sys.path.insert(0, str(_PKG_DIR / "python"))
+from hkp_pack import provenance_sidecar  # noqa: E402
+
 ARCH = "gfx950"
 STAMP_NAME = ".hkp-packed.stamp"
 HKP_PACK = _PKG_DIR / "tools" / "hkp_pack.py"
@@ -114,6 +117,22 @@ def pack_root(
         pytest.fail(f"hkp_pack failed ({result.returncode}):\n{result.stderr}")
     (out / STAMP_NAME).write_text("")
     return out
+
+
+def read_packed(path):
+    """A packed descriptor with each UKD's provenance attached from its sidecar."""
+    doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    provenance_sidecar.attach(Path(path), doc)
+    return doc
+
+
+def write_packed(path, doc):
+    """Write `doc` (UKD provenance inline, as read_packed returns it) back as a
+    packed descriptor: provenance in a fresh sidecar, digests matching the UKDs."""
+    path = Path(path)
+    sidecar_name, data = provenance_sidecar.detach(path.name, doc)
+    (path.parent / sidecar_name).write_bytes(data)
+    path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
 
 
 @pytest.fixture(scope="module")

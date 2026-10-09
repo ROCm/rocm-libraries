@@ -9,8 +9,10 @@ from probe_support import (  # noqa: F401 (pytest fixtures)
     comgr_lib,
     hipcc,
     packed_root,
+    read_packed,
     rocm_kpack_dir,
     run_assert,
+    write_packed,
 )
 
 KDP = f"{ARCH}/attention.kdp.json"
@@ -39,17 +41,17 @@ class _Tree:
         self.expect_path.write_text(json.dumps(entries), encoding="utf-8")
 
     def kdp(self):
-        return json.loads((self.root / KDP).read_text(encoding="utf-8"))
+        return read_packed(self.root / KDP)
 
     def mutate_ukd(self, edit):
         kdp = self.kdp()
         edit(kdp["kernelDescriptors"][0])
-        (self.root / KDP).write_text(json.dumps(kdp, indent=2), encoding="utf-8")
+        write_packed(self.root / KDP, kdp)
 
     def mutate_kdp(self, edit):
         kdp = self.kdp()
         edit(kdp)
-        (self.root / KDP).write_text(json.dumps(kdp, indent=2), encoding="utf-8")
+        write_packed(self.root / KDP, kdp)
 
     def run(self, expect_comgr=None, root=None):
         return run_assert(
@@ -66,9 +68,7 @@ def tree(packed_root, tmp_path, rocm_kpack_dir, comgr_lib):
     shutil.copytree(packed_root, copy)
     comgr = (
         comgr_lib
-        or json.loads((copy / KDP).read_text(encoding="utf-8"))["kernelDescriptors"][0][
-            "provenance"
-        ]["comgr_path"]
+        or read_packed(copy / KDP)["kernelDescriptors"][0]["provenance"]["comgr_path"]
     )
     return _Tree(copy, tmp_path / "expect.json", rocm_kpack_dir, comgr)
 
@@ -137,11 +137,20 @@ def test_ukd_count_mismatch(tree):
 
 
 def test_ukd_shipped_twice_fails_count(tree):
-    # Every shipped UKD is in the expect list, but one ships twice: matched > expected.
-    tree.mutate_kdp(
-        lambda kdp: kdp["kernelDescriptors"].append(kdp["kernelDescriptors"][0])
-    )
+    # Every shipped UKD is in the expect list, but one ships twice under another id
+    # (the sidecar keys UKDs by id): matched > expected.
+    def duplicate(kdp):
+        first = kdp["kernelDescriptors"][0]
+        kdp["kernelDescriptors"].append({**first, "id": first["id"] + "-copy"})
+
+    tree.mutate_kdp(duplicate)
     _assert_fails(tree.run(), "ukd-count")
+
+
+def test_missing_provenance_sidecar_fails(tree):
+    for sidecar in tree.root.rglob("*.provenance.json.gz"):
+        sidecar.unlink()
+    _assert_fails(tree.run(), "provenance-sidecar")
 
 
 def test_ukd_count_zero_is_failure(tree):

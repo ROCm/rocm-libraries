@@ -16,8 +16,10 @@ from probe_support import (  # noqa: F401 (pytest fixtures)
     derive_and_pack,
     hip_source,
     hipcc,
+    read_packed,
     rocm_kpack_dir,
     run_assert,
+    write_packed,
 )
 
 _EMBEDDED = {
@@ -50,10 +52,10 @@ class _Tree:
         return self.root / ARCH / self.kdp_rel
 
     def mutate(self, name, edit):
-        kdp = json.loads(self._path().read_text())
+        kdp = read_packed(self._path())
         (ukd,) = [u for u in kdp["kernelDescriptors"] if u["name"] == name]
         edit(ukd)
-        self._path().write_text(json.dumps(kdp, indent=2))
+        write_packed(self._path(), kdp)
 
     def mutate_expect(self, edit):
         entries = json.loads(self.expect_path.read_text())
@@ -140,9 +142,9 @@ def test_mixed_hip_and_embedded_source_root_passes(mixed, rocm_kpack_dir):
 def test_mixed_root_still_runs_archive_checks_for_the_kpack_ukds(mixed, rocm_kpack_dir):
     out, expect = mixed
     kdp = out / ARCH / "hip" / "pointwise.kdp.json"
-    doc = json.loads(kdp.read_text())
+    doc = read_packed(kdp)
     doc["kernelDescriptors"][0]["kernel_source"]["sha256"] = "0" * 64
-    kdp.write_text(json.dumps(doc))
+    write_packed(kdp, doc)
     _fails(run_assert(out, expect, rocm_kpack_dir), "sha256")
 
 
@@ -201,9 +203,9 @@ def test_passthrough_shipped_as_kpack_fails_ukd_kind(emb):
 def test_kpack_kind_shipped_as_passthrough_fails_ukd_kind(mixed, rocm_kpack_dir):
     out, expect = mixed
     kdp = out / ARCH / "hip" / "pointwise.kdp.json"
-    doc = json.loads(kdp.read_text())
+    doc = read_packed(kdp)
     doc["kernelDescriptors"][0]["kernel_source"] = dict(_EMBEDDED)
-    kdp.write_text(json.dumps(doc))
+    write_packed(kdp, doc)
     _fails(run_assert(out, expect, rocm_kpack_dir), "ukd-kind")
 
 
