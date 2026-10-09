@@ -923,10 +923,11 @@ TEST_P(IntegrationGpuGfx950ConvFwdServing, EveryServingKernelMatchesCpuReference
 //
 // hipkernel:Gfx950ConvFwdAot ships every AOT instance of rocKE's sweep that the packaged
 // launch runs, each built once against rocKE's probe problem and matched to a graph by
-// capability. hipkernel:Gfx950ConvFwdAotSeed runs the same native code over a small seed
-// of them, 12 implicit-GEMM and 4 direct depthwise instances per dtype
-// (test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed). Both run the graphs
-// below, in both dtypes.
+// capability. hipkernel:Gfx950ConvFwdAotSeed runs the same native code over a seed of
+// them, per dtype 12 implicit-GEMM instances, 4 std and spatial direct depthwise
+// instances, and 22 each of the tiled, col, grouped and non-grouped direct kernels
+// (test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed). Both run the graphs of
+// aotGraphs(), in both dtypes; the seed also runs aotSeedDirectGraphs().
 
 namespace
 {
@@ -953,9 +954,11 @@ struct AotGraph
     size_t implicitBf16;
 };
 
-// Direct instances serve only guarded depthwise graphs with their compiled filter, stride
-// and padding; batch, image and group count are kernel arguments. In the seed: std 3x3/1
-// and 5x5/2, spatial (fewer than 64 groups) 3x3/1 and 7x7/2.
+// A direct instance serves only graphs with its compiled filter, stride, padding and
+// dilation; batch, image and group count are kernel arguments. In the seed: std 3x3/1 and
+// 5x5/2, spatial (fewer than 64 groups) 3x3/1 and 7x7/2, and the tiled, col, grouped and
+// non-grouped instances aotSeedDirectGraphs() is for, which also serve some graphs here
+// (non-grouped the dense 3x3 ones whose C, K and Wo they tile).
 // clang-format off
 const std::vector<AotGraph>& aotGraphs()
 {
@@ -996,7 +999,92 @@ const std::vector<AotGraph>& aotGraphs()
 }
 // clang-format on
 
-/// aotGraphs() in both dtypes, with the seed's selected counts or the full catalog's.
+/// One graph for the seed's tiled, col, grouped and non-grouped direct instances, and how
+/// many instances of each family the seed selects for it (the same in both dtypes),
+/// counted as for aotGraphs(). Each such instance serves at least two of these graphs: images,
+/// batches and group counts with tails, "valid" and "same" padding for col, every grouped
+/// channel count, and every dilation the non-grouped sweep builds. Only the seed suite
+/// runs them: the shipped catalog's suite samples its thousands of candidates per graph.
+struct AotSeedGraph
+{
+    std::string name;
+    ConvProblem problem;
+    size_t seedDirect;
+    size_t seedImplicit;
+};
+
+// clang-format off
+const std::vector<AotSeedGraph>& aotSeedDirectGraphs()
+{
+    static const std::vector<AotSeedGraph> s_graphs{
+        // Tiled depthwise: 3x3, 7x7, 15x15 and 31x31 filters, strides 1 and 2.
+        {"TiledG32", {2, 32, 32, 13, 17, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 8, 1},
+        {"TiledG200", {1, 200, 200, 9, 7, 3, 3, 1, 1, 1, 1, 1, 1, 200}, 7, 1},
+        {"TiledG5Strided", {3, 5, 5, 12, 12, 3, 3, 2, 2, 1, 1, 1, 1, 5}, 6, 1},
+        {"TiledG96Strided", {1, 96, 96, 17, 14, 3, 3, 2, 2, 1, 1, 1, 1, 96}, 6, 1},
+        {"TiledG24Strided7x7", {2, 24, 24, 15, 15, 7, 7, 2, 2, 3, 3, 1, 1, 24}, 7, 1},
+        {"TiledG130Strided7x7", {1, 130, 130, 21, 9, 7, 7, 2, 2, 3, 3, 1, 1, 130}, 6, 1},
+        {"TiledG16Filter15", {1, 16, 16, 20, 23, 15, 15, 1, 1, 7, 7, 1, 1, 16}, 1, 1},
+        {"TiledG70Filter15", {2, 70, 70, 16, 16, 15, 15, 1, 1, 7, 7, 1, 1, 70}, 1, 1},
+        {"TiledG8Filter31", {1, 8, 8, 40, 37, 31, 31, 2, 2, 15, 15, 1, 1, 8}, 2, 1},
+        {"TiledG65Filter31", {1, 65, 65, 33, 31, 31, 31, 2, 2, 15, 15, 1, 1, 65}, 2, 1},
+        // Column-streamed depthwise: "valid" (padding 0) and "same" padding.
+        {"ColG40Valid", {2, 40, 40, 11, 19, 3, 3, 1, 1, 0, 0, 1, 1, 40}, 1, 1},
+        {"ColG7Valid", {3, 7, 7, 6, 9, 3, 3, 1, 1, 0, 0, 1, 1, 7}, 1, 1},
+        {"ColG24Strided5x5Valid", {2, 24, 24, 13, 17, 5, 5, 2, 2, 0, 0, 1, 1, 24}, 5, 1},
+        {"ColG100Strided5x5Valid", {1, 100, 100, 18, 21, 5, 5, 2, 2, 0, 0, 1, 1, 100}, 5, 1},
+        {"ColG24Strided5x5", {2, 24, 24, 13, 17, 5, 5, 2, 2, 2, 2, 1, 1, 24}, 1, 1},
+        {"ColG72Filter9", {1, 72, 72, 20, 16, 9, 9, 1, 1, 4, 4, 1, 1, 72}, 10, 1},
+        {"ColG9Filter9", {2, 9, 9, 13, 11, 9, 9, 1, 1, 4, 4, 1, 1, 9}, 10, 1},
+        {"ColG9Strided11x11Valid", {2, 9, 9, 25, 27, 11, 11, 2, 2, 0, 0, 1, 1, 9}, 2, 1},
+        {"ColG64Strided11x11Valid", {1, 64, 64, 31, 23, 11, 11, 2, 2, 0, 0, 1, 1, 64}, 2, 1},
+        {"ColG12Filter7Valid", {2, 12, 12, 16, 18, 7, 7, 1, 1, 0, 0, 1, 1, 12}, 1, 1},
+        {"ColG80Filter7Valid", {1, 80, 80, 9, 20, 7, 7, 1, 1, 0, 0, 1, 1, 80}, 1, 1},
+        {"ColG20Strided9x9", {1, 20, 20, 23, 19, 9, 9, 2, 2, 4, 4, 1, 1, 20}, 4, 1},
+        {"ColG66Strided9x9", {2, 66, 66, 17, 25, 9, 9, 2, 2, 4, 4, 1, 1, 66}, 4, 1},
+        // Grouped, 4, 8, 16 and 32 channels per group.
+        {"GroupedG16Cpg4", {2, 64, 64, 9, 19, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 4, 7},
+        {"GroupedG32Cpg4", {1, 128, 128, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 4, 7},
+        {"GroupedG16Cpg8", {2, 128, 128, 9, 19, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 4, 12},
+        {"GroupedG48Cpg8", {1, 384, 384, 7, 33, 3, 3, 1, 1, 1, 1, 1, 1, 48}, 4, 12},
+        {"GroupedG16Cpg16", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 8, 12},
+        {"GroupedG32Cpg16", {2, 512, 512, 8, 17, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 8, 12},
+        {"GroupedG16Cpg32", {1, 512, 512, 9, 19, 3, 3, 1, 1, 1, 1, 1, 1, 16}, 6, 12},
+        {"GroupedG8Cpg32", {2, 256, 256, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 8}, 6, 12},
+        // Non-grouped: output widths every swept tile width divides, row and channel tails,
+        // stride 2 and the swept dilations.
+        {"NongroupedC64K96", {1, 64, 96, 10, 96, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 9, 12},
+        {"NongroupedC32K64", {2, 32, 64, 7, 48, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 7, 12},
+        {"NongroupedC128K32", {1, 128, 32, 5, 32, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 8, 12},
+        {"NongroupedWo192", {1, 32, 32, 3, 192, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 14, 12},
+        {"NongroupedWo160", {2, 64, 64, 2, 160, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 10, 12},
+        {"NongroupedWo128", {1, 64, 128, 4, 128, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 10, 12},
+        {"NongroupedWo384", {1, 16, 32, 2, 384, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 11, 12},
+        {"NongroupedWo80", {2, 32, 64, 3, 80, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 8, 12},
+        {"NongroupedWo320", {1, 16, 32, 2, 320, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 9, 12},
+        {"NongroupedC64K64Strided", {1, 64, 64, 13, 191, 3, 3, 2, 2, 1, 1, 1, 1, 1}, 1, 12},
+        {"NongroupedC48K96Strided", {2, 48, 96, 9, 95, 3, 3, 2, 2, 1, 1, 1, 1, 1}, 1, 12},
+        {"NongroupedDilated2x2", {1, 64, 64, 12, 96, 3, 3, 1, 1, 2, 2, 2, 2, 1}, 1, 12},
+        {"NongroupedDilated2x2C32", {2, 32, 32, 7, 32, 3, 3, 1, 1, 2, 2, 2, 2, 1}, 1, 12},
+        {"NongroupedDilated3x3", {1, 64, 64, 8, 96, 3, 3, 1, 1, 3, 3, 3, 3, 1}, 1, 12},
+        {"NongroupedDilated3x3C32", {2, 32, 32, 9, 32, 3, 3, 1, 1, 3, 3, 3, 3, 1}, 1, 12},
+        {"NongroupedDilated4x4", {1, 64, 64, 10, 96, 3, 3, 1, 1, 4, 4, 4, 4, 1}, 1, 12},
+        {"NongroupedDilated4x4C32", {2, 32, 32, 9, 32, 3, 3, 1, 1, 4, 4, 4, 4, 1}, 1, 12},
+        {"NongroupedDilated3x1", {1, 64, 64, 9, 96, 3, 3, 1, 1, 1, 1, 3, 1, 1}, 1, 12},
+        {"NongroupedDilated3x1C32", {2, 32, 32, 11, 32, 3, 3, 1, 1, 1, 1, 3, 1, 1}, 1, 12},
+        {"NongroupedDilated3x1Strided", {1, 64, 96, 20, 191, 3, 3, 2, 2, 1, 1, 3, 1, 1}, 1, 12},
+        {"NongroupedDilated3x1StridedC32", {2, 32, 32, 13, 63, 3, 3, 2, 2, 1, 1, 3, 1, 1}, 1, 12},
+        {"NongroupedDilated1x2", {1, 64, 64, 5, 96, 3, 3, 1, 1, 2, 2, 1, 2, 1}, 1, 12},
+        {"NongroupedDilated1x2C32", {2, 32, 32, 6, 32, 3, 3, 1, 1, 2, 2, 1, 2, 1}, 1, 12},
+        {"NongroupedDilated1x4", {1, 32, 32, 9, 96, 3, 3, 1, 1, 4, 4, 1, 4, 1}, 1, 12},
+        {"NongroupedDilated1x4C64", {1, 64, 96, 6, 48, 3, 3, 1, 1, 4, 4, 1, 4, 1}, 1, 12},
+    };
+    return s_graphs;
+}
+// clang-format on
+
+/// aotGraphs() in both dtypes, with the seed's selected counts or the full catalog's; the
+/// seed's also run aotSeedDirectGraphs().
 std::vector<Variant> aotVariants(bool fullCatalog)
 {
     std::vector<Variant> variants;
@@ -1011,6 +1099,21 @@ std::vector<Variant> aotVariants(bool fullCatalog)
                                 graph.problem,
                                 fullCatalog ? graph.direct : graph.seedDirect,
                                 fullCatalog ? implicit : graph.seedImplicit});
+        }
+    }
+    if(!fullCatalog)
+    {
+        for(const auto& graph : aotSeedDirectGraphs())
+        {
+            for(const auto dtype : {DataType::HALF, DataType::BFLOAT16})
+            {
+                variants.push_back({graph.name + dtypeSuffix(dtype),
+                                    dtype,
+                                    0,
+                                    graph.problem,
+                                    graph.seedDirect,
+                                    graph.seedImplicit});
+            }
         }
     }
     return variants;
@@ -1032,6 +1135,13 @@ namespace
 {
 
 constexpr const char* AOT_SEED_ENGINE_NAME = "hipkernel:Gfx950ConvFwdAotSeed";
+
+/// Whether @p problem is pure depthwise (groups == C == K): the graphs the std, spatial,
+/// tiled and col kernels serve, where an unbenchmarked plan prefers a direct instance.
+bool isDepthwise(const ConvProblem& problem)
+{
+    return problem.groups == problem.c && problem.c == problem.k;
+}
 
 } // namespace
 
@@ -1096,11 +1206,15 @@ TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, KernelFamilyKnobSelectsEachFamilysIns
     ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*direct, variant.dtype, 47));
     direct.reset();
 
-    // Unbenchmarked, a direct instance ranks above every implicit-GEMM one.
+    // Unbenchmarked, a depthwise direct instance ranks above every implicit-GEMM one; the
+    // grouped and non-grouped direct kernels rank below them (aotScore).
     recorder.clearLogs();
     auto unforced = buildConvGraph(variant.dtype, variant.problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*unforced, {disableBenchmarkingKnob()}));
-    EXPECT_EQ(selectedKernel(recorder), directKernel) << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(selectedKernel(recorder),
+              isDepthwise(variant.problem) || variant.implicitArms == 0 ? directKernel
+                                                                        : implicitKernel)
+        << recorder.getRecordedLogsAsString();
 }
 
 #endif // HKP_TEST_GFX950_CONV_FWD_AOT_SEED
