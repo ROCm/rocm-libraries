@@ -34,8 +34,9 @@ static void build_optimization_barriers(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
-static const char* ARCHES[] = {"gfx1250", "gfx950"};
-static const int NUM_CONFIGS = 2;
+static const char* ARCHES[]
+    = {"gfx1250", "gfx950", "gfx90a", "gfx942", "gfx1151", "gfx1201", "gfx11-generic"};
+static const int NUM_CONFIGS = sizeof(ARCHES) / sizeof(ARCHES[0]);
 
 int main(int argc, char** argv)
 {
