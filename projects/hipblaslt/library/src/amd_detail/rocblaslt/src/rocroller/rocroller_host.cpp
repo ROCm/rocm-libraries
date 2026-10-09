@@ -482,6 +482,7 @@ rocblaslt_status
     RocRollerHandle* rocroller_handle = static_cast<RocRollerHandle*>(handle->rocroller_handle);
     auto             kernelType       = genKernelType(prob);
     int              index;
+    *returnAlgoCount = 0;
 
     if(prob.bias != nullptr)
     {
@@ -666,6 +667,7 @@ rocblaslt_status isRocRollerSolutionSupported(rocblaslt_handle             handl
         return rocblaslt_status_invalid_value;
     }
 
+    *workspaceSizeInBytes = kernel->workspaceRequired(prob);
     return rocblaslt_status_success;
 }
 
