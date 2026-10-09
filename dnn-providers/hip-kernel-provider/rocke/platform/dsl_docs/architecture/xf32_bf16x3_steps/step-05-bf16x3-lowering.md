@@ -13,7 +13,7 @@ steps 5 and 6). Ticket AICK-2208.
 - [Synthetic ops in the C engine](#synthetic-ops-in-the-c-engine)
 - [One asymmetry left standing](#one-asymmetry-left-standing)
 - [Verification](#verification)
-- [Follow-ups left open](#follow-ups-left-open)
+- [Follow-ups, closed after review](#follow-ups-closed-after-review)
 
 ## Why the two steps are one change
 
@@ -121,10 +121,11 @@ claiming a parity that is not yet there.
   lowering to exactly one call with no split.
 - [`tests/core/test_xf32_bf16x3_lowering.cpp`](../../../tests/core/test_xf32_bf16x3_lowering.cpp)
   — the same properties pinned directly on the C engine, by parsing serialized
-  IR and inspecting the emitted text. This exists because the Python file's
-  engine-parity test needs the `rocke_engine` pybind module and *skips* where it
-  is absent — which is every environment that builds only the archive. Wired
-  into ctest as `rocke_xf32_bf16x3_lowering`.
+  IR and inspecting the emitted text. Wired into ctest as
+  `rocke_xf32_bf16x3_lowering`. It pins the recipe, not byte identity: the
+  Python file's engine-parity test needs the `rocke_engine` pybind module and
+  *skips* where only the archive is built, which is why the
+  `xf32_bf16x3_mma` parity family (below) was added after review.
 - Python↔C byte identity for both atoms at llvm20, llvm22 **and** llvm23:
   `IDENTICAL` on all six, checked by lowering the serialized IR through
   `ir_lower_cli` and diffing against `_lower_kernel_to_llvm_python`. This is the
@@ -136,15 +137,20 @@ claiming a parity that is not yet there.
   [step 1](step-01-mma-result-dtype.md). No new drift — expected, since no
   golden kernel selects xf32 yet.
 
-## Follow-ups left open
+## Follow-ups, closed after review
 
-- **Closed after review.** The bare-`op_id` fragment lookups did not know the
-  emulated atoms, so neither the C builder's `rocke_b_mma` nor the bare-string
-  form of Python's `IRBuilder.mma` could construct an xf32 `tile.mma`. Both now
-  resolve the logical op_id through its physical atom — see
+- The bare-`op_id` fragment lookups did not know the emulated atoms, so neither
+  the C builder's `rocke_b_mma` nor the bare-string form of Python's
+  `IRBuilder.mma` could construct an xf32 `tile.mma`. Both now resolve the
+  logical op_id through its physical atom — see
   [step 4](step-04-gfx950-xf32-rows.md#follow-ups-left-open). The C test still
   embeds serialized IR, now so that it pins the recipe independent of the
   builder.
-- No golden kernel exercises the expansion yet, so the byte-identity gate covers
-  it only through the two focused tests above. That changes when a kernel family
-  selects xf32.
+- No shipped kernel selects an XF32 atom, so the byte-identity gate never
+  compared the engines on the expansion: the pybind parity test above skips in
+  archive-only builds, and the C test checks only C output. The
+  [`xf32_bf16x3_mma`](../../../tests/instances/parity/xf32_bf16x3_mma_emit.py)
+  parity pair closes that. It builds both atoms through each engine's builder
+  from the bare op_id and is byte-compared by `tools/check_byte_identity.py`,
+  which needs only the archive. Swapping two terms in the C++ expansion alone
+  turns both of its configs into `MISMATCH`.

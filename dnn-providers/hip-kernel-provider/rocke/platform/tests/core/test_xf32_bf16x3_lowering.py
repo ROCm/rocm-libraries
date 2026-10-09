@@ -232,7 +232,12 @@ class TestNativeAtomsAreUntouched(unittest.TestCase):
 
 
 class TestEngineParity(unittest.TestCase):
-    """The #1 invariant: the two engines emit the same bytes for the expansion."""
+    """The #1 invariant: the two engines emit the same bytes for the expansion.
+
+    Needs the ``rocke_engine`` pybind module and skips without it. Where only
+    the archive is built, the same comparison is the ``xf32_bf16x3_mma`` parity
+    family that ``tools/check_byte_identity.py`` runs.
+    """
 
     def test_python_cpp_byte_identity_for_every_flavor(self):
         for op_id in _EMULATED:

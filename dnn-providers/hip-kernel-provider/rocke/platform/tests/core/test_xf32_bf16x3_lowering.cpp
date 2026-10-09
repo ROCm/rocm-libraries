@@ -4,12 +4,12 @@
  * test_xf32_bf16x3_lowering.cpp -- C++ engine coverage for the XF32 BF16x3
  * emulated MMA atoms (AICK-2208).
  *
- * The Python-side twin is tests/core/test_xf32_bf16x3_lowering.py, which also
- * carries the engine-parity check. That check needs the rocke_engine pybind
- * module and skips where it is absent, so the C engine would otherwise be
- * ungated in exactly the environments that build only the archive. This file
- * closes that hole: it parses serialized IR (the same artifact the Python test
- * lowers) and pins the emitted text directly.
+ * The Python-side twin is tests/core/test_xf32_bf16x3_lowering.py. This file
+ * pins the recipe on the C engine's own output, by parsing serialized IR (the
+ * same artifact the Python test lowers) and inspecting the emitted text. Byte
+ * identity between the two engines is the parity family's job
+ * (tests/instances/parity/xf32_bf16x3_mma_emit.{c,py}, run by
+ * tools/check_byte_identity.py), which needs only the archive.
  *
  * Input IR is embedded rather than built through rocke_b_mma so these checks
  * hold independent of the builder: serialized IR spells the vector types
