@@ -159,6 +159,7 @@ SchedulingFeatures schedulingFeaturesFromModule(const StinkyAsmModule& module) {
     features.prefetchLocalRead = opts.PrefetchLocalRead;
     features.unrollLoopCopies = opts.UnrollLoopCopies;
     features.tdmStageBytes = opts.TdmStageBytes;
+    features.tdmScaleTensors = opts.TdmScaleTensors != 0;
     return features;
 }
 
@@ -215,7 +216,8 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
             out.dsCapTdmBeginCycles = std::max(0, tEnd - kTdmWindowPreCycles);
             out.dsCapTdmEndCycles = tEnd + kTdmWindowPostCycles;
         }
-        out.dsCapTdmPerCap = kPolicyDsCapTdmPerCap;
+        out.dsCapTdmPerCap =
+            features.tdmScaleTensors ? kPolicyDsCapTdmPerCapScaled : kPolicyDsCapTdmPerCap;
     }
     out.dsCapTdmSource = SchedulingKnobSource::Policy;
 

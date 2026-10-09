@@ -7232,6 +7232,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       stinky_module_options["TdmStageBytes"] = int(
         (kernel["MacroTile0"] * kernel["ProblemType"]["DataTypeA"].numBytes() +
          kernel["MacroTile1"] * kernel["ProblemType"]["DataTypeB"].numBytes()) * kernel["DepthU"])
+      # MX scale tensors ride their own TDM loads next to the data tiles; the policy keeps the
+      # ds rate in the TDM landing window higher for such kernels (measured: a tight window cap
+      # costs fp4 / MX kernels ~1.4% and gains fp8 1-2%).
+      stinky_module_options["TdmScaleTensors"] = int(bool(
+        kernel["ProblemType"].get("MXBlockA") or kernel["ProblemType"].get("MXBlockB")))
       # ds_load issue cap shape (see GlobalParameters); 0/0 keeps the scheduler defaults.
       stinky_module_options["DsIssueCapMode"] = int(globalParameters.get("StinkyTofuDsIssueCapMode") or 0)
       stinky_module_options["DsIssueCapSpanCycles"] = int(globalParameters.get("StinkyTofuDsIssueCapSpanCycles") or 0)
