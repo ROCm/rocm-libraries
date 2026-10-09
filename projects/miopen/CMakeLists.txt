@@ -390,7 +390,66 @@ endif()
 
 # HIP
 if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+    # Arch name sanitization for CMake target names (used by ck_impl and unbundling)
+    function(miopen_sanitize_arch ARCH OUT_VAR)
+        string(REPLACE ":" "_" _r "${ARCH}")
+        string(REPLACE "+" "p" _r "${_r}")
+        string(REPLACE "-" "_" _r "${_r}")
+        set(${OUT_VAR} "${_r}" PARENT_SCOPE)
+    endfunction()
+
+    # Strip target features (e.g. ":sramecc+:xnack-") to get the base arch name.
+    # The ck_impl loader uses the same stripping logic when looking up the .so.
+    function(ck_impl_base_arch ARCH OUT_VAR)
+        string(FIND "${ARCH}" ":" _colon_pos)
+        if(_colon_pos GREATER -1)
+            string(SUBSTRING "${ARCH}" 0 ${_colon_pos} _base)
+        else()
+            set(_base "${ARCH}")
+        endif()
+        set(${OUT_VAR} "${_base}" PARENT_SCOPE)
+    endfunction()
+
+    # The GPU targets that get a CK grouped conv plugin: one full target id per base arch,
+    # taken from GPU_TARGETS, restricted to the base archs MIOpen has CK grouped conv kernels
+    # for. Shared by the CK component request, the unbundle step and src/ck_impl so all three
+    # agree on the target set.
+    # Note: this is narrower than CK's own supported arch list - e.g. gfx103x is CK-capable
+    # but MIOpen does not yet provide CK grouped conv kernels for it. Add arches here when
+    # MIOpen adds grouped conv support for them.
+    function(miopen_ck_plugin_targets OUT_VAR)
+        set(_supported_archs
+            gfx908 gfx90a gfx942 gfx950
+            gfx1100 gfx1101 gfx1102
+            gfx1150 gfx1151 gfx1152 gfx1153
+            gfx1200 gfx1201 gfx1250 gfx1250-strict
+        )
+        set(_plugin_targets)
+        set(_seen_bases)
+        foreach(_gpu_target IN LISTS GPU_TARGETS)
+            ck_impl_base_arch("${_gpu_target}" _base)
+            if(NOT _base IN_LIST _supported_archs)
+                message(STATUS "MIOpen CK: skipping ${_gpu_target} (no MIOpen CK grouped conv support for this arch)")
+            elseif(NOT _base IN_LIST _seen_bases)
+                list(APPEND _seen_bases "${_base}")
+                list(APPEND _plugin_targets "${_gpu_target}")
+            endif()
+        endforeach()
+        set(${OUT_VAR} "${_plugin_targets}" PARENT_SCOPE)
+    endfunction()
+
+    # MIOPEN_CK_PLUGIN_TARGETS: full target ids that get a CK grouped conv plugin.
+    # MIOPEN_CK_PER_TARGET: ON when CK provides one conv library per target
+    # (device_conv_operations_<arch_safe>), OFF when only the unified device_conv_operations
+    # exists (older or full CK installs).
+    set(MIOPEN_CK_PLUGIN_TARGETS)
+    set(MIOPEN_CK_SELECTED_TARGETS)
+    set(MIOPEN_CK_PER_TARGET OFF)
+
     if(MIOPEN_USE_COMPOSABLEKERNEL)
+        miopen_ck_plugin_targets(MIOPEN_CK_PLUGIN_TARGETS)
+        set(MIOPEN_CK_SELECTED_TARGETS "${MIOPEN_CK_PLUGIN_TARGETS}")
+
         if(MIOPEN_BUILD_CK)
             include(cmake/Dependencies.cmake)
 
@@ -404,18 +463,69 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
                 message(FATAL_ERROR "Could not find composablekernel in requirements.txt")
             endif()
             miopen_add_dependency(composable_kernel options NO_LOCAL)
+            # The in-tree CK is built with MIOPEN_REQ_LIBS_ONLY, so it only has per-target libraries.
+            set(MIOPEN_CK_PER_TARGET ON)
         else()
-            find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
+            # CK installs that carry per-target conv libraries list each one as a component;
+            # older and full installs only have the unified device_conv_operations. The
+            # component list comes from the CK package config so detection works however the
+            # package was located: composable_kernel_DIR is not the CK install dir under
+            # TheRock's trampoline or a CMAKE_FIND_PACKAGE_REDIRECTS_DIR redirect.
+            find_package(composable_kernel 1.0.0)
+            set(_ck_installed_per_target)
+            if(composable_kernel_FOUND)
+                set(_ck_installed_per_target ${_composable_kernel_supported_components})
+                list(FILTER _ck_installed_per_target INCLUDE REGEX "^device_conv_operations_.")
+            endif()
+            if(_ck_installed_per_target)
+                set(MIOPEN_CK_PER_TARGET ON)
+            elseif(composable_kernel_FOUND)
+                find_package(composable_kernel 1.0.0 OPTIONAL_COMPONENTS device_conv_operations)
+            endif()
+        endif()
+
+        if(MIOPEN_CK_PER_TARGET)
+            # Build plugins only for targets CK has a conv library for.
+            set(_ck_available_targets)
+            set(_ck_components)
+            foreach(_gpu_target IN LISTS MIOPEN_CK_PLUGIN_TARGETS)
+                miopen_sanitize_arch("${_gpu_target}" _arch_safe)
+                if(MIOPEN_BUILD_CK)
+                    set(_ck_has_lib FALSE)
+                    if(TARGET device_conv_operations_${_arch_safe})
+                        set(_ck_has_lib TRUE)
+                    endif()
+                else()
+                    set(_ck_has_lib FALSE)
+                    if("device_conv_operations_${_arch_safe}" IN_LIST _ck_installed_per_target)
+                        set(_ck_has_lib TRUE)
+                    endif()
+                endif()
+                if(_ck_has_lib)
+                    list(APPEND _ck_available_targets "${_gpu_target}")
+                    list(APPEND _ck_components device_conv_operations_${_arch_safe})
+                else()
+                    ck_impl_base_arch("${_gpu_target}" _arch_base)
+                    message(WARNING "MIOpen CK: no CK library for ${_gpu_target}; skipping MIOpenCKGroupedConv_${_arch_base}")
+                endif()
+            endforeach()
+            set(MIOPEN_CK_PLUGIN_TARGETS "${_ck_available_targets}")
+            if(NOT MIOPEN_BUILD_CK AND _ck_components)
+                find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS ${_ck_components})
+            endif()
+        endif()
+
+        # CK found without a conv library, or not found: build and link only what is found.
+        # TARGET is used because Configs older than the component-not-found handling never
+        # set composable_kernel_device_conv_operations_FOUND.
+        if(NOT MIOPEN_BUILD_CK AND NOT MIOPEN_CK_PER_TARGET AND NOT TARGET composable_kernel::device_conv_operations)
+            foreach(_gpu_target IN LISTS MIOPEN_CK_PLUGIN_TARGETS)
+                ck_impl_base_arch("${_gpu_target}" _arch_base)
+                message(WARNING "MIOpen CK: no CK library for ${_gpu_target}; skipping MIOpenCKGroupedConv_${_arch_base}")
+            endforeach()
+            set(MIOPEN_CK_PLUGIN_TARGETS)
         endif()
     endif()
-
-    # Arch name sanitization for CMake target names (used by ck_impl and unbundling)
-    function(miopen_sanitize_arch ARCH OUT_VAR)
-        string(REPLACE ":" "_" _r "${ARCH}")
-        string(REPLACE "+" "p" _r "${_r}")
-        string(REPLACE "-" "_" _r "${_r}")
-        set(${OUT_VAR} "${_r}" PARENT_SCOPE)
-    endfunction()
 
     # --- Optional per-architecture CK archive unbundling ---
     if(MIOPEN_USE_COMPOSABLEKERNEL AND MIOPEN_CK_UNBUNDLE_PER_ARCH)
@@ -436,25 +546,29 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
             message(FATAL_ERROR "Per-arch CK unbundling requires clang-offload-bundler and llvm-objcopy")
         endif()
 
-        # Get the fat archive path
-        if(MIOPEN_BUILD_CK)
-            set(CK_FAT_ARCHIVE_TARGET device_conv_operations)
-            set(CK_FAT_ARCHIVE_PATH $<TARGET_FILE:device_conv_operations>)
-        else()
-            set(CK_FAT_ARCHIVE_PATH $<TARGET_FILE:composable_kernel::device_conv_operations>)
-            set(CK_FAT_ARCHIVE_TARGET composable_kernel::device_conv_operations)
-        endif()
-
         set(CK_PER_ARCH_DIR "${CMAKE_CURRENT_BINARY_DIR}/lib")
 
-        foreach(arch IN LISTS GPU_TARGETS)
+        foreach(arch IN LISTS MIOPEN_CK_PLUGIN_TARGETS)
             miopen_sanitize_arch("${arch}" arch_safe)
             set(target_name "ck_conv_${arch_safe}")
 
-            # Skip if already created (GPU_TARGETS may contain duplicates)
+            # Skip if already created
             if(TARGET ${target_name})
                 continue()
             endif()
+
+            # The fat archive to unbundle: this target's own conv library in per-target mode,
+            # the unified one otherwise.
+            if(MIOPEN_CK_PER_TARGET)
+                set(_ck_fat_lib device_conv_operations_${arch_safe})
+            else()
+                set(_ck_fat_lib device_conv_operations)
+            endif()
+            if(NOT MIOPEN_BUILD_CK)
+                set(_ck_fat_lib composable_kernel::${_ck_fat_lib})
+            endif()
+            set(CK_FAT_ARCHIVE_TARGET ${_ck_fat_lib})
+            set(CK_FAT_ARCHIVE_PATH $<TARGET_FILE:${_ck_fat_lib}>)
 
             set(per_arch_lib "${CK_PER_ARCH_DIR}/libdevice_conv_operations_${arch_safe}.a")
 
