@@ -34,12 +34,16 @@
 // The kernel assigns one wavefront-sized lane group per row, so it needs
 // (wf_size * m) threads. Two things must hold for the grid to be correct:
 //
-//   1. The product is computed in int64_t. With J = int32_t (the default build)
-//      `wf_size * m` is a 32-bit product that wraps at m = 2^32 / wf_size --
-//      16,777,216 rows at wf_size 256, 33,554,432 at 128, and so on. The wrapped
-//      value is small, the grid collapses to a single block, and the validator
-//      inspects only the first BLOCKSIZE/wf_size rows before returning
-//      rocsparse_status_success on a matrix it never looked at (AISPARSE-698).
+//   1. The product is computed in int64_t. `wf_size` is an int literal, so with
+//      J = int32_t (the default build) the old `wf_size * m` was a signed 32-bit
+//      product: undefined behaviour once m > 2^31 / wf_size, i.e. from
+//      8,388,609 rows at wf_size 256 and 536,870,913 rows at wf_size 4. Past that
+//      point the product wrapped. A negative result became a block count of about
+//      4.29e9 in dim3 and the launch was rejected; a small positive one (exactly
+//      m = 2^32 / wf_size gives 0, hence one block) launched a grid that covered
+//      only the first rows. Either way nothing wrote *data_status and the
+//      validator returned rocsparse_status_success on a matrix it never examined
+//      (AISPARSE-698).
 //   2. The block count is clamped so that the launch is actually accepted. Two
 //      independent device limits apply, and for a 256-thread block it is the
 //      second that binds:
@@ -64,57 +68,35 @@
 //      never wrapped but the ceil-divide could exceed the 32-bit dim3 field and
 //      be truncated on the way into the launch.
 //
-// rocsparse::get_grid_size_x applies both limits. The grid-stride variant runs
-// exactly when that clamp is below the natural block count.
-#define LAUNCH_CHECK_MATRIX_CSR(block_size, wf_size)                                               \
-    do                                                                                             \
-    {                                                                                              \
-        const int64_t natural_blocks_x = (static_cast<int64_t>(wf_size) * m - 1) / block_size + 1; \
-        const int64_t num_blocks_x                                                                 \
-            = rocsparse::get_grid_size_x(handle, natural_blocks_x, block_size);                    \
-        if(num_blocks_x < natural_blocks_x)                                                        \
-        {                                                                                          \
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                    \
-                (rocsparse::check_matrix_csr_device<block_size, wf_size, true>),                   \
-                dim3(num_blocks_x),                                                                \
-                dim3(block_size),                                                                  \
-                0,                                                                                 \
-                handle->stream,                                                                    \
-                m,                                                                                 \
-                n,                                                                                 \
-                nnz,                                                                               \
-                csr_val,                                                                           \
-                csr_row_ptr,                                                                       \
-                csr_col_ind,                                                                       \
-                csr_col_ind_sorted,                                                                \
-                idx_base,                                                                          \
-                matrix_type,                                                                       \
-                uplo,                                                                              \
-                storage,                                                                           \
-                d_data_status);                                                                    \
-        }                                                                                          \
-        else                                                                                       \
-        {                                                                                          \
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                    \
-                (rocsparse::check_matrix_csr_device<block_size, wf_size, false>),                  \
-                dim3(num_blocks_x),                                                                \
-                dim3(block_size),                                                                  \
-                0,                                                                                 \
-                handle->stream,                                                                    \
-                m,                                                                                 \
-                n,                                                                                 \
-                nnz,                                                                               \
-                csr_val,                                                                           \
-                csr_row_ptr,                                                                       \
-                csr_col_ind,                                                                       \
-                csr_col_ind_sorted,                                                                \
-                idx_base,                                                                          \
-                matrix_type,                                                                       \
-                uplo,                                                                              \
-                storage,                                                                           \
-                d_data_status);                                                                    \
-        }                                                                                          \
-    } while(0)
+// rocsparse::dispatch_grid_stride_x applies both limits and selects the
+// grid-stride variant exactly when the clamp is below the natural block count.
+#define LAUNCH_CHECK_MATRIX_CSR(block_size, wf_size)                                              \
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(                                  \
+        handle,                                                                                   \
+        (static_cast<int64_t>(wf_size) * m - 1) / block_size + 1,                                 \
+        block_size,                                                                               \
+        [&](auto grid_stride, uint32_t grid) -> rocsparse_status {                                \
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                   \
+                (rocsparse::                                                                      \
+                     check_matrix_csr_device<block_size, wf_size, decltype(grid_stride)::value>), \
+                dim3(grid),                                                                       \
+                dim3(block_size),                                                                 \
+                0,                                                                                \
+                handle->stream,                                                                   \
+                m,                                                                                \
+                n,                                                                                \
+                nnz,                                                                              \
+                csr_val,                                                                          \
+                csr_row_ptr,                                                                      \
+                csr_col_ind,                                                                      \
+                csr_col_ind_sorted,                                                               \
+                idx_base,                                                                         \
+                matrix_type,                                                                      \
+                uplo,                                                                             \
+                storage,                                                                          \
+                d_data_status);                                                                   \
+            return rocsparse_status_success;                                                      \
+        }))
 
 template <typename T, typename I, typename J>
 rocsparse_status rocsparse::check_matrix_csr_core(rocsparse_handle       handle,
@@ -166,31 +148,22 @@ rocsparse_status rocsparse::check_matrix_csr_core(rocsparse_handle       handle,
     // check_row_ptr_array and shift_offsets_kernel clamp their grids like the
     // main validation kernel: an oversized launch is rejected without a failed
     // status, and the rows it would have checked are then silently accepted.
-    // As there, the grid-stride variant runs exactly when the clamp binds.
-    const int64_t  row_ptr_natural_blocks = (static_cast<int64_t>(m) - 1) / 256 + 1;
-    const uint32_t row_ptr_blocks = rocsparse::get_grid_size_x(handle, row_ptr_natural_blocks, 256);
-    if(row_ptr_blocks < row_ptr_natural_blocks)
-    {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_row_ptr_array<256, true>),
-                                           dim3(row_ptr_blocks),
-                                           dim3(256),
-                                           0,
-                                           handle->stream,
-                                           m,
-                                           csr_row_ptr,
-                                           d_data_status);
-    }
-    else
-    {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_row_ptr_array<256, false>),
-                                           dim3(row_ptr_blocks),
-                                           dim3(256),
-                                           0,
-                                           handle->stream,
-                                           m,
-                                           csr_row_ptr,
-                                           d_data_status);
-    }
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+        handle,
+        (static_cast<int64_t>(m) - 1) / 256 + 1,
+        256,
+        [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::check_row_ptr_array<256, decltype(grid_stride)::value>),
+                dim3(grid),
+                dim3(256),
+                0,
+                handle->stream,
+                m,
+                csr_row_ptr,
+                d_data_status);
+            return rocsparse_status_success;
+        }));
 
     RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(data_status,
                                                  d_data_status,
@@ -227,30 +200,22 @@ rocsparse_status rocsparse::check_matrix_csr_core(rocsparse_handle       handle,
         tmp_cols2 = reinterpret_cast<J*>(ptr);
         ptr += ((sizeof(J) * nnz - 1) / 256 + 1) * 256;
 
-        const int64_t  shift_natural_blocks = static_cast<int64_t>(m) / 512 + 1;
-        const uint32_t shift_blocks = rocsparse::get_grid_size_x(handle, shift_natural_blocks, 512);
-        if(shift_blocks < shift_natural_blocks)
-        {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::shift_offsets_kernel<512, true>),
-                                               dim3(shift_blocks),
-                                               dim3(512),
-                                               0,
-                                               handle->stream,
-                                               m + 1,
-                                               csr_row_ptr,
-                                               tmp_offsets);
-        }
-        else
-        {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::shift_offsets_kernel<512, false>),
-                                               dim3(shift_blocks),
-                                               dim3(512),
-                                               0,
-                                               handle->stream,
-                                               m + 1,
-                                               csr_row_ptr,
-                                               tmp_offsets);
-        }
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+            handle,
+            static_cast<int64_t>(m) / 512 + 1,
+            512,
+            [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::shift_offsets_kernel<512, decltype(grid_stride)::value>),
+                    dim3(grid),
+                    dim3(512),
+                    0,
+                    handle->stream,
+                    m + 1,
+                    csr_row_ptr,
+                    tmp_offsets);
+                return rocsparse_status_success;
+            }));
 
         // rocprim buffer
         void* tmp_rocprim = reinterpret_cast<void*>(ptr);

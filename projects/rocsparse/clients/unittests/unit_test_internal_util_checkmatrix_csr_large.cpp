@@ -28,108 +28,86 @@
 //
 // library/src/util/rocsparse_check_matrix_csr.cpp launches
 // check_matrix_csr_device with one WF_SIZE-wide lane group per row, i.e.
-// (wf_size * m) threads. That product used to be evaluated in J (int32_t in a
-// default build), so it wrapped modulo 2^32 and the grid expression
-// `(wf_size * m - 1) / block_size + 1` collapsed to ONE BLOCK. A single block of
-// 256 threads covers only 256 / wf_size rows; every row above that was never
+// (wf_size * m) threads. wf_size was an int literal, so with m an int32_t the
+// product `wf_size * m` was a SIGNED 32-bit product. It is undefined behaviour,
+// and in practice wraps, once m > 2^31 / wf_size. The grid expression
+// `(wf_size * m - 1) / block_size + 1` then either went negative, which dim3
+// turns into about 4.29e9 blocks that the runtime rejects, or collapsed to a
+// handful of blocks. In both cases the rows beyond the first few were never
 // looked at, nothing wrote *data_status, and the routine returned
 // rocsparse_status_success with data_status == success on corrupt input.
 //
-// Fixing only the product is not enough. The corrected grid is 16,777,216
-// blocks, which a dispatch cannot carry (see A NOTE ON THE GRID CLAMP below), so
-// the block count has to be clamped -- and a clamped grid is 64 rows short of m
-// at this size. The kernel therefore grid-strides, and the last row is reached
-// only on its second sweep.
-//
-// SIZING (why wf_size == 4 and m == 2^30)
-// ---------------------------------------
+// SIZING (why wf_size == 4 and m == 2^29 + 1)
+// -------------------------------------------
 // The wavefront size is dispatched from the AVERAGE ROW LENGTH,
 // avg_row_nnz = nnz / m, so the matrix has to be shaped to select the wf_size
-// whose wrap point it reaches:
+// whose overflow point it reaches:
 //
-//   wf_size      selected when        wraps at m = 2^32 / wf_size
-//   ------------------------------------------------------------
-//         4      avg_row_nnz <=   4        1,073,741,824
-//         8      avg_row_nnz <=   8          536,870,912
-//        ...
-//       256      avg_row_nnz >  128           16,777,216
+//   wf_size   selected when    first affected m      min nnz to get there
+//   ----------------------------------------------------------------------
+//         4   avg_row_nnz <=   4     536,870,913                      1
+//         8   avg_row_nnz <=   8     268,435,457          1,342,177,285
+//        16   avg_row_nnz <=  16     134,217,729          1,207,959,561
+//        32   avg_row_nnz <=  32      67,108,865          1,140,850,705
+//        64   avg_row_nnz <=  64      33,554,433          1,107,296,289
+//       128   avg_row_nnz <= 128      16,777,217          1,090,519,105
+//       256   avg_row_nnz >  128       8,388,609          1,082,130,561
 //
-// Every bucket except wf_size 4 has a nonzero LOWER bound on avg_row_nnz, so
-// reaching its wrap point costs nnz >= (wf_size / 2) * (2^32 / wf_size) = 2^31
-// nonzeros. That is both more memory than any current card has (>= 17 GB for
-// the column and value arrays alone) and more than the rocsparse_int nnz
-// argument of rocsparse_Xcheck_matrix_csr can even express. The wf_size 4
-// bucket is the only reachable one, because `avg_row_nnz <= 4` is satisfied by
+// "First affected m" is 2^31 / wf_size + 1. Every wf_size is therefore reachable
+// through the 32-bit API, but every bucket except wf_size 4 has a nonzero lower
+// bound on avg_row_nnz, so reaching it costs about 1.1e9 nonzeros or more: over
+// 8 GB for the column and value arrays alone, too much for a default unit test.
+// The wf_size 4 bucket needs none, because `avg_row_nnz <= 4` is satisfied by
 // avg_row_nnz == 0: an almost empty matrix with a huge row count.
 //
-// So: m = n = 2^30 = 1,073,741,824 rows, nnz = 1, avg_row_nnz = 0 -> wf_size 4,
-// and 4 * 2^30 == 2^32 == 0 (mod 2^32), which is exactly the wrap. The buggy
-// grid is 1 block and inspects rows [0, 64); the corruption is planted in row
-// m - 1, which only the 16,777,215 blocks that were never launched would reach.
-//
-// The same m also pins the clamp and the grid-stride loop, because the corrected
-// grid for 4 * 2^30 = 2^32 threads is one block past what a dispatch can carry.
+// So: m = n = 2^29 + 1 = 536,870,913 rows, nnz = 1, avg_row_nnz = 0 -> wf_size 4,
+// and 4 * m = 2^31 + 4 overflows int32_t. The buggy grid is negative, the launch
+// is rejected, and no row is examined; the corruption is planted in row m - 1.
 //
 // FOOTPRINT
 // ---------
-// Only the row pointer array is large: (m + 1) * sizeof(int32_t) = 4.295 GB,
-// which fits comfortably on a 15 GB gfx1201. It is built on the DEVICE with
-// hipMemset plus a single 4-byte write, so there is no multi-gigabyte host
-// allocation and no host->device copy of the row pointers. The column, value and
-// temporary buffers are a handful of bytes.
+// Only the row pointer array is large: (m + 1) * sizeof(int32_t) = 2.15 GB. It
+// is built on the DEVICE with hipMemset plus a single 4-byte write, so there is
+// no multi-gigabyte host allocation and no host->device copy of the row
+// pointers. The column, value and temporary buffers are a handful of bytes. If
+// the allocation cannot be satisfied the test fails with a message rather than
+// skipping.
 //
-// There is deliberately NO device-memory guard and NO GTEST_SKIP here: guards of
-// that kind have repeatedly caused regression tests in this programme to never
-// execute anywhere, silently. If the allocation cannot be satisfied this test
-// FAILS LOUDLY rather than disappearing.
+// WHAT THIS DOES NOT COVER, AND WHERE THAT IS COVERED
+// ---------------------------------------------------
+// At m = 2^29 + 1 the corrected grid is 8,388,609 blocks, below the 16,777,215
+// that a dispatch can carry, so the grid clamp and the grid-stride loop do not
+// engage. They engage at m >= 2^30 for wf_size 4 (16,777,216 blocks, one past the
+// 2^32 - 1 work-item limit of the dispatch packet), and the grid-stride loops
+// are exercised on small matrices by CheckMatrixCsrForcedClamp below, which
+// shrinks maxGridSize[0] so that the same clamp-and-stride code runs for the
+// wf_size 4, 32 and 256 kernels.
 //
-
-// A NOTE ON THE GRID CLAMP
-// ------------------------
-// At this size the clamp is load-bearing, and it is not maxGridSize[0] that
-// binds. A dispatch may carry at most 2^32 - 1 WORK ITEMS, because the HSA
-// packet encodes the grid size in work items in a 32-bit field, so a 256-thread
-// block allows only 16,777,215 blocks. The ceil-divide for m = 2^30 at wf_size 4
-// asks for exactly 16,777,216 -- one block too many -- and a launch that large
-// is rejected with hipErrorInvalidConfiguration.
-//
-// So this matrix pins the clamp as well as the 64-bit product: with the block
-// count clamped to 16,777,215 one sweep of the grid covers
-// 16,777,215 * 64 = 1,073,741,760 rows, which is 64 rows SHORT of m, and row
-// m - 1 is reached only on the second sweep of the grid-stride loop. The planted
-// corruption is invisible unless the 64-bit product, the clamp and the
-// grid-stride loop are all three correct.
-//
-// One more trap this test has to cover explicitly: the library's
-// RETURN_IF_HIPLAUNCHKERNELGGL_ERROR only inspects hipGetLastError() when the
-// kernel-launch debug variable is set, so a REJECTED launch does not become a
-// failed status -- the routine returns rocsparse_status_success having executed
-// nothing, which is indistinguishable from the original bug. The test therefore
-// asserts on the pending HIP error as well as on data_status.
-//
-// The second test below additionally drives check_matrix_csr_device directly
-// with a deliberately undersized grid. That covers the multi-sweep path for the
-// wf_size values the public 32-bit API cannot reach at all (see SIZING), on a
-// 4096-row matrix costing a few kilobytes.
+// The library's RETURN_IF_HIPLAUNCHKERNELGGL_ERROR only inspects hipGetLastError()
+// when the kernel-launch debug variable is set, so a REJECTED launch does not
+// become a failed status -- the routine returns rocsparse_status_success having
+// executed nothing, which is indistinguishable from the original bug. The large
+// test therefore asserts on the pending HIP error as well as on data_status.
 //
 
 #include "unit_test_utils.hpp"
 
-#include "check_matrix_csr_device.h"
 #include "rocsparse.h"
 #include "unit_test_grid_clamp.hpp"
 
 #include <cstdint>
 #include <gtest/gtest.h>
-#include <numeric>
+#include <tuple>
+#include <vector>
 
 using namespace rocsparse_ut;
 
 namespace
 {
-    // Row count at which the int32_t (wf_size * m) product wraps to 0 for the
-    // dispatched wf_size of 4. See the SIZING note above.
-    constexpr int32_t large_m = int32_t{1} << 30; // 1,073,741,824
+    // Smallest row count at which the int32_t (wf_size * m) product overflows for
+    // the dispatched wf_size of 4: 4 * (2^29 + 1) = 2^31 + 4. See the SIZING note
+    // above.
+    constexpr int32_t large_m = (int32_t{1} << 29) + 1; // 536,870,913
 
     // Exactly one nonzero in the whole matrix, so avg_row_nnz = nnz / m = 0 and
     // the dispatcher selects wf_size 4.
@@ -139,20 +117,41 @@ namespace
     constexpr rocsparse_matrix_type  GENERAL = rocsparse_matrix_type_general;
     constexpr rocsparse_fill_mode    LOWER   = rocsparse_fill_mode_lower;
     constexpr rocsparse_storage_mode SORTED  = rocsparse_storage_mode_sorted;
+
+    // Destroys the descriptor on every exit path, including an early return from
+    // a failed ASSERT_*.
+    struct SpmatGuard
+    {
+        rocsparse_spmat_descr mat = nullptr;
+
+        SpmatGuard() = default;
+
+        ~SpmatGuard()
+        {
+            if(mat != nullptr)
+            {
+                rocsparse_destroy_spmat_descr(mat);
+            }
+        }
+
+        SpmatGuard(const SpmatGuard&) = delete;
+
+        SpmatGuard& operator=(const SpmatGuard&) = delete;
+    };
 }
 
 class CheckMatrixCsrLargeGrid : public HandleTest
 {
 };
 
-// A 2^30-row CSR matrix whose single nonzero sits in the LAST row. The row
+// A (2^29 + 1)-row CSR matrix whose single nonzero sits in the LAST row. The row
 // pointer array is valid throughout (so check_row_ptr_array passes and the
 // routine proceeds to the real validation kernel); the column index of that one
 // nonzero is what the test flips.
 //
 // Assertion (b) is the load-bearing one: before AISPARSE-698 the validator
 // returned rocsparse_status_success / rocsparse_data_status_success here,
-// because the wrapped grid never launched a block that reached row m - 1.
+// because the overflowed grid never launched a block that reached row m - 1.
 // Assertion (a) runs first on the SAME matrix with a legal column index, so a
 // rejection in (b) is attributable to the planted corruption and not to the
 // matrix being malformed in some other way.
@@ -161,7 +160,7 @@ TEST_F(CheckMatrixCsrLargeGrid, corrupt_high_row_is_rejected)
     // row_ptr[i] = 0 for i in [0, m), row_ptr[m] = 1: rows [0, m-1) are empty and
     // row m-1 holds the single nonzero. Allocated and filled on the device.
     // device_vector owns the allocation, so an assertion below cannot leak the
-    // 4.3 GB for the rest of the process and starve the other tests in this
+    // 2.15 GB for the rest of the process and starve the other tests in this
     // binary. Its size_t constructor allocates on the device WITHOUT building a
     // host copy, which is what keeps the host footprint at zero.
     const size_t           row_ptr_len = static_cast<size_t>(large_m) + 1;
@@ -224,8 +223,8 @@ TEST_F(CheckMatrixCsrLargeGrid, corrupt_high_row_is_rejected)
         << "a validation kernel launch was rejected by the runtime, so the "
            "control matrix was never examined";
     ASSERT_EQ(data_status, rocsparse_data_status_success)
-        << "the uncorrupted 2^30-row matrix must validate; the corruption check "
-           "below is only meaningful if it does";
+        << "the uncorrupted " << large_m
+        << "-row matrix must validate; the corruption check below is only meaningful if it does";
 
     // (b) Plant an out-of-range column index in row m - 1. Only a grid that
     //     actually covers all m rows can see it.
@@ -235,8 +234,8 @@ TEST_F(CheckMatrixCsrLargeGrid, corrupt_high_row_is_rejected)
     data_status = rocsparse_data_status_success;
     ASSERT_EQ(check(&data_status), rocsparse_status_success);
     ASSERT_EQ(hipGetLastError(), hipSuccess)
-        << "the validation kernel launch was rejected by the runtime (a grid of "
-           "more than 2^32 - 1 work items), so no row was examined at all";
+        << "the validation kernel launch was rejected by the runtime, so no row was examined at "
+           "all";
     EXPECT_EQ(data_status, rocsparse_data_status_invalid_index)
         << "rocsparse_scheck_matrix_csr accepted a CSR matrix with an "
            "out-of-range column index in row "
@@ -245,8 +244,8 @@ TEST_F(CheckMatrixCsrLargeGrid, corrupt_high_row_is_rejected)
 
     // (c) Same corruption through the generic entry point, which reaches the
     //     same check_matrix_csr_core on the CSR path.
-    rocsparse_spmat_descr mat = nullptr;
-    ASSERT_EQ(rocsparse_create_csr_descr(&mat,
+    SpmatGuard mat;
+    ASSERT_EQ(rocsparse_create_csr_descr(&mat.mat,
                                          large_m,
                                          large_m,
                                          large_nnz,
@@ -262,7 +261,7 @@ TEST_F(CheckMatrixCsrLargeGrid, corrupt_high_row_is_rejected)
     size_t                spmat_buffer_size = 0;
     rocsparse_data_status spmat_status      = rocsparse_data_status_success;
     ASSERT_EQ(rocsparse_check_spmat(handle,
-                                    mat,
+                                    mat.mat,
                                     &spmat_status,
                                     rocsparse_check_spmat_stage_buffer_size,
                                     &spmat_buffer_size,
@@ -274,7 +273,7 @@ TEST_F(CheckMatrixCsrLargeGrid, corrupt_high_row_is_rejected)
 
     spmat_status = rocsparse_data_status_success;
     ASSERT_EQ(rocsparse_check_spmat(handle,
-                                    mat,
+                                    mat.mat,
                                     &spmat_status,
                                     rocsparse_check_spmat_stage_compute,
                                     &spmat_buffer_size,
@@ -285,165 +284,29 @@ TEST_F(CheckMatrixCsrLargeGrid, corrupt_high_row_is_rejected)
            "the runtime, so no row was examined at all";
     EXPECT_EQ(spmat_status, rocsparse_data_status_invalid_index)
         << "rocsparse_check_spmat accepted the same corrupt matrix on the CSR path";
-
-    EXPECT_EQ(rocsparse_destroy_spmat_descr(mat), rocsparse_status_success);
-}
-
-// ===========================================================================
-// Grid-stride coverage: check_matrix_csr_device driven directly.
-// ===========================================================================
-//
-// The clamp in LAUNCH_CHECK_MATRIX_CSR is not reachable through the 32-bit
-// public API on this hardware (see the note at the top of this file), so the
-// kernel's grid-stride loop would otherwise only ever be observed completing in
-// a single sweep. Launching the kernel directly with a grid far smaller than the
-// row count reproduces exactly the situation a clamped grid creates, on a 4096-
-// row matrix that costs a few kilobytes.
-//
-// Without the grid-stride loop a launch of GRID blocks covers only
-// GRID * (BLOCKSIZE / WF_SIZE) rows; the corruption is planted in the LAST row,
-// which is reachable only on the final sweep.
-namespace
-{
-    constexpr int32_t small_m    = 4096;
-    constexpr int32_t small_grid = 2; // deliberately far below what m needs
-
-    // Drive the grid-stride instantiation
-    // rocsparse::check_matrix_csr_device<256, WF_SIZE, true> over a 4096-row
-    // matrix with one nonzero per row, using `small_grid` blocks. `bad_last_col`
-    // selects whether the single nonzero of the last row carries a legal column
-    // index or an out-of-range one.
-    //
-    // The HIP status is returned separately from the data status: every value of
-    // rocsparse_data_status is a legitimate result, so none of them can double as
-    // an error sentinel without turning a device failure into a wrong answer.
-    template <uint32_t WF_SIZE>
-    hipError_t run_undersized_grid(bool bad_last_col, rocsparse_data_status* status)
-    {
-        std::vector<int32_t> h_row_ptr(small_m + 1);
-        std::iota(h_row_ptr.begin(), h_row_ptr.end(), 0); // one nonzero per row
-
-        std::vector<int32_t> h_col_ind(small_m);
-        std::iota(h_col_ind.begin(), h_col_ind.end(), 0); // diagonal
-        if(bad_last_col)
-        {
-            h_col_ind[small_m - 1] = small_m; // == n, one past the last column
-        }
-
-        const std::vector<float> h_val(small_m, 1.0f);
-
-        device_vector<int32_t>               d_row_ptr{h_row_ptr};
-        device_vector<int32_t>               d_col_ind{h_col_ind};
-        device_vector<float>                 d_val{h_val};
-        device_vector<rocsparse_data_status> d_status{size_t{1}};
-        if(!d_row_ptr.ptr || !d_col_ind.ptr || !d_val.ptr || !d_status.ptr)
-        {
-            return hipErrorOutOfMemory;
-        }
-
-        // rocsparse_data_status_success == 0, matching how the library primes it.
-        const hipError_t memset_status = hipMemset(d_status.ptr, 0, sizeof(rocsparse_data_status));
-        if(memset_status != hipSuccess)
-        {
-            return memset_status;
-        }
-
-        // hipGetLastError() is sticky, so drain anything an earlier test left
-        // behind before the launch check below reads it.
-        (void)hipGetLastError();
-
-        hipLaunchKernelGGL(
-            (rocsparse::check_matrix_csr_device<256, WF_SIZE, true, float, int32_t, int32_t>),
-            dim3(small_grid),
-            dim3(256),
-            0,
-            0,
-            small_m,
-            small_m,
-            static_cast<int32_t>(small_m),
-            d_val.ptr,
-            d_row_ptr.ptr,
-            d_col_ind.ptr,
-            d_col_ind.ptr,
-            BASE,
-            GENERAL,
-            LOWER,
-            SORTED,
-            d_status.ptr);
-
-        const hipError_t launch_status = hipGetLastError();
-        if(launch_status != hipSuccess)
-        {
-            return launch_status;
-        }
-
-        const hipError_t sync_status = hipDeviceSynchronize();
-        if(sync_status != hipSuccess)
-        {
-            return sync_status;
-        }
-
-        *status = to_host(d_status)[0];
-        return hipSuccess;
-    }
-
-    template <uint32_t WF_SIZE>
-    void expect_undersized_grid_covers_last_row()
-    {
-        const int64_t rows_per_sweep = small_grid * (256 / static_cast<int64_t>(WF_SIZE));
-        ASSERT_LT(rows_per_sweep, small_m) << "test grid must be too small for one sweep";
-
-        rocsparse_data_status valid_status = rocsparse_data_status_inf;
-        ASSERT_EQ(run_undersized_grid<WF_SIZE>(/*bad_last_col=*/false, &valid_status), hipSuccess)
-            << "WF_SIZE=" << WF_SIZE << ": the kernel launch itself failed";
-        EXPECT_EQ(valid_status, rocsparse_data_status_success)
-            << "WF_SIZE=" << WF_SIZE << ": a valid matrix must not be rejected";
-
-        rocsparse_data_status corrupt_status = rocsparse_data_status_success;
-        ASSERT_EQ(run_undersized_grid<WF_SIZE>(/*bad_last_col=*/true, &corrupt_status), hipSuccess)
-            << "WF_SIZE=" << WF_SIZE << ": the kernel launch itself failed";
-        EXPECT_EQ(corrupt_status, rocsparse_data_status_invalid_index)
-            << "WF_SIZE=" << WF_SIZE << ": a grid of " << small_grid << " blocks covers only "
-            << rows_per_sweep << " of " << small_m << " rows per sweep, so row " << (small_m - 1)
-            << " is reached only by the grid-stride loop (AISPARSE-698)";
-    }
-}
-
-// One case per end of the dispatched WF_SIZE range plus a middle value. WF_SIZE
-// is the lane-group width, not the hardware wavefront, so all three are valid on
-// a wave32 part; the kernel has no cross-lane operation.
-TEST(CheckMatrixCsrGridStride, undersized_grid_still_covers_every_row_wf4)
-{
-    expect_undersized_grid_covers_last_row<4>();
-}
-
-TEST(CheckMatrixCsrGridStride, undersized_grid_still_covers_every_row_wf32)
-{
-    expect_undersized_grid_covers_last_row<32>();
-}
-
-TEST(CheckMatrixCsrGridStride, undersized_grid_still_covers_every_row_wf256)
-{
-    expect_undersized_grid_covers_last_row<256>();
 }
 
 // ===========================================================================
 // Forced clamp: the whole validator with maxGridSize[0] shrunk.
 // ===========================================================================
 //
-// check_row_ptr_array and, for unsorted input, shift_offsets_kernel are clamped
-// with get_grid_size_x and grid-stride like the main validation kernel. With
-// maxGridSize[0] at 1, 3 or 7 a 4096-row matrix needs several sweeps of every
-// kernel: check_row_ptr_array covers at most 7 * 256 rows per sweep and
-// shift_offsets_kernel 7 * 512 offsets.
+// check_matrix_csr_device, check_row_ptr_array and, for unsorted input,
+// shift_offsets_kernel clamp their grids with get_grid_size_x and grid-stride
+// over whatever the clamp drops. With maxGridSize[0] at 1, 3 or 7 a 4096-row
+// matrix needs several sweeps of every kernel: check_row_ptr_array covers at
+// most 7 * 256 rows per sweep, shift_offsets_kernel 7 * 512 offsets and
+// check_matrix_csr_device 7 * (256 / wf_size) rows.
 //
-// Row i holds columns {i, i + 1} (n = m + 1), ascending for sorted storage and
-// descending for unsorted storage, so avg_row_nnz = 2 dispatches wf_size 4.
+// Row i holds row_len columns {i, ..., i + row_len - 1} (n = m + row_len - 1),
+// ascending for sorted storage and descending for unsorted storage. The row
+// length sets avg_row_nnz and with it the wf_size the dispatcher picks:
+//
+//   row_len     2 -> wf_size   4
+//   row_len    20 -> wf_size  32
+//   row_len   130 -> wf_size 256
 namespace
 {
-    constexpr int32_t clamp_m   = 4096;
-    constexpr int32_t clamp_n   = clamp_m + 1;
-    constexpr int32_t clamp_nnz = 2 * clamp_m;
+    constexpr int32_t clamp_m = 4096;
 
     // Row whose offsets are corrupted. It sits in logical block 15 of the
     // 256-thread check_row_ptr_array grid, so only a later sweep reaches it.
@@ -453,39 +316,52 @@ namespace
     {
         valid,
         bad_row_ptr, // row_ptr[bad_row + 1] < row_ptr[bad_row]
-        // Row m - 2 keeps one entry and the last row holds three, {m-1, m, m-1}.
-        // The duplicate is adjacent only once the columns are sorted, so an
-        // unsorted matrix is flagged only if shift_offsets_kernel wrote the
-        // last row's offsets.
+        // Row m - 2 gives one entry to the last row, which holds
+        // {m-1, m+row_len-2, ..., m, m-1}. The duplicate is adjacent only once the
+        // columns are sorted, so an unsorted matrix is flagged only if
+        // shift_offsets_kernel wrote the last row's offsets.
         split_duplicate_last_row
     };
 
-    rocsparse_data_status
-        run_clamped(rocsparse_handle handle, rocsparse_storage_mode storage, clamp_case c)
+    rocsparse_data_status run_clamped(rocsparse_handle       handle,
+                                      rocsparse_storage_mode storage,
+                                      clamp_case             c,
+                                      int32_t                row_len)
     {
+        const int32_t clamp_n   = clamp_m + row_len - 1;
+        const int32_t clamp_nnz = row_len * clamp_m;
+
         std::vector<int32_t> h_row_ptr(clamp_m + 1);
-        std::vector<int32_t> h_col_ind(clamp_nnz);
-        for(int32_t i = 0; i <= clamp_m; ++i)
-        {
-            h_row_ptr[i] = 2 * i;
-        }
+        std::vector<int32_t> h_col_ind;
+        h_col_ind.reserve(clamp_nnz);
+        const bool ascending = (storage == rocsparse_storage_mode_sorted);
         for(int32_t i = 0; i < clamp_m; ++i)
         {
-            const bool ascending = (storage == rocsparse_storage_mode_sorted);
-            h_col_ind[2 * i]     = ascending ? i : i + 1;
-            h_col_ind[2 * i + 1] = ascending ? i + 1 : i;
+            std::vector<int32_t> cols;
+            for(int32_t k = 0; k < row_len; ++k)
+            {
+                cols.push_back(ascending ? i + k : i + row_len - 1 - k);
+            }
+            if(c == clamp_case::split_duplicate_last_row)
+            {
+                if(i == clamp_m - 2)
+                {
+                    cols.pop_back();
+                }
+                if(i == clamp_m - 1)
+                {
+                    cols.insert(cols.begin(), clamp_m - 1);
+                    cols.back() = clamp_m - 1;
+                }
+            }
+            h_row_ptr[i + 1] = h_row_ptr[i] + static_cast<int32_t>(cols.size());
+            h_col_ind.insert(h_col_ind.end(), cols.begin(), cols.end());
         }
+        EXPECT_EQ(h_row_ptr[clamp_m], clamp_nnz);
+
         if(c == clamp_case::bad_row_ptr)
         {
             h_row_ptr[bad_row + 1] = h_row_ptr[bad_row] - 1;
-        }
-        if(c == clamp_case::split_duplicate_last_row)
-        {
-            h_row_ptr[clamp_m - 1]   = clamp_nnz - 3;
-            h_col_ind[clamp_nnz - 4] = clamp_m - 2;
-            h_col_ind[clamp_nnz - 3] = clamp_m - 1;
-            h_col_ind[clamp_nnz - 2] = clamp_m;
-            h_col_ind[clamp_nnz - 1] = clamp_m - 1;
         }
         const std::vector<float> h_val(clamp_nnz, 1.0f);
 
@@ -537,16 +413,28 @@ namespace
     }
 }
 
-class CheckMatrixCsrForcedClamp : public HandleTest, public ::testing::WithParamInterface<int>
+// Parameters: (maxGridSize[0], row_len).
+class CheckMatrixCsrForcedClamp : public HandleTest,
+                                  public ::testing::WithParamInterface<std::tuple<int, int>>
 {
+protected:
+    int max_grid() const
+    {
+        return std::get<0>(GetParam());
+    }
+
+    int row_len() const
+    {
+        return std::get<1>(GetParam());
+    }
 };
 
 TEST_P(CheckMatrixCsrForcedClamp, valid_matrix_passes)
 {
-    const ScopedMaxGridSizeX clamp(handle, GetParam());
-    EXPECT_EQ(run_clamped(handle, rocsparse_storage_mode_sorted, clamp_case::valid),
+    const ScopedMaxGridSizeX clamp(handle, max_grid());
+    EXPECT_EQ(run_clamped(handle, rocsparse_storage_mode_sorted, clamp_case::valid, row_len()),
               rocsparse_data_status_success);
-    EXPECT_EQ(run_clamped(handle, rocsparse_storage_mode_unsorted, clamp_case::valid),
+    EXPECT_EQ(run_clamped(handle, rocsparse_storage_mode_unsorted, clamp_case::valid, row_len()),
               rocsparse_data_status_success);
 }
 
@@ -555,22 +443,31 @@ TEST_P(CheckMatrixCsrForcedClamp, valid_matrix_passes)
 // could report a duplicate instead.
 TEST_P(CheckMatrixCsrForcedClamp, bad_row_ptr_in_later_block_is_detected)
 {
-    const ScopedMaxGridSizeX clamp(handle, GetParam());
-    EXPECT_EQ(run_clamped(handle, rocsparse_storage_mode_sorted, clamp_case::bad_row_ptr),
-              rocsparse_data_status_invalid_offset_ptr);
-    EXPECT_EQ(run_clamped(handle, rocsparse_storage_mode_unsorted, clamp_case::bad_row_ptr),
-              rocsparse_data_status_invalid_offset_ptr);
+    const ScopedMaxGridSizeX clamp(handle, max_grid());
+    EXPECT_EQ(
+        run_clamped(handle, rocsparse_storage_mode_sorted, clamp_case::bad_row_ptr, row_len()),
+        rocsparse_data_status_invalid_offset_ptr);
+    EXPECT_EQ(
+        run_clamped(handle, rocsparse_storage_mode_unsorted, clamp_case::bad_row_ptr, row_len()),
+        rocsparse_data_status_invalid_offset_ptr);
 }
 
 TEST_P(CheckMatrixCsrForcedClamp, unsorted_duplicate_in_last_row_is_detected)
 {
-    const ScopedMaxGridSizeX clamp(handle, GetParam());
-    EXPECT_EQ(
-        run_clamped(handle, rocsparse_storage_mode_unsorted, clamp_case::split_duplicate_last_row),
-        rocsparse_data_status_duplicate_entry)
+    const ScopedMaxGridSizeX clamp(handle, max_grid());
+    EXPECT_EQ(run_clamped(handle,
+                          rocsparse_storage_mode_unsorted,
+                          clamp_case::split_duplicate_last_row,
+                          row_len()),
+              rocsparse_data_status_duplicate_entry)
         << "shift_offsets_kernel must cover all " << (clamp_m + 1) << " offsets";
 }
 
 INSTANTIATE_TEST_SUITE_P(CheckMatrixCsrForcedClamp,
                          CheckMatrixCsrForcedClamp,
-                         ::testing::Values(1, 3, 7));
+                         ::testing::Combine(::testing::Values(1, 3, 7),
+                                            ::testing::Values(2, 20, 130)),
+                         [](const ::testing::TestParamInfo<std::tuple<int, int>>& info) {
+                             return "grid" + std::to_string(std::get<0>(info.param)) + "_len"
+                                    + std::to_string(std::get<1>(info.param));
+                         });

@@ -191,7 +191,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # Distinct anchor at the very end of the device source list so this leaf does
   # not conflict with the sibling unit-test branches that append above.
   # Drives the public rocsparse_scheck_matrix_csr / rocsparse_check_spmat entry
-  # points on a 2^30-row matrix; links roc::rocsparse, no compile-in TUs.
+  # points on a (2^29 + 1)-row matrix and on small matrices with a forced grid
+  # clamp; links roc::rocsparse, no compile-in TUs.
   unit_test_internal_util_checkmatrix_csr_large.cpp
   #10149: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_conversion_bsr.cpp
@@ -369,10 +370,6 @@ target_include_directories(rocsparse-unit-test-device PRIVATE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level3>
-  # check_matrix_csr_device.h, launched directly by
-  # unit_test_internal_util_checkmatrix_csr_large.cpp to cover the kernel's
-  # grid-stride loop with a deliberately undersized grid [AISPARSE-698].
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/util>
 )
 
 # hip::device provides the HIP device-compilation flags (-x hip, --offload-arch).
