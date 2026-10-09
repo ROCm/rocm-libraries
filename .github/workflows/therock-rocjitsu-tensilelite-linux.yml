@@ -4,7 +4,8 @@
 # Run TensileLite common GEMM tests under rocjitsu CPU emulation.
 # Advisory (continue-on-error) sidecar job following the same pattern as
 # therock-rocjitsu-race-check-linux.yml. The emulator comes from this run's
-# TheRock artifacts (rocjitsu + mirage), so its version follows therock_ref.
+# TheRock artifacts (rocjitsu + mirage), so its version follows therock_ref,
+# unless that rocjitsu predates ROCJITSU_MIN_REF (see below).
 
 name: TheRock rocjitsu tensilelite test Linux
 
@@ -56,9 +57,10 @@ jobs:
       PER_TEST_TIMEOUT: ${{ inputs.full_suite && '7200' || '2700' }}
       # Leave time within the 345-minute step for cleanup and report generation.
       SUITE_TIMEOUT_SECONDS: "19800"
-      # TEMPORARY: build rocjitsu at this rocm-systems develop commit (has #13122, mixed-format
-      # WMMA fix) until therock_ref ships it. Empty uses TheRock's rocjitsu.
-      ROCJITSU_OVERRIDE_REF: 63802eae5b80bac357c314911b89b6f6dff328c0
+      # Oldest rocm-systems commit this lane passes with (it has #13122, the
+      # mixed-format WMMA fix). If therock_ref's rocjitsu predates it, the job
+      # builds rocjitsu at this commit instead; empty always uses TheRock's.
+      ROCJITSU_MIN_REF: 63802eae5b80bac357c314911b89b6f6dff328c0
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -92,32 +94,61 @@ jobs:
         run: |
           python -m unittest discover -v -s "${SCRIPTS_DIR}/tests" -p 'rocjitsu*_test.py'
 
-      - name: Checkout rocm-systems for rocjitsu override
-        if: ${{ env.ROCJITSU_OVERRIDE_REF != '' }}
+      - name: Choose rocjitsu source
+        id: rocjitsu-source
+        if: ${{ env.ROCJITSU_MIN_REF != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The TheRock checkout records the rocm-systems commit its rocjitsu is built from.
+          pinned="$(git ls-tree HEAD rocm-systems | awk '{print $3}')"
+          status="$(python - "${ROCJITSU_MIN_REF}" "${pinned}" <<'PY'
+          import json, os, sys, urllib.request
+          base, head = sys.argv[1:]
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/ROCm/rocm-systems/compare/{base}...{head}",
+              headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}"},
+          )
+          try:
+              print(json.load(urllib.request.urlopen(request, timeout=60))["status"])
+          except (OSError, ValueError, KeyError) as error:
+              print(f"unknown ({error})")
+          PY
+          )"
+          echo "TheRock rocm-systems ${pinned:-not found} vs ${ROCJITSU_MIN_REF}: ${status}"
+          case "${status}" in
+            ahead|identical) echo "Using TheRock's rocjitsu" ;;
+            *) echo "ref=${ROCJITSU_MIN_REF}" >> "${GITHUB_OUTPUT}" ;;
+          esac
+
+      - name: Checkout rocm-systems for rocjitsu
+        if: ${{ steps.rocjitsu-source.outputs.ref != '' }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: ROCm/rocm-systems
-          ref: ${{ env.ROCJITSU_OVERRIDE_REF }}
+          ref: ${{ steps.rocjitsu-source.outputs.ref }}
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
             shared/machine-readable-isa/isa
           sparse-checkout-cone-mode: true
 
-      # mirage loads ROCJITSU_LIB instead of the artifact's librocjitsu.so.
-      - name: Build rocjitsu override
-        if: ${{ env.ROCJITSU_OVERRIDE_REF != '' }}
+      # mirage loads ROCJITSU_LIB instead of the artifact's librocjitsu.so. The
+      # options match TheRock's build: LTO and x86-64-v3 measured within 2%.
+      - name: Build rocjitsu
+        if: ${{ steps.rocjitsu-source.outputs.ref != '' }}
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential libdrm-dev
           build_dir="${GITHUB_WORKSPACE}/rocjitsu-build"
           cmake -S rocm-systems/emulation/rocjitsu -B "${build_dir}" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DLTO=ON \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
             -DROCM_PATH="${ROCM_PATH}" -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
             -DCMAKE_C_COMPILER="${ROCM_PATH}/bin/amdclang" \
             -DCMAKE_CXX_COMPILER="${ROCM_PATH}/bin/amdclang++" \
-            -DCMAKE_CXX_FLAGS="-march=x86-64-v3 -Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
+            -DCMAKE_CXX_FLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
           cmake --build "${build_dir}" --parallel "$(nproc)" --target rocjitsu_shared
           {
             echo "ROCJITSU_LIB=${build_dir}/librocjitsu.so"
