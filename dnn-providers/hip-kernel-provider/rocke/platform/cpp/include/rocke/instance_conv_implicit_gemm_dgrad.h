@@ -134,10 +134,10 @@ typedef struct rocke_dgrad_conv_spec
 
     /* AOT: upper bound on the sub-GEMM record count the kernel can search.
      * The tilde decomposition produces a different record count per
-     * stride/dilation, so the count itself is a kernarg; only the binary
-     * search's trip depth -- ceil(log2(max_sub_gemms)) + 1 -- is baked in.
-     * A launch whose record count exceeds this must pick a kernel built with
-     * a larger bound. Default 64. */
+     * stride/dilation, so the count itself is a kernarg, and the binary
+     * search runs ceil(log2(count)) steps, worked out in the kernel against
+     * this bound. A launch whose record count exceeds it must pick a kernel
+     * built with a larger bound. Default 1024 (strides up to 32x32). */
     int max_sub_gemms;
 } rocke_dgrad_conv_spec_t;
 
@@ -221,6 +221,9 @@ typedef struct rocke_tilde_decomposition
 
 /* Number of i32 fields packed per sub-GEMM record in the parameter buffer. */
 #define ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS 22
+/* i32 fields per magic-division table entry; the table follows the records,
+ * one entry per record (Python _MAGIC_FIELDS / sub_gemm_magic_pairs). */
+#define ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS 8
 
 typedef struct rocke_sub_gemm_params
 {
@@ -267,9 +270,10 @@ int rocke_enumerate_sub_gemms(const rocke_conv_problem_t* p,
                               rocke_sub_gemm_params_t* out,
                               int out_cap);
 
-/* Pack sub-GEMM records into a flat i32 buffer for the kernel.
- * Writes ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS * count i32s into out_buf.
- * Returns the total number of i32s written. */
+/* Pack sub-GEMM records into a flat i32 buffer for the kernel: the records,
+ * then one magic-division table entry per record. Writes
+ * (ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS + ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS) *
+ * count i32s into out_buf. Returns the total number of i32s written. */
 int rocke_pack_sub_gemm_buffer(const rocke_sub_gemm_params_t* sgs,
                                int count,
                                int tile_m,

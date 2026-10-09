@@ -97,9 +97,11 @@ All convolutions — stride=1 and strided — use a **single unified tiled kerne
 (dY, W, dX, dY_bytes, W_bytes, dX_bytes, sub_gemm_buf, num_sub_gemms)
 ```
 
-All kernels — stride=1 and strided — share this 8-param ABI. For stride=1
-`sub_gemm_buf` holds exactly one record and the binary search trivially
-returns index 0.
+All kernels — stride=1 and strided — share this 8-param ABI. The binary
+search runs `ceil(log2(num_sub_gemms))` steps, so for stride=1 (exactly one
+record) it is skipped and returns index 0. `max_sub_gemms` (default 1024,
+strides up to 32x32) only bounds the record count a kernel accepts; the
+search does not grow with it.
 
 ## Grid Layout
 

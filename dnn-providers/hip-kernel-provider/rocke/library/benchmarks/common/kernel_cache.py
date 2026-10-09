@@ -711,10 +711,11 @@ class KernelCache:
             if not ok:
                 return False, why
 
-        # Baked filter geometry (direct conv) and the stride/dilation that
-        # implicit-GEMM dgrad folds into its tilde decomposition. For implicit
-        # GEMM 0 means "runtime"; direct conv bakes all of them, and there 0 is
-        # a real value (PAD=0 for a 1x1 filter) that has to match too.
+        # Baked filter geometry (direct conv), and the stride/dilation older
+        # implicit-GEMM dgrad caches recorded per binary (current ones record
+        # 0: the tilde kernel takes them at run time). For implicit GEMM 0
+        # means "runtime"; direct conv bakes all of them, and there 0 is a real
+        # value (PAD=0 for a 1x1 filter) that has to match too.
         for field, attrs in (
             ("filter_h", ("KH", "Y")),
             ("filter_w", ("KW", "X")),

@@ -336,6 +336,47 @@ class TestConvDgradCorrectness(unittest.TestCase):
             label="bf16 stride=2",
         )
 
+    def test_bf16_patch_embedding_stride16(self):
+        """bf16 dgrad of a 16x16 / stride-16 patch embedding.
+
+        Its tilde decomposition has 16*16 = 256 sub-GEMMs, more than the 64 a
+        kernel used to dispatch over: the CTA's search over the records runs
+        as many steps as their count needs.
+        """
+        if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
+            self.skipTest(
+                f"stride>1 dgrad requires atomic-add or wavelet pipeline; running on {ARCH}"
+            )
+        self._verify(
+            "--dtype",
+            "bf16",
+            "--N",
+            "2",
+            "--Hi",
+            "32",
+            "--Wi",
+            "32",
+            "--C",
+            "3",
+            "--K",
+            "32",
+            "--Y",
+            "16",
+            "--X",
+            "16",
+            "--pH",
+            "0",
+            "--pW",
+            "0",
+            "--sH",
+            "16",
+            "--sW",
+            "16",
+            "--split-k",
+            "1",
+            label="bf16 patch 16x16 stride=16",
+        )
+
     # ---- split_k > 1 (atomic epilogue) ---------------------------------------
 
     def test_fp16_split_k(self):

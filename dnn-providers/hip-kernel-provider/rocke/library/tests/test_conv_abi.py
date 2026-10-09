@@ -943,6 +943,34 @@ def test_cache_rejects_dgrad_beyond_max_sub_gemms():
     assert not ok and "sub-GEMMs" in reason
 
 
+def test_aot_dgrad_builds_one_tilde_binary_for_every_stride(monkeypatch):
+    """The AOT dgrad grid builds only the tilde kernel: its probe is strided
+    (so the tilde epilogue is emitted) and its identity records stride and
+    dilation as runtime, so one binary serves unit and non-unit strides."""
+    from rocke.core.arch import ArchTarget
+
+    from benchmarks.common.kernel_cache import KernelCache
+
+    ks = _shrink_sweep_grid(monkeypatch)
+    target = ArchTarget.from_gfx(_ARCH)
+    family = "wmma" if target.wave_size == 32 else "mma"
+    jobs = list(ks._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64))
+    assert jobs
+    for j in jobs:
+        i = j.identity
+        assert (i.stride_h, i.stride_w, i.dilation_h, i.dilation_w) == (0, 0, 0, 0)
+        p = ks._probe_problem("dgrad", j.caps)
+        assert p.sH > 1 or p.dH > 1
+
+    cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)
+    ident = next(j.identity for j in jobs if ks._spec_is_valid(j, _ARCH, "fp16"))
+    for s, d in ((1, 1), (2, 1), (3, 1), (1, 2)):
+        p = ConvProblem(
+            N=1, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, sH=s, sW=s, pH=d, pW=d, dH=d, dW=d
+        )
+        assert cache.supports_problem(ident, p)[0], (s, d)
+
+
 def test_deep_fused_conv_pool_signature_matches_kernel_params():
     """deep_fused_conv_pool builds conv0 through the AOT implicit-GEMM builder,
     so its launch signature has to carry the runtime problem block too -- and
@@ -1162,7 +1190,16 @@ def test_enumerate_jobs_matches_a_serial_round_robin(monkeypatch, jobs):
     streams = [
         iter(ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)),
         iter(ks._wgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, split_ks)),
-        iter(ks._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64)),
+        iter(
+            ks._dgrad_jobs(
+                _ARCH,
+                "fp16",
+                target.wave_size,
+                family,
+                target,
+                ks.CACHE_DGRAD_MAX_SUB_GEMMS,
+            )
+        ),
     ]
     seen = {}
     while streams:
@@ -1591,7 +1628,10 @@ def test_describe_jobs_breaks_the_grid_down(monkeypatch):
     for direction in ("fwd", "wgrad", "dgrad"):
         n = sum(j.direction == direction for j in jobs)
         assert f"  {direction}: {n} kernels" in lines
-    assert "k-loop:" in text and "split-K:" in text and "stride x dilation:" in text
+    assert "k-loop:" in text and "split-K:" in text
+    # dgrad builds one binary for every stride and dilation, so that axis
+    # takes a single value and is not broken down.
+    assert "stride x dilation:" not in text
 
 
 def test_aot_grid_caps_accumulator_registers(monkeypatch):

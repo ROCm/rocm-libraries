@@ -53,19 +53,25 @@ Per direction, on top of that:
   served only to depthwise problems whose merged GEMM fits the tile.
 * **dgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
   {1, 2, 4, 8} (W and dX along cpg); with the default epilogue c = 1 and b in
-  {1, 2, 4, 8}. stride and dilation are baked into the
-  tilde decomposition, so they are capabilities: stride in {1, 2} x dilation
-  in {1, 2}; up to 64 sub-GEMMs.
+  {1, 2, 4, 8}. One binary per configuration serves every stride and
+  dilation: the tilde decomposition is computed on the host and passed in
+  the sub-GEMM record buffer, up to 1024 sub-GEMMs (stride 32x32). Only the
+  tilde kernel is built -- stride 1 / dilation 1 runs it as one sub-GEMM,
+  as fast as the unit-stride kernel. The B tile takes the layout the JIT sweep
+  picks (``DgradConvSpec.default_lds_k_outer``): K-outer wherever the arch,
+  dtype, atom and pipeline allow it and the B load is wider than one element,
+  M-outer otherwise.
 
 Every direction builds the grouped kernel only: it serves groups == 1 as well
 (``CACHE_GROUPED``), so there is no separate ungrouped binary.
 
-Not swept (spec defaults): ``lds_k_outer`` (off, so wgrad ``async_dma``, which
-needs it, is never built), ``chiplet_swizzle``, ``lds_k_pad`` / ``lds_layout``,
-``waves_per_eu``, accumulator epilogues, ``cshuffle_no_alias``, the wgrad
-non-split (``split_k`` = 1) kernel, the pointwise fast path (1x1 problems run
-the general kernels) and 3-D convolution. The direct-conv cache sweeps its own
-grid: see :mod:`benchmarks.common.direct_kernel_sweep`.
+Not swept (spec defaults): fwd/wgrad ``lds_k_outer`` (off, so wgrad
+``async_dma``, which needs it, is never built), ``chiplet_swizzle``,
+``lds_k_pad`` / ``lds_layout``, ``waves_per_eu``, accumulator epilogues,
+``cshuffle_no_alias``, the wgrad non-split (``split_k`` = 1) kernel, the
+pointwise fast path (1x1 problems run the general kernels) and 3-D
+convolution. The direct-conv cache sweeps its own grid: see
+:mod:`benchmarks.common.direct_kernel_sweep`.
 """
 
 from __future__ import annotations
@@ -152,11 +158,20 @@ _AOT_ALIAS_PIPELINES: Dict[str, Tuple[str, ...]] = {
 # computes groups == 1 correctly too (group index 0, cpg == C), so the cache
 # builds the grouped one only and offers it to both; KernelCache keeps
 # honouring ungrouped entries of older caches for ungrouped problems only.
-# Implicit-GEMM dgrad folds the stride and dilation into its tilde
-# decomposition, so those need a binary per value.
+#
+# Implicit-GEMM dgrad reads its stride and dilation from the tilde sub-GEMM
+# records at run time; the only thing they change in the emitted code is the
+# unit-stride (stride 1, dilation 1) epilogue versus the tilde one. The cache
+# builds the tilde kernel only and records stride/dilation 0 (runtime), so one
+# binary serves every stride and dilation within max_sub_gemms. The unit-stride
+# kernel is not built: it measured no faster on stride-1 problems.
 CACHE_GROUPED: Tuple[bool, ...] = (True,)
-CACHE_DGRAD_STRIDES: Tuple[int, ...] = (1, 2)
-CACHE_DGRAD_DILATIONS: Tuple[int, ...] = (1, 2)
+# Sub-GEMM records an implicit-GEMM dgrad binary dispatches over (its tilde
+# decomposition has stride_h * stride_w of them at most): 32x32, so the
+# patch-embedding strides 14 and 16 of vision transformers fit. The CTA's
+# search runs only as many steps as a problem's records need, so the bound
+# costs the common stride-1 / stride-2 problems nothing.
+CACHE_DGRAD_MAX_SUB_GEMMS = 1024
 # wgrad group merging (WgradConvSpec.group_merge): Gm depthwise groups share
 # one workgroup. The degree is baked in and the binary serves depthwise
 # problems only (groups divisible by Gm, Y*X*Gm within the tile). Mirrors
@@ -186,8 +201,6 @@ _PIPELINES = CACHE_PIPELINES
 _EPILOGUES = CACHE_EPILOGUES
 _GROUPED = CACHE_GROUPED
 _WGRAD_GROUP_MERGES = CACHE_WGRAD_GROUP_MERGES
-_DGRAD_STRIDES = CACHE_DGRAD_STRIDES
-_DGRAD_DILATIONS = CACHE_DGRAD_DILATIONS
 _WGRAD_SPLIT_KS = CACHE_WGRAD_SPLIT_KS
 
 
@@ -285,11 +298,8 @@ def _layout_caps() -> List[dict]:
 
 
 def _dgrad_caps() -> List[dict]:
-    """dgrad's capability variants: grouped x stride x dilation."""
-    return [
-        dict(grouped=g, stride=s, dilation=d)
-        for s, d, g in itertools.product(_DGRAD_STRIDES, _DGRAD_DILATIONS, _GROUPED)
-    ]
+    """dgrad's capability variants: grouped, always the tilde kernel."""
+    return [dict(grouped=g, tilde=True) for g in _GROUPED]
 
 
 def _job_flavor(llvm_flavor: Optional[str]) -> str:
@@ -550,6 +560,8 @@ def _dgrad_jobs(
     geometries: Optional[Sequence[tuple]] = None,
     llvm_flavor: Optional[str] = None,
 ) -> Iterator[BuildJob]:
+    from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
+
     da, db, dd = _dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
@@ -567,18 +579,27 @@ def _dgrad_jobs(
     ):
         if not _aot_pipeline("dgrad", pipeline):
             continue
-        # dgrad folds the stride and dilation into its tilde decomposition,
-        # so those are capabilities here, not launch parameters.
+        # Stride and dilation are runtime (the tilde records); the identity
+        # records them as 0.
         # dgrad's B (W, KYXC) and D (dX) are both contiguous along cpg, so
         # they share one width; A (dY) runs along kpg. The default epilogue
         # stores scalar, so there D is 1 and B takes its own width.
         for vec_a, vec_bc, caps in itertools.product(_VECS, _VECS, _dgrad_caps()):
             vec_c = 1 if epilogue == "default" else vec_bc
-            grouped, stride, dilation = (
-                caps["grouped"],
-                caps["stride"],
-                caps["dilation"],
+            # The JIT sweep's B-tile layout. Its predicate keys on the parity
+            # of cpg, which is runtime here; the B load width stands in for
+            # it: a width > 1 only serves problems whose cpg it divides (an
+            # even channel run), and width 1 is the odd-cpg kernel, where
+            # K-outer has no scatter to remove.
+            lds_k_outer = DgradConvSpec.default_lds_k_outer(
+                arch=arch,
+                dtype_b=db,
+                warp_tile_n=wt,
+                cpg=vec_bc,
+                wave_size=wave_size,
+                pipeline=pipeline,
             )
+            grouped = caps["grouped"]
             cfg = dict(
                 tile_m=tile_m,
                 tile_n=tile_n,
@@ -594,6 +615,7 @@ def _dgrad_jobs(
                 vector_size_a=vec_a,
                 vector_size_b=vec_bc,
                 vector_size_c=vec_c,
+                lds_k_outer=lds_k_outer,
                 max_sub_gemms=max_sub_gemms,
             )
             yield BuildJob(
@@ -606,10 +628,6 @@ def _dgrad_jobs(
                     dtype_b=db,
                     dtype_d=dd,
                     grouped=grouped,
-                    stride_h=stride,
-                    stride_w=stride,
-                    dilation_h=dilation,
-                    dilation_w=dilation,
                     **cfg,
                 ),
                 direction="dgrad",
@@ -874,7 +892,7 @@ def enumerate_jobs(
     target,
     directions: Sequence[str],
     split_ks: Sequence[int] = CACHE_WGRAD_SPLIT_KS,
-    max_sub_gemms: int = 64,
+    max_sub_gemms: int = CACHE_DGRAD_MAX_SUB_GEMMS,
     validate: bool = True,
     jobs: int = 1,
     log=None,
@@ -1028,7 +1046,9 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
 
     caps = caps or {}
     groups = 2 if caps.get("grouped") else 1
-    stride = int(caps.get("stride", 1))
+    # The tilde dgrad kernel is the strided one: any stride > 1 selects its
+    # code path, and the binary then serves every stride at run time.
+    stride = 2 if caps.get("tilde") else int(caps.get("stride", 1))
     dilation = int(caps.get("dilation", 1))
     # Keep the dilated filter inside the image so Ho/Wo stay positive.
     extent = 16 + 2 * (dilation - 1)
