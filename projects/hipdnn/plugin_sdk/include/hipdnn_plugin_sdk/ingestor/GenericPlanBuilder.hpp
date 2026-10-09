@@ -92,7 +92,7 @@ public:
             {
                 return false;
             }
-            return !_stateManager.unsortedDefinitions(contextFor(handle, opGraph)).empty();
+            return !_stateManager.catalogView(contextFor(handle, opGraph))->entries.empty();
         }
         catch(const std::exception& error)
         {
@@ -125,26 +125,26 @@ public:
                                const TSettings& executionSettings) const override
     {
         const auto context = contextFor(handle, opGraph);
-        const auto catalog = _stateManager.unsortedCatalog(context);
-        if(catalog.entries.empty())
+        const auto catalog = _stateManager.catalogView(context);
+        if(catalog->entries.empty())
         {
             throwNoApplicableKernel();
         }
 
         const auto filtered
-            = applyKnobFilter(catalog.entries, executionSettings.ingestorSettings.knobFilter);
+            = applyKnobFilter(catalog->entries, executionSettings.ingestorSettings.knobFilter);
         if(filtered.empty())
         {
             throwUnsatisfiableKnobFilter(executionSettings.ingestorSettings.knobFilter,
-                                         catalog.entries.size());
+                                         catalog->entries.size());
         }
 
         size_t maxBytes = 0;
-        for(const auto& kernel : filtered)
+        for(const auto* kernel : filtered)
         {
-            const auto dispatcher = _stateManager.getDispatchDetails(kernel);
-            maxBytes = std::max(maxBytes,
-                                dispatcher.handler->workspaceBytes(context, catalog.bound, kernel));
+            const auto* handler = _stateManager.dispatchHandler(*kernel);
+            maxBytes
+                = std::max(maxBytes, handler->workspaceBytes(context, catalog->bound, *kernel));
         }
         return maxBytes;
     }
@@ -170,7 +170,9 @@ public:
                    TContext& executionContext) const override
     {
         const auto context = contextFor(handle, opGraph);
-        const auto catalog = _stateManager.sortedCatalog(context);
+        // Held for the whole build: the candidates below point into it.
+        const auto sortedView = _stateManager.sortedCatalogView(context);
+        const auto& catalog = *sortedView;
         if(catalog.entries.empty())
         {
             throwNoApplicableKernel();
@@ -203,7 +205,7 @@ public:
 
         if(record.has_value())
         {
-            if(const auto ranked = orderIfFullyCovered(*record, filtered); ranked.has_value())
+            if(const auto ranked = orderIfFullyCoveredView(*record, filtered); ranked.has_value())
             {
                 // Walks the ranked list instead of committing to its front: constructing
                 // a GenericPlan runs prepare()/workspaceBytes() and throws on a null
@@ -215,13 +217,13 @@ public:
                     try
                     {
                         auto plan = std::make_unique<GenericPlan<THandle>>(
-                            _stateManager.getDispatchDetails((*ranked)[rank]),
+                            _stateManager.getDispatchDetails(*(*ranked)[rank]),
                             context,
                             catalog.bound);
 
                         HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
                                                << _engine.name << "' served kernel "
-                                               << toString((*ranked)[rank].kernelId) << " at rank "
+                                               << toString((*ranked)[rank]->kernelId) << " at rank "
                                                << rank << " from a benchmarked record of "
                                                << record->size() << " entry(s) for "
                                                << filtered.size() << " candidate(s)");
@@ -247,7 +249,7 @@ public:
 
                     HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
                                            << _engine.name << "' could not build a plan for "
-                                           << toString((*ranked)[rank].kernelId) << " at rank "
+                                           << toString((*ranked)[rank]->kernelId) << " at rank "
                                            << rank << ": " << failure
                                            << "; trying the next ranked entry");
                 }
@@ -280,13 +282,14 @@ public:
                 try
                 {
                     auto plan = std::make_unique<GenericPlan<THandle>>(
-                        _stateManager.getDispatchDetails(filtered[rank]), context, catalog.bound);
+                        _stateManager.getDispatchDetails(*filtered[rank]), context, catalog.bound);
 
-                    HIPDNN_PLUGIN_LOG_INFO(
-                        "ingestor: engine '"
-                        << _engine.name << "' selected kernel " << toString(filtered[rank].kernelId)
-                        << " at rank " << rank << " from " << filtered.size() << " candidate(s) ("
-                        << catalog.entries.size() << " before knob filtering)");
+                    HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                           << _engine.name << "' selected kernel "
+                                           << toString(filtered[rank]->kernelId) << " at rank "
+                                           << rank << " from " << filtered.size()
+                                           << " candidate(s) (" << catalog.entries.size()
+                                           << " before knob filtering)");
 
                     executionContext.setPlan(std::move(plan));
                     return;
@@ -300,16 +303,16 @@ public:
                     {
                         throw;
                     }
-                    failures.emplace_back(toString(filtered[rank].kernelId) + ": " + error.what());
+                    failures.emplace_back(toString(filtered[rank]->kernelId) + ": " + error.what());
                 }
                 catch(const std::exception& error)
                 {
-                    failures.emplace_back(toString(filtered[rank].kernelId) + ": " + error.what());
+                    failures.emplace_back(toString(filtered[rank]->kernelId) + ": " + error.what());
                 }
 
                 HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
                                        << _engine.name << "' could not build a plan for "
-                                       << toString(filtered[rank].kernelId) << " at rank " << rank
+                                       << toString(filtered[rank]->kernelId) << " at rank " << rank
                                        << ": " << failures.back() << "; trying the next candidate");
             }
 
@@ -320,7 +323,7 @@ public:
                                                     << filtered.size() << " candidate(s) ("
                                                     << catalog.entries.size()
                                                     << " before knob filtering), ranked front "
-                                                    << toString(filtered.front().kernelId));
+                                                    << toString(filtered.front()->kernelId));
 
         // Every candidate walk applies the same policy: an unbuildable candidate is a reason
         // to carry, a malformed descriptor stops the build. Absorbing here what the others
@@ -328,16 +331,16 @@ public:
         std::vector<std::string> benchmarkFailures;
         std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates;
         candidates.reserve(filtered.size());
-        for(const auto& kernel : filtered)
+        for(const auto* kernel : filtered)
         {
             try
             {
                 candidates.push_back(
-                    {kernel.kernelId,
+                    {kernel->kernelId,
                      std::make_unique<GenericPlan<THandle>>(
-                         _stateManager.getDispatchDetails(kernel), context, catalog.bound),
-                     kernel.packId,
-                     kernel.dispatchId});
+                         _stateManager.getDispatchDetails(*kernel), context, catalog.bound),
+                     kernel->packId,
+                     kernel->dispatchId});
                 continue;
             }
             catch(const HipdnnPluginException& error)
@@ -346,16 +349,16 @@ public:
                 {
                     throw;
                 }
-                benchmarkFailures.emplace_back(toString(kernel.kernelId) + ": " + error.what());
+                benchmarkFailures.emplace_back(toString(kernel->kernelId) + ": " + error.what());
             }
             catch(const std::exception& error)
             {
-                benchmarkFailures.emplace_back(toString(kernel.kernelId) + ": " + error.what());
+                benchmarkFailures.emplace_back(toString(kernel->kernelId) + ": " + error.what());
             }
 
             HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '" << _engine.name
                                                         << "' dropped benchmarking candidate '"
-                                                        << toString(kernel.kernelId)
+                                                        << toString(kernel->kernelId)
                                                         << "': " << benchmarkFailures.back());
         }
 
@@ -389,7 +392,8 @@ public:
     {
         using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-        const auto ranked = _stateManager.sortedDefinitions(contextFor(handle, opGraph));
+        const auto catalog = _stateManager.sortedCatalogView(contextFor(handle, opGraph));
+        const auto& ranked = catalog->entries;
         std::vector<KnobT> knobs;
         if(ranked.empty())
         {
@@ -521,23 +525,27 @@ private:
         return setting.valueAs<IntValue>().value() != 0;
     }
 
-    std::vector<KernelDefinition> applyKnobFilter(const std::vector<KernelDefinition>& catalog,
-                                                  const KnobFilter& filter) const
+    /// The kernels of @p catalog every set knob agrees with, in order; pointers into the
+    /// same catalog view, so nothing is copied.
+    std::vector<const KernelDefinition*>
+        applyKnobFilter(const std::vector<const KernelDefinition*>& catalog,
+                        const KnobFilter& filter) const
     {
         if(filter.empty())
         {
             return catalog;
         }
 
-        std::vector<KernelDefinition> filtered;
+        std::vector<const KernelDefinition*> filtered;
         filtered.reserve(catalog.size());
-        for(const auto& kernel : catalog)
+        for(const auto* kernel : catalog)
         {
             const bool matchesEverySetKnob
-                = std::all_of(filter.begin(), filter.end(), [&kernel](const auto& setting) {
-                      const auto value = kernel.tryGetMetadata(setting.first);
-                      const auto* intValue
-                          = value.has_value() ? std::get_if<int64_t>(&*value) : nullptr;
+                = std::all_of(filter.begin(), filter.end(), [kernel](const auto& setting) {
+                      const auto it = kernel->metadata.find(setting.first);
+                      const auto* intValue = it == kernel->metadata.end()
+                                                 ? nullptr
+                                                 : std::get_if<int64_t>(&it->second);
                       return intValue != nullptr && *intValue == setting.second;
                   });
             if(matchesEverySetKnob)
@@ -551,7 +559,7 @@ private:
     /// Keeps the first @p limit of the ranked @p candidates. Runs before the winner-record
     /// lookup, so coverage is judged against the shortlist a benchmark under the same
     /// limit measured, not against the whole catalog.
-    void applyCandidateLimit(std::vector<KernelDefinition>& candidates,
+    void applyCandidateLimit(std::vector<const KernelDefinition*>& candidates,
                              const std::optional<size_t>& limit) const
     {
         if(!limit.has_value() || candidates.size() <= *limit)

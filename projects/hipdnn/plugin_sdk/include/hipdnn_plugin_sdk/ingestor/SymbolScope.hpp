@@ -76,6 +76,14 @@ public:
         recordUndo(&CandidateFilterRegistry::unregisterSymbol, symbol);
     }
 
+    /// Registered under the symbol of a kernel-scoped matcher; see KernelPrepareFn.
+    /// @throws std::runtime_error if @p symbol is already registered.
+    void add(const std::string& symbol, KernelPrepareFn prepare)
+    {
+        KernelPrepareRegistry::registerSymbol(symbol, prepare);
+        recordUndo(&KernelPrepareRegistry::unregisterSymbol, symbol);
+    }
+
     /// @p handler must outlive every plan built from it; packs use a
     /// process-lifetime static.
     /// @throws std::runtime_error if @p symbol is already registered.

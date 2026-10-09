@@ -51,13 +51,36 @@ public:
     /// determinism or reaching UB. Infinities are already well-ordered and pass through.
     std::vector<KernelDefinition> rank(const Catalog& catalog, const MatchContext& context) const
     {
-        std::vector<std::pair<double, const KernelDefinition*>> scored;
-        scored.reserve(catalog.entries.size());
+        std::vector<const KernelDefinition*> view;
+        view.reserve(catalog.entries.size());
         for(const auto& entry : catalog.entries)
         {
-            const double raw = score(context, catalog.bound, entry);
+            view.push_back(&entry);
+        }
+
+        std::vector<KernelDefinition> ranked;
+        ranked.reserve(view.size());
+        for(const auto* entry : rankView(view, catalog.bound, context))
+        {
+            ranked.push_back(*entry);
+        }
+        return ranked;
+    }
+
+    /// rank() over a view of a catalog, ordering the pointers rather than copying the
+    /// kernels: the same order, the same NaN and tie-break rules.
+    std::vector<const KernelDefinition*>
+        rankView(const std::vector<const KernelDefinition*>& entries,
+                 const BoundTokens& bound,
+                 const MatchContext& context) const
+    {
+        std::vector<std::pair<double, const KernelDefinition*>> scored;
+        scored.reserve(entries.size());
+        for(const auto* entry : entries)
+        {
+            const double raw = score(context, bound, *entry);
             scored.emplace_back(std::isnan(raw) ? -std::numeric_limits<double>::infinity() : raw,
-                                &entry);
+                                entry);
         }
 
         std::stable_sort(scored.begin(), scored.end(), [](const auto& lhs, const auto& rhs) {
@@ -72,11 +95,11 @@ public:
             return lhs.second->kernelId < rhs.second->kernelId;
         });
 
-        std::vector<KernelDefinition> ranked;
+        std::vector<const KernelDefinition*> ranked;
         ranked.reserve(scored.size());
         for(const auto& [_, entry] : scored)
         {
-            ranked.push_back(*entry);
+            ranked.push_back(entry);
         }
         return ranked;
     }

@@ -63,6 +63,37 @@ TEST(TestIngestorKernelHeuristic, NamesTheDescriptorThatCouldNotResolve)
     }
 }
 
+TEST(TestIngestorKernelHeuristic, RanksAViewInTheSameOrderAsTheCatalog)
+{
+    const ScopedTestSymbols symbols;
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    // Ties on score fall through to priority, then id; a view orders its pointers by the
+    // same rules rank() orders copies by.
+    Catalog catalog;
+    catalog.entries = {makeDefinition(testId(0x03), 64),
+                       makeDefinition(testId(0x01), 256),
+                       makeDefinition(testId(0x02), 64, 1),
+                       makeDefinition(testId(0x04), 256)};
+    std::vector<const KernelDefinition*> view;
+    for(const auto& entry : catalog.entries)
+    {
+        view.push_back(&entry);
+    }
+
+    const NativeKernelHeuristic heuristic(SCORE_SYMBOL);
+    const auto ranked = heuristic.rank(catalog, context);
+    const auto rankedView = heuristic.rankView(view, catalog.bound, context);
+    ASSERT_EQ(rankedView.size(), ranked.size());
+    for(size_t i = 0; i < ranked.size(); ++i)
+    {
+        EXPECT_EQ(rankedView[i]->kernelId, ranked[i].kernelId);
+    }
+    EXPECT_EQ(ranked.front().kernelId, testId(0x01));
+}
+
 TEST(TestIngestorKernelHeuristic, RanksHigherScoringKernelsFirst)
 {
     const ScopedTestSymbols symbols;

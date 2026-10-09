@@ -151,6 +151,7 @@ using GraphCriterionRegistry = NativeRegistry<GraphCriterionFn>;
 using KernelMatcherRegistry = NativeRegistry<KernelMatcherFn>;
 using ScoreRegistry = NativeRegistry<ScoreFn>;
 using CandidateFilterRegistry = NativeRegistry<CandidateFilterFn>;
+using KernelPrepareRegistry = NativeRegistry<KernelPrepareFn>;
 
 /// Non-owning: the provider must keep each handler alive for as long as any plan
 /// built from it can execute.
