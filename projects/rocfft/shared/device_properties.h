@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 
 #include <cstdint>
 #include <hip/hip_runtime_api.h>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -106,6 +107,15 @@ static void launch_limits_check(const std::string&     kernel_name,
        || gridDim.y > static_cast<uint32_t>(deviceProp.maxGridSize[1])
        || gridDim.z > static_cast<uint32_t>(deviceProp.maxGridSize[2]))
         throw std::runtime_error("max grid size exceeded: " + kernel_name);
+
+    // Total work items along each dimension is counted in uint32_t in the
+    // dispatch packet, so the grid/block product must fit even when each
+    // factor on its own is well within the grid and block limits above.
+    constexpr uint64_t max_work_items_per_dim = std::numeric_limits<uint32_t>::max();
+    if(static_cast<uint64_t>(gridDim.x) * blockDim.x > max_work_items_per_dim
+       || static_cast<uint64_t>(gridDim.y) * blockDim.y > max_work_items_per_dim
+       || static_cast<uint64_t>(gridDim.z) * blockDim.z > max_work_items_per_dim)
+        throw std::runtime_error("max work items per dim exceeded: " + kernel_name);
 }
 
 #endif

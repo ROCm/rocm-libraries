@@ -1648,7 +1648,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             hq = b.mod(rem, b.const_i32(Hq))
             qb0 = b.div(rem, b.const_i32(Hq))
             if INTERLEAVE and causal and NQB > 1:
-                odd = b.cmp_eq(b.mod(rem, b.const_i32(2)), b.const_i32(1))
+                # Reverse qb for ODD hq. Keying on rem (= qb0*Hq + hq) instead is
+                # not a bijection for odd Hq: two qb0 alias onto one qb.
+                odd = b.cmp_eq(b.mod(hq, b.const_i32(2)), b.const_i32(1))
                 qb = b.select(odd, b.sub(b.const_i32(NQB - 1), qb0), qb0)
             else:
                 qb = qb0

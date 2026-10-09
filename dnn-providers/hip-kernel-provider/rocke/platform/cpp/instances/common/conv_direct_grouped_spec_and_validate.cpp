@@ -1699,6 +1699,16 @@ rocke_status_t rocke_direct_depthwise_col_validate(const rocke_direct_depthwise_
         }
         return ROCKE_ERR_VALUE;
     }
+    /* The tap indexing has no dilation term. */
+    {
+        char dil_why[256];
+        if(rocke_direct_dilation_reason(p, dil_why, sizeof dil_why))
+        {
+            if(reason != NULL && reason_cap > 0)
+                snprintf(reason, reason_cap, "%s", dil_why);
+            return ROCKE_ERR_VALUE;
+        }
+    }
     if(spec->block_h <= 0)
     {
         if(reason && reason_cap > 0)
@@ -2805,6 +2815,27 @@ rocke_status_t rocke_direct_depthwise_tiled_validate(
                      p->stride,
                      p->PAD);
         return ROCKE_ERR_VALUE;
+    }
+    {
+        const int Ho = rocke_dconv_col__Ho(p);
+        const int Wo = rocke_dconv_col__Wo(p);
+        if(Ho < 1 || Wo < 1)
+        {
+            if(reason && reason_cap > 0)
+                snprintf(reason,
+                         reason_cap,
+                         "DirectDepthwiseTiledSpec: filter does not fit the padded input: "
+                         "Ho=%d, Wo=%d (H=%d, W=%d, KH=%d, KW=%d, PAD=%d, stride=%d)",
+                         Ho,
+                         Wo,
+                         p->H,
+                         p->W,
+                         p->KH,
+                         p->KW,
+                         p->PAD,
+                         p->stride);
+            return ROCKE_ERR_VALUE;
+        }
     }
     if(reason && reason_cap > 0)
     {
