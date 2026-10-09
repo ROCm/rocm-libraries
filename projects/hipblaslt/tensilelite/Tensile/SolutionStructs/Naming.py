@@ -185,6 +185,12 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     requiredParametersTemp.difference_update({"StreamKAtomic", "StreamKFixupTreeReduction", "DebugStreamK"})
   if state.get("TileProcessingStrategy", "None") == "None":
     requiredParametersTemp.difference_update({"WorkAssignment", "PersistentXCCMapping", "WorkQueueStealing"})
+  # AccumShuffle 0 emits byte-identical assembly to a kernel generated before the parameter
+  # existed, so encoding AS0 would rename every kernel in the library without changing one
+  # instruction. Omit it at 0 and let 1/2 carry the tag; absence therefore means 0, and the
+  # three values still map to three distinct names.
+  if not state.get("AccumShuffle", 0):
+    requiredParametersTemp.discard("AccumShuffle")
 
 
   if ignoreInternalArgs:
