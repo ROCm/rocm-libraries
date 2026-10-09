@@ -137,6 +137,12 @@ process is never demoted: TheRock's `rocm_sdk.initialize_process` loaded it
 ERROR: support is already registered for analysis`. It stays first; if it
 cannot handle the target ISA, the compile fails at `set_isa`.
 
+On Linux, the Python COMGR loader rejects `ROCKE_COMGR_LIB` before `dlopen` if
+it names an existing file different from the only distinct mapped COMGR path.
+An alias of the same file remains valid. With multiple mapped paths or
+unreadable maps, the existing override precedence remains unchanged. Compile
+with another COMGR in a separate process before importing torch.
+
 torch is therefore **optional** — required only for the `torch.fx` fusion
 frontend, torch-tensor launch (`runtime/torch_interop.py`), and on-GPU torch-eager
 numeric checks. Building the engine, lowering, `comgr` compile, numpy launch, and

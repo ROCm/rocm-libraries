@@ -6899,6 +6899,87 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             mapped(foreign, foreign)
             self.assertEqual(rc._mapped_lib("amdhip64"), foreign)
 
+    def test_comgr_override_rejects_only_a_different_unique_mapped_file(self):
+        import contextlib
+        import os
+        import tempfile
+        import types
+        from unittest import mock
+
+        from rocke.runtime import comgr as comgr_mod
+        from rocke.runtime import runtime_coexistence as rc
+
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            site, core_lib, torch_stub = self._fake_torch_site(tmp)
+            wheel = os.path.join(core_lib, "libamd_comgr.so.3")
+            root = os.path.join(tmp, "rocm-10.2.0", "lib")
+            os.makedirs(root)
+            host = os.path.join(root, "libamd_comgr.so.3")
+            open(host, "wb").close()
+            maps = os.path.join(tmp, "maps")
+            with open(maps, "w") as fh:
+                # Multiple map segments for one file are still one copy.
+                for address in ("7f00-7f01", "7f01-7f02"):
+                    fh.write(f"{address} r-xp 00000000 08:01 11 {wheel}\n")
+            sdk_stub = types.ModuleType("rocm_sdk")
+            sdk_stub.__version__ = "10.1.0a20260822"
+            self._enter_fake_process(
+                stack,
+                tmp,
+                site,
+                {"torch": torch_stub, "rocm_sdk": sdk_stub},
+                maps=maps,
+                root_libdirs=[root],
+            )
+            stack.enter_context(mock.patch.object(comgr_mod, "_IS_WINDOWS", False))
+            self.assertEqual(rc._mapped_lib("amd_comgr", require_unique=True), wheel)
+
+            os.environ["ROCKE_COMGR_LIB"] = host
+            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                with self.assertRaises(comgr_mod.ComgrError) as error:
+                    comgr_mod._load_lib()
+                load.assert_not_called()
+            self.assertIn(host, str(error.exception))
+            self.assertIn(wheel, str(error.exception))
+            self.assertIn("separate process", str(error.exception))
+
+            # A different spelling of the *same* mapped file keeps override
+            # precedence; path aliases must not become hard failures.
+            same_file = os.path.join(core_lib, "..", "lib", "libamd_comgr.so.3")
+            self.assertEqual(os.path.realpath(same_file), os.path.realpath(wheel))
+            os.environ["ROCKE_COMGR_LIB"] = same_file
+            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                self.assertIs(comgr_mod._load_lib(), load.return_value)
+                load.assert_called_once_with(same_file)
+
+            # An invalid override retains the existing fallback to torch's
+            # mapped library rather than becoming a new hard error.
+            missing = os.path.join(tmp, "missing", "libamd_comgr.so.3")
+            os.environ["ROCKE_COMGR_LIB"] = missing
+            with mock.patch.object(
+                comgr_mod.ctypes, "CDLL", side_effect=[OSError("missing"), object()]
+            ) as load:
+                comgr_mod._load_lib()
+                self.assertEqual(
+                    [call.args[0] for call in load.call_args_list], [missing, wheel]
+                )
+
+            # No mapped copy, or multiple distinct mapped copies, leaves the
+            # existing override and mapped-tier policy unchanged.
+            os.environ["ROCKE_COMGR_LIB"] = host
+            with mock.patch.object(rc, "_PROC_MAPS", os.path.join(tmp, "no-maps")):
+                self.assertIsNone(rc._mapped_lib("amd_comgr", require_unique=True))
+                with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                    comgr_mod._load_lib()
+                    load.assert_called_once_with(host)
+            with open(maps, "a") as fh:
+                fh.write(f"7f02-7f03 r-xp 00000000 08:01 12 {host}\n")
+            self.assertEqual(rc._mapped_lib("amd_comgr"), wheel)
+            self.assertIsNone(rc._mapped_lib("amd_comgr", require_unique=True))
+            with mock.patch.object(comgr_mod.ctypes, "CDLL") as load:
+                comgr_mod._load_lib()
+                load.assert_called_once_with(host)
+
     def test_rocm_version_parsed_from_versioned_libdir(self):
         from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
 

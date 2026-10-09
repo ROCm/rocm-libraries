@@ -233,6 +233,13 @@ process is never demoted: TheRock's `rocm_sdk.initialize_process` loaded it
 ERROR: support is already registered for analysis`. It stays first; if it
 cannot handle the target ISA, the compile fails at `set_isa`.
 
+On Linux, if exactly one distinct COMGR path is mapped and `ROCKE_COMGR_LIB`
+names another existing file, the Python loader raises `ComgrError` before
+`dlopen` can load a second LLVM. An alias of the same file still works. With
+multiple mapped paths or unreadable maps, this narrow check does not change
+override precedence or the mapped-library selection policy. To use a different
+COMGR, compile in a separate process before importing torch.
+
 If you hit `cannot load libamd_comgr.so` in a torch-less process, set
 `ROCM_PATH` (or `ROCKE_COMGR_LIB`) to point at your ROCm install.
 

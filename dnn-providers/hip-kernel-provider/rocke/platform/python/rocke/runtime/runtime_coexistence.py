@@ -51,13 +51,14 @@ _IS_WINDOWS = sys.platform == "win32"
 _PROC_MAPS = "/proc/self/maps"
 
 
-def _mapped_lib(stem: str) -> Optional[str]:
+def _mapped_lib(stem: str, *, require_unique: bool = False) -> Optional[str]:
     """Find a mapped library without guessing between distinct runtime copies.
 
     A library has several entries in /proc/self/maps. If distinct copies are
     mapped, prefer the one owned by imported torch or its active ROCm SDK
-    wheel. Address order does not identify which copy torch loaded. Return
-    None when no unique choice exists; Linux only, unreadable maps return None.
+    wheel. Address order does not identify which copy torch loaded. Set
+    require_unique to reject *all* multiple-copy cases, without changing that
+    preference. Linux only; unreadable maps return None.
     """
     if _IS_WINDOWS:
         return None
@@ -77,7 +78,7 @@ def _mapped_lib(stem: str) -> Optional[str]:
         return None
     if len(mapped) == 1:
         return mapped[0]
-    if not mapped:
+    if not mapped or require_unique:
         return None
 
     torch_mod = sys.modules.get("torch")
@@ -411,6 +412,9 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
 
     Order:
       1. ``$ROCKE_HIP_LIB`` / ``$ROCKE_COMGR_LIB`` (explicit override, full path).
+         The COMGR loader refuses an existing override that differs from the
+         sole mapped COMGR file before opening it; this candidate list remains
+         the normal priority order when that safety check does not apply.
       2. The lib torch uses if torch is *already* imported: the copy already
          mapped into the process, else ``<torch>/lib/lib<stem>.so``, else (TheRock
          torch only) ``_rocm_sdk_core/lib/lib<stem>.so*`` (see
