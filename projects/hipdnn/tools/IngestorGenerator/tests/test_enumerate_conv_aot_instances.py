@@ -112,8 +112,9 @@ def _knob_class(identity):
     )
 
 
-def test_the_implicit_catalog_is_rockes_whole_forward_sweep(grid_fp16):
-    """No selection of ours: every valid identity kernel_sweep enumerates, once."""
+def test_the_implicit_catalog_is_rockes_forward_sweep_less_the_exclusions(grid_fp16):
+    """Every valid identity kernel_sweep enumerates, once, except exactly those the
+    exclusion policy names."""
     from benchmarks.common import kernel_sweep
     from rocke.core.arch import ArchTarget
 
@@ -125,14 +126,82 @@ def test_the_implicit_catalog_is_rockes_whole_forward_sweep(grid_fp16):
         )
         if kernel_sweep._spec_is_valid(job, "gfx950", "fp16")
     ]
+    kept = [i for i in swept if tool.excluded_reason(i) is None]
     hashes = sorted(tool.stable_hash(i) for i in grid_fp16)
-    assert hashes == sorted(tool.stable_hash(i) for i in swept)
+    assert hashes == sorted(tool.stable_hash(i) for i in kept)
     assert len(set(hashes)) == len(hashes)
+    # Each rule drops something, so none of them is dead.
+    reasons = collections.Counter(tool.excluded_reason(i) for i in swept)
+    assert set(reasons) == {
+        None,
+        "async DMA K loop",
+        "width pair outside PACKAGED_VECTOR_WIDTHS",
+        "cshuffle with store width 1",
+    }
     classes = {_knob_class(i) for i in grid_fp16}
     assert {c[0] for c in classes} == {"mem", "compv3", "compv4"}
     assert {c[1] for c in classes} == {"default", "cshuffle"}
-    assert {c[2] for c in classes} == {"", "unroll", "async"}
-    assert {c[5] for c in classes} == {1, 2, 4, 8}
+    assert {c[2] for c in classes} == {"", "unroll"}
+    widths = {(c[1], c[3], c[5]) for c in classes}
+    assert widths == {
+        ("default", 1, 1),
+        ("default", 4, 1),
+        ("cshuffle", 1, 4),
+        ("cshuffle", 2, 2),
+        ("cshuffle", 4, 4),
+        ("cshuffle", 8, 8),
+    }
+
+
+@pytest.mark.parametrize(
+    "change, reason",
+    [
+        ({}, None),
+        ({"vector_size_a": 1, "vector_size_b": 1, "vector_size_c": 4}, None),
+        (
+            {
+                "epilogue": "default",
+                "vector_size_a": 4,
+                "vector_size_b": 4,
+                "vector_size_c": 1,
+            },
+            None,
+        ),
+        ({"unroll_k": True}, None),
+        (
+            {"async_dma": True, "async_chunk_a": 8, "async_chunk_b": 8},
+            "async DMA K loop",
+        ),
+        ({"vector_size_c": 4}, "width pair outside PACKAGED_VECTOR_WIDTHS"),
+        ({"vector_size_b": 4}, "width pair outside PACKAGED_VECTOR_WIDTHS"),
+        (
+            {
+                "epilogue": "default",
+                "vector_size_a": 8,
+                "vector_size_b": 8,
+                "vector_size_c": 1,
+            },
+            "width pair outside PACKAGED_VECTOR_WIDTHS",
+        ),
+        (
+            {"vector_size_a": 4, "vector_size_b": 4, "vector_size_c": 1},
+            "cshuffle with store width 1",
+        ),
+    ],
+    ids=[
+        "8-8-8",
+        "1-1-4",
+        "default-4-4-1",
+        "unroll",
+        "async",
+        "8-8-4",
+        "unequal-a-b",
+        "default-8-8-1",
+        "cshuffle-4-4-1",
+    ],
+)
+def test_excluded_reason_names_the_rule_an_identity_breaks(change, reason):
+    assert tool.excluded_reason(_identity(**change)) == reason
 
 
 def test_every_knob_class_of_the_grid_converts(tmp_path, grid_fp16):
@@ -315,8 +384,8 @@ def test_main_reports_the_direct_identities_the_converter_refuses(
 def test_main_refuses_an_implicit_identity_the_converter_refuses(
     tmp_path, monkeypatch, synthetic_grid, capsys
 ):
-    """The implicit-GEMM grid is shipped whole: an identity the converter cannot
-    package is an error, never a silent omission."""
+    """Every implicit-GEMM identity the policy keeps is shipped: one the converter
+    cannot package is an error, never a silent omission."""
     unsupported = dict(synthetic_grid[0], split_k=2)
     monkeypatch.setattr(tool, "grid_identities", lambda dtype, jobs: [unsupported])
     monkeypatch.setattr(
