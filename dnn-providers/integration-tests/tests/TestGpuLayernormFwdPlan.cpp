@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -28,6 +29,7 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 TEST(TestGpuLayernormFwdPlanBuilder, PlanConstruction)
 {
@@ -41,7 +43,7 @@ TEST(TestGpuLayernormFwdPlanBuilder, PlanConstruction)
 
     const std::vector<int64_t> ioDims = {2, 3, 4, 5};
     const TensorLayout layout = TensorLayout::NCHW;
-    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     const int64_t normalizedDimCount = 2;
 
     auto graphBuilder = createLayernormFwdGraph(X_UID,
@@ -55,6 +57,7 @@ TEST(TestGpuLayernormFwdPlanBuilder, PlanConstruction)
                                                 layout,
                                                 epsilon,
                                                 normalizedDimCount,
+                                                DataType::FLOAT,
                                                 DataType::FLOAT,
                                                 DataType::FLOAT,
                                                 DataType::FLOAT,
@@ -100,7 +103,7 @@ TEST(TestGpuLayernormFwdPlanBuilder, IsApplicable)
 
     const std::vector<int64_t> ioDims = {2, 3, 4, 5};
     const TensorLayout layout = TensorLayout::NCHW;
-    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     const int64_t normalizedDimCount = 2;
 
     auto graphBuilder = createLayernormFwdGraph(X_UID,
@@ -114,6 +117,7 @@ TEST(TestGpuLayernormFwdPlanBuilder, IsApplicable)
                                                 layout,
                                                 epsilon,
                                                 normalizedDimCount,
+                                                DataType::FLOAT,
                                                 DataType::FLOAT,
                                                 DataType::FLOAT,
                                                 DataType::FLOAT,
@@ -170,6 +174,51 @@ TEST(TestGpuLayernormFwdPlanBuilder, IsApplicable)
                                                batchnormGraphWrapper.getTensorMap()));
 }
 
+TEST(TestGpuLayernormFwdPlanBuilder, IsApplicableAcceptsEpsilonTypeDifferentFromComputeType)
+{
+    constexpr int64_t X_UID = 10;
+    constexpr int64_t Y_UID = 11;
+    constexpr int64_t SCALE_UID = 12;
+    constexpr int64_t BIAS_UID = 13;
+    constexpr int64_t EPSILON_UID = 14;
+    constexpr int64_t MEAN_UID = 15;
+    constexpr int64_t INV_VARIANCE_UID = 16;
+
+    const std::vector<int64_t> ioDims = {2, 3, 4, 5};
+    const TensorLayout layout = TensorLayout::NCHW;
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
+    const int64_t normalizedDimCount = 2;
+
+    auto graphBuilder = createLayernormFwdGraph(X_UID,
+                                                Y_UID,
+                                                SCALE_UID,
+                                                BIAS_UID,
+                                                EPSILON_UID,
+                                                MEAN_UID,
+                                                INV_VARIANCE_UID,
+                                                ioDims,
+                                                layout,
+                                                epsilon,
+                                                normalizedDimCount,
+                                                DataType::FLOAT, // x
+                                                DataType::FLOAT, // y
+                                                DataType::FLOAT, // scale/bias
+                                                DataType::FLOAT, // mean/inv_variance
+                                                DataType::FLOAT, // compute
+                                                DataType::HALF); // epsilon
+
+    auto graphWrapper = GraphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+    const GpuLayernormFwdPlanBuilder<DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT>
+        planBuilder;
+
+    EXPECT_TRUE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+}
+
 // ====================================================
 // Templated helper for plan execution vs CPU reference
 // ====================================================
@@ -185,7 +234,8 @@ template <typename XType,
 void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
                             const TensorLayout& layout,
                             int64_t normalizedDimCount,
-                            float tolerance)
+                            float tolerance,
+                            DataType epsilonDataType = DataType::UNSET)
 {
     const auto normalizedDim = static_cast<int64_t>(ioDims.size()) - normalizedDimCount;
 
@@ -220,8 +270,12 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
     auto meanInvVarianceDataType = nativeTypeToDataType<MeanInvVarianceType>();
     auto computeDataType = nativeTypeToDataType<ComputeType>();
+    if(epsilonDataType == DataType::UNSET)
+    {
+        epsilonDataType = computeDataType;
+    }
 
-    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     auto graphBuilder = createLayernormFwdGraph(X_UID,
                                                 Y_UID,
                                                 SCALE_UID,
@@ -237,7 +291,8 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
                                                 yDataType,
                                                 scaleBiasDataType,
                                                 meanInvVarianceDataType,
-                                                computeDataType);
+                                                computeDataType,
+                                                epsilonDataType);
 
     const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
@@ -270,11 +325,11 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     Tensor<MeanInvVarianceType> cpuRstd(batchDims, batchStrides);
 
     constexpr unsigned int SEED = 42;
-    xTensor.fillWithRandomValues(static_cast<XType>(-1.0), static_cast<XType>(1.0), SEED);
-    scaleTensor.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 1);
-    biasTensor.fillWithRandomValues(
-        static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 2);
+    fillWithRandomValues(xTensor, static_cast<XType>(-1.0), static_cast<XType>(1.0), SEED);
+    fillWithRandomValues(
+        scaleTensor, static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 1);
+    fillWithRandomValues(
+        biasTensor, static_cast<ScaleBiasType>(-1.0), static_cast<ScaleBiasType>(1.0), SEED + 2);
     epsilonTensor.fillWithValue(static_cast<ComputeType>(LAYERNORM_DEFAULT_EPSILON));
 
     Tensor<YType> gpuY(ioDims, ioStrides);
@@ -355,6 +410,14 @@ TEST(TestGpuLayernormFwdPlanFp32, ExecutePlanNhwc)
 
     runPlanExecuteVsCpuRef<float, float, float, float, float>(
         {5, 4, 3, 2}, TensorLayout::NHWC, 3, layernorm::getTolerance<float>());
+}
+
+TEST(TestGpuLayernormFwdPlanFp32, ExecutePlanNchwWithDoubleEpsilon)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<float, float, float, float, float>(
+        {5, 4, 3, 2}, TensorLayout::NCHW, 3, layernorm::getTolerance<float>(), DataType::DOUBLE);
 }
 
 // =========================

@@ -73,7 +73,7 @@ jobs:
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
       AMDGPU_FAMILIES: ${{ matrix.family }}
       TEATIME_FORCE_INTERACTIVE: 0
-      ARTIFACT_GROUP: ${{ matrix.family }}-asan
+      ARTIFACT_GROUP: ${{ matrix.family }}-host-asan
     steps:
       - name: "Check out rocm-libraries"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -117,13 +117,13 @@ jobs:
       - name: Fetch sources
         timeout-minutes: 30
         run: |
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --depth 1 --progress --no-include-rocm-libraries --no-include-ml-frameworks
 
-      - name: Configure gfx90a TheRock ASAN math-libs
+      - name: Configure gfx90a TheRock host-ASAN math-libs
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          # Mirrors TheRock's linux-release-asan preset while retaining
+          # Mirrors TheRock's linux-release-host-asan preset while retaining
           # this workflow's focused single-family build.
           extra_cmake_options: >-
             -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../
@@ -131,12 +131,12 @@ jobs:
             -DTHEROCK_ENABLE_ALL=OFF
             -DTHEROCK_ENABLE_BLAS=ON
             -DTHEROCK_ENABLE_SPARSE=ON
-            -DTHEROCK_SANITIZER=ASAN
+            -DTHEROCK_SANITIZER=HOST_ASAN
             -Damd-llvm_BUILD_TYPE=Release
             -Dtherock-host-blas_BUILD_TYPE=Release
             -Dtherock-SuiteSparse_BUILD_TYPE=Release
             -Damd-llvm_SANITIZER=OFF
-            -Damd-comgr_SANITIZER=ASAN
+            -Damd-comgr_SANITIZER=HOST_ASAN
             -Dhipcc_SANITIZER=OFF
             -Dhipify_SANITIZER=OFF
             -Daqlprofile_SANITIZER=OFF
@@ -148,7 +148,7 @@ jobs:
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build hipBLASLt through staged hipSPARSELt consumer (ASAN)
+      - name: Build hipBLASLt through staged hipSPARSELt consumer (HOST_ASAN)
         run: cmake --build TheRock/build --target hipSPARSELt -- -k 0
 
       - name: Report
@@ -196,7 +196,7 @@ jobs:
     name: "Test hipBLASLt ASAN | ${{ matrix.family }} (quick)"
     needs: [setup, build]
     runs-on: ${{ matrix.runs_on }}
-    timeout-minutes: 210
+    timeout-minutes: 90
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --ipc host
@@ -220,7 +220,8 @@ jobs:
       THEROCK_BIN_DIR: "./build/bin"
       THEROCK_DIR: ${{ github.workspace }}
       AMDGPU_FAMILIES: ${{ matrix.family }}
-      ARTIFACT_GROUP: ${{ matrix.family }}-asan
+      ARTIFACT_GROUP: ${{ matrix.family }}-host-asan
+      HSA_XNACK: "0"
       TEST_COMPONENT: hipblaslt
     steps:
       - name: Checkout TheRock repository
@@ -259,7 +260,10 @@ jobs:
 
       - name: Driver / GPU sanity check
         timeout-minutes: 3
+        env:
+          RUNNER_NAME: ${{ runner.name }}
         run: |
+          echo "Runner: ${RUNNER_NAME}"
           export PATH="${GITHUB_WORKSPACE}/build/bin:${PATH}"
           export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/build/lib:${LD_LIBRARY_PATH:-}"
           timeout -k 10 120 python3 ./build_tools/print_driver_gpu_info.py || true
@@ -273,20 +277,30 @@ jobs:
           {
             echo "ASAN_OPTIONS=quarantine_size_mb=600"
             echo "LSAN_OPTIONS=suppressions=${LSAN_SUPP}:print_suppressions=0"
-            echo "HSA_XNACK=1"
+            echo "HSA_XNACK=0"
             echo "ASAN_SYMBOLIZER_PATH=${OUT}/lib/llvm/bin/llvm-symbolizer"
             echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"
           } >> "$GITHUB_ENV"
 
       - name: Test hipBLASLt (quick)
-        timeout-minutes: 180
+        # A passing smoke run takes 2-3 minutes; hangs used to run to the
+        # 180-minute step limit. Cap the test well below that and name the
+        # runner, since hangs have clustered on specific hosts.
+        timeout-minutes: 30
         env:
           SHARD_INDEX: 1
           TOTAL_SHARDS: 1
           TEST_TYPE: quick
+          RUNNER_NAME: ${{ runner.name }}
         run: |
           mkdir -p ./test_logs
-          python3 rocm-libraries/test/therock/test_hipblaslt.py 2>&1 | tee ./test_logs/hipblaslt-test_output.log
+          status=0
+          timeout -k 60 20m python3 rocm-libraries/test/therock/test_hipblaslt.py 2>&1 \
+            | tee ./test_logs/hipblaslt-test_output.log || status=$?
+          if [[ "${status}" -eq 124 || "${status}" -eq 137 ]]; then
+            echo "::error::hipBLASLt ASAN test hung and was killed after 20 minutes on runner ${RUNNER_NAME}"
+          fi
+          exit "${status}"
 
   summary:
     name: "hipBLASLt ASAN CI Summary"

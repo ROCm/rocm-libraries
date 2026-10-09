@@ -377,18 +377,32 @@ def _kernel_id(req: MoeRequest, candidate: KernelCandidate, spec) -> KernelId:
     )
 
 
+def registered_moe_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, object], ...]:
+    """Every registered MoE candidate that can launch ``req``.
+
+    Probes opt-in variants and expands each candidate's ``sweep_space``.
+    Production :func:`dispatch_moe` is unchanged.
+    """
+    if _request_errors(req):
+        return ()
+    return MOE_REGISTRY.combos(req)
+
+
 def moe_sweep_space(req: OperatorRequest) -> Sequence[object]:
     if _request_errors(req):
         return ()
-    specs = []
-    seen = set()
-    for candidate in MOE_REGISTRY.supported(req):
-        spec = candidate.select_spec(req)
-        h = stable_json_hash(_struct(spec), n=16)
-        if h not in seen:
-            seen.add(h)
-            specs.append(spec)
-    return tuple(specs)
+    return MOE_REGISTRY.sweep_space(
+        req, spec_key=lambda spec: stable_json_hash(_struct(spec), n=16)
+    )
+
+
+def dispatch_moe_all(req: MoeRequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible fused-MoE kernel for ``req``, including opt-in variants."""
+    if _request_errors(req):
+        return ()
+    return MOE_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 def dispatch_moe(req: MoeRequest, *, ranker: Ranker | None = None) -> DispatchResult:

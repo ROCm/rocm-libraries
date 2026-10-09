@@ -172,14 +172,14 @@ namespace detail
 #define ROCPRIM_ATOMIC_LOAD(inst, mod, wait, ptr) \
     asm volatile(inst " %0, %1 " mod "\t\n" wait : "=v"(result) : "v"(ptr) : "memory")
 
-#if ROCPRIM_TARGET_CDNA3
+#if ROCPRIM_TARGET_CDNA3 || ROCPRIM_TARGET_CDNA4
     #define ROCPRIM_ATOMIC_LOAD_FLAT(ptr) \
         ROCPRIM_ATOMIC_LOAD("flat_load_dwordx4", "sc1", "s_waitcnt vmcnt(0)", ptr)
     #define ROCPRIM_ATOMIC_LOAD_SHARED(ptr) \
         ROCPRIM_ATOMIC_LOAD("ds_read_b128", "", "s_waitcnt lgkmcnt(0)", ptr)
     #define ROCPRIM_ATOMIC_LOAD_GLOBAL(ptr) \
         ROCPRIM_ATOMIC_LOAD("global_load_dwordx4", "off sc1", "s_waitcnt vmcnt(0)", ptr)
-#elif ROCPRIM_TARGET_RDNA4
+#elif ROCPRIM_TARGET_CDNA5 || ROCPRIM_TARGET_RDNA4
     #define ROCPRIM_ATOMIC_LOAD_FLAT(ptr) \
         ROCPRIM_ATOMIC_LOAD("flat_load_b128", "scope:SCOPE_DEV", "s_wait_loadcnt_dscnt 0x0", ptr)
     #define ROCPRIM_ATOMIC_LOAD_SHARED(ptr) \
@@ -289,14 +289,14 @@ namespace detail
 #define ROCPRIM_ATOMIC_STORE(inst, mod, wait, ptr) \
     asm volatile(inst " %0, %1 " mod "\t\n" wait : : "v"(ptr), "v"(value) : "memory")
 
-#if ROCPRIM_TARGET_CDNA3
+#if ROCPRIM_TARGET_CDNA3 || ROCPRIM_TARGET_CDNA4
     #define ROCPRIM_ATOMIC_STORE_FLAT(ptr) \
         ROCPRIM_ATOMIC_STORE("flat_store_dwordx4", "sc1", "s_waitcnt vmcnt(0)", ptr)
     #define ROCPRIM_ATOMIC_STORE_SHARED(ptr) \
         ROCPRIM_ATOMIC_STORE("ds_write_b128", "", "s_waitcnt lgkmcnt(0)", ptr)
     #define ROCPRIM_ATOMIC_STORE_GLOBAL(ptr) \
         ROCPRIM_ATOMIC_STORE("global_store_dwordx4", "off sc1", "s_waitcnt vmcnt(0)", ptr)
-#elif ROCPRIM_TARGET_RDNA4
+#elif ROCPRIM_TARGET_CDNA5 || ROCPRIM_TARGET_RDNA4
     #define ROCPRIM_ATOMIC_STORE_FLAT(ptr) \
         ROCPRIM_ATOMIC_STORE("flat_store_b128", "scope:SCOPE_DEV", "s_wait_storecnt_dscnt 0x0", ptr)
     #define ROCPRIM_ATOMIC_STORE_SHARED(ptr) \
@@ -375,8 +375,8 @@ namespace detail
     ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_fence_release_vmem_order_only()
     {
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-#if ROCPRIM_TARGET_RDNA4
-        // RDNA4 (gfx12) splits waitcnt: wait for all store counts to complete
+#if ROCPRIM_TARGET_CDNA5
+        // CDNA5 (gfx1250) splits waitcnt: wait for all store counts to complete
         asm volatile("s_wait_storecnt 0x0" : : : "memory");
 #else
         // Wait until all vmem operations complete (s_waitcnt vmcnt(0))
@@ -395,8 +395,8 @@ namespace detail
     /// developers that know what they are doing.
     ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_fence_acquire_order_only()
     {
-#if ROCPRIM_TARGET_RDNA4
-        // RDNA4 (gfx12) splits waitcnt: wait for all load counts to complete
+#if ROCPRIM_TARGET_CDNA5
+        // CDNA5 (gfx1250) splits waitcnt: wait for all load counts to complete
         asm volatile("s_wait_loadcnt 0x0" : : : "memory");
 #else
         __builtin_amdgcn_s_waitcnt(/*vmcnt*/ 0 | (/*exp_cnt*/ 0x7 << 4) | (/*lgkmcnt*/ 0xf << 8));

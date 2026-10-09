@@ -5,6 +5,9 @@ frontend v9 and hipDNN's cuDNN-shaped compatibility shim. The shim is source
 compatibility for supported v9 graph-API translation units, not ABI compatibility
 and not a full cuDNN backend implementation.
 
+NVIDIA, CUDA, and cuDNN are trademarks and/or registered trademarks of NVIDIA
+Corporation. hipDNN is not affiliated with or endorsed by NVIDIA.
+
 ## Scope
 
 The shim targets the cuDNN frontend v9 graph API surface exposed by

@@ -21,6 +21,7 @@ import unittest
 
 from dispatch.grouped_convolution import (
     ConvGroupedRequest,
+    _block,
     _problem,
     conv_grouped_candidates,
     dispatch_conv_grouped,
@@ -73,6 +74,8 @@ def _expected_grid(req, spec):
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
             arch=spec.arch,
+            groups=p.groups,
+            block_size=_block(spec)[0],
         ).split_k
     return (gx, gy, p.groups * split_k)
 
@@ -149,23 +152,31 @@ class TestGroupedConvDirectionSurface(unittest.TestCase):
             self.assertGreater(len(conv_grouped_candidates(direction)), 0, direction)
 
 
-class TestForceDeterministic(unittest.TestCase):
-    """``force_deterministic`` flag on ConvGroupedRequest promotes two_stage=True."""
+class TestTwoStageSelection(unittest.TestCase):
+    """two_stage is chosen by atomic availability, not by a caller flag."""
 
-    def test_force_deterministic_sets_two_stage_for_split_k_gt1(self):
-        # When force_deterministic=True and split_k resolves to > 1, the
-        # WgradConvSpec produced by to_wgrad_spec must have two_stage=True.
-        r = dispatch_conv_grouped(_wgrad("gfx942", force_deterministic=True))
+    def test_odd_wg_N_takes_the_scratch_path(self):
+        # wg_N = Y*X*cpg odd => the packed <2 x bf16> atomic pair is not
+        # dword-aligned, so split-K can only go through the f32 scratch.
+        r = dispatch_conv_grouped(_wgrad("gfx950", C=3, K=24, Y=3, X=3, dtype="bf16"))
         ws = r.spec.to_wgrad_spec(_problem(r.request))
         if ws.split_k > 1:
             self.assertTrue(
                 ws.two_stage,
-                "force_deterministic=True with split_k > 1 must produce two_stage=True",
+                "odd wg_N with a 16-bit dW must resolve to the two-stage path",
             )
 
-    def test_force_deterministic_noop_for_split_k_1(self):
-        # split_k=1 is always deterministic; force_deterministic must not error.
-        r = dispatch_conv_grouped(_wgrad("gfx1250", force_deterministic=True))
+    def test_even_wg_N_stays_on_the_packed_atomic(self):
+        # wg_N even => the packed atomic can address dW directly and no
+        # scratch/second launch is needed.
+        r = dispatch_conv_grouped(_wgrad("gfx950", C=64, K=64, Y=3, X=3, dtype="bf16"))
+        ws = r.spec.to_wgrad_spec(_problem(r.request))
+        self.assertFalse(
+            ws.two_stage, "an even wg_N should reach split-K via packed atomics"
+        )
+
+    def test_split_k_1_needs_no_two_stage(self):
+        r = dispatch_conv_grouped(_wgrad("gfx1250"))
         ws = r.spec.to_wgrad_spec(_problem(r.request))
         self.assertEqual(ws.split_k, 1, "gfx1250 always uses split_k=1")
         self.assertFalse(ws.two_stage, "split_k=1 needs no two_stage")
@@ -398,18 +409,69 @@ class TestGroupedSpecKernelNameDistinguishesBody(unittest.TestCase):
         self.assertIn("kouter", on.kernel_name())
         assert isinstance(base, ConvGroupedSpec)
 
-    def test_force_deterministic_changes_the_name(self):
-        from dataclasses import replace
+    def test_ws_replicas_changes_the_instance_name(self):
+        from dataclasses import replace as _replace
 
-        base = dispatch_conv_grouped(_wgrad("gfx942", G=4)).spec
-        det = replace(base, force_deterministic=True)
-        plain = replace(base, force_deterministic=False)
+        r = dispatch_conv_grouped(_wgrad("gfx950", C=3, K=24, Y=3, X=3, dtype="bf16"))
+        ws = r.spec.to_wgrad_spec(_problem(r.request))
         self.assertNotEqual(
-            det.kernel_name(),
-            plain.kernel_name(),
-            "force_deterministic promotes to two_stage, which adds the `ws` "
-            "workspace pointer to the signature -- an ABI change",
+            ws.kernel_name(),
+            _replace(ws, ws_replicas=ws.ws_replicas + 1).kernel_name(),
+            "ws_replicas changes the scratch addressing, so it must reach the "
+            "name the compile cache keys on",
         )
+
+
+class TestLaunchContractMatchesKernel(unittest.TestCase):
+    """The dispatcher's signature and launch values must describe the kernel
+    ``to_wgrad_spec`` builds and the grid ``_wgrad_grid`` launches.
+
+    Both go through the split-K resolver, so the raw ``spec.split_k`` (-1 on
+    the auto path) and the spec's (absent) two-stage flag must not leak into
+    the kernargs: kernargs pack positionally, and a mismatch launches.
+    """
+
+    def _check(self, req):
+        from dispatch.grouped_convolution import launch_values_for
+        from kernels.common.conv_args import ConvArgs
+
+        r = dispatch_conv_grouped(req)
+        p = _problem(r.request)
+        ws = r.spec.to_wgrad_spec(p)
+        abi = ConvArgs.from_problem(
+            p,
+            direction="wgrad",
+            tile_m=ws.tile_m,
+            tile_n=ws.tile_n,
+            tile_k=ws.tile_k,
+        ).arg_names(two_stage=ws.two_stage)
+        self.assertEqual([a["name"] for a in r.signature], [n for n, _ in abi])
+
+        ws_kw = dict(ws_ptr=0x9000, ws_bytes=64) if ws.two_stage else {}
+        values = launch_values_for(
+            r.request,
+            r.spec,
+            A_ptr=0x1000,
+            B_ptr=0x2000,
+            D_ptr=0x3000,
+            A_bytes=1,
+            B_bytes=1,
+            D_bytes=1,
+            **ws_kw,
+        )
+        self.assertEqual(values["ks_count"], ws.split_k)
+        self.assertEqual(r.grid[2], p.groups * ws.split_k)
+        return ws
+
+    def test_auto_split_k(self):
+        self._check(_wgrad("gfx942", G=4))
+
+    def test_odd_wg_N_two_stage(self):
+        # Odd wg_N with a 16-bit dW cannot use the packed atomic, so split-K
+        # resolves to the two-stage path and its scratch pair joins the ABI.
+        ws = self._check(_wgrad("gfx950", C=3, K=24, Y=3, X=3, dtype="bf16"))
+        if ws.split_k > 1:
+            self.assertTrue(ws.two_stage)
 
 
 if __name__ == "__main__":

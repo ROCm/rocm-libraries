@@ -168,6 +168,137 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* B_bytes; /* param B_bytes (I32)                       */
     rocke_value_t* D_bytes; /* param D_bytes (I32)                       */
 
+    /* ---- AOT runtime problem-dimension params (Value, not compile-time int) ----
+     * Python: p_N = b.param("p_N", I32) … p_num_pid_n = b.param("p_num_pid_n", I32)
+     * Every former b.const_i32(p.X) is replaced by the corresponding p_* Value.
+     */
+    rocke_value_t* p_N;
+    rocke_value_t* p_Hi;
+    rocke_value_t* p_Wi;
+    rocke_value_t* p_C;
+    rocke_value_t* p_K;
+    rocke_value_t* p_Y;
+    rocke_value_t* p_X;
+    rocke_value_t* p_sH;
+    rocke_value_t* p_sW;
+    rocke_value_t* p_pH;
+    rocke_value_t* p_pW;
+    rocke_value_t* p_dH;
+    rocke_value_t* p_dW;
+    rocke_value_t* p_groups;
+    rocke_value_t* p_Ho;
+    rocke_value_t* p_Wo;
+    rocke_value_t* p_cpg;
+    rocke_value_t* p_kpg;
+    /* 3-D depth extents. Emitted only when spec.problem.is_3d; the ABI
+     * interleaves them with the 2-D dims (see conv_abi._dims), so the
+     * shared emitter -- not each caller -- decides where they land. */
+    /* Whether the AOT block carries the depth extents. wgrad/dgrad give
+     * ctx->p a GEMM-shaped stub problem with no depth, so this is read from
+     * the *real* spec problem and is the only thing the shared descriptor
+     * builders may consult for the 3-D shape. */
+    bool params_is_3d;
+    rocke_value_t* p_Z;
+    rocke_value_t* p_Di;
+    rocke_value_t* p_sD;
+    rocke_value_t* p_pD;
+    rocke_value_t* p_dD;
+    rocke_value_t* p_Do;
+    rocke_value_t* p_K_gemm; /* [Z*]Y*X*cpg  (fwd reduction dim) */
+    rocke_value_t* p_M; /* N*Ho*Wo  (fwd output spatial) */
+    /* Strides (row-major, in elements) */
+    rocke_value_t* p_A_stride_n;
+    rocke_value_t* p_A_stride_di;
+    rocke_value_t* p_A_stride_hi;
+    rocke_value_t* p_A_stride_wi;
+    rocke_value_t* p_B_stride_k;
+    rocke_value_t* p_B_stride_z;
+    rocke_value_t* p_B_stride_y;
+    rocke_value_t* p_B_stride_x;
+    rocke_value_t* p_D_stride_n;
+    rocke_value_t* p_D_stride_do;
+    rocke_value_t* p_D_stride_ho;
+    rocke_value_t* p_D_stride_wo;
+    /* Magic-number pairs for runtime unmerge */
+    rocke_value_t* p_magic_m_Do_mult;
+    rocke_value_t* p_magic_m_Do_shift;
+    rocke_value_t* p_magic_m_Ho_mult;
+    rocke_value_t* p_magic_m_Ho_shift;
+    rocke_value_t* p_magic_m_Wo_mult;
+    rocke_value_t* p_magic_m_Wo_shift;
+    rocke_value_t* p_magic_k_Y_mult;
+    rocke_value_t* p_magic_k_Y_shift;
+    rocke_value_t* p_magic_k_X_mult;
+    rocke_value_t* p_magic_k_X_shift;
+    rocke_value_t* p_magic_k_cpg_mult;
+    rocke_value_t* p_magic_k_cpg_shift;
+    /* Grid info (chiplet swizzle) */
+    rocke_value_t* p_num_pid_m;
+    rocke_value_t* p_num_pid_n;
+
+    /* ---- backward-direction AOT kernargs ----
+     * The forward slots above are named for the forward tensors (A = NHWC
+     * activation, B = KYXC filter, D = NHWK output). wgrad and dgrad bind
+     * different tensors to the same operand positions, so they get their own
+     * named slots rather than reusing the forward ones under a comment --
+     * a descriptor builder reading "p_A_stride_hi" when the tensor is
+     * actually NHWK is exactly the kind of mix-up byte-identity will not
+     * catch until the numbers come out wrong. */
+    rocke_value_t* p_wg_M;
+    rocke_value_t* p_wg_N;
+    rocke_value_t* p_wg_K;
+    rocke_value_t* p_dg_M;
+    rocke_value_t* p_dg_N;
+    rocke_value_t* p_dg_K;
+    rocke_value_t* p_dY_stride_n;
+    rocke_value_t* p_dY_stride_do;
+    rocke_value_t* p_dY_stride_ho;
+    rocke_value_t* p_dY_stride_wo;
+    rocke_value_t* p_X_stride_n;
+    rocke_value_t* p_X_stride_di;
+    rocke_value_t* p_X_stride_hi;
+    rocke_value_t* p_X_stride_wi;
+    rocke_value_t* p_dW_stride_k;
+    rocke_value_t* p_dW_stride_z;
+    rocke_value_t* p_dW_stride_y;
+    rocke_value_t* p_dW_stride_x;
+    rocke_value_t* p_W_stride_k;
+    rocke_value_t* p_W_stride_y;
+    rocke_value_t* p_W_stride_x;
+    rocke_value_t* p_dX_stride_n;
+    rocke_value_t* p_dX_stride_hi;
+    rocke_value_t* p_dX_stride_wi;
+    /* wgrad: k_wg -> (n, ho, wo) divides by Wo then Ho; n_wg -> (y, x, c)
+     * divides by cpg then X. dgrad: m -> (n, hi, wi) divides by Wi then Hi. */
+    rocke_value_t* p_magic_k_Do_mult;
+    rocke_value_t* p_magic_k_Do_shift;
+    rocke_value_t* p_magic_k_Ho_mult;
+    rocke_value_t* p_magic_k_Ho_shift;
+    rocke_value_t* p_magic_k_Wo_mult;
+    rocke_value_t* p_magic_k_Wo_shift;
+    rocke_value_t* p_magic_n_Y_mult;
+    rocke_value_t* p_magic_n_Y_shift;
+    rocke_value_t* p_magic_n_X_mult;
+    rocke_value_t* p_magic_n_X_shift;
+    rocke_value_t* p_magic_n_cpg_mult;
+    rocke_value_t* p_magic_n_cpg_shift;
+    rocke_value_t* p_magic_m_Hi_mult;
+    rocke_value_t* p_magic_m_Hi_shift;
+    rocke_value_t* p_magic_m_Wi_mult;
+    rocke_value_t* p_magic_m_Wi_shift;
+
+    /* D-side group base for the epilogue: g*kpg, folded into k_out.
+     * Distinct from k_out_group_base above, which the A/B loaders use --
+     * Python builds a second one next to the D descriptor, before the K-loop. */
+    rocke_value_t* d_k_out_group_base;
+    /* Pointwise d_addr validity: Python emits a single const_i32(1) next to
+     * the D descriptor and reuses it for every store. */
+    rocke_value_t* ir_always_valid_d;
+    /* Negated offsets used by embed_dynamic (p_pH_neg = -p_pH, p_pW_neg = -p_pW) */
+    rocke_value_t* p_pH_neg;
+    rocke_value_t* p_pW_neg;
+    rocke_value_t* p_pD_neg;
+
     /* ---- per-lane MMA fragment widths (off op) ---- */
     int a_per_lane; /* op.a_frag_len */
     int b_per_lane; /* op.b_frag_len */
@@ -305,6 +436,19 @@ typedef struct rocke_conv_build_ctx
      * at split_k == 1, so without this the C engine emits a full-range
      * reduction under split-K atomics. */
     int kloop_num_iters;
+    /* Runtime upper bound for the AOT k-loop drivers. NULL means "use
+     * ctx->c_K_gemm", which is what the forward conv wants; wgrad/dgrad set it
+     * to their split-K slice end. Together with kloop_k_lo this replaces the
+     * old compile-time kloop_num_iters for every driver that now emits an
+     * scf.for over a runtime extent. */
+    rocke_value_t* kloop_k_hi;
+    /* Offset whose tile is known to read as zero (the global reduction
+     * extent). The ping-pong drivers compute a second tile per step and rely
+     * on the one past an odd tile count reading zero; that only holds at the
+     * real end of the tensor. When kloop_k_hi is a split-K slice end, set
+     * this and the drivers redirect a prefetch at or past kloop_k_hi here, so
+     * it cannot pull in the next slice's first tile. NULL = no redirect. */
+    rocke_value_t* kloop_k_zero_fill;
     /* Atom edge + fragment length used by the K-outer transpose-read feed. */
     rocke_value_t* tr_lane_mod4;
     rocke_value_t* tr_grp16;
@@ -335,7 +479,10 @@ typedef struct rocke_conv_build_ctx
      *   K_iters    = ceil(p.K_gemm / block_k) */
     rocke_value_t* wavelet_load_tid; /* load-wave-relative tid in [0, nloads*ws) */
     rocke_value_t* wavelet_is_math; /* i1: warp_id < n_math_warps             */
-    int wavelet_n_math_warps; /* warp_m * warp_n                        */
+    int wavelet_n_math_warps;
+    /* spec.block_size: the math waves' thread count, subtracted from tid to
+     * get the load waves' local id. */
+    int wavelet_math_block_size; /* warp_m * warp_n                        */
     int wavelet_K_iters; /* ceil(K_gemm / block_k)                 */
     int wavelet_epi_barriers; /* N_epi: extra barriers epilogue emits    */
 
@@ -359,7 +506,34 @@ typedef struct rocke_conv_build_ctx
      * phase reads final_accs. */
     rocke_value_t* final_accs[ROCKE_CONV_MAX_ACCS];
     int num_final_accs;
+
+    /* ---- forward A/B addressing split into a K-invariant and a K-varying part ----
+     * Python's split_ab block: when set, rocke_conv_a_descriptor /
+     * rocke_conv_b_descriptor distribute the strides so LLVM can hoist the row
+     * part out of the K loop. The constants are emitted by ctx_init before the
+     * schedule prologue. */
+    bool split_ab;
+    rocke_value_t* split_neg_pH;
+    rocke_value_t* split_neg_pW;
+    rocke_value_t* split_ystep; /* dH * A_stride_hi */
+    rocke_value_t* split_xstep; /* dW * A_stride_wi */
+    rocke_value_t* split_group_base; /* group_idx * cpg, NULL when ungrouped */
 } rocke_conv_build_ctx_t;
+
+/* Python mul_u24: x * y with both operands masked to 24 bits so the backend
+ * selects v_mul_u32_u24. Only for terms the host bounds (conv_args.MUL24_REDUCTION_LIMIT). */
+rocke_value_t* rocke_conv_mul_u24(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y);
+
+/* Python magic_divmod with runtime Values: *quot = val // dim through the
+ * magic pair, *rem = val - quot * dim (rocke_conv_mul_u24 when u24). */
+void rocke_conv_magic_divmod(rocke_ir_builder_t* b,
+                             rocke_value_t* val,
+                             rocke_value_t* mult,
+                             rocke_value_t* shift,
+                             rocke_value_t* dim,
+                             bool u24,
+                             rocke_value_t** quot,
+                             rocke_value_t** rem);
 
 /* ===================================================================== *
  *  PHASE FUNCTIONS -- one per Python closure / module-level helper.
@@ -383,6 +557,11 @@ const rocke_mmaop_t* rocke_conv_resolve_op(rocke_ir_builder_t* b,
 
 /* _choose_load_vec(spec) -> width. Thin adapter over rocke_choose_load_vec. */
 int rocke_conv_choose_load_vec(const rocke_implicit_gemm_conv_spec_t* spec);
+
+/* The default sync-path load width: rocke_conv_choose_load_vec clamped by the
+ * per-group channel count (Python _sync_load_vecs without an explicit
+ * vector_size_*). 0 when the tile admits no width. */
+int rocke_conv_default_load_vec(const rocke_implicit_gemm_conv_spec_t* spec);
 
 /* _emit_mfma(b, atom, a, bv, c): atom.emit MFMA dispatch. */
 rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
@@ -466,29 +645,6 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
                                 rocke_value_t* A_dst,
                                 rocke_value_t* B_dst);
 
-/* Split-load helpers for CK pipeline_basic (sync path only).
- *
- * emit_global_read: issue only buffer_load_vN for A and B into VGPR staging.
- *   Sets ctx->k_off_capture = k_off so descriptors address the correct tile.
- *   Fills *a_staged and *b_staged (caller-allocated); these are consumed later
- *   by emit_lds_write. Mirrors Python emit_global_read() -> (k_off, a_staged, b_staged).
- *
- * emit_lds_write: commit the staged VGPRs to LDS via smem_store_vN.
- *   Restores ctx->k_off_capture = k_off (from the staged tuple) so any
- *   descriptor that re-reads k_off_capture sees the correct value.
- *   Mirrors Python emit_lds_write(staged_tuple, A_dst, B_dst). */
-void rocke_conv_emit_global_read(rocke_conv_build_ctx_t* ctx,
-                                 rocke_value_t* k_off,
-                                 rocke_ctl_staged_t* a_staged,
-                                 rocke_ctl_staged_t* b_staged);
-
-void rocke_conv_emit_lds_write(rocke_conv_build_ctx_t* ctx,
-                               rocke_value_t* k_off,
-                               const rocke_ctl_staged_t* a_staged,
-                               const rocke_ctl_staged_t* b_staged,
-                               rocke_value_t* A_dst,
-                               rocke_value_t* B_dst);
-
 /* emit_wmma_phase(ctx, A_src, B_src, iter_vars[n], out_accs[n]): one K-tile of
  * WMMA atoms, fully MMA-contract driven (gfx1151). Reads iter_vars (length
  * ctx->num_accs), writes the new accs into out_accs. */
@@ -513,20 +669,15 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
 /* ----- K-loop drivers (ctx-driven; write ctx->final_accs) ----- *
  * Exactly one is called per build, chosen as Python does:
  *   unroll_k                -> rocke_conv_emit_kloop_unroll
- *   pipeline=="basic"       -> rocke_conv_emit_kloop_basic
- *   else not async_dma      -> rocke_conv_emit_kloop_simple
+ *   else not async_dma      -> rocke_conv_emit_kloop_simple  (mem/compv3/compv4/basic)
  *   else (async_dma)        -> rocke_conv_emit_kloop_async */
 
 /* spec.unroll_k branch (lines 1276-1310): double-buffered Python-unrolled
  * software pipeline (ping-pong A_smem/A_smem2). */
 void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx);
 
-/* pipeline=="basic" branch: CK pipeline_basic single-buffer, global-read/compute
- * overlap. Global read for tile k+1 is issued before the sync+mfma for tile k
- * so VMEM latency is hidden behind compute. Single LDS buffer, no double-buf. */
-void rocke_conv_emit_kloop_basic(rocke_conv_build_ctx_t* ctx);
-
-/* not-async branch (lines 1311-1319): single scf.for_iter load+sync+mfma+sync. */
+/* not-async branch (lines 1311-1319): single scf.for_iter load+sync+mfma+sync.
+ * Covers mem, compv3, compv4, and basic (basic now uses the same runtime loop). */
 void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
 
 /* async_dma branch (lines 1320-1347): SoftwarePipeline.run_ping_pong over the
@@ -548,14 +699,21 @@ void rocke_conv_emit_kloop_wavelet(rocke_conv_build_ctx_t* ctx);
 void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx);
 
 /* _emit_direct_epilogue(b, spec, accs[n], grid, d_rsrc): MFMA per-lane scalar
- * fp16 store via DirectEpilogue + the D descriptor addr_fn. */
+ * fp16 store via DirectEpilogue + the D descriptor addr_fn. D_desc,
+ * k_out_group_base (NULL when ungrouped) and the bounds are the kernel's
+ * runtime values, exactly as for the cshuffle epilogue. */
 void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      const rocke_implicit_gemm_conv_spec_t* spec,
                                      rocke_value_t* const* accs,
                                      int num_accs,
                                      const rocke_warp_grid_t* grid,
                                      rocke_value_t* d_rsrc,
-                                     rocke_value_t* ir_c_K_pw);
+                                     rocke_value_t* ir_c_K_pw,
+                                     rocke_value_t* always_valid_d,
+                                     const rocke_tensor_descriptor_t* D_desc,
+                                     rocke_value_t* k_out_group_base,
+                                     rocke_value_t* bound_m,
+                                     rocke_value_t* bound_n);
 
 /* _emit_direct_epilogue_wmma(b, spec, op, accs[n], warp_m_idx, warp_n_idx, lane,
  * block_m_off, block_n_off, d_rsrc, c0, ir_c_K_pw): WMMA per-lane fp16 store. */
@@ -571,7 +729,11 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* block_n_off,
                                           rocke_value_t* d_rsrc,
                                           rocke_value_t* c0,
-                                          rocke_value_t* ir_c_K_pw);
+                                          rocke_value_t* ir_c_K_pw,
+                                          const rocke_tensor_descriptor_t* D_desc,
+                                          rocke_value_t* k_out_group_base,
+                                          rocke_value_t* bound_m,
+                                          rocke_value_t* bound_n);
 
 /* _emit_cshuffle_epilogue(b, spec, accs[n], grid, d_rsrc, ir_c_K_pw): LDS-staged
  * cshuffle store via CShuffleEpilogue.from_grid + the D descriptor addr_fn. */
@@ -582,7 +744,12 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_warp_grid_t* grid,
                                        rocke_value_t* d_rsrc,
                                        rocke_value_t* ir_c_K_pw,
-                                       const rocke_mmaop_t* op);
+                                       rocke_value_t* always_valid_d,
+                                       const rocke_mmaop_t* op,
+                                       const rocke_tensor_descriptor_t* D_desc,
+                                       rocke_value_t* k_out_group_base,
+                                       rocke_value_t* bound_m,
+                                       rocke_value_t* bound_n);
 
 /* ----- driver-internal ctx population (the build prologue, lines 787-1032) ----
  * Splitting the long prologue out of the public entry keeps the glue TU small;
