@@ -154,6 +154,9 @@ struct PassFeatureConfig {
         /// issuing them ASAP under the cap: spread evenly, thinned to dsCapTdmPerCap inside the TDM
         /// landing window, count kept. Needs the DsCapTdm window. Off by default.
         bool dsPaceTdm = false;
+        /// dsPaceTdm: the first N ungated ds_loads of a region stay ASAP (prefetch the WMMAs need
+        /// early); only the rest are paced.
+        int dsPaceLeadLoads = 0;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
         /// WMMA windows by the region's matrix latency. 0 disables the extra
