@@ -34,7 +34,8 @@ Usage::
 
 Exits non-zero if any check fails, so it doubles as a CI gate. On a host with
 no gfx950 device it prints ``SKIPPED`` and exits 0 -- the emulated atoms are
-gfx950-only, and a skip must not be mistaken for a pass.
+gfx950-only, and a skip must not be mistaken for a pass. The test suite runs it
+through ``tests/core/test_xf32_bf16x3_device.py``.
 
 The complementary host-side half (what the recipe is worth against fp32,
 TF32 and plain bf16, with no GPU) is ``tests/core/test_xf32_bf16x3_numerics.py``.

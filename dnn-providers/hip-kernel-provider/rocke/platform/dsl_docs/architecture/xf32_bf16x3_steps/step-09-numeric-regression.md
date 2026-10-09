@@ -33,7 +33,7 @@ reach, so they are two artifacts rather than one:
 | question | where | needs a GPU |
 |---|---|---|
 | Is the arithmetic worth it — vs fp32, vs real TF32, vs plain bf16? | [`tests/core/test_xf32_bf16x3_numerics.py`](../../../tests/core/test_xf32_bf16x3_numerics.py) | no |
-| Does the lowering compute that arithmetic on hardware? | [`examples/gfx950/xf32/bf16x3_parity.py`](../../../python/rocke/examples/gfx950/xf32/bf16x3_parity.py) | yes, gfx950 |
+| Does the lowering compute that arithmetic on hardware? | [`examples/gfx950/xf32/bf16x3_parity.py`](../../../python/rocke/examples/gfx950/xf32/bf16x3_parity.py), run by [`tests/core/test_xf32_bf16x3_device.py`](../../../tests/core/test_xf32_bf16x3_device.py) | yes, gfx950 |
 
 Putting the accuracy claims on the host side is deliberate: they are the part
 of this feature most likely to be quietly wrong, and a check that only runs on
@@ -124,6 +124,23 @@ What *was* verified on this host, without a device:
 The numeric assertions inside the harness are therefore **unexercised**. They
 are not reported as passing anywhere, and this note is the record of that.
 
+### How the suite reaches it
+
+The harness is an examples-only `__main__` script, so as first written neither
+pytest nor `tests/run_all.py` invoked it, and its assertions would not have run
+even on a gfx950 host. After review it is run by
+[`tests/core/test_xf32_bf16x3_device.py`](../../../tests/core/test_xf32_bf16x3_device.py),
+which pytest — and so `run_all.py` and `run_checks.py` — discovers like any
+other test:
+
+- device 0 is probed in a subprocess, keeping HIP out of the pytest process;
+- on gfx950 the harness runs with `--require-device`, and anything but exit 0
+  with `PASSED` fails the test;
+- off gfx950 it skips, and so does a host without torch, which the harness
+  allocates through (torch stays optional);
+- `ROCKE_REQUIRE_GFX950=1` turns either skip into a failure. That is the
+  spelling for a gfx950 validation node, mirroring `ROCKE_REQUIRE_GFX1250`.
+
 ## Verification
 
 - `tests/core/test_xf32_bf16x3_numerics.py` — 13 tests, green.
@@ -131,5 +148,11 @@ are not reported as passing anywhere, and this note is the record of that.
 - `examples/gfx950/xf32/bf16x3_parity.py` — `SKIPPED` (exit 0) and, with
   `--require-device`, `FAILED` (exit 2) on this gfx942 host. Numeric result:
   **not measured**.
+- `tests/core/test_xf32_bf16x3_device.py` on the same gfx942 host — skips
+  ("needs HIP device 0 to be gfx950; found gfx942"), and errors under
+  `ROCKE_REQUIRE_GFX950=1`. With the probe faked to report gfx950, a host
+  without torch skips (errors under the env var), and the harness's own
+  `FAILED` exit fails the test with its message. The gfx950 pass itself is
+  still **not measured**.
 - No emission changed in this step, so the byte-identity result from
   [steps 5+6](step-05-bf16x3-lowering.md) still stands.
