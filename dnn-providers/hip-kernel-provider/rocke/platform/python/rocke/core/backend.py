@@ -258,8 +258,9 @@ def _lower_via_cpp_engine(
     passing it to the engine. The spec bindings use the same Python resolver;
     standalone native candidate discovery does not own Python compilation.
     An explicit flavor remains suitable for offline emission.
-    Both core resolvers retain the llvm22 default when compiler evidence is
-    unavailable. A native caller that owns a separate compilation stage must
+    Both core resolvers reject automatic selection when compiler evidence is
+    unavailable; offline emission requires an explicit flavor.
+    A native caller that owns a separate compilation stage must
     pass a flavor matching its compiler; native AUTO does not share its private
     handle with that stage.
 

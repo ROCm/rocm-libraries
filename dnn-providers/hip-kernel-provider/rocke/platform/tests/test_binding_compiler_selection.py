@@ -55,6 +55,19 @@ conv_spec = {"problem": {"N": 1, "H": 16, "W": 32, "cpg": 16, "kpg": 128}}
 conv = rocke_engine.conv_direct_nongrouped_lower_llvm(conv_spec, arch="gfx950")
 assert lower_llvm._datalayout_for_flavor("llvm23") in conv
 
+# Paged and strided attention bindings use the same compiler, including both
+# modules emitted by the gfx950 segment/reduce path.
+attention_spec = {"head_size": 64, "block_size": 16, "num_query_heads": 8,
+                  "num_kv_heads": 2, "num_segments": 2, "num_seqs": 1,
+                  "dtype": "fp16"}
+for arch in ("gfx942", "gfx950"):
+    for layout in ("paged", "strided"):
+        text = getattr(rocke_engine, arch + "_attention_tiled_3d_lower_llvm")(
+            dict(attention_spec, kv_layout=layout), arch=arch)
+        expected_modules = 2 if arch == "gfx950" else 1
+        assert text.count(lower_llvm._datalayout_for_flavor("llvm23")) == expected_modules
+        assert ("k_stride_batch_bytes" in text) == (layout == "strided")
+
 # The direct serialized-IR binding also delegates AUTO, but explicit emission
 # does not need to query or load a compiler.
 b = IRBuilder("binding_offline_probe")
