@@ -15,11 +15,11 @@ builds proves nothing. For every graph the engine runs twice with `--collect-imm
   candidate  a copy of it with the model promoted into the engine's UED, as the only tree the
              runtime reads (candidate_tree.py).
 
-Each run gets its own empty HIPDNN_CACHE_DIR, because a benchmark winner record takes
-precedence over any ranker and a run writes one: shared, the record graph i's run left could
-serve graph j. The runtime says (at INFO) when a record ordered the catalog instead of the
-ranker, and every such run is counted. Every message the runtime prints that it is not using
-the model is recorded per graph.
+Each run reads only the tree named for it and gets its own empty HIPDNN_CACHE_DIR
+(engine_run.py), because a benchmark winner record takes precedence over any ranker and a run
+writes one: shared, the record graph i's run left could serve graph j. The runtime says (at
+INFO) when a record ordered the catalog instead of the ranker, and every such run is counted.
+Every message the runtime prints that it is not using the model is recorded per graph.
 
 Writes the rows; `decide.py l2` turns them into the verdict.
 
@@ -33,16 +33,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import candidate_tree  # noqa: E402  (beside this script)
-from validate_l1 import graphs_of  # noqa: E402
+import engine_run  # noqa: E402
 
 #: What the runtime says when it declines a model it was given (UhdKernelHeuristic.hpp and the
 #: UHD adapters): the plan still builds, so this text is the only evidence.
@@ -52,36 +49,37 @@ FROM_RECORD = re.compile(r"catalog entries from a benchmarked\s*record")
 
 
 def run(bench: str, graph: Path, plugin_dir: str, engine_id: str, env: dict,
-        ranking_metric: str | None, timeout: int) -> dict:
+        ranking_metric: str | None, timeout: int, scratch: Path) -> dict:
+    """One `--collect-immediate` run: whether it ran, its timing, and what the runtime said
+    about the model. `ok` is the plan running (exit 0), whatever it printed."""
     command = [bench, "--graph", str(graph), "--plugin-dir", plugin_dir, "--engine-id", engine_id,
                "--collect-immediate", "--json"]
     if ranking_metric:
         command += ["--ranking-metric", ranking_metric]
-    try:
-        proc = subprocess.run(command, capture_output=True, text=True, env=env, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": f"no answer within {timeout} s", "refusals": [],
-                "timed_out": True}
-    lines = (proc.stderr + "\n" + proc.stdout).splitlines()
+    result = engine_run.call(command, env, timeout, scratch)
+    if result["timed_out"]:
+        return {"ok": False, "error": result["error"], "refusals": [], "timed_out": True}
+    output = result["stderr"] + "\n" + result["stdout"]
+    lines = output.splitlines()
     refusals = sorted({line.strip()[:400] for line in lines if REFUSAL.search(line)})
-    row = {"ok": proc.returncode == 0, "refusals": refusals[:3],
-           "from_record": bool(FROM_RECORD.search(proc.stderr + "\n" + proc.stdout))}
-    if proc.returncode != 0:
+    row = {"ok": result["returncode"] == 0, "refusals": refusals[:3],
+           "from_record": bool(FROM_RECORD.search(output))}
+    if not row["ok"]:
         # At INFO the tail is teardown chatter; the runtime's own error lines say what failed.
         errors = [line.strip() for line in lines if "[error]" in line or line.lstrip().startswith("Error")]
-        row["error"] = "\n".join(errors[-4:])[-1200:] if errors else (proc.stderr or proc.stdout)[-600:]
+        row["error"] = "\n".join(errors[-4:])[-1200:] if errors else result["error"][-600:]
         return row
-    try:
-        response = json.loads(proc.stdout[proc.stdout.index("{"):])
-        timing = response.get("avgTimeMs", response.get("avg_time_ms"))
-        if not isinstance(timing, (int, float)) or timing <= 0:
-            row["error"] = "hipdnn_bench emitted no positive avgTimeMs"
-        else:
-            row["avgTimeMs"] = timing
-        row["benchmark"] = response.get("benchmark") or response.get("graph_id")
-        row["device"] = response.get("device") or response.get("device_id")
-    except ValueError:
+    response = result.get("response")
+    if response is None:
         row["error"] = "hipdnn_bench emitted no JSON timing"
+        return row
+    timing = response.get("avgTimeMs", response.get("avg_time_ms"))
+    if not isinstance(timing, (int, float)) or timing <= 0:
+        row["error"] = "hipdnn_bench emitted no positive avgTimeMs"
+    else:
+        row["avgTimeMs"] = timing
+    row["benchmark"] = response.get("benchmark") or response.get("graph_id")
+    row["device"] = response.get("device") or response.get("device_id")
     return row
 
 
@@ -112,20 +110,16 @@ def main(argv: list[str] | None = None) -> int:
     install = candidate_tree.install_promoted(farm, Path(args.candidate_dir), args.engine,
                                               args.role, args.arch_key)
 
-    graphs = graphs_of(args.sample, args.graphs or [], args.limit)
-    base = {k: v for k, v in os.environ.items()
-            if k not in ("HIPDNN_DESCRIPTOR_DIR", "HIPDNN_DESCRIPTOR_RUNTIME_DIR", "HIPDNN_CACHE_DIR")}
+    graphs = engine_run.graphs_of(args.sample, args.graphs or [], args.limit)
     # INFO, not warn: the record-served line is INFO; refusals are errors and print either way.
-    sides = {"incumbent": dict(base, HIPDNN_LOG_LEVEL="info"),
-             "candidate": dict(base, HIPDNN_LOG_LEVEL="info", HIPDNN_DESCRIPTOR_DIR=str(farm))}
+    sides = {"incumbent": dict(engine_run.isolated_env(), HIPDNN_LOG_LEVEL="info"),
+             "candidate": dict(engine_run.isolated_env(farm), HIPDNN_LOG_LEVEL="info")}
     rows = []
-    for index, graph in enumerate(graphs):
+    for graph in graphs:
         row: dict = {"graph": str(graph)}
         for side, env in sides.items():
-            cache = work / "caches" / f"{side}-{index}"
-            row[side] = run(args.bench, graph, args.plugin_dir, args.engine_id,
-                            dict(env, HIPDNN_CACHE_DIR=str(cache)), args.ranking_metric, args.timeout)
-            shutil.rmtree(cache, ignore_errors=True)
+            row[side] = run(args.bench, graph, args.plugin_dir, args.engine_id, env,
+                            args.ranking_metric, args.timeout, work / "caches")
         rows.append(row)
     document = {"schema": "hipdnn_uhd.catalog_validation_rows/1", "install": install,
                 "graphs": len(graphs), "rows": rows,

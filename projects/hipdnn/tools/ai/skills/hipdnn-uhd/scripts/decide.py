@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import statistics
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -82,14 +83,6 @@ def spearman(xs: list[float], ys: list[float]) -> Optional[float]:
     return sxy / math.sqrt(sxx * syy)
 
 
-def _median(values: list[float]) -> Optional[float]:
-    if not values:
-        return None
-    ordered = sorted(values)
-    mid = len(ordered) // 2
-    return ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2.0
-
-
 def accuracy(pairs: list[tuple[float, float]]) -> dict[str, Any]:
     """(predicted, measured) in one metric -> error summary. Relative, because an L1
     score is compared across engines whose values differ by orders of magnitude."""
@@ -102,7 +95,7 @@ def accuracy(pairs: list[tuple[float, float]]) -> dict[str, Any]:
     absolute = [abs(r) for r in relative]
     return {
         "graphs": len(usable),
-        "median_abs_pct_error": 100.0 * _median(absolute),
+        "median_abs_pct_error": 100.0 * statistics.median(absolute),
         "mean_abs_pct_error": 100.0 * sum(absolute) / len(absolute),
         "mean_pct_bias": 100.0 * sum(relative) / len(relative),
         "within_10pct": sum(a <= 0.10 for a in absolute) / len(absolute),

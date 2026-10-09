@@ -23,10 +23,11 @@ which a symlink back into the build always does. Then per model
 * **descriptor** (an engine binding through its UED's role map): `uhd_gen promote` installs
   the model and rebinds the role map -- only the entry of the model's own metric is replaced.
 
-Then the command after `--` runs with `HIPDNN_DESCRIPTOR_DIR` on the copy. With `--cache-dir`
-it also gets its own `HIPDNN_CACHE_DIR`: a benchmark winner record there takes precedence over
-any heuristic (KernelIngestorStateManager.hpp), so a scratch cache is what makes a catalog
-ranker the thing actually exercised.
+Then the command after `--` runs with `HIPDNN_DESCRIPTOR_DIR` on the copy, and no other
+descriptor root (engine_run.py). With `--cache-dir` it also gets its own `HIPDNN_CACHE_DIR`: a
+benchmark winner record there takes precedence over any heuristic
+(KernelIngestorStateManager.hpp), so a scratch cache is what makes a catalog ranker the thing
+actually exercised.
 
     candidate_tree.py --root <per-arch descriptor root> --farm <new dir>
         [--opaque <declared id> <model dir>] [--promote <engine> <role> <arch> <model dir>]
@@ -37,11 +38,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import engine_run  # noqa: E402  (beside this script)
 
 
 def _load(path: Path) -> dict:
@@ -145,11 +148,10 @@ def main(argv: list[str] | None = None) -> int:
     record = {"root": args.root, "farm": str(farm), "installed": installed}
     if args.record:
         Path(args.record).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(record))
+    print(json.dumps(record), flush=True)  # before the command's own output
     if not command:
         return 0
-    env = dict(os.environ, HIPDNN_DESCRIPTOR_DIR=str(farm))
-    env.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
+    env = engine_run.isolated_env(farm)
     if args.cache_dir:
         Path(args.cache_dir).mkdir(parents=True, exist_ok=True)
         env["HIPDNN_CACHE_DIR"] = args.cache_dir

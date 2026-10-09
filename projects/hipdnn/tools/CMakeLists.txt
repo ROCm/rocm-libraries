@@ -63,6 +63,19 @@ if(Python3_Interpreter_FOUND)
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
         set_tests_properties(mine_shapes_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
 
+        # The hipdnn-uhd skill's scripts, against a fake hipdnn_bench. Its uhd_gen-backed
+        # cases (promotion into a candidate tree) need the evaluator too.
+        add_test(
+            NAME uhd_skill_scripts_tests
+            COMMAND ${Python3_EXECUTABLE} -m pytest -q
+                    ${CMAKE_CURRENT_SOURCE_DIR}/ai/tests/test_uhd_skill_scripts.py
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+        set_tests_properties(uhd_skill_scripts_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
+        if(TARGET hipdnn_uhd_features)
+            set_tests_properties(uhd_skill_scripts_tests PROPERTIES
+                ENVIRONMENT "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
+        endif()
+
     else()
         message(WARNING
                 "uhd_gen tests NOT registered: pytest is not importable by "
