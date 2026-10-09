@@ -58,6 +58,9 @@ def _base_spec(req: AttentionRequest):
         _tuned_waves_per_eu,
     )
 
+    # Exact compare, deliberately: ``AttentionRequest.__post_init__`` has already
+    # canonicalized ``arch``, so a case- or suffix-insensitive compare here would
+    # be defending against an input shape that cannot reach this function.
     if req.arch != "gfx942":
         raise ValueError(
             f"gfx942 dense spec factory requires arch='gfx942', got {req.arch!r}"

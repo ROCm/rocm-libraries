@@ -112,7 +112,7 @@ def run_sweep(
             kernel = (
                 spec.kernel_name()
                 if tuning_id
-                else _sweep_kernel_name(problem, run_backend)
+                else _sweep_kernel_name(problem, run_backend, arch)
             )
             out = torch.empty_like(data["query"])
             if not tensors_validated and hasattr(spec, "kernel_spec"):
@@ -169,19 +169,19 @@ def run_sweep(
     return entries
 
 
-def _sweep_kernel_name(problem, run_backend):
+def _sweep_kernel_name(problem, run_backend, arch: str):
     """Launched-kernel name for a swept path (mirrors ``_run_prod``'s
     ``instance_name`` so a sweep entry can be joined against a prod entry)."""
     if run_backend == "tiled":
         from kernels import supports_native_unified_attention_tiled
         from kernels.common.attention_unified import _tiled_spec_from_problem
 
-        ok, _ = supports_native_unified_attention_tiled(problem)
-        return _tiled_spec_from_problem(problem).kernel_name() if ok else "scalar"
+        ok, _ = supports_native_unified_attention_tiled(problem, arch)
+        return _tiled_spec_from_problem(problem, arch).kernel_name() if ok else "scalar"
     if run_backend == "3d":
         from kernels import supports_native_unified_attention_3d_tiled
 
-        ok, _ = supports_native_unified_attention_3d_tiled(problem)
+        ok, _ = supports_native_unified_attention_3d_tiled(problem, arch)
         return "3d" if ok else "scalar"
     return "scalar"
 

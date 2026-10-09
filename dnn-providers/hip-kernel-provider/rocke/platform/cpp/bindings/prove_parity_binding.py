@@ -1465,7 +1465,7 @@ def _selector_parity_row(problem_dict, arch):
             "kernels.common.attention_unified._resolve_attention_arch",
             return_value=arch,
         ):
-            py_spec_obj = _tiled_spec_from_problem(prob)
+            py_spec_obj = _tiled_spec_from_problem(prob, arch)
         # Normalise to the same field-set the C++ binding emits
         from dataclasses import asdict
 

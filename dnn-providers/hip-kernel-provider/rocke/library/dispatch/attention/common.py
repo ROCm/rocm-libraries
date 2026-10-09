@@ -28,14 +28,19 @@ where ``path`` is ``"2d"`` or ``"3d"``.
 DEFERRED -- arch-tuned block geometry
 -------------------------------------
 The 2D-tiled kernel's exact CTA geometry (``num_warps`` / ``block_m_per_warp`` /
-``tile_size``) is chosen by heuristics in ``attention_unified`` that query the
-running device arch (``_resolve_attention_arch``) and encode many measured,
-shape-specific thresholds (see ``_select_2d_num_warps`` et al.). Those are
-downstream PERFORMANCE-TUNING knobs, not a "which kernel family" decision, and
-they are not reproducible CPU-only without a device. They are intentionally OUT
-of the parity identity here; modelling them faithfully across C++/Python is a
-separate, larger effort. This dispatcher selects the path + backend; geometry is
-left to the instance builder at launch time.
+``tile_size``) is chosen by heuristics in ``attention_unified`` that encode many
+measured, shape-specific thresholds (see ``_select_2d_num_warps`` et al.). Those
+are downstream PERFORMANCE-TUNING knobs, not a "which kernel family" decision.
+They are intentionally OUT of the parity identity here; modelling them faithfully
+across C++/Python is a separate, larger effort. This dispatcher selects the path
++ backend; geometry is left to the instance builder at launch time.
+
+Since AICK-2146 those heuristics take ``arch`` as an explicit argument rather
+than probing the running device, so they ARE reproducible CPU-only: geometry for
+``gfx950`` can be computed from a ``gfx942`` host. That makes the deferral a
+scoping choice about the C++ parity identity, not a capability limit. The one
+remaining host read on the selection path is the CU count when ``num_cus`` is
+left at 0 -- see :func:`_resolve_num_cus` for the exact scope of the guarantee.
 
 That deferral is also why the unified candidates report ``grid=(0, 0, 0)`` and
 an empty ``signature``, and so cannot carry a ``bind``: there is no geometry to
@@ -60,7 +65,7 @@ from kernels.common.attention_unified import (
     UNIFIED_DTYPES,
     UNIFIED_HEAD_SIZES,
 )
-from rocke.core.arch import ArchTarget
+from rocke.core.arch import ArchTarget, base_arch_from_target_id
 from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_matches
 from rocke.dispatch.tuning.identity import jsonable, normalize_knobs
 
@@ -95,6 +100,32 @@ def _parse_attention_mask_type(value: object) -> AttentionMaskType:
         ) from exc
 
 
+def canonical_arch(arch: str) -> str:
+    """The single arch authority for the attention family.
+
+    Every arch comparison in this family is an exact string compare against a
+    lowercase base name (``"gfx942"``, ``"gfx950"``). That only holds if the
+    strings agree on case and carry no target-ID decoration, and previously each
+    site defended itself -- some with ``.lower()``, some with ``.strip()``, some
+    not at all. A feature suffix therefore silently failed a gate: a request for
+    ``gfx950:sramecc+`` is a request for gfx950, but ``== "gfx950"`` said no.
+
+    :func:`base_arch_from_target_id` is the platform's existing canonicalizer and
+    is already what :func:`get_device_arch` applies, so the host-resolved arch is
+    canonical by construction and ``request.arch`` was the only uncanonical
+    source. Reusing it here -- rather than writing a second normalizer -- is what
+    makes the two sources comparable.
+
+    A missing arch stays missing. ``None`` must not become the *string*
+    ``"none"`` -- that would turn "no arch was supplied", which callers detect by
+    emptiness, into a plausible-looking arch name that fails much later with a
+    worse message.
+    """
+    if not isinstance(arch, str) or not arch.strip():
+        return ""
+    return base_arch_from_target_id(arch.strip().lower())
+
+
 @dataclass(frozen=True)
 class AttentionRequest(OperatorRequest):
     """Normalized scaled-dot-product-attention request."""
@@ -111,9 +142,11 @@ class AttentionRequest(OperatorRequest):
     use_sinks: bool = False
     sliding_window: int = 0
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
-    num_cus: int = (
-        0  # 0 => auto-resolve to the device CU count at dispatch (_resolve_num_cus)
-    )
+    # 0 => auto-resolve at dispatch (_resolve_num_cus). NOTE: auto-resolution is
+    # the one part of selection that is NOT host-independent -- on-box it reads
+    # the live CU count. Pass a real count (or `target_ctas`) for a reproducible,
+    # host-independent decision. See _resolve_num_cus for the full contract.
+    num_cus: int = 0
     target_ctas: int = (
         0  # 0 => auto: num_cus*4. >0 pins the routing/segmentation target directly.
     )
@@ -132,10 +165,19 @@ class AttentionRequest(OperatorRequest):
     use_fp8: bool = False
     fp8_fnuz: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        # ONE ``__post_init__``, normalizing both fields. Two of them is not two
+        # hooks -- Python keeps the last binding and the earlier one never runs.
+        #
         # Callers rebuild pins from stored JSON; a bad value fails here, with
         # its name, rather than as an unhashable key inside a cache.
         object.__setattr__(self, "tuning_knobs", normalize_knobs(self.tuning_knobs))
+        # The one place ``arch`` is canonicalized. The class calls itself
+        # "Normalized" -- this is what makes that true of the arch, so every
+        # downstream comparison can be an exact ``==`` against a base name
+        # without each site re-normalizing (and disagreeing about how).
+        # ``object.__setattr__`` because the dataclass is frozen.
+        object.__setattr__(self, "arch", canonical_arch(self.arch))
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -265,16 +307,49 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
          device.
     The on-box count is floored at ``120`` for **gfx950 only** (see below); every
     other arch passes the live count through exactly as develop does.
+
     An explicit ``target_ctas`` on the spec supersedes all of the above. Because
     the resolved value feeds the 3D ``num_segments`` (a compiled-kernel constant),
     the on-box value is device-dependent within an arch (varies across parts); for
     a reproducible or cross-compile target pass an explicit ``num_cus`` or the
     ``target_ctas`` spec override rather than relying on the live query.
+
+    **``120`` is a develop-inherited placeholder, not a per-arch CU count.**
+    Branch 3 returns it for *every* arch outside ``_AUTO_RESOLVE_ARCHS`` --
+    gfx1250, gfx90a and anything else alike -- so those arches route against a
+    number that describes none of them. That is develop's behaviour and this
+    change deliberately preserves it: replacing it with real per-arch counts
+    moves 2D/3D routing and ``num_segments`` for every caller leaving
+    ``num_cus`` at 0, which wants measurement rather than a refactor (the same
+    reasoning as the scope limit below). Until then, a caller dispatching for an
+    arch outside ``_AUTO_RESOLVE_ARCHS`` and relying on CU-sensitive routing
+    should pass an explicit ``num_cus``; adding an arch to
+    ``_AUTO_RESOLVE_ARCHS`` only helps a host that IS that arch.
+
+    **Scope limit of AICK-2146's host-independence guarantee.** Branch 2 is the
+    one surviving host read on the selection path, and it is deliberate: it is
+    how a same-arch on-box request keeps picking the kernel tuned for the part it
+    is actually running on. So the guarantee this dispatcher makes is
+    *arch*-independence, not full host-independence:
+
+    * ``num_cus > 0`` (or ``target_ctas > 0``) -- selection is a pure function of
+      ``(problem, arch)``. Same inputs, same kernel, on any box or no box.
+    * ``num_cus == 0`` and ``arch in _AUTO_RESOLVE_ARCHS`` -- the CU count, and
+      therefore 2D/3D routing and ``num_segments``, is still host-derived when the
+      host happens to BE that arch. A gfx942 request can route differently on a
+      gfx942 box than on a gfx950 box or a CPU box (both of which take branch 3's
+      ``120``). ``tests/dispatch/attention/test_host_independent_dispatch.py::
+      TestNumCusHostDependence`` pins both halves of this.
+
+    Collapsing branch 2 into a per-arch constant would make selection fully
+    host-independent, but it would also change the shipped on-box routing and
+    segment counts for every caller that leaves ``num_cus`` at 0 -- a measured
+    behaviour change, not a refactor. It is deliberately out of scope here.
     """
     n = int(req.num_cus)
     if n > 0:
         return n
-    arch = req.arch.lower()
+    arch = req.arch
     if arch in _AUTO_RESOLVE_ARCHS:
         try:
             from rocke.runtime.hip_module import get_device_arch
@@ -322,7 +397,6 @@ def _problem_with_num_cus(
         fp8_fnuz=bool(req.fp8_fnuz),
         num_cus=int(num_cus),
         target_ctas=int(req.target_ctas),
-        clamp_arch=req.arch.lower(),
     )
 
 
