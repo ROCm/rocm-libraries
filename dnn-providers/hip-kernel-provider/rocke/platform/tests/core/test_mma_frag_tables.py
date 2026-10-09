@@ -9,8 +9,8 @@ a bare ``op_id`` string via three pieces:
 
 * ``_mma_c_frag_len`` — accumulator fragment length, resolved from the arch SSOT
   ``core.arch.target._MMA_FRAGMENT_INFO`` (no ir-side copy);
-* ``_mma_c_is_int`` — whether the atom accumulates in i32, resolved from the JSON
-  catalog accumulator dtype (``target._op_id_c_dtype``);
+* ``_mma_c_dtype`` — the atom's accumulator dtype, resolved from the JSON catalog
+  (``target._op_id_c_dtype``); every catalog accumulator has an IR type;
 * ``_MMA_RESULT_HINT`` — the ir-side SSA result-name hints (naming only, kept in
   ir.py to preserve byte-identical value numbering).
 
@@ -26,11 +26,17 @@ from __future__ import annotations
 
 import unittest
 
+from rocke.core.arch import ArchTarget, known_arches
 from rocke.core.arch.target import _MMA_FRAGMENT_INFO, _op_id_c_dtype
 from rocke.core.ir import (
     _MMA_RESULT_HINT,
+    F16,
+    F32,
+    I32,
+    IRBuilder,
+    _mma_c_dtype,
     _mma_c_frag_len,
-    _mma_c_is_int,
+    dtype_to_ir_type,
 )
 
 
@@ -65,16 +71,37 @@ class TestMmaFragTables(unittest.TestCase):
             int_op_ids, "expected at least one i32-accumulator atom in the catalog"
         )
         for op_id in int_op_ids:
-            self.assertTrue(
-                _mma_c_is_int(op_id),
-                msg=f"{op_id!r} is i32 in the catalog but _mma_c_is_int disagrees",
-            )
+            self.assertEqual(_mma_c_dtype(op_id), "i32")
             self.assertGreater(
                 _mma_c_frag_len(op_id),
                 0,
                 msg=f"int-accumulator op_id {op_id!r} has no SSOT frag length, so "
                 f"IRBuilder.mma would raise for it",
             )
+
+    def test_an_op_id_outside_the_catalog_accumulates_in_fp32(self):
+        # mfma_f32_4x4x4_f16 has fragment information but no catalog row.
+        self.assertNotIn("mfma_f32_4x4x4_f16", _op_id_c_dtype())
+        self.assertEqual(_mma_c_dtype("mfma_f32_4x4x4_f16"), "fp32")
+
+    def test_mma_results_take_the_accumulator_dtype(self):
+        for gfx, op_id, c, a_type, result in (
+            ("gfx942", "mfma_f32_16x16x16_f16", (F32, 4), (F16, 4), "vec<f32x4>"),
+            ("gfx1151", "wmma_i32_16x16x16_iu8", (I32, 8), (I32, 4), "vec<i32x8>"),
+        ):
+            with self.subTest(op_id=op_id):
+                b = IRBuilder(f"result_{op_id}")
+                a = b.zero_vec(*a_type)
+                op = ArchTarget.from_gfx(gfx).mma.by_op_id(op_id)
+                self.assertEqual(b.mma(op, a, a, b.zero_vec(*c)).type.name, result)
+                self.assertEqual(b.mma(op_id, a, a, b.zero_vec(*c)).type.name, result)
+
+    def test_every_catalog_accumulator_has_an_ir_type(self):
+        for gfx in known_arches():
+            for op in ArchTarget.from_gfx(gfx).mma.ops:
+                with self.subTest(gfx=gfx, op_id=op.op_id):
+                    dtype_to_ir_type(op.c_dtype)
+                    self.assertEqual(_mma_c_dtype(op.op_id), op.c_dtype)
 
     def test_result_hint_op_ids_have_frag_lengths(self):
         for op_id in _MMA_RESULT_HINT:
