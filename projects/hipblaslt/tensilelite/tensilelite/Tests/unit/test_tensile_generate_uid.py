@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for :mod:`Tensile.TensileGenerateUID`."""
+"""Unit tests for :mod:`tensilelite.TensileGenerateUID`."""
 
 from __future__ import annotations
 
@@ -11,15 +11,15 @@ from pathlib import Path
 
 import pytest
 
-from Tensile import LibraryIO
-from Tensile.Common.SolutionIdGen import (
+from tensilelite import LibraryIO
+from tensilelite.Common.SolutionIdGen import (
     RANDOM_MASK,
     RANDOM_SHIFT,
     decode_solution_id,
     decode_solution_uid,
     encode_solution_uid,
 )
-from Tensile.TensileGenerateUID import (
+from tensilelite.TensileGenerateUID import (
     find_solution_by_index,
     main,
     regenerate_uid_for_solution,
@@ -248,7 +248,7 @@ def test_module_main_guard_exits_zero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``python -m Tensile.TensileGenerateUID`` runs ``main`` via ``__main__``.
+    """``python -m tensilelite.TensileGenerateUID`` runs ``main`` via ``__main__``.
 
     Args:
         tmp_path: Pytest temporary-directory fixture.
@@ -268,5 +268,5 @@ def test_module_main_guard_exits_zero(
         ["TensileGenerateUID.py", str(yaml_path), "--index", "0"],
     )
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("Tensile.TensileGenerateUID", run_name="__main__")
+        runpy.run_module("tensilelite.TensileGenerateUID", run_name="__main__")
     assert excinfo.value.code == 0

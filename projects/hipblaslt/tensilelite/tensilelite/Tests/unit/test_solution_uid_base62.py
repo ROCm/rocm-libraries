@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from Tensile.Common.SolutionIdGen import (
+from tensilelite.Common.SolutionIdGen import (
     UINT64_MAX,
     decode_solution_uid,
     encode_solution_uid,

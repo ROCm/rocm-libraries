@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Concurrent uniqueness tests for :mod:`Tensile.Common.SolutionIdGen`."""
+"""Concurrent uniqueness tests for :mod:`tensilelite.Common.SolutionIdGen`."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import List
 
 import pytest
 
-from Tensile.Common.SolutionIdGen import (
+from tensilelite.Common.SolutionIdGen import (
     EPOCH_MS,
     MS_MASK,
     RANDOM_MASK,
