@@ -37,8 +37,7 @@
  * @file TestPluginSerialization.cpp
  * @brief The plan serialization hooks, called through the C API: the null checks, the
  *        refusals of a save and a load, and for each packed set a kpack plan saved,
- *        loaded without its archive and executed. A save is refused once the archive is
- *        removed.
+ *        loaded without its archive and executed.
  *
  * Every case that reads a packed archive reads a copy of the packed set in a scratch
  * directory. Other suites corrupt or delete the staged archives.
@@ -316,38 +315,16 @@ TEST_P(TestPluginSerializationKpack, RoundTripsAKpackPlanThroughTheHooks)
         ASSERT_GT(serialized.data().size, 0U);
     }
 
-    {
-        SCOPED_TRACE("save after the archive is removed");
-        const std::filesystem::path archive = built.archive();
-        ASSERT_TRUE(std::filesystem::remove(archive)) << archive;
-
-        const uint8_t byte = 0;
-        hipdnnPluginConstData_t refused{&byte, 7};
-        const std::string message
-            = expectHookRefusal(save(*saveHandle, *context, refused),
-                                HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-                                serialization::INGESTOR_PLAN_SAVE_INCOMPATIBLE_PREFIX,
-                                "OPEN_ARCHIVE");
-        EXPECT_NE(message.find(archive.string()), std::string::npos) << message;
-        EXPECT_EQ(refused.ptr, static_cast<const void*>(&byte));
-        EXPECT_EQ(refused.size, 7U);
-    }
-
-    {
-        SCOPED_TRACE("original run after the archive is removed");
-        std::vector<uint8_t> again;
-        ASSERT_NO_FATAL_FAILURE(runPlan(context->plan(), *saveHandle, built.tensors, again));
-        EXPECT_EQ(again, original);
-    }
-
     ScopedExecutionContext restored(*loadHandle);
     size_t cachedBefore = 0;
     {
         SCOPED_TRACE("load without the archive");
-        // Destroy the original plan and drop the cached modules, so that no code object of the
-        // original plan stays loaded.
+        // Destroy the original plan and drop the cached modules and kept archives. Then remove
+        // the archive. The load can use no code object of the original plan.
         context.reset();
         resetIngestorModuleCachesForTesting();
+        const std::filesystem::path archive = built.archive();
+        ASSERT_TRUE(std::filesystem::remove(archive)) << archive;
         cachedBefore = packs::packModuleCacheEntries();
 
         ASSERT_EQ(hipdnnEnginePluginCreateExecutionContextFromSerialized(

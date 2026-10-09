@@ -268,8 +268,8 @@ public:
     compilation::IRunnableKernel& kernelFor(int deviceOrdinal) const;
 
     /// Reads this kernel's code object again from its source and verifies its digest.
-    /// Loads no module, touches no HIP state and holds no lock, so it is safe while other
-    /// threads launch the kernel.
+    /// Loads no module and touches no HIP state. It takes no lock of this kernel, so other
+    /// threads can launch it meanwhile.
     ///
     /// @throws HipdnnPluginException with a save refusal when the bytes cannot be read
     ///         or do not match the descriptor's digest, and with INTERNAL_ERROR when this

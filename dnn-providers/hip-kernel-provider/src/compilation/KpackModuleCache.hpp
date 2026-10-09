@@ -187,41 +187,6 @@ public:
         return state()->opens.load(std::memory_order_relaxed);
     }
 
-    /// Opens @p archivePath afresh, never retained and never shared.
-    /// @throws KpackModuleLoadFailure at OPEN_ARCHIVE or ARCH_LOOKUP.
-    static std::shared_ptr<const OpenKpackArchive> openUnretained(const std::string& archivePath)
-    {
-        state()->opens.fetch_add(1, std::memory_order_relaxed);
-        auto opened = std::make_shared<OpenKpackArchive>();
-        KpackError error;
-        if(!opened->archive.open(archivePath, error))
-        {
-            if(error.archiveAbsent)
-            {
-                throw KpackModuleLoadFailure(error.stage,
-                                             "kpack archive '" + archivePath + "' does not exist ("
-                                                 + error.codeName + ")");
-            }
-            throw KpackModuleLoadFailure(error.stage,
-                                         "kpack archive '" + archivePath + "' could not be read ("
-                                             + error.codeName + ")");
-        }
-        if(!opened->archive.architectures(opened->arches, error))
-        {
-            throw KpackModuleLoadFailure(error.stage,
-                                         "cannot read the architecture list of kpack archive '"
-                                             + archivePath + "' (" + error.codeName + ")");
-        }
-        if(opened->arches.empty())
-        {
-            throw KpackModuleLoadFailure(KpackLoadStage::ARCH_LOOKUP,
-                                         "kpack archive '" + archivePath
-                                             + "' declares no architectures; its gfx_arches "
-                                               "entry is absent or malformed");
-        }
-        return opened;
-    }
-
 private:
     /// One path's retained handle. Its mutex serializes opens of that path only.
     struct Slot
@@ -258,25 +223,61 @@ private:
             closed.swap(shared.slots);
         }
     }
+
+    /// @throws KpackModuleLoadFailure at OPEN_ARCHIVE or ARCH_LOOKUP.
+    static std::shared_ptr<const OpenKpackArchive> openUnretained(const std::string& archivePath)
+    {
+        state()->opens.fetch_add(1, std::memory_order_relaxed);
+        auto opened = std::make_shared<OpenKpackArchive>();
+        KpackError error;
+        if(!opened->archive.open(archivePath, error))
+        {
+            if(error.archiveAbsent)
+            {
+                throw KpackModuleLoadFailure(error.stage,
+                                             "kpack archive '" + archivePath + "' does not exist ("
+                                                 + error.codeName + ")");
+            }
+            throw KpackModuleLoadFailure(error.stage,
+                                         "kpack archive '" + archivePath + "' could not be read ("
+                                             + error.codeName + ")");
+        }
+        if(!opened->archive.architectures(opened->arches, error))
+        {
+            throw KpackModuleLoadFailure(error.stage,
+                                         "cannot read the architecture list of kpack archive '"
+                                             + archivePath + "' (" + error.codeName + ")");
+        }
+        if(opened->arches.empty())
+        {
+            throw KpackModuleLoadFailure(KpackLoadStage::ARCH_LOOKUP,
+                                         "kpack archive '" + archivePath
+                                             + "' declares no architectures; its gfx_arches "
+                                               "entry is absent or malformed");
+        }
+        return opened;
+    }
 };
 
-/// Reads the code object stored under @p tocKey for @p deviceArch from @p opened and checks
-/// its digest against @p expectedSha256. Loads no module and touches no HIP state.
+/// Reads the code object stored under @p tocKey for @p deviceArch from the kpack archive at
+/// @p archivePath and checks its digest against @p expectedSha256. Loads no module and
+/// touches no HIP state. Opens the archive through SharedKpackArchives, so while a lease is
+/// held the read uses the handle that an earlier load or read opened.
 ///
 /// @param selectedArch Receives the archive arch entry the read selected.
-/// @throws KpackModuleLoadFailure at ARCH_LOOKUP, ENTRY_LOOKUP, DECOMPRESS or DIGEST_MISMATCH.
-inline KpackCodeObject readVerifiedKpackCodeObject(const OpenKpackArchive& opened,
-                                                   const std::string& archivePath,
+/// @throws KpackModuleLoadFailure on any stage that fails.
+inline KpackCodeObject readVerifiedKpackCodeObject(const std::string& archivePath,
                                                    const std::string& tocKey,
                                                    const std::string& deviceArch,
                                                    const std::string& expectedSha256,
                                                    std::string& selectedArch)
 {
-    const std::string* matched = selectKpackArchiveArch(opened.arches, deviceArch);
+    const auto opened = SharedKpackArchives::open(archivePath);
+    const std::string* matched = selectKpackArchiveArch(opened->arches, deviceArch);
     if(matched == nullptr)
     {
         std::string available;
-        for(const auto& candidate : opened.arches)
+        for(const auto& candidate : opened->arches)
         {
             available += (available.empty() ? "" : ", ") + candidate;
         }
@@ -288,7 +289,7 @@ inline KpackCodeObject readVerifiedKpackCodeObject(const OpenKpackArchive& opene
 
     KpackError error;
     KpackCodeObject codeObject;
-    if(!opened.archive.codeObject(tocKey, *matched, codeObject, error))
+    if(!opened->archive.codeObject(tocKey, *matched, codeObject, error))
     {
         if(error.stage == KpackLoadStage::ENTRY_LOOKUP)
         {
@@ -299,6 +300,11 @@ inline KpackCodeObject readVerifiedKpackCodeObject(const OpenKpackArchive& opene
                                              + "); this usually means the packer and the "
                                                "descriptor disagree");
         }
+        // The archive failed to yield an entry its TOC lists, so the next read reopens it.
+        // A missing entry or arch keeps the handle: both are answered from the TOC read at
+        // open, and with discovery memoized a reopen would only repeat the miss. Revisit
+        // if discovery ever rescans.
+        SharedKpackArchives::evict(archivePath, opened);
         throw KpackModuleLoadFailure(error.stage,
                                      "cannot decompress toc_key '" + tocKey + "' at arch '"
                                          + *matched + "' from kpack archive '" + archivePath + "' ("
@@ -310,6 +316,7 @@ inline KpackCodeObject readVerifiedKpackCodeObject(const OpenKpackArchive& opene
     const std::string actualSha256 = utilities::sha256Hex(codeObject.data(), codeObject.size());
     if(actualSha256 != expectedSha256)
     {
+        SharedKpackArchives::evict(archivePath, opened);
         throw KpackModuleLoadFailure(KpackLoadStage::DIGEST_MISMATCH,
                                      "the code object for toc_key '" + tocKey + "' at arch '"
                                          + *matched + "' in kpack archive '" + archivePath
@@ -321,21 +328,6 @@ inline KpackCodeObject readVerifiedKpackCodeObject(const OpenKpackArchive& opene
 
     selectedArch = *matched;
     return codeObject;
-}
-
-/// As above, from @p archivePath opened afresh: the read sees the archive as it is on disk
-/// now, not a handle SharedKpackArchives retains.
-///
-/// @throws KpackModuleLoadFailure on any stage that fails.
-inline KpackCodeObject readVerifiedKpackCodeObject(const std::string& archivePath,
-                                                   const std::string& tocKey,
-                                                   const std::string& deviceArch,
-                                                   const std::string& expectedSha256,
-                                                   std::string& selectedArch)
-{
-    const auto opened = SharedKpackArchives::openUnretained(archivePath);
-    return readVerifiedKpackCodeObject(
-        *opened, archivePath, tocKey, deviceArch, expectedSha256, selectedArch);
 }
 
 /// One hipModule_t per (archive path, toc_key, device arch, device ordinal, declared
@@ -396,29 +388,11 @@ public:
                                   int deviceOrdinal,
                                   const std::string& expectedSha256)
     {
-        const auto opened = SharedKpackArchives::open(archivePath);
         std::string matched;
-        KpackCodeObject codeObject;
-        try
-        {
-            // The digest check comes before hipModuleLoadData, so bytes that fail never
-            // reach the driver.
-            codeObject = readVerifiedKpackCodeObject(
-                *opened, archivePath, tocKey, deviceArch, expectedSha256, matched);
-        }
-        catch(const KpackModuleLoadFailure& failure)
-        {
-            // The archive failed to yield an intact entry its TOC lists, so the next miss
-            // re-reads it. A missing entry or arch keeps the handle: both are answered from
-            // the TOC read at open, and with discovery memoized a reopen would only repeat
-            // the miss. Revisit if discovery ever rescans.
-            if(failure.stage() == KpackLoadStage::DECOMPRESS
-               || failure.stage() == KpackLoadStage::DIGEST_MISMATCH)
-            {
-                SharedKpackArchives::evict(archivePath, opened);
-            }
-            throw;
-        }
+        // The digest check comes before hipModuleLoadData, so bytes that fail never reach
+        // the driver.
+        const KpackCodeObject codeObject
+            = readVerifiedKpackCodeObject(archivePath, tocKey, deviceArch, expectedSha256, matched);
 
         // Bound before the load, not after: the device current at hipModuleLoadData is
         // the one the module belongs to for the rest of its life. A refused bind fails
