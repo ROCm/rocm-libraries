@@ -485,28 +485,45 @@ TEST(TestKernelIngestorEngine, ReportsTheSerializationNoteOnlyOnSaveableEngines)
     ASSERT_TRUE(supportsExecutionPlanSerialization(loadedSet(CONV_FWD.engineName)));
     ASSERT_FALSE(supportsExecutionPlanSerialization(loadedSet(POINTWISE_ADD.engineName)));
 
-    Container container;
-    auto& engineManager = container.getEngineManager();
     Handle handle;
 
-    const auto notesOf
-        = [&](std::string_view engineName, const flatbuffers::FlatBufferBuilder& graph) {
-              hipdnnPluginConstData_t details{};
-              engineManager.getEngineDetails(
-                  handle,
-                  wrap(graph),
-                  hipdnn_data_sdk::utilities::engineNameToId(std::string(engineName)),
-                  details);
-              return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper(
-                         details.ptr, details.size)
-                  .behaviorNotes();
-          };
+    const auto notesOf = [&handle](Container& container,
+                                   std::string_view engineName,
+                                   const flatbuffers::FlatBufferBuilder& graph) {
+        hipdnnPluginConstData_t details{};
+        container.getEngineManager().getEngineDetails(
+            handle,
+            wrap(graph),
+            hipdnn_data_sdk::utilities::engineNameToId(std::string(engineName)),
+            details);
+        return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper(details.ptr,
+                                                                                  details.size)
+            .behaviorNotes();
+    };
+    const auto expectTheNoteOnlyOnConvFwd = [&notesOf](Container& container) {
+        const auto convFwdNotes = notesOf(container, CONV_FWD.engineName, buildConvFwdGraph());
+        EXPECT_EQ(std::count(convFwdNotes.begin(), convFwdNotes.end(), SERIALIZATION_NOTE), 1);
 
-    const auto convFwdNotes = notesOf(CONV_FWD.engineName, buildConvFwdGraph());
-    EXPECT_EQ(std::count(convFwdNotes.begin(), convFwdNotes.end(), SERIALIZATION_NOTE), 1);
+        const auto pointwiseNotes
+            = notesOf(container, POINTWISE_ADD.engineName, buildPointwiseGraph());
+        EXPECT_EQ(std::count(pointwiseNotes.begin(), pointwiseNotes.end(), SERIALIZATION_NOTE), 0);
+    };
 
-    const auto pointwiseNotes = notesOf(POINTWISE_ADD.engineName, buildPointwiseGraph());
-    EXPECT_EQ(std::count(pointwiseNotes.begin(), pointwiseNotes.end(), SERIALIZATION_NOTE), 0);
+    // The first Container takes the state managers that discovery built; a later one builds
+    // its own. Both construction paths must report the note.
+    rediscoverStateManagersForTesting();
+    {
+        SCOPED_TRACE("first Container");
+        Container container;
+        ASSERT_EQ(takeDiscoveredStateManager(loadedSet(CONV_FWD.engineName).engine.id).get(),
+                  nullptr);
+        expectTheNoteOnlyOnConvFwd(container);
+    }
+    {
+        SCOPED_TRACE("later Container");
+        Container container;
+        expectTheNoteOnlyOnConvFwd(container);
+    }
 }
 
 // The SDK default save and restore return nothing. A handler's own save and restore reject

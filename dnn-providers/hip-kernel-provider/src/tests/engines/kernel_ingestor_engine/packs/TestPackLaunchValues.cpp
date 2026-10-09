@@ -360,6 +360,29 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesAScaleOfAnotherType)
                       mustBeFloat + toString(MetadataType::STRING));
 }
 
+TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesAScaleOutsideTheSupportedRange)
+{
+    const auto valid = savedGfx950AttentionDense();
+
+    for(const double scale : {0x1p-65, 0x1p5, 0.0, -1.0})
+    {
+        SCOPED_TRACE(scale);
+        SavedLaunchInputs outside = valid;
+        outside.values["scale"] = scale;
+        expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, outside, "launch value 'scale'");
+        expectReadRefusal(
+            &readGfx950AttentionDenseLaunchInputs, outside, "outside the supported [2^-64, 2^4]");
+    }
+
+    for(const float scale : {0x1p-64F, 0x1p4F})
+    {
+        SCOPED_TRACE(scale);
+        SavedLaunchInputs bound = valid;
+        bound.values["scale"] = static_cast<double>(scale);
+        EXPECT_EQ(readGfx950AttentionDenseLaunchInputs(bound).binding.scale, scale);
+    }
+}
+
 TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesAStringValueOfAnotherType)
 {
     const auto valid = savedGfx950AttentionDense();
