@@ -332,7 +332,7 @@ def test_stabilize_ids_rewrites_kernel_ids_and_refuses_referenced_ones(tmp_path)
         tool.stabilize_ids(kdp)
 
 
-# ---- Direct depthwise identities ----
+# ---- Direct identities ----
 
 
 @pytest.fixture(scope="module")
@@ -351,52 +351,76 @@ def forward_direct_identities():
     ]
 
 
-def test_direct_identities_are_packaged_exactly_when_the_native_launch_runs_them(
+#: Forward identities per dtype and algorithm in rocKE's direct sweep grid.
+_DIRECT_GRID = {
+    "direct_depthwise": 54,
+    "direct_depthwise_spatial": 30,
+    "direct_depthwise_tiled": 1536,
+    "direct_depthwise_col": 540,
+    "direct_grouped": 80,
+    "direct_nongrouped": 3058,
+}
+
+
+def test_direct_identities_are_packaged_exactly_when_the_launch_runs_them(
     forward_direct_identities,
 ):
+    from builders.common.convolution_forward import AOT_DIRECT_ALGORITHMS
+
+    assert tool.PACKAGED_DIRECT_ALGORITHMS == AOT_DIRECT_ALGORITHMS
+    assert tool.DIRECT_ALGORITHMS.items() <= tool.PACKAGED_DIRECT_ALGORITHMS.items()
     accepted = {}
     for identity in forward_direct_identities:
         spec, why = tool.instance_spec(identity)
-        if identity["algorithm"] in tool.DIRECT_ALGORITHMS:
-            assert spec is not None, why
-            assert spec.is_direct
-            assert spec.direct_variant == tool.DIRECT_ALGORITHMS[identity["algorithm"]]
-            key = (spec.dtype, identity["algorithm"])
-            accepted[key] = accepted.get(key, 0) + 1
-        else:
+        if identity["algorithm"] not in tool.PACKAGED_DIRECT_ALGORITHMS:
             assert spec is None and "has no packaged launch" in why, why
-    # The study's runnable subset: 54 std and 30 spatial identities per dtype.
+            continue
+        assert spec is not None, why
+        assert spec.is_direct
+        assert (
+            spec.direct_variant
+            == tool.PACKAGED_DIRECT_ALGORITHMS[identity["algorithm"]]
+        )
+        key = (spec.dtype, identity["algorithm"])
+        accepted[key] = accepted.get(key, 0) + 1
+    # Every forward identity of the packaged algorithms, in both dtypes.
     assert accepted == {
         (dtype, algorithm): count
         for dtype in ("fp16", "bf16")
-        for algorithm, count in (
-            ("direct_depthwise", 54),
-            ("direct_depthwise_spatial", 30),
-        )
+        for algorithm, count in _DIRECT_GRID.items()
+        if algorithm in tool.PACKAGED_DIRECT_ALGORITHMS
     }
 
 
 def test_a_direct_instance_carries_the_identitys_capabilities_and_knobs(
     forward_direct_identities,
 ):
+    from benchmarks.common.direct_kernel_sweep import direct_job_for_identity
     from benchmarks.common.kernel_cache import KernelIdentity
 
-    for identity in forward_direct_identities:
-        if identity["algorithm"] not in tool.DIRECT_ALGORITHMS:
+    for identity in forward_direct_identities[::7]:
+        if identity["algorithm"] not in tool.PACKAGED_DIRECT_ALGORITHMS:
             continue
         spec, _ = tool.instance_spec(identity)
-        knobs = json.loads(identity["knobs"])
         assert spec.instance_id == KernelIdentity.from_dict(identity).stable_hash()
-        assert (spec.filter_h, spec.stride_h, spec.pad_h, spec.dilation_h) == (
+        assert (
+            spec.filter_h,
+            spec.stride_h,
+            spec.pad_h,
+            spec.dilation_h,
+            spec.dilation_w,
+        ) == (
             identity["filter_h"],
             identity["stride_h"],
             identity["pad_h"],
             identity["dilation_h"],
+            identity["dilation_w"],
         )
-        assert (spec.block_w, spec.block_waves) == (
-            knobs.get("block_w", 0),
-            knobs["block_waves"],
-        )
+        # The knobs round-trip, and so does the job the direct sweep builds from them.
+        assert spec.direct_knobs() == json.loads(identity["knobs"])
+        job = direct_job_for_identity(KernelIdentity.from_dict(identity))
+        assert spec.probe_problem().cpg == (job.caps["cpg"] or 256)
+        assert spec.probe_problem().kpg == (job.caps["kpg"] or 256)
         # The implicit-GEMM fields are the identity's placeholders.
         assert (spec.tile_m, spec.pipeline, spec.vector_size_c, spec.grouped) == (
             0,
@@ -404,64 +428,99 @@ def test_a_direct_instance_carries_the_identitys_capabilities_and_knobs(
             0,
             0,
         )
+        # Only the variant's own knobs leave their KMD default.
+        own = set(tool.DIRECT_VARIANT_FIELDS[spec.direct_variant])
+        for name, default in tool.DIRECT_KNOB_FIELDS.items():
+            if name not in own:
+                assert getattr(spec, name) == default, (name, identity["algorithm"])
 
 
 @pytest.mark.parametrize(
-    ("change", "reason"),
+    ("algorithm", "change", "reason"),
     [
-        ({"arch": "gfx942"}, "gfx950"),
-        ({"algorithm": "direct_depthwise_tiled"}, "has no packaged launch"),
-        ({"dtype_d": "fp32"}, "mixed operand dtypes"),
-        ({"cpg": 2, "kpg": 2}, "not depthwise"),
-        ({"filter_w": 5, "pad_w": 2}, "cannot build"),
-        ({"pad_h": 0, "pad_w": 0}, "cannot build"),
-        ({"split_k": 2}, "cannot build"),
-        ({"knobs": '{"block_waves": 1}'}, "knobs"),
-        ({"knobs": '{"block_w": 4, "block_waves": 1, "x": 1}'}, "x"),
-        ({"knobs": '{"block_w": 4, "block_waves": 99}'}, "block_waves"),
+        ("direct_depthwise", {"arch": "gfx942"}, "gfx950"),
+        (
+            "direct_depthwise",
+            {"algorithm": "direct_depthwise_dgrad"},
+            "no packaged launch",
+        ),
+        ("direct_depthwise", {"dtype_d": "fp32"}, "mixed operand dtypes"),
+        ("direct_depthwise", {"cpg": 2, "kpg": 2}, "cannot build"),
+        ("direct_depthwise", {"filter_w": 5, "pad_w": 2}, "cannot build"),
+        ("direct_depthwise", {"pad_h": 0, "pad_w": 0}, "cannot build"),
+        ("direct_depthwise", {"split_k": 2}, "cannot build"),
+        ("direct_depthwise", {"knobs": '{"block_waves": 1}'}, "knobs"),
+        (
+            "direct_depthwise",
+            {"knobs": '{"block_w": 4, "block_waves": 1, "x": 1}'},
+            "x",
+        ),
+        (
+            "direct_depthwise",
+            {"knobs": '{"block_w": 4, "block_waves": 99}'},
+            "block_waves",
+        ),
+        ("direct_depthwise_tiled", {"filter_h": 33, "filter_w": 33}, "cannot build"),
     ],
 )
 def test_unsupported_direct_identities_are_named_with_their_reason(
-    forward_direct_identities, change, reason
+    forward_direct_identities, algorithm, change, reason
 ):
     identity = copy.deepcopy(
-        next(
-            i
-            for i in forward_direct_identities
-            if i["algorithm"] == "direct_depthwise"
-            and json.loads(i["knobs"]) == {"block_w": 4, "block_waves": 1}
-        )
+        next(i for i in forward_direct_identities if i["algorithm"] == algorithm)
     )
     identity.update(change)
     spec, why = tool.instance_spec(identity)
     assert spec is None and reason in why, why
 
 
-def test_direct_instances_are_a_variant_stating_the_family_fields(seed_specs):
-    config = tool.build_config(seed_specs)
+def test_direct_instances_are_variants_stating_their_own_fields(
+    seed_specs, forward_direct_identities
+):
+    # The seed's implicit-GEMM instances and the first identity of each direct
+    # algorithm in each dtype.
+    firsts = {}
+    for identity in forward_direct_identities:
+        if identity["algorithm"] in tool.PACKAGED_DIRECT_ALGORITHMS:
+            firsts.setdefault((identity["dtype_a"], identity["algorithm"]), identity)
+    config = tool.build_config(
+        [s for s in seed_specs if not s.is_direct] + _specs(firsts.values())
+    )
     for pack in config["packs"]:
-        implicit, direct = pack["variants"]
+        implicit, *direct = pack["variants"]
         assert implicit["spec_order"] == list(tool.SPEC_ORDER)
-        assert direct["spec_order"] == list(tool.DIRECT_SPEC_ORDER)
-        assert all(shape["kernel_family"] == 1 for shape in direct["shapes"])
         assert not any("kernel_family" in shape for shape in implicit["shapes"])
-    # Implicit-GEMM descriptors leave the direct fields to their builder default.
+        variants = {}
+        for variant in direct:
+            names = {shape["direct_variant"] for shape in variant["shapes"]}
+            assert all(shape["kernel_family"] == 1 for shape in variant["shapes"])
+            (own,) = {tool.DIRECT_VARIANT_FIELDS[name] for name in names}
+            assert variant["spec_order"] == list(tool.DIRECT_SPEC_ORDER + own)
+            variants[tuple(sorted(names))] = variant["name"]
+        # std and spatial keep the variant they had before the other direct kernels.
+        assert variants == {
+            ("spatial", "std"): "gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}",
+            ("tiled",): "gfx950_conv_fwd_aot_dwtiled_{dtype}_{instance_id}",
+        }
+    # Every direct field is builder_default, so implicit-GEMM descriptors (and std and
+    # spatial ones, for the block knobs) leave them to the KMD.
     defaults = {
         field["name"]: field["default_value"]
         for field in config["kmd_fields"]
         if field.get("builder_default")
     }
-    assert defaults == tool.DIRECT_FIELDS
+    assert defaults == {**tool.DIRECT_FIELDS, **tool.DIRECT_KNOB_FIELDS}
     from builders.common.convolution_forward import Gfx950ConvFwdAotSpec
 
     assert {
         f.name: f.default
         for f in dataclasses.fields(Gfx950ConvFwdAotSpec)
-        if f.name in tool.DIRECT_FIELDS
-    } == tool.DIRECT_FIELDS
+        if f.name in defaults
+    } == defaults
+    assert [f.name for f in dataclasses.fields(Gfx950ConvFwdAotSpec)] == list(
+        tool.SPEC_ORDER + tuple(defaults)
+    )
     assert config["engine"]["knobs"] == ["tile_k", "kernel_family"]
-    # Both families are in the shipped seed.
-    assert {s.is_direct for s in seed_specs} == {False, True}
 
 
 def _stabilize_ids_one_kernel_at_a_time(kdp_path):
@@ -780,3 +839,70 @@ def test_the_seed_runs_every_knob_value_the_catalog_ships(seed_identities):
                 dtype,
                 position,
             )
+
+
+# ---- The native direct launch's golden table ----
+
+_GEOMETRY_TEST = (
+    _REPO
+    / "dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine"
+    / "packs/TestGfx950ConvFwdGeometry.cpp"
+)
+#: One directLaunchCases() row: the instance (compiled values, variant, knobs), the
+#: problem, then the verdict, grid and block.
+_LAUNCH_ROW = re.compile(
+    r"^\s*\{\{\{([\d, ]+)\}, DirectVariant::(\w+), ([\d, ]+)\}, \{([\d, ]+)\}, "
+    r"(true|false), (\d+), (\d+), (\d+), (\d+)\},$",
+    re.MULTILINE,
+)
+
+
+def test_native_direct_launch_cases_are_the_adapters():
+    """TestGfx950ConvFwdGeometry.cpp holds conv::directInstanceLaunch to a table of
+    (instance, problem) cases; every row must be what the adapter decides, so the native
+    launch is checked against gfx950_conv_fwd_aot_serves, grid() and block()."""
+    from builders.common.convolution_forward import (
+        Gfx950ConvFwdAotSpec,
+        Gfx950ConvFwdSpec,
+        gfx950_conv_fwd_aot_serves,
+    )
+
+    rows = _LAUNCH_ROW.findall(_GEOMETRY_TEST.read_text())
+    assert len(rows) >= 30, "directLaunchCases() rows not found; keep one row per line"
+    variants = set()
+    for compiled, variant, knobs, problem, served, *launch in rows:
+        fy, fx, sh, sw, ph, pw, dh, dw = (int(v) for v in compiled.split(","))
+        # A row states the DirectInstance fields up to its variant's last; the rest are 0.
+        values = [int(v) for v in knobs.split(",")]
+        values += [0] * (14 - len(values))
+        bw, waves, bh, bq, bg, cpg, kpg, th, tw, tk, ck, wm, wn, atom_tile = values
+        # The table records the atom's tile only; the gfx950 sweep's atom of that tile.
+        atom = {32: "32x32x16", 16: "16x16x32"}.get(atom_tile, "none")
+        spec = Gfx950ConvFwdAotSpec(
+            dtype="fp16", tile_m=0, tile_n=0, tile_k=0, warp_m=0, warp_n=0,
+            warp_tile_m=0, warp_tile_n=0, warp_tile_k=0, wave_size=64,
+            pipeline="direct", epilogue="direct", vector_size_a=0, vector_size_b=0,
+            vector_size_c=0, unroll_k=0, async_dma=0, async_chunk_a=0,
+            async_chunk_b=0, grouped=0, instance_id="0" * 40, kernel_family=1,
+            direct_variant=variant.lower(), filter_h=fy, filter_w=fx, stride_h=sh,
+            stride_w=sw, pad_h=ph, pad_w=pw, dilation_h=dh, dilation_w=dw,
+            block_w=bw, block_waves=waves, block_h=bh, block_q=bq, block_groups=bg,
+            cpg=cpg, kpg=kpg, tile_h=th, tile_w=tw, tile_k_out=tk, ck=ck, waves_m=wm,
+            waves_n=wn, atom=atom, swizzle_wgm=8 if atom_tile else 0,
+            iglp=0 if atom_tile else -1,
+        )  # fmt: skip
+        n, c, k, hi, wi, y, x, psh, psw, pph, ppw, pdh, pdw, groups = (
+            int(v) for v in problem.split(",")
+        )
+        runtime = Gfx950ConvFwdSpec(
+            N=n, C=c, K=k, Hi=hi, Wi=wi, Y=y, X=x, sH=psh, sW=psw, pH=pph, pW=ppw,
+            dH=pdh, dW=pdw, groups=groups,
+        )  # fmt: skip
+        ok, why = gfx950_conv_fwd_aot_serves(spec, runtime)
+        assert ok == (served == "true"), (variant, problem, why)
+        if ok:
+            gx, gy, gz, block = (int(v) for v in launch)
+            assert spec.grid(runtime) == (gx, gy, gz), (variant, problem)
+            assert spec.block()[0] == block, (variant, problem)
+        variants.add((variant, ok))
+    assert variants == {(v, ok) for v in ("TILED",) for ok in (True, False)}

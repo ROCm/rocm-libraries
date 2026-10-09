@@ -557,12 +557,15 @@ enum class KernelFamily : int64_t
 };
 
 /// The direct_variant metadata value: "none" for implicit GEMM, "std" for
-/// DirectDepthwiseSpec and "spatial" for DirectDepthwiseSpatialSpec.
+/// DirectDepthwiseSpec and "spatial" for DirectDepthwiseSpatialSpec. The other values are
+/// direct kernels only the AOT-instance engine packages; the exact-shape engine has std
+/// and spatial only.
 enum class DirectVariant
 {
     NONE,
     STD,
     SPATIAL,
+    TILED, ///< "tiled": DirectDepthwiseTiledSpec.
 };
 
 /// A closed value set: any other integer, including a future family this build does not
@@ -593,6 +596,10 @@ inline std::optional<DirectVariant> parseDirectVariant(std::string_view value)
     if(value == "spatial")
     {
         return DirectVariant::SPATIAL;
+    }
+    if(value == "tiled")
+    {
+        return DirectVariant::TILED;
     }
     return std::nullopt;
 }
@@ -746,37 +753,121 @@ inline std::optional<LaunchGeometry> directLaunchGeometry(const Problem& problem
                           static_cast<unsigned int>(blockWaves * waveSize)};
 }
 
-/// One direct depthwise binary as both engines describe it: what it compiled in, and the
-/// variant and block knobs its grid follows. Mirrors the direct fields of
-/// Gfx950ConvFwdAotSpec in rocke/library/builders/common/convolution_forward.py; the
-/// exact-shape engine reads the compiled values from its build problem instead.
+/// One direct binary as both engines describe it: what it compiled in, and the variant and
+/// block knobs its grid follows. Mirrors the direct fields of Gfx950ConvFwdAotSpec in
+/// rocke/library/builders/common/convolution_forward.py; the exact-shape engine reads the
+/// compiled values from its build problem instead, and has std and spatial only. Each
+/// variant reads only its own knobs; the rest stay 0.
 struct DirectInstance
 {
     DirectCapabilities compiled;
     DirectVariant variant;
-    int64_t blockW; ///< Output columns per block for std; 0 for spatial, which derives it.
+    /// Output columns per block for std and tiled; 0 for spatial, which derives it.
+    int64_t blockW;
+    /// Waves per block, one channel per lane, for the depthwise variants.
     int64_t blockWaves;
+    /// Output rows per block (tiled).
+    int64_t blockH = 0;
 };
 
+/// rocKE's DirectConvProblem takes one stride and one padding, and the instance's compiled
+/// filter, stride, padding and dilation must all be the graph's.
+inline bool directCompiledMatches(const DirectCapabilities& compiled, const Problem& problem)
+{
+    return problem.strideH == problem.strideW && problem.padH == problem.padW
+           && directServes(compiled, problem);
+}
+
+/// ceil(a / b) for a >= 0, b > 0, without the overflow of a + b - 1.
+inline int64_t ceilDiv(int64_t a, int64_t b)
+{
+    return a == 0 ? 0 : 1 + (a - 1) / b;
+}
+
+/// The (x, y, z) grid with every axis at most 65535 and at least 1, else std::nullopt.
+inline std::optional<LaunchGeometry>
+    boundedDirectGrid(int64_t gridX, int64_t gridY, int64_t gridZ, int64_t threads)
+{
+    for(const auto extent : {gridX, gridY, gridZ})
+    {
+        if(extent < 1 || extent > DIRECT_MAX_GRID_DIM)
+        {
+            return std::nullopt;
+        }
+    }
+    return LaunchGeometry{static_cast<unsigned int>(gridX),
+                          static_cast<unsigned int>(gridY),
+                          static_cast<unsigned int>(gridZ),
+                          static_cast<unsigned int>(threads)};
+}
+
+/// rocKE's depthwise filter bound (_DW_MAX_KH, _DW_MAX_KW).
+constexpr int64_t DIRECT_DEPTHWISE_MAX_FILTER = 32;
+
+/// The tiled depthwise kernel: is_valid_depthwise_tiled_spec in conv_direct_grouped.py on
+/// the runtime problem, then direct_launch_geometry's (ceil(Wo / block_w),
+/// ceil(groups / (64 * block_waves)), N * ceil(Ho / block_h)) grid of 64 * block_waves
+/// threads. It indexes outputs directly and bounds its rows by the runtime Ho, so it is not
+/// tied to "same" padding.
+inline std::optional<LaunchGeometry> depthwiseTileLaunch(const Problem& problem,
+                                                         const Geometry& geometry,
+                                                         const DirectInstance& instance)
+{
+    const auto& compiled = instance.compiled;
+    if(!(problem.groups == problem.c && problem.c == problem.k)
+       || !directCompiledMatches(compiled, problem) || compiled.dilationH != 1
+       || compiled.dilationW != 1 || compiled.y < 1 || compiled.y > DIRECT_DEPTHWISE_MAX_FILTER
+       || compiled.x < 1 || compiled.x > DIRECT_DEPTHWISE_MAX_FILTER || instance.blockW < 1
+       || instance.blockH < 1 || instance.blockWaves < 1
+       || instance.blockWaves > DIRECT_MAX_BLOCK_WAVES || geometry.ho < 1 || geometry.wo < 1)
+    {
+        return std::nullopt;
+    }
+    if(compiled.strideH > compiled.y)
+    {
+        return std::nullopt;
+    }
+    const auto threads = instance.blockWaves * DIRECT_WAVE_SIZE;
+    if(problem.n > DIRECT_MAX_GRID_DIM)
+    {
+        return std::nullopt;
+    }
+    return boundedDirectGrid(ceilDiv(geometry.wo, instance.blockW),
+                             ceilDiv(problem.groups, threads),
+                             problem.n * ceilDiv(geometry.ho, instance.blockH),
+                             threads);
+}
+
 /// The launch of @p instance on @p problem, or std::nullopt when the binary cannot compute
-/// it. Mirrors _direct_serves in convolution_forward.py: the direct guard
+/// it. std and spatial mirror _direct_serves in convolution_forward.py: the direct guard
 /// (directProblemSupported), the compiled filter, stride and padding (directServes), and
-/// directLaunchGeometry's variant rules and 65535 grid bound. directKernargs then holds no
-/// further refusal.
+/// directLaunchGeometry's variant rules and 65535 grid bound. The other variants mirror
+/// _aot_direct_serves, rocKE's own offer (KernelCache.supports_problem, then plan_for's
+/// re-validation and launch geometry). directKernargs then holds no further refusal.
 inline std::optional<LaunchGeometry> directInstanceLaunch(const Problem& problem,
                                                           const Geometry& geometry,
                                                           const DirectInstance& instance)
 {
-    if(!directProblemSupported(problem) || !directServes(instance.compiled, problem))
+    switch(instance.variant)
     {
+    case DirectVariant::STD:
+    case DirectVariant::SPATIAL:
+        if(!directProblemSupported(problem) || !directServes(instance.compiled, problem))
+        {
+            return std::nullopt;
+        }
+        return directLaunchGeometry(problem,
+                                    geometry,
+                                    instance.variant,
+                                    instance.blockW,
+                                    instance.blockWaves,
+                                    DIRECT_WAVE_SIZE);
+    case DirectVariant::TILED:
+        return depthwiseTileLaunch(problem, geometry, instance);
+    case DirectVariant::NONE:
+    default:
         return std::nullopt;
     }
-    return directLaunchGeometry(problem,
-                                geometry,
-                                instance.variant,
-                                instance.blockW,
-                                instance.blockWaves,
-                                DIRECT_WAVE_SIZE);
 }
 
 /// Whether @p variant, @p blockW and @p blockWaves are gfx950_conv_fwd_direct_spec_for_request's
