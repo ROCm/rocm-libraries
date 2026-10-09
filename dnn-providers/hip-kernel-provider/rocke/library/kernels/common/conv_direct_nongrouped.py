@@ -220,12 +220,12 @@ class DirectNongroupedConvSpec:
     @property
     def lds_in_h(self) -> int:
         p = self.problem
-        return (self.tile_h - 1) * p.stride + p.KH
+        return (self.tile_h - 1) * p.stride + (p.KH - 1) * p.dil_h + 1
 
     @property
     def lds_in_w(self) -> int:
         p = self.problem
-        return (self.tile_w - 1) * p.stride + p.KW
+        return (self.tile_w - 1) * p.stride + (p.KW - 1) * p.dil_w + 1
 
     @property
     def c_stride(self) -> int:
@@ -273,6 +273,7 @@ class DirectNongroupedConvSpec:
         return kernel_name_join(
             self.name,
             p.short(),
+            f"d{p.dil_h}x{p.dil_w}" if p.is_dilated else "",
             f"t{self.tile_h}x{self.tile_w}x{self.tile_k}",
             f"ck{self.ck}",
             f"w{self.waves_m}x{self.waves_n}",
@@ -315,6 +316,11 @@ class DirectNongroupedConvSpec:
             raise ValueError(
                 "DirectNongroupedConvSpec: tile, wave, stride and channel "
                 "parameters must be positive"
+            )
+        if p.dil_h < 1 or p.dil_w < 1:
+            raise ValueError(
+                f"DirectNongroupedConvSpec: dilation must be positive "
+                f"(got {p.dil_h}x{p.dil_w})"
             )
         t = self.atom_tile
         if self.tile_w % t != 0:
@@ -473,7 +479,7 @@ def nongrouped_live_regs(spec: DirectNongroupedConvSpec) -> int:
     w_passes = -(-w_slots // threads)
     frag_regs = spec.frag // 2
     prefetch = x_passes * (_X_LOAD_VEC // 2) + w_passes * frag_regs
-    in_rows = (spec.rows_per_wave - 1) * p.stride + p.KH
+    in_rows = (spec.rows_per_wave - 1) * p.stride + (p.KH - 1) * p.dil_h + 1
     b_frags = in_rows * spec.n_col_blocks * frag_regs
     a_frags = spec.m_tiles_per_wave * frag_regs
     return spec.acc_vgprs + prefetch + b_frags + a_frags
@@ -656,8 +662,8 @@ def build_direct_conv_nongrouped(
 ) -> KernelDef:
     """Build the IR for one non-grouped NHWC direct convolution kernel.
 
-    AOT: the binary bakes the filter, ``stride``, ``PAD``, dtype and the tile
-    geometry of ``spec``; batch, extents and channel counts are kernargs (see
+    AOT: the binary bakes the filter, ``stride``, ``PAD``, the dilation, dtype
+    and the tile geometry of ``spec``; batch, extents and channel counts are kernargs (see
     the module docstring). ``spec.problem`` only has to pass the validator --
     the emitted IR does not depend on its ``N``/``H``/``W``/``C``/``K``.
     """
@@ -670,6 +676,7 @@ def build_direct_conv_nongrouped(
     dtype = p.dtype
 
     KH, KW, S, PAD = p.KH, p.KW, p.stride, p.PAD
+    DH, DW = p.dil_h, p.dil_w
     N_TAPS = KH * KW
 
     TH, TW, TK, CK = spec.tile_h, spec.tile_w, spec.tile_k, spec.ck
@@ -937,12 +944,12 @@ def build_direct_conv_nongrouped(
         """One activation fragment, addressed by *input* row inside the wave window.
 
         Taps share activations: output row ``row`` at tap row ``r`` reads input
-        row ``row * stride + r``, so the ``KH`` taps of a column only need
-        ``(ROWS_W - 1) * stride + KH`` distinct fragments instead of
-        ``ROWS_W * KH``.  Indexing by input row is what makes that reuse
-        expressible.
+        row ``row * stride + r * dil_h``, so the ``KH`` taps of a column only
+        need ``(ROWS_W - 1) * stride + (KH - 1) * dil_h + 1`` distinct fragments
+        instead of ``ROWS_W * KH``.  Indexing by input row is what makes that
+        reuse expressible. Filter column ``s`` sits ``s * dil_w`` columns in.
         """
-        pos = in_row * LDS_IN_W + cb * AT * S + s
+        pos = in_row * LDS_IN_W + cb * AT * S + s * DW
         off = pos * CSTRIDE + katom * AK
         idx = b.add(base, b.const_i32(off))
         return b.smem_load_vN(X_smem, c0, idx, dtype=io_type, n=FRAG)
@@ -950,7 +957,7 @@ def build_direct_conv_nongrouped(
     # ---- main channel loop ------------------------------------------------
     zero_acc = b.zero_vec_f32(ACC)
     n_acc = MT_W * NT_W
-    n_in_rows = (ROWS_W - 1) * S + KH
+    n_in_rows = (ROWS_W - 1) * S + (KH - 1) * DH + 1
 
     def emit_mfmas(accs, x_base, w_base):
         """One channel chunk of MFMAs against the staged tiles.
@@ -971,7 +978,7 @@ def build_direct_conv_nongrouped(
                         read_a_frag(w_base, tap, mt, katom) for mt in range(MT_W)
                     ]
                     for row in range(ROWS_W):
-                        bf_row = b_frags[row * S + r_c]
+                        bf_row = b_frags[row * S + r_c * DH]
                         for cb in range(NCB):
                             nt = row * NCB + cb
                             for mt in range(MT_W):
