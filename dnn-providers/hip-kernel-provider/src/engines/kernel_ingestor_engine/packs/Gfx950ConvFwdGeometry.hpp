@@ -568,6 +568,7 @@ enum class DirectVariant
     TILED, ///< "tiled": DirectDepthwiseTiledSpec.
     COL, ///< "col": DirectDepthwiseColSpec.
     GROUPED, ///< "grouped": DirectConvSpec.
+    NONGROUPED, ///< "nongrouped": DirectNongroupedConvSpec.
 };
 
 /// A closed value set: any other integer, including a future family this build does not
@@ -610,6 +611,10 @@ inline std::optional<DirectVariant> parseDirectVariant(std::string_view value)
     if(value == "grouped")
     {
         return DirectVariant::GROUPED;
+    }
+    if(value == "nongrouped")
+    {
+        return DirectVariant::NONGROUPED;
     }
     return std::nullopt;
 }
@@ -783,7 +788,31 @@ struct DirectInstance
     int64_t blockGroups = 0;
     int64_t cpg = 0;
     int64_t kpg = 0;
+    /// nongrouped: output rows, columns and channels per block, input channels per LDS
+    /// stage, the waves along channels and rows, and the MFMA atom's M == N.
+    int64_t tileH = 0;
+    int64_t tileW = 0;
+    int64_t tileKOut = 0;
+    int64_t ck = 0;
+    int64_t wavesM = 0;
+    int64_t wavesN = 0;
+    int64_t atomTile = 0;
 };
+
+/// The output tile of DirectNongroupedConvSpec's MFMA atom (_ATOMS in
+/// rocke/library/kernels/common/conv_direct_nongrouped.py); std::nullopt for any other.
+inline std::optional<int64_t> nongroupedAtomTile(std::string_view atom)
+{
+    if(atom == "32x32x16" || atom == "32x32x8")
+    {
+        return 32;
+    }
+    if(atom == "16x16x32" || atom == "16x16x16")
+    {
+        return 16;
+    }
+    return std::nullopt;
+}
 
 /// rocKE's DirectConvProblem takes one stride and one padding, and the instance's compiled
 /// filter, stride, padding and dilation must all be the graph's.
@@ -892,6 +921,92 @@ inline std::optional<LaunchGeometry> groupedDirectLaunch(const Problem& problem,
                              instance.blockGroups * DIRECT_WAVE_SIZE);
 }
 
+/// tile_w_candidates in conv_direct_nongrouped.py: the multiples of @p atomTile up to six
+/// atoms that tile @p wo exactly, or if none does, the one that wastes the fewest columns
+/// (the first of them). rocKE's direct_plans offers a non-grouped binary only when its
+/// tile width is one of these for the problem's Wo.
+inline bool nongroupedTileWidthFits(int64_t tileW, int64_t wo, int64_t atomTile)
+{
+    constexpr int64_t MAX_MULTIPLE = 6;
+    bool anyExact = false;
+    int64_t leastWaste = 0;
+    int64_t leastWasteWidth = 0;
+    for(int64_t multiple = 1; multiple <= MAX_MULTIPLE; ++multiple)
+    {
+        const auto width = atomTile * multiple;
+        if(wo % width == 0)
+        {
+            anyExact = true;
+            if(width == tileW)
+            {
+                return true;
+            }
+        }
+        const auto covered = ceilDiv(wo, width) * width;
+        if(multiple == 1 || covered < leastWaste)
+        {
+            leastWaste = covered;
+            leastWasteWidth = width;
+        }
+    }
+    return !anyExact && tileW == leastWasteWidth;
+}
+
+/// The byte offset every masked-out access of the non-grouped kernel is redirected to
+/// (_OOB_BASE in conv_direct_nongrouped.py): each tensor must end at or below it.
+constexpr int64_t NONGROUPED_OOB_BASE = 0x7F000000;
+/// The non-grouped kernel's input loads are dwordx4 of 8 halves (_X_LOAD_VEC).
+constexpr int64_t NONGROUPED_LOAD_VECTOR = 8;
+
+/// The non-grouped direct kernel (groups == 1, C and K kernel arguments):
+/// DirectNongroupedConvSpec.validate and is_valid_nongrouped_spec in
+/// conv_direct_nongrouped.py on the runtime problem (C a multiple of ck and of 8, K a
+/// multiple of the atom tile, every tensor below the masked-access offset, stride 1 or
+/// 2), the tile widths direct_plans tries for Wo (nongroupedTileWidthFits), then its
+/// flat grid of n_w_tiles * n_h_tiles * N * n_k_tiles blocks of waves_m * waves_n * 64
+/// threads. The block id is decoded in i32 and a dispatch's x extent in work-items is
+/// 32-bit, so both bound the grid.
+inline std::optional<LaunchGeometry> nongroupedDirectLaunch(const Problem& problem,
+                                                            const Geometry& geometry,
+                                                            const DirectInstance& instance)
+{
+    const auto& compiled = instance.compiled;
+    if(problem.groups != 1 || !directCompiledMatches(compiled, problem) || compiled.dilationH < 1
+       || compiled.dilationW < 1 || (compiled.strideH != 1 && compiled.strideH != 2)
+       || instance.tileH < 1 || instance.tileW < 1 || instance.tileKOut < 1 || instance.ck < 1
+       || instance.wavesM < 1 || instance.wavesN < 1 || instance.atomTile < 1
+       || instance.wavesM * instance.wavesN > 1024 / DIRECT_WAVE_SIZE || problem.c <= 0
+       || problem.k <= 0 || problem.c % instance.ck != 0 || problem.c % NONGROUPED_LOAD_VECTOR != 0
+       || problem.k % instance.atomTile != 0 || geometry.ho < 1 || geometry.wo < 1)
+    {
+        return std::nullopt;
+    }
+    for(const auto bytes : geometry.tensorBytes)
+    {
+        if(bytes > NONGROUPED_OOB_BASE)
+        {
+            return std::nullopt;
+        }
+    }
+    // The last prefetch reads one chunk past C from the masked-access offset, in i32.
+    constexpr int64_t I32_MAX = std::numeric_limits<int32_t>::max();
+    if(problem.c + instance.ck > (I32_MAX - NONGROUPED_OOB_BASE) / 2
+       || !nongroupedTileWidthFits(instance.tileW, geometry.wo, instance.atomTile))
+    {
+        return std::nullopt;
+    }
+    // D's byte count bounds N * Ho * Wo * K, and so this product of tile counts.
+    const auto blocks = ceilDiv(geometry.wo, instance.tileW) * ceilDiv(geometry.ho, instance.tileH)
+                        * problem.n * ceilDiv(problem.k, instance.tileKOut);
+    const auto threads = instance.wavesM * instance.wavesN * DIRECT_WAVE_SIZE;
+    if(blocks > I32_MAX || blocks * threads > int64_t{std::numeric_limits<uint32_t>::max()})
+    {
+        return std::nullopt;
+    }
+    return LaunchGeometry{
+        static_cast<unsigned int>(blocks), 1, 1, static_cast<unsigned int>(threads)};
+}
+
 /// The launch of @p instance on @p problem, or std::nullopt when the binary cannot compute
 /// it. std and spatial mirror _direct_serves in convolution_forward.py: the direct guard
 /// (directProblemSupported), the compiled filter, stride and padding (directServes), and
@@ -921,6 +1036,8 @@ inline std::optional<LaunchGeometry> directInstanceLaunch(const Problem& problem
         return depthwiseTileLaunch(problem, geometry, instance);
     case DirectVariant::GROUPED:
         return groupedDirectLaunch(problem, geometry, instance);
+    case DirectVariant::NONGROUPED:
+        return nongroupedDirectLaunch(problem, geometry, instance);
     case DirectVariant::NONE:
     default:
         return std::nullopt;

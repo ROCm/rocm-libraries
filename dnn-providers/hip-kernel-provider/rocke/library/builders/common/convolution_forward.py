@@ -55,6 +55,7 @@ from dataclasses import asdict, dataclass, fields, replace
 from dispatch.grouped_convolution import ConvGroupedRequest, dispatch_conv_grouped
 from rocke.core.ir import KernelDef
 from kernels.common import conv_direct_grouped as _direct
+from kernels.common import conv_direct_nongrouped as _nongrouped
 from kernels.common import conv_implicit_gemm as _conv
 from kernels.common.conv_abi import conv_args_signature, conv_direct_args_signature
 from kernels.common.conv_args import MUL24_REDUCTION_LIMIT, ConvArgs
@@ -891,6 +892,8 @@ DIRECT_VARIANT_TILED = "tiled"
 DIRECT_VARIANT_COL = "col"
 #: DirectConvSpec: cpg == kpg in {4, 8, 16, 32}, one wave per group.
 DIRECT_VARIANT_GROUPED = "grouped"
+#: DirectNongroupedConvSpec: groups == 1, C and K runtime.
+DIRECT_VARIANT_NONGROUPED = "nongrouped"
 #: Each forward algorithm of ``direct_kernel_sweep.DIRECT_CAPABILITIES`` and the
 #: ``direct_variant`` an instance of it carries.
 AOT_DIRECT_ALGORITHMS = {
@@ -899,6 +902,7 @@ AOT_DIRECT_ALGORITHMS = {
     "direct_depthwise_tiled": DIRECT_VARIANT_TILED,
     "direct_depthwise_col": DIRECT_VARIANT_COL,
     "direct_grouped": DIRECT_VARIANT_GROUPED,
+    "direct_nongrouped": DIRECT_VARIANT_NONGROUPED,
 }
 _AOT_DIRECT_VARIANTS = tuple(AOT_DIRECT_ALGORITHMS.values())
 #: The block knobs after ``block_w``/``block_waves`` and the value each holds
@@ -947,6 +951,18 @@ AOT_DIRECT_KNOBS = {
         "block_groups": "block_groups",
         "double_buffer": "double_buffer",
     },
+    DIRECT_VARIANT_NONGROUPED: {
+        "tile_h": "tile_h",
+        "tile_w": "tile_w",
+        "tile_k": "tile_k_out",
+        "ck": "ck",
+        "waves_m": "waves_m",
+        "waves_n": "waves_n",
+        "atom": "atom",
+        "swizzle_wgm": "swizzle_wgm",
+        "iglp": "iglp",
+        "waves_per_eu": "waves_per_eu",
+    },
 }
 #: Fields a variant states beyond its knobs: the grouped kernel's compiled
 #: channel counts and its row tile, which the direct sweep leaves at
@@ -974,6 +990,12 @@ _AOT_FAMILY_DEFAULTS = {
     "block_waves": 0,
     **_AOT_DIRECT_KNOB_DEFAULTS,
 }
+#: Every axis of a direct grid but the non-grouped kernel's flat one is held to
+#: this, as for std and spatial (``_MAX_GRID_DIM``). The non-grouped kernel
+#: decodes a flat 1-D block id in i32, and a dispatch's x extent in work-items
+#: is 32-bit.
+_AOT_NONGROUPED_MAX_GRID_X = _INT32_MAX
+_AOT_MAX_DISPATCH_ITEMS = (1 << 32) - 1
 
 
 def aot_direct_grouped_block_h() -> int:
@@ -1119,7 +1141,9 @@ class Gfx950ConvFwdAotSpec:
 
     def _direct_caps(self) -> tuple[int, int]:
         """``(cpg, kpg)`` the direct kernel compiles: 1 for the depthwise variants,
-        the recorded counts for grouped."""
+        the recorded counts for grouped, 0 (runtime) for non-grouped."""
+        if self.direct_variant == DIRECT_VARIANT_NONGROUPED:
+            return 0, 0
         if self.direct_variant == DIRECT_VARIANT_GROUPED:
             return self.cpg, self.kpg
         return 1, 1
@@ -1136,7 +1160,10 @@ class Gfx950ConvFwdAotSpec:
         """
         if self.is_direct:
             cpg, kpg = self._direct_caps()
-            if self.direct_variant == DIRECT_VARIANT_SPATIAL:
+            if cpg == 0:
+                # Runtime channel counts: one group of 256.
+                groups, cpg, kpg = 1, 256, 256
+            elif self.direct_variant == DIRECT_VARIANT_SPATIAL:
                 # The spatial variant takes fewer groups than a wave.
                 groups = 8
             else:
@@ -1246,6 +1273,10 @@ class Gfx950ConvFwdAotSpec:
         if variant == DIRECT_VARIANT_GROUPED:
             return _direct.DirectConvSpec(
                 problem=problem, name=name, block_h=self.block_h, **knobs
+            )
+        if variant == DIRECT_VARIANT_NONGROUPED:
+            return _nongrouped.DirectNongroupedConvSpec(
+                problem=problem, name=name, **knobs
             )
         raise ValueError(f"unknown direct variant {variant!r}")
 
@@ -1361,6 +1392,8 @@ def aot_direct_problem(problem: Gfx950ConvFwdSpec) -> _direct.DirectConvProblem:
 
 def _aot_direct_grid(rocke_spec) -> tuple[int, int, int]:
     """rocKE's launch grid for a direct kernel spec (``plan_for``'s ``_conv_step``)."""
+    if isinstance(rocke_spec, _nongrouped.DirectNongroupedConvSpec):
+        return rocke_spec.grid()
     return _direct.direct_launch_geometry(rocke_spec)[0]
 
 
@@ -1368,6 +1401,8 @@ def _aot_direct_validate(variant: str, rocke_spec, arch: str) -> tuple[bool, str
     """rocKE's validator for ``rocke_spec``, as ``direct_kernel_sweep.validate_spec``
     runs it."""
     try:
+        if variant == DIRECT_VARIANT_NONGROUPED:
+            return _nongrouped.is_valid_nongrouped_spec(rocke_spec, arch=arch)
         if variant == DIRECT_VARIANT_GROUPED:
             rocke_spec.validate()
             return _direct.is_valid_spec(rocke_spec, arch=arch)
@@ -1409,11 +1444,22 @@ def _aot_direct_knob_error(spec: Gfx950ConvFwdAotSpec) -> str:
                     f"{default!r}, got {value!r}"
                 )
             continue
-        if type(value) is not int:
+        if name == "atom":
+            if value not in _nongrouped._ATOMS:
+                return (
+                    f"atom must be one of {sorted(_nongrouped._ATOMS)}, got {value!r}"
+                )
+        elif type(value) is not int:
             return f"{name} must be an integer, got {value!r}"
         elif name in _AOT_DIRECT_BOOL_KNOBS:
             if value not in (0, 1):
                 return f"{name} must be 0 or 1"
+        elif name == "iglp":
+            if not -1 <= value <= _INT32_MAX:
+                return "iglp must be -1 (unset) or a nonnegative level"
+        elif name == "waves_per_eu":
+            if not 0 <= value <= _INT32_MAX:
+                return "waves_per_eu must be 0 (unset) or positive"
         elif name in ("block_waves", "block_groups"):
             # One wave per channel block or group: at most 1024 threads.
             if not 1 <= value <= _DIRECT_MAX_BLOCK_WAVES:
@@ -1436,7 +1482,8 @@ def _aot_direct_error(spec: Gfx950ConvFwdAotSpec) -> str:
 
     rocKE's direct kernels compile one stride and one padding (they read
     neither ``sW`` nor ``pW``), and the direct sweep builds square filters
-    only; the per-axis fields state that without a convention.
+    only; the per-axis fields state that without a convention. Only the
+    non-grouped kernel computes a dilated convolution.
     """
     for name, value in _AOT_DIRECT_PLACEHOLDERS.items():
         actual = getattr(spec, name)
@@ -1464,7 +1511,9 @@ def _aot_direct_error(spec: Gfx950ConvFwdAotSpec) -> str:
         value = getattr(spec, name)
         if type(value) is not int or not 0 <= value <= _INT32_MAX:
             return f"{name} must be a nonnegative signed 32-bit integer"
-    if spec.dilation_h != 1 or spec.dilation_w != 1:
+    if spec.direct_variant != DIRECT_VARIANT_NONGROUPED and (
+        spec.dilation_h != 1 or spec.dilation_w != 1
+    ):
         return "the direct depthwise kernels have no dilation (dilation_h == dilation_w == 1)"
     if spec.stride_h != spec.stride_w or spec.pad_h != spec.pad_w:
         return "the direct depthwise kernels compile one stride and one padding"
@@ -1622,8 +1671,10 @@ def _aot_direct_serves(
     rocKE's own offer, ``KernelCache.supports_problem`` then ``plan_for``: the
     compiled filter, stride, padding, dilation and channel counts are the
     problem's, and the kernel's validator accepts the spec rebuilt on the real
-    problem. The kernels compile one stride and one padding, so both axes must
-    agree. Then the launch has to fit: every grid axis 65535.
+    problem (for non-grouped, also only the tile widths a sweep of its Wo would
+    try). The kernels compile one stride and one padding, so both axes must
+    agree. Then the launch has to fit: every grid axis 65535, the non-grouped
+    kernel's flat grid a 32-bit dispatch.
     """
     variant = spec.direct_variant
     if problem.sH != problem.sW or problem.pH != problem.pW:
@@ -1640,7 +1691,10 @@ def _aot_direct_serves(
                 f"direct kernel compiled for {label} {baked}, problem has {actual}",
             )
     cpg, kpg = problem.C // problem.groups, problem.K // problem.groups
-    if (cpg, kpg) != spec._direct_caps():
+    if variant == DIRECT_VARIANT_NONGROUPED:
+        if problem.groups != 1:
+            return False, "the non-grouped direct kernel serves groups == 1 only"
+    elif (cpg, kpg) != spec._direct_caps():
         return False, (
             f"direct kernel compiled for cpg, kpg = {spec._direct_caps()}, "
             f"problem has {(cpg, kpg)}"
@@ -1649,7 +1703,23 @@ def _aot_direct_serves(
     ok, why = _aot_direct_validate(variant, rocke_spec, _ARCH)
     if not ok:
         return False, why
-    for axis, extent in zip("xyz", _aot_direct_grid(rocke_spec)):
+    grid = _aot_direct_grid(rocke_spec)
+    if variant == DIRECT_VARIANT_NONGROUPED:
+        widths = _nongrouped.tile_w_candidates(
+            rocke_spec.problem.Wo, rocke_spec.atom_tile
+        )
+        if spec.tile_w not in widths:
+            return False, (
+                f"tile_w={spec.tile_w} does not fit Wo={rocke_spec.problem.Wo} "
+                f"(widths tried for it: {widths})"
+            )
+        if (
+            grid[0] > _AOT_NONGROUPED_MAX_GRID_X
+            or grid[0] * rocke_spec.threads_per_block > _AOT_MAX_DISPATCH_ITEMS
+        ):
+            return False, f"flat direct grid {grid[0]} does not fit one dispatch"
+        return True, "ok"
+    for axis, extent in zip("xyz", grid):
         if extent > _MAX_GRID_DIM:
             return False, f"direct grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
     return True, "ok"
@@ -1671,7 +1741,7 @@ def gfx950_conv_fwd_aot_serves(
     (:func:`_direct_serves`) on the instance's compiled filter, stride and
     padding. The other direct variants: rocKE's own offer
     (:func:`_aot_direct_serves`). Batch, image and group count are kernel
-    arguments.
+    arguments, and for non-grouped the channel counts too.
     """
     error = _problem_error(problem, decline_grouped_pointwise=False)
     if error:
@@ -1735,6 +1805,7 @@ _AOT_DIRECT_BUILDERS = {
     DIRECT_VARIANT_TILED: _direct.build_direct_depthwise_tiled,
     DIRECT_VARIANT_COL: _direct.build_direct_depthwise_col,
     DIRECT_VARIANT_GROUPED: _direct.build_direct_conv,
+    DIRECT_VARIANT_NONGROUPED: _nongrouped.build_direct_conv_nongrouped,
 }
 
 
