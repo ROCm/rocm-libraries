@@ -277,6 +277,14 @@ install(EXPORT hipdnn_flatbuffers_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR
         FILE hipdnn_flatbuffers_sdkTargets.cmake COMPONENT Development
 )
 
+# Tells the package config whether this install ships the op-schema registry JSON
+# installed below.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(HIPDNN_FLATBUFFERS_SDK_SHIPS_OP_SCHEMA_REGISTRY ON)
+else()
+    set(HIPDNN_FLATBUFFERS_SDK_SHIPS_OP_SCHEMA_REGISTRY OFF)
+endif()
+
 configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_flatbuffers_sdkConfig.cmake.in"
     "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk/hipdnn_flatbuffers_sdkConfig.cmake"
@@ -308,13 +316,17 @@ install(
     COMPONENT Development
 )
 
-# The op-schema registry JSON for build-time tools (hkp_pack). The package config names
-# its installed path in HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY. The header installs
-# with the include directory above.
-install(
-    FILES "${CMAKE_CURRENT_SOURCE_DIR}/op_schema_registry.json"
-    DESTINATION ${HIP_DNN_FLATBUFFERS_SDK_INSTALL_DATA_DIR}
-    COMPONENT Development
-)
+# The op-schema registry JSON for build-time tools (hkp_pack). Only a kernel ingestor
+# build packs descriptors against it, and only that build installs the ingestor headers,
+# so the JSON ships with them. The package config names its installed path in
+# HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY. The header installs with the include
+# directory above.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/op_schema_registry.json"
+        DESTINATION ${HIP_DNN_FLATBUFFERS_SDK_INSTALL_DATA_DIR}
+        COMPONENT Development
+    )
+endif()
 
 add_subdirectory(tests)

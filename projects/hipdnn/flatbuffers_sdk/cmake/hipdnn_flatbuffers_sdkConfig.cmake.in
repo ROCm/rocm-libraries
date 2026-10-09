@@ -26,8 +26,11 @@ set(HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB @HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB@)
 
 # The op-schema registry generated with this SDK's graph schemas. Build-time tools
 # that resolve graph patterns read it, so it matches the installed runtime header.
-set(HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY
-    "@PACKAGE_HIP_DNN_FLATBUFFERS_SDK_INSTALL_DATA_DIR@/op_schema_registry.json")
+# Only a kernel ingestor build installs it; otherwise the variable stays unset.
+if(@HIPDNN_FLATBUFFERS_SDK_SHIPS_OP_SCHEMA_REGISTRY@)
+    set(HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY
+        "@PACKAGE_HIP_DNN_FLATBUFFERS_SDK_INSTALL_DATA_DIR@/op_schema_registry.json")
+endif()
 
 # nlohmann_json is optional based on HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)

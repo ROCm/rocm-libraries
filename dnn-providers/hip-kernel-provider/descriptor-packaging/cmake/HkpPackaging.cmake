@@ -1637,8 +1637,9 @@ function(hkp_add_packaging)
 
     # The op-schema registry defaults to the one that matches the hipDNN this provider
     # builds against, since the runtime header the matcher runs on comes from that
-    # hipDNN. An installed hipDNN (imported hipdnn_flatbuffers_sdk target) names its
-    # registry, under <prefix>/share/hipdnn_flatbuffers_sdk/, through its package
+    # hipDNN. An installed hipDNN built with HIPDNN_ENABLE_KERNEL_INGESTOR (imported
+    # hipdnn_flatbuffers_sdk target) names its registry, under
+    # <prefix>/share/hipdnn_flatbuffers_sdk/, through its package
     # config. An in-tree hipDNN, or a build without the target, uses the copy generated
     # and committed beside the repository's graph schemas.
     get_filename_component(_default_op_schema_registry
@@ -1664,8 +1665,9 @@ provider builds against.")
             "'${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}'. Descriptor packaging "
             "resolves UED graph patterns against it. Set "
             "HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY to the op_schema_registry.json "
-            "of the hipDNN this provider builds against: an installed hipDNN "
-            "ships it under share/hipdnn_flatbuffers_sdk/.")
+            "of the hipDNN this provider builds against: an installed hipDNN built "
+            "with HIPDNN_ENABLE_KERNEL_INGESTOR ships it under "
+            "share/hipdnn_flatbuffers_sdk/.")
     endif()
 
     # One list for every root, so "every root is wired to rocKE identically" holds in
