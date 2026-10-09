@@ -24,7 +24,7 @@ the shared ones.
 
 Usage:
     check_pytest_junit.py --junit build/tooling-junit/<ctest test name>.xml \\
-        --allow-skips .github/hipdnn-tooling-allowed-skips.txt
+        --allow-skips projects/hipdnn/tools/tooling-allowed-skips.txt
 
 Exit codes:
     0  no skipped testcase outside the allow-lists, and every entry matched one

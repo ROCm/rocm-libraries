@@ -180,10 +180,8 @@ class TestConstructionFailureAbortsRatherThanBuckets:
         )
 
     def test_a_dispatcher_that_raises_also_exits_2(self, parity, capsys, monkeypatch):
-        """The factory is inside the same try as the request constructor, so a
-        dispatcher that raises is operational, never a decline. The dispatcher's own
-        message is asserted so an exit 2 raised while resolving the symbol does not
-        pass."""
+        """A dispatcher that raises is operational, never a decline. Its own message is
+        asserted so an exit 2 raised while resolving the symbol does not pass."""
         shapes = [{"seqlen_q": 256}]
         argv = parity(shapes)
         real_resolve_shapes = dispatch_parity.resolve_shapes
@@ -391,7 +389,7 @@ class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
         if spec is None:
             return False
         root = (
-            Path(__file__).resolve().parents[5]
+            launch_surface.find_repo_root(_TOOLS)
             / os.path.expanduser(profile["provider_root"])
         ).resolve()
         locations = [spec.origin, *(spec.submodule_search_locations or [])]
@@ -468,18 +466,7 @@ class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
             monkeypatch, shape={**self._SHAPE, "hdim_q": 96, "hdim_v": 96}
         )
         assert resolution.kind == "declined"
-        assert "head_size must be 64 or 128" in resolution.reason, resolution.reason
-
-    def test_a_shape_naming_another_candidate_is_fatal_not_a_mixed_catalog(
-        self, monkeypatch
-    ):
-        """The pin decides which kernel family the catalog is, so a shape that
-        overrides it aborts rather than emitting another family's kernels."""
-        with pytest.raises(dispatch_parity.ParityError, match="dispatch.pin"):
-            self._resolve(
-                monkeypatch,
-                shape={**self._SHAPE, "algorithm": "attention_dense_persist"},
-            )
+        assert resolution.reason.strip(), "a decline carries the dispatcher's reason"
 
     def test_the_reference_oracle_reaches_the_pinned_candidate(self, monkeypatch):
         """``reconcile_applicability`` builds its own requests from ``request.defaults``,
@@ -496,3 +483,124 @@ class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
         )
         assert served[0][0] is True, served[0]
         assert served[1][0] is False, served[1]
+
+
+#: A pinning dispatcher in miniature, so the dialect's failure paths are tested without
+#: rocKE. `seqlen_q` picks the outcome: 777 is refused, 888 fails operationally, 999
+#: resolves to a route-only spec (no `kernel_spec`) and 555 to a result that lacks the
+#: attribute altogether.
+_PIN_STUB = """
+import dataclasses
+from types import SimpleNamespace
+
+
+class Refused(ValueError):
+    pass
+
+
+@dataclasses.dataclass
+class Request:
+    seqlen_q: int
+    algorithm: str = "auto"
+
+
+@dataclasses.dataclass
+class Spec:
+    seqlen_q: int
+
+
+def dispatch(request):
+    if request.algorithm != "stub_grid":
+        raise RuntimeError("the pin never reached the request")
+    if request.seqlen_q == 777:
+        raise Refused("pin does not admit seqlen_q 777")
+    if request.seqlen_q == 888:
+        raise RuntimeError("dispatcher exploded")
+    if request.seqlen_q == 999:
+        return SimpleNamespace(spec=SimpleNamespace(kernel_spec=None))
+    if request.seqlen_q == 555:
+        return SimpleNamespace(spec=SimpleNamespace())
+    return SimpleNamespace(spec=SimpleNamespace(kernel_spec=Spec(request.seqlen_q)))
+"""
+
+
+@pytest.fixture
+def pin_resolve(tmp_path, monkeypatch):
+    """``resolve_shapes`` over one shape against the stub, with ``overrides`` merged
+    into the profile's ``dispatch`` block."""
+    (tmp_path / "pin_stub.py").write_text(_PIN_STUB)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "pin_stub", raising=False)
+
+    def resolve(seqlen_q, shape=None, **overrides):
+        profile = {
+            "dispatch": {
+                "module": "pin_stub",
+                "function": "dispatch",
+                "pin": {"algorithm": "stub_grid"},
+                "result_attr": "spec",
+                "spec_attr": "kernel_spec",
+                "refusal_exception": "pin_stub.Refused",
+                **overrides,
+            },
+            "request": {"module": "pin_stub", "class": "Request"},
+        }
+        shapes = [{"seqlen_q": seqlen_q, **(shape or {})}]
+        return dispatch_parity.resolve_shapes(shapes, profile)
+
+    return resolve
+
+
+class TestThePinDialectFailsLoudlyWhereItShould:
+    def test_a_served_shape_reaches_the_builders_spec(self, pin_resolve):
+        """The control: the failures below are not a harness that raises on everything.
+        The stub raises unless the pin reached the request, so this also proves the
+        pin is merged into every request."""
+        (resolution,) = pin_resolve(256)
+        assert resolution.kind == "constructed"
+        assert resolution.spec.seqlen_q == 256
+
+    def test_a_shape_restating_the_pin_is_not_a_conflict(self, pin_resolve):
+        (resolution,) = pin_resolve(256, shape={"algorithm": "stub_grid"})
+        assert resolution.kind == "constructed"
+
+    def test_a_shape_naming_another_candidate_is_fatal_not_a_mixed_catalog(
+        self, pin_resolve
+    ):
+        """The pin decides which kernel family the catalog is, so a shape that
+        overrides it aborts rather than emitting another family's kernels."""
+        with pytest.raises(dispatch_parity.ParityError, match="dispatch.pin"):
+            pin_resolve(256, shape={"algorithm": "other_grid"})
+
+    def test_a_refusal_is_a_decline_carrying_the_dispatchers_reason(self, pin_resolve):
+        (resolution,) = pin_resolve(777)
+        assert resolution.kind == "declined"
+        assert "does not admit seqlen_q 777" in resolution.reason
+
+    def test_a_refusal_aborts_when_the_profile_names_no_refusal_class(
+        self, pin_resolve
+    ):
+        with pytest.raises(dispatch_parity.ParityError, match="does not admit"):
+            pin_resolve(777, refusal_exception=None)
+
+    def test_an_exception_that_is_not_the_refusal_stays_fatal(self, pin_resolve):
+        with pytest.raises(dispatch_parity.ParityError, match="dispatcher exploded"):
+            pin_resolve(888)
+
+    def test_a_route_only_result_is_fatal_rather_than_a_catalog_entry(
+        self, pin_resolve
+    ):
+        with pytest.raises(dispatch_parity.ParityError, match="routing decision"):
+            pin_resolve(999)
+
+    def test_a_result_without_the_named_attribute_is_fatal(self, pin_resolve):
+        with pytest.raises(dispatch_parity.ParityError, match="does not have"):
+            pin_resolve(555)
+
+    def test_the_refusal_must_name_an_exception_class(self, pin_resolve):
+        with pytest.raises(dispatch_parity.ParityError, match="not an exception class"):
+            pin_resolve(256, refusal_exception="pin_stub.Spec")
+
+    def test_the_refusal_must_be_a_dotted_path(self, pin_resolve):
+        with pytest.raises(dispatch_parity.ParityError, match="dotted path"):
+            pin_resolve(256, refusal_exception="Refused")

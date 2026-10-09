@@ -123,14 +123,28 @@ endif()
 
 # DescriptorGenerator pytest suite, plus the junit directory both tooling suites write to.
 # ctest reports a suite whose every case skips as a pass, so the pytest junit is the only place
-# a skip is visible: .github/scripts/check_pytest_junit.py reads it in the Linux superbuild
-# lane and fails on any skip .github/hipdnn-tooling-allowed-skips.txt does not name.
+# a skip is visible: .github/scripts/check_pytest_junit.py reads it and fails on any skip
+# tooling-allowed-skips.txt in this directory does not name.
 # Build tree only, like the smoke tests above. The option is OFF by default so TheRock and
 # developer builds are unchanged; when ON, a missing prerequisite fails configure rather than
 # silently skipping.
+if(HIPDNN_ENABLE_TOOLING_TESTS AND HIPDNN_SKIP_TESTS)
+    message(STATUS "hipDNN: HIPDNN_ENABLE_TOOLING_TESTS is ignored because HIPDNN_SKIP_TESTS is ON")
+endif()
 if(HIPDNN_ENABLE_TOOLING_TESTS AND NOT HIPDNN_SKIP_TESTS)
     if(NOT Python3_FOUND)
         message(FATAL_ERROR "hipDNN: HIPDNN_ENABLE_TOOLING_TESTS=ON needs a Python3 interpreter")
+    endif()
+    # The IngestorGenerator suite is registered below only with the kernel ingestor, whose
+    # hipdnn_validate_descriptors tool its round-trip tests run. Without it the option would
+    # register one suite and leave the other silently absent.
+    if(NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
+        message(
+            FATAL_ERROR
+                "hipDNN: HIPDNN_ENABLE_TOOLING_TESTS=ON also needs HIPDNN_ENABLE_KERNEL_INGESTOR=ON: "
+                "the IngestorGenerator suite runs the hipdnn_validate_descriptors tool that option "
+                "builds. Enable it, or configure with -DHIPDNN_ENABLE_TOOLING_TESTS=OFF."
+        )
     endif()
     execute_process(
         COMMAND "${Python3_EXECUTABLE}" -c "import pytest, yaml, jinja2"

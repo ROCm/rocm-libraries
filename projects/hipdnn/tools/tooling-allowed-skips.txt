@@ -1,12 +1,16 @@
 # Skips the superbuild lanes accept from the hipDNN tooling pytest suites.
 #
 # Read by .github/scripts/check_pytest_junit.py in .github/workflows/hipdnn-superbuild-ci.yml.
-# The Windows lane also reads hipdnn-tooling-allowed-skips-windows.txt for the skips only it makes.
+# The Windows lane also reads tooling-allowed-skips-windows.txt, beside this file, for the skips
+# only it makes. Both live next to the suites they excuse so that their owners maintain them.
 # Each line is `<pattern> # <reason>`; every entry needs a reason. The pattern is an fnmatch
 # glob over `<junit file stem>::<classname>::<test name>`, e.g.
-# `hipdnn_ingestor_generator_pytest::tests.test_round_trip::test_x[param]`. The junit stem is
-# the ctest test name. An entry that matches no skipped test fails the check, so delete entries
-# whose skip is gone.
+# `hipdnn_ingestor_generator_pytest::tests.test_round_trip::*`. The junit stem is the ctest
+# test name. `[` starts a glob character class, so a parametrized id such as `test_x[p1]` is
+# matched with `*` or written `test_x[[]p1]`. An entry that matches no skipped test fails the
+# check, so the list only shrinks: the same rule as KNOWN_BAD in
+# dnn-providers/hip-kernel-provider/rocke/TESTING.md and KNOWN_VIOLATIONS in
+# dnn-providers/hip-kernel-provider/rocke/library/tests/test_library_layering.py.
 #
 # Add an entry only for an input the author supplies by design. A skip whose input the build
 # can provide is a gate to close, not an entry to add.

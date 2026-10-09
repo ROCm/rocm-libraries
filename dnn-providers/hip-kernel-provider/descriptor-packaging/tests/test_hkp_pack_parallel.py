@@ -10,6 +10,7 @@ copies it verbatim into a tree that has never seen this file.
 
 import concurrent.futures
 import itertools
+import multiprocessing
 import os
 import re
 import sys
@@ -24,7 +25,6 @@ from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_source_relpath, hip_variant_key
 from pack_helpers import (
     _child_sys_path,
-    _conftest_only_paths,
     _kdp,
     _silent,
     _ukd,
@@ -801,7 +801,7 @@ def test_variant_key_for_uses_module_globals(monkeypatch):
 
 @pytest.mark.quick
 def test_worker_inherits_parent_sys_path(tmp_path, monkeypatch):
-    """A pool worker starts with the parent's `sys.path`, conftest inserts and all.
+    """A spawned pool worker starts with the parent's `sys.path`, conftest inserts and all.
 
     CPython propagates `sys.path` to children under both `spawn` and
     `forkserver`, so a worker can import `hkp_pack`, and any producer module a
@@ -814,22 +814,22 @@ def test_worker_inherits_parent_sys_path(tmp_path, monkeypatch):
     pool must be built after parent-side path setup, is documented at the
     construction site.
 
-    The path watched is one the test prepends to the parent's `sys.path` itself, in a
-    directory no `PYTHONPATH` carries, so the premise holds in every environment. An
-    operator-supplied directory such as HIPKERNELPROVIDER_ROCM_KPACK_DIR cannot serve:
-    it can already be a site-packages directory (as in CI), which the child has on its
-    `sys.path` whether or not the parent's propagated.
+    The pool is pinned to `spawn` because the platform default is not one start
+    method: it is `fork` on Linux up to Python 3.13, where the child inherits
+    `sys.path` with the rest of the parent's memory and a check would prove nothing.
+    The path watched is one the test prepends itself, in a directory no `PYTHONPATH`
+    carries, so it reaches the child only if the interpreter propagates it.
     """
     probe = tmp_path / "parent-only-path"
     probe.mkdir()
     monkeypatch.syspath_prepend(str(probe))
-    expected = _conftest_only_paths([str(probe)])
-    assert expected, "the premise: the probe is on sys.path and PYTHONPATH lacks it"
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=1) as pool:
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=1, mp_context=multiprocessing.get_context("spawn")
+    ) as pool:
         child_path = list(pool.map(_child_sys_path, [None], chunksize=1))[0]
 
-    assert set(expected) <= set(child_path)
+    assert str(probe) in child_path
 
 
 @pytest.mark.quick
