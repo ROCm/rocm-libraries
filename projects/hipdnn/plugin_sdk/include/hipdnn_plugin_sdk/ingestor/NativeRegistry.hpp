@@ -46,8 +46,10 @@ using ScoreFn = double (*)(const MatchContext&, const BoundTokens&, const Kernel
 /// UMD it already declares; no descriptor names it. Once every pack has been matched,
 /// it sees every kernel that UMD admitted for the graph, across all packs listing it,
 /// in catalog order, and returns one keep flag per kernel. It can only narrow the
-/// catalog: what it keeps stays in order, and ranking orders it as before. Must be
-/// thread-safe, like the stages above.
+/// catalog: what it keeps stays in order, and ranking orders it as before. It resolves
+/// with its matcher, once per engine's shared state (KernelIngestorSharedState), so it
+/// must be registered before the engine loads. Must be thread-safe, like the stages
+/// above.
 using CandidateFilterFn = std::vector<bool> (*)(const MatchContext&,
                                                 const BoundTokens&,
                                                 const std::vector<const KernelDefinition*>&);

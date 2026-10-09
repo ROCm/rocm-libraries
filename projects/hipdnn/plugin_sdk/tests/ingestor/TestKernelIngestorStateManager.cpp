@@ -548,6 +548,34 @@ TEST(TestKernelIngestorStateManager, ACandidateFilterMustAnswerForEveryKernel)
                  std::runtime_error);
 }
 
+TEST(TestKernelIngestorStateManager, ACandidateFilterIsResolvedOnceWithTheSharedState)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    std::shared_ptr<const KernelIngestorSharedState<TestHandle>> state;
+    {
+        const auto filter = scopedCandidateFilter("test.kernel", &keepLargestBlocks);
+        state = makeStateManager()->sharedState();
+    }
+    const auto properties = testDeviceProperties();
+
+    // The filter is unregistered now. A manager over the shared state still applies the
+    // one resolved with it, like its matchers: both are part of the immutable state.
+    const StateManager first(state);
+    const TestGraph graph(makeGraphId(0xC7));
+    const auto catalog = first.unsortedCatalog(MatchContext{graph, 0, properties});
+    EXPECT_EQ(candidateFilterCalls().calls, 1);
+    ASSERT_EQ(catalog.entries.size(), 1U);
+    EXPECT_EQ(catalog.entries.front().getIntMetadata(BLOCK_SIZE), 256);
+
+    // One registered after the state was built is never consulted, by any manager over it.
+    const auto late = scopedCandidateFilter("test.kernel", &answerWithNoFlags);
+    const StateManager second(state);
+    const TestGraph other(makeGraphId(0xC8));
+    std::vector<KernelDefinition> definitions;
+    EXPECT_NO_THROW(definitions = second.unsortedDefinitions(MatchContext{other, 0, properties}));
+    EXPECT_EQ(definitions.size(), 1U);
+}
+
 TEST(TestKernelIngestorStateManager, AGraphTheMatchDeclinesEmptiesTheCatalogWithoutCriteria)
 {
     // nullopt from the engine's graph match is the whole answer: no criterion and no

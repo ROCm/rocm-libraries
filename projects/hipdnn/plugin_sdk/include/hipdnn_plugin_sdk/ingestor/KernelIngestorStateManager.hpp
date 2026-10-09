@@ -58,6 +58,16 @@ struct ResolvedMatcher
     KernelMatcherFn kernelFn = nullptr;
 };
 
+/// A kernel-scoped matcher's CandidateFilterFn, resolved once with the matcher, and the
+/// packs whose admitted kernels it refines as one set: every pack listing the matcher.
+struct ResolvedCandidateFilter
+{
+    DescriptorId matcherId;
+    std::string description;
+    CandidateFilterFn filter = nullptr;
+    std::unordered_set<DescriptorId, DescriptorIdHash> listingPacks;
+};
+
 /// A UDD plus the handler its dispatchSymbol resolved to at construction.
 template <typename THandle>
 struct ResolvedDispatch
@@ -182,6 +192,7 @@ public:
         }
 
         validateAndIndexPacks();
+        resolveCandidateFilters();
     }
 
     KernelIngestorSharedState(const KernelIngestorSharedState&) = delete;
@@ -228,7 +239,52 @@ public:
         return _graphMatchFn;
     }
 
+    /// Every kernel-scoped matcher whose symbol also names a CandidateFilterFn, in the
+    /// order the packs first list them. Resolved at construction, like the matchers: the
+    /// registry is immutable once the provider loaded, and absence means no refinement.
+    const std::vector<ResolvedCandidateFilter>& candidateFilters() const
+    {
+        return _candidateFilters;
+    }
+
 private:
+    void resolveCandidateFilters()
+    {
+        std::unordered_set<DescriptorId, DescriptorIdHash> visited;
+        for(const auto& pack : _packs)
+        {
+            for(const auto& matcherId : pack.matcherIds)
+            {
+                const auto& matcher = _matchers.at(matcherId);
+                if(matcher.descriptor.scope != MatchScope::KERNEL
+                   || !visited.insert(matcherId).second)
+                {
+                    continue;
+                }
+                const auto filter
+                    = CandidateFilterRegistry::tryResolve(matcher.descriptor.matchSymbol);
+                if(filter == nullptr)
+                {
+                    continue;
+                }
+                ResolvedCandidateFilter resolved{
+                    matcherId,
+                    describeDescriptor("matcher", matcher.descriptor.name, matcher.descriptor.id),
+                    filter,
+                    {}};
+                for(const auto& other : _packs)
+                {
+                    if(std::find(other.matcherIds.begin(), other.matcherIds.end(), matcherId)
+                       != other.matcherIds.end())
+                    {
+                        resolved.listingPacks.insert(other.id);
+                    }
+                }
+                _candidateFilters.push_back(std::move(resolved));
+            }
+        }
+    }
+
     /// Validates every pack's references and builds the KernelDefinition for each of
     /// its kernels. Every field of a definition is context-independent, so this is the
     /// only place they are ever computed: buildCatalog copies them per query rather
@@ -388,6 +444,7 @@ private:
     std::vector<std::vector<KernelDefinition>> _definitions;
     std::shared_ptr<IKernelHeuristic> _heuristic;
     GraphMatchFn _graphMatchFn = nullptr;
+    std::vector<ResolvedCandidateFilter> _candidateFilters;
 };
 
 /// The engine's view of its own kernels: which apply to a graph, in what order, and
@@ -876,8 +933,7 @@ private:
     /// Each kernel-scoped matcher whose symbol also names a CandidateFilterFn narrows, as
     /// one set, every kernel admitted from the packs listing it. Runs once every pack has
     /// been matched, so a set sharded across packs is refined whole; what stays keeps its
-    /// order. Resolved per call rather than at construction: absence is the common case
-    /// and means no refinement, and the registry is immutable once the provider loaded.
+    /// order. The filters and their packs were resolved with the shared state.
     void applyCandidateFilters(const MatchContext& context, Catalog& catalog) const
     {
         if(catalog.entries.empty())
@@ -885,73 +941,46 @@ private:
             return;
         }
         std::vector<bool> keep(catalog.entries.size(), true);
-        std::unordered_set<DescriptorId, DescriptorIdHash> visited;
-        for(const auto& pack : _packs)
+        for(const auto& resolved : _state->candidateFilters())
         {
-            for(const auto& matcherId : pack.matcherIds)
+            std::vector<size_t> indices;
+            std::vector<const KernelDefinition*> candidates;
+            for(size_t i = 0; i < catalog.entries.size(); ++i)
             {
-                const auto& matcher = _matchers.at(matcherId);
-                if(matcher.descriptor.scope != MatchScope::KERNEL
-                   || !visited.insert(matcherId).second)
+                if(keep[i] && resolved.listingPacks.count(catalog.entries[i].packId) != 0)
                 {
-                    continue;
+                    indices.push_back(i);
+                    candidates.push_back(&catalog.entries[i]);
                 }
-                const auto filter
-                    = CandidateFilterRegistry::tryResolve(matcher.descriptor.matchSymbol);
-                if(filter == nullptr)
-                {
-                    continue;
-                }
-
-                std::unordered_set<DescriptorId, DescriptorIdHash> listing;
-                for(const auto& other : _packs)
-                {
-                    if(std::find(other.matcherIds.begin(), other.matcherIds.end(), matcherId)
-                       != other.matcherIds.end())
-                    {
-                        listing.insert(other.id);
-                    }
-                }
-                std::vector<size_t> indices;
-                std::vector<const KernelDefinition*> candidates;
-                for(size_t i = 0; i < catalog.entries.size(); ++i)
-                {
-                    if(keep[i] && listing.count(catalog.entries[i].packId) != 0)
-                    {
-                        indices.push_back(i);
-                        candidates.push_back(&catalog.entries[i]);
-                    }
-                }
-                if(candidates.empty())
-                {
-                    continue;
-                }
-
-                const auto description
-                    = describeDescriptor("matcher", matcher.descriptor.name, matcher.descriptor.id);
-                const auto kept = filter(context, catalog.bound, candidates);
-                if(kept.size() != candidates.size())
-                {
-                    throw std::runtime_error("the candidate filter of " + description + " returned "
-                                             + std::to_string(kept.size()) + " flag(s) for "
-                                             + std::to_string(candidates.size()) + " kernel(s)");
-                }
-                size_t survivors = 0;
-                for(size_t i = 0; i < kept.size(); ++i)
-                {
-                    if(kept[i])
-                    {
-                        ++survivors;
-                    }
-                    else
-                    {
-                        keep[indices[i]] = false;
-                    }
-                }
-                HIPDNN_PLUGIN_LOG_INFO("ingestor: the candidate filter of "
-                                       << description << " kept " << survivors << " of "
-                                       << candidates.size() << " kernel(s)");
             }
+            if(candidates.empty())
+            {
+                continue;
+            }
+
+            const auto kept = resolved.filter(context, catalog.bound, candidates);
+            if(kept.size() != candidates.size())
+            {
+                throw std::runtime_error("the candidate filter of " + resolved.description
+                                         + " returned " + std::to_string(kept.size())
+                                         + " flag(s) for " + std::to_string(candidates.size())
+                                         + " kernel(s)");
+            }
+            size_t survivors = 0;
+            for(size_t i = 0; i < kept.size(); ++i)
+            {
+                if(kept[i])
+                {
+                    ++survivors;
+                }
+                else
+                {
+                    keep[indices[i]] = false;
+                }
+            }
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: the candidate filter of "
+                                   << resolved.description << " kept " << survivors << " of "
+                                   << candidates.size() << " kernel(s)");
         }
 
         size_t next = 0;
