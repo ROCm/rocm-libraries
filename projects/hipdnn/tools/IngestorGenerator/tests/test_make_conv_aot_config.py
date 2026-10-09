@@ -531,6 +531,51 @@ def test_direct_instances_are_variants_stating_their_own_fields(
     assert config["engine"]["knobs"] == ["tile_k", "kernel_family"]
 
 
+def test_the_seed_runs_every_direct_variant_knob(
+    seed_identities, forward_direct_identities
+):
+    """The seed pins each of its instances on the GPU, so per dtype it holds at least 20
+    instances of each tiled, col, grouped and non-grouped kernel, together every value
+    of every knob the direct sweep builds for it, and every grouped channel count and
+    non-grouped dilation."""
+    for dtype in ("fp16", "bf16"):
+        for algorithm in (
+            "direct_depthwise_tiled",
+            "direct_depthwise_col",
+            "direct_grouped",
+            "direct_nongrouped",
+        ):
+
+            def values(identities):
+                found = set()
+                for identity in identities:
+                    if (identity["dtype_a"], identity["algorithm"]) == (
+                        dtype,
+                        algorithm,
+                    ):
+                        found |= set(json.loads(identity["knobs"]).items())
+                        found.add(
+                            (
+                                "caps",
+                                identity["cpg"],
+                                identity["dilation_h"],
+                                identity["dilation_w"],
+                            )
+                        )
+                return found
+
+            seeded = [
+                i
+                for i in seed_identities
+                if (i["dtype_a"], i["algorithm"]) == (dtype, algorithm)
+            ]
+            assert len(seeded) >= 20, (dtype, algorithm)
+            assert values(forward_direct_identities) == values(seed_identities), (
+                dtype,
+                algorithm,
+            )
+
+
 def _stabilize_ids_one_kernel_at_a_time(kdp_path):
     """The original quadratic algorithm, kept as the reference for the linear one."""
     document = json.loads(kdp_path.read_text())
@@ -607,6 +652,10 @@ _GRAPH_ROW = re.compile(
     r'^\s*\{"(\w+)", \{([\d, ]*)\}, (\d+), (\d+), (\d+), (\d+), (\d+)\},$',
     re.MULTILINE,
 )
+#: One aotSeedDirectGraphs() row: name, problem, the seed's direct and implicit counts.
+_SEED_GRAPH_ROW = re.compile(
+    r'^\s*\{"(\w+)", \{([\d, ]*)\}, (\d+), (\d+)\},$', re.MULTILINE
+)
 #: ConvProblem's defaults, in its field order: n, c, k, hi, wi, y, x, strides,
 #: paddings, dilations, groups.
 _DEFAULT_PROBLEM = (2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1)
@@ -663,6 +712,17 @@ def _gpu_suite_graphs():
         yield name, values or _DEFAULT_PROBLEM, tuple(int(v) for v in row)
 
 
+def _seed_direct_graphs():
+    """aotSeedDirectGraphs(): name, problem, the seed's direct and implicit counts."""
+    text = _GPU_SUITE.read_text()
+    start = text.index("aotSeedDirectGraphs()\n{")
+    rows = _SEED_GRAPH_ROW.findall(text[start : text.index("return s_graphs", start)])
+    assert len(rows) >= 50, "aotSeedDirectGraphs() rows not found; one row per line"
+    for name, problem, *row in rows:
+        values = tuple(int(v) for v in problem.split(","))
+        yield name, values, tuple(int(v) for v in row)
+
+
 def test_gpu_suite_selected_counts_are_the_python_runtime_candidates(catalogs):
     """IntegrationGpuGfx950ConvFwd.cpp states, per graph, how many instances of each
     family the seed and the full catalog select; the engine's kernel matcher and
@@ -683,11 +743,22 @@ def test_gpu_suite_selected_counts_are_the_python_runtime_candidates(catalogs):
             # rocKE's direct benchmark runs every direct kernel that serves.
             assert (counted[0], counted[2]) == (serving[0], serving[2]), (name, dtype)
 
+    # The seed-only graphs of its tiled, col, grouped and non-grouped instances: each has
+    # both families selected, so the kernel_family knob test runs both.
+    for name, problem, row in _seed_direct_graphs():
+        for dtype in ("fp16", "bf16"):
+            counted = _selected_counts(catalogs["seed"], problem, dtype)
+            assert counted == row, (name, dtype)
+            assert counted[0] > 0 and counted[1] > 0, (name, dtype)
+            serving = _serving_counts(catalogs["seed"], problem, dtype)
+            assert counted[0] == serving[0] and counted[1] <= serving[1], (name, dtype)
+
 
 def test_gpu_suite_selects_every_seed_instance_for_some_graph(catalogs):
     """The seed suite pins every selected instance of each graph, so every seed
     instance has to be selected for at least one of them to be checked on the GPU."""
     graphs = [problem for _, problem, _ in _gpu_suite_graphs()]
+    graphs += [problem for _, problem, _ in _seed_direct_graphs()]
     for dtype in ("fp16", "bf16"):
         selected = {
             spec.instance_id
