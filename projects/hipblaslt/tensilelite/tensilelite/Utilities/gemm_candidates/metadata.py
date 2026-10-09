@@ -45,6 +45,7 @@ class LibraryMetadata:
         solution_index: int,
         number_of_problems: int,
         *,
+        seed: int = 1,
         max_dimension: int = 8192,
         max_data_bytes: int = 128 * 1024 * 1024,
     ) -> list[GemmCase]:
@@ -53,7 +54,8 @@ class LibraryMetadata:
         Returns the requested count, or every candidate in the bounded
         dimensional domain if that is smaller. See ``candidate_gemms`` for
         the policy and the distinction between candidates and native support.
-        The returned cases can be formatted for either native client.
+        ``seed`` selects reproducible epilogues and optional settings within
+        that count. The returned cases can be formatted for either native client.
         """
         from .candidates import candidate_gemms
 
@@ -61,6 +63,7 @@ class LibraryMetadata:
             self,
             solution_index,
             max_cases=number_of_problems,
+            seed=seed,
             max_dimension=max_dimension,
             max_data_bytes=max_data_bytes,
         )

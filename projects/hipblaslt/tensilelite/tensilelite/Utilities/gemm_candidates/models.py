@@ -26,6 +26,16 @@ _TYPE_INFO = {
 # names to none/Scalar/Vector; block modes must use the numeric enum values.
 _MX_SCALE_TYPES = {"E8": {32: 3, 16: 4}, "Float8": {32: 5, 16: 6}, "E5M3": {32: 7, 16: 8}}
 
+# Activations representable by both clients. Bench calls the parameter-free
+# SiLU operation "swish"; Tensile's distinct Swish takes an extra parameter.
+_BENCH_ACTIVATIONS = {
+    "None": "none",
+    "Relu": "relu",
+    "Gelu": "gelu",
+    "Silu": "swish",
+    "Clamp": "clamp",
+}
+
 
 def bench_type(name: str) -> str:
     """Convert a supported Tensile type name to a bench input type."""
@@ -49,9 +59,8 @@ class GemmShape:
 
 @dataclass(frozen=True, slots=True)
 class GemmProfile:
-    """Types, transposes and optional features taken from one solution.
+    """Types, transposes and selected optional features for one solution.
 
-    Bias/scales follow the metadata; this is not an epilogue sweep.
     Type names are Tensile names, such as ``Half`` and ``Float``.
     """
 
@@ -262,11 +271,11 @@ class GemmCase:
     profile: GemmProfile
     id: str
     reason: str
-    # Selected runtime values, separate from the solution's allowed profile.
-    # The initial policy chooses these defaults; formatters consume the values.
+    # Selected runtime values; formatters consume them without resampling.
     alpha: float = 1
     beta: float = 0
     activation: str = "None"
+    activation_args: tuple[float, float] = (0.0, 6.0)
 
     @property
     def leading_dimensions(self) -> tuple[int, int, int, int]:

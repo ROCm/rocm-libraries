@@ -11,7 +11,7 @@ import msgpack
 import pytest
 import yaml
 from tensilelite.Utilities.gemm_candidates.candidates import candidate_gemms
-from tensilelite.Utilities.gemm_candidates.clients import bench_yaml, tensile_ini
+from tensilelite.Utilities.gemm_candidates.clients import bench_yaml, tensile_configs, tensile_ini
 from tensilelite.Utilities.gemm_candidates.metadata import load_library_metadata
 from tensilelite.Utilities.gemm_candidates.models import GemmShape
 
@@ -203,6 +203,110 @@ def test_requested_count_extends_the_boundary_menu_and_preserves_prefixes(librar
     assert GemmShape(128, 97, 128) in shapes
 
 
+@pytest.fixture
+def runtime_library(library):
+    problem = {
+        "useBias": 1,
+        "biasDataTypeWhiteList": ["Float", "Half"],
+        "biasSrcWhiteList": [3],
+        "activationType": "Hipblaslt_all",
+        "useScaleAB": "Scalar",
+        "useScaleCD": True,
+        "useScaleAlphaVec": 1,
+    }
+    predicates = [
+        {
+            "type": "ActivationEnumWhiteList",
+            "value": ["None", "Relu", "Gelu", "Silu", "Clamp", "Sigmoid", "Abs"],
+        }
+    ]
+    return library(*(solution(i, problem=problem, predicates=predicates) for i in (17, 9)))
+
+
+def test_case_budget_includes_seeded_runtime_variation(runtime_library):
+    loaded = runtime_library
+    cases = loaded.get_problems(17, 1000, seed=7)
+    assert len(cases) == len({case.shape for case in cases}) == 1000
+    for count in (1, 4, 10, 100):
+        assert loaded.get_problems(17, count, seed=7) == cases[:count]
+    different = loaded.get_problems(17, 1000, seed=8)
+    assert [case.shape for case in different] == [case.shape for case in cases]
+    assert different != cases
+    aliases = loaded.get_problems(9, 1000, seed=7)
+    assert [replace(case, solution_index=17) for case in aliases] == cases
+    assert [(c.alpha, c.beta) for c in cases[:8]] == [(1, 0), (2, 0), (1, 1), (2, 1)] * 2
+    # A broad deterministic sample checks the documented probability without
+    # requiring a particular RNG sequence or expecting exactly 5 of 10 cases.
+    plain = sum(not c.profile.use_bias and c.activation == "None" for c in cases)
+    assert 450 < plain < 550
+    assert {c.activation for c in cases} == {"None", "Relu", "Gelu", "Silu", "Clamp"}
+    assert {c.profile.bias_type for c in cases if c.profile.use_bias} == {"Float", "Half"}
+    assert {c.profile.scale_ab for c in cases} == {"", "Scalar"}
+    assert {c.profile.scale_cd for c in cases} == {False, True}
+    assert {c.profile.scale_alpha_vector for c in cases} == {False, True}
+
+
+@pytest.mark.parametrize(
+    "predicates, pairs",
+    [
+        ([{"type": "BetaZero"}], {(1, 0), (2, 0)}),
+        ([{"type": "BetaOne"}], {(1, 1), (2, 1)}),
+        ([{"type": "AlphaValue", "value": "One"}], {(1, 0), (1, 1)}),
+        ([{"type": "BetaValue", "value": "One"}], {(1, 1), (2, 1)}),
+        ([{"type": "AlphaValue", "value": "Any"}], {(1, 0), (2, 0), (1, 1), (2, 1)}),
+    ],
+)
+def test_runtime_sampling_respects_scalar_restrictions(library, predicates, pairs):
+    cases = library(solution(predicates=predicates)).get_problems(17, 10)
+    assert {(case.alpha, case.beta) for case in cases} == pairs
+
+
+def test_runtime_sampling_respects_activation_lists_and_rejects_impossible_scalars(library):
+    loaded = library(
+        solution(
+            problem={"activationType": "All"},
+            predicates=[{"type": "ActivationEnumWhiteList", "value": ["Relu", "Abs"]}],
+        )
+    )
+    cases = loaded.get_problems(17, 100)
+    assert {case.activation for case in cases} == {"None", "Relu"}
+    plain = next(case for case in cases if case.activation == "None")
+    assert "activation-type=None\n" in tensile_ini([plain])
+    loaded = library(solution(predicates=[{"type": "AlphaValue", "value": "NegativeOne"}]))
+    with pytest.raises(ValueError, match="scalar restrictions"):
+        loaded.get_problems(17, 10)
+    with pytest.raises(ValueError, match="seed must be an integer"):
+        library().get_problems(17, 10, seed=1.5)
+
+
+def test_tensile_groups_run_each_case_once_with_its_own_settings(runtime_library):
+    cases = runtime_library.get_problems(17, 10) + runtime_library.get_problems(9, 10)
+    expected = {(c.solution_index, c.shape.tensile_sizes): c for c in cases}
+    configs = tensile_configs(cases, results_file="report.csv")
+    observed, result_paths = set(), set()
+    for ini in configs:
+        options = dict(line.split("=", 1) for line in ini.splitlines())
+        result_paths.add(options["results-file"])
+        for line in ini.splitlines():
+            if not line.startswith("problem-size="):
+                continue
+            shape = tuple(map(int, line.split("=", 1)[1].split(",")))
+            key = (int(options["solution-start-idx"]), shape)
+            case = expected[key]
+            assert key not in observed
+            observed.add(key)
+            assert options["num-solutions"] == "1"
+            assert options["init-alpha"] == {1: "One", 2: "Two"}[case.alpha]
+            assert options["init-beta"] == {0: "Zero", 1: "One"}[case.beta]
+            assert options["init-c"] == ("Random" if case.beta else "Zero")
+            assert options["activation-enum-args"] == case.activation
+            assert options["use-bias"] == str(int(case.profile.use_bias))
+            assert options["use-scaleAB"] == case.profile.scale_ab
+    assert observed == expected.keys()
+    assert len(result_paths) == len(configs)
+    assert tensile_configs([cases[0]]) == [tensile_ini([cases[0]])]
+
+
 @pytest.mark.parametrize("data_limit", [32, 128, 4096])
 def test_short_result_exhausts_the_bounded_domain(library, data_limit):
     loaded = library()
@@ -391,6 +495,12 @@ def test_both_adapters_preserve_shapes_types_and_packed_layouts(
         )
     )
     case = replace(candidate_gemms(loaded, 17)[0], shape=GemmShape(5, 7, 11, 3))
+    case = replace(
+        case,
+        profile=replace(
+            case.profile, use_bias=True, scale_ab="Scalar", scale_cd=True, scale_alpha_vector=True
+        ),
+    )
     (row,) = yaml.safe_load(bench_yaml([case]))
     assert (row["M"], row["N"], row["K"], row["batch_count"]) == (5, 7, 11, 3)
     assert (row["lda"], row["ldb"], row["ldc"], row["ldd"]) == (lda, ldb, 5, 5)
@@ -473,7 +583,7 @@ def test_mx_profiles_reach_both_clients(
     rows = yaml.safe_load(bench_yaml(cases))
     assert len(rows) == len(cases) == 10
     assert all(row["scaleA"] == row["scaleB"] == bench_scale for row in rows)
-    ini = dict(line.split("=", 1) for line in tensile_ini(cases).splitlines())
+    ini = dict(line.split("=", 1) for line in "".join(tensile_configs(cases)).splitlines())
     assert ini["mx-a-block"] == ini["mx-b-block"] == str(block)
     assert ini["mx-a-type"] == ini["mx-b-type"] == scale_type
     assert ini["mx-scale-format"] == str(int(layout != 0))
@@ -551,14 +661,21 @@ def test_bench_rejects_a_scale_layout_it_cannot_upload(library):
         bench_yaml(cases)
 
 
-def test_adapters_take_runtime_settings_from_the_case(library):
+@pytest.mark.parametrize(
+    "activation, bench_activation, args",
+    [("Relu", "relu", (0.0, 6.0)), ("Silu", "swish", (0.0, 6.0)), ("Clamp", "clamp", (-1.0, 1.0))],
+)
+def test_adapters_take_runtime_settings_from_the_case(library, activation, bench_activation, args):
     case = library(solution(problem={"activationType": "All"})).get_problems(17, 1)[0]
-    selected = replace(case, alpha=2, beta=1, activation="Relu")
+    selected = replace(case, alpha=2, beta=1, activation=activation, activation_args=args)
     (row,) = yaml.safe_load(bench_yaml([selected]))
-    assert (row["alpha"], row["beta"], row["activation_type"]) == (2, 1, "relu")
+    assert (row["alpha"], row["beta"], row["activation_type"]) == (2, 1, bench_activation)
+    assert (row["activation_arg1"], row["activation_arg2"]) == args
     ini = tensile_ini([selected])
     assert "init-alpha=Two\n" in ini and "init-beta=One\n" in ini
-    assert "activation-enum-args=Relu\n" in ini
+    assert "init-c=Random\n" in ini
+    assert f"activation-enum-args={activation}\n" in ini
+    assert f"activation-additional-args={args[0]},{args[1]}\n" in ini
     with pytest.raises(ValueError, match="runtime profile"):
         tensile_ini([case, selected])
 
@@ -567,10 +684,10 @@ def test_batching_preserves_solution_associations(library):
     loaded = library(solution(17), solution(9))
     a, b = [candidate_gemms(loaded, i, max_cases=4) for i in (17, 9)]
     assert [r["solution_index"] for r in yaml.safe_load(bench_yaml(a + b))] == [17] * 4 + [9] * 4
-    ini = tensile_ini(a)
-    assert ini.count("problem-size=") == len(a)
-    assert ini.count("a-strides=") == len(a)
-    assert ini.count("solution-start-idx=") == 1
+    configs = tensile_configs(a)
+    assert sum(ini.count("problem-size=") for ini in configs) == len(a)
+    assert sum(ini.count("a-strides=") for ini in configs) == len(a)
+    assert all(ini.count("solution-start-idx=") == 1 for ini in configs)
     with pytest.raises(ValueError, match="only one solution"):
         tensile_ini(a + b)
     foreign = replace(a[0], metadata_file=a[0].metadata_file.parent / "other" / "library.dat")

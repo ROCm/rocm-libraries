@@ -122,14 +122,16 @@ class NoGenerator(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, NoGenerator())
 import yaml
 from tensilelite.Utilities.gemm_candidates import (
-    load_library_metadata, candidate_gemms, bench_yaml, tensile_ini,
+    load_library_metadata, candidate_gemms, bench_yaml, tensile_configs,
 )
 library = load_library_metadata(sys.argv[1], target="gfx942", solution_indices=[17])
 cases = candidate_gemms(library, 17)
 assert len(cases) > 1
 assert cases[0].profile.a_type == "Half"
 assert yaml.safe_load(bench_yaml(cases))[0]["solution_index"] == 17
-assert "solution-start-idx=17\\n" in tensile_ini(cases)
+configs = tensile_configs(cases)
+assert all("solution-start-idx=17\\n" in config for config in configs)
+assert sum(config.count("problem-size=") for config in configs) == len(cases)
 """
     env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[3]))
     result = subprocess.run(

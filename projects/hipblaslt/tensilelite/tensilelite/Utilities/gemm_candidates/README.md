@@ -3,27 +3,29 @@
 `library.get_problems(index, count)` returns a deterministic `list[GemmCase]` to
 try with one packaged TensileLite solution. It uses the solution's dimensional
 constraints and tile sizes to target different reduction lengths and matrix
-boundaries. It needs neither a GPU nor the kernel generator.
+boundaries, then assigns seeded runtime settings within the same case budget.
+It needs neither a GPU nor the kernel generator.
 
 ```python
 from pathlib import Path
 from tensilelite.Utilities.gemm_candidates import (
     bench_yaml,
     load_library_metadata,
-    tensile_ini,
+    tensile_configs,
 )
 
 index = 17  # Substitute a solution index from your library.
 library = load_library_metadata(
     "/path/to/hipblaslt/library", target="gfx942", solution_indices=[index]
 )
-cases = library.get_problems(index, 10)
+cases = library.get_problems(index, 10, seed=1)
 
 for case in cases:
     print(case.id, case.shape, case.profile.a_type, case.reason)
 
 Path("cases.yaml").write_text(bench_yaml(cases))
-Path("cases.ini").write_text(tensile_ini(cases, results_file="results.csv"))
+for number, config in enumerate(tensile_configs(cases, results_file="results.csv")):
+    Path(f"cases-{number}.ini").write_text(config)
 ```
 
 Use Python 3.10 or later with `msgpack` and `PyYAML`. From a source checkout,
@@ -40,9 +42,8 @@ Each immutable `GemmCase` contains:
   selected bias/scaling settings. Type strings use Tensile names, such as
   `Half`, `BFloat16` and `Float`. MX profiles include each operand's scale
   block/type and the solution's scale layout.
-- Selected `alpha`, `beta` and `activation` values. The initial policy chooses
-  1, 0 and `None`; both adapters read these from the case. Future policies can
-  vary runtime settings without changing the list-of-cases interface.
+- Selected `alpha`, `beta`, `activation` and `activation_args` values. Both
+  adapters read these from the case without resampling.
 - Solution index, solution name, kernel name, target, metadata file and code objects.
 - An `id` and a readable `reason` explaining why the shape was selected.
 
@@ -51,7 +52,7 @@ A/B/C/D order. `shape.tensile_sizes` gives the Tensile client's **M,N,batch,K**
 order. The adapters handle that distinction.
 
 The return type is independent of the runner. `bench_yaml(cases)` and
-`tensile_ini(cases)` translate the same logical cases into the two clients'
+`tensile_configs(cases)` translate the same logical cases into the two clients'
 input formats. They use existing client data initialization and MX packing;
 the Python utility does not allocate GPU buffers or implement numerical GEMM.
 
@@ -99,13 +100,42 @@ The default limits are dimensions at most 8192 and at most 128 MiB of combined
 A/B/C/D storage per case, accounting for packed FP4/FP6 storage. Workspace,
 bias and scalar/MX scale buffers are separate. Pass `max_dimension` and
 `max_data_bytes` to change these limits. Requests are deterministic prefixes:
-asking for 10 returns the first 10 of the 100-case result with the same limits.
+asking for 10 returns the first 10 of the 100-case result with the same limits
+and seed. Changing the seed changes runtime settings, not the selected shapes.
 
 A shorter list means every distinct shape in this **bounded dimensional
 domain** has been returned. It does not establish exhaustive kernel-path
 coverage, or exhaust all GEMMs beyond the configured limits, layouts and
 runtime settings. An empty feasible set raises `ValueError`. The equivalent
 free-function form is `candidate_gemms(library, index, max_cases=count)`.
+
+## Runtime settings
+
+Each shape receives one combination of settings. A request for ten cases still
+returns ten cases; settings do not introduce a Cartesian product.
+
+The default `seed=1` and solution name initialize a local random generator.
+Results are independent of call order, process hash randomization, paths and
+numeric index aliases. The seed is unrelated to a repository revision.
+
+- Alpha/beta cycle through `(1,0)`, `(2,0)`, `(1,1)`, `(2,1)`. Recorded scalar
+  restrictions reduce the allowed values; for example, `BetaZero` keeps beta=0.
+- Half the epilogue draws disable both bias and activation. The other half
+  choose uniformly among the supported nonempty bias/activation combinations.
+  Activations come from the solution's whitelist, limited to ReLU, GELU, SiLU
+  and clamp, which both clients can execute. A solution with no such features
+  always uses the plain epilogue. Ten cases need not split exactly five/five.
+- Enabled bias chooses a type and source from the metadata's allowed lists.
+  Optional A/B, C/D and alpha-vector scaling are independently enabled with
+  probability 1/2. Required MX block scales remain enabled; optional A/B scalar
+  scales remain disabled for MX because bench uses the same option for both.
+- Clamp chooses bounds `(0,6)` or `(-1,1)`. Beta=1 cases initialize C with
+  random data so numerical validation exercises its contribution.
+
+Without optional scales, the operation is
+`D = activation(alpha * op(A) * op(B) + beta * C + bias)`.
+Absent bias/activation reduces this to ordinary GEMM. These samples aim to
+exercise different settings; they do not establish exhaustive path coverage.
 
 ## Reuse and batching
 
@@ -159,14 +189,14 @@ the generator while sharing serialization rules with its existing clients.
 ```sh
 HIPBLASLT_TENSILE_LIBPATH=/path/to/hipblaslt/library/gfx942 \
     hipblaslt-bench --yaml cases.yaml
-tensilelite-client --config-file cases.ini
+for config in cases-*.ini; do
+    tensilelite-client --config-file "$config"
+done
 ```
 
 Use clients and code objects compatible with the metadata and GPU. Both
 adapters enable numerical validation and apply each case's runtime settings.
-The initial policy uses alpha=1/beta=0, no activation, and supported
-per-solution bias/scaling defaults. It selects one bias type/source rather
-than sweeping epilogues. Tensile uses the fixed input
+Tensile uses the fixed input
 initialization seed `1`; its seed `0` would select the current time.
 
 MX cases support FP8/BF8, packed FP4/FP6/BF6 inputs, and mixed MX/ordinary
@@ -184,9 +214,15 @@ scale layout. Native MX execution requires a compatible GPU; host-side
 generation and formatting do not establish numerical or race correctness.
 
 `bench_yaml` can combine rows for several solutions for one target in the same
-installation; each row carries its explicit index. `tensile_ini` accepts cases for **one
-solution and runtime profile** and rejects mixed inputs, because the client
-otherwise applies all shapes to all selected solutions. Both accept
+installation; each row carries its explicit index. `tensile_configs` groups
+cases with the same solution and runtime settings, returning a list of INI
+strings. Run each configuration in a separate invocation: passing several
+`--config-file` arguments merges options rather than running independent groups.
+Every case occurs in exactly one group, and each group gets its own result CSV.
+Grouping reduces the number of client starts when cases share settings.
+
+`tensile_ini` formats a single uniform group and rejects mixed inputs, because
+the client applies all shapes to all selected solutions/settings. Both accept
 `workspace_bytes` to override the 128 MiB workspace limit. The formatters return
 strings and do not execute clients.
 

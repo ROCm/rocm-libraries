@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 from ..ClientConfig import problemTypeOptions
-from .models import GemmCase, bench_type
+from .models import _BENCH_ACTIVATIONS, GemmCase, bench_type
 
 
 def bench_yaml(cases: Iterable[GemmCase], *, workspace_bytes: int = 128 * 1024 * 1024) -> str:
@@ -27,6 +27,8 @@ def bench_yaml(cases: Iterable[GemmCase], *, workspace_bytes: int = 128 * 1024 *
             raise ValueError("Bench cases must come from the same library directory and target")
         library = source
         p, s = case.profile, case.shape
+        if case.activation not in _BENCH_ACTIVATIONS:
+            raise ValueError(f"Bench cannot represent activation {case.activation!r}")
         row = {
             "function": "matmul",
             "algo_method": 2,
@@ -55,7 +57,9 @@ def bench_yaml(cases: Iterable[GemmCase], *, workspace_bytes: int = 128 * 1024 *
             "scaleC": p.scale_cd,
             "scaleD": p.scale_cd,
             "scaleAlpha_vector": p.scale_alpha_vector,
-            "activation_type": case.activation.lower(),
+            "activation_type": _BENCH_ACTIVATIONS[case.activation],
+            "activation_arg1": case.activation_args[0],
+            "activation_arg2": case.activation_args[1],
             "norm_check": 1,
             "norm_check_assert": True,
             "allclose_check": 1,
@@ -80,6 +84,51 @@ def bench_yaml(cases: Iterable[GemmCase], *, workspace_bytes: int = 128 * 1024 *
     return yaml.dump(rows, Dumper=getattr(yaml, "CSafeDumper", yaml.SafeDumper), sort_keys=False)
 
 
+def _tensile_identity(case: GemmCase) -> tuple:
+    """Options that Tensile applies to every shape in a configuration."""
+    return (
+        case.solution_index,
+        case.solution_name,
+        case.kernel_name,
+        case.profile,
+        case.target,
+        case.metadata_file,
+        case.code_objects,
+        case.alpha,
+        case.beta,
+        case.activation,
+        case.activation_args,
+    )
+
+
+def tensile_configs(
+    cases: Iterable[GemmCase],
+    *,
+    results_file: str | Path = "results.csv",
+    workspace_bytes: int = 128 * 1024 * 1024,
+) -> list[str]:
+    """Group cases by runtime settings and return one INI per client invocation.
+
+    Each input case occurs exactly once, with no shape/settings cross product.
+    Groups retain first-occurrence order. Multiple groups get distinct result
+    paths (``results-0.csv``, etc.); one group keeps ``results_file`` unchanged.
+    Run each configuration separately: the client's multiple-config-file
+    option merges options and does not execute independent configurations.
+    """
+    groups = {}
+    for case in cases:
+        groups.setdefault(_tensile_identity(case), []).append(case)
+    path = Path(results_file)
+    return [
+        tensile_ini(
+            group,
+            results_file=path.with_stem(f"{path.stem}-{i}") if len(groups) > 1 else path,
+            workspace_bytes=workspace_bytes,
+        )
+        for i, group in enumerate(groups.values())
+    ]
+
+
 def tensile_ini(
     cases: Iterable[GemmCase],
     *,
@@ -92,30 +141,18 @@ def tensile_ini(
     them raises ``ValueError``: the client applies common options to every
     problem, so combining unrelated solutions would create a cross product.
     This enables full numerical validation with one enqueue per case and no
-    timing sweep. Code objects are needed at execution time, not formatting.
+    timing sweep. Use ``tensile_configs`` for cases with different runtime
+    settings. Code objects are needed at execution time, not formatting.
     """
     cases = list(cases)
     if not cases:
         raise ValueError("A Tensile configuration needs at least one case")
     first = cases[0]
 
-    def identity(case):
-        return (
-            case.solution_index,
-            case.solution_name,
-            case.kernel_name,
-            case.profile,
-            case.target,
-            case.metadata_file,
-            case.code_objects,
-            case.alpha,
-            case.beta,
-            case.activation,
-        )
-
-    if any(identity(case) != identity(first) for case in cases[1:]):
+    if any(_tensile_identity(case) != _tensile_identity(first) for case in cases[1:]):
         raise ValueError(
-            "A Tensile configuration must contain only one solution and runtime profile"
+            "A Tensile configuration must contain only one solution and runtime profile; "
+            "use tensile_configs to group cases"
         )
     p = first.profile
     # The client exposes scalar initialization modes rather than arbitrary
@@ -128,14 +165,19 @@ def tensile_ini(
         "results-file": results_file,
         "solution-start-idx": first.solution_index,
         "num-solutions": 1,
-        **problemTypeOptions(p.as_problem_type()),
+        **problemTypeOptions(
+            {
+                **p.as_problem_type(),
+                "activationType": p.activation_type if first.activation != "None" else "None",
+            }
+        ),
         "bias-type-args": p.bias_type,
         "activation-enum-args": first.activation,
-        "activation-additional-args": "2.0,2.0",
+        "activation-additional-args": ",".join(map(str, first.activation_args)),
         "init-seed": 1,  # Zero asks the client to seed from the clock.
         "init-a": "Random",
         "init-b": "Random",
-        "init-c": "Zero",
+        "init-c": "Random" if first.beta else "Zero",
         "init-d": "Zero",
         "init-alpha": scalar_modes[first.alpha],
         "init-beta": scalar_modes[first.beta],

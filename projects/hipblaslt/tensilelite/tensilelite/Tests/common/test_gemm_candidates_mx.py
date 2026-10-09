@@ -21,7 +21,7 @@ from tensilelite import Tensile
 from tensilelite.Common import state
 from tensilelite.SolutionStructs.Problem import ProblemType
 from tensilelite.Tests.gpu_detection import get_available_archs
-from tensilelite.Utilities.gemm_candidates import load_library_metadata, tensile_ini
+from tensilelite.Utilities.gemm_candidates import load_library_metadata, tensile_configs
 
 pytestmark = [pytest.mark.gfx950, pytest.mark.emu_fast, pytest.mark.gpu, pytest.mark.gemm]
 
@@ -44,6 +44,8 @@ def _logic(dtype):
             "TransposeB": False,
             "Batched": True,
             "UseBeta": True,
+            "UseBias": 1 if dtype == "F8" else 0,
+            "ActivationType": "hipblaslt_all" if dtype == "F8" else "none",
             "MXBlockA": 32,
             "MXBlockB": 32,
         },
@@ -141,22 +143,30 @@ def test_mx_candidates(dtype, tmp_path, pytestconfig, tensile_args, worker_lock_
     assert len(library.indices) == 1
     cases = library.get_problems(library.indices[0], 10)
     assert len(cases) == 10
-    config = tmp_path / "candidates.ini"
-    config.write_text(tensile_ini(cases, results_file=tmp_path / "results.csv"))
-    with worker_lock_instance, (tmp_path / "client.log").open("w+") as log:
-        result = subprocess.run(
-            [options.prebuilt_client, "--config-file", str(config)],
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            timeout=90,
-        )
-        log.seek(0)
-        text = log.read()
-    assert result.returncode == 0, text
-    assert "\nRACE " not in "\n" + text, text
-    rows = list(csv.reader(text.splitlines()))
-    header = next(row for row in rows if row[:2] == ["run", "problem-progress"])
-    records = [dict(zip(header, row)) for row in rows if row and row[0] == "0"]
+    assert {(c.alpha, c.beta) for c in cases} == {(1, 0), (2, 0), (1, 1), (2, 1)}
+    if dtype == "F8":
+        assert any(c.profile.use_bias or c.activation != "None" for c in cases)
+    records, logs = [], []
+    with worker_lock_instance:
+        for i, ini in enumerate(tensile_configs(cases, results_file=tmp_path / "results.csv")):
+            config = tmp_path / f"candidates-{i}.ini"
+            config.write_text(ini)
+            with (tmp_path / f"client-{i}.log").open("w+") as log:
+                result = subprocess.run(
+                    [options.prebuilt_client, "--config-file", str(config)],
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    timeout=90,
+                )
+                log.seek(0)
+                text = log.read()
+            assert result.returncode == 0, text
+            assert "\nRACE " not in "\n" + text, text
+            logs.append(text)
+            rows = list(csv.reader(text.splitlines()))
+            header = next(row for row in rows if row[:2] == ["run", "problem-progress"])
+            records.extend(dict(zip(header, row)) for row in rows if row and row[0] == "0")
+    text = "\n".join(logs)
     expected = {case.shape.tensile_sizes: case for case in cases}
     assert len(records) == len(expected), text
     observed = set()

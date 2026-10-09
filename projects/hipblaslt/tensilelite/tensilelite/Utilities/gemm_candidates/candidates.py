@@ -2,12 +2,13 @@
 # SPDX-License-Identifier: MIT
 """A bounded, deterministic set of GEMMs around a solution's size boundaries."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from heapq import heappop, heappush
 from math import lcm
+from random import Random
 
 from .metadata import LibraryMetadata, _Solution
-from .models import GemmCase, GemmProfile, GemmShape
+from .models import _BENCH_ACTIVATIONS, GemmCase, GemmProfile, GemmShape, bench_type
 
 
 @dataclass
@@ -120,11 +121,90 @@ def _small_shapes(bounds: dict[str, _Dimension], profile: GemmProfile, max_data_
                 heappush(frontier, (shape.m * shape.n * shape.k * shape.batch_count, neighbor))
 
 
+def _runtime_cases(cases: list[GemmCase], solution: _Solution, seed: int) -> list[GemmCase]:
+    """Assign one setting combination per shape, without expanding the budget.
+
+    Half the epilogue draws select no bias/activation; the other half choose
+    uniformly among the supported nonempty combinations. Optional scales are
+    independently enabled with probability 1/2. Required MX scales stay fixed.
+    """
+    profile = cases[0].profile
+    # String seeding is stable across processes. Paths, revision and numeric
+    # indices do not influence a solution's draws; aliases get the same settings.
+    rng = Random(f"{seed}:{solution.name}")
+    activations = set(_BENCH_ACTIVATIONS)
+    has_activation_list = False
+    alphas, betas = [1, 2], [0, 1]
+    for predicate in _conjuncts(solution.predicate):
+        kind, value = predicate["type"], predicate.get("value")
+        if kind == "ActivationEnumWhiteList":
+            activations &= set(value)
+            has_activation_list = True
+        elif kind in {"BetaZero", "BetaOne"}:
+            betas = [beta for beta in betas if beta == int(kind == "BetaOne")]
+        elif kind in {"AlphaValue", "BetaValue"} and value != "Any":
+            # Other scalar values use Any; beta=0 has its own BetaZero predicate.
+            allowed = {"One": 1, "NegativeOne": -1}
+            values = alphas if kind == "AlphaValue" else betas
+            values[:] = [scalar for scalar in values if scalar == allowed.get(value)]
+    if not has_activation_list or profile.activation_type == "None":
+        activations.clear()
+    activations.add("None")  # Disabling activation bypasses its enum whitelist.
+    if not alphas or not betas:
+        raise ValueError(
+            f"Solution {solution.index}: scalar restrictions exclude alpha=1/2, beta=0/1"
+        )
+    epilogues = [
+        (bias, activation)
+        for bias in ((False, True) if profile.use_bias else (False,))
+        for activation in sorted(activations)
+        if bias or activation != "None"
+    ]
+    bias_types = solution.problem.get("biasDataTypeWhiteList") or [profile.bias_type]
+    bias_sources = solution.problem.get("biasSrcWhiteList") or [profile.bias_source]
+    # Reuse the formatter's supported type set instead of adding another table.
+    for dtype in bias_types:
+        bench_type(dtype)
+    if any(source not in {0, 1, 3} for source in bias_sources):
+        raise ValueError("unsupported bias source")
+
+    result = []
+    for position, case in enumerate(cases):
+        bias, activation = (
+            rng.choice(epilogues) if epilogues and rng.random() >= 0.5 else (False, "None")
+        )
+        selected = replace(
+            profile,
+            use_bias=bias,
+            bias_type=rng.choice(bias_types) if bias else profile.bias_type,
+            bias_source=rng.choice(bias_sources) if bias else profile.bias_source,
+            scale_ab=profile.scale_ab if rng.random() < 0.5 else "",
+            scale_cd=profile.scale_cd and rng.random() < 0.5,
+            scale_alpha_vector=profile.scale_alpha_vector and rng.random() < 0.5,
+        )
+        result.append(
+            replace(
+                case,
+                profile=selected,
+                alpha=alphas[position % len(alphas)],
+                beta=betas[(position // len(alphas)) % len(betas)],
+                activation=activation,
+                activation_args=(
+                    rng.choice(((0.0, 6.0), (-1.0, 1.0)))
+                    if activation == "Clamp"
+                    else case.activation_args
+                ),
+            )
+        )
+    return result
+
+
 def candidate_gemms(
     library: LibraryMetadata,
     solution_index: int,
     *,
     max_cases: int = 10,
+    seed: int = 1,
     max_dimension: int = 8192,
     max_data_bytes: int = 128 * 1024 * 1024,
 ) -> list[GemmCase]:
@@ -147,12 +227,19 @@ def candidate_gemms(
     combined A/B/C/D storage; workspace, bias and scalar/MX scale buffers are
     separate. Unsupported profiles and an empty feasible candidate set raise
     ``ValueError``. An index not loaded in ``library`` raises ``KeyError``.
-    This function performs no file I/O, GPU calls or random sampling.
+    After selecting shapes, a local RNG seeded by ``seed`` and the solution
+    name assigns epilogues and optional settings. Half the epilogue draws
+    disable bias/activation; other draws choose supported nonempty combinations.
+    Alpha/beta cycle through (1,0), (2,0), (1,1), (2,1), subject to recorded
+    scalar restrictions. Settings vary within the shape budget and preserve
+    prefixes. This function performs no file I/O or GPU calls.
     """
     if type(solution_index) is not int or solution_index < 0:
         raise ValueError("solution_index must be a nonnegative integer")
     if any(type(n) is not int or n <= 0 for n in (max_cases, max_dimension, max_data_bytes)):
         raise ValueError("Candidate limits must be positive integers")
+    if type(seed) is not int:
+        raise ValueError("seed must be an integer")
     solution = library._solutions[solution_index]
     try:
         profile = GemmProfile.from_problem_type(solution.problem)
@@ -322,4 +409,4 @@ def candidate_gemms(
             )
             if len(cases) == max_cases:
                 break
-    return cases
+    return _runtime_cases(cases, solution, seed)
