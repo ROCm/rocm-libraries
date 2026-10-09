@@ -248,6 +248,27 @@ class TestGfx1250SubtileCodegen:
         assert "v_wmma_f32_16x16x4_f32" in asm
         assert ", 0" in asm  # acc2_imm=0
 
+    # -- emitMfmaInstruction WMMA opcode per 16-bit type --
+
+    @pytest.mark.parametrize("dtype,opcode", [("B", "v_wmma_f32_16x16x32_bf16"),
+                                              ("H", "v_wmma_f32_16x16x32_f16")])
+    def test_wmma_opcode_matches_16bit_type(self, dtype, opcode):
+        """bf16 and fp16 share AB_B16_W32 but need their own WMMA opcode."""
+        from Tensile.Common.DataType import DataType
+        from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
+        kernel = _create_gfx1250_kernel(32, 32)
+        kernel["SourceSwap"] = False
+        kernel["ProblemType"]["DataTypeA"] = DataType(dtype)
+        kernel["ProblemType"]["DataTypeB"] = DataType(dtype)
+        writer, tiA, tiB = _create_writer_gfx1250(kernel)
+        tiA.allocVgprTileRegisters_legacy(writer, kernel)
+        tiB.allocVgprTileRegisters_legacy(writer, kernel)
+        dTile = SimpleNamespace(regList=SimpleNamespace(indices=list(range(200, 208)),
+                                                        pool=writer.vgprPool))
+        asm = str(emitMfmaInstruction(writer, kernel, tiA.vgprTiles[0], tiB.vgprTiles[0],
+                                      dTile, dTile))
+        assert opcode in asm, asm
+
     # -- scheduler preloop initD placement on the WMMA path --
 
     def test_initd_preloop_op_wmma_zeroing_gfx1250(self):

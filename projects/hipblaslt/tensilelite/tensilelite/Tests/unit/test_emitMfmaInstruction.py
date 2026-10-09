@@ -266,6 +266,30 @@ def test_BF16_path_unchanged(writer):
     assert "cbsz" not in asm and "blgp" not in asm
 
 
+def test_FP16_emits_f16_mfma(writer):
+    """fp16 shares the bf16 16x16x32 operand layout but must use the f16 opcode."""
+    kernel = _mkKernel("H", "H", miK=32, sourceSwap=False)
+    tA = _mkTile(0, 4, writer.vgprPool)
+    tB = _mkTile(8, 4, writer.vgprPool)
+    tC = _mkTile(16, 4, writer.vgprPool)
+    tD = _mkTile(32, 4, writer.vgprPool)
+    asm = str(emitMfmaInstruction(writer, kernel, tA, tB, tC, tD))
+    assert "v_mfma_f32_16x16x32_f16" in asm
+    assert "bf16" not in asm
+
+
+@pytest.mark.parametrize("dA,dB", [("B", "H"), ("H", "B"), ("F8", "F8")])
+def test_non_16bit_or_mixed_types_raise_on_16x16x32(writer, dA, dB):
+    """The dense 16x16x32 path must not fall back to a bf16 opcode."""
+    kernel = _mkKernel(dA, dB, miK=32, sourceSwap=False)
+    tA = _mkTile(0, 4, writer.vgprPool)
+    tB = _mkTile(8, 4, writer.vgprPool)
+    tC = _mkTile(16, 4, writer.vgprPool)
+    tD = _mkTile(32, 4, writer.vgprPool)
+    with pytest.raises(RuntimeError):
+        emitMfmaInstruction(writer, kernel, tA, tB, tC, tD)
+
+
 # ---- Pool-aliasing dispatch unchanged for F8 ------------------------------
 def test_F8_uses_accvgpr_alias_when_D_in_agpr_pool(writer):
     """When MIArchVgpr=False AND D's pool is the agprPool, the F8 path must

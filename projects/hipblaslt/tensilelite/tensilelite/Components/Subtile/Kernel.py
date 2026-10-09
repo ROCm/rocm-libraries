@@ -1162,6 +1162,20 @@ def _selectF8F6F4InstType(kernel):
   raise RuntimeError(f"Unsupported data types for MFMA instruction: A = {aType}, B = {bType}\n")
 
 
+# ---------------------------------------------------------------------------
+# Pick the MFMAInstruction instType for the dense 16-bit 16x16x32 MFMA/WMMA.
+# bf16 and fp16 share the operand layout, so only the opcode differs.
+# ---------------------------------------------------------------------------
+def _select16bitInstType(kernel):
+  aType = kernel["ProblemType"]["DataTypeA"]
+  bType = kernel["ProblemType"]["DataTypeB"]
+  if aType.isBFloat16() and bType.isBFloat16():
+    return InstType.INST_BF16
+  if aType.isHalf() and bType.isHalf():
+    return InstType.INST_F16
+  raise RuntimeError(f"Unsupported data types for 16-bit MFMA instruction: A = {aType}, B = {bType}\n")
+
+
 ##################################################
 # Subroutine to generate MMA Instruction
 # Given RegisterTileInfo inputs for A,B,C,D operands
@@ -1220,8 +1234,8 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
                                    mxsa=vgpr(unitScaleVgpr), mxsb=vgpr(unitScaleVgpr), \
                                    comment=comment))
   else:
-    # BF16: 16x16x32
-    module.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[16,16,miK,1], mfma1k=False, \
+    # BF16 / FP16: 16x16x32
+    module.add(MFMAInstruction(instType=_select16bitInstType(kernel), accType=InstType.INST_F32, variant=[16,16,miK,1], mfma1k=False, \
                                acc=dAccAlias(vgprDStart,opDSize), \
                                a=aOperand, \
                                b=bOperand, \
