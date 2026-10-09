@@ -486,6 +486,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return BufferAtomicCmpswapB32(vgpr(0), vgpr(1), vgpr(2));
         case logical::BufferAtomicCmpswapB64:
             return BufferAtomicCmpswapB64(vgpr(0), vgpr(1), vgpr(2));
+        case logical::BufferAtomicPkAddBF16:
+            return BufferAtomicPkAddBF16(vgpr(0), vgpr(1), vgpr(2));
         case logical::FlatLoadU8:
             return FlatLoadU8(vgpr(0), vgpr(1));
         case logical::FlatLoadI8:
@@ -797,6 +799,7 @@ using OpcodeMnemonicPair = std::pair<logical::Opcode, std::string>;
 
 static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::BufferAtomicAddF32, "buffer_atomic_add_f32"},
+    {logical::BufferAtomicPkAddBF16, "buffer_atomic_pk_add_bf16"},
     {logical::GlobalAtomicIncU32Saddr, "global_atomic_inc_u32"},
     {logical::DSLoadB32, "ds_load_b32"},
     {logical::DSLoadB64, "ds_load_b64"},
@@ -1154,6 +1157,7 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         {logical::DSLoadB96TrB6, {{12, 5, 0}}},   {logical::DSLoadB64TrB4, {{12, 5, 0}}},
         {logical::DSLoadB64TrB8, {{12, 5, 0}}},   {logical::DSLoadB128TrB16, {{12, 5, 0}}},
         {logical::DSLoadB192, {{12, 5, 0}}},      {logical::DSStoreB192, {{12, 5, 0}}},
+        {logical::DSStoreB256, {{12, 5, 0}}},
     };
 
     std::cout << "Testing " << testedOpcodes.size() << " instructions on " << archs.size()
@@ -1243,6 +1247,55 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
 
     std::cout << "? Lowering test complete: " << passedTests << "/" << totalTests << " passed ("
               << (passedTests * 100 / totalTests) << "%)\n";
+}
+
+TEST(LogicalToAsmComprehensive, SBarrierPreservesExplicitSemantics) {
+    struct BarrierCase {
+        bool separate;
+        bool wait;
+        bool clusterBarrier;
+        std::vector<UnifiedOpcode> expectedOpcodes;
+        int expectedId;
+    };
+
+    const std::vector<BarrierCase> cases = {
+        {false, false, false, {GFX::s_barrier_signal, GFX::s_barrier_wait}, -1},
+        {true, false, false, {GFX::s_barrier_signal}, -1},
+        {true, true, false, {GFX::s_barrier_wait}, -1},
+        {false, false, true, {GFX::s_barrier_signal, GFX::s_barrier_wait}, -3},
+        {true, false, true, {GFX::s_barrier_signal}, -3},
+        {true, true, true, {GFX::s_barrier_wait}, -3},
+    };
+
+    for (const BarrierCase& testCase : cases) {
+        Function func("kernel");
+        BasicBlock* bb = func.createBasicBlock("test");
+        bb->appendIR(static_cast<IRBase*>(
+            SBarrier(testCase.separate, testCase.wait, testCase.clusterBarrier, "barrier")));
+
+        PassManager pm;
+        GemmTileConfig config;
+        config.arch = {12, 5, 0};
+        pm.setGemmTileConfig(config);
+        pm.addPass(createToStinkyAsmPass());
+        pm.run(func);
+
+        std::vector<StinkyInstruction*> lowered;
+        for (BasicBlock& block : func)
+            for (IRBase& ir : block)
+                if (auto* inst = dyn_cast<StinkyInstruction>(&ir)) lowered.push_back(inst);
+
+        ASSERT_EQ(lowered.size(), testCase.expectedOpcodes.size());
+        for (size_t i = 0; i < lowered.size(); ++i) {
+            EXPECT_EQ(lowered[i]->getUnifiedOpcode(), testCase.expectedOpcodes[i]);
+            ASSERT_EQ(lowered[i]->getSrcRegs().size(), size_t{1});
+            const StinkyRegister& src = lowered[i]->getSrcRegs()[0];
+            ASSERT_EQ(src.dataType, StinkyRegister::Type::LiteralInt);
+            EXPECT_EQ(src.getLiteralInt(), testCase.expectedId);
+        }
+        ASSERT_NE(lowered.back()->getModifier<CommentData>(), nullptr);
+        EXPECT_EQ(lowered.back()->getModifier<CommentData>()->comment, "barrier");
+    }
 }
 
 /**

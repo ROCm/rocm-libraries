@@ -35,6 +35,7 @@ import shutil
 import subprocess
 import sys
 import pickle
+import sys
 import zlib
 from contextlib import contextmanager
 from pathlib import Path
@@ -320,18 +321,98 @@ def memCompress(obj):
 def memDecompress(byt):
     return pickle.loads(zlib.decompress(byt))
 
-def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress = False) -> KernelCodeGenResult:
+_GFX1250 = (12, 5)
+
+
+def _assertCorrectBackendForKernel(kernel) -> None:
+    """Fail loudly if the active rocisa backend is inconsistent with what was
+    requested for *this* worker, instead of silently emitting wrong assembly.
+
+    Two regimes, distinguished by whether ``ROCISA_BACKEND`` is explicitly set:
+
+    * **Explicitly set** (e.g. ``cmpbackend.sh``; the documented
+      "``ROCISA_BACKEND=rocisa`` forces the native path on gfx1250" override;
+      or the native batch of a mixed build): trust the requested backend, but
+      verify the *active* backend actually matches it. A mismatch means a
+      worker ignored the env var -- e.g. a forked pool inheriting the parent's
+      already-selected backend -- which is the real hazard we guard against.
+      We deliberately do NOT impose the gfx1250->stinkytofu policy here:
+      forcing native rocisa on gfx1250 (to compare backends) is a supported,
+      intentional choice.
+
+    * **Unset** (backend auto-selected via ``_detect_default_backend``):
+      enforce the ISA->backend policy so a gfx1250 kernel never silently goes
+      through native rocisa (the combined-arch "all"-detection bug), and a
+      non-gfx1250 kernel never accidentally goes through the adapter.
+
+    In both regimes we also check the underlying nanobind extension
+    (``stinkytofu._stinkytofu`` / ``rocisa._rocisa``) is really loaded, not
+    just that ``rocisa._BACKEND`` is a matching string.
+
+    Raises ``RuntimeError`` (not ``assert``) so the guard survives ``python -O``
+    -- a safety net whose whole point is to fail the build loudly must not be
+    optimised away.
     """
-    Generate source for a single kernel.
-    Returns (error, source, header, kernelName).
-    """
-    kernelWriter = kernelWriterAssembly
-    kernelWriter.setRocIsa(data, outOptions)
+    backend = getattr(rocisa, "_BACKEND", "")
+    stinky_loaded = "stinkytofu._stinkytofu" in sys.modules
+    native_loaded = "rocisa._rocisa" in sys.modules
+    env = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+
+    if env:
+        want_stinky = (env == "stinkytofu")
+        active_stinky = (backend == "stinkytofu")
+        if want_stinky != active_stinky:
+            raise RuntimeError(
+                f"kernel {kernel.get('SolutionIndex')} (ISA={tuple(kernel['ISA'])}): "
+                f"ROCISA_BACKEND={env!r} was requested but the active backend is "
+                f"rocisa._BACKEND={backend!r} -- a worker ignored the env var "
+                "(likely a forked pool inheriting the parent's backend). Refusing "
+                "to continue instead of silently emitting wrong assembly."
+            )
+        if want_stinky and not stinky_loaded:
+            raise RuntimeError(
+                f"kernel {kernel.get('SolutionIndex')}: ROCISA_BACKEND='stinkytofu' "
+                "but the stinkytofu._stinkytofu extension is not loaded. Refusing "
+                "to continue instead of silently emitting wrong assembly."
+            )
+        if not want_stinky and not native_loaded:
+            raise RuntimeError(
+                f"kernel {kernel.get('SolutionIndex')}: ROCISA_BACKEND={env!r} "
+                "(native) but the rocisa._rocisa extension is not loaded. Refusing "
+                "to continue instead of silently emitting wrong assembly."
+            )
+        return
+
+    isGfx1250 = tuple(kernel["ISA"])[:2] == _GFX1250
+    if isGfx1250:
+        if not (backend == "stinkytofu" and stinky_loaded):
+            raise RuntimeError(
+                f"gfx1250 kernel {kernel.get('SolutionIndex')} is about to be "
+                f"generated with rocisa._BACKEND={backend!r} "
+                f"(stinkytofu._stinkytofu loaded={stinky_loaded}); "
+                "expected the stinkytofu backend with its native extension loaded. "
+                "This would silently produce wrong assembly for gfx1250 -- refusing "
+                "to continue instead."
+            )
+    else:
+        if not (backend != "stinkytofu" and native_loaded):
+            raise RuntimeError(
+                f"non-gfx1250 kernel {kernel.get('SolutionIndex')} (ISA={tuple(kernel['ISA'])}) "
+                f"is about to be generated with rocisa._BACKEND={backend!r} "
+                f"(rocisa._rocisa loaded={native_loaded}); "
+                "expected the native rocisa backend. This would silently produce "
+                "wrong assembly -- refusing to continue instead."
+            )
+
+
+def _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress=False) -> KernelCodeGenResult:
+    """Run codegen on a single kernel after rocisa state has been set up."""
+    _assertCorrectBackendForKernel(kernel)
     asmFilename = getKernelFileBase(splitGSU, kernel)
-    err, src = kernelWriter.getSourceFileString(kernel)
+    err, src = kernelWriterAssembly.getSourceFileString(kernel)
     if compress:
         src = memCompress(src)
-    header = kernelWriter.getHeaderFileString(kernel)
+    header = kernelWriterAssembly.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
     customKernelDef = kernel._state.get("CustomKernel", None)
@@ -342,11 +423,95 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
             f"runtime will clamp to 1."
         )
     return KernelCodeGenResult(
-        err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
-        kernel["WavefrontSize"], cuocc, \
-        pgr, kernel["MathClocksUnrolledLoop"], \
+        err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]),
+        kernel["WavefrontSize"], cuocc,
+        pgr, kernel["MathClocksUnrolledLoop"],
         customKernelDef
     )
+
+
+def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress = False) -> KernelCodeGenResult:
+    """Generate source for a single kernel."""
+    kernelWriterAssembly.setRocIsa(data, outOptions)
+    return _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress)
+
+
+def processKernelSourceNativeInit(
+    kernelWriterAssembly, assemblerPath, outputNoComment, splitGSU, kernel, compress=False
+) -> KernelCodeGenResult:
+    """Generate source for a non-gfx1250 kernel using native rocisa.
+
+    Workers importing native rocisa (``ROCISA_BACKEND=rocisa``) call this
+    instead of ``processKernelSource`` so they initialise the rocisa
+    singleton from scratch rather than accepting pickled adapter data.
+    Each ISA is initialised at most once per worker process.
+    """
+    import rocisa as _ri
+    ti = _ri.rocIsa.getInstance()
+    isa = tuple(kernel["ISA"])
+    if isa not in ti.getData():
+        ti.init(isa, assemblerPath, False)
+    outOpts = ti.getOutputOptions()
+    outOpts.outputNoComment = outputNoComment
+    kernelWriterAssembly.setRocIsa(ti.getData(), outOpts)
+    return _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress)
+
+
+def _shutdown_worker_pool():
+    try:
+        from joblib.externals.loky import get_reusable_executor
+        get_reusable_executor().shutdown(wait=True)
+    except Exception:
+        pass
+
+
+@contextmanager
+def _native_rocisa_workers():
+    """Run the enclosed ParallelMap2 calls on fresh native-rocisa workers."""
+    orig_backend = os.environ.get("ROCISA_BACKEND")
+    orig_threads = globalParameters["CpuThreads"]
+    os.environ["ROCISA_BACKEND"] = "rocisa"
+    # Keep at least 2 threads so ParallelMap2 runs in worker processes, not in-process.
+    if 0 <= orig_threads < 2:
+        globalParameters["CpuThreads"] = 2
+    try:
+        # Drop idle adapter workers so joblib starts fresh ones that inherit ROCISA_BACKEND.
+        _shutdown_worker_pool()
+        yield
+    finally:
+        # Drop the native workers so later ParallelMap2 calls start adapter workers again.
+        _shutdown_worker_pool()
+        globalParameters["CpuThreads"] = orig_threads
+        if orig_backend is None:
+            os.environ.pop("ROCISA_BACKEND", None)
+        else:
+            os.environ["ROCISA_BACKEND"] = orig_backend
+
+
+def _mapKernelsByBackend(fn, nativeFn, kernels):
+    """Map ``fn`` over ``kernels`` in order, using ``nativeFn`` on native-rocisa workers
+    for non-gfx1250 kernels while the stinkytofu adapter is active."""
+    nativeIdx = []
+    if getattr(rocisa, "_BACKEND", "") == "stinkytofu":
+        nativeIdx = [i for i, k in enumerate(kernels) if tuple(k["ISA"])[:2] != _GFX1250]
+    if not nativeIdx:
+        # Common path: single-backend (all stinkytofu or all native).
+        return ParallelMap2(fn, kernels, "Generating assembly kernels", multiArg=False, return_as="list")
+
+    results = [None] * len(kernels)
+
+    def runBatch(f, idx, message):
+        batch = ParallelMap2(f, [kernels[i] for i in idx], message, multiArg=False, return_as="list")
+        for i, r in zip(idx, batch):
+            results[i] = r
+
+    adapterIdx = [i for i, k in enumerate(kernels) if tuple(k["ISA"])[:2] == _GFX1250]
+    if adapterIdx:
+        runBatch(fn, adapterIdx, "Generating assembly kernels (gfx1250, stinkytofu)")
+    with _native_rocisa_workers():
+        runBatch(nativeFn, nativeIdx, "Generating assembly kernels (native rocisa)")
+    return results
+
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
     if result.err != 0:
@@ -605,16 +770,25 @@ def writeSolutionsAndKernels(
         numAsmKernels = len(asmKernels)
         numKernels = len(asmKernels)
         assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
-        asmIter = zip(
-            itertools.repeat(kernelWriterAssembly),
-            itertools.repeat(rocisa.rocIsa.getInstance().getData()),
-            itertools.repeat(outOptions),
-            itertools.repeat(splitGSU),
-            asmKernels
-        )
         memcompress = numAsmKernels > 10000
+        unaryProcessKernelSource = functools.partial(
+            processKernelSource,
+            kernelWriterAssembly,
+            rocisa.rocIsa.getInstance().getData(),
+            outOptions,
+            splitGSU,
+            compress=memcompress,
+        )
+        unaryProcessNative = functools.partial(
+            processKernelSourceNativeInit,
+            kernelWriterAssembly,
+            str(asmToolchain.assembler.path),
+            disableAsmComments,
+            splitGSU,
+            compress=memcompress,
+        )
     with timing_context("python_kernel_codegen"):
-        asmResults = ParallelMap2(functools.partial(processKernelSource, compress=memcompress), asmIter, "Generating assembly kernels", return_as="list")
+        asmResults = _mapKernelsByBackend(unaryProcessKernelSource, unaryProcessNative, asmKernels)
     with timing_context("python_kernel_validate"):
         removeInvalidSolutionsAndKernels(
             asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU
@@ -786,12 +960,18 @@ def writeSolutionsAndKernelsTCL(
             return processed_kernel
         return composed_function
 
-    results = ParallelMap2(
+    unaryProcessNative = functools.partial(
+        processKernelSourceNativeInit,
+        kernelWriterAssembly,
+        str(asmToolchain.assembler.path),
+        not disableAsmComments,
+        splitGSU,
+        compress=memcompress,
+    )
+    results = _mapKernelsByBackend(
         compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
+        compose(unaryAssemble, unaryWriteAssembly, unaryProcessNative),
         uniqueAsmKernels,
-        "Generating assembly kernels",
-        multiArg=False,
-        return_as="list"
     )
 
     buildAssemblyCodeObjectFiles(

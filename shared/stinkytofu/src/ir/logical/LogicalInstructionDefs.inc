@@ -2281,6 +2281,16 @@
              false,
              "IF_MUBUFAtomic"},
 
+                                    {"BufferAtomicPkAddBF16",
+             "BufferAtomicPkAddBF16",
+             2,
+             true,
+             "Memory Arithmetic",
+             false,
+             false,
+             false,
+             "IF_MUBUFStore"},
+
                                     {"FlatLoadU8",
              "FlatLoadU8",
              1,

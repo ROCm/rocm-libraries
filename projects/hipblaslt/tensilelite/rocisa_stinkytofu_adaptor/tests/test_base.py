@@ -22,6 +22,8 @@ import pickle
 import sys
 import unittest
 
+from _adaptor_testcase import AdaptorTestCase
+
 
 # ---------------------------------------------------------------------------
 # Self-contained sys.path bootstrap (mirrors test_code.py).
@@ -47,7 +49,7 @@ from rocisa_stinkytofu_adaptor.code import Module, TextBlock  # noqa: E402
 # ===========================================================================
 
 
-class TestIsaToGfx(unittest.TestCase):
+class TestIsaToGfx(AdaptorTestCase):
     def test_tuple_isa_gfx1250(self):
         self.assertEqual(_base.isaToGfx((12, 5, 0)), "gfx1250")
 
@@ -68,7 +70,7 @@ class TestIsaToGfx(unittest.TestCase):
 # ===========================================================================
 
 
-class _StateSaveRestore(unittest.TestCase):
+class _StateSaveRestore(AdaptorTestCase):
     """Snapshot/restore ``base.py`` state so tests cannot leak into one another.
 
     We grab the live references at setUp time and restore them in
@@ -115,7 +117,7 @@ class _StateSaveRestore(unittest.TestCase):
 # ===========================================================================
 
 
-class TestClassLocationParity(unittest.TestCase):
+class TestClassLocationParity(AdaptorTestCase):
     """``rocisa::IsaInfo`` lives in ``base.hpp``; the Python mirror must too."""
 
     def test_isainfo_defined_in_base_module(self):
@@ -141,7 +143,7 @@ class TestClassLocationParity(unittest.TestCase):
 # ===========================================================================
 
 
-class TestRocIsaIsThinShell(unittest.TestCase):
+class TestRocIsaIsThinShell(AdaptorTestCase):
     """``rocIsa`` instance must hold no state -- state lives in ``base.py``."""
 
     def test_init_does_not_set_state_fields(self):
@@ -459,7 +461,7 @@ class TestBaseAccessorsAreSourceOfTruth(_StateSaveRestore):
 # overridden by the ``_dummy.py`` ``__getattr__`` no-op.
 
 
-class TestItemConstruction(unittest.TestCase):
+class TestItemConstruction(AdaptorTestCase):
     """Item is a regular (concrete) class -- the C++ ``Item`` is also
     concrete (``Item("foo")`` compiles and ``.toString()`` returns
     "foo"), so we mirror that. Only ``clone()`` is semi-abstract
@@ -483,7 +485,7 @@ class TestItemConstruction(unittest.TestCase):
         self.assertFalse(hasattr(Item(), "__dict__"))
 
 
-class TestItemInheritanceShape(unittest.TestCase):
+class TestItemInheritanceShape(AdaptorTestCase):
     """``isinstance(x, Item)`` parity for ``code.py`` subclasses.
 
     Mirror of rocisa C++ ``TextBlock`` / ``Module`` inheriting from
@@ -526,7 +528,7 @@ class TestItemInheritanceShape(unittest.TestCase):
         self.assertNotIn("parent", TextBlock.__slots__)
 
 
-class TestItemDefaultMethods(unittest.TestCase):
+class TestItemDefaultMethods(AdaptorTestCase):
     """Default ``toString`` / ``prettyPrint`` / ``__str__`` / counters
     on the bare ``Item`` -- subclasses (Module / TextBlock) override
     them but the base behaviour is what dummies fall back to."""
@@ -632,7 +634,7 @@ class TestItemCapabilityProxies(_StateSaveRestore):
         self.assertEqual(ki.wavefrontSize, 32)
 
 
-class TestDummyItem(unittest.TestCase):
+class TestDummyItem(AdaptorTestCase):
     """``DummyItem`` is the inert sentinel KernelWriter sticks into
     Module trees as a marker without polluting countType totals.
     Mirror of rocisa C++ ``DummyItem`` (base.hpp:299-310)."""

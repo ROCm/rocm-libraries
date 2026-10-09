@@ -22,6 +22,8 @@ import io
 import os
 import sys
 import unittest
+
+from _adaptor_testcase import AdaptorTestCase
 from contextlib import redirect_stdout
 
 # ---------------------------------------------------------------------------
@@ -48,7 +50,7 @@ from rocisa_stinkytofu_adaptor.register import RegisterPool  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-class TestStatusEnum(unittest.TestCase):
+class TestStatusEnum(AdaptorTestCase):
     """The Status enum values are wire-compatible with the rocisa C++ enum."""
 
     def test_values_match_rocisa(self):
@@ -61,7 +63,7 @@ class TestStatusEnum(unittest.TestCase):
         self.assertTrue(hasattr(RegisterPool, "Register"))
 
 
-class TestRegisterRecord(unittest.TestCase):
+class TestRegisterRecord(AdaptorTestCase):
     def test_construct_and_repr(self):
         r = RegisterPool.Register(RegisterPool.Status.Available, "tagX")
         self.assertEqual(r.status, RegisterPool.Status.Available)
@@ -74,7 +76,7 @@ class TestRegisterRecord(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestConstruction(unittest.TestCase):
+class TestConstruction(AdaptorTestCase):
     def test_empty_pool(self):
         p = RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=True)
         self.assertEqual(p.size(), 0)
@@ -94,7 +96,7 @@ class TestConstruction(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestKernArgAddressABI(unittest.TestCase):
+class TestKernArgAddressABI(AdaptorTestCase):
     """Tensile's _initKernel asserts SGPR0 == KernArgAddress.
 
     Reproduces the exact call sequence at KernelWriter.py:7456-7466.
@@ -127,7 +129,7 @@ class TestKernArgAddressABI(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestCheckOutAligned(unittest.TestCase):
+class TestCheckOutAligned(AdaptorTestCase):
     def test_zero_size_raises(self):
         pool = RegisterPool(4, RegisterType.Sgpr, defaultPreventOverflow=False)
         pool.add(0, 4)
@@ -221,7 +223,7 @@ class TestCheckOutAligned(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestCheckIn(unittest.TestCase):
+class TestCheckIn(AdaptorTestCase):
     def test_checkin_releases_slots(self):
         pool = RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False)
         idx = pool.checkOutAligned(3, 1, "tmp", preventOverflow=False)
@@ -246,7 +248,7 @@ class TestCheckIn(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestCheckOutMulti(unittest.TestCase):
+class TestCheckOutMulti(AdaptorTestCase):
     def test_partition_lump_sum(self):
         pool = RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False)
         idx_vec = pool.checkOutMulti([2, 1, 3], 1, ["A", "B", "C"])
@@ -273,7 +275,7 @@ class TestCheckOutMulti(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestAddRemove(unittest.TestCase):
+class TestAddRemove(AdaptorTestCase):
     def test_add_marks_available(self):
         pool = RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False)
         pool.add(0, 4, "manual")
@@ -304,7 +306,7 @@ class TestAddRemove(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestFreeStateToggle(unittest.TestCase):
+class TestFreeStateToggle(AdaptorTestCase):
     """Used by KernelWriter.freeSgprVarPool to temporarily lend out a slot
     while keeping the name binding intact."""
 
@@ -337,7 +339,7 @@ class TestFreeStateToggle(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestCheckFinalState(unittest.TestCase):
+class TestCheckFinalState(AdaptorTestCase):
     def test_clean_state_passes(self):
         pool = RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False)
         idx = pool.checkOutAligned(2, 1, "tmp", preventOverflow=False)
@@ -356,7 +358,7 @@ class TestCheckFinalState(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestAvailability(unittest.TestCase):
+class TestAvailability(AdaptorTestCase):
     def test_available_count(self):
         pool = RegisterPool(8, RegisterType.Sgpr, defaultPreventOverflow=False)
         pool.add(0, 8)
@@ -384,7 +386,7 @@ class TestAvailability(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestPoolGrowth(unittest.TestCase):
+class TestPoolGrowth(AdaptorTestCase):
     def test_appendPool_adds_available(self):
         pool = RegisterPool(2, RegisterType.Sgpr, defaultPreventOverflow=False)
         self.assertEqual(pool.size(), 2)
@@ -408,7 +410,7 @@ class TestPoolGrowth(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestOccupancyLimit(unittest.TestCase):
+class TestOccupancyLimit(AdaptorTestCase):
     def test_set_and_reset(self):
         pool = RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False)
         pool.setOccupancyLimit(maxSize=10, size=8)
@@ -424,7 +426,7 @@ class TestOccupancyLimit(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestDeepCopy(unittest.TestCase):
+class TestDeepCopy(AdaptorTestCase):
     def test_deepcopy_independent_state(self):
         pool = RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False)
         pool.checkOutAligned(2, 1, "A", preventOverflow=False)
@@ -448,7 +450,7 @@ class TestDeepCopy(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TestTensileInitKernelHead(unittest.TestCase):
+class TestTensileInitKernelHead(AdaptorTestCase):
     """Simulates KernelWriter.py:7383 + 7456-7466 to ensure ABI parity."""
 
     def test_replay(self):

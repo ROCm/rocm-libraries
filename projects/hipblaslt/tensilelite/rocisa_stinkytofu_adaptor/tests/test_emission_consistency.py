@@ -79,6 +79,8 @@ import sys
 import textwrap
 import unittest
 
+from _adaptor_testcase import AdaptorTestCase
+
 
 # ===========================================================================
 # Environment probes
@@ -457,7 +459,7 @@ class _ThreePathEqualityCase:
 # auto-generated. Add a new instruction = add a new class.
 
 
-class TestVMovB32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMovB32_VgprToVgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_mov_b32 v0, v1`` -- the most basic VGPR-to-VGPR move."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -469,7 +471,7 @@ class TestVMovB32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVMovB32_VgprToVgprNoComment(unittest.TestCase,
+class TestVMovB32_VgprToVgprNoComment(AdaptorTestCase,
                                        _ThreePathEqualityCase):
     """Empty-comment branch in ``formatStr`` (no padding, no '//')."""
 
@@ -482,7 +484,7 @@ class TestVMovB32_VgprToVgprNoComment(unittest.TestCase,
     """)
 
 
-class TestVMovB32_HexImmediate(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMovB32_HexImmediate(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_mov_b32 v0, 0x0`` -- string-immediate src (KernelWriter's
     typical ``hex(N)`` pattern)."""
 
@@ -495,7 +497,7 @@ class TestVMovB32_HexImmediate(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVMovB32_IntImmediate(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMovB32_IntImmediate(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_mov_b32 v0, 42`` -- int-immediate src."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -507,7 +509,7 @@ class TestVMovB32_IntImmediate(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVMovB32_MultipleSequential(unittest.TestCase,
+class TestVMovB32_MultipleSequential(AdaptorTestCase,
                                       _ThreePathEqualityCase):
     """Three sequential ``v_mov_b32`` -- verifies Module child order
     survives all three paths."""
@@ -523,7 +525,7 @@ class TestVMovB32_MultipleSequential(unittest.TestCase,
     """)
 
 
-class TestVMovB32_NestedModules(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMovB32_NestedModules(AdaptorTestCase, _ThreePathEqualityCase):
     """Inner Module inside outer Module -- depth-first traversal must
     preserve emit order across all three paths."""
 
@@ -539,7 +541,7 @@ class TestVMovB32_NestedModules(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVMovB32_NamedRegister(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMovB32_NamedRegister(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_mov_b32 vgprValuA, vgprValuB`` -- symbolic-name VGPR via
     ``vgpr("Name")``. Verifies the RegName round-trip survives the
     rocisa-shape -> logical-IR -> asm-IR pipeline."""
@@ -559,7 +561,7 @@ class TestVMovB32_NamedRegister(unittest.TestCase, _ThreePathEqualityCase):
 # ===========================================================================
 
 
-class TestSMovB32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestSMovB32_SgprToSgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_mov_b32 s0, s1`` -- basic SGPR-to-SGPR move."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -571,7 +573,7 @@ class TestSMovB32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSMovB32_SgprToSgprNoComment(unittest.TestCase, _ThreePathEqualityCase):
+class TestSMovB32_SgprToSgprNoComment(AdaptorTestCase, _ThreePathEqualityCase):
     """Empty-comment branch for ``s_mov_b32`` (no ``//`` suffix)."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -583,7 +585,7 @@ class TestSMovB32_SgprToSgprNoComment(unittest.TestCase, _ThreePathEqualityCase)
     """)
 
 
-class TestSMovB32_HexImmediate(unittest.TestCase, _ThreePathEqualityCase):
+class TestSMovB32_HexImmediate(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_mov_b32 s0, 0x0`` -- string-immediate src."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -595,7 +597,7 @@ class TestSMovB32_HexImmediate(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSMovB64_PairToPair(unittest.TestCase, _ThreePathEqualityCase):
+class TestSMovB64_PairToPair(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_mov_b64 s[0:1], s[4:5]`` -- 64-bit pair operands."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -607,7 +609,7 @@ class TestSMovB64_PairToPair(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSLoadB32_BaseImmOffset(unittest.TestCase, _ThreePathEqualityCase):
+class TestSLoadB32_BaseImmOffset(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_load_b32 s0, s[2:3], 0`` -- minimal SMEM load (no modifiers)."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -620,7 +622,7 @@ class TestSLoadB32_BaseImmOffset(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSLoadB64_WideDst(unittest.TestCase, _ThreePathEqualityCase):
+class TestSLoadB64_WideDst(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_load_b64 s[0:1], s[4:5], 0``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -633,7 +635,7 @@ class TestSLoadB64_WideDst(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSNop_Wait0(unittest.TestCase, _ThreePathEqualityCase):
+class TestSNop_Wait0(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_nop 0`` -- minimal scalar NOP (wait=0)."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -649,7 +651,7 @@ class TestSNop_Wait0(unittest.TestCase, _ThreePathEqualityCase):
 # ===========================================================================
 
 
-class TestSAddU32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestSAddU32_SgprToSgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_add_u32 s0, s1, s2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -661,7 +663,7 @@ class TestSAddU32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSAddU32_Immediate(unittest.TestCase, _ThreePathEqualityCase):
+class TestSAddU32_Immediate(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_add_u32 s0, s1, 4`` -- immediate operand."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -673,7 +675,7 @@ class TestSAddU32_Immediate(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSSubU32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestSSubU32_SgprToSgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_sub_u32 s0, s1, s2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -685,7 +687,7 @@ class TestSSubU32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSMulI32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestSMulI32_SgprToSgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_mul_i32 s0, s1, s2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -697,7 +699,7 @@ class TestSMulI32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSMulHII32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestSMulHII32_SgprToSgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_mul_hi_i32 s0, s1, s2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -709,7 +711,7 @@ class TestSMulHII32_SgprToSgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSLShiftLeftB32(unittest.TestCase, _ThreePathEqualityCase):
+class TestSLShiftLeftB32(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_lshl_b32 s0, s1, s2`` -- value=s1, shift=s2."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -721,7 +723,7 @@ class TestSLShiftLeftB32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSLShiftRightB32(unittest.TestCase, _ThreePathEqualityCase):
+class TestSLShiftRightB32(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_lshr_b32 s0, s1, s2`` -- value=s1, shift=s2."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -733,7 +735,7 @@ class TestSLShiftRightB32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSAShiftRightI32(unittest.TestCase, _ThreePathEqualityCase):
+class TestSAShiftRightI32(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_ashr_i32 s0, s1, s2`` -- value=s1, shift=s2."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -745,7 +747,7 @@ class TestSAShiftRightI32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSAndB32(unittest.TestCase, _ThreePathEqualityCase):
+class TestSAndB32(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_and_b32 s0, s1, s2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -757,7 +759,7 @@ class TestSAndB32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSOrB32(unittest.TestCase, _ThreePathEqualityCase):
+class TestSOrB32(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_or_b32 s0, s1, s2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -769,7 +771,7 @@ class TestSOrB32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSXorB32(unittest.TestCase, _ThreePathEqualityCase):
+class TestSXorB32(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_xor_b32 s0, s1, s2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -781,7 +783,7 @@ class TestSXorB32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSAndSaveExecB32(unittest.TestCase, _ThreePathEqualityCase):
+class TestSAndSaveExecB32(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_and_saveexec_b32 s0, s1`` -- unary (1 src)."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -793,7 +795,7 @@ class TestSAndSaveExecB32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSLShiftLeft1AddU32(unittest.TestCase, _ThreePathEqualityCase):
+class TestSLShiftLeft1AddU32(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_lshl1_add_u32 s0, s1, s2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -810,7 +812,7 @@ class TestSLShiftLeft1AddU32(unittest.TestCase, _ThreePathEqualityCase):
 # ===========================================================================
 
 
-class TestSGetRegB32(unittest.TestCase, _ThreePathEqualityCase):
+class TestSGetRegB32(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_getreg_b32 s0, s1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -838,7 +840,7 @@ class TestSGetRegB32(unittest.TestCase, _ThreePathEqualityCase):
 ## Same applies to VSubI32 / VSubU32 (ExplicitNC variants).
 
 
-class TestVAddF32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestVAddF32_VgprToVgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_add_f32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -850,7 +852,7 @@ class TestVAddF32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVSubF32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestVSubF32_VgprToVgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_sub_f32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -862,7 +864,7 @@ class TestVSubF32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVMulF32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMulF32_VgprToVgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_mul_f32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -874,7 +876,7 @@ class TestVMulF32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVMulLOU32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMulLOU32_VgprToVgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_mul_lo_u32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -886,7 +888,7 @@ class TestVMulLOU32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVMulHIU32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMulHIU32_VgprToVgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_mul_hi_u32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -898,7 +900,7 @@ class TestVMulHIU32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVAndB32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestVAndB32_VgprToVgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_and_b32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -910,7 +912,7 @@ class TestVAndB32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVOrB32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestVOrB32_VgprToVgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_or_b32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -922,7 +924,7 @@ class TestVOrB32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVXorB32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestVXorB32_VgprToVgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_xor_b32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -934,7 +936,7 @@ class TestVXorB32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVLShiftLeftB32(unittest.TestCase, _ThreePathEqualityCase):
+class TestVLShiftLeftB32(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_lshlrev_b32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -946,7 +948,7 @@ class TestVLShiftLeftB32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVLShiftRightB32(unittest.TestCase, _ThreePathEqualityCase):
+class TestVLShiftRightB32(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_lshrrev_b32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -958,7 +960,7 @@ class TestVLShiftRightB32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVFmaF32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestVFmaF32_VgprToVgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_fma_f32 v0, v1, v2, v3``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -970,7 +972,7 @@ class TestVFmaF32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVAndOrB32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
+class TestVAndOrB32_VgprToVgpr(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_and_or_b32 v0, v1, v2, v3``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -991,7 +993,7 @@ class TestVAndOrB32_VgprToVgpr(unittest.TestCase, _ThreePathEqualityCase):
 ## the adaptor's own rendering and deepcopy.
 
 
-class TestVReadfirstlaneB32(unittest.TestCase, _ThreePathEqualityCase):
+class TestVReadfirstlaneB32(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_readfirstlane_b32 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1008,7 +1010,7 @@ class TestVReadfirstlaneB32(unittest.TestCase, _ThreePathEqualityCase):
 # ===========================================================================
 
 
-class TestSCmpEQI32(unittest.TestCase, _ThreePathEqualityCase):
+class TestSCmpEQI32(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_cmp_eq_i32 s0, s1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1020,7 +1022,7 @@ class TestSCmpEQI32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSCmpGtU32(unittest.TestCase, _ThreePathEqualityCase):
+class TestSCmpGtU32(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_cmp_gt_u32 s0, s1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1032,7 +1034,7 @@ class TestSCmpGtU32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSCmpLgI32(unittest.TestCase, _ThreePathEqualityCase):
+class TestSCmpLgI32(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_cmp_lg_i32 s0, s1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1044,7 +1046,7 @@ class TestSCmpLgI32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSBitcmp1B32(unittest.TestCase, _ThreePathEqualityCase):
+class TestSBitcmp1B32(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_bitcmp1_b32 s0, s1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1056,7 +1058,7 @@ class TestSBitcmp1B32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCmpEQF32(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCmpEQF32(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cmp_eq_f32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1068,7 +1070,7 @@ class TestVCmpEQF32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCmpGEI32(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCmpGEI32(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cmp_ge_i32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1080,7 +1082,7 @@ class TestVCmpGEI32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCmpNeU32(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCmpNeU32(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cmp_ne_u32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1092,7 +1094,7 @@ class TestVCmpNeU32(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCmpClassF32(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCmpClassF32(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cmp_class_f32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1119,7 +1121,7 @@ class TestVCmpClassF32(unittest.TestCase, _ThreePathEqualityCase):
 # ===========================================================================
 
 
-class TestSAbsI32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestSAbsI32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_abs_i32 s0, s1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1131,7 +1133,7 @@ class TestSAbsI32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSMaxI32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestSMaxI32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_max_i32 s0, s1, s2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1143,7 +1145,7 @@ class TestSMaxI32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestSMinU32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestSMinU32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``s_min_u32 s0, s1, s2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1155,7 +1157,7 @@ class TestSMinU32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVExpF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVExpF32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_exp_f32 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1167,7 +1169,7 @@ class TestVExpF32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVRcpF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVRcpF32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_rcp_f32 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1179,7 +1181,7 @@ class TestVRcpF32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVRsqF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVRsqF32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_rsq_f32 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1191,7 +1193,7 @@ class TestVRsqF32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVNotB32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVNotB32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_not_b32 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1203,7 +1205,7 @@ class TestVNotB32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVRndneF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVRndneF32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_rndne_f32 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1215,7 +1217,7 @@ class TestVRndneF32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVMaxF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMaxF32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_max_f32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1227,7 +1229,7 @@ class TestVMaxF32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVMinF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMinF32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_min_f32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1239,7 +1241,7 @@ class TestVMinF32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVMaxI32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMaxI32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_max_i32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1251,7 +1253,7 @@ class TestVMaxI32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVMed3I32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMed3I32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_med3_i32 v0, v1, v2, v3``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1263,7 +1265,7 @@ class TestVMed3I32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVMed3F32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMed3F32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_med3_f32 v0, v1, v2, v3``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1275,7 +1277,7 @@ class TestVMed3F32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVAShiftRightI32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVAShiftRightI32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_ashrrev_i32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1287,7 +1289,7 @@ class TestVAShiftRightI32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVPackF16toB32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVPackF16toB32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_pack_b32_f16 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1316,7 +1318,7 @@ class TestVPackF16toB32Emission(unittest.TestCase, _ThreePathEqualityCase):
 # ===========================================================================
 
 
-class TestVCvtF16toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtF16toF32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_f32_f16 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1328,7 +1330,7 @@ class TestVCvtF16toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtF32toF16Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtF32toF16Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_f16_f32 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1340,7 +1342,7 @@ class TestVCvtF32toF16Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtF32toU32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtF32toU32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_u32_f32 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1352,7 +1354,7 @@ class TestVCvtF32toU32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtU32toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtU32toF32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_f32_u32 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1364,7 +1366,7 @@ class TestVCvtU32toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtI32toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtI32toF32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_f32_i32 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1376,7 +1378,7 @@ class TestVCvtI32toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtF32toI32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtF32toI32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_i32_f32 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1388,7 +1390,7 @@ class TestVCvtF32toI32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtFP8toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtFP8toF32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_f32_fp8 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1400,7 +1402,7 @@ class TestVCvtFP8toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtBF8toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtBF8toF32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_f32_bf8 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1412,7 +1414,7 @@ class TestVCvtBF8toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtPkFP8toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtPkFP8toF32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_pk_f32_fp8 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1424,7 +1426,7 @@ class TestVCvtPkFP8toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtPkBF8toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtPkBF8toF32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_pk_f32_bf8 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1436,7 +1438,7 @@ class TestVCvtPkBF8toF32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtPkF32toBF8Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtPkF32toBF8Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_pk_bf8_f32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1448,7 +1450,7 @@ class TestVCvtPkF32toBF8Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtSRF32toFP8Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtSRF32toFP8Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_sr_fp8_f32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1460,7 +1462,7 @@ class TestVCvtSRF32toFP8Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtSRF32toBF8Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtSRF32toBF8Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_sr_bf8_f32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1472,7 +1474,7 @@ class TestVCvtSRF32toBF8Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtPkF32toFP8Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtPkF32toFP8Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_pk_fp8_f32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1484,7 +1486,7 @@ class TestVCvtPkF32toFP8Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCvtPkF32toBF16Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCvtPkF32toBF16Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_pk_bf16_f32 v0, v1, v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1508,7 +1510,7 @@ class TestVCvtPkF32toBF16Emission(unittest.TestCase, _ThreePathEqualityCase):
 # ===========================================================================
 
 
-class TestDSLoadB32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestDSLoadB32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``ds_load_b32 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1520,7 +1522,7 @@ class TestDSLoadB32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestDSLoadB64Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestDSLoadB64Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``ds_load_b64 v[0:1], v2``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1532,7 +1534,7 @@ class TestDSLoadB64Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestDSLoadB128Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestDSLoadB128Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``ds_load_b128 v[0:3], v4``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1544,7 +1546,7 @@ class TestDSLoadB128Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestDSLoadU8Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestDSLoadU8Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``ds_load_u8 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1556,7 +1558,7 @@ class TestDSLoadU8Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestDSLoadU16Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestDSLoadU16Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``ds_load_u16 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1568,7 +1570,7 @@ class TestDSLoadU16Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestDSStoreB32Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestDSStoreB32Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``ds_store_b32 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1580,7 +1582,7 @@ class TestDSStoreB32Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestDSStoreB64Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestDSStoreB64Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``ds_store_b64 v0, v[1:2]``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1592,7 +1594,7 @@ class TestDSStoreB64Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestDSStoreB128Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestDSStoreB128Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``ds_store_b128 v0, v[1:4]``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1604,7 +1606,7 @@ class TestDSStoreB128Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestDSStoreB8Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestDSStoreB8Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``ds_store_b8 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1616,7 +1618,7 @@ class TestDSStoreB8Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestDSStoreB16Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestDSStoreB16Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``ds_store_b16 v0, v1``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1628,7 +1630,7 @@ class TestDSStoreB16Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestDSStoreB96Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestDSStoreB96Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``ds_store_b96 v0, v[1:3]``."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1640,7 +1642,7 @@ class TestDSStoreB96Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestWmmaF6Gfx1250Scaled(unittest.TestCase):
+class TestWmmaF6Gfx1250Scaled(AdaptorTestCase):
     """gfx1250 F6 WMMA mnemonic is gated on the forceScaledWMMA toggle.
 
     All three gfx1250 steppings share ISA (12,5,0) and the same caps, so the
@@ -1724,7 +1726,7 @@ class TestWmmaF6Gfx1250Scaled(unittest.TestCase):
 # pins both targets' text directly.
 
 
-class TestECvtF16toF32True16Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestECvtF16toF32True16Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_f32_f16 v0, v1.h`` -- half on the f16 *source*."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1737,7 +1739,7 @@ class TestECvtF16toF32True16Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestECvtF32toF16True16Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestECvtF32toF16True16Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cvt_f16_f32 v0.h, v1`` -- half on the f16 *destination*."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1750,7 +1752,7 @@ class TestECvtF32toF16True16Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestECvtF32toF16DefaultHalfEmission(unittest.TestCase,
+class TestECvtF32toF16DefaultHalfEmission(AdaptorTestCase,
                                           _ThreePathEqualityCase):
     """``sel`` omitted: both sides must fall back to the low half.
 
@@ -1768,7 +1770,7 @@ class TestECvtF32toF16DefaultHalfEmission(unittest.TestCase,
     """)
 
 
-class TestVMaxF16True16Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVMaxF16True16Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_max_f16 v0.l, v1.l, v2.h`` -- t16-tagged binary f16 ALU."""
 
     BUILD_MODULE_SNIPPET = textwrap.dedent("""\
@@ -1785,7 +1787,7 @@ class TestVMaxF16True16Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
-class TestVCndMaskB16True16Emission(unittest.TestCase, _ThreePathEqualityCase):
+class TestVCndMaskB16True16Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """``v_cndmask_b16`` -- t16-tagged select whose mask src has no half.
 
     The mask is passed explicitly: left implicit, path 1 prints ``vcc`` while
