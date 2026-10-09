@@ -3466,4 +3466,89 @@ namespace
                 EXPECT_EQ(w & 0x20000000u, 0u);
     }
 
+    // The CU-count hint (smCountTarget) caps the CUs the split is sized for,
+    // as it caps origami's num_cus for the static grid, and so also the
+    // static path's choice of reduction. The query and the launch see the
+    // same hint, so they agree; a launch handed the workspace of a query made
+    // with another hint still fits the split to it.
+    TEST(StreamKDynamicSplit_pre_checkin, HintSizesTheSplitAndTheWorkspace)
+    {
+        auto solution = dynamicParallelSolution();
+        auto device   = uniformitySteeringDevice();
+        // 14 x 2 tiles of 128 x 128, 144 iterations of 64.
+        auto         problem = dynamicSplitGemm(1792, 256, 9216, 1);
+        const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+        ASSERT_EQ(tiles, 28u);
+
+        const auto   open         = solution->streamKDynamicDecomposition(problem, device, tiles);
+        const size_t openRequired = solution->requiredWorkspaceSize(problem, device);
+        ASSERT_TRUE(open.parallel);
+        EXPECT_EQ(open.skSplit, 9u) << "256 / 28 parts on the device";
+        EXPECT_GT(open.totalItems, 192u);
+
+        problem.setParams().setSmCountTarget(192);
+        const auto hinted = solution->streamKDynamicDecomposition(problem, device, tiles);
+        ASSERT_TRUE(hinted.parallel);
+        EXPECT_EQ(hinted.skSplit, 6u) << "192 / 28 parts on the hinted CUs";
+        EXPECT_EQ(hinted.grid, 168u);
+        const size_t required = solution->requiredWorkspaceSize(problem, device);
+        EXPECT_EQ(required, hinted.workspaceBytes);
+        EXPECT_LE(required, openRequired) << "the hint never asks for more workspace";
+
+        // Query with the hint, launch with it: the same split and bytes.
+        problem.setWorkspaceSize(required);
+        expectSameSplit(solution->streamKDynamicDecomposition(problem, device, tiles), hinted);
+        auto launch = solution->resolvePersistentSettings(problem, device);
+        ASSERT_TRUE(launch.dynamicSplit.has_value());
+        expectSameSplit(*launch.dynamicSplit, hinted);
+        EXPECT_EQ(launch.workspaceBytes, required);
+        auto inv = solveWithWorkspace(*solution, problem, device);
+        ASSERT_EQ(inv.size(), 2u);
+        EXPECT_EQ(inv[0].numWorkGroups.x, 168u);
+
+        // Workspace queried without the hint, launch with it: the hinted
+        // split, which fits.
+        problem.setWorkspaceSize(openRequired);
+        expectSameSplit(solution->streamKDynamicDecomposition(problem, device, tiles), hinted);
+
+        // Workspace queried with the hint, launch without it: the split
+        // shrinks to the workspace it is given.
+        problem.setParams().setSmCountTarget(0);
+        problem.setWorkspaceSize(required);
+        const auto shrunk = solution->streamKDynamicDecomposition(problem, device, tiles);
+        EXPECT_LE(shrunk.workspaceBytes, required);
+        EXPECT_LE(shrunk.totalItems, open.totalItems);
+        launch = solution->resolvePersistentSettings(problem, device);
+        ASSERT_TRUE(launch.dynamicSplit.has_value());
+        expectSameSplit(*launch.dynamicSplit, shrunk);
+        EXPECT_LE(launch.workspaceBytes, required);
+
+        // A hint above the CU count is the CU count.
+        problem.setWorkspaceSize(size_t{1} << 30);
+        problem.setParams().setSmCountTarget(100000);
+        expectSameSplit(solution->streamKDynamicDecomposition(problem, device, tiles), open);
+
+        // 14 x 4 tiles: parallel on the device (56 <= 256 / 4), the arrival
+        // fixup on 192 hinted CUs (56 > 192 / 4), with 3 parts per tile.
+        auto         wide      = dynamicSplitGemm(1792, 512, 9216, 1);
+        const size_t wideTiles = wide.getNumTiles(solution->sizeMapping, 1);
+        ASSERT_EQ(wideTiles, 56u);
+        const auto w = solution->streamKDynamicDecomposition(wide, device, wideTiles);
+        EXPECT_TRUE(w.parallel);
+        EXPECT_EQ(w.skSplit, 4u);
+        wide.setParams().setSmCountTarget(192);
+        const auto wh = solution->streamKDynamicDecomposition(wide, device, wideTiles);
+        EXPECT_FALSE(wh.parallel);
+        EXPECT_EQ(wh.skSplit, 3u);
+        EXPECT_EQ(wh.grid, 168u);
+
+        // Whole tiles keep the device-wide grid under the hint.
+        auto         many      = dynamicSplitGemm(4096, 2048, 9216, 1);
+        const size_t manyTiles = many.getNumTiles(solution->sizeMapping, 1);
+        many.setParams().setSmCountTarget(192);
+        const auto m = solution->streamKDynamicDecomposition(many, device, manyTiles);
+        EXPECT_EQ(m.skTiles, 0u);
+        EXPECT_EQ(m.grid, 256u) << "the queues rebalance whole tiles; the grid is not capped";
+    }
+
 } // namespace

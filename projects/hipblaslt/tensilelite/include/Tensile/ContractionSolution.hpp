@@ -625,7 +625,8 @@ namespace TensileLite
         // Workgroups the dynamic grid policy may launch (CUs x occupancy,
         // capped by persistentMaxCUs and a fixed grid).
         size_t maxGrid = 0;
-        // CUs the split is sized for: origami's cu_count for the static grid.
+        // CUs the split is sized for: origami's cu_count for the static grid
+        // (the device CUs, capped by persistentMaxCUs and smCountTarget).
         size_t splitCUs = 0;
         // The kernel can fix split tiles up by last arrival. With neither this
         // nor allowParallel every tile stays whole unless the debug overrides
