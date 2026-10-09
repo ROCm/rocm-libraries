@@ -792,29 +792,30 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ T atomic_load(const T* ptr, int order, int scope)
     {
-        return __hip_atomic_load(ptr, order, scope);
+        return __scoped_atomic_load_n(ptr, order, scope);
     }
 
     template <>
     __device__ __forceinline__ rocsparse_float_complex
         atomic_load(const rocsparse_float_complex* ptr, int order, int scope)
     {
-        return rocsparse_float_complex(__hip_atomic_load((const float*)ptr, order, scope),
-                                       __hip_atomic_load((const float*)ptr + 1, order, scope));
+        return rocsparse_float_complex(__scoped_atomic_load_n((const float*)ptr, order, scope),
+                                       __scoped_atomic_load_n((const float*)ptr + 1, order, scope));
     }
 
     template <>
     __device__ __forceinline__ rocsparse_double_complex
         atomic_load(const rocsparse_double_complex* ptr, int order, int scope)
     {
-        return rocsparse_double_complex(__hip_atomic_load((const double*)ptr, order, scope),
-                                        __hip_atomic_load((const double*)ptr + 1, order, scope));
+        return rocsparse_double_complex(
+            __scoped_atomic_load_n((const double*)ptr, order, scope),
+            __scoped_atomic_load_n((const double*)ptr + 1, order, scope));
     }
 
     template <typename T>
     __device__ __forceinline__ void atomic_store(T* ptr, T val, int order, int scope)
     {
-        __hip_atomic_store(ptr, val, order, scope);
+        __scoped_atomic_store_n(ptr, val, order, scope);
     }
 
     template <>
@@ -823,8 +824,8 @@ namespace rocsparse
                                                  int                      order,
                                                  int                      scope)
     {
-        __hip_atomic_store((float*)ptr, std::real(val), order, scope);
-        __hip_atomic_store((float*)ptr + 1, std::imag(val), order, scope);
+        __scoped_atomic_store_n((float*)ptr, std::real(val), order, scope);
+        __scoped_atomic_store_n((float*)ptr + 1, std::imag(val), order, scope);
     }
 
     template <>
@@ -833,8 +834,8 @@ namespace rocsparse
                                                  int                       order,
                                                  int                       scope)
     {
-        __hip_atomic_store((double*)ptr, std::real(val), order, scope);
-        __hip_atomic_store((double*)ptr + 1, std::imag(val), order, scope);
+        __scoped_atomic_store_n((double*)ptr, std::real(val), order, scope);
+        __scoped_atomic_store_n((double*)ptr + 1, std::imag(val), order, scope);
     }
 
     template <typename T1, typename T2>
@@ -2795,7 +2796,7 @@ namespace rocsparse
     template <bool SLEEP>
     __device__ __forceinline__ int32_t spin_loop(int32_t* __restrict__ done, int scope)
     {
-        int32_t  local_done    = __hip_atomic_load(done, __ATOMIC_RELAXED, scope);
+        int32_t  local_done    = __scoped_atomic_load_n(done, __ATOMIC_RELAXED, scope);
         uint32_t times_through = 0;
         while(!local_done)
         {
@@ -2811,7 +2812,7 @@ namespace rocsparse
                     ++times_through;
                 }
             }
-            local_done = __hip_atomic_load(done, __ATOMIC_RELAXED, scope);
+            local_done = __scoped_atomic_load_n(done, __ATOMIC_RELAXED, scope);
         }
         return local_done;
     }

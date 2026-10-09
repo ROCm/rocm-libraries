@@ -104,6 +104,25 @@ Tests:
   matrix_size:
     - { M:  128,  N:  128,  K:  0  }
 
+# Skinny GEMMs that library logic routes to the rocBLAS wvSpltK custom kernels on
+# gfx950: padded leading dimensions they must honor, and general-batched
+# (pointer-array) problems they cannot run, which must fall back to other kernels.
+- name: matmul_skinny_bf16_tn
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 1024, N: 1, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 2, K: 1024, lda: 1032, ldb: 1040, ldc: 1048, ldd: 1056 }
+    - { M: 1024, N: 3, K: 1024, lda: 1024, ldb: 1032, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 4, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+  alpha: 1
+  beta: [0, 2]
+  batch_mode: [0, 1]
+  batch_count: 1
+
 # Tests confirm no NaN propagation when alpha = 0, 2 and beta = 0. Value .NaN is converted into zero
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
@@ -3108,6 +3127,551 @@ Tests:
   unit_check: 1
   gpu_arch: '1201'
 
+###############################################################################
+# fast_check: verification without a host reference GEMM.
+#
+# unit_check compares D against a host reference GEMM, which costs O(M*N*K) and
+# copies every padded buffer to pinned host memory. On gfx942 the ldd = 1049100
+# case above spends 12 s of its 14.4 s allocating pinned host memory and the
+# lda = 1049100 case spends 3.8 s in the reference. fast_check (fast_check.hpp)
+# instead checks every element of D with Freivalds' algorithm in O(M*K + K*N +
+# M*N) host work on unpadded copies, and checks the padding on the device:
+#   - A, B and C padding holds a poison value (40), so a kernel that reads
+#     padding produces a wrong D;
+#   - D is filled with a NaN sentinel before each solution runs, and afterwards
+#     every element outside the M x N x batch region must still hold it, so an
+#     out-of-bounds write fails the test, as does an element never written.
+# fast_check requires integer_exact. It also models the rounding of results too
+# large for a 16-bit output, so 16-bit types can use K above 256 here.
+#
+# Runtimes below were measured on gfx942 (MI300A) with all fast_check cases in one
+# process: about 75 s for the pre_checkin cases and 260 s for the nightly cases.
+# A large case run on its own can take several seconds longer, because its device
+# memory is allocated fresh instead of reused.
+###############################################################################
+
+# Both checks on the same results: they must agree. Covers every transpose, both
+# integer_exact alpha/beta pairs, padded leading dimensions and strided batches.
+# Runtime on gfx942: 48 cases, about 48 s.
+- name: matmul_fast_check_matches_unit_check
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_half_precision
+      - *hpa_bf16_precision
+  matrix_size: *fast_check_crosscheck_sizes
+  transA_transB: *transA_transB_range
+  alpha_beta: *integer_exact_alpha_beta
+  batch_count: 3
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+
+# For real inputs, conjugate transpose has the same layout and values as transpose.
+# Unequal M, N and K expose a wrong transpose flag in the compact input copies.
+- name: matmul_fast_check_conjugate_transpose
+  category: pre_checkin
+  function:
+    matmul: *single_precision
+  matrix_size:
+    - { M: 13, N: 11, K: 17, lda: 19, ldb: 19, ldc: 17, ldd: 19 }
+    - { M: 13, N: 19, K: 7, lda: 17, ldb: 23, ldc: 17, ldd: 19 }
+  transA: [ N, T, C ]
+  transB: [ N, T, C ]
+  alpha: 2.0
+  beta: -2.0
+  batch_count: 3
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+
+# Both checks with the epilogue fast_check supports (bias and scaleAlpha_vector),
+# and with C and D sharing memory, where D's padding must keep C's poison value.
+# lda equals A's row count here; see the padded-lda case below.
+# Runtime on gfx942: 8 cases, under 1 s.
+- name: matmul_fast_check_matches_unit_check_epilogue
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 200, lda: 131, ldb: 211, ldc: 140, ldd: 151 }
+    - { M: 1031, N: 517, K: 256, lda: 1031, ldb: 1033, ldc: 1031, ldd: 1100 }
+  transA: N
+  transB: T
+  alpha_beta: *integer_exact_alpha_beta
+  bias_vector: 1
+  bias_type: f32_r
+  scaleAlpha_vector: 1
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+
+# The same with a padded lda. The CPU reference applies scaleAlpha_vector to the
+# wrong rows of A when lda exceeds A's row count (ROCM-32062), so unit_check
+# fails a GPU result fast_check accepts. Quarantined in known_bugs.yaml.
+# Runtime on gfx942: 8 cases; skipped while quarantined.
+- name: matmul_fast_check_epilogue_padded_lda_ROCM32062
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size: *fast_check_crosscheck_sizes
+  transA: N
+  transB: T
+  alpha_beta: *integer_exact_alpha_beta
+  bias_vector: 1
+  bias_type: f32_r
+  scaleAlpha_vector: 1
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+
+# Runtime on gfx942: 8 cases, about 1 s.
+- name: matmul_fast_check_matches_unit_check_c_equal_d
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 256, lda: 1040, ldb: 1033, ldc: 1100, ldd: 1100 }
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  c_equal_d: true
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+
+# The size_t index-overflow sweep with fast_check alone, in all three precisions.
+# matmul_size_t_index_overflow_hpa above must use rand_int because integer_exact
+# with unit_check caps 16-bit K at 256; fast_check removes that cap.
+# Runtime on gfx942: 36 cases, about 24 s.
+- name: matmul_fast_check_size_t_index_overflow
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_half_precision
+      - *hpa_bf16_precision
+  matrix_size: *size_t_index_overflow
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: -2.0
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# The ROCM-26455 shape and epilogue with fast_check alone.
+# Runtime on gfx942: 8 cases, about 2 s.
+- name: matmul_fast_check_size_t_output_overflow_epilogue
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size: *size_t_output_overflow
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 1.0
+  beta: 0.0
+  bias_vector: 1
+  bias_type: f32_r
+  scaleAlpha_vector: 1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '9(42|50)'
+
+# Output element offsets above 2^32 (32-bit unsigned wrap), and a batch base
+# offset above 2^32: 3 batches with stride 2^31 + 2 put batch 2 at element
+# 4,294,967,300.
+# Runtime on gfx942: 4 cases, about 1 s.
+- name: matmul_fast_check_offset_above_2_32
+  category: nightly
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size: *fast_check_output_index_2_32
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: -2.0
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# Runtime on gfx942: 4 cases, about 2 s.
+- name: matmul_fast_check_batch_offset_above_2_32
+  category: nightly
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64,
+        stride_a: 4096, stride_b: 4096, stride_c: 2147483650, stride_d: 2147483650 }
+  batch_count: 3
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: -2.0
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# Large shapes with partial tiles in every dimension.
+# Runtime on gfx942: 8 cases, about 10 s.
+- name: matmul_fast_check_large
+  category: nightly
+  function:
+    matmul: *single_precision
+  matrix_size: *fast_check_large_sizes
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Runtime on gfx942: 16 cases, about 15 s.
+- name: matmul_fast_check_large_16bit
+  category: nightly
+  function:
+    matmul:
+      - *hpa_half_precision
+      - *hpa_bf16_precision
+  matrix_size: *fast_check_large_16bit_sizes
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# ROCM-31016: kernels bound D's stores with num_records = 0xfffff000, and the
+# solution predicate used to compare a shape's store extent against 2^32. At
+# M = 8,388,607, N = 256 in bf16 with ldd = M, one MacroTile1 = 256 tile spans
+# all of D, 4,294,966,784 bytes, which lies between the two. Kernels admitted
+# there dropped the last stores without an error. Every offered solution runs,
+# because the defect is specific to kernels with MacroTile1 = 256. The D sentinel
+# reports the dropped stores as elements never written.
+# Runtime on gfx942: 1 case covering 1,093 solutions, about 144 s.
+- name: matmul_fast_check_store_extent_ROCM31016
+  category: nightly
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 8388607, N: 256, K: 48 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  algo_method: [1]
+  requested_solution_num: -1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '9(42|50)'
+
+# Every supported solution, not only the heuristic's first choice, on the
+# ldc = ldd = 1049100 output-overflow shape. An indexing defect is usually specific
+# to one kernel, so a check of only the top pick misses it once a retune changes
+# that pick.
+# Runtime on gfx942: 2 cases covering every solution, about 88 s.
+- name: matmul_fast_check_size_t_output_overflow_all_solutions
+  category: nightly
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size: *size_t_output_overflow
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  algo_method: [1]
+  requested_solution_num: -1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+
+###############################################################################
+# fast_check placement (AIHPBLAS-4994).
+#
+# Some address defects depend on where a buffer sits, not on problem size: a
+# kernel that drops the carry out of the low 32 bits of an address (ROCM-32046)
+# goes wrong only when a buffer crosses a 4 GiB boundary, and the wrong access
+# lands exactly 4 GiB away, outside every allocation. These cases place one
+# operand at a time across a 4 GiB virtual-address boundary (by default half of
+# it on each side) with poison memory mapped 4 GiB below and above it. A
+# dropped-carry read returns poison and fast_check reports a wrong D; a
+# dropped-carry write changes the poison and the test reports it. The defect
+# does not depend on size, so small shapes suffice, and every solution runs
+# because such defects are specific to a few kernels.
+###############################################################################
+
+# Every PR: each operand placed in turn, with the heuristic's first 16 solutions.
+# The workspace is placed only in the all-solutions cases below: at this shape
+# none of the first 16 f32 solutions uses one.
+# Runtime on gfx942: 8 cases, about 4 s.
+- name: matmul_fast_check_placement
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 263 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  placement: [ a, b, c, d ]
+  requested_solution_num: 16
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# The side operands, with the epilogue that reads them.
+# Runtime on gfx942: 4 cases, about 4 s.
+- name: matmul_fast_check_placement_epilogue
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 263 }
+  transA: N
+  transB: T
+  alpha: 1.0
+  beta: 0.0
+  bias_vector: 1
+  bias_type: f32_r
+  scaleAlpha_vector: 1
+  placement: [ bias, scale_alpha_vec ]
+  requested_solution_num: 16
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Nightly: the same placements with every supported solution, about 6 minutes on
+# gfx942.
+# Runtime on gfx942: 10 cases, about 178 s.
+- name: matmul_fast_check_placement_all_solutions
+  category: nightly
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 263 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  placement: [ a, b, c, d, workspace ]
+  algo_method: [1]
+  requested_solution_num: -1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Runtime on gfx942: 4 cases, about 190 s.
+- name: matmul_fast_check_placement_epilogue_all_solutions
+  category: nightly
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 263 }
+  transA: N
+  transB: T
+  alpha: 1.0
+  beta: 0.0
+  bias_vector: 1
+  bias_type: f32_r
+  scaleAlpha_vector: 1
+  placement: [ bias, scale_alpha_vec ]
+  algo_method: [1]
+  requested_solution_num: -1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+###############################################################################
+# fast_check every solution, every iteration (AIHPBLAS-5015).
+#
+# Each defect class lives in a few of the hundreds of shipped solutions (2 of 244
+# in ROCM-32046, 39 of 545 in ROCM-31290), and intermittent defects fail only some
+# launches (ROCM-31901, ROCM-31905, and ROCM-31105 under repeated launches). These
+# cases run every supported solution (algo_method 1, which includes hand-written
+# custom kernels) and launch and check each one fast_check_repeat times, with D
+# refilled with the sentinel before each launch. A failure names the solution, its
+# library index and kernel, and the iteration; the test ends with a summary of the
+# failing solutions and their iterations.
+###############################################################################
+
+# Self-test: one element of D is corrupted after the launch on iteration 2 of 4,
+# for every solution. The case passes only if every solution is reported on
+# iteration 2, with the corrupted element named, and on no other iteration.
+# Runtime on gfx90a: 2 cases, under 1 s.
+- name: matmul_fast_check_repeat_reports_injected_iteration
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 200, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  batch_count: 3
+  requested_solution_num: 4
+  fast_check_repeat: 4
+  fast_check_inject: 2
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Every PR: the heuristic's first 16 solutions, each launched and checked 4 times,
+# on shapes with partial tiles in every dimension.
+# Runtime on gfx90a: 12 cases, about 3 s.
+- name: matmul_fast_check_repeat
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_half_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 263, lda: 1040, ldb: 1033, ldc: 1031, ldd: 1100 }
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  fast_check_repeat: 4
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Nightly: every supported solution, each launched and checked 3 times. For
+# 16-bit outputs the larger shape keeps K at 129, so almost every result stays
+# in the range bf16 stores exactly and the check runs on the device; at
+# K = 1031 most results round, and each check copies D back to the host.
+# Runtime on gfx90a: 24 cases, about 210 s.
+- name: matmul_fast_check_every_solution_repeat
+  category: nightly
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_half_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 263, lda: 1040, ldb: 1033, ldc: 1031, ldd: 1100 }
+    - { M: 4099, N: 2053, K: 129 }
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  algo_method: [1]
+  requested_solution_num: -1
+  fast_check_repeat: 3
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# Runtime on gfx90a: 4 cases, about 50 s.
+- name: matmul_fast_check_every_solution_repeat_f32_large_k
+  category: nightly
+  function:
+    matmul: *single_precision
+  matrix_size:
+    - { M: 4099, N: 2053, K: 1031 }
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  algo_method: [1]
+  requested_solution_num: -1
+  fast_check_repeat: 3
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+# The xf32 fast path selects hand-written custom kernels on gfx950 (ROCM-31258).
+# Every supported solution, custom kernels included, launched and checked 3 times.
+- name: matmul_fast_check_every_solution_repeat_xf32
+  category: nightly
+  function:
+    matmul: *xf32_precision
+  matrix_size:
+    - { M: 4099, N: 2053, K: 32 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  algo_method: [1]
+  requested_solution_num: -1
+  fast_check_repeat: 3
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+  gpu_arch: '950'
+
+# Stream-K solutions (the ROCM-31290 and GitHub PR 11962 families). TensileLite
+# offers them only when the process starts with TENSILE_SOLUTION_SELECTION_METHOD=2,
+# except on gfx950, where they are the only library; elsewhere these cases skip
+# with that message. Run them with:
+#   TENSILE_SOLUTION_SELECTION_METHOD=2 hipblaslt-test --gtest_filter='*fast_check_streamk*'
+- name: matmul_fast_check_streamk_repeat
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_half_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 263, lda: 1040, ldb: 1033, ldc: 1031, ldd: 1100 }
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 16
+  fast_check_repeat: 4
+  requires_streamk: 1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
+
+- name: matmul_fast_check_streamk_every_solution_repeat
+  category: nightly
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_half_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 1031, N: 517, K: 263, lda: 1040, ldb: 1033, ldc: 1031, ldd: 1100 }
+    - { M: 4099, N: 2053, K: 129 }
+  transA_transB: *transA_transB_range
+  alpha: 2.0
+  beta: -2.0
+  algo_method: [1]
+  requested_solution_num: -1
+  fast_check_repeat: 3
+  requires_streamk: 1
+  initialization: integer_exact
+  unit_check: 0
+  fast_check: 1
 
 - name: matmul_96_complex
   category: pre_checkin

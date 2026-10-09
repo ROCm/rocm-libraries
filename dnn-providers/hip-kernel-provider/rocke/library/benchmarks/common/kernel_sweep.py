@@ -373,7 +373,7 @@ def _fwd_jobs(
                         dtype_b=db,
                         dtype_d=dd,
                         grouped=grouped,
-                        **_async_chunks(cfg, (da, db, dd), caps),
+                        **_async_chunks(cfg, (da, db, dd), caps, arch),
                         **cfg,
                     ),
                     direction="fwd",
@@ -382,13 +382,17 @@ def _fwd_jobs(
                 )
 
 
-def _async_chunks(cfg: dict, dtypes, caps: dict) -> dict:
+def _async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> dict:
     """The fwd async loaders' chunk widths, for the identity.
 
     They are chosen from the build-time cpg -- the probe problem's -- so they
     are a capability of the binary and have to be recorded. Taken from the
     builder's own loader construction so the two cannot disagree. An invalid
     spec records 0; the job is dropped by the validity filter anyway.
+
+    ``arch`` matters because the width is also capped by what the target's
+    DRAM->LDS DMA can move per lane, so the same ``cfg`` records different
+    chunk widths on gfx942 and gfx950.
     """
     if not cfg.get("async_dma"):
         return {}
@@ -405,7 +409,7 @@ def _async_chunks(cfg: dict, dtypes, caps: dict) -> dict:
             data=ConvDataSpec(dtype_a=da, dtype_b=db, dtype_d=dd),
             **cfg,
         )
-        a_loader, b_loader = async_tile_loaders(spec)
+        a_loader, b_loader = async_tile_loaders(spec, arch)
     except ValueError:
         return {}
     return dict(
@@ -618,6 +622,79 @@ def _dgrad_jobs(
             )
 
 
+def job_for_identity(identity: KernelIdentity) -> BuildJob:
+    """The job ``--compile-all`` builds ``identity`` from.
+
+    The inverse of the generators above, obtained by running them: the
+    identity's geometry is fed to its direction's generator (with the
+    identity's own split-K degree, sub-GEMM cap and LLVM flavor) and the job
+    whose identity is equal is returned. So a rebuilt job is exactly the one
+    the cache build made, never a reconstruction that could drift from it.
+
+    Raises ``LookupError`` for an identity the generators of this checkout do
+    not produce (a different grid, or a field they never set).
+    """
+    from rocke.core.arch import ArchTarget
+
+    if identity.algorithm != "implicit_gemm" or identity.direction not in (
+        "fwd",
+        "wgrad",
+        "dgrad",
+    ):
+        raise LookupError(
+            f"not an implicit-GEMM conv identity: {identity.direction}/"
+            f"{identity.algorithm}"
+        )
+    if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
+        raise LookupError("the AOT grid builds A, B and D in one dtype")
+    if identity.warp_tile_m != identity.warp_tile_n:
+        raise LookupError("the AOT grid builds square warp tiles only")
+    target = ArchTarget.from_gfx(identity.arch)
+    if target.wave_size != identity.wave_size:
+        raise LookupError(
+            f"{identity.arch} runs wave{target.wave_size}, the identity records "
+            f"wave{identity.wave_size}"
+        )
+    dtype = identity.dtype_a
+    wt = identity.warp_tile_m
+    mma_family = "wmma" if target.wave_size == 32 else "mma"
+    atom = target.mma.select_largest_k(
+        family=mma_family, a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=wt, n=wt
+    )
+    if atom is None or atom.k != identity.warp_tile_k:
+        raise LookupError(
+            f"no {wt}x{wt}x{identity.warp_tile_k} {dtype} MMA atom on {identity.arch}"
+        )
+    geometry = (
+        identity.tile_m,
+        identity.tile_n,
+        identity.tile_k,
+        identity.warp_m,
+        identity.warp_n,
+        wt,
+        identity.pipeline,
+        identity.epilogue,
+        atom,
+    )
+    want = identity.stable_hash()
+    for job in _direction_jobs(
+        identity.direction,
+        identity.arch,
+        dtype,
+        target,
+        (identity.split_k,),
+        identity.max_sub_gemms,
+        geometries=[geometry],
+        llvm_flavor=identity.llvm_flavor,
+    ):
+        if job.identity.stable_hash() == want:
+            return job
+    raise LookupError(
+        f"{identity.label()} is not produced by this checkout's "
+        f"{identity.direction} generator (another grid, or a field it never sets)"
+    )
+
+
 def _spec_is_valid(job: BuildJob, arch: str, dtype: str) -> bool:
     """Would this configuration build at all?
 
@@ -794,6 +871,25 @@ def _enumerate_worker(payload):
     )
 
 
+def _worker_init() -> None:
+    """Pool initializer: stop a compiler abort from writing a core dump.
+
+    COMGR runs in-process, so an ``LLVM ERROR`` is an ``abort()`` in the
+    worker. With the default core limit each one leaves a core the size of the
+    worker's address space -- hundreds of MB -- and a grid that trips the same
+    backend bug in thousands of variants fills the disk before the run ends.
+    The crash is still reported: the broken pool is what the caller detects.
+    """
+    try:
+        import resource  # POSIX only
+
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    except (ImportError, OSError, ValueError):
+        # No RLIMIT_CORE here (non-POSIX, or a hard limit we may not lower).
+        # Cores are a disk-space problem, never a correctness one.
+        pass
+
+
 def enumerate_jobs(
     *,
     arch: str,
@@ -888,7 +984,7 @@ def enumerate_jobs(
                 ),
             )
     else:
-        with ProcessPoolExecutor(max_workers=jobs) as pool:
+        with ProcessPoolExecutor(max_workers=jobs, initializer=_worker_init) as pool:
             futures = {
                 pool.submit(_enumerate_worker, payload): idx
                 for idx, payload in enumerate(payloads)
@@ -1078,7 +1174,11 @@ def _compile_worker(payload):
 # A main compile pool that keeps breaking is not a single bad kernel.
 _MAX_POOL_RESTARTS = 20
 
-_WORKER_DIED = "worker process died (out of memory, or a crash in the compiler)"
+_WORKER_DIED = (
+    "worker process died: either the OOM killer, or the compiler aborted on "
+    "this kernel's IR (an LLVM ERROR -- e.g. an instruction form the target "
+    "does not have -- calls abort() rather than returning a diagnostic)"
+)
 
 
 # Each single-worker pool holds a handful of pipes; the slot count is capped so
@@ -1117,7 +1217,10 @@ def _run_isolated(suspects, jobs: int):
     """
     pending = list(suspects)
     pending.reverse()
-    slots = [ProcessPoolExecutor(max_workers=1) for _ in range(_isolated_slots(jobs))]
+    slots = [
+        ProcessPoolExecutor(max_workers=1, initializer=_worker_init)
+        for _ in range(_isolated_slots(jobs))
+    ]
     running: Dict = {}  # future -> (slot index, kind, payload)
 
     def submit(i: int) -> None:
@@ -1138,7 +1241,9 @@ def _run_isolated(suspects, jobs: int):
                 except BrokenProcessPool:
                     result = _died_result(kind, payload)
                     slots[i].shutdown(wait=True)
-                    slots[i] = ProcessPoolExecutor(max_workers=1)
+                    slots[i] = ProcessPoolExecutor(
+                        max_workers=1, initializer=_worker_init
+                    )
                 yield kind, payload, result
                 if pending:
                     submit(i)
@@ -1152,7 +1257,7 @@ def _pool_map(fn, payloads, jobs: int, on_result) -> None:
         for payload in payloads:
             on_result(fn(payload))
         return
-    with ProcessPoolExecutor(max_workers=jobs) as pool:
+    with ProcessPoolExecutor(max_workers=jobs, initializer=_worker_init) as pool:
         futures = [pool.submit(fn, p) for p in payloads]
         for fut in as_completed(futures):
             on_result(fut.result())
@@ -1355,7 +1460,7 @@ def compile_jobs(
         if err is not None:
             state["rejected"] += 1
             if state["rejected"] <= 10:
-                log(f"  [skip] {job.identity.short_label()}: {err}")
+                log(f"  [skip] {job.identity.label()}: {err}")
         else:
             first = key not in members
             members.setdefault(key, []).append((job, meta))
@@ -1379,7 +1484,7 @@ def compile_jobs(
             state["failed"] += 1
             if state["failed"] <= 10:
                 job = members[key][0][0]
-                log(f"  [fail] {job.identity.short_label()}: {err}")
+                log(f"  [fail] {job.identity.label()}: {err}")
             return
         cache.put_blob(key, hsaco, kernel_name)
         state["compiled"] += 1
@@ -1417,7 +1522,9 @@ def compile_jobs(
         restarts = 0
         while True:
             broken: List[Tuple[str, tuple]] = []
-            with ProcessPoolExecutor(max_workers=jobs) as pool:
+            with ProcessPoolExecutor(
+                max_workers=jobs, initializer=_worker_init
+            ) as pool:
                 futures: Dict = {}
 
                 def submit(kind: str, payload) -> None:
@@ -1469,15 +1576,17 @@ def compile_jobs(
             restarts += 1
             if restarts > _MAX_POOL_RESTARTS:
                 raise RuntimeError(
-                    f"compile workers died {restarts} times; giving up. A worker "
-                    f"dying repeatedly usually means memory pressure -- rerun "
-                    f"with a lower --jobs (was {jobs})."
+                    f"compile workers died {restarts} times; giving up. Either "
+                    f"memory pressure -- rerun with a lower --jobs (was {jobs}) "
+                    f"-- or this grid emits IR the backend aborts on for a whole "
+                    f"family of variants, in which case the [fail] lines above "
+                    f"name them and the emitter needs the fix, not the run."
                 )
             log(
-                f"  [warn] a worker process died (out of memory, or a crash in "
-                f"the compiler); rerunning its {len(broken)} in-flight job(s) "
-                f"one per process to find the culprit. Lower --jobs if this "
-                f"repeats."
+                f"  [warn] a worker process died (out of memory, or the compiler "
+                f"aborting on its IR); rerunning its {len(broken)} in-flight "
+                f"job(s) one per process to find the culprit. Lower --jobs if "
+                f"this repeats."
             )
             # Rerun the suspects one per single-worker pool, so a job that
             # kills its worker again breaks only its own pool and is reported.
@@ -1571,4 +1680,14 @@ def describe_cache(
             f"since. They still run; rerun --compile-all for those directions to "
             f"refresh them (only kernels whose code changed are recompiled)"
         )
+    # What a rebuild from the names below reproduces against: the binary is a
+    # function of these as well as of the kernel's identity.
+    log(
+        f"  this checkout: emitter {current_emitter_digest()[:12]}, "
+        f"LLVM {current_llvm_flavor()}, comgr {current_comgr_id()}"
+    )
+    log(
+        "  kernel names are complete identities; rebuild one with: "
+        "python -m benchmarks.common.reproduce_kernel <name> --cache <cache dir>"
+    )
     return 0
