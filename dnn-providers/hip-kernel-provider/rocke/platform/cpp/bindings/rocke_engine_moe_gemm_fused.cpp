@@ -16,6 +16,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "builder_lifetime.hpp"
 #include "llvm_flavor.hpp"
 
 #include <cstdlib>
@@ -148,10 +149,11 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
         rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
     rocke_status_t st
         = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
-    rocke_ir_builder_free(&b);
+    guard.reset();
     if(st != ROCKE_OK || !ll)
     {
         if(ll)

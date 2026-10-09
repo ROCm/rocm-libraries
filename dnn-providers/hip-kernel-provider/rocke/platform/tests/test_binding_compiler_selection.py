@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 
 import pytest
 
@@ -107,3 +108,137 @@ def test_python_bindings_use_the_compiling_library(tmp_path):
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+CLEANUP_PROBE = r"""
+from rocke.core import lower_llvm
+from rocke.core.ir import IRBuilder
+from rocke.core.ir_serialize import serialize
+from rocke.runtime.comgr import ComgrError
+import rocke_engine
+
+def unavailable():
+    raise ComgrError("cleanup probe: compiler unavailable")
+
+lower_llvm._resolve_llvm_flavor = unavailable
+common = dict(head_size=64, num_query_heads=4, num_kv_heads=2,
+              dtype="fp16", seqlen_q=16, seqlen_k=64, block_size=16,
+              total_q=16, max_seqlen_q=16, max_seqlen_k=64, num_seqs=1)
+attention = dict(common, block_size=16, num_segments=2, num_seqs=1)
+moe = dict(dtype="f16", tile=dict(tile_m=32, tile_n=128, tile_k=64,
+           warp_m=1, warp_n=2, warp_tile_m=32, warp_tile_n=32, warp_tile_k=16))
+cases = [
+    (rocke_engine.layernorm2d_lower_llvm, {}, "gfx950"),
+    (rocke_engine.rmsnorm2d_lower_llvm, {}, "gfx950"),
+    (rocke_engine.attention_unified_lower_llvm, common, "gfx950"),
+    (rocke_engine.fmha_bwd_lower_llvm, common, "gfx950"),
+    (rocke_engine.fmha_head_grouping_lower_llvm, common, "gfx950"),
+    (rocke_engine.fmha_appendkv_lower_llvm, common, "gfx950"),
+    (rocke_engine.fmha_paged_prefill_lower_llvm, common, "gfx950"),
+    (rocke_engine.fmha_varlen_lower_llvm,
+     dict(common, max_seqlen_q=16, max_seqlen_k=64), "gfx950"),
+    (rocke_engine.moe_gemm_fused_lower_llvm, moe, "gfx950"),
+]
+for kind in ("jenga", "vsa"):
+    cases.append((rocke_engine.sparse_attention_lower_llvm,
+                  dict(common, kind=kind), "gfx950"))
+for arch in ("gfx942", "gfx950"):
+    for layout in ("paged", "strided"):
+        cases.append((getattr(rocke_engine, arch + "_attention_tiled_3d_lower_llvm"),
+                      dict(attention, kv_layout=layout), arch))
+for lower, spec, arch in cases:
+    for _ in range(2):
+        try:
+            lower(spec, arch=arch)
+        except ComgrError as exc:
+            assert str(exc) == "cleanup probe: compiler unavailable"
+        else:
+            raise AssertionError(lower.__name__ + " did not propagate resolver failure")
+
+# A failure in the second gfx950 stage must release its reduce builder too.
+calls = 0
+def fail_reduce():
+    global calls
+    calls += 1
+    if calls == 1:
+        return "llvm23"
+    return unavailable()
+
+lower_llvm._resolve_llvm_flavor = fail_reduce
+try:
+    rocke_engine.gfx950_attention_tiled_3d_lower_llvm(attention, arch="gfx950")
+except ComgrError:
+    assert calls == 2
+else:
+    raise AssertionError("reduce resolver failure did not propagate")
+
+# Keep spec validation ahead of automatic compiler selection.
+lower_llvm._resolve_llvm_flavor = unavailable
+try:
+    rocke_engine.layernorm2d_lower_llvm(dict(dtype="invalid"), arch="gfx950")
+except ComgrError:
+    raise AssertionError("compiler lookup preceded invalid-spec rejection")
+except RuntimeError as exc:
+    assert "build failed" in str(exc)
+else:
+    raise AssertionError("invalid spec was accepted")
+
+ir = serialize(IRBuilder("cleanup_explicit_probe").kernel)
+assert rocke_engine.lower_serialized_ir(ir, arch="gfx950", flavor="llvm20")
+"""
+
+
+def test_binding_resolver_failure_preserves_error_contract():
+    pytest.importorskip("rocke_engine")
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", CLEANUP_PROBE],
+        env=dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path)),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_resolver_failure_releases_binding_builders(tmp_path):
+    pytest.importorskip("rocke_engine")
+    valgrind = shutil.which("valgrind")
+    if sys.platform != "linux" or not valgrind:
+        pytest.skip("builder leak detection requires Linux and Valgrind")
+    report = tmp_path / "leaks.xml"
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path), TMPDIR=str(tmp_path))
+    result = subprocess.run(
+        [
+            valgrind,
+            "--vgdb=no",
+            "--leak-check=full",
+            "--show-leak-kinds=definite",
+            "--xml=yes",
+            "--xml-file=" + str(report),
+            sys.executable,
+            "-B",
+            "-c",
+            CLEANUP_PROBE,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    # Python and third-party shutdown reports are outside this ownership gate.
+    # Require no lost arena allocation from any exercised rocKE binding.
+    leaks = [
+        error
+        for error in ET.parse(report).findall("error")
+        if error.findtext("kind") == "Leak_DefinitelyLost"
+        and any(
+            "rocke_arena" in (frame.findtext("fn") or "")
+            for frame in error.findall("stack/frame")
+        )
+    ]
+    assert not leaks, "\n".join(
+        ET.tostring(error, encoding="unicode") for error in leaks
+    )
