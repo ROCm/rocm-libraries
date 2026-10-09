@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def default_bundle_path(tests_dir: Path, architecture: str) -> Path:
+def default_bundle_path(tests_dir: Path, architecture: str, *, operation: str) -> Path:
     """Keep installed references in the test-only architecture packaging domain.
 
     Both provider and standalone installs put library tests at
@@ -19,5 +19,5 @@ def default_bundle_path(tests_dir: Path, architecture: str) -> Path:
     tests_dir = tests_dir.resolve()
     if tests_dir.parts[-3:] == ("tests", "library", "tests"):
         test_root = tests_dir.parent.parent.parent
-        return test_root / "engines/test_arch_content/rocke/conv" / architecture
-    return tests_dir / "reference_bundles" / "conv" / architecture
+        return test_root / "engines/test_arch_content/rocke" / operation / architecture
+    return tests_dir / "reference_bundles" / operation / architecture
