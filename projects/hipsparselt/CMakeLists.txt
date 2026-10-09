@@ -165,9 +165,10 @@ if(HIPSPARSELT_ENABLE_HIP)
         message(STATUS "hipSPARSELt uses the staged hipBLASLt package.")
     else()
         cmake_path(GET HIPBLASLT_TENSILELITE_PATH PARENT_PATH _hipblaslt_source_dir)
-        list(APPEND CMAKE_MODULE_PATH "${_hipblaslt_source_dir}/cmake")
+        list(APPEND CMAKE_MODULE_PATH "${_hipblaslt_source_dir}/tensilelite/cmake")
         block()
             set(HIPBLASLT_ENABLE_TENSILELITE_ONLY ON)
+            set(HIPBLASLT_ENABLE_MXDATAGENERATOR OFF)
             set(CMAKE_SKIP_INSTALL_RULES ON)
             if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
                 set(HIPBLASLT_ENABLE_YAML ON)
@@ -260,7 +261,7 @@ if(_hipsparselt_requires_hipblaslt)
     if(BUILD_SHARED_LIBS)
         rocm_package_add_dependencies(
             COMPONENT runtime
-            DEPENDS hipblaslt
+            DEPENDS tensilelite-host
         )
         rocm_package_add_deb_dependencies(
             COMPONENT devel
