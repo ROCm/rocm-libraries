@@ -16,13 +16,16 @@ from rocke.core.lower_llvm import lower_kernel_to_llvm
 @pytest.mark.parametrize(
     "a,b,sa,sb", [("fp4", "fp4", "e4m3", "e4m3"), ("fp6", "fp4", "e8m0", "e5m3")]
 )
-def test_scale_example_contract(a, b, sa, sb):
+@pytest.mark.parametrize("matrix_path", ["wmma_scale", "wmma_scale16"])
+@pytest.mark.parametrize("output_dtype", ["bf16", "fp16"])
+def test_scale_example_contract(a, b, sa, sb, matrix_path, output_dtype):
     spec = make_spec(
         argparse.Namespace(
             m=32,
             n=48,
             k=256,
-            matrix_path="wmma_scale16",
+            matrix_path=matrix_path,
+            output_dtype=output_dtype,
             dtype_a=a,
             dtype_b=b,
             scale_dtype_a=sa,
@@ -30,10 +33,45 @@ def test_scale_example_contract(a, b, sa, sb):
         )
     )
     assert spec.resolved_scale_dtypes() == (sa, sb)
+    assert spec.dtype_c == output_dtype
     assert is_valid_spec(spec)[0]
-    assert "@llvm.amdgcn.wmma.scale16" in lower_kernel_to_llvm(
+    llvm = lower_kernel_to_llvm(
         build_block_scaled_gemm(spec), arch="gfx1250", llvm_flavor="llvm23"
     )
+    intrinsic = "scale16" if matrix_path == "wmma_scale16" else "scale"
+    assert f"@llvm.amdgcn.wmma.{intrinsic}." in llvm
+    storage_type = "half" if output_dtype == "fp16" else "bfloat"
+    assert f"store {storage_type} " in llvm
+
+
+@pytest.mark.parametrize("matrix_path", ["wmma_scale", "wmma_scale16"])
+@pytest.mark.parametrize("output_dtype", [None, "bf16", "fp16"])
+def test_scale_formats_gemm_cli_selects_output(monkeypatch, matrix_path, output_dtype):
+    from rocke.examples.gfx1250.gemm import _scaled_gemm_example
+    from rocke.examples.gfx1250.gemm import scale_formats_gemm as example
+
+    seen = []
+
+    def run(spec, cases, **kwargs):
+        seen.append(spec.dtype_c)
+        return len(cases)
+
+    monkeypatch.setattr(_scaled_gemm_example, "run_cases", run)
+    argv = ["--matrix-path", matrix_path]
+    if output_dtype is not None:
+        argv += ["--output-dtype", output_dtype]
+    assert example.main(argv) == 0
+    assert seen == [output_dtype or "bf16"]
+
+
+def test_scale_formats_gemm_cli_rejects_unsupported_output(monkeypatch, capsys):
+    from rocke.examples.gfx1250.gemm import scale_formats_gemm as example
+
+    monkeypatch.setattr(example, "verify", lambda *args: pytest.fail("must not launch"))
+    with pytest.raises(SystemExit) as exc:
+        example.main(["--output-dtype", "fp32"])
+    assert exc.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

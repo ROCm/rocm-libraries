@@ -19,16 +19,21 @@ _MIXED = (
 
 
 @pytest.mark.parametrize("matrix_path", ["wmma_scale", "wmma_scale16"])
+@pytest.mark.parametrize("output_dtype", ["bf16", "fp16"])
 @pytest.mark.parametrize(
     "a,b,sa,sb,route",
     [(*case, route) for case in _MIXED for route in ("comgr", "hip")],
 )
-def test_scale_format_wmma_numeric(gpu_env, matrix_path, a, b, sa, sb, route):
+def test_scale_format_wmma_numeric(
+    gpu_env, matrix_path, output_dtype, a, b, sa, sb, route
+):
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             _MODULE,
+            "--output-dtype",
+            output_dtype,
             "--dtype-a",
             a,
             "--dtype-b",
@@ -57,6 +62,9 @@ def test_scale_format_wmma_numeric(gpu_env, matrix_path, a, b, sa, sb, route):
     )
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
+    compiled = [line for line in output.splitlines() if "] compiled " in line]
+    assert len(compiled) == 1, output
+    assert f"_out_{output_dtype}_" in compiled[0], output
     count = 20 if matrix_path == "wmma_scale16" else 12
     assert f"PASS: verified {count} cases" in output, output
     assert output.count("bad=0") == count, output

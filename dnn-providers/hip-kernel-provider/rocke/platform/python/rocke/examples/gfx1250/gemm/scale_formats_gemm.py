@@ -19,7 +19,7 @@ def make_spec(args) -> BlockScaledGemmSpec:
         K=args.k,
         dtype_a=args.dtype_a,
         dtype_b=args.dtype_b,
-        dtype_c="bf16",
+        dtype_c=args.output_dtype,
         scale_dtype="e8m0",
         scale_dtype_a=args.scale_dtype_a,
         scale_dtype_b=args.scale_dtype_b,
