@@ -528,14 +528,14 @@ def _mma_c_frag_len(op_id: str) -> int:
     return frag_len
 
 
-def _mma_c_is_int(op_id: str) -> bool:
-    """True when ``op_id`` accumulates in i32 (integer WMMA).
+def _mma_c_dtype(op_id: str) -> str:
+    """The accumulator dtype of ``op_id``, from the arch catalog.
 
-    Sourced from the arch catalog's accumulator dtype
-    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``).
-    Op_ids absent from the catalog default to the f32 accumulator.
+    Sourced from ``core/arch/data/arch_specs.json`` via
+    ``target._op_id_c_dtype``. Op_ids absent from the catalog accumulate in
+    fp32.
     """
-    return _arch._op_id_c_dtype().get(op_id) == "i32"
+    return _arch._op_id_c_dtype().get(op_id, "fp32")
 
 
 @dataclass(frozen=True)
@@ -2574,8 +2574,9 @@ class IRBuilder:
         matching MFMA call on CDNA or the WMMA call on RDNA. **One kernel body,
         two ISAs.**
 
-        The result vector type is ``<c_frag_len x float>`` (the per-lane
-        accumulator length the atom produces). When ``op`` is an ``op_id``
+        The result vector type is ``<c_frag_len x C>``: the per-lane
+        accumulator length the atom produces, with C the instruction's
+        accumulator dtype from the arch catalog. When ``op`` is an ``op_id``
         string the frag length is resolved from the static MMA fragment table;
         an emulated atom's op_id resolves through the physical atom it expands
         into.
@@ -2603,12 +2604,10 @@ class IRBuilder:
             if hasattr(op, "c_frag_len") and op.c_frag_len
             else _mma_c_frag_len(op_id)
         )
-        # Accumulator element type: integer WMMA atoms (iu8/iu4) accumulate in
-        # i32; everything else in f32. Prefer the atom's own c_dtype when ``op``
-        # is an MmaOp, else resolve from the arch SSOT via op_id.
-        c_dtype = getattr(op, "c_dtype", None)
-        is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
-        c_elem = I32 if is_int_acc else F32
+        # Accumulator element type: the atom's own c_dtype when ``op`` is an
+        # MmaOp, else the catalog's accumulator dtype for the op_id.
+        c_dtype = getattr(op, "c_dtype", None) or _mma_c_dtype(op_id)
+        c_elem = dtype_to_ir_type(c_dtype)
         hint = (
             "mxacc"
             if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")
