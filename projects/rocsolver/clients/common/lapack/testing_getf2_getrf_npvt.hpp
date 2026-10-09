@@ -223,7 +223,7 @@ void getf2_getrf_npvt_getError(const rocblas_handle handle,
     *max_err = 0;
     for(I b = 0; b < bc; ++b)
     {
-        if(!singular)
+        if(hInfo[b][0] == 0)
         {
             err = norm_error('F', m, n, lda, hA[b], hARes[b]);
             *max_err = rocblas_max_nan(err, (*max_err));
