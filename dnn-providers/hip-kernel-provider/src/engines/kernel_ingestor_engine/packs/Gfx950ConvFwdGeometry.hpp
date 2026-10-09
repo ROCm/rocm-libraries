@@ -1044,6 +1044,14 @@ inline std::optional<LaunchGeometry> directInstanceLaunch(const Problem& problem
     }
 }
 
+/// The variants that compute only pure depthwise problems; grouped and non-grouped
+/// compete with implicit GEMM on ordinary graphs.
+inline bool isDepthwiseDirectVariant(DirectVariant variant)
+{
+    return variant == DirectVariant::STD || variant == DirectVariant::SPATIAL
+           || variant == DirectVariant::TILED || variant == DirectVariant::COL;
+}
+
 /// Whether @p variant, @p blockW and @p blockWaves are gfx950_conv_fwd_direct_spec_for_request's
 /// choice with no overrides for @p groups: spatial with one wave below 64 groups, otherwise
 /// std with block_w 4 and one wave.
