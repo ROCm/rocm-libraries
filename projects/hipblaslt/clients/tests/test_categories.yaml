@@ -14,7 +14,8 @@
 #   so "*pre_checkin*" selects the tests whose category is pre_checkin.
 #
 #   Categories present in clients/tests/data today: smoke, quick, pre_checkin,
-#   nightly, stress, HMM, plus known_bug (assigned dynamically, including per-GPU via
+#   nightly, stress, HMM, sdc_hunt (on demand, deliberately in no tier; see
+#   clients/scripts/sdc_hunt), plus known_bug (assigned dynamically, including per-GPU via
 #   known_bug_platforms).
 #
 #   multi_gpu is the exception: it has no entries in data/, and its tests are

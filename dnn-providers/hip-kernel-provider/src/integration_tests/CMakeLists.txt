@@ -83,7 +83,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # arch-agnostic and lives in HkpPackaging.cmake, which only an ingestor build
     # includes -- hence this guard.
     hkp_product_offers_engine(_hkp_knobs_bundle "hipkernel:Gfx950AttentionDense")
-    if(_hkp_knobs_bundle)
+    if(_hkp_knobs_bundle AND NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Skipping gfx950 dense attention knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
+    elseif(_hkp_knobs_bundle)
         target_sources(hip_kernel_provider_integration_tests PRIVATE
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         )
@@ -219,7 +223,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
         INSTALL_SUBDIR hip_kernel_provider
         ${_gfx950_shard_args}
         REFERENCE_EXECUTOR gpu
-        GTEST_FILTER "quick_SdpaFwd_bshd_*:standard_SdpaFwd_bshd_*"
+        GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*"
         ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
     )
 endif()
