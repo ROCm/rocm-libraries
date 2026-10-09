@@ -3,6 +3,26 @@
     "HIP_MLOPS_ENGINE": [
       {
         "cases": [
+          "16_3_8_14_14_bfp16_ncdhw",
+          "16_3_8_14_14_fp16_ndhwc",
+          "16_3_8_14_14_fp32_ncdhw_27df98",
+          "16_3_8_14_14_fp32_ncdhw_c62944",
+          "16_3_8_14_14_fp32_ndhwc_dad2a0"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
           "1_256_1_1_bfp16_nchw",
           "1_256_1_1_fp16_nchw",
           "1_256_1_1_fp16_nhwc",
@@ -148,26 +168,6 @@
             "linux"
           ],
           "gfx950": [
-            "linux"
-          ]
-        }
-      },
-      {
-        "cases": [
-          "16_3_8_14_14_bfp16_ncdhw",
-          "16_3_8_14_14_fp16_ndhwc",
-          "16_3_8_14_14_fp32_ncdhw_27df98",
-          "16_3_8_14_14_fp32_ncdhw_c62944",
-          "16_3_8_14_14_fp32_ndhwc_dad2a0"
-        ],
-        "support": {
-          "gfx1151": [
-            "windows"
-          ],
-          "gfx90a": [
-            "linux"
-          ],
-          "gfx942": [
             "linux"
           ]
         }

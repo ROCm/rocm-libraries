@@ -252,40 +252,6 @@
       },
       {
         "cases": [
-          "1_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0_748394",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad0x0_prepad0x0",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_3a6799",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_b082f3",
-          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_bdedac",
-          "8_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0"
-        ],
-        "support": {
-          "gfx1030": [
-            "windows"
-          ],
-          "gfx1101": [
-            "linux"
-          ],
-          "gfx1150": [
-            "linux"
-          ],
-          "gfx1151": [
-            "linux",
-            "windows"
-          ],
-          "gfx1201": [
-            "linux"
-          ],
-          "gfx942": [
-            "linux"
-          ],
-          "gfx950": [
-            "linux"
-          ]
-        }
-      },
-      {
-        "cases": [
           "1_16_16_16_16_fp32_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
           "1_16_16_16_16_fp32_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_162ecb",
           "1_16_16_16_16_fp32_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0_99f4ba",
@@ -386,6 +352,40 @@
           "8_16_16_16_fp32_nhwc_dil1x1_postpad0x0_prepad0x0_53318c"
         ],
         "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "1_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0_748394",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad0x0_prepad0x0",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_3a6799",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_b082f3",
+          "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_bdedac",
+          "8_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0"
+        ],
+        "support": {
+          "gfx1030": [
+            "windows"
+          ],
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ],

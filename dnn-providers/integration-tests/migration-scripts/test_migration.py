@@ -1147,8 +1147,8 @@ def test_retier_bundles():
             root,
             "full",
             _retier_graph_template("${case.attributes.relu_lower_clip}"),
-            [_retier_case("c", clip_attr=0.5)],
-            {"MIOPEN_ENGINE": [{"cases": ["c"], "support": win}]},
+            [_retier_case("0c", clip_attr=0.5)],
+            {"MIOPEN_ENGINE": [{"cases": ["0c"], "support": win}]},
         )
         single = root / "quick" / "Op2" / "nchw" / "fp32" / "Small"
         single.mkdir(parents=True)
@@ -1169,7 +1169,7 @@ def test_retier_bundles():
         plan = [
             ("quick", "Op/Default/a", "standard"),
             ("quick", "Op/Default/b", "quick"),
-            ("full", "Op/Default/c", "quick"),
+            ("full", "Op/Default/0c", "quick"),
             ("quick", "Op2/nchw/fp32/Small", "full"),
         ]
 
@@ -1247,16 +1247,24 @@ def test_retier_bundles():
         assert case_a["id"] == "a" and case_a["values"]["attributes"] == {
             "relu_lower_clip": None
         }
-        # "c" kept its own value; "b" (stayed) gained the explicit null.
+        # "0c" kept its own value; "b" (stayed) gained the explicit null.
         by_id = {c["id"]: c for c in quick["sweep.json"]["cases"]}
-        assert by_id["c"]["values"]["attributes"] == {"relu_lower_clip": 0.5}
+        assert by_id["0c"]["values"]["attributes"] == {"relu_lower_clip": 0.5}
         assert by_id["b"]["values"]["attributes"] == {"relu_lower_clip": None}
-        # Claims follow their case: b and c have different arch maps, so two groups.
+        # Claims follow their case: b and 0c have different arch maps, so two groups.
         groups = quick["support.json"]["claims"]["MIOPEN_ENGINE"]
         assert {tuple(g["cases"]): g["support"] for g in groups} == {
             ("b",): lin,
-            ("c",): win,
+            ("0c",): win,
         }
+        # Canonical text: "0c" arrived after "b" but sorts first, and the sidecar
+        # tools refuse any file whose groups are not in sorted-first-case order.
+        sys.path.insert(0, str(SCRIPT_DIR.parent / "scripts"))
+        from support_sidecar import parse
+
+        for tier in ("quick", "standard"):
+            path = root / tier / "Op" / "Default" / "support.json"
+            parse(path, path.read_text("utf-8"))
         assert std["support.json"]["claims"]["MIOPEN_ENGINE"] == [
             {"cases": ["a"], "support": win}
         ]

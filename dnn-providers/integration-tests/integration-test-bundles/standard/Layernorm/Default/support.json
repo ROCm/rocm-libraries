@@ -3,56 +3,6 @@
     "HIP_MLOPS_ENGINE": [
       {
         "cases": [
-          "2_2_3_2_2_fp16_ndhwc_normalized_dim_count3_9e7e52",
-          "2_2_3_2_2_fp32_ncdhw_normalized_dim_count2_fa25d4",
-          "2_2_3_2_fp16_nchw_normalized_dim_count1_cdab79",
-          "2_2_3_2_fp32_nhwc_normalized_dim_count2_bc5b90",
-          "2_5_2_2_2_bfp16_ncdhw_normalized_dim_count4_06435d",
-          "32_4_4_256_bfp16_nchw_normalized_dim_count3_97e5e5",
-          "32_4_4_256_bfp16_nchw_normalized_dim_count3_9e3e58",
-          "32_4_4_256_bfp16_nhwc_normalized_dim_count3_1812b5",
-          "32_4_4_256_bfp16_nhwc_normalized_dim_count3_88b8fc",
-          "32_4_4_256_fp16_nchw_normalized_dim_count3_6fc8f9",
-          "32_4_4_256_fp16_nchw_normalized_dim_count3_7c1af0",
-          "32_4_4_256_fp16_nhwc_normalized_dim_count3_a1d80d",
-          "32_4_4_256_fp16_nhwc_normalized_dim_count3_f3a3de",
-          "32_4_4_256_fp32_nchw_normalized_dim_count3_31d03d",
-          "32_4_4_256_fp32_nchw_normalized_dim_count3_5a2c61",
-          "32_4_4_256_fp32_nchw_normalized_dim_count3_6ee2ed",
-          "32_4_4_256_fp32_nhwc_normalized_dim_count3_55f12a",
-          "32_4_4_256_fp32_nhwc_normalized_dim_count3_5f558c",
-          "32_4_4_256_fp32_nhwc_normalized_dim_count3_9efd9b"
-        ],
-        "support": {
-          "gfx1100": [
-            "linux"
-          ],
-          "gfx1101": [
-            "windows"
-          ],
-          "gfx1150": [
-            "linux"
-          ],
-          "gfx1151": [
-            "linux",
-            "windows"
-          ],
-          "gfx1200": [
-            "linux"
-          ],
-          "gfx90a": [
-            "linux"
-          ],
-          "gfx942": [
-            "linux"
-          ],
-          "gfx950": [
-            "linux"
-          ]
-        }
-      },
-      {
-        "cases": [
           "1_3_8_112_112_bfp16_ncdhw_normalized_dim_count1_20d920",
           "1_3_8_112_112_bfp16_ncdhw_normalized_dim_count1_7a9f47",
           "1_3_8_112_112_bfp16_ndhwc_normalized_dim_count1_22d483",
@@ -160,6 +110,56 @@
             "linux"
           ],
           "gfx942": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "2_2_3_2_2_fp16_ndhwc_normalized_dim_count3_9e7e52",
+          "2_2_3_2_2_fp32_ncdhw_normalized_dim_count2_fa25d4",
+          "2_2_3_2_fp16_nchw_normalized_dim_count1_cdab79",
+          "2_2_3_2_fp32_nhwc_normalized_dim_count2_bc5b90",
+          "2_5_2_2_2_bfp16_ncdhw_normalized_dim_count4_06435d",
+          "32_4_4_256_bfp16_nchw_normalized_dim_count3_97e5e5",
+          "32_4_4_256_bfp16_nchw_normalized_dim_count3_9e3e58",
+          "32_4_4_256_bfp16_nhwc_normalized_dim_count3_1812b5",
+          "32_4_4_256_bfp16_nhwc_normalized_dim_count3_88b8fc",
+          "32_4_4_256_fp16_nchw_normalized_dim_count3_6fc8f9",
+          "32_4_4_256_fp16_nchw_normalized_dim_count3_7c1af0",
+          "32_4_4_256_fp16_nhwc_normalized_dim_count3_a1d80d",
+          "32_4_4_256_fp16_nhwc_normalized_dim_count3_f3a3de",
+          "32_4_4_256_fp32_nchw_normalized_dim_count3_31d03d",
+          "32_4_4_256_fp32_nchw_normalized_dim_count3_5a2c61",
+          "32_4_4_256_fp32_nchw_normalized_dim_count3_6ee2ed",
+          "32_4_4_256_fp32_nhwc_normalized_dim_count3_55f12a",
+          "32_4_4_256_fp32_nhwc_normalized_dim_count3_5f558c",
+          "32_4_4_256_fp32_nhwc_normalized_dim_count3_9efd9b"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }

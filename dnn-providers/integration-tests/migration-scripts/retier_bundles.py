@@ -59,6 +59,10 @@ from pathlib import Path
 
 from bundle_utils import canon, expand
 
+# The sidecar renderer lives with the tools that verify and rewrite sidecars.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+from support_sidecar import Claim, render  # noqa: E402
+
 TIERS = ["quick", "standard", "comprehensive", "full"]
 # Single-graph bundle JSON that is not the graph itself.
 _NOT_A_GRAPH = (".support.json", "sweep.json", "support.json", "meta.json")
@@ -280,7 +284,7 @@ def build_plan(root: Path, assignments: dict):
     for (new_tier, op, topology), items in dest.items():
         items.sort(key=lambda x: x[2])
         template = unified[(op, topology)]
-        cases, claims, goldens, seen = [], {}, [], set()
+        cases, claims, goldens, seen = [], set(), [], set()
         for sw, case, _ in items:
             if case["id"] in seen:
                 raise SystemExit(
@@ -293,24 +297,16 @@ def build_plan(root: Path, assignments: dict):
                 moved["values"] = unify_values(case["values"], sw.template, template)
             cases.append(moved)
             for engine, support in sw.claims_of(case["id"]).items():
-                group = claims.setdefault(engine, {}).setdefault(
-                    canon(support), (support, [])
+                claims.update(
+                    Claim(case["id"], engine, arch, platform)
+                    for arch, platforms in support.items()
+                    for platform in platforms
                 )
-                group[1].append(case["id"])
             if case.get("golden"):
                 goldens.append((sw, case))
-        support_json = None
-        if claims:
-            support_json = {
-                "claims": {
-                    engine: [
-                        {"cases": sorted(ids), "support": support}
-                        for support, ids in groups.values()
-                    ]
-                    for engine, groups in sorted(claims.items())
-                },
-                "version": 1,
-            }
+        # Canonical sidecar text, so the checked-in file round-trips through
+        # support_sidecar.py whatever order the cases arrived in.
+        support_text = render(Path("support.json"), claims) if claims else None
         existing = sweeps.get((new_tier, op, topology))
         unchanged = (
             existing is not None
@@ -324,7 +320,7 @@ def build_plan(root: Path, assignments: dict):
                 **{k: v for k, v in first_sweep.items() if k != "cases"},
                 "cases": cases,
             },
-            "support": support_json,
+            "support": support_text,
             "goldens": goldens,
             "unchanged": unchanged,
         }
@@ -378,7 +374,7 @@ def apply_plan(root: Path, sweeps: dict, out: dict, single_moves: list):
             _write_json(d / "graph.template.json", plan["template"])
             _write_json(d / "sweep.json", plan["sweep"])
             if plan["support"]:
-                _write_json(d / "support.json", plan["support"])
+                (d / "support.json").write_bytes(plan["support"].encode("utf-8"))
             for (g_tier, g_op, g_topology, case_id), src in staged_golden.items():
                 if (g_tier, g_op, g_topology) == (tier, op, topology):
                     shutil.copytree(src, d / "golden" / case_id)
