@@ -776,7 +776,10 @@ several engines' L1 `corpus*.csv` on the corpus manifest's `benchmark` ids and r
 per ranking metric, coverage and per-regime winners over the graphs more than one engine
 serves. A row counts only toward the metric its `binding.metric` was collected under, so a
 label may name both of an engine's corpora (`MIOpen=corpus_tflops.csv`,
-`MIOpen=corpus_time.csv`).
+`MIOpen=corpus_time.csv`). `reproduce/score_predictions.py` scores a bake-off: given each
+engine's `--predict-engine` answer per graph and the same engines' L1 corpora, it reports,
+per metric and regime, how often the engine predicted best is the one measured best, and the
+regret of the pick when it is not.
 
 ### Engine-level immediate predictions
 
