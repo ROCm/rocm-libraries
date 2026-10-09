@@ -103,8 +103,8 @@ jobs:
         if: ${{ env.ROCJITSU_OVERRIDE_REF != '' }}
         run: |
           set -euo pipefail
-          apt-get update
-          apt-get install -y --no-install-recommends build-essential libdrm-dev
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential libdrm-dev
           build_dir="${GITHUB_WORKSPACE}/rocjitsu-build"
           cmake -S rocm-systems/emulation/rocjitsu -B "${build_dir}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DLTO=ON \
