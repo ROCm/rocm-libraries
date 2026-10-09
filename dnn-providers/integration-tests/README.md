@@ -479,7 +479,7 @@ recompiling or touching test source:
 version = 1
 
 [[tolerance_overrides]]
-filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/14"]
+filters = ["*_ConvolutionWrw_Default.8_16_16_16_16_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0"]
 atol = 1.19
 rtol = 0.2
 
@@ -587,9 +587,10 @@ C++ integration tests still exist and still matter — but only for what bundles
 cannot express. The remaining C++ tests live in two places:
 
 - `src/integration-tests/{op}/` — shared cross-provider C++ tests built into
-  `hipdnn_integration_tests` (conv, matmul, sdpa, batchnorm, layernorm,
-  rmsnorm, reduction, pointwise). Most of these are graph tests and are
-  **not built by default** — see below.
+  `hipdnn_integration_tests`. Only tests with no bundle equivalent remain:
+  the conv serialize round-trip, resample backward and the
+  `is_supported_ext` timing test (always built), plus the MoE grouped matmul
+  and SDPA forward/chained graph tests (not built by default — see below).
 - `<provider>/integration_tests/` — provider-local C++ tests (e.g.
   `miopen_plugin_integration_tests`) for behavior specific to one plugin.
 
@@ -649,11 +650,13 @@ So, in practice:
   `test_categories_integration.yaml` files still match, so they pick up CTest
   labels normally. Keep that pattern in the YAMLs even on a default `OFF`
   build: the always-built tests (`Smoke/IntegrationConvFwdSerializeRoundTripFp32`,
-  `Smoke/IntegrationGpuResampleForward*`) register under it too.
+  `Smoke/IntegrationGpuResampleBackward*`) register under it too.
 
-One op is still exempt as migration debt: `resample/` has no bundles yet, so
-`IntegrationGpuResampleForward.cpp` stays always-built rather than dropping the
-op's only coverage. Remove it from the allow-list once its bundles land.
+Graph tests that have not been ported to bundles yet remain as migration
+debt: resample backward (always built, so its coverage is not dropped) and MoE
+grouped matmul both need an input-fill recipe for their index/routing tensors
+before they can become bundles (ALMIOPEN-2880, ALMIOPEN-2881). Remove each
+file, and its allow-list entry, once its bundles land.
 
 ## Adding a New Reference-Executor Operation
 

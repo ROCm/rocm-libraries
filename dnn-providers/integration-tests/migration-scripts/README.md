@@ -49,7 +49,7 @@ to migrate a whole suite in bulk with a byte- and behavior-level proof. For
 ```bash
 # Step 1: Capture — dump the graph(s) for just this test
 ./build/bin/hipdnn_integration_tests --capture-bundles /tmp/captured \
-    --gtest_filter='Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/*'
+    --gtest_filter='Smoke/IntegrationGpuResampleBackwardFp16.Correctness/*'
 
 # Step 2: Import — merge each captured graph into the bundle tree
 for graph in /tmp/captured/*/*/*.json; do
