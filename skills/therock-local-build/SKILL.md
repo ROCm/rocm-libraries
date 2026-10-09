@@ -130,6 +130,23 @@ Run `artifact_manager.py` and `configure_stage.py` from `$T`.
    `$B/artifacts` (for `hipkernelprovider`: `hipkernelprovider_{dbg,lib,test}_generic`). To rebuild a subproject from scratch run `ninja -C $B <Subproject>+expunge`,
    then `cmake -S $T -B $B`, then build.
 
+   `dist/rocm` holds the rebuilt subprojects and what they pull in, but it can lack
+   bootstrapped libraries that only show up at run time (observed when rebuilding
+   `miopen`: no `librocblas`, `libhipblaslt` or `librocm_sysdeps_*` in `dist/rocm`, so
+   every binary failed to load). Check the loader closure (Verify, step 2) before
+   running any test. Every bootstrapped subproject also installs to its own
+   `<subproject>/stage` directory, at any depth (sysdeps are at
+   `third-party/sysdeps/linux/<lib>/build/stage`), so a complete tree can be assembled
+   by copying all `stage` directories, rebuilt ones first, without overwriting:
+   ```bash
+   S=$PWD/rocm-merged; mkdir -p $S
+   for st in $B/math-libs/composable_kernel/stage $B/ml-libs/*/stage \
+             $(find $B -type d -name stage -not -path '*/stage/*' | sort); do
+     [ -d "$st" ] && cp -an "$st"/. "$S"/ 2>/dev/null
+   done
+   ```
+   Put the subprojects you rebuilt in the first list so their files win.
+
 ## Limit threads
 
 `ninja -j` limits only the outer build. Each subproject runs its own `cmake --build` on
@@ -145,7 +162,23 @@ and `CMAKE_BUILD_PARALLEL_LEVEL=$N`. Capping makes the build slower; size `N` to
      grep -oE '(ml-libs|math-libs)/[A-Za-z0-9_+-]+/(stage|build)' | sort -u
    ```
    Expected: `build` for `hipdnn_integration_tests` and `hipkernelprovider` only.
-2. After step 4, run the tests from `$B/dist/rocm`. Setting the two `*_VISIBLE_DEVICES`
+2. After step 4, check that every shipped library and executable resolves its
+   dependencies. The planner trusts `BUILD_TOPOLOGY.toml`, which misses run-time links
+   (`libhipblas` needs `librocsolver`, which needs `librocsparse`; `blas` lists neither),
+   so excluded artifacts can leave unresolved libraries. Run from the tree you test
+   (`$B/dist/rocm` or the merged tree above):
+   ```bash
+   R=$B/dist/rocm   # or $S
+   for f in $(find $R/lib $R/bin -maxdepth 2 -type f \( -name '*.so*' -o -perm -u+x \)); do
+     LD_LIBRARY_PATH=$R/lib:$R/lib/llvm/lib ldd $f 2>/dev/null | grep 'not found'
+   done | sort | uniq -c    # expect no output
+   ```
+   For each `not found` library, find the artifact that ships it, drop that name from
+   `EXCLUDE_ARTIFACTS`, and re-run step 2. Checked on gfx1201 for a `miopen` rebuild: with
+   `solver` and `sparse` removed from the planner's exclude list, the bootstrapped base
+   (all `stage` directories merged, before any rebuild) had no unresolved libraries; with
+   them excluded, `libhipblas` and `librocsolver` did.
+3. Run the tests from `$B/dist/rocm` (or the merged tree). Setting the two `*_VISIBLE_DEVICES`
    variables hides GPUs; GPU test cases then skip, and the run must report 0 failures.
    ```bash
    cd $B/dist/rocm && export LD_LIBRARY_PATH=$PWD/lib
@@ -164,6 +197,15 @@ GPUs hidden: 0 failures, GPU cases skipped for lack of a device.
 
 - **A dependency compiles that should be prebuilt.** It is a same-stage dependency that
   `fetch --stage S` does not bootstrap. Use the planner (step 1).
+- **Every test fails at once with `error while loading shared libraries`.** The tree
+  lacks a bootstrapped library: see Build step 4 and Verify step 2.
+- **An incremental rebuild does nothing after you edit a header in another subproject**
+  (for example a `composablekernel` header consumed by MIOpen). A subproject's
+  `stamp/build.stamp` depends only on its configure stamp and its own sources, so ninja
+  reports `no work to do` (observed with a one-line CK header edit). Untested remedy:
+  delete `<subproject>/stamp/build.stamp` and `stage.stamp` for the edited subproject
+  and its consumers, then run ninja again so their inner builds re-run. Hash the output
+  library before and after; identical hashes mean the edit did not reach it.
 - **`find_package(hipdnn_integration_tests)`: "config file not found".**
   `hipdnn-integration-tests` publishes only `test` and `run` components, so its CMake
   package is in no archive. Rebuild it with its consumer; the planner does this. If you
