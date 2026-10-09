@@ -153,6 +153,14 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
             if(result EQUAL 0)
                 target_compile_options(test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma
                     PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+                # Same reason as tdm_subtile_wmma above: "_wmma" drops gfx9 only, and off
+                # gfx1250 named_barrier is uninstantiable by design (static_assert), so the
+                # surviving gfx11/gfx12 archs would fail the device pass.
+                get_target_property(_tdm_pc_archs
+                    test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma HIP_ARCHITECTURES)
+                list(FILTER _tdm_pc_archs INCLUDE REGEX "^gfx125")
+                set_property(TARGET test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma
+                    PROPERTY HIP_ARCHITECTURES ${_tdm_pc_archs})
                 # A broken named barrier handshake hangs rather than failing, so cap the run
                 # instead of letting it hold a GPU for the 1500s CTest default.
                 set_tests_properties(test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma
@@ -168,7 +176,14 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
     foreach(test_target ${CK_TILE_GEMM_TEST_TARGETS})
         set_tests_properties(${test_target} PROPERTIES LABELS "CK_TILE_GEMM_TESTS")
     endforeach()
-    # Joined after the relabel above so it keeps SMOKE_TEST; gfx1250 CI runs only `ninja smoke`.
+    # comp_tdm_pc is deliberately absent from the tile engine CI config (it is a shared contract
+    # with the dispatcher bridge), so this gtest is the only CI coverage of
+    # GemmPipelineAgBgCrCompTDMProducerConsumer. It must be joined HERE, after the relabel loop
+    # above, and never added to CK_TILE_GEMM_TEST_TARGETS before it: that loop uses
+    # set_tests_properties(... PROPERTIES LABELS ...), which REPLACES, so going through it would
+    # drop the SMOKE_TEST label add_gtest_executable set -- and gfx1250 CI runs only
+    # `ninja smoke` (ctest -L SMOKE_TEST), which would then build this test but never run it.
+    # APPEND PROPERTY below adds the label without disturbing SMOKE_TEST.
     if(TEST test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma)
         set_property(TEST test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma
             APPEND PROPERTY LABELS "CK_TILE_GEMM_TESTS")
