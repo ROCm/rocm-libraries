@@ -3,11 +3,14 @@
 #
 # hip-kernel-provider hipkernel:Gfx950AttentionDense external integration test categories.
 #
-# Pinned to hipkernel:Gfx950AttentionDense via --test-engine. Matches BSHD bundles
-# under integration-test-bundles/{quick,standard,comprehensive,full}/SdpaFwd/bshd/.
+# Pinned to hipkernel:Gfx950AttentionDense via --test-engine. Selects the shared sweeps
+# integration-test-bundles/{quick,standard,comprehensive,full}/SdpaFwd/Default/ by suite,
+# not by text in the case id: import_graph.py names cases in its own format, so a name
+# pattern would miss the cases it adds. Engine pinning and support claims do the rest: a
+# claimed case the engine declines fails its lane, an unclaimed one it declines skips,
+# and an unclaimed one it accepts runs and is reported as unclaimed support.
 # Tiers cascade: standard runs quick + standard, comprehensive runs quick +
 # standard + comprehensive; only "full" runs the full-tier bundles.
-# The harness skips any case the engine does not service.
 
 _common_excludes: &common_excludes
   - "*DISABLED*"
@@ -17,7 +20,7 @@ test_categories:
   quick:
     description: "Quick gfx950 dense attention BSHD bundle coverage"
     test_patterns:
-      - "quick_*Sdpa*bshd*"
+      - "quick_SdpaFwd_Default.*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -27,8 +30,8 @@ test_categories:
   standard:
     description: "Standard gfx950 dense attention BSHD bundle coverage"
     test_patterns:
-      - "quick_*Sdpa*bshd*"
-      - "standard_*Sdpa*bshd*"
+      - "quick_SdpaFwd_Default.*"
+      - "standard_SdpaFwd_Default.*"
     exclude: *common_excludes
     labels:
       - "standard"
@@ -38,9 +41,9 @@ test_categories:
   comprehensive:
     description: "Comprehensive gfx950 dense attention coverage: quick + standard + comprehensive-tier bundles"
     test_patterns:
-      - "quick_*Sdpa*bshd*"
-      - "standard_*Sdpa*bshd*"
-      - "comprehensive_*Sdpa*bshd*"
+      - "quick_SdpaFwd_Default.*"
+      - "standard_SdpaFwd_Default.*"
+      - "comprehensive_SdpaFwd_Default.*"
     exclude: *common_excludes
     labels:
       - "comprehensive"
@@ -50,7 +53,7 @@ test_categories:
   full:
     description: "Full gfx950 dense attention coverage"
     test_patterns:
-      - "*Sdpa*bshd*"
+      - "*_SdpaFwd_Default.*"
     exclude: *common_excludes
     labels:
       - "full"
@@ -59,7 +62,7 @@ test_categories:
   ffm-quick:
     description: "Fast-feedback quick tier: BSHD quick bundles"
     test_patterns:
-      - "quick_*Sdpa*bshd*"
+      - "quick_SdpaFwd_Default.*"
     exclude: *common_excludes
     labels:
       - "ffm-quick"
