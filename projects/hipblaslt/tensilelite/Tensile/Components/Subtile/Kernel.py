@@ -1022,7 +1022,7 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
 
   if useWmma:
     if writer.states.asmCaps.get("HasWMMA_V1", False):
-      regsPerInst = 4
+      regsPerInst = 8 if writer.states.kernel["WavefrontSize"] == 32 else 4
       instType, accType = InstType.INST_F16, InstType.INST_F32
       variant = [16, 16, 16, 1]
     else:
