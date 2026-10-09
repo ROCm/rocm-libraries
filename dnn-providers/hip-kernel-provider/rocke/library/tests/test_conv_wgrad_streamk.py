@@ -286,7 +286,12 @@ class TestStreamKValidator(unittest.TestCase):
         ),
         ("unknown_arch", _DENSE, "gfx9999", {}),
         ("unknown_arch+tile_m", _DENSE, "gfx9999", dict(tile_m=96)),
-        ("wave32_on_gfx950+ctas", _DENSE, "gfx950", dict(wave_size=32, streamk_ctas=-5)),
+        (
+            "wave32_on_gfx950+ctas",
+            _DENSE,
+            "gfx950",
+            dict(wave_size=32, streamk_ctas=-5),
+        ),
         ("wave64_on_gfx1250", _DENSE, "gfx1250", {}),
         ("async_dma", _DENSE, "gfx950", dict(async_dma=True)),
         ("async_dma_off", _DENSE, "gfx950", dict(async_dma=True, streamk="off")),
