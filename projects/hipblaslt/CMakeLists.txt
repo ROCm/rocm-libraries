@@ -665,7 +665,9 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
             list(APPEND _tw_commands
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${_tw_dst}"
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${_tw_src}/tilewright_index" ${_tw_models} "${_tw_dst}")
+                        "${_tw_src}/tilewright_index" ${_tw_models} "${_tw_dst}"
+                COMMAND ${CMAKE_COMMAND} "-DWEIGHTS_DIR=${_tw_src}" "-DLIBRARY_DIR=${_tw_dst}"
+                        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/tilewright_prune_blocklists.cmake")
         endforeach()
         add_custom_target(hipblaslt-tilewright-models ALL ${_tw_commands}
             COMMENT "Copying tilewright models into ${HIPBLASLT_TENSILE_LIBPATH}/library"
