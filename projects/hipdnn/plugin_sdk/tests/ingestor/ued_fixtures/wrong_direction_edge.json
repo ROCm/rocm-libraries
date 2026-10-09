@@ -1,6 +1,8 @@
 {
   "description": "A result name bound under operands.",
   "valid": false,
+  "runtime_error": "declares no operand 'out_0'; it is a result, so it belongs under 'results'",
+  "packager_error": "operand 'out_0' is declared by op 'pointwise' as a result",
   "ued": {
     "version": "1.0",
     "id": "36133160-68f3-5114-917a-0c321e92c73a",

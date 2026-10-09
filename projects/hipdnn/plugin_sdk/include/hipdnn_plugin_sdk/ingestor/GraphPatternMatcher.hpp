@@ -5,10 +5,12 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -36,6 +38,9 @@
 /// Distinct variables may name the same tensor. A tensor-uid list field (OpSchema's
 /// resultLists) is never bound, but its uids count as that node's results. A tensor a list
 /// produces is therefore not a graph input and cannot have a second producer.
+///
+/// Before the search, the matcher declines a graph that has a root node whose opcode no
+/// pattern root carries. A root node reads no tensor another node produces.
 ///
 /// The search is deterministic. It visits pattern nodes in CompiledGraphPattern::matchOrder()
 /// and graph nodes in graph order, and the first complete assignment wins. It reads the raw
@@ -142,6 +147,44 @@ inline std::optional<PatternGraphIndex>
         index.schemas.push_back(schema);
     }
     return index;
+}
+
+/// False when a root of @p graph carries an opcode that no root of @p pattern carries. A
+/// graph root reads no tensor, through a scalar operand, that another graph node produces.
+///
+/// This test is sound. In a one-to-one match, a pattern node that reads a produced variable
+/// maps to a graph node that reads a tensor another graph node produces. So every graph root
+/// maps to a pattern root, and a graph root with no matching pattern root rules out a match.
+inline bool rootOpcodesAdmit(const CompiledGraphPattern& pattern, const PatternGraphIndex& graph)
+{
+    const auto& rootOpcodes = pattern.rootOpcodes();
+    for(size_t nodeIndex = 0; nodeIndex < graph.nodes.size(); ++nodeIndex)
+    {
+        const auto* schema = graph.schemas[nodeIndex];
+        if(std::binary_search(
+               rootOpcodes.begin(), rootOpcodes.end(), schema->opcode, std::less<>{}))
+        {
+            continue;
+        }
+        const auto& node = *graph.nodes[nodeIndex];
+        bool isRoot = true;
+        for(const auto& operand : schema->operands)
+        {
+            const auto uid = operand.read(node);
+            const auto producer
+                = uid.has_value() ? graph.producers.find(*uid) : graph.producers.end();
+            if(producer != graph.producers.end() && producer->second != nodeIndex)
+            {
+                isRoot = false;
+                break;
+            }
+        }
+        if(isRoot)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 /// Backtracking search for an injective pattern-node to graph-node assignment.
@@ -437,7 +480,8 @@ inline std::optional<BoundTokens> matchGraphPatternOrThrow(const CompiledGraphPa
         return std::nullopt;
     }
     const auto index = indexPatternGraph(context.graph.getGraph());
-    if(!index.has_value() || index->nodes.size() != pattern.nodeCount())
+    if(!index.has_value() || index->nodes.size() != pattern.nodeCount()
+       || !rootOpcodesAdmit(pattern, *index))
     {
         return std::nullopt;
     }

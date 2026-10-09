@@ -3,9 +3,19 @@
 The fixture corpus and the JSON Schema live in the hipDNN plugin SDK. The
 runtime's gtests read the same files, so the packer and the loader agree on
 every fixture and on the schema's member lists.
+
+Each invalid fixture names the error it must raise, so it cannot pass because
+of an unrelated defect. The text is a plain substring, matched literally:
+
+- `error` when the packer and the runtime share the wording.
+- `runtime_error` and `packager_error` when they word it differently. This
+  test reads `packager_error`.
+
+A valid fixture carries none of these keys.
 """
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -18,6 +28,8 @@ from hkp_pack.descriptors import (
 )
 from hkp_pack.errors import HkpPackError
 from hkp_pack.graph_pattern import (
+    MAX_PATTERN_NODES,
+    MAX_PATTERN_OPCODE_SET,
     NODE_KEYS,
     NODE_REQUIRED_KEYS,
     OP_SCHEMA_REGISTRY_ENV,
@@ -31,32 +43,27 @@ SCHEMA_PATH = _PLUGIN_SDK / "schemas" / "universal_engine_descriptor.schema.json
 _FIXTURES = sorted(FIXTURE_DIR.glob("*.json"))
 assert _FIXTURES, f"no UED fixtures under {FIXTURE_DIR}"
 
-# The error each invalid fixture must raise. Matching on it stops an invalid
-# fixture from passing because of an unrelated defect.
-_EXPECTED_ERROR = {
-    "bad_kind": "is not 'op'",
-    "both_arms": "exactly one of 'nodes' or 'native'",
-    "duplicate_json_key": "duplicate key 'in_0'",
-    "duplicate_node_id": "node 'pw' id is not unique",
-    "empty_nodes": "'nodes' must be a nonempty array",
-    "graph_input_bound_by_two_operands": "binds '\\$x', already bound by node 'first'",
-    "neither_arm": "exactly one of 'nodes' or 'native'",
-    "one_of_optionality_disagreement": "disagree on operand 'mean'",
-    "one_of_single_member": "needs at least two opcodes",
-    "one_of_unknown_key": "op has unknown key 'mode'",
-    "one_of_unknown_member": "op 'pointwise_relu' is not in the op-schema registry",
-    "optional_produced_variable": "marks '\\$conv_out' optional, but node 'conv'",
-    "optional_required_operand": "operand 'in_0' is bound with '\\?'",
-    "optional_result": "result 'out_0' binding .* takes no '\\?'",
-    "reserved_node_id": "node 'graph' id is a reserved root",
-    "reserved_variable": "binds reserved root '\\$kernel'",
-    "unknown_edge_name": "operand 'A' is not declared by op 'pointwise'",
-    "unknown_node_key": "node 'pointwise' has unknown key 'inputs'",
-    "unknown_opcode": "op 'pointwise_add' is not in the op-schema registry",
-    "variable_bound_by_two_results": "binds '\\$y', already bound by node 'first'",
-    "variable_equals_node_id": "'\\$pointwise' collides with node id",
-    "wrong_direction_edge": "operand 'out_0' is declared by op 'pointwise' as a result",
-}
+_ERROR_KEYS = {"error", "runtime_error", "packager_error"}
+
+
+def _read_case(fixture):
+    return json.loads(fixture.read_text(encoding="utf-8"))
+
+
+def _ued_text(case):
+    return case["ued_text"] if "ued_text" in case else json.dumps(case["ued"])
+
+
+def _packager_error(case):
+    """The text the packer's error for an invalid fixture must contain."""
+    if "error" in case:
+        assert not {"runtime_error", "packager_error"} & case.keys()
+        return case["error"]
+    assert {"runtime_error", "packager_error"} <= case.keys()
+    return case["packager_error"]
+
+
+_VALID_FIXTURES = [path for path in _FIXTURES if _read_case(path)["valid"]]
 
 _NODES_UED = {
     "version": "1.0",
@@ -90,15 +97,31 @@ def _ued_root(tmp_path, text, metadata):
 @pytest.mark.quick
 @pytest.mark.parametrize("fixture", _FIXTURES, ids=lambda path: path.stem)
 def test_ued_fixture_validity_matches_the_runtime(tmp_path, fixture):
-    case = json.loads(fixture.read_text(encoding="utf-8"))
-    text = case["ued_text"] if "ued_text" in case else json.dumps(case["ued"])
+    case = _read_case(fixture)
+    text = _ued_text(case)
     root = _ued_root(tmp_path, text, json.loads(text)["metadata"])
 
     if case["valid"]:
+        assert not _ERROR_KEYS & case.keys()
         load_flat_input(root)
     else:
-        with pytest.raises(HkpPackError, match=_EXPECTED_ERROR[fixture.stem]):
+        error = _packager_error(case)
+        assert error
+        with pytest.raises(HkpPackError, match=re.escape(error)):
             load_flat_input(root)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("fixture", _VALID_FIXTURES, ids=lambda path: path.stem)
+def test_valid_fixture_conforms_to_the_schema(fixture):
+    # The descriptor-packaging tests declare no dependencies beyond pytest, so
+    # a host without jsonschema skips this check.
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.Draft7Validator.check_schema(schema)
+    ued = json.loads(_ued_text(_read_case(fixture)))
+
+    jsonschema.Draft7Validator(schema).validate(ued)
 
 
 @pytest.mark.quick
@@ -115,6 +138,11 @@ def test_schema_member_lists_equal_the_packer_constants():
     ]
     assert set(node["properties"]) == set(NODE_KEYS)
     assert set(node["required"]) == set(NODE_REQUIRED_KEYS)
+    assert graph_match["properties"]["nodes"]["maxItems"] == MAX_PATTERN_NODES
+    opcode_set = next(
+        arm for arm in node["properties"]["op"]["oneOf"] if arm.get("type") == "object"
+    )
+    assert opcode_set["properties"]["one_of"]["maxItems"] == MAX_PATTERN_OPCODE_SET
 
 
 @pytest.mark.quick
@@ -172,24 +200,6 @@ def test_native_ued_loads_without_a_registry(tmp_path):
     root = _ued_root(tmp_path, json.dumps(native), native["metadata"])
 
     load_flat_input(root, op_schema_registry=tmp_path / "absent.json")
-
-
-@pytest.mark.quick
-@pytest.mark.parametrize(
-    "key, field",
-    [("operands", "input_tensor_uids"), ("results", "output_tensor_uids")],
-)
-def test_an_edge_naming_a_registry_edge_list_is_undeclared(tmp_path, key, field):
-    # custom_op's uid vectors are edge lists. The runtime indexes them, but a
-    # pattern never binds them.
-    node = {"kind": "op", "id": "custom", "op": "custom_op", key: {field: "$uids"}}
-    ued = dict(_NODES_UED, graph_match={"nodes": [node]})
-    root = _ued_root(tmp_path, json.dumps(ued), ued["metadata"])
-
-    with pytest.raises(
-        HkpPackError, match=f"{key[:-1]} '{field}' is not declared by op 'custom_op'"
-    ):
-        load_flat_input(root)
 
 
 @pytest.mark.quick

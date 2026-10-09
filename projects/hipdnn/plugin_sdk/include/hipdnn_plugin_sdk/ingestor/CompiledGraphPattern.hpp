@@ -188,8 +188,9 @@ public:
         return it != _variables.end() && it->name == name ? &*it : nullptr;
     }
 
-    /// Opcodes a graph's entry node may carry. This is the union of the opcode sets of the
-    /// nodes that read no variable another node produces. Sorted and distinct.
+    /// Opcodes a graph's root node may carry. This is the union of the opcode sets of the
+    /// nodes that read no variable another node produces. Sorted and distinct. The matcher
+    /// declines a graph with a root outside this set before it searches.
     const std::vector<std::string>& rootOpcodes() const noexcept
     {
         return _rootOpcodes;

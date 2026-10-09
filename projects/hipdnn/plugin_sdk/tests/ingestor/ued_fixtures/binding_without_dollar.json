@@ -1,0 +1,27 @@
+{
+  "description": "An operand binding with no leading '$'.",
+  "valid": false,
+  "runtime_error": "has malformed binding 'x'",
+  "packager_error": "operand 'in_0' binding \"x\" must be of the form",
+  "ued": {
+    "version": "1.0",
+    "id": "8d66c592-e3de-54b3-a8ee-9681ca5a9ed5",
+    "name": "ued_fixture:binding_without_dollar",
+    "metadata": "f959f665-ae22-50a3-8d15-31530f853ca0",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "x"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

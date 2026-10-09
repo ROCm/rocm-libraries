@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "ued.json",
   "title": "hipDNN UED",
-  "description": "Universal Engine Descriptor (RFC 0020 section 4.2). Structural shape only; registry and cross-reference rules are semantic (section 13.2). Keys starting with 'x-' or '_', and the key 'provenance', are extensions the loader ignores.",
+  "description": "Universal Engine Descriptor. Implements a subset of RFC 0020 section 4.2, and differs from the RFC's inline schema in two ways: 'heuristic' is a single UHD id in place of the role maps ('sort_kernel_catalog', 'predict_engine', 'predict_applicable_kernels'), and 'sdk_version' is MAJOR.MINOR.PATCH. Structural shape only; registry and cross-reference rules are semantic (section 13.2). Keys starting with 'x-' or '_', and the key 'provenance', are extensions the loader ignores.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "id", "name", "metadata"],
@@ -64,7 +64,7 @@
           "addedInVersion": "1.0"
         },
         "nodes": {
-          "description": "Structural pattern over the op DAG. Opcodes, operand and result names MUST resolve against the op-schema registry, and a node binds at most 64 edges (semantic; see RFC 0020 section 13.2).",
+          "description": "Structural pattern over the op DAG. Opcodes, operand and result names MUST resolve against the op-schema registry (semantic; see RFC 0020 section 13.2). A node binds at most 64 edges across 'operands' and 'results'; the loader checks this limit, which this schema cannot express.",
           "type": "array",
           "minItems": 1,
           "maxItems": 32,
@@ -83,7 +83,7 @@
                 "addedInVersion": "1.0"
               },
               "id": {
-                "description": "Attributes namespace root; unique within 'nodes', not 'graph', 'kernel' or 'device', and not a pattern variable name (semantic).",
+                "description": "Attributes namespace root; unique within 'nodes', not 'graph', 'kernel' or 'device', and not a pattern variable name. The loader checks these rules when it parses the pattern; this schema does not.",
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
                 "addedInVersion": "1.0"

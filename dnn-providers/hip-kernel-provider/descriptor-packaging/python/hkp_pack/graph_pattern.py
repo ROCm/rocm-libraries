@@ -80,8 +80,12 @@ class _Node:
 
 
 def resolve_op_schema_registry(path=None):
-    """Return the registry path from the argument, the environment, or the repo copy."""
-    if path is not None:
+    """Return the registry path from the argument, the environment, or the repo copy.
+
+    An empty argument or environment value counts as absent, so a build that
+    passes an unset CMake variable gets the default.
+    """
+    if path:
         return Path(path)
     env = os.environ.get(OP_SCHEMA_REGISTRY_ENV)
     if env:

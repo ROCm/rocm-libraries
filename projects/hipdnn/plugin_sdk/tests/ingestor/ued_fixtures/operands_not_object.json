@@ -1,0 +1,27 @@
+{
+  "description": "A node whose 'operands' is an array instead of an object.",
+  "valid": false,
+  "runtime_error": "must be an object mapping edge names to bindings",
+  "packager_error": "field 'operands' must be an object",
+  "ued": {
+    "version": "1.0",
+    "id": "144cb36f-9794-56d8-91a2-9f21cd6cdf12",
+    "name": "ued_fixture:operands_not_object",
+    "metadata": "23a2e1f8-adf4-5c20-b699-f7757a0d503f",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pw",
+          "op": "pointwise",
+          "operands": [
+            "$input_a"
+          ],
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

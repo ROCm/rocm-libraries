@@ -31,7 +31,6 @@ import re
 import tempfile
 
 from gen_cache_key import (
-    INTEGER_BASE_TYPES,
     NAMESPACE,
     SCALAR_BASE_TYPES,
     SDK_DIR,
@@ -152,10 +151,6 @@ class Registry:
             (f for f in obj["fields"] if not f.get("deprecated")),
             key=lambda f: f.get("id", 0),
         )
-
-    @staticmethod
-    def _is_scalar_integer(ftype):
-        return ftype["base_type"] in INTEGER_BASE_TYPES and ftype.get("index", -1) < 0
 
     def _union_members(self):
         """(union value, table object) per NodeAttributes member, NONE excluded."""

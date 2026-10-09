@@ -1,6 +1,8 @@
 {
   "description": "'?' on a result binding.",
   "valid": false,
+  "runtime_error": "has binding '$output?'; '?' is only allowed on an operand binding",
+  "packager_error": "result 'out_0' binding \"$output?\" takes no '?'",
   "ued": {
     "version": "1.0",
     "id": "7d337f4c-91de-54d1-bbe9-d6dc7a302752",

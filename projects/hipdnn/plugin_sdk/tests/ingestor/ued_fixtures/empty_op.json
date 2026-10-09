@@ -1,0 +1,28 @@
+{
+  "description": "A node whose 'op' is the empty string.",
+  "valid": false,
+  "runtime_error": "must not be empty",
+  "packager_error": "field 'op' must be a nonempty string",
+  "ued": {
+    "version": "1.0",
+    "id": "9b64619a-c6bf-5181-88f4-dc82ec4e12ca",
+    "name": "ued_fixture:empty_op",
+    "metadata": "8f640873-248c-5318-b5e5-090f88af1aba",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pw",
+          "op": "",
+          "operands": {
+            "in_0": "$input_a",
+            "in_1": "$input_b"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

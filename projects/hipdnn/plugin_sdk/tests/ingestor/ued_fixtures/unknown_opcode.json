@@ -1,6 +1,7 @@
 {
   "description": "An opcode absent from the registry.",
   "valid": false,
+  "error": "'pointwise_add' is not in the op-schema registry",
   "ued": {
     "version": "1.0",
     "id": "bd2a58a9-997c-5f60-bcc9-178bbc9bed25",

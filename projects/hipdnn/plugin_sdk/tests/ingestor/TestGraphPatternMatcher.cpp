@@ -50,6 +50,15 @@ const std::string CONV_ADD_CHAIN = R"([
      "operands": {"in_0": "$conv_out", "in_1": "$bias"}, "results": {"out_0": "$y"}}
 ])";
 
+/// CONV_ADD_CHAIN with the add reading a graph input instead of the convolution's output.
+/// Both nodes are roots.
+const std::string CONV_AND_ADD = R"([
+    {"kind": "op", "id": "conv", "op": "convolution_fwd",
+     "operands": {"x": "$x", "w": "$w"}, "results": {"y": "$conv_out"}},
+    {"kind": "op", "id": "add", "op": "pointwise",
+     "operands": {"in_0": "$a", "in_1": "$bias"}, "results": {"out_0": "$y"}}
+])";
+
 const std::string TWO_UNARY = R"([
     {"kind": "op", "id": "left", "op": "pointwise",
      "operands": {"in_0": "$a"}, "results": {"out_0": "$b"}},
@@ -327,14 +336,46 @@ TEST(TestGraphPatternMatcher, DeclinesGraphInputVariableProducedInsideTheGraph)
 {
     // No pattern node produces `$a`, so it must be a graph input. Here the convolution
     // computes it instead.
-    const std::string disconnected = R"([
-        {"kind": "op", "id": "conv", "op": "convolution_fwd",
-         "operands": {"x": "$x", "w": "$w"}, "results": {"y": "$conv_out"}},
-        {"kind": "op", "id": "add", "op": "pointwise",
-         "operands": {"in_0": "$a", "in_1": "$bias"}, "results": {"out_0": "$y"}}
-    ])";
-    EXPECT_FALSE(match(disconnected, convAddGraph(3)).has_value());
-    EXPECT_TRUE(match(disconnected, convAddGraph(6)).has_value());
+    EXPECT_FALSE(match(CONV_AND_ADD, convAddGraph(3)).has_value());
+    EXPECT_TRUE(match(CONV_AND_ADD, convAddGraph(6)).has_value());
+}
+
+bool rootPruneAdmits(const std::string& pattern, const PatternGraphBuilder& graph)
+{
+    const auto compiled = compilePatternText(pattern);
+    const auto built = graph.build();
+    const auto index = detail::indexPatternGraph(built.context().graph.getGraph());
+    if(!index.has_value())
+    {
+        ADD_FAILURE() << "graph failed to index";
+        return false;
+    }
+    return detail::rootOpcodesAdmit(*compiled, *index);
+}
+
+// A full match would decline the rejected graphs too, so these tests call the prune
+// directly.
+
+TEST(TestGraphPatternMatcher, RootPruneChecksOnlyGraphRoots)
+{
+    // The pointwise node is not a pattern root, but it reads the convolution's output, so
+    // it is not a graph root either.
+    EXPECT_TRUE(rootPruneAdmits(CONV_ADD_CHAIN, convAddGraph(3)));
+
+    // Reversed chain: the pointwise node is the only graph root.
+    PatternGraphBuilder pointwiseFirst;
+    pointwiseFirst.tensor(1).tensor(2).tensor(3, true).tensor(4).tensor(5);
+    pointwiseFirst.node(pointwiseNode(PointwiseMode::ADD, 1, 4, 3));
+    pointwiseFirst.node(convolutionFwdNode(3, 2, 5));
+    EXPECT_FALSE(rootPruneAdmits(CONV_ADD_CHAIN, pointwiseFirst));
+}
+
+TEST(TestGraphPatternMatcher, RootPruneRequiresEveryGraphRootToBeAPatternRoot)
+{
+    // Both graph nodes are roots. The convolution is a pattern root, the pointwise node is
+    // not.
+    EXPECT_FALSE(rootPruneAdmits(CONV_ADD_CHAIN, convAddGraph(6)));
+    EXPECT_TRUE(rootPruneAdmits(CONV_AND_ADD, convAddGraph(6)));
 }
 
 TEST(TestGraphPatternMatcher, CountsATensorACustomOpListProducesAsProduced)

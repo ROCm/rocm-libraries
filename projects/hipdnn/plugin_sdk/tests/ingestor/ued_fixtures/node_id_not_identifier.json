@@ -1,0 +1,27 @@
+{
+  "description": "A node id that is not an identifier.",
+  "valid": false,
+  "error": "must be an identifier",
+  "ued": {
+    "version": "1.0",
+    "id": "053c78af-4b9f-5ecb-b79c-9f3ce6df1ffc",
+    "name": "ued_fixture:node_id_not_identifier",
+    "metadata": "9d1edae1-72bc-59eb-8141-216ccb493a29",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "conv-1",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$input_a",
+            "in_1": "$input_b"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

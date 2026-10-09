@@ -1,6 +1,8 @@
 {
   "description": "'?' on an operand whose variable another node produces.",
   "valid": false,
+  "runtime_error": "optional binding '$conv_out?' on operand 'in_1'",
+  "packager_error": "marks '$conv_out' optional, but node 'conv' produces it",
   "ued": {
     "version": "1.0",
     "id": "302d2ae1-5332-5fc7-ba70-1d76724749c9",

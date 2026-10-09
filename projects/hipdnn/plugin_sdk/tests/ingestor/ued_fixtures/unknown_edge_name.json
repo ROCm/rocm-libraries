@@ -1,6 +1,8 @@
 {
   "description": "An operand name the op does not declare.",
   "valid": false,
+  "runtime_error": "opcode 'pointwise' declares no operand 'A'",
+  "packager_error": "operand 'A' is not declared by op 'pointwise'",
   "ued": {
     "version": "1.0",
     "id": "e24c7ef5-29d6-5f0a-8237-b862a2295cf3",

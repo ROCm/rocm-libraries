@@ -1,6 +1,7 @@
 {
   "description": "A variable has the same name as a node id.",
   "valid": false,
+  "error": "variable '$pointwise' collides with node id 'pointwise'",
   "ued": {
     "version": "1.0",
     "id": "aba0c103-5f63-560f-937a-81b307c21e4e",

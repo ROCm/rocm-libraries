@@ -24,8 +24,9 @@
 namespace hipdnn_plugin_sdk::ingestor::detail
 {
 
-/// Throws the one exception type every parse violation uses. `where` is the file path, so
-/// the message reads on its own even though the caller also logs the path.
+/// Throws the one exception type every parse violation uses. Callers build `message` with
+/// a locator that names the descriptor file and, for a pattern error, the engine, so the
+/// message reads on its own even though the caller also logs the path.
 [[noreturn]] inline void fail(const std::string& message)
 {
     throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE, message);

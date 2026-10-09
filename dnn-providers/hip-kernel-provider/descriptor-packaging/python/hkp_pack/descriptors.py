@@ -450,6 +450,31 @@ def _require_string(doc, key, where):
     return value
 
 
+# What `std::istringstream >> int >> char >> int >> char >> int` accepts, as
+# hipdnn_data_sdk::utilities::Version parses it: optional whitespace before each
+# number and each dot, an optional sign, ASCII digits, and any trailing text.
+_WS = r"[ \t\n\v\f\r]*"
+_INT = rf"{_WS}([+-]?[0-9]+)"
+_SDK_VERSION_RE = re.compile(rf"{_INT}{_WS}\.{_INT}{_WS}\.{_INT}")
+_INT_MIN = -(2**31)
+_INT_MAX = 2**31 - 1
+
+
+def _validate_sdk_version(value, where):
+    """Accept exactly what the runtime's Version{string} constructor accepts.
+
+    Each component must also fit in an int, or the stream extraction fails.
+    """
+    match = _SDK_VERSION_RE.match(value)
+    if not match or not all(
+        _INT_MIN <= int(part) <= _INT_MAX for part in match.groups()
+    ):
+        raise HkpPackError(
+            f"{where} field 'sdk_version' '{value}' is not a "
+            "MAJOR.MINOR.PATCH version"
+        )
+
+
 def _validate_ued(desc, op_schema_registry=None):
     """Validate a UED with the rules the runtime loader applies.
 
@@ -472,6 +497,8 @@ def _validate_ued(desc, op_schema_registry=None):
         _require_string(doc, key, where)
     if "heuristic" in doc:
         _require_string(doc, "heuristic", where)
+    if "sdk_version" in doc:
+        _validate_sdk_version(_require_string(doc, "sdk_version", where), where)
     for key in ("knobs", "behavior_notes", "numerical_notes"):
         values = doc.get(key, [])
         if not isinstance(values, list) or any(
@@ -612,7 +639,8 @@ def load_flat_input(
     the same way, so nothing the walk passes over is invisible. Raises
     HkpPackError on any malformed / missing-field / unknown-type /
     dangling-reference descriptor that IS type-tagged. A duplicate JSON key at
-    any depth also raises, as it does in the runtime loader.
+    any depth also raises, in every descriptor type. That is stricter than the
+    runtime loader, which keeps the last occurrence in a KDP.
 
     `op_schema_registry` is the registry a UED's `graph_match.nodes` pattern
     resolves against. graph_pattern.resolve_op_schema_registry supplies the

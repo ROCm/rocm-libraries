@@ -1,6 +1,8 @@
 {
   "description": "An opcode set with one member.",
   "valid": false,
+  "runtime_error": "lists 1 opcode(s); an opcode set needs at least 2",
+  "packager_error": "op 'one_of' needs at least two opcodes",
   "ued": {
     "version": "1.0",
     "id": "675eef40-32d9-57ee-b3db-c1d359b24ad7",

@@ -100,6 +100,20 @@ TEST(TestCompiledGraphPattern, RejectsResultNameBoundAsOperand)
                 ::testing::HasSubstr("declares no result 'x'; it is an operand"));
 }
 
+TEST(TestCompiledGraphPattern, RejectsEdgeNamingAnEdgeList)
+{
+    // custom_op carries its tensors in uid lists, which the registry keeps apart from
+    // named edges. A pattern cannot bind a list by its field name.
+    EXPECT_EQ(compileError(R"([{"kind": "op", "id": "custom", "op": "custom_op",
+                                "operands": {"input_tensor_uids": "$inputs"}}])"),
+              "node 'custom' in test.ued.json: opcode 'custom_op' declares no operand "
+              "'input_tensor_uids'");
+    EXPECT_EQ(compileError(R"([{"kind": "op", "id": "custom", "op": "custom_op",
+                                "results": {"output_tensor_uids": "$outputs"}}])"),
+              "node 'custom' in test.ued.json: opcode 'custom_op' declares no result "
+              "'output_tensor_uids'");
+}
+
 TEST(TestCompiledGraphPattern, RejectsOptionalBindingOnRequiredOperand)
 {
     EXPECT_EQ(compileError(R"([{"kind": "op", "id": "pw", "op": "pointwise",
@@ -167,16 +181,17 @@ TEST(TestCompiledGraphPattern, RootOpcodesAreTheChainEntry)
 
 TEST(TestCompiledGraphPattern, RootOpcodesUnionEveryIndependentEntry)
 {
+    // `join` reads both entries' results, so its opcode is not a root opcode.
     const auto pattern = compilePatternText(R"([
-        {"kind": "op", "id": "join", "op": "pointwise",
-         "operands": {"in_0": "$conv_out", "in_1": "$scaled"}, "results": {"out_0": "$y"}},
+        {"kind": "op", "id": "join", "op": "matmul",
+         "operands": {"a": "$conv_out", "b": "$scaled"}, "results": {"c": "$y"}},
         {"kind": "op", "id": "conv", "op": "convolution_fwd",
          "operands": {"x": "$x", "w": "$w"}, "results": {"y": "$conv_out"}},
-        {"kind": "op", "id": "scale", "op": {"one_of": ["pointwise", "matmul"]},
-         "results": {}}
+        {"kind": "op", "id": "scale", "op": {"one_of": ["rms_norm", "layernorm"]},
+         "operands": {"x": "$z"}, "results": {"y": "$scaled"}}
     ])");
     EXPECT_EQ(pattern->rootOpcodes(),
-              (std::vector<std::string>{"convolution_fwd", "matmul", "pointwise"}));
+              (std::vector<std::string>{"convolution_fwd", "layernorm", "rms_norm"}));
 }
 
 TEST(TestCompiledGraphPattern, PointwiseNodePublishesScalarAttributesOnly)

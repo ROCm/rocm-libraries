@@ -1,0 +1,24 @@
+{
+  "description": "An operand naming custom_op's 'input_tensor_uids' edge list. The registry lists edge lists apart from named edges, and a pattern cannot bind one.",
+  "valid": false,
+  "runtime_error": "opcode 'custom_op' declares no operand 'input_tensor_uids'",
+  "packager_error": "operand 'input_tensor_uids' is not declared by op 'custom_op'",
+  "ued": {
+    "version": "1.0",
+    "id": "42d61b87-e0b9-5c17-97e4-3256e5a70f39",
+    "name": "ued_fixture:operand_names_edge_list",
+    "metadata": "89d3ca32-82e4-5784-863b-cbbc8a3b09d2",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "custom",
+          "op": "custom_op",
+          "operands": {
+            "input_tensor_uids": "$inputs"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -26,6 +26,7 @@ import pytest
 
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
+from hkp_pack.graph_pattern import OP_SCHEMA_REGISTRY_ENV
 from hkp_pack.hip_compile import hip_variant_key
 from hkp_pack import pipeline
 from hkp_pack.pipeline import (
@@ -1090,6 +1091,11 @@ def test_generic_descriptors_are_validated_against_the_loader_schema(
         ({"knobs": ["block_size", "block_size"]}, None, "duplicates"),
         ({"numerical_notes": [7]}, None, "numerical_notes"),
         ({"behavior_notes": ["future_note"]}, None, "behavior note"),
+        ({"sdk_version": 1}, None, "'sdk_version' must be a nonempty string"),
+        ({"sdk_version": "1.2"}, None, "'sdk_version' '1.2' is not a MAJOR.MINOR"),
+        ({"sdk_version": "1.2.x"}, None, "'sdk_version' '1.2.x' is not a MAJOR"),
+        # Version{} reads each component into an int; this one overflows it.
+        ({"sdk_version": "1.2.2147483648"}, None, "is not a MAJOR.MINOR.PATCH"),
     ],
 )
 def test_ued_body_rejected_before_packaging(
@@ -1106,6 +1112,58 @@ def test_ued_body_rejected_before_packaging(
 
     with pytest.raises(HkpPackError, match=expected):
         load_flat_input(root)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("sdk_version", ["1.2.3", " 1. 2 .3", "1.2.3-rc1"])
+def test_ued_sdk_version_accepts_what_the_runtime_parses(
+    tmp_path, empty_arch_fixture, sdk_version
+):
+    """The runtime's Version{} skips whitespace and ignores trailing text, so a
+    stricter pack-time rule would refuse a UED the runtime loads."""
+    root = tmp_path / "root"
+    folder = _nest(root, "hip", empty_arch_fixture)
+    path = folder / "solo.ued.json"
+    document = _read(path)
+    document["sdk_version"] = sdk_version
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    load_flat_input(root)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("env_set", [True, False])
+def test_an_empty_registry_argument_falls_back(
+    tmp_path, empty_arch_fixture, monkeypatch, env_set
+):
+    """HkpPackaging.cmake passes an empty `--op-schema-registry` when its variable
+    is unset. That must mean "not given", not the current directory."""
+    root = tmp_path / "root"
+    folder = _nest(root, "hip", empty_arch_fixture)
+    path = folder / "solo.ued.json"
+    document = _read(path)
+    document["graph_match"] = {
+        "nodes": [
+            {
+                "kind": "op",
+                "id": "pointwise",
+                "op": "pointwise",
+                "operands": {"in_0": "$input_a", "in_1": "$input_b"},
+                "results": {"out_0": "$output"},
+            }
+        ]
+    }
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    if not env_set:
+        monkeypatch.delenv(OP_SCHEMA_REGISTRY_ENV, raising=False)
+        load_flat_input(root, op_schema_registry="")
+        return
+    missing = tmp_path / "absent" / "op_schema_registry.json"
+    monkeypatch.setenv(OP_SCHEMA_REGISTRY_ENV, str(missing))
+    with pytest.raises(HkpPackError, match="cannot read op-schema registry") as exc:
+        load_flat_input(root, op_schema_registry="")
+    assert str(missing) in str(exc.value)
 
 
 @pytest.mark.quick

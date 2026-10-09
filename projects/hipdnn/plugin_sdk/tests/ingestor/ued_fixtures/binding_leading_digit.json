@@ -1,0 +1,28 @@
+{
+  "description": "A result binding whose variable name starts with a digit.",
+  "valid": false,
+  "runtime_error": "has malformed binding '$1a'",
+  "packager_error": "result 'out_0' binding \"$1a\" must be of the form",
+  "ued": {
+    "version": "1.0",
+    "id": "3d93222c-2da1-5cdd-b4ae-a2244bcdf0c5",
+    "name": "ued_fixture:binding_leading_digit",
+    "metadata": "2d88356f-c1d7-5435-8c86-6a46776f9971",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$input_a",
+            "in_1": "$input_b"
+          },
+          "results": {
+            "out_0": "$1a"
+          }
+        }
+      ]
+    }
+  }
+}

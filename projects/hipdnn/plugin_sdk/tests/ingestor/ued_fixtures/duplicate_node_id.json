@@ -1,6 +1,8 @@
 {
   "description": "Two nodes share an id.",
   "valid": false,
+  "runtime_error": "node id 'pw' is used by two nodes",
+  "packager_error": "node 'pw' id is not unique",
   "ued": {
     "version": "1.0",
     "id": "04f4a686-855e-5aec-81d3-667bd5f9b48b",

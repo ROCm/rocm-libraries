@@ -1,0 +1,33 @@
+{
+  "description": "An opcode set that lists the same opcode twice.",
+  "valid": false,
+  "runtime_error": "opcode 'layernorm' is listed twice in key 'one_of'",
+  "packager_error": "op 'one_of' contains duplicates",
+  "ued": {
+    "version": "1.0",
+    "id": "b10b97d6-83eb-5205-ad93-cd32a789a902",
+    "name": "ued_fixture:one_of_duplicate_member",
+    "metadata": "fe5c8d10-5463-596c-90e0-20941693fd96",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "norm",
+          "op": {
+            "one_of": [
+              "layernorm",
+              "rms_norm",
+              "layernorm"
+            ]
+          },
+          "operands": {
+            "x": "$x"
+          },
+          "results": {
+            "y": "$y"
+          }
+        }
+      ]
+    }
+  }
+}

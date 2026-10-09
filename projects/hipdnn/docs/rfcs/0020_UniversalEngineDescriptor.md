@@ -238,13 +238,16 @@ the member existed — an engine that states no graph shape binds nothing and le
 entirely to its packs' criteria. That is a narrow way to write an engine, not a broken one, and
 keeping it absence-safe is what holds the format on the `1.0` line (§ 14.2).
 
-A single JSON Schema **file** is delivered with the provider, and the inline copy below is that
-file's content; a build check verifies the two match. The file reflects the latest version
-the runtime supports and covers **all** supported versions at once: its `version` property
-enumerates the accepted versions (here, only `1.0`), and each new version adds its value to the
-`enum`. The runtime supports exactly one major version, so every enumerated version is of that
-major. Every field is present, with fields introduced after the earliest version marked
-**optional**, so the schema is a structural **superset**: it accepts any supported version
+A single JSON Schema **file** is delivered with the provider. The inline copy below is the target
+that file converges on. The delivered file currently implements a subset of it, with two
+substitutions: one `heuristic` UHD id in place of the three role maps (§ 4.6), and `sdk_version`
+as `MAJOR.MINOR.PATCH` rather than `<major>.<minor>`. The runtime loader documents both
+differences. A build check that verifies the two match lands with the role maps. The file
+reflects the latest version the runtime supports and covers **all** supported versions at once:
+its `version` property enumerates the accepted versions (here, only `1.0`), and each new version
+adds its value to the `enum`. The runtime supports exactly one major version, so every enumerated
+version is of that major. Every field is present, with fields introduced after the earliest version
+marked **optional**, so the schema is a structural **superset**: it accepts any supported version
 structurally but does not, on its own, enforce which fields are required or forbidden at a specific
 version. Confirming whether a given field is permitted or required at the UED's declared version is
 possible from the `addedInVersion` data but is not part of this schema's own validation (§ 13.1,
@@ -461,7 +464,10 @@ in what its criteria constrain (§ 6). A family spanning two topologies is two e
 **This arm is implemented** in the kernel ingestor, behind `HIPDNN_ENABLE_KERNEL_INGESTOR`: the
 loader parses `nodes`, checks it (§ 4.3.2), and compiles it against the generated op-schema
 registry (§ 4.3.3, Appendix B) when the UED is read, and the compiled pattern decides and binds
-each graph (§ 7). The escape hatch of § 4.5 remains for a match this arm cannot express.
+each graph (§ 7). Before the search, each engine's matcher declines a graph whose root node
+carries an opcode no root of the pattern carries. The cross-engine root-opcode index of § 7 and
+§ 12 step 4 is not built yet, so every engine is still consulted. The escape hatch of § 4.5
+remains for a match this arm cannot express.
 
 #### 4.3.1 Grammar
 

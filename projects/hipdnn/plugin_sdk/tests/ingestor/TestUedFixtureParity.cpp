@@ -38,7 +38,14 @@
  * corpus (the `ued_fixtures` JSON files, each `{"description", "valid", "ued" | "ued_text"}`)
  * states one verdict per document, and the packager's tests hold it to the same corpus, so
  * a document one side accepts and the other refuses fails one of the two suites. The JSON
- * Schema published for authors is held to the loader's key lists here as well.
+ * Schema published for authors is held to the loader's key lists and limits here as well.
+ *
+ * Each invalid fixture also names the error it must raise, so it cannot pass because of an
+ * unrelated defect. The text is a plain substring, matched literally:
+ *  - `error` when the runtime and the packager share the wording.
+ *  - `runtime_error` and `packager_error` when they word it differently. This test reads
+ *    `runtime_error` and checks the loader's error log for it.
+ * A valid fixture carries none of these keys.
  *
  * The corpus and schema are staged under `share/hipdnn_plugin_sdk/` beside the test binary's
  * `bin/` directory, in the build tree and in an install alike.
@@ -165,6 +172,24 @@ TEST_P(TestUedFixtureParity, RuntimeAgreesWithTheFixtureVerdict)
         << GetParam().path << " must carry exactly one of 'ued' and 'ued_text'";
     const bool expected = fixture.at("valid").get<bool>();
 
+    const bool sharedError = fixture.contains("error");
+    const bool splitError = fixture.contains("runtime_error") || fixture.contains("packager_error");
+    ASSERT_EQ(sharedError || splitError, !expected)
+        << GetParam().path
+        << (expected ? " is valid and must not name an error"
+                     : " is invalid and must name the error it raises");
+    ASSERT_FALSE(sharedError && splitError)
+        << GetParam().path << " must carry 'error' or the 'runtime_error' and 'packager_error' "
+        << "pair, not both";
+    if(splitError)
+    {
+        ASSERT_TRUE(fixture.contains("runtime_error") && fixture.contains("packager_error"))
+            << GetParam().path << " must carry both 'runtime_error' and 'packager_error'";
+    }
+    const std::string expectedError = sharedError ? fixture.at("error").get<std::string>()
+                                                  : fixture.value("runtime_error", std::string());
+    ASSERT_EQ(expectedError.empty(), expected) << GetParam().path;
+
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir
@@ -175,6 +200,12 @@ TEST_P(TestUedFixtureParity, RuntimeAgreesWithTheFixtureVerdict)
 
     EXPECT_EQ(catalog.engines.size() == 1, expected) << fixture.value("description", "") << "\n"
                                                      << recorder.getRecordedLogsAsString();
+    if(!expected)
+    {
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, expectedError))
+            << "expected an error containing: " << expectedError << "\n"
+            << recorder.getRecordedLogsAsString();
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(Fixtures,
@@ -242,6 +273,16 @@ TEST(TestUedFixtureParity, SchemaPatternNodeKeysMatchTheParser)
     EXPECT_EQ(keysOf(node.at("properties")), setOf(PATTERN_NODE_KEYS));
     EXPECT_EQ(stringsOf(node.at("required")), setOf(PATTERN_NODE_REQUIRED_KEYS));
     EXPECT_EQ(keysOf(opcodeSetSchema(schema).at("properties")), setOf(PATTERN_OPCODE_SET_KEYS));
+}
+
+TEST(TestUedFixtureParity, SchemaPatternLimitsMatchTheParser)
+{
+    const auto schema = readSchema();
+    const auto& nodes = schema.at("properties").at("graph_match").at("properties").at("nodes");
+
+    EXPECT_EQ(nodes.at("maxItems").get<size_t>(), MAX_PATTERN_NODES);
+    EXPECT_EQ(opcodeSetSchema(schema).at("properties").at("one_of").at("maxItems").get<size_t>(),
+              MAX_PATTERN_OPCODE_SET);
 }
 
 /// Each object the runtime closes to unknown keys allows, in the schema, exactly the

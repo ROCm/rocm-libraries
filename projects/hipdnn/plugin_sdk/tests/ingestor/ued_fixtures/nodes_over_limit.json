@@ -1,0 +1,378 @@
+{
+  "description": "A chain of 33 pointwise nodes, one over MAX_PATTERN_NODES (32).",
+  "valid": false,
+  "error": "has 33 nodes",
+  "ued": {
+    "version": "1.0",
+    "id": "d14146d5-4d3f-5ed4-acb5-7e705579b515",
+    "name": "ued_fixture:nodes_over_limit",
+    "metadata": "38b07746-4f3f-568f-a16a-1a983e40b22b",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "n00",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v00"
+          },
+          "results": {
+            "out_0": "$v01"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n01",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v01"
+          },
+          "results": {
+            "out_0": "$v02"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n02",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v02"
+          },
+          "results": {
+            "out_0": "$v03"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n03",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v03"
+          },
+          "results": {
+            "out_0": "$v04"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n04",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v04"
+          },
+          "results": {
+            "out_0": "$v05"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n05",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v05"
+          },
+          "results": {
+            "out_0": "$v06"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n06",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v06"
+          },
+          "results": {
+            "out_0": "$v07"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n07",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v07"
+          },
+          "results": {
+            "out_0": "$v08"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n08",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v08"
+          },
+          "results": {
+            "out_0": "$v09"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n09",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v09"
+          },
+          "results": {
+            "out_0": "$v10"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n10",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v10"
+          },
+          "results": {
+            "out_0": "$v11"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n11",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v11"
+          },
+          "results": {
+            "out_0": "$v12"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n12",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v12"
+          },
+          "results": {
+            "out_0": "$v13"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n13",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v13"
+          },
+          "results": {
+            "out_0": "$v14"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n14",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v14"
+          },
+          "results": {
+            "out_0": "$v15"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n15",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v15"
+          },
+          "results": {
+            "out_0": "$v16"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n16",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v16"
+          },
+          "results": {
+            "out_0": "$v17"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n17",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v17"
+          },
+          "results": {
+            "out_0": "$v18"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n18",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v18"
+          },
+          "results": {
+            "out_0": "$v19"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n19",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v19"
+          },
+          "results": {
+            "out_0": "$v20"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n20",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v20"
+          },
+          "results": {
+            "out_0": "$v21"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n21",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v21"
+          },
+          "results": {
+            "out_0": "$v22"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n22",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v22"
+          },
+          "results": {
+            "out_0": "$v23"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n23",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v23"
+          },
+          "results": {
+            "out_0": "$v24"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n24",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v24"
+          },
+          "results": {
+            "out_0": "$v25"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n25",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v25"
+          },
+          "results": {
+            "out_0": "$v26"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n26",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v26"
+          },
+          "results": {
+            "out_0": "$v27"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n27",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v27"
+          },
+          "results": {
+            "out_0": "$v28"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n28",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v28"
+          },
+          "results": {
+            "out_0": "$v29"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n29",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v29"
+          },
+          "results": {
+            "out_0": "$v30"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n30",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v30"
+          },
+          "results": {
+            "out_0": "$v31"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n31",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v31"
+          },
+          "results": {
+            "out_0": "$v32"
+          }
+        },
+        {
+          "kind": "op",
+          "id": "n32",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$v32"
+          },
+          "results": {
+            "out_0": "$v33"
+          }
+        }
+      ]
+    }
+  }
+}

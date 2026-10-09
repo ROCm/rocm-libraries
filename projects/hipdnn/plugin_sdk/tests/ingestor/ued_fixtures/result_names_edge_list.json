@@ -1,0 +1,24 @@
+{
+  "description": "A result naming custom_op's 'output_tensor_uids' edge list. The registry lists edge lists apart from named edges, and a pattern cannot bind one.",
+  "valid": false,
+  "runtime_error": "opcode 'custom_op' declares no result 'output_tensor_uids'",
+  "packager_error": "result 'output_tensor_uids' is not declared by op 'custom_op'",
+  "ued": {
+    "version": "1.0",
+    "id": "4a6664d7-a5f3-53bd-9363-c9f21a71d867",
+    "name": "ued_fixture:result_names_edge_list",
+    "metadata": "a1dc7314-cb9e-536c-8ba2-85720f065aac",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "custom",
+          "op": "custom_op",
+          "results": {
+            "output_tensor_uids": "$outputs"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,6 +1,7 @@
 {
   "description": "An unknown non-extension key inside the op object.",
   "valid": false,
+  "error": "unknown key 'mode'",
   "ued": {
     "version": "1.0",
     "id": "536170a1-20df-50ef-a676-e4c31e863dfb",

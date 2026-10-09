@@ -1,6 +1,8 @@
 {
   "description": "Two results bind the same variable.",
   "valid": false,
+  "runtime_error": "variable '$y' is bound by two results",
+  "packager_error": "binds '$y', already bound by node 'first' result 'out_0'",
   "ued": {
     "version": "1.0",
     "id": "da551654-cb4c-5314-97ed-a9b7dd1c0a74",

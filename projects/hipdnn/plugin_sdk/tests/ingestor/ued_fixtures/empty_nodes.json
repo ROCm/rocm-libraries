@@ -1,6 +1,8 @@
 {
   "description": "'nodes' is an empty array.",
   "valid": false,
+  "runtime_error": "must not be empty",
+  "packager_error": "'nodes' must be a nonempty array",
   "ued": {
     "version": "1.0",
     "id": "0e863a2f-6c74-5a71-9bd9-8092da7aa9a8",

@@ -1,6 +1,8 @@
 {
   "description": "A node id is a reserved root.",
   "valid": false,
+  "runtime_error": "node id 'graph' is a reserved root",
+  "packager_error": "node 'graph' id is a reserved root",
   "ued": {
     "version": "1.0",
     "id": "b15a4d2e-4452-580c-a9e3-af9edd2ef101",

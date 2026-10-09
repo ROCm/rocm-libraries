@@ -1,6 +1,8 @@
 {
   "description": "A variable is a reserved root.",
   "valid": false,
+  "runtime_error": "variable '$kernel' is a reserved root",
+  "packager_error": "binds reserved root '$kernel'",
   "ued": {
     "version": "1.0",
     "id": "9ab49777-7299-51a6-8f1b-c6bff9e0f2af",

@@ -1,0 +1,56 @@
+{
+  "description": "An opcode set with 33 distinct members, one over MAX_PATTERN_OPCODE_SET (32).",
+  "valid": false,
+  "error": "lists 33 opcodes",
+  "ued": {
+    "version": "1.0",
+    "id": "823d37c5-efb3-5c2f-9e94-5c6577c6fb8b",
+    "name": "ued_fixture:one_of_over_limit",
+    "metadata": "cf1ae429-ff1c-530b-b111-58cbd7a3b941",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "any",
+          "op": {
+            "one_of": [
+              "op_00",
+              "op_01",
+              "op_02",
+              "op_03",
+              "op_04",
+              "op_05",
+              "op_06",
+              "op_07",
+              "op_08",
+              "op_09",
+              "op_10",
+              "op_11",
+              "op_12",
+              "op_13",
+              "op_14",
+              "op_15",
+              "op_16",
+              "op_17",
+              "op_18",
+              "op_19",
+              "op_20",
+              "op_21",
+              "op_22",
+              "op_23",
+              "op_24",
+              "op_25",
+              "op_26",
+              "op_27",
+              "op_28",
+              "op_29",
+              "op_30",
+              "op_31",
+              "op_32"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

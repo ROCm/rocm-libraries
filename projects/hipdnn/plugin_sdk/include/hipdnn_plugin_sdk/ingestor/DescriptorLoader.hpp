@@ -80,7 +80,7 @@
  * completed metadata tuples collide on the catalog key.
  *
  * The UED follows RFC 0020 (source of truth); the other six follow RFC 0017 §4 until
- * their own follow-ups land. Five deliberate divergences, pending an amendment:
+ * their own follow-ups land. Seven deliberate divergences, pending an amendment:
  *
  *  - RFC 0020 §4.2: no `schema` member -- the filename already carries that fact, and a
  *    file whose name and body disagree has no correct reading.
@@ -99,6 +99,11 @@
  *    `provenance`, is warned about and ignored instead, so a descriptor may carry
  *    tracking data. Every other unknown key is still the hard rejection the RFC asks
  *    for, including a leftover `schema`.
+ *  - RFC 0020 §4.2 and §4.6 give a UED three optional role maps (`sort_kernel_catalog`,
+ *    `predict_engine`, `predict_applicable_kernels`); a UED carries one optional
+ *    `heuristic` UHD id instead, until the role maps are implemented.
+ *  - RFC 0020 §4.2 spells `sdk_version` as `<major>.<minor>`; it is `MAJOR.MINOR.PATCH`,
+ *    the form hipdnn_data_sdk::utilities::Version parses and the engine gates on.
  *
  * `sdk_version` sits on the UED rather than the UMD as RFC 0017 §4 has it; see the note at
  * parseEngineDescriptor().
@@ -109,7 +114,8 @@
  * `kernelDescriptors` key is camelCase, the RFCs' own inconsistency, kept as-is rather
  * than silently "fixed". A key repeated within one JSON object, at any depth, fails the
  * file (see parseDescriptorDocument). A KDP is the exception: its single-pass scan keeps
- * the last occurrence, as a DOM parse does (see PackScan).
+ * the last occurrence, as a DOM parse does (see PackScan). hkp_pack is stricter: it
+ * rejects a duplicate key in a KDP at pack time.
  *
  * A UED's `graph_match` carries exactly one of two arms. `native` is stored as a symbol and
  * resolved through GraphMatchRegistry when the set is validated. `nodes` is parsed and
@@ -178,8 +184,8 @@ struct DescriptorCatalog
 };
 
 /// Every top-level key a UED may carry, excluding extension keys. This is RFC 0020 §4.2's
-/// members plus `sdk_version` (see parseEngineDescriptor()). The UED JSON Schema's
-/// `properties` list the same set.
+/// members with one `heuristic` id in place of the three role maps (see the divergence
+/// list at the top of this file). The UED JSON Schema's `properties` list the same set.
 inline constexpr std::array<std::string_view, 10> UED_KEYS{"version",
                                                            "id",
                                                            "name",
@@ -278,7 +284,10 @@ inline std::string
     return text;
 }
 
-/// Descriptor-file version components.
+/// A descriptor's declared `major.minor`. Deliberately not `hipdnn_data_sdk::Version`
+/// (`major.minor.patch`): RFC 0020 §4.2 spells this field with exactly two components,
+/// and the two types gate different things -- this one a file at load, `Version` a graph
+/// against an engine at match time.
 struct DescriptorVersion
 {
     int major = 0;
@@ -750,10 +759,10 @@ inline GraphMatch parseGraphMatch(const nlohmann::json& object,
 
 inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const std::string& where)
 {
-    // `sdk_version` deviates from RFC 0020 §4.2, whose field table and schema don't list
-    // it: RFC 0017 §4 puts the graph schema version on the UMD, but every descriptor
-    // under an engine reads tokens that engine's binding produced, so it belongs on the
-    // engine instead. Accepted here pending the RFC amendment that moves the field.
+    // `sdk_version` is on the engine, not the UMD where RFC 0017 §4 puts it: every
+    // descriptor under an engine reads tokens that engine's binding produced. RFC 0020
+    // §4.2 makes the same move. The value is MAJOR.MINOR.PATCH, not §4.2's MAJOR.MINOR
+    // (see the divergence list at the top of this file).
     requireKnownKeys(root, UED_KEYS, where);
     for(const auto key : UED_REQUIRED_KEYS)
     {

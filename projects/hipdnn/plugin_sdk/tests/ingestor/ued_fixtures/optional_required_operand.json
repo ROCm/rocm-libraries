@@ -1,6 +1,8 @@
 {
   "description": "'?' on an operand the registry declares required.",
   "valid": false,
+  "runtime_error": "operand 'in_0' of opcode 'pointwise' is required, so binding '$input_a?' cannot be optional",
+  "packager_error": "operand 'in_0' is bound with '?', but the registry declares it required",
   "ued": {
     "version": "1.0",
     "id": "3663cc46-821b-5bf8-99a8-41d4a45b97b9",

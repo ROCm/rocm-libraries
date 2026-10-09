@@ -1,6 +1,7 @@
 {
   "description": "An opcode-set member absent from the registry.",
   "valid": false,
+  "error": "'pointwise_relu' is not in the op-schema registry",
   "ued": {
     "version": "1.0",
     "id": "d2414210-ab36-589d-bd41-3032231a1563",

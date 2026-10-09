@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -23,6 +24,7 @@
 
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
+#include "GraphPatternTestSupport.hpp"
 #include "KernelIngestorTestFixtures.hpp"
 
 /**
@@ -35,6 +37,12 @@ namespace
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
+using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+
+/// One binary pointwise node, published under the names its slots bind.
+const std::string BINARY_POINTWISE_PATTERN = R"([{"kind": "op", "id": "pointwise",
+    "op": "pointwise", "operands": {"in_0": "$input_a", "in_1": "$input_b"},
+    "results": {"out_0": "$output"}}])";
 
 inline bool rejectSecondCriterion(const MatchContext& /*context*/, const BoundTokens& /*bound*/)
 {
@@ -460,6 +468,45 @@ TEST(TestKernelIngestorStateManager, AnEngineWithNoGraphMatchStillMatchesOnItsCr
     EXPECT_TRUE(catalog.bound.empty());
     EXPECT_EQ(counters().graphMatchCalls, 0);
     EXPECT_EQ(counters().graphCalls, 1);
+}
+
+TEST(TestKernelIngestorStateManager, ACompiledPatternBindsTheCatalogOrDeclinesIt)
+{
+    // The declarative graph_match: a matching graph's tokens reach the catalog, and a
+    // graph the pattern declines empties it before any kernel matcher runs.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    const StateManager manager(
+        makeSchema(),
+        std::vector<MatchDescriptor>{
+            {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
+        makeTestDispatches(),
+        {makePack({KERNEL_MATCHER_ID})},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        GraphMatch{compilePatternText(BINARY_POINTWISE_PATTERN)});
+    const auto properties = testDeviceProperties();
+
+    PatternGraphBuilder add;
+    add.tensor(1).tensor(2).tensor(3).node(pointwiseNode(PointwiseMode::ADD, 1, 2, 3));
+    const auto addGraph = add.build();
+    const auto matched
+        = manager.unsortedCatalog(MatchContext{addGraph.context().graph, 0, properties});
+
+    EXPECT_EQ(matched.entries.size(), 2U);
+    EXPECT_EQ(std::get<std::string>(matched.bound.at("pointwise.operation")), "ADD");
+    EXPECT_EQ(tryGetBoundInt(matched.bound, "input_b"), 2);
+
+    // A unary node leaves the pattern's required in_1 slot empty.
+    PatternGraphBuilder abs;
+    abs.tensor(1).tensor(3).node(pointwiseNode(PointwiseMode::ABS, 1, std::nullopt, 3));
+    const auto absGraph = abs.build();
+    const auto kernelCallsBefore = counters().kernelCalls;
+    const auto declined
+        = manager.unsortedCatalog(MatchContext{absGraph.context().graph, 0, properties});
+
+    EXPECT_TRUE(declined.entries.empty());
+    EXPECT_TRUE(declined.bound.empty());
+    EXPECT_EQ(counters().kernelCalls, kernelCallsBefore);
 }
 
 TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredGraphMatchSymbol)
@@ -1170,6 +1217,18 @@ INSTANTIATE_TEST_SUITE_P(
                     std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID})},
                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
                     GraphMatch{});
+            }},
+        StateManagerConstructionThrowCase{
+            "RejectsANullCompiledPattern",
+            "null compiled graph pattern",
+            [] {
+                return std::make_unique<StateManager>(
+                    makeSchema(),
+                    makeTestMatchers(),
+                    makeTestDispatches(),
+                    std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID})},
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    GraphMatch{std::shared_ptr<const CompiledGraphPattern>{}});
             }},
         StateManagerConstructionThrowCase{"RejectsAMissingHeuristic",
                                           "requires a heuristic",

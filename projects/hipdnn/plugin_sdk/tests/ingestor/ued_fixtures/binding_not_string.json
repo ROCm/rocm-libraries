@@ -1,0 +1,27 @@
+{
+  "description": "An operand binding that is a number, not a string.",
+  "valid": false,
+  "runtime_error": "must be a string binding",
+  "packager_error": "operand 'in_0' binding 7 must be of the form",
+  "ued": {
+    "version": "1.0",
+    "id": "a747b6bc-21b6-509e-a773-0612d1be8d46",
+    "name": "ued_fixture:binding_not_string",
+    "metadata": "412c827e-d38b-55d4-a0c5-9c92528e8f79",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "in_0": 7
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

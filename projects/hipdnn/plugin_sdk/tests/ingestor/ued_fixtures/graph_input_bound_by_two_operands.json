@@ -1,6 +1,8 @@
 {
   "description": "Two operands bind a variable no node produces.",
   "valid": false,
+  "runtime_error": "graph input variable '$x' is bound by two operands",
+  "packager_error": "binds '$x', already bound by node 'first' operand 'in_0'",
   "ued": {
     "version": "1.0",
     "id": "898d65dd-7757-5663-9b9e-ebd5ddc97f9a",

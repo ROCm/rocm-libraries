@@ -1,0 +1,27 @@
+{
+  "description": "An operand binding that is '$' alone, with no variable name.",
+  "valid": false,
+  "runtime_error": "has malformed binding '$'",
+  "packager_error": "operand 'in_0' binding \"$\" must be of the form",
+  "ued": {
+    "version": "1.0",
+    "id": "3be56aac-d3b8-50a9-8a33-1d1ce4edaebf",
+    "name": "ued_fixture:binding_empty_name",
+    "metadata": "ed58ccc8-a657-59b5-bfe4-8f0a9bca6782",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pointwise",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

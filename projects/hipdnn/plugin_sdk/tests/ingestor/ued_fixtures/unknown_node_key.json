@@ -1,6 +1,7 @@
 {
   "description": "An unknown non-extension key inside a node object.",
   "valid": false,
+  "error": "unknown key 'inputs'",
   "ued": {
     "version": "1.0",
     "id": "c59db536-09aa-5161-9cb3-a07527c1b287",
