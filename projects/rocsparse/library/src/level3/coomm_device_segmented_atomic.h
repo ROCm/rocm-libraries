@@ -62,7 +62,7 @@ namespace rocsparse
         __shared__ I shared_row[WF_SIZE];
         __shared__ T shared_val[COLS][WF_SIZE];
 
-        const int64_t offset = hipBlockIdx_x * LOOPS * WF_SIZE;
+        const int64_t offset = static_cast<int64_t>(hipBlockIdx_x) * LOOPS * WF_SIZE;
 
         if(offset >= nnz)
         {

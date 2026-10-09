@@ -75,6 +75,7 @@ namespace rocsparse
         n,                                                                               \
         k,                                                                               \
         nnz,                                                                             \
+        nblocks,                                                                         \
         batch_count_C,                                                                   \
         batch_stride_A,                                                                  \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                    \
@@ -107,6 +108,7 @@ namespace rocsparse
         n,                                                                                    \
         k,                                                                                    \
         nnz,                                                                                  \
+        nblocks,                                                                              \
         batch_count_C,                                                                        \
         batch_stride_A,                                                                       \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                         \
@@ -299,21 +301,22 @@ namespace rocsparse
 #undef COOMMN_DIM
 #undef LOOPS
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::coommnn_general_block_reduce<1024>),
-                dim3(n, 1, get_grid_size_z<I>(handle, batch_count_C)),
-                1024,
-                0,
-                stream,
-                n,
-                nblocks,
-                row_block_red,
-                val_block_red,
-                dense_C,
-                ldc,
-                batch_stride_C,
-                order_C,
-                batch_count_C);
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::coommnn_general_block_reduce<1024>),
+                                               dim3(get_grid_size_x<I>(handle, n, 1024),
+                                                    1,
+                                                    get_grid_size_z<I>(handle, batch_count_C)),
+                                               1024,
+                                               0,
+                                               stream,
+                                               n,
+                                               nblocks,
+                                               row_block_red,
+                                               val_block_red,
+                                               dense_C,
+                                               ldc,
+                                               batch_stride_C,
+                                               order_C,
+                                               batch_count_C);
         }
         else
         {

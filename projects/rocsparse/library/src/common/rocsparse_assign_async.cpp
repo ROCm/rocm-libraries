@@ -24,7 +24,10 @@
 #include "rocsparse_assign_async.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_indextype_utils.hpp"
+
+#include <algorithm>
 
 namespace rocsparse
 {
@@ -63,13 +66,18 @@ template <typename T>
 rocsparse_status
     rocsparse::assign_device_async(int64_t n, T* dest, const T* value, hipStream_t stream)
 {
-    if(n <= 0)
+    if(n < 0)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_size);
+    }
+
+    if(n == 0)
     {
         return rocsparse_status_success;
     }
 
-    const int64_t nblocks
-        = std::min((n - 1) / rocsparse::assign_blocksize + 1, rocsparse::assign_max_blocks);
+    const int64_t nblocks = std::min(rocsparse::ceil_div(n, rocsparse::assign_blocksize),
+                                     rocsparse::assign_max_blocks);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
         (rocsparse::assign_device_kernel<rocsparse::assign_blocksize>),
@@ -86,13 +94,18 @@ rocsparse_status
 template <typename T>
 rocsparse_status rocsparse::assign_async(int64_t n, T* dest, T value, hipStream_t stream)
 {
-    if(n <= 0)
+    if(n < 0)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_size);
+    }
+
+    if(n == 0)
     {
         return rocsparse_status_success;
     }
 
-    const int64_t nblocks
-        = std::min((n - 1) / rocsparse::assign_blocksize + 1, rocsparse::assign_max_blocks);
+    const int64_t nblocks = std::min(rocsparse::ceil_div(n, rocsparse::assign_blocksize),
+                                     rocsparse::assign_max_blocks);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::assign_kernel<rocsparse::assign_blocksize>),
                                        dim3(nblocks),

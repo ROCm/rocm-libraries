@@ -83,6 +83,15 @@ namespace rocsparse
                                 : static_cast<int64_t>(4294967295LL);
     }
 
+    // Ceiling division count / block_size in 64-bit, written as
+    // (count - 1) / block_size + 1 so that it cannot overflow before the divide
+    // the way (count + block_size - 1) / block_size does for counts near the type
+    // maximum. Returns 0 when count <= 0 or block_size <= 0.
+    static constexpr int64_t ceil_div(int64_t count, int64_t block_size)
+    {
+        return (count > 0 && block_size > 0) ? ((count - 1) / block_size + 1) : 0;
+    }
+
     // Clamp a grid.x extent. block_size must be the blockDim.x the launch uses;
     // it is a runtime argument rather than a template parameter because several
     // callers choose it at runtime, for example the csrmv LRB path picks
