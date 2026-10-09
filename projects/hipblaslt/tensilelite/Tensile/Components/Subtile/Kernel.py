@@ -458,6 +458,11 @@ class TileInfo:
     isAB = tc in ['A', 'B']
     isMXSAB = tc in ['MXSA', 'MXSB']
     _tc = 'A' if isA else 'B'
+    # SwizzleTensor{A,B} means the host has already transformed the data into
+    # the MFMA-friendly 16-row interleaved layout.  The GR/LR emitters must not
+    # apply the ordinary LDS swizzle to these tensors.
+    self.isPreShuffled = isAB and kernel["ProblemType"].get(
+        "SwizzleTensor%s" % _tc, False)
 
     # --- Extract kernel config ---
     if isinstance(geometry, (ABTilePair, MXScaleTilePair)):
@@ -1327,8 +1332,10 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   """
   module = Module("MultiDU tail SRD rewind (partial macro tile)")
   scaleInc = lambda ti: int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
-  incs = [("A", int(numUnroll.get('A', 1)) * int(tiA.depthUBytes)),
-          ("B", int(numUnroll.get('B', 1)) * int(tiB.depthUBytes))]
+  dataInc = lambda ti: int(ti.depthUBytes) * (
+      int(ti.mmaTileShape[0]) if ti.isPreShuffled else 1)
+  incs = [("A", int(numUnroll.get('A', 1)) * dataInc(tiA)),
+          ("B", int(numUnroll.get('B', 1)) * dataInc(tiB))]
   if scaleTiA is not None:
     incs.append(("MXSA", int(numUnroll.get('SA', 1)) * scaleInc(scaleTiA)))
   if scaleTiB is not None:
