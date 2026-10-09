@@ -273,7 +273,7 @@ def decide_catalog(
     Four gates:
 
     * `available` -- the engine ran under the candidate tree on at least `min_available` of the
-      held-out graphs it runs under the build's own tree. A graph that tree cannot run either
+      held-out graphs it runs under the root as it stands. A graph that tree cannot run either
       is the engine's failure, not the candidate's: it is reported (`engine_failures`) and left
       out, and an engine that runs none of them fails the gate, since then nothing was tested;
     * `read` -- the runtime did not say, on any graph, that it is not using the model. A refused
@@ -299,9 +299,9 @@ def decide_catalog(
     problems = []
     if not runnable:
         problems.append(f"the engine ran none of the {len(rows)} held-out graph(s) even under the "
-                        f"build's own tree; nothing about the candidate was tested")
+                        f"root as it stands; nothing about the candidate was tested")
     elif not passed:
-        problems.append(f"{len(runnable) - len(ran)} of {len(runnable)} graph(s) the build's own tree "
+        problems.append(f"{len(runnable) - len(ran)} of {len(runnable)} graph(s) the root as it stands "
                         f"runs failed under the candidate tree")
     gates["available"] = {"passed": passed, "fraction": fraction, "graphs": len(rows),
                           "runnable": len(runnable), "ran": len(ran),

@@ -47,7 +47,7 @@ python3 $UHD/scripts/decide.py l1 --rows rows.json --candidate-dir <model dir> -
   The copy holds the candidate as the only document carrying it.
 - **Descriptor engine**: `--declared-id` is the model's own `id`, and `--promote` installs, in
   order, the L2 its rows were measured under and then the candidate. The candidate's truth is
-  measured under that tree, the incumbent's under the build's own.
+  measured under that tree, the incumbent's under `<tree>` as it stands.
 - Every engine call reads only the tree named for it (`HIPDNN_DESCRIPTOR_RUNTIME_DIR` and
   `HIPDNN_DESCRIPTOR_PATH` are cleared) and gets an empty `HIPDNN_CACHE_DIR`.
 - Gates: `identity` (the engine could only have read the candidate), `available` (it predicts
