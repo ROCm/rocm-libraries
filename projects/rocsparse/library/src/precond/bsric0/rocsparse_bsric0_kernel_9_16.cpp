@@ -196,8 +196,9 @@ namespace rocsparse
             }
 
             // Loop over the row the current column index depends on. Each lane processes one
-            // entry. The blocks of row block_col come from other block rows and need device
-            // scope loads. The blocks of this block row were stored by this wavefront.
+            // entry. The blocks of row block_col come from other block rows, and the blocks of
+            // this block row were stored with device scope stores, which bypass the L1. Both
+            // need device scope loads.
             for(I l = 0; l < count - 1; l++)
             {
                 J idx2 = local_index[l];
@@ -214,7 +215,8 @@ namespace rocsparse
                         {
                             T v1
                                 = rocsparse::load_done_row_data(&bsr_val[idx2 + block_dim * q + p]);
-                            T v2      = (tidy < block_dim) ? bsr_val[idx + block_dim * tidy + p]
+                            T v2      = (tidy < block_dim) ? rocsparse::load_done_row_data(
+                                       &bsr_val[idx + block_dim * tidy + p])
                                                            : static_cast<T>(0);
                             local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                         }
@@ -222,7 +224,8 @@ namespace rocsparse
                         {
                             T v1
                                 = rocsparse::load_done_row_data(&bsr_val[idx2 + block_dim * p + q]);
-                            T v2      = (tidy < block_dim) ? bsr_val[idx + block_dim * p + tidy]
+                            T v2      = (tidy < block_dim) ? rocsparse::load_done_row_data(
+                                       &bsr_val[idx + block_dim * p + tidy])
                                                            : static_cast<T>(0);
                             local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                         }
@@ -299,17 +302,9 @@ namespace rocsparse
                 }
             }
 
-            // Only this wavefront reads the stored blocks back before the done flag is set,
-            // and set_done_flag waits for all stores.
-            if constexpr(rocsparse::has_noncoherent_xcd_l2)
-            {
-                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
-                __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
-            }
-            else
-            {
-                __threadfence();
-            }
+            // Later iterations of this wavefront read this block back with device scope
+            // loads. Wait for the stores first.
+            rocsparse::release_done_row_data();
         }
 
         // Load current diagonal block into shared memory
