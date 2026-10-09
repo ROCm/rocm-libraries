@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -86,7 +86,14 @@ inline O adjacent_difference(execution::parallel_unsequenced_policy, I fi, I li,
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::adjacent_difference(::thrust::device, fi, li, fo, ::std::move(op));
+
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn) {
+        return ::thrust::adjacent_difference(::thrust::device, fi, li, fo, ::std::move(fn));
+    },
+    "hipstdpar adjacent_difference: failed to synchronize",
+    op
+  );
 }
 
 template <typename I,
@@ -153,7 +160,14 @@ inline T reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op op)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::reduce(::thrust::device, f, l, ::std::move(x), ::std::move(op));
+
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn) {
+      return ::thrust::reduce(::thrust::device, f, l, ::std::move(x), ::std::move(fn));
+    },
+    "hipstdpar reduce: failed to synchronize",
+    op
+  );
 }
 
 template <typename I,
@@ -204,7 +218,14 @@ inline O exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::exclusive_scan(::thrust::device, fi, li, fo, ::std::move(x), ::std::move(op));
+
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn) {
+      return ::thrust::exclusive_scan(::thrust::device, fi, li, fo, ::std::move(x), ::std::move(fn));
+    },
+    "hipstdpar exclusive_scan: failed to synchronize",
+    op
+  );
 }
 
 template <typename I,
@@ -256,7 +277,14 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op));
+
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn) {
+      return ::thrust::inclusive_scan(::thrust::device, fi, li, fo, ::std::move(fn));
+    },
+    "hipstdpar inclusive_scan: failed to synchronize",
+    op
+  );
 }
 
 template <typename I,
@@ -294,23 +322,58 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
 
   ::hipstd::__maybe_bind_globals();
 
-  auto lo = ::thrust::inclusive_scan(::thrust::device, fi, li, fo, op);
+  using op_t = ::std::decay_t<Op>;
 
-  auto fn   = [op = ::std::move(op), x = ::std::move(x)](auto&& y) { return op(x, y); };
-  using fn_t = decltype(fn);
-
-  if constexpr (::std::is_trivially_destructible_v<fn_t>)
+  if constexpr (::std::is_trivially_destructible_v<op_t>)
   {
-    return ::thrust::transform(::thrust::device, fo, lo, fo, ::std::move(fn));
+    // op is safe to copy into the asynchronous scan; only the transform functor
+    // (which may capture a non-trivial x) can outlive its kernel.
+    auto lo = ::thrust::inclusive_scan(::thrust::device, fi, li, fo, op);
+
+    auto fn    = [op = ::std::move(op), x = ::std::move(x)](auto&& y) { return op(x, y); };
+    using fn_t = decltype(fn);
+
+    if constexpr (::std::is_trivially_destructible_v<fn_t>)
+    {
+      return ::thrust::transform(::thrust::device, fo, lo, fo, ::std::move(fn));
+    }
+    else
+    {
+      ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+      O result;
+      try
+      {
+        result =
+          ::thrust::transform(::thrust::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+      }
+      catch (...)
+      {
+        (void) ::hipDeviceSynchronize();
+        throw;
+      }
+      ::thrust::hip_rocprim::throw_on_error(
+        ::hipDeviceSynchronize(), "hipstdpar inclusive_scan: failed to synchronize");
+      guard.destroy_and_free();
+      return result;
+    }
   }
   else
   {
-    ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+    // op is non-trivial: keep a device-resident copy alive for the whole stream so
+    // that both the scan and the transform (which references op) outlive their kernels.
+    ::hipstd::detail::device_callable_guard<op_t> op_guard(::std::move(op));
+    ::hipstd::detail::callable_proxy<op_t> op_proxy{op_guard.get()};
+
+    auto fn    = [op_proxy, x = ::std::move(x)](auto&& y) { return op_proxy(x, y); };
+    using fn_t = decltype(fn);
+    ::hipstd::detail::device_callable_guard<fn_t> fn_guard(::std::move(fn));
+
     O result;
     try
     {
-      result = ::thrust::transform(
-        ::thrust::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+      auto lo = ::thrust::inclusive_scan(::thrust::device, fi, li, fo, op_proxy);
+      result  = ::thrust::transform(
+        ::thrust::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{fn_guard.get()});
     }
     catch (...)
     {
@@ -319,7 +382,8 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
     }
     ::thrust::hip_rocprim::throw_on_error(
       ::hipDeviceSynchronize(), "hipstdpar inclusive_scan: failed to synchronize");
-    guard.destroy_and_free();
+    fn_guard.destroy_and_free();
+    op_guard.destroy_and_free();
     return result;
   }
 }
@@ -376,7 +440,15 @@ inline T transform_reduce(execution::parallel_unsequenced_policy, I0 f0, I0 l0, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::inner_product(::thrust::device, f0, l0, f1, ::std::move(x), ::std::move(op0), ::std::move(op1));
+
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn0, auto fn1) {
+        return ::thrust::inner_product(::thrust::device, f0, l0, f1, ::std::move(x), ::std::move(fn0), ::std::move(fn1));
+      },
+      "hipstdpar transform_reduce: failed to synchronize",
+      op0,
+      op1
+  );
 }
 
 template <
@@ -411,7 +483,15 @@ inline T transform_reduce(execution::parallel_unsequenced_policy, I f, I l, T x,
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::transform_reduce(::thrust::device, f, l, ::std::move(op1), ::std::move(x), ::std::move(op0));
+
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn0, auto fn1) {
+        return ::thrust::transform_reduce(::thrust::device, f, l, ::std::move(fn1), ::std::move(x), ::std::move(fn0));
+    },
+    "hipstdpar transform_reduce: failed to synchronize",
+    op0,
+    op1
+  );
 }
 
 template <
@@ -448,8 +528,16 @@ inline O transform_exclusive_scan(execution::parallel_unsequenced_policy, I fi, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::transform_exclusive_scan(
-    ::thrust::device, fi, li, fo, ::std::move(op1), ::std::move(x), ::std::move(op0));
+
+  return ::hipstd::detail::with_device_callables(
+    [&](auto fn0, auto fn1) {
+        return ::thrust::transform_exclusive_scan(
+            ::thrust::device, fi, li, fo, ::std::move(fn1), ::std::move(x), ::std::move(fn0));
+    },
+    "hipstdpar transform_exclusive_scan: failed to synchronize",
+    op0,
+    op1
+  );
 }
 
 template <
@@ -488,7 +576,15 @@ inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::transform_inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op1), ::std::move(op0));
+
+  return ::hipstd::detail::with_device_callables(
+      [&](auto fn0, auto fn1) {
+          return ::thrust::transform_inclusive_scan(::thrust::device, fi, li, fo, ::std::move(fn1), ::std::move(fn0));
+      },
+      "hipstdpar transform_inclusive_scan: failed to synchronize",
+      op0,
+      op1
+  );
 }
 
 template <
@@ -529,23 +625,61 @@ inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, 
 
   ::hipstd::__maybe_bind_globals();
 
-  auto lo = ::thrust::transform_inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op1), op0);
+  using op0_t = ::std::decay_t<Op0>;
+  using op1_t = ::std::decay_t<Op1>;
 
-  auto fn    = [op0 = ::std::move(op0), x = ::std::move(x)](auto&& y) { return op0(x, y); };
-  using fn_t = decltype(fn);
-
-  if constexpr (::std::is_trivially_destructible_v<fn_t>)
+  if constexpr (::std::is_trivially_destructible_v<op0_t> && ::std::is_trivially_destructible_v<op1_t>)
   {
-    return ::thrust::transform(::thrust::device, fo, lo, fo, ::std::move(fn));
+    // Both operators are safe to copy into the asynchronous scan.  Only the
+    // transform functor (which may capture a non-trivial x) can outlive its kernel.
+    auto lo = ::thrust::transform_inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op1), op0);
+
+    auto fn    = [op0 = ::std::move(op0), x = ::std::move(x)](auto&& y) { return op0(x, y); };
+    using fn_t = decltype(fn);
+
+    if constexpr (::std::is_trivially_destructible_v<fn_t>)
+    {
+      return ::thrust::transform(::thrust::device, fo, lo, fo, ::std::move(fn));
+    }
+    else
+    {
+      ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+      O result;
+      try
+      {
+        result =
+          ::thrust::transform(::thrust::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+      }
+      catch (...)
+      {
+        (void) ::hipDeviceSynchronize();
+        throw;
+      }
+      ::thrust::hip_rocprim::throw_on_error(
+        ::hipDeviceSynchronize(), "hipstdpar transform_inclusive_scan: failed to synchronize");
+      guard.destroy_and_free();
+      return result;
+    }
   }
   else
   {
-    ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+    // Keep device-resident copies of both operators alive for the whole stream:
+    // op1 feeds the scan, op0 feeds both the scan and the transform.
+    ::hipstd::detail::device_callable_guard<op0_t> op0_guard(::std::move(op0));
+    ::hipstd::detail::device_callable_guard<op1_t> op1_guard(::std::move(op1));
+    ::hipstd::detail::callable_proxy<op0_t> op0_proxy{op0_guard.get()};
+
+    auto fn    = [op0_proxy, x = ::std::move(x)](auto&& y) { return op0_proxy(x, y); };
+    using fn_t = decltype(fn);
+    ::hipstd::detail::device_callable_guard<fn_t> fn_guard(::std::move(fn));
+
     O result;
     try
     {
+      auto lo = ::thrust::transform_inclusive_scan(
+        ::thrust::device, fi, li, fo, ::hipstd::detail::callable_proxy<op1_t>{op1_guard.get()}, op0_proxy);
       result = ::thrust::transform(
-        ::thrust::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+        ::thrust::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{fn_guard.get()});
     }
     catch (...)
     {
@@ -554,7 +688,9 @@ inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, 
     }
     ::thrust::hip_rocprim::throw_on_error(
       ::hipDeviceSynchronize(), "hipstdpar transform_inclusive_scan: failed to synchronize");
-    guard.destroy_and_free();
+    fn_guard.destroy_and_free();
+    op1_guard.destroy_and_free();
+    op0_guard.destroy_and_free();
     return result;
   }
 }
