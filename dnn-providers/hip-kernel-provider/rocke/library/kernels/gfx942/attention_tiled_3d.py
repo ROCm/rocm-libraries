@@ -1159,3 +1159,28 @@ def build_unified_attention_reduce_tiled(
         b.global_store(out, out_idx, scalar_out, align=2)
 
     return b.kernel
+
+
+def supports_tiled_3d_spec(
+    spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx942"
+) -> Tuple[bool, str]:
+    """Spec-shaped wrapper for ``supports_tiled_3d`` (gfx942 variant).
+
+    ``supports_tiled_3d`` is kwargs-only and unreachable from a spec instance
+    (``hkp_pack``'s ``_check_support_predicate`` skips kwargs-only predicates).
+    This wrapper extracts the necessary fields and delegates, making the 3D
+    unified builder validatable at pack time.
+    """
+    use_fp8 = spec.kv_storage_dtype is not None
+    return supports_tiled_3d(
+        head_size=spec.head_size,
+        block_size=spec.block_size,
+        dtype=spec.dtype,
+        num_queries_per_kv=spec.num_queries_per_kv,
+        use_alibi=spec.use_alibi,
+        use_qq_bias=spec.use_qq_bias,
+        use_fp8=use_fp8,
+        q_dtype=spec.dtype,
+        kv_storage_dtype=spec.kv_storage_dtype,
+        arch=arch,
+    )

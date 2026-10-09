@@ -184,8 +184,12 @@ _GFX942_BLOCK_M = (32, 64, 128, 256, 512)
 _GFX942_BLOCK_N = (32, 64, 128, 256)
 # The gfx950 bodies implement 128- and 256-row query tiles (see
 # supports_attention_dense); the validator prunes block_n the tile cannot take.
+# block_n=256 is the seventh shipped tile (D64 BM256/BN256), safe because
+# supports_attention_dense rejects D128/BN256 via the LDS budget check (it
+# needs 1184*256=303,104 bytes against gfx950's 163,840 limit). D64/BN256
+# needs only 528*256=135,168 bytes and is within budget.
 _GFX950_BLOCK_M = (128, 256)
-_GFX950_BLOCK_N = (32, 64, 128)
+_GFX950_BLOCK_N = (32, 64, 128, 256)
 
 
 def _num_persistent_axis(policies: Tuple[str, ...]) -> KnobAxis:
