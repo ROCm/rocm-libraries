@@ -269,6 +269,26 @@ def _resolve_attention_arch() -> str:
     return _RESOLVED_ATTENTION_ARCH
 
 
+def _canonical_arch_for_selection(arch: Optional[str]) -> str:
+    """Return a canonical arch for selection-path comparisons.
+
+    Strips feature suffixes (``"gfx942:sramecc+"``) and normalizes case
+    (``"GFX950"``), mirroring :func:`~dispatch.attention.common.canonical_arch`
+    at the ``AttentionRequest`` boundary but without a ``dispatch`` import (which
+    would invert the ``kernels → dispatch`` dependency direction).
+
+    When ``arch`` is ``None`` or empty the running device is queried via
+    :func:`_resolve_attention_arch` — correct on the **launch path** where the
+    compiled kernel must match the local device. Callers on the **selection path**
+    must always supply an explicit arch.
+    """
+    if not arch:
+        return _resolve_attention_arch()
+    from rocke.core.arch import base_arch_from_target_id
+
+    return base_arch_from_target_id(arch.strip().lower())
+
+
 def _tiled_2d_impl(arch: str):
     """Lazily import the arch-specific tiled-2D spec / builder / gate.
 
@@ -289,7 +309,15 @@ def _tiled_2d_impl(arch: str):
     gfx950 builder after ``attention_arch.validate_tiled_attention_arch`` was
     relaxed to admit gfx942 -- otherwise the gfx950 builder would emit
     gfx950-only ISA on gfx942 and crash comgr.
+
+    ``arch`` must be a canonical base name (no ``:`` features, lowercase). A
+    decorated ID (``"gfx942:sramecc+"``) will miss every branch and silently fall
+    through to gfx950. Call ``_canonical_arch_for_selection`` first.
     """
+    assert ":" not in arch, (
+        f"_tiled_2d_impl received a decorated target ID {arch!r}; "
+        "canonicalize via _canonical_arch_for_selection first"
+    )
     if arch == "gfx1250":
         from ..gfx1250.attention_tiled_2d import (
             UnifiedAttention2DTiledSpec,
@@ -335,8 +363,12 @@ def _tiled_3d_impl(arch: str):
     Returns ``(UnifiedAttention3DTiledSpec, UnifiedAttentionReduceTiledSpec,
     build_unified_attention_3d_tiled, build_unified_attention_reduce_tiled,
     supports_tiled_3d)``. See :func:`_tiled_2d_impl` for why this import is
-    lazy and arch-keyed.
+    lazy and arch-keyed, and for the canonicality requirement on ``arch``.
     """
+    assert ":" not in arch, (
+        f"_tiled_3d_impl received a decorated target ID {arch!r}; "
+        "canonicalize via _canonical_arch_for_selection first"
+    )
     if arch == "gfx1250":
         from ..gfx1250.attention_tiled_3d import (
             UnifiedAttention3DTiledSpec,
@@ -444,6 +476,8 @@ def supports_native_unified_attention(
 ) -> Tuple[bool, str]:
     """Return whether CK DSL can run this problem without fallback today.
 
+    ``arch`` may be a decorated target ID — canonicalized internally.
+
     This is deliberately strict. It prevents a partially implemented backend
     from being selected in `auto` mode and gives test code a single place to
     check coverage.
@@ -459,6 +493,7 @@ def supports_native_unified_attention(
     - sliding_window: yes
     - softcap: yes
     """
+    arch = _canonical_arch_for_selection(arch)
     if problem.head_size not in UNIFIED_HEAD_SIZES:
         return False, f"unsupported head_size {problem.head_size}"
     if problem.block_size not in UNIFIED_BLOCK_SIZES:
@@ -484,7 +519,12 @@ def supports_native_unified_attention_tiled(
     problem: UnifiedAttentionProblem,
     arch: str,
 ) -> Tuple[bool, str]:
-    """Return whether the optimized tiled MFMA path can run this problem."""
+    """Return whether the optimized tiled MFMA path can run this problem.
+
+    ``arch`` may be a decorated target ID (``"gfx942:sramecc+"``) — it is
+    canonicalized internally before routing.
+    """
+    arch = _canonical_arch_for_selection(arch)
     if arch == "gfx1250" and problem.softcap > 0:
         return False, "gfx1250 tiled 2D does not support softcap yet"
     _, _, supports_tiled_2d = _tiled_2d_impl(arch)
@@ -573,7 +613,11 @@ def supports_native_unified_attention_3d_tiled(
     problem: UnifiedAttentionProblem,
     arch: str,
 ) -> Tuple[bool, str]:
-    """Return whether the optimized tiled MFMA 3D split-KV path can run this."""
+    """Return whether the optimized tiled MFMA 3D split-KV path can run this.
+
+    ``arch`` may be a decorated target ID — canonicalized internally.
+    """
+    arch = _canonical_arch_for_selection(arch)
     rejected = _reject_fp8_format_arch_mismatch(problem, arch)
     if rejected is not None:
         return rejected

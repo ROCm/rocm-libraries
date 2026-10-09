@@ -631,6 +631,14 @@ _LIVE_ARCH_CALLERS_ALLOWED = frozenset(
         "run_unified_attention_torch",  # the public launch entry
         "_run_3d_tiled",  # split-KV decode launch
         "_run_2d_graphed",  # 2D graph-replay launch
+        # ``_canonical_arch_for_selection`` is the canonicalizer for the public
+        # gates (``supports_native_unified_attention_tiled`` etc.).  Its
+        # device-read branch fires only when ``arch`` is ``None`` -- i.e. the
+        # caller is on the launch path and has not supplied an explicit arch.
+        # Selection-path callers always pass an arch, so the branch is dead for
+        # them; the allow-list entry is here because the AST sweep counts every
+        # reference to ``_resolve_attention_arch`` regardless of branch.
+        "_canonical_arch_for_selection",
     }
 )
 
@@ -687,6 +695,116 @@ class TestLiveArchReadsAreConfinedToTheLaunchPath(unittest.TestCase):
             "allow-listed functions that no longer call _resolve_attention_arch(). "
             "Drop them -- a stale entry silently re-permits a future device read",
         )
+
+
+class TestDecoratedTargetIds(unittest.TestCase):
+    """Decorated target IDs (``gfx942:sramecc+``, ``gfx1250:xnack-``) must route
+    to the correct arch backend, not fall through to the gfx950 default.
+
+    CongMa13 (2026-10-09): the ``_tiled_2d_impl`` / ``_tiled_3d_impl`` routers
+    use bare ``==`` comparisons, so an unstripped decorated ID misses every branch
+    and lands on gfx950 — pairing a gfx950 spec/builder with a gfx942 or gfx1250
+    compile target.  The fix is ``_canonical_arch_for_selection`` at every
+    public entry point; this test is the direct-call coverage he requested.
+    """
+
+    def _problem(self):
+        import kernels.common.attention_unified as au
+
+        return au.UnifiedAttentionProblem(
+            total_q=128,
+            num_seqs=1,
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=128,
+            max_seqlen_k=1024,
+            dtype="bf16",
+        )
+
+    def test_canonical_arch_for_selection_strips_features(self):
+        """``_canonical_arch_for_selection`` must normalize case and strip ``:`` suffix."""
+        from kernels.common.attention_unified import _canonical_arch_for_selection
+
+        cases = [
+            ("gfx942:sramecc+", "gfx942"),
+            ("gfx1250:xnack-", "gfx1250"),
+            ("gfx950:sramecc+:xnack-", "gfx950"),
+            ("GFX950", "gfx950"),
+            ("gfx942", "gfx942"),
+        ]
+        for raw, expected in cases:
+            with self.subTest(raw=raw):
+                self.assertEqual(_canonical_arch_for_selection(raw), expected)
+
+    def test_impl_routers_receive_canonical_arch(self):
+        """A decorated ID must canonicalize to the correct arch and therefore
+        select the correct spec class — not fall through to the gfx950 default.
+
+        ``_tiled_2d_impl`` and ``_tiled_3d_impl`` use bare ``==`` comparisons on
+        the arch string.  ``_canonical_arch_for_selection`` strips ``:`` features
+        before reaching them; this test verifies that the round-trip is correct.
+        """
+        import kernels.common.attention_unified as au
+
+        gfx942_cls_2d = au._tiled_2d_impl("gfx942")[0]
+        gfx950_cls_2d = au._tiled_2d_impl("gfx950")[0]
+        gfx1250_cls_2d = au._tiled_2d_impl("gfx1250")[0]
+
+        # Precondition: all three route to distinct classes.
+        self.assertIsNot(gfx942_cls_2d, gfx950_cls_2d)
+        self.assertIsNot(gfx1250_cls_2d, gfx950_cls_2d)
+
+        for decorated, expected_cls, wrong_cls, label in [
+            ("gfx942:sramecc+", gfx942_cls_2d, gfx950_cls_2d, "gfx942"),
+            ("gfx1250:xnack-", gfx1250_cls_2d, gfx950_cls_2d, "gfx1250"),
+            ("gfx950:sramecc+:xnack-", gfx950_cls_2d, gfx942_cls_2d, "gfx950"),
+        ]:
+            with self.subTest(decorated=decorated):
+                canonical = au._canonical_arch_for_selection(decorated)
+                routed_cls = au._tiled_2d_impl(canonical)[0]
+                self.assertIs(
+                    routed_cls,
+                    expected_cls,
+                    f"{decorated!r} -> canonical {canonical!r} "
+                    f"routed to the wrong class",
+                )
+                self.assertIsNot(
+                    routed_cls,
+                    wrong_cls,
+                    f"{decorated!r} fell through to {label}'s default",
+                )
+
+    def test_supports_tiled_decorated_equals_bare(self):
+        """``supports_native_unified_attention_tiled/3d_tiled`` returns the same
+        verdict for a decorated ID as for the stripped base name."""
+        from kernels import (
+            supports_native_unified_attention_tiled,
+            supports_native_unified_attention_3d_tiled,
+        )
+
+        p = self._problem()
+        for bare, decorated in [
+            ("gfx942", "gfx942:sramecc+"),
+            ("gfx950", "gfx950:sramecc+:xnack-"),
+        ]:
+            with self.subTest(bare=bare, decorated=decorated):
+                ok_b2, _ = supports_native_unified_attention_tiled(p, arch=bare)
+                ok_d2, _ = supports_native_unified_attention_tiled(p, arch=decorated)
+                self.assertEqual(
+                    ok_b2,
+                    ok_d2,
+                    f"2D tiled verdict differs: bare={ok_b2} decorated={ok_d2}",
+                )
+
+                ok_b3, _ = supports_native_unified_attention_3d_tiled(p, arch=bare)
+                ok_d3, _ = supports_native_unified_attention_3d_tiled(p, arch=decorated)
+                self.assertEqual(
+                    ok_b3,
+                    ok_d3,
+                    f"3D tiled verdict differs: bare={ok_b3} decorated={ok_d3}",
+                )
 
 
 if __name__ == "__main__":
