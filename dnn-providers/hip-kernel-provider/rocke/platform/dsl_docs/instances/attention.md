@@ -99,6 +99,16 @@ Current coverage (verified via `library/builders/gfx950/attention/prefill/parity
 - 2D scalar correctness kernel + 2D MFMA tiled kernel;
 - 3D split-KV (segment + reduce pipeline).
 
+Additive attention bias (`UnifiedAttentionProblem.use_additive_bias`): an fp32
+`[B, H, Sq, Sk]` bias added to the scores, broadcastable over B and/or H via a
+zero stride, indexed by the query head under GQA. Forward only, **gfx950 only**
+(tiled 2D and 3D split-KV, Python engine); other arches report it unsupported
+through `supports_native_unified_attention_tiled` / `_3d_tiled`. Verified by the
+on-GPU numeric lane
+[test_attention_additive_bias_gfx950_numeric.py](../../../library/tests/test_attention_additive_bias_gfx950_numeric.py)
+rather than the parity scenario set above; knob semantics are in the
+[builders/common Knob reference](../../../library/builders/common/README.md#knob-reference).
+
 bf16 attention uses the `mfma_f32_16x16x16_bf16` op via the `_1k` LLVM variant (with `<4 x i16>` operands; the plain `bf16.16x16x16` intrinsic does not exist on this target).
 
 CK Tile ``01_fmha`` family parity:
@@ -261,6 +271,7 @@ Detailed flow:
 5. Score processing:
  - apply scale;
  - apply ALiBi/QQ bias if configured;
+ - apply the additive bias if configured (gfx950);
  - apply causal and sliding-window masks;
  - apply softcap when configured;
  - set invalid positions to -inf.

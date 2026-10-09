@@ -393,6 +393,24 @@ def bind_tuning_attention_torch(
             sinks=_kw.get("sinks", tensors.get("sinks")),
             alibi_slopes=_kw.get("alibi_slopes", tensors.get("alibi_slopes")),
             qq_bias=_kw.get("qq_bias", tensors.get("qq_bias")),
+            additive_bias=_kw.get("additive_bias", tensors.get("additive_bias")),
+            additive_bias_batch_stride=int(
+                _kw.get(
+                    "additive_bias_batch_stride",
+                    tensors.get("additive_bias_batch_stride", 0),
+                )
+            ),
+            additive_bias_head_stride=int(
+                _kw.get(
+                    "additive_bias_head_stride",
+                    tensors.get("additive_bias_head_stride", 0),
+                )
+            ),
+            additive_bias_sq_stride=int(
+                _kw.get(
+                    "additive_bias_sq_stride", tensors.get("additive_bias_sq_stride", 0)
+                )
+            ),
             backend=backend,
             stream=int(_kw.get("stream", stream)),
             tuning_spec=spec,

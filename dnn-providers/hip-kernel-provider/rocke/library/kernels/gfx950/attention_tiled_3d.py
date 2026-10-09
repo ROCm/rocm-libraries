@@ -115,6 +115,7 @@ class UnifiedAttention3DTiledSpec:
     num_segments: int
     use_alibi: bool = False
     use_qq_bias: bool = False
+    use_additive_bias: bool = False
     num_seqs: int = 0
     # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). Attention is
     # register-pressure-bound; setting this to 2 or 3 tightens the
@@ -193,6 +194,7 @@ class UnifiedAttention3DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            "addb" if self.use_additive_bias else "",
         )
 
 
@@ -204,8 +206,9 @@ def supports_tiled_3d(
     num_queries_per_kv: int,
     use_alibi: bool,
     use_qq_bias: bool,
-    use_fp8: bool,
-    q_dtype,
+    use_additive_bias: bool = False,
+    use_fp8: bool = False,
+    q_dtype=None,
     kv_storage_dtype: Optional[str] = None,
     arch: str = "gfx950",
 ) -> Tuple[bool, str]:
@@ -296,6 +299,7 @@ def build_unified_attention_3d_tiled(
     USE_SINKS = spec.use_sinks
     USE_ALIBI = spec.use_alibi
     USE_QQ_BIAS = spec.use_qq_bias
+    USE_ADDITIVE_BIAS = spec.use_additive_bias
     # 64-bit paged-KV addressing for caches > 2 GiB (see spec docstring).
     I64_KV_ADDR = spec.use_i64_kv_addr
     # FP8 K/V cache: see ``UnifiedAttention2DTiledSpec.kv_storage_dtype``.
@@ -369,6 +373,15 @@ def build_unified_attention_3d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    # Additive-bias params are appended only when the feature is on, so the
+    # non-bias kernel ABI (and its IR) is unchanged.
+    if USE_ADDITIVE_BIAS:
+        additive_bias_ptr = b.param(
+            "additive_bias_ptr", PtrType(F32, "global"), readonly=True, align=4
+        )
+        additive_bias_batch_stride_p = b.param("additive_bias_batch_stride", I32)
+        additive_bias_head_stride_p = b.param("additive_bias_head_stride", I32)
+        additive_bias_sq_stride_p = b.param("additive_bias_sq_stride", I32)
 
     q_block_global_idx = b.block_id_x()
     kv_head_idx = b.block_id_y()
@@ -891,6 +904,24 @@ def build_unified_attention_3d_tiled(
                         align=4,
                     )
                     s_scaled = b.fadd(s_scaled, b.fmul(qq_v, rcp_ln2))
+                if USE_ADDITIVE_BIAS:
+                    # Per-row query head (GQA-correct); ``m_ok`` keeps padding
+                    # rows and tail columns (col_abs >= seq_len) off the buffer.
+                    ab_base = b.add(
+                        b.mul(additive_bias_batch_stride_p, seq_idx),
+                        b.mul(additive_bias_head_stride_p, hoist_qh_r[reg]),
+                    )
+                    ab_row = b.add(ab_base, b.mul(additive_bias_sq_stride_p, qp_r))
+                    ab_idx = b.add(ab_row, col_abs)
+                    ab_v = b.masked_global_load(
+                        additive_bias_ptr,
+                        ab_idx,
+                        m_ok,
+                        b.const_f32(0.0),
+                        dtype=F32,
+                        align=4,
+                    )
+                    s_scaled = b.fadd(s_scaled, b.fmul(ab_v, rcp_ln2))
                 masked[(n, reg)] = b.select(m_ok, s_scaled, neg_inf)
 
         m_new = []
