@@ -12,6 +12,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <list>
@@ -22,6 +24,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -688,22 +691,37 @@ namespace TensileLite
 
     /**
      * Ranks the kernels of a Prediction library with the tilewright model that
-     * ships for the library. Pool position i is configs[i].
+     * ships for the library. Each config's index is its pool position.
+     *
+     * A library stem can ship a blocklist next to its tilewright_index,
+     * `<stem>.tilewright.blocklist`: the names (ContractionSolution::name()) of
+     * kernels that compute wrong results, one per line. The ranker leaves them
+     * out of its pool, so a group of configs the model scores as one candidate
+     * is served by its first member that is not blocked, and a group whose
+     * members are all blocked is no candidate.
      */
     class TilewrightRanker
     {
     public:
+        // The kernel names a blocklist holds; null for a library without one.
+        using Blocklist = std::shared_ptr<const std::unordered_set<std::string>>;
+
         // Throws std::invalid_argument for a null model, an invalid attribute
         // name, or a launch model other than the one the model was trained with.
+        // `blocked` flags the pool positions `blocklist` left out of `configs`.
         TilewrightRanker(tilewright::ModelPtr                           model,
                          std::vector<tilewright::Config>                configs,
-                         std::shared_ptr<const tilewright::LaunchModel> launch = nullptr,
-                         std::string                                    arch   = {})
+                         std::shared_ptr<const tilewright::LaunchModel> launch    = nullptr,
+                         std::string                                    arch      = {},
+                         Blocklist                                      blocklist = nullptr,
+                         std::vector<bool>                              blocked   = {})
             : m_candidates(std::move(model),
                            std::move(configs),
                            tilewright::PoolOptions{.tie_break = tilewright::TieBreak::PoolOrder,
                                                    .launch    = std::move(launch)})
             , m_arch(std::move(arch))
+            , m_blocklist(std::move(blocklist))
+            , m_blocked(std::move(blocked))
         {
         }
 
@@ -725,24 +743,63 @@ namespace TensileLite
             return model;
         }
 
+        // The blocklist of the stem of `logicFile` in the directory of its
+        // tilewright_index: every line but blank ones and those that start with
+        // '#', without surrounding blanks. Null when there is no such file;
+        // throws std::runtime_error when it cannot be read.
+        static Blocklist loadBlocklist(std::string const& logicFile)
+        {
+            std::string           dir  = ".";
+            std::string const     stem = logicStem(logicFile, &dir);
+            std::filesystem::path path = std::filesystem::path(dir) / (stem + BlocklistSuffix);
+            std::error_code       ec;
+            if(!std::filesystem::exists(path, ec))
+                return nullptr;
+            std::ifstream in(path);
+            if(!std::filesystem::is_regular_file(path, ec) || !in)
+                throw std::runtime_error("cannot read the blocklist " + path.string());
+            auto        names = std::make_shared<std::unordered_set<std::string>>();
+            std::string line;
+            while(std::getline(in, line))
+            {
+                size_t const first = line.find_first_not_of(" \t\r");
+                if(first == std::string::npos || line[first] == '#')
+                    continue;
+                names->insert(line.substr(first, line.find_last_not_of(" \t\r") + 1 - first));
+            }
+            if(in.bad())
+                throw std::runtime_error("cannot read the blocklist " + path.string());
+            return names;
+        }
+
         // A ranker over `poolSize` kernels of `arch` whose kernel i is
-        // solutionAt(i), with its per-cell data built now when `prepare` is
-        // set and TENSILE_TILEWRIGHT_PREPARE does not turn that off. Throws
-        // what the CandidateSet throws.
+        // solutionAt(i), without those `blocklist` names, with its per-cell data
+        // built now when `prepare` is set and TENSILE_TILEWRIGHT_PREPARE does not
+        // turn that off. Throws what the CandidateSet throws.
         template <typename SolutionAt>
         static std::shared_ptr<const TilewrightRanker> make(tilewright::ModelPtr model,
                                                             size_t               poolSize,
                                                             SolutionAt&&         solutionAt,
                                                             std::string const&   arch,
-                                                            bool                 prepare = true)
+                                                            bool                 prepare = true,
+                                                            Blocklist blocklist          = nullptr)
         {
             using MySolution = typename std::decay_t<decltype(*solutionAt(0))>;
 
             auto const                      names = tilewright::attribute_names(*model);
             std::vector<tilewright::Config> configs;
+            std::vector<bool>               blocked;
             configs.reserve(poolSize);
             for(size_t i = 0; i < poolSize; i++)
+            {
+                if(blocklist && blocklist->count(solutionAt(i)->name()) != 0)
+                {
+                    blocked.resize(poolSize);
+                    blocked[i] = true;
+                    continue;
+                }
                 configs.push_back(makeConfig(solutionAt(i)->sizeMapping, i, &names));
+            }
 
             std::shared_ptr<const tilewright::LaunchModel> launch;
             if(tilewright::describe(*model).format_version >= 3)
@@ -755,8 +812,12 @@ namespace TensileLite
                                                                               std::move(solutions));
             }
 
-            auto ranker = std::make_shared<const TilewrightRanker>(
-                std::move(model), std::move(configs), std::move(launch), arch);
+            auto ranker = std::make_shared<const TilewrightRanker>(std::move(model),
+                                                                   std::move(configs),
+                                                                   std::move(launch),
+                                                                   arch,
+                                                                   std::move(blocklist),
+                                                                   std::move(blocked));
             if(prepare && Debug::Instance().tilewrightPrepare())
             {
                 auto const start = std::chrono::steady_clock::now();
@@ -772,9 +833,10 @@ namespace TensileLite
         }
 
         // Looks up the stem of `logicFile` in the tilewright_index of its
-        // directory; config i is built from solutions[i]. Returns nullptr when
-        // no model is listed for the stem, or, with a warning, when the listed
-        // model cannot be used.
+        // directory; pool position i is solutions[i], unless the stem's
+        // blocklist names it. Returns nullptr when no model is listed for the
+        // stem, or, with a warning, when the listed model or the blocklist
+        // cannot be used.
         template <typename MySolution>
         static std::shared_ptr<const TilewrightRanker>
             load(std::string const&                                              logicFile,
@@ -805,7 +867,8 @@ namespace TensileLite
                         return solutions[i].second;
                     },
                     logicArch(logicFile),
-                    prepare);
+                    prepare,
+                    loadBlocklist(logicFile));
             }
             catch(std::exception const& e)
             {
@@ -934,12 +997,13 @@ namespace TensileLite
                 else
                     m_candidates.rank_top(
                         tilewrightProblem, tilewrightHardware, context, depth, ranked);
+                auto const& configs = m_candidates.configs();
                 positions.reserve(ranked.size());
                 for(auto const& r : ranked)
                 {
                     if(!r.scored)
                         break;
-                    positions.push_back(r.config_index);
+                    positions.push_back(configs[r.config_index].index);
                 }
             }
             catch(std::exception const& e)
@@ -987,6 +1051,25 @@ namespace TensileLite
         {
             return m_candidates;
         }
+
+        // The blocklist the ranker's pool was built with; null without one.
+        Blocklist const& blocklist() const noexcept
+        {
+            return m_blocklist;
+        }
+
+        // Whether the blocklist left pool position `position` out of the pool.
+        bool blocked(size_t position) const noexcept
+        {
+            return position < m_blocked.size() && m_blocked[position];
+        }
+
+        bool blocksAny() const noexcept
+        {
+            return !m_blocked.empty();
+        }
+
+        static constexpr char const* BlocklistSuffix = ".tilewright.blocklist";
 
     private:
         // TILEWRIGHT_DIAG, read as tilewright reads it.
@@ -1152,6 +1235,8 @@ namespace TensileLite
 
         tilewright::CandidateSet                 m_candidates;
         std::string                              m_arch;
+        Blocklist                                m_blocklist;
+        std::vector<bool>                        m_blocked;
         mutable std::mutex                       m_reportedMutex;
         mutable std::set<std::pair<size_t, int>> m_reported;
     };

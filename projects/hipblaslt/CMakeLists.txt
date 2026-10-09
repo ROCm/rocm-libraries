@@ -635,8 +635,9 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
         # lib/, separate from executables (no extension) in bin/.
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library")
     endif()
-    # TensileLite looks a model up in the tilewright_index of the directory the
-    # library logic was loaded from, so each library subtree gets its own copy.
+    # TensileLite looks a model, and the blocklist of a library stem, up in the
+    # directory the library logic was loaded from, so each library subtree gets
+    # its own copy.
     get_property(_tw_linked GLOBAL PROPERTY TENSILELITE_HAS_TILEWRIGHT)
     if(_tw_linked AND TARGET tensilelite-device-libraries)
         cmake_path(SET _tw_weights_root NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/tilewright/weights/hipblaslt")
@@ -658,7 +659,8 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
             if(NOT "${_tw_src}/tilewright_index" IN_LIST _tw_indexes)
                 continue()
             endif()
-            file(GLOB _tw_models CONFIGURE_DEPENDS "${_tw_src}/*.tilewright.bin")
+            file(GLOB _tw_models CONFIGURE_DEPENDS "${_tw_src}/*.tilewright.bin"
+                 "${_tw_src}/*.tilewright.blocklist")
             set(_tw_dst "${HIPBLASLT_TENSILE_LIBPATH}/library/${_sub}")
             list(APPEND _tw_commands
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${_tw_dst}"

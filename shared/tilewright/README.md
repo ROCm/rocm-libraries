@@ -34,6 +34,17 @@ and tilewright does not offer a kernel such a row already returned;
 bank pool. A library builds its bank pool, and the pool's `CandidateSet`, on
 its first call on each device.
 
+A library stem can also ship a blocklist next to its `tilewright_index`,
+`<stem>.tilewright.blocklist`: the names (`ContractionSolution::name()`, the
+solution names of the logic file) of kernels that compute wrong results, one
+per line, after comment lines that start with `#`. TensileLite leaves them out
+of every pool it ranks with the model, the Prediction table's and the bank's,
+and the analytical ranking that fills the remaining slots of a call skips them
+too. A view key whose first member is listed is served by its next member, a
+key whose members are all listed is no candidate, and `top1_index` counts the
+kernels that remain, as the training pipeline's pools do. A blocklist that
+cannot be read makes the model unusable for the library.
+
 ## Layout
 
 | Path | Contents |
