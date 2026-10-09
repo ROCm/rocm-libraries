@@ -54,10 +54,14 @@ def _is_use_cache_file(relpath):
     - caches/<hash>/cache.yaml
     - caches/<hash>/source/library/* (.co, .hsaco, .yaml)
     - Data/*.yaml
+    - library/** (.co, .hsaco, .dat, .dat.zlib, .yaml) from TensileCreateLibrary
 
     Everything else is build-only intermediate output.
     """
     parts = relpath.replace(os.sep, "/").split("/")
+
+    if len(parts) > 1 and parts[0] == "library":
+        return parts[-1].endswith((".co", ".hsaco", ".dat", ".dat.zlib", ".yaml"))
 
     if parts[-1] == "cache.yaml" and "caches" in parts:
         return True

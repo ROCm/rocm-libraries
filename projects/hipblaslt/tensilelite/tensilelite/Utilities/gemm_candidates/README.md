@@ -190,6 +190,41 @@ otherwise applies all shapes to all selected solutions. Both accept
 `workspace_bytes` to override the 128 MiB workspace limit. The formatters return
 strings and do not execute clients.
 
+## Testing MX candidates
+
+[`test_gemm_candidates_mx.py`](../../Tests/common/test_gemm_candidates_mx.py)
+builds one small gfx950 MXFP4 solution and one MXFP8 solution, requests ten
+candidates for each, and runs them through the Tensile client. It checks every
+shape's solution index/name and numerical result against the CPU reference.
+The test needs a prebuilt client and a compiler that supports gfx950; it builds
+its own device libraries.
+
+From the TensileLite project directory, run on gfx950 hardware with:
+
+```sh
+python -m pytest -q -n 0 tensilelite/Tests/common/test_gemm_candidates_mx.py \
+    --gpu-targets gfx950 --prebuilt-client /path/to/tensilelite-client \
+    --tensile-options=--cxx-compiler,/path/to/amdclang++ \
+    --basetemp /path/to/test-work
+```
+
+For CPU emulation, prefix that command with
+`rocjitsu --config /path/to/gfx950-with-race.json --`. Start from rocJITsu's
+gfx950 configuration and enable the `race` plugin and a `stderr` sink: the
+test also fails on any race report in the client output. The numerical checks
+run in both modes.
+
+For separate CI build and test stages, add
+`--build-only --artifact-dir /path/to/artifacts` on the build machine, then
+`--use-cache --artifact-dir /path/to/artifacts` on the execution machine.
+The build stage needs no GPU or emulator. The execution stage loads the
+packaged metadata and code objects and regenerates the candidate inputs.
+
+The test belongs to the gfx950 `common` suite and is marked `emu_fast`.
+[CI scheduling](../../../TESTING.md#pre-submit--ci-gates) determines where
+those suites run. The current GitHub rocJITsu job targets gfx942; it needs
+separate gfx950 job wiring to execute this MX test on pull requests.
+
 ## Limits of the result
 
 A candidate is not a proven supported minimum or a measurement of code-path
