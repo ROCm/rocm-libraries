@@ -24,10 +24,13 @@ import os
 import json
 import argparse
 from typing import Any
+from utils import create_logger
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+
+log = create_logger()
 
 """
 This script performs comparative analysis of different optimization strategies for kernel tuning simulations.
@@ -183,12 +186,12 @@ def calculate_performance_stats(results: dict[str, Any], algo, arch):
     ).sort_values("Mean", ascending=False)
 
     # Print performance summary
-    print(f"\nOptimization Strategy Performance Summary for {algo} on {arch}")
-    print("=" * 80)
-    print("\nPerformance statistics (%):")
-    print(summary_stats.to_string())
-    print("\nNote: Higher values indicate better performance")
-    print("=" * 80)
+    log.info(f"Optimization Strategy Performance Summary for {algo} on {arch}")
+    log.info("=" * 80)
+    log.info("Performance statistics (%):")
+    log.info(summary_stats.to_string())
+    log.info("Note: Higher values indicate better performance")
+    log.info("=" * 80)
 
     return df
 

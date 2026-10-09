@@ -3,8 +3,13 @@
 import logging
 import argparse
 import re
+import os
+import sys
 
-log = logging.getLogger("confgen.migrate")
+sys.path.append(f"{os.path.dirname(__file__)}/../")
+from utils import create_logger
+
+log = create_logger("confgen.migrate")
 
 
 def try_make_int(text: str):
@@ -104,5 +109,4 @@ def main():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
     main()  

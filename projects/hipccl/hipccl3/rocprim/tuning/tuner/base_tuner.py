@@ -28,12 +28,14 @@ import json
 from pathlib import Path
 import numpy as np
 from jinja2 import Environment, FileSystemLoader
-from utils import TYPE_CONFIGS, Parser, BASE_DIR
+from utils import TYPE_CONFIGS, Parser, BASE_DIR, create_logger
 from hip import hip  # type: ignore (pyright doesn't detect hip-python correctly)
 import warnings
 from dataclasses import dataclass
 import confgen.parse
 import pathlib
+
+log = create_logger()
 
 """
 The following base class is used when implementing the tuning for new algorithms
@@ -318,7 +320,7 @@ class BaseTuner(ABC):
             }
         )
 
-        print(f"Found existing configuration: {default_tune_params}")
+        log.info(f"Found existing configuration: {default_tune_params}")
         kernel_tuner.tune_kernel(**tune_kernel_args)
 
     def tune_type(
@@ -326,15 +328,15 @@ class BaseTuner(ABC):
         types: Dict[str, Any],
     ) -> None:
         """Performs auto-tuning for a specific type combination."""
-        print(f"\nTuning for {' '.join([str(x) for x in types.values()])}")
-        print(f"Using size: {self.bytes_size} bytes")
+        log.info(f"Tuning for {' '.join([str(x) for x in types.values()])}")
+        log.info(f"Using size: {self.bytes_size} bytes")
         strategy_print_message = (
             f"Using strategy: {self.strategy if self.strategy else 'brute_force'}"
         )
         strategy_print_message += (
             f", max fevals: {self.max_fevals}" if self.strategy != "brute_force" else ""
         )
-        print(strategy_print_message)
+        log.info(strategy_print_message)
 
         try:
             tune_kernel_args = self._get_base_tune_kernel_args(types)
@@ -347,8 +349,8 @@ class BaseTuner(ABC):
             self._save_output(cache_file_path, types, results)
 
         except Exception as e:
-            print(f"Failed tuning for {' '.join([str(x) for x in types.values()])}")
-            print(f"Error: {str(e)}")
+            log.error(f"Failed tuning for {' '.join([str(x) for x in types.values()])}")
+            log.error(f"Error: {str(e)}")
             raise
 
     def generate_wrapper(
