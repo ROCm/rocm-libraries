@@ -36,13 +36,13 @@ import yaml
 import json
 import collections
 from contextlib import contextmanager
-from Tensile.Common.Utilities import _global_ti
-from Tensile.Common.Architectures import detectGlobalCurrentArch, gfxToIsa
-from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from Tensile.Common.DataType import DataType
-from Tensile.Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters
-from Tensile.Common.Types import IsaVersion
-from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+from tensilelite.Common.Utilities import _global_ti
+from tensilelite.Common.Architectures import detectGlobalCurrentArch, gfxToIsa
+from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters
+from tensilelite.Common.Types import IsaVersion
+from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int, xnack: bool = False):
     vgpr = ((vgpr+7)//8)*8
