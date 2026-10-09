@@ -47,8 +47,9 @@ Because the callable is not known at that call site when the kernel is compiled,
 This limit defaults to 1024 bytes per thread.
 
 That budget covers every local variable in the callable and in anything it calls.
-Objects with inline storage dominate it, and what matters is the storage class rather than the container type: a ``hip::std::inplace_vector`` and a plain array of the same element count occupy the same stack space.
-A callable that spawns child threads and keeps their handles in a local array is a common case, since ``sizeof(hip::wthread)`` is 16 bytes on the device, so roughly 63 handles fit in the default budget, independently of ``hip::wthread::hardware_concurrency()``.
+Objects with inline storage dominate it, and what matters is the storage class/location rather than the container type: a ``hip::std::inplace_vector`` and a plain array of the same element count occupy roughly the same stack space.
+A callable that spawns child threads and keeps their handles in a local array is a common case.
+Since ``sizeof(hip::wthread)`` is 16 bytes on the device, roughly 63 handles fit in the default budget, independently of ``hip::wthread::hardware_concurrency()``.
 
 There are two ways to design around this. The first is to keep large objects off the stack by allocating them on the device heap, so the callable's own stack usage stays constant no matter how much data it manages.
 
