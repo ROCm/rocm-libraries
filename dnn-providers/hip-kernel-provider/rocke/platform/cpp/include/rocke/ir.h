@@ -855,6 +855,8 @@ rocke_value_t* rocke_b_tanh(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_zext(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_sext(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_trunc(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
+/* Bitcast to a type of the same bit width; another width (ValueError) or a
+ * pointer (TypeError) is refused before any op is built. */
 rocke_value_t* rocke_b_bitcast(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_select(rocke_ir_builder_t* b,
                               rocke_value_t* cond,
@@ -1372,6 +1374,8 @@ rocke_value_t* rocke_b_ds_read_tr_b8(rocke_ir_builder_t* b,
                                      const rocke_type_t* dtype /* NULL=>fp8e4m3 */);
 
 /* ----- vector bitcast / packed f32->f16 conversion ----- */
+/* Reinterpret a vector as another vector type of the same bit width; another
+ * width (ValueError) or a pointer (TypeError) is refused before any op is built. */
 rocke_value_t*
     rocke_b_vec_bitcast(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_vec_trunc_f32_to_f16(rocke_ir_builder_t* b, rocke_value_t* v);

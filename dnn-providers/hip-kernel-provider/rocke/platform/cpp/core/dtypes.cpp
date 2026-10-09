@@ -1,12 +1,17 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /* Target-independent dtype names. Mirrors rocke.core.dtypes:
- * normalize_dtype -> rocke_normalize_dtype.
- * No architecture, IR builder, or lowering dependencies.
+ * normalize_dtype -> rocke_normalize_dtype, dtype_info -> rocke_dtype_info
+ * (NULL on a miss) and rocke_require_dtype_info (raises).
+ * No architecture, IR builder, or lowering dependencies; the engine exception
+ * types (rocke/error.hpp) carry the raising lookup's refusal.
  */
 #include "rocke/dtypes.h"
 
 #include <string.h>
+
+#include "rocke/dtypes_internal.h"
+#include "rocke/error.hpp"
 
 /* =========================================================================
  * target-independent dtype normalization
@@ -187,4 +192,12 @@ const rocke_dtype_info_t* rocke_dtype_info(const char* name)
         if(strcmp(key, info.name) == 0)
             return &info;
     return NULL;
+}
+
+const rocke_dtype_info_t* rocke_require_dtype_info(const char* name)
+{
+    const rocke_dtype_info_t* info = rocke_dtype_info(name);
+    if(!info)
+        throw ckc::ValueError(ckc::format_error("unknown dtype '%s'", name ? name : "(null)"));
+    return info;
 }

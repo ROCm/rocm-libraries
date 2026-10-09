@@ -159,6 +159,25 @@ void rocke_i_refuse_unsigned_operands(const rocke_op_t* op, const char* instead)
 /* Lane count of a vector type, or 1 for a scalar. */
 int rocke_i_count_of(const rocke_type_t* t);
 
+/* The number of bits a value of type `t` occupies (Python core/ir.py::type_bits):
+ * a scalar's format width, a vector's element width times its count, a
+ * pointer's address-space width. Throws ckc::TypeError for an LDS allocation
+ * (memory, not a value) and ckc::ValueError "unknown dtype '<name>'" for a
+ * scalar with no format. */
+int rocke_i_type_bits(const rocke_type_t* t);
+
+/* Refuse a bitcast of a `source` value to `target` unless both are values of
+ * the same bit width (Python core/ir.py::_check_bitcast_width). `verb` names
+ * the builder ("bitcast", "vec_bitcast") and `hint` says what to do instead of
+ * changing the width. Throws ckc::TypeError when either type is a pointer
+ * (LLVM does not bitcast pointers) or an LDS allocation, and ckc::ValueError
+ * naming both types and widths when the widths differ. Builders call it before
+ * creating the op, so a refused cast leaves the kernel unchanged. */
+void rocke_i_check_bitcast_width(const char* verb,
+                                 const rocke_type_t* source,
+                                 const rocke_type_t* target,
+                                 const char* hint);
+
 /* ------------------------------------------------------------- attr helpers */
 
 /* Build a small attr map IN the arena and return it by value (the map's

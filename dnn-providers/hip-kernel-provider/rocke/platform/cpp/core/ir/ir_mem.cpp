@@ -1284,6 +1284,8 @@ rocke_value_t*
     if(!v || !target)
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "vec_bitcast: null operand/target");
+    rocke_i_check_bitcast_width(
+        "vec_bitcast", v->type, target, "slice or concatenate the vector first");
     ops[0] = v;
     a = rocke_i_attrs(b);
     rocke_attr_set_str(b, &a, "target", target->name);
