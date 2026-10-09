@@ -155,8 +155,7 @@ namespace rocsparse
 
             // A launch whose grid.y was not clamped covers every column panel in
             // one sweep, so the straight-line variant stops after the first panel
-            // and skips the grid-stride loop's per-panel control cost
-            // (AISPARSE-667).
+            // and skips the grid-stride loop's per-panel control cost.
             if constexpr(!GRID_STRIDE)
             {
                 break;
@@ -201,11 +200,11 @@ namespace rocsparse
         // 32; on wave32 it shrinks to fit small block dimensions.
         const rocsparse_int tile = rocsparse::bellmm_general_tile_size(handle, bell_block_dim);
 
-#define ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, GRID_STRIDE)                        \
+#define ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, GRID_STRIDE, BLOCKS, THREADS)       \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                \
         (rocsparse::bellmm_general_blockdim_kernel<(TILE), (TILE), (GRID_STRIDE), T>), \
-        bellmm_blocks,                                                                 \
-        bellmm_threads,                                                                \
+        (BLOCKS),                                                                      \
+        (THREADS),                                                                     \
         0,                                                                             \
         stream,                                                                        \
         trans_A,                                                                       \
@@ -234,11 +233,11 @@ namespace rocsparse
         dim3 bellmm_threads((TILE), (TILE), 1);                                                  \
         if(bellmm_panels > static_cast<int64_t>(bellmm_blocks.y))                                \
         {                                                                                        \
-            ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, true);                                    \
+            ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, true, bellmm_blocks, bellmm_threads);     \
         }                                                                                        \
         else                                                                                     \
         {                                                                                        \
-            ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, false);                                   \
+            ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, false, bellmm_blocks, bellmm_threads);    \
         }                                                                                        \
     }
 
@@ -255,6 +254,7 @@ namespace rocsparse
             break;
         }
 
+#undef ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL
 #undef ROCSPARSE_LAUNCH_BELLMM_GENERAL
 
         return rocsparse_status_success;

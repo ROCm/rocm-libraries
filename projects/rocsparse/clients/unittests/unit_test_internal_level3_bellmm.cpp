@@ -36,9 +36,12 @@
 // regression in either the clamp or the panel stride is caught:
 //
 //   * clamp removed  -> the launch is rejected (hipErrorInvalidConfiguration) and
-//                       NO column is computed, so C keeps its sentinel from index 0.
+//                       NO column is computed, so C keeps its prefill value from
+//                       index 0.
 //   * stride removed -> only the first grid sweep is computed and the column tail
-//                       keeps its sentinel value.
+//                       keeps its prefill value.
+//   * stride too small (columns visited more than once) -> those columns are
+//                       accumulated into more than once and exceed the expectation.
 //
 // The output comparison is what catches both, not the returned status: an over-large
 // grid.y is rejected asynchronously, so rocsparse_spmm still reports success.
@@ -51,8 +54,9 @@
 // (including the 15 GB gfx1201) and is permanently enabled, with no
 // device-memory guard that could silently drop it at instantiation.
 //
-// A = I and alpha/beta = 1/0, so C must equal B bit-for-bit and the check can be
-// an exact comparison.
+// A = I, alpha = 1 and beta = 1 with C pre-filled to a known value, so C must
+// equal B + fill and the check can be an exact comparison. beta = 1 makes every
+// update accumulate, so a column visited twice differs from a column visited once.
 //
 #include "unit_test_utils.hpp"
 
@@ -63,6 +67,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <vector>
 
 using namespace rocsparse_ut;
 
@@ -86,14 +91,27 @@ namespace
     constexpr int64_t m         = mb * block_dim;
     constexpr int64_t k         = kb * block_dim;
 
-    // Column-distinguishing value for B[row, col]. Every value is an exact
-    // integer below 2^24, so it round-trips through float without rounding and
-    // the output comparison can be exact. Two different (row, col) pairs never
+    // Value C is pre-filled with. Nonzero and distinct from every b_value, so a
+    // column that is never visited cannot match the expected b_value + fill.
+    constexpr int fill_value = 3;
+
+    // Column-distinguishing value for B[row, col]. Every value, and its sum with
+    // fill_value, is an exact integer below 2^24 (a column visited twice, 2 * b +
+    // fill, still is), so it round-trips through float without rounding and the
+    // output comparison can be exact. Two different (row, col) pairs never
     // collide, so a panel written at the wrong column offset is detected.
     template <typename T>
     T b_value(int64_t row, int64_t col)
     {
         return static_cast<T>(col + 1 + row * 4194304);
+    }
+
+    // Expected C[row, col] for A = I, alpha = 1, beta = 1 and C pre-filled with
+    // fill_value.
+    template <typename T>
+    T c_value(int64_t row, int64_t col)
+    {
+        return b_value<T>(row, col) + static_cast<T>(fill_value);
     }
 
     // Report the first index whose value differs from the expectation, or -1 if
@@ -107,7 +125,7 @@ namespace
             for(int64_t row = 0; row < rows; ++row)
             {
                 const int64_t idx = row + col * ld;
-                if(got[idx] != b_value<T>(row, col))
+                if(got[idx] != c_value<T>(row, col))
                 {
                     return idx;
                 }
@@ -197,10 +215,10 @@ static void run_bellmm_beyond_grid_y_clamp(rocsparse_handle handle)
     }
     device_vector<T> dB(hB);
 
-    // C: m x n, column order, ldc = m. Pre-filled with a sentinel so a column
-    // never visited by the kernel is caught (beta == 0, so every visited element
-    // is overwritten).
-    device_vector<T> dC(std::vector<T>(static_cast<size_t>(m) * n, static_cast<T>(-1)));
+    // C: m x n, column order, ldc = m. Pre-filled with fill_value and updated with
+    // beta = 1, so a column never visited keeps fill_value and a column visited
+    // more than once accumulates more than b_value.
+    device_vector<T> dC(std::vector<T>(static_cast<size_t>(m) * n, static_cast<T>(fill_value)));
 
     ASSERT_NE(dA_col_ind.ptr, nullptr);
     ASSERT_NE(dA_val.ptr, nullptr);
@@ -232,7 +250,7 @@ static void run_bellmm_beyond_grid_y_clamp(rocsparse_handle handle)
         rocsparse_status_success);
 
     const T alpha = static_cast<T>(1);
-    const T beta  = static_cast<T>(0);
+    const T beta  = static_cast<T>(1);
 
     size_t buffer_size = 0;
     ASSERT_EQ(rocsparse_spmm(handle,
@@ -285,14 +303,15 @@ static void run_bellmm_beyond_grid_y_clamp(rocsparse_handle handle)
         << "bellmm launch failed for n = " << n << " (grid.y clamp = " << grid_y_max << ")";
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-    // A = I, alpha = 1, beta = 0 => C == B exactly.
+    // A = I, alpha = 1, beta = 1 => C == B + fill_value exactly.
     const std::vector<T> hC  = to_host(dC);
     const int64_t        bad = first_mismatch<T>(hC, m, m, n);
     EXPECT_EQ(bad, -1) << "C[" << (bad % m) << ", " << (bad / m) << "] = " << hC[bad]
-                       << ", expected " << b_value<T>(bad % m, bad / m) << " (n = " << n
+                       << ", expected " << c_value<T>(bad % m, bad / m) << " (n = " << n
                        << ", grid.y clamp = " << grid_y_max
                        << "; a column past the clamp is reached only by the kernel's "
-                          "column-panel grid-stride loop)";
+                          "column-panel grid-stride loop, and a column visited more than "
+                          "once is accumulated into more than once)";
 }
 
 TEST_F(BellMM, grid_stride_beyond_grid_y_clamp_f32)
