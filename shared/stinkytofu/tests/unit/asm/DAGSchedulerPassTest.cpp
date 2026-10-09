@@ -3838,7 +3838,7 @@ TEST_F(DsCapTdmTest, BurstLiftsTheCapInsideTheWindow) {
             p.dagFeatures.dsCapTdmPerCap = 1;
             p.dagFeatures.dsCapTdmBeginCycles = 0;
             p.dagFeatures.dsCapTdmEndCycles = 64;
-            p.dagFeatures.dsCapTdmBurst = burst;
+            p.dagFeatures.dsCapTdmBurst = burst ? 1 : 0;
         });
         std::string shape;
         for (const std::string& m : mnemonicSequence(*bb)) {
