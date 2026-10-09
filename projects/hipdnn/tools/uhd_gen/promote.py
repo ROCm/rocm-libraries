@@ -159,6 +159,14 @@ def parse_uhd_ids(values: list[str] | None) -> dict[str | None, str]:
 
 def run_promote(args: argparse.Namespace) -> int:
     try:
+        if not args.dry_run:
+            for journal in recover_interrupted(Path(args.descriptor_tree)):
+                logger.warning("undid an interrupted promotion recorded in %s", journal)
+        elif any(Path(args.descriptor_tree).rglob(JOURNAL_NAME)):
+            raise PromoteError(
+                "the tree holds an interrupted promotion; promote without --dry-run to "
+                "undo it first"
+            )
         plan = build_plan(
             Path(args.model_dir),
             Path(args.descriptor_tree),
@@ -1244,14 +1252,71 @@ def _temp_beside(destination: Path) -> Path:
     return Path(name)
 
 
+#: Written beside the last file a promotion swaps in, before the first swap, and removed once
+#: the promotion has finished or been undone. Finding one means a promotion was interrupted
+#: (the process killed mid-swap), and it says how to undo it.
+JOURNAL_NAME = ".uhd-promote-journal.json"
+
+
+def _write_journal(path: Path, journal: dict) -> None:
+    temp = _temp_beside(path)
+    temp.write_text(json.dumps(journal, indent=1) + "\n", encoding="utf-8")
+    os.replace(temp, path)
+
+
+def _undo(journal_path: Path) -> None:
+    """Put back every destination the journaled promotion replaced, remove the ones it
+    created, its staged files and empty directories, then the journal.
+
+    Raises PromoteError, leaving the journal and every unrestored backup in place, when a
+    destination cannot be put back; the next promotion into the tree tries again.
+    """
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    failed = []
+    for entry in reversed(journal["entries"]):
+        destination = Path(entry["destination"])
+        backup = entry.get("backup")
+        try:
+            if Path(entry["staged"]).exists():
+                # Never swapped in (os.replace consumes the staged file): unchanged.
+                Path(entry["staged"]).unlink()
+                if backup is not None:
+                    Path(backup).unlink(missing_ok=True)
+            elif backup is None:
+                destination.unlink(missing_ok=True)
+            elif Path(backup).exists():
+                os.replace(backup, destination)
+        except OSError as error:
+            failed.append(f"{destination}: {error}")
+    if failed:
+        raise PromoteError(
+            "an interrupted promotion could not be undone; the replaced files are kept "
+            f"beside them and listed in {journal_path}: " + "; ".join(failed)
+        )
+    for directory in map(Path, journal["created_dirs"]):
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
+    journal_path.unlink()
+
+
+def recover_interrupted(descriptor_tree: Path) -> list[Path]:
+    """Undo every promotion into @p descriptor_tree that was interrupted mid-swap; returns
+    the journals undone."""
+    journals = sorted(Path(descriptor_tree).rglob(JOURNAL_NAME))
+    for journal in journals:
+        _undo(journal)
+    return journals
+
+
 def _apply(plan: PromotePlan) -> None:
     """Execute only the operations approved by build_plan; never restamp provenance.
 
     Every output is serialized and staged beside its destination, and every destination
-    it replaces is backed up, before any destination changes. The staged files are then
-    swapped in with os.replace, the UED last because it is what binds the model. A
-    failure at any point restores the replaced destinations and removes the created
-    ones, so the tree is left as it was.
+    it replaces is backed up, before any destination changes. A journal naming them is
+    written, then the staged files are swapped in with os.replace, the UED last because it
+    is what binds the model. A failure undoes the swap from the journal; a process killed
+    mid-swap leaves the journal, and the next promotion into the tree undoes it first
+    (`recover_interrupted`).
     """
     documents = []
     if plan.write_descriptor:
@@ -1270,7 +1335,7 @@ def _apply(plan: PromotePlan) -> None:
     ]
     staged = []
     backups = {}
-    replaced = []
+    journal_path = None
     try:
         plan.destination_descriptor.parent.mkdir(parents=True, exist_ok=True)
         for source, destination in plan.copies:
@@ -1283,24 +1348,45 @@ def _apply(plan: PromotePlan) -> None:
             if destination.exists():
                 backups[destination] = _temp_beside(destination)
                 shutil.copy2(destination, backups[destination])
+        if not staged:
+            return
+        journal_path = staged[-1][1].parent / JOURNAL_NAME
+        _write_journal(
+            journal_path,
+            {
+                "entries": [
+                    {
+                        "destination": str(destination),
+                        "staged": str(temp),
+                        "backup": (
+                            str(backups[destination])
+                            if destination in backups
+                            else None
+                        ),
+                    }
+                    for temp, destination in staged
+                ],
+                "created_dirs": [str(directory) for directory in created_dirs],
+            },
+        )
         for temp, destination in staged:
             os.replace(temp, destination)
-            replaced.append(destination)
     except BaseException:
-        for destination in reversed(replaced):
-            if destination in backups:
-                os.replace(backups.pop(destination), destination)
-            else:
-                destination.unlink(missing_ok=True)
-        for temp, _ in staged:
-            temp.unlink(missing_ok=True)
-        for directory in created_dirs:
-            if directory.is_dir() and not any(directory.iterdir()):
-                directory.rmdir()
+        if journal_path is not None and journal_path.exists():
+            # Restores what was replaced; on failure keeps the journal and the backups.
+            _undo(journal_path)
+        else:
+            for temp, _ in staged:
+                temp.unlink(missing_ok=True)
+            for backup in backups.values():
+                backup.unlink(missing_ok=True)
+            for directory in created_dirs:
+                if directory.is_dir() and not any(directory.iterdir()):
+                    directory.rmdir()
         raise
-    finally:
-        for backup in backups.values():
-            backup.unlink(missing_ok=True)
+    journal_path.unlink()
+    for backup in backups.values():
+        backup.unlink(missing_ok=True)
 
 
 def _report(plan: PromotePlan, dry_run: bool) -> None:
