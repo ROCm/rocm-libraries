@@ -3237,6 +3237,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
         if not self.states.staggerUCode:
           module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
+      elif tdmA and tdmB and isPersistent(kernel) and not kernel["UseSubtileImpl"]:
+        # Subtile offsets Address{A,B} before building its descriptors.
+        module.add(self.tdmApplyTileKOffset(kernel, tensorParametersA, tensorParametersB))
 
       # WaveIdx already freed for subtile (before graWorkGroup above).
       # TDM StaggerU reads wave parity from WaveIdx through calculateStagger below,
@@ -12006,6 +12009,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     assert False, "Should be overrided"
 
   def tdmApplyTileKOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def tdmApplyTileKOffset(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
   def papResetTDMDescriptorForTailWaveSeparated(self, kernel, tPA, tPB) -> Module:

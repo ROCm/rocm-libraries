@@ -21039,6 +21039,33 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(_tdmSparseMetadataKOffset(self, kernel))
     return mod
 
+  def tdmApplyTileKOffset(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+    """Advance single-wave TDM descriptors to this work item's first K iteration.
+
+    Each tensor owns its descriptor and advances by its own GlobalReadIncs,
+    which may be an assembler constant rather than an SGPR.
+    """
+    mod = Module("TDM StreamK K-offset")
+    # DP-only: StreamKLocalStart == 0 and is not allocated.
+    if isPersistentDataParallel(kernel):
+      return mod
+    with self.allocTmpSgpr(2, tag="tdmApplyTileKOffset_tmpSgprRes") as tmpSgprRes:
+      tmpSgpr = tmpSgprRes.idx
+      for tP in (tPA, tPB):
+        tc = tP["tensorChar"]
+        group0 = f"tdm{tc}Group0"
+        inc = self.globalReadIncsOperand(tc, self.states.unrollIdx)
+        mod.add(SMulHIU32(dst=sgpr(tmpSgpr+1), src0=sgpr("StreamKLocalStart"), src1=inc,
+                          comment="StreamK K-offset high word"))
+        mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=inc,
+                        comment=f"StreamK K-offset for {group0} = localStart * increment"))
+        mod.add(SAddU32(dst=sgpr(f"{group0}+2"), src0=sgpr(f"{group0}+2"), src1=sgpr(tmpSgpr),
+                        comment=f"Apply StreamK K-offset to TDM {group0}"))
+        mod.add(SAddCU32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=sgpr(tmpSgpr+1),
+                         comment="Apply K-offset high word and address carry"))
+    mod.add(_tdmSparseMetadataKOffset(self, kernel))
+    return mod
+
   def tdmApplyTileTailOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
     # PAP rejects shared-scale groupings because this path requires tdm<tcA><tcB>Incs.
     mod = Module("TDM StreamK tail K-offset Wave Separated")
