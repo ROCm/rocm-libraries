@@ -615,7 +615,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
     // Burst experiment: inside the window the cap is lifted entirely.
     bool dsCapLifted() const {
-        return getPassContext().getPassFeatureConfig().dagFeatures.dsCapTdmBurst && inTdmWindow();
+        return getPassContext().getPassFeatureConfig().dagFeatures.dsCapTdmBurst >= 1 &&
+               inTdmWindow();
+    }
+    bool dsThrottleLifted() const {
+        return getPassContext().getPassFeatureConfig().dagFeatures.dsCapTdmBurst >= 2 &&
+               inTdmWindow();
     }
     // Pacing plan (DsPacePlan.hpp): the k-th ds_load of the region may not issue before
     // dsPacePlan_[k]. Empty = ASAP.
@@ -635,6 +640,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return std::max(dsIssueCap_.minResidual(dsCapWindowLimit()), dsPaceResidual());
     }
     int dsReadThrottleWait() const {
+        if (dsThrottleLifted()) return 0;
         return dsReadInflight_.throttleWait();
     }
 

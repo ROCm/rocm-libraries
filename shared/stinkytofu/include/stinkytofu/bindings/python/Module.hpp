@@ -155,7 +155,8 @@
     X(DsPaceTdm, int, 0)       /* 1: plan ds_load release times around the TDM landing window */  \
     X(TdmScaleTensors, int, 0) /* 1: the kernel TDMs MX scale tensors besides the data tiles */   \
     X(DsPaceLeadLoads, int, 0) /* DsPaceTdm: first N ungated ds_loads stay ASAP */                \
-    X(DsCapTdmBurst, int, 0)   /* experiment: lift the ds cap inside the TDM window */
+    X(DsCapTdmBurst, int,                                                                         \
+      0) /* experiment: 1 lift the ds cap, 2 also the throttle, inside the TDM window */
 
 namespace stinkytofu {
 /**
