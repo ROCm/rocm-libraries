@@ -508,6 +508,18 @@ namespace TensileLite
         std::array<int, 2> waveGroup;
     };
 
+    // Byte layout of a StreamK launch's workspace. Partial tiles start at the
+    // workspace base. The compute-type intermediate D matrix of an output-bias
+    // gradient (BiasSrc D) starts at biasOffset, after the partial tiles, and is
+    // read back by the bias reduction kernel. Parallel reduction keeps that matrix
+    // in the first partials slice instead, so it reports no separate bias region.
+    struct StreamKWorkspaceLayout
+    {
+        size_t partialBytes = 0;
+        size_t biasOffset   = 0;
+        size_t biasBytes    = 0;
+    };
+
     struct PersistentLaunchSettings
     {
         TileProcessingStrategy tileProcessingStrategy = TileProcessingStrategy::None;
@@ -516,6 +528,7 @@ namespace TensileLite
         size_t selectedGrid = 0;
         size_t totalTiles = 0;
         size_t workspaceBytes = 0;
+        StreamKWorkspaceLayout workspaceLayout;
         bool clusterGridClamp = false;
         int argsVersion = 0;
         origami::reduction_t reduction = origami::reduction_t::none;
@@ -757,8 +770,10 @@ namespace TensileLite
         bool   partialsPresent        = false;
         // recomputed: requiredWorkspaceBytes > 0.
         bool   workspaceAllocated     = false;
-        // recomputed: partials(+work-queue) bytes this launch reserves; 0 when no
-        // partials are needed or the workspace-DP fallback fired.
+        // recomputed: partials(+work-queue) bytes this launch reserves, plus the
+        // output-bias matrix of workspaceLayout on in-kernel-fixup launches. The
+        // partials term is 0 when no partials are needed or the workspace-DP
+        // fallback fired; the bias matrix is reserved either way.
         //
         // WARNING: this is NOT ContractionSolution::requiredWorkspaceSize()'s return
         // value, even though the names are close. requiredWorkspaceSize() is the
@@ -780,12 +795,16 @@ namespace TensileLite
         // other two, including the allocate-then-launch flow where the queried
         // size becomes problem.workspaceSize().
         size_t requiredWorkspaceBytes = 0;
-        // recomputed: partials(+work-queue) bytes wanted, before the fit check against
+        // recomputed: partials(+work-queue) bytes wanted, plus the output-bias matrix
+        // on in-kernel-fixup launches, before the fit check against
         // givenWorkspaceBytes. Non-zero even when the fallback fires, which is what
         // makes the "wanted vs given" comparison legible in the report.
         size_t idealWorkspaceBytes    = 0;
         // available: problem.workspaceSize().
         size_t givenWorkspaceBytes    = 0;
+        // recomputed: where the partial tiles and the output-bias matrix sit in the
+        // workspace of the FINAL launch. Same rule as resolveStreamKSettings().
+        StreamKWorkspaceLayout workspaceLayout;
         // recomputed: skTiles*skSplit slot count for the dynamic path (informational; does
         // NOT feed the allocation guard, which is sized by grid).
         size_t dynamicPartialsSlots   = 0;
@@ -1031,6 +1050,9 @@ namespace TensileLite
         bool                 uniformSummationOrderSupported(Problem const&  problem,
                                                             Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
+        // Bytes of the compute-type intermediate D matrix an output-bias gradient
+        // (BiasSrc D) writes to the workspace; 0 for every other problem.
+        size_t               outputBiasWorkspaceSize(Problem const& problem) const;
 
         // Compute the StreamK launch-parameter DECISIONS for this solution on the
         // given problem/hardware. solve() does NOT consume this on the hot path:
@@ -1285,8 +1307,9 @@ namespace TensileLite
                                                size_t                   gsu) const;
 
         template <bool T_Debug>
-        KernelInvocation generateReductionCall(Problem const&           problem,
-                                               ContractionInputs const& inputs) const;
+        KernelInvocation generateReductionCall(Problem const&                  problem,
+                                               ContractionInputs const&        inputs,
+                                               PersistentLaunchSettings const& launch) const;
 
         std::string outputReductionKernelName(Problem const&           problem,
                                               ContractionInputs const& inputs,
@@ -1456,6 +1479,12 @@ namespace TensileLite
         StreamKSettings resolveStreamKSettings(Problem const&  problem,
                                                Hardware const& hardware,
                                                bool const* effectiveDynamicHint = nullptr) const;
+
+        // Workspace layout of a StreamK launch whose reduction and grid are final.
+        StreamKWorkspaceLayout streamKWorkspaceLayout(Problem const&       problem,
+                                                      origami::reduction_t reduction,
+                                                      size_t               grid,
+                                                      size_t               tiles) const;
 
         // Reasons checkUniformSummationOrder() would refuse this launch.
         // Empty means the launch is row-uniform. requireSynchronizer is the

@@ -1762,7 +1762,8 @@ namespace TensileLite
             if(problemType.useGradient && problem.biasSrc() == ContractionProblemGemm::TENSOR::D
                && inputs.bias != nullptr)
                 args.template append<void const*>("ws_bias",
-                                                  (uint8_t*)inputs.ws + workspaceOffsetInByte);
+                                                  (uint8_t*)inputs.ws + workspaceOffsetInByte
+                                                      + launch.workspaceLayout.biasOffset);
             else
             {
                 if(problemType.stridedBatched)
@@ -3398,7 +3399,10 @@ namespace TensileLite
                     if(problemType.useGradient
                        && problem.biasSrc() == ContractionProblemGemm::TENSOR::D
                        && inputs.bias != nullptr)
-                        rv.args.template append<void const*>("AddressBias", inputs.ws);
+                        rv.args.template append<void const*>(
+                            "AddressBias",
+                            static_cast<uint8_t const*>(inputs.ws)
+                                + launch.workspaceLayout.biasOffset);
                     else
                         rv.args.template append<void const*>(
                             "AddressBias",
@@ -4724,8 +4728,9 @@ namespace TensileLite
 
     template <bool T_Debug>
     KernelInvocation
-        ContractionSolution::generateReductionCall(Problem const&           problem,
-                                                   ContractionInputs const& inputs) const
+        ContractionSolution::generateReductionCall(Problem const&                  problem,
+                                                   ContractionInputs const&        inputs,
+                                                   PersistentLaunchSettings const& launch) const
     {
         TensorDescriptor const& c = problem.c();
         TensorDescriptor const& d = problem.d();
@@ -4777,7 +4782,8 @@ namespace TensileLite
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
 
         // FIXME: Need to check the formula for batch > 1
-        rv.args.append<void*>("WS", inputs.ws);
+        rv.args.append<void*>("WS",
+                              static_cast<uint8_t*>(inputs.ws) + launch.workspaceLayout.biasOffset);
         rv.args.append<void const*>("bias", inputs.bias);
         for(size_t i = 0; i < 2; i++)
         {
@@ -5294,9 +5300,9 @@ namespace TensileLite
             if(inputs.bias != nullptr)
             {
                 if(debug)
-                    rv.push_back(generateReductionCall<true>(problem, inputs));
+                    rv.push_back(generateReductionCall<true>(problem, inputs, launch));
                 else
-                    rv.push_back(generateReductionCall<false>(problem, inputs));
+                    rv.push_back(generateReductionCall<false>(problem, inputs, launch));
             }
         }
 
@@ -5746,6 +5752,8 @@ namespace TensileLite
                 // resolveStreamKSettings() uses, on the same triple, so the
                 // size reported here is the size the launch actually needs.
                 reductionStrat = streamKReconcileReduction(reductionStrat, skGrid, tiles);
+                // The DP fall back still writes an output-bias gradient's matrix.
+                const size_t outputBiasBytes = outputBiasWorkspaceSize(problem);
                 // Get space required for partial tiles=
                 if(reductionStrat == origami::reduction_t::parallel)
                 {
@@ -5756,17 +5764,24 @@ namespace TensileLite
                         = requiredWorkspaceSizeForSplitTiles(problem, skGrid / tiles, skGrid);
                     if(idealWorkspace <= problem.workspaceSize())
                         size += idealWorkspace;
+                    else
+                        size += outputBiasBytes;
                 }
-                else if(skGrid > 0 && (tiles % skGrid != 0 && !streamKDP && !forceDPOnly))
+                else if(skGrid > 0)
                 {
-                    // The workspace holds the partial tiles only. The per-XCD
-                    // work-queue counters live at the base of the flag buffer
+                    // The workspace holds the partial tiles, followed by an
+                    // output-bias gradient's matrix. The per-XCD work-queue
+                    // counters live at the base of the flag buffer
                     // (AddressFlags), not here, so they need no room in it.
-                    size_t idealWorkspace = partialTileSize(skGrid);
+                    size_t idealWorkspace = outputBiasBytes;
+                    if(tiles % skGrid != 0 && !streamKDP && !forceDPOnly)
+                        idealWorkspace += partialTileSize(skGrid);
                     // If given workspace is less than ideal, we can fall back to DP mode
                     // Performance will likely be lower, but the kernel can run if workspace is unavailable
                     if(idealWorkspace <= problem.workspaceSize())
                         size += idealWorkspace;
+                    else
+                        size += outputBiasBytes;
                 }
             }
         }
@@ -6237,11 +6252,13 @@ namespace TensileLite
 
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
+        const size_t outputBiasBytes = outputBiasWorkspaceSize(problem);
         if(sk.grid > 0
            && (sk.reduction == origami::reduction_t::parallel
                || (tiles % sk.grid != 0 && !streamKDP && !forceDPOnly)))
         {
-            // The workspace holds the partial tiles only. The per-XCD work-queue
+            // The workspace holds the partial tiles, followed on in-kernel-fixup
+            // launches by an output-bias gradient's matrix. The per-XCD work-queue
             // counters live at the base of the flag buffer (AddressFlags), not
             // here, so they need no room in it: the kernel builds SrdWS solely
             // from AddressWS (computeWorkspaceSrd() in StreamK.py) while the
@@ -6252,6 +6269,8 @@ namespace TensileLite
             // with the two workspace-size queries (requiredWorkspaceSize() and
             // computeStreamKDecisions()), which carry no such term.
             size_t idealWorkspace = partialTileSize(sk.grid);
+            if(sk.reduction != origami::reduction_t::parallel)
+                idealWorkspace += outputBiasBytes;
             // If given workspace is less than ideal, we can fall back to DP mode
             // Performance will likely be lower, but the kernel can run if workspace is unavailable.
             // (The non-power-of-two XCD case is handled earlier by explicit
@@ -6263,12 +6282,16 @@ namespace TensileLite
             }
         }
 
-        if(sizeMapping.requiresPartialReduction() && sk.grid > 0)
+        if((sizeMapping.requiresPartialReduction() || customStreamK) && sk.grid > 0)
         {
-            if(sk.reduction == origami::reduction_t::parallel && tiles > 0)
-                sk.workspaceBytes = requiredWorkspaceSizeGsu(problem, hardware, sk.grid / tiles);
-            else if(tiles % sk.grid != 0 && !streamKDP)
-                sk.workspaceBytes = partialTileSize(sk.grid);
+            sk.workspaceLayout = streamKWorkspaceLayout(problem, sk.reduction, sk.grid, tiles);
+            if(sizeMapping.requiresPartialReduction())
+            {
+                if(sk.reduction == origami::reduction_t::parallel && tiles > 0)
+                    sk.workspaceBytes = requiredWorkspaceSizeGsu(problem, hardware, sk.grid / tiles);
+                else
+                    sk.workspaceBytes = sk.workspaceLayout.biasOffset + sk.workspaceLayout.biasBytes;
+            }
         }
         return sk;
     }
@@ -7261,6 +7284,36 @@ namespace TensileLite
         return size;
     }
 
+    size_t ContractionSolution::outputBiasWorkspaceSize(Problem const& problem) const
+    {
+        if(!problemType.useGradient || !problemType.useBias
+           || problem.getParams().biasEnum() == rocisa::DataType::None
+           || problem.biasSrc() != ContractionProblemGemm::TENSOR::D)
+            return 0;
+        return problem.d().totalLogicalElements() * problem.computeTypeElementSize();
+    }
+
+    StreamKWorkspaceLayout
+        ContractionSolution::streamKWorkspaceLayout(Problem const&       problem,
+                                                    origami::reduction_t reduction,
+                                                    size_t               grid,
+                                                    size_t               tiles) const
+    {
+        StreamKWorkspaceLayout layout;
+        if(grid == 0)
+            return layout;
+        if(reduction == origami::reduction_t::parallel)
+        {
+            layout.partialBytes = partialTileSize(grid);
+            return layout;
+        }
+        if(tiles % grid != 0 && !Debug::Instance().useStreamKDataParrallel())
+            layout.partialBytes = partialTileSize(grid);
+        layout.biasOffset = layout.partialBytes;
+        layout.biasBytes  = outputBiasWorkspaceSize(problem);
+        return layout;
+    }
+
     // Single source of truth for the StreamK launch decisions. The reduction, grid,
     // and workspace/DP fallback computed here are the values solve() launches with:
     // solve() reads them straight out of the returned snapshot into StreamKSettings
@@ -7357,17 +7410,19 @@ namespace TensileLite
         // tiles%grid!=0), sized by grid (not by dynamicSlots). This is the same
         // reserve-or-not rule requiredWorkspaceSize() implements independently, so
         // the two must be changed together.
-        size_t idealWorkspace = 0;
-        bool   needPartials   = false;
+        const size_t outputBiasBytes = outputBiasWorkspaceSize(problem);
+        size_t       idealWorkspace  = 0;
         if(grid > 0
            && (reduction == origami::reduction_t::parallel
                || (tiles % grid != 0 && !streamKDP && !forceDPOnly)))
         {
-            needPartials = true;
-            // The workspace holds the partial tiles only. The per-XCD work-queue
-            // counters live at the base of the flag buffer (AddressFlags), not
-            // here, so they need no room in it.
+            // The workspace holds the partial tiles, followed on in-kernel-fixup
+            // launches by an output-bias gradient's matrix. The per-XCD
+            // work-queue counters live at the base of the flag buffer
+            // (AddressFlags), not here, so they need no room in it.
             idealWorkspace = partialTileSize(grid);
+            if(reduction != origami::reduction_t::parallel)
+                idealWorkspace += outputBiasBytes;
             if(idealWorkspace > problem.workspaceSize())
             {
                 reduction                  = origami::reduction_t::tree;
@@ -7375,12 +7430,17 @@ namespace TensileLite
                 d.workspaceDPFallbackFired = true;
             }
         }
+        else if(grid > 0)
+            idealWorkspace = outputBiasBytes;
 
         d.reduction              = reduction;
         d.skGrid                 = grid;
         d.finalGrid              = grid;
         d.idealWorkspaceBytes    = idealWorkspace;
-        d.requiredWorkspaceBytes = (needPartials && !d.workspaceDPFallbackFired) ? idealWorkspace : 0;
+        d.workspaceLayout        = streamKWorkspaceLayout(problem, reduction, grid, tiles);
+        d.requiredWorkspaceBytes = reduction == origami::reduction_t::parallel
+                                       ? d.workspaceLayout.partialBytes
+                                       : d.workspaceLayout.biasOffset + d.workspaceLayout.biasBytes;
         d.workspaceAllocated     = d.requiredWorkspaceBytes > 0;
         d.dpOnly                 = streamKDP || forceDPOnly || d.workspaceDPFallbackFired;
 
@@ -7558,10 +7618,13 @@ namespace TensileLite
         field(10, "partials", yn(d.partialsPresent));
 
         os << "  workspace:\n";
-        field(9, "allocated", yn(d.workspaceAllocated));
-        field(9, "required", fmtBytes(d.requiredWorkspaceBytes));
-        field(9, "ideal", fmtBytes(d.idealWorkspaceBytes));
-        field(9, "given", fmtGiven(d.givenWorkspaceBytes));
+        field(12, "allocated", yn(d.workspaceAllocated));
+        field(12, "required", fmtBytes(d.requiredWorkspaceBytes));
+        field(12, "ideal", fmtBytes(d.idealWorkspaceBytes));
+        field(12, "given", fmtGiven(d.givenWorkspaceBytes));
+        field(12, "partialBytes", fmtBytes(d.workspaceLayout.partialBytes));
+        field(12, "biasOffset", std::to_string(d.workspaceLayout.biasOffset));
+        field(12, "biasBytes", fmtBytes(d.workspaceLayout.biasBytes));
 
         os << "  dp-only:\n";
         field(11, "dpOnly", yn(d.dpOnly));

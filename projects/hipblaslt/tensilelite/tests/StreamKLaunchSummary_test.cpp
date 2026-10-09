@@ -16,6 +16,7 @@
 // and whether a partials workspace is reserved.
 
 #include <array>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <gtest/gtest.h>
@@ -23,6 +24,7 @@
 #include <limits>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 #include <hip/hip_runtime.h>
@@ -1385,6 +1387,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspacePreservesAuxiliaryAllocations
             solution.sizeMapping.workspaceSizePerElemBias = 4;
 
             auto problem = makeBatchedGemmProblem(128, 256, 4096, batch);
+            problem.setBetaType(rocisa::DataType::Float);
             problem.setUseBias(1);
             problem.setUseGradient(test.gradient);
             problem.setBias(test.biasEnabled ? rocisa::DataType::Float : rocisa::DataType::None,
@@ -1415,9 +1418,265 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspacePreservesAuxiliaryAllocations
             EXPECT_FALSE(launch.workspaceDPFallbackFired);
             EXPECT_EQ(launch.requiredWorkspaceBytes, partials);
 
+            // The DP fall back has no partials, but an output-bias gradient
+            // still writes its FP32 matrix to the workspace.
+            const bool   outputBias = test.gradient && test.biasEnabled && test.biasSrc == Tensor::D;
+            const size_t fallback   = outputBias ? 128 * 256 * batch * 4 : 0;
             problem.setWorkspaceSize(expected - 1);
-            EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), 0u);
+            EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), fallback);
         }
+    }
+}
+
+namespace
+{
+    // Generated SK3 solution for a gradient GEMM; the problem picks the bias source.
+    void initOutputBiasSolution(ContractionSolution& solution)
+    {
+        initStreamKSolution(solution, 3);
+        solution.kernelName                                    = "generated_streamk_output_bias";
+        solution.customKernel.name                             = solution.kernelName;
+        solution.customKernel.generated                        = true;
+        solution.sizeMapping.globalSplitU                      = 0;
+        solution.sizeMapping.globalAccumulation                = 0;
+        solution.sizeMapping.workGroupMapping                  = 1;
+        solution.sizeMapping.workGroupMappingXCC               = 1;
+        solution.internalArgsSupport.version                   = 3;
+        solution.internalArgsSupport.persistentLoopArgsVersion = 0;
+        solution.internalArgsSupport.useUniversalArgs          = true;
+        solution.problemType.useBias                           = 1;
+        solution.problemType.useGradient                       = true;
+    }
+
+    ContractionProblemGemm
+        makeOutputBiasProblem(size_t m, size_t n, size_t k, bool gradient = true)
+    {
+        auto problem = makeGemmProblem(m, n, k);
+        problem.setAlphaType(rocisa::DataType::Float);
+        problem.setBetaType(rocisa::DataType::Float);
+        problem.setUseBias(1);
+        problem.setUseGradient(gradient);
+        problem.setBias(rocisa::DataType::Float, m, 0, gradient, ContractionProblemGemm::TENSOR::D);
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+        return problem;
+    }
+
+    ContractionInputs outputBiasInputs()
+    {
+        ContractionInputs inputs;
+        inputs.alpha        = 1.0f;
+        inputs.beta         = 1.0f;
+        inputs.a            = reinterpret_cast<void*>(uintptr_t{0x40000});
+        inputs.b            = reinterpret_cast<void*>(uintptr_t{0x40000});
+        inputs.c            = reinterpret_cast<void*>(uintptr_t{0x40000});
+        inputs.d            = reinterpret_cast<void*>(uintptr_t{0x50000});
+        inputs.bias         = reinterpret_cast<void*>(uintptr_t{0x30000});
+        inputs.ws           = reinterpret_cast<void*>(uintptr_t{0x1000000});
+        inputs.Synchronizer = reinterpret_cast<void*>(uintptr_t{0x60000});
+        return inputs;
+    }
+
+    void const* pointerArgument(KernelArguments const& args, const char* name)
+    {
+        auto field = KernelArguments::const_iterator(args, name);
+        if(field == args.end() || (*field).second != sizeof(void*))
+            throw std::runtime_error(std::string("missing pointer argument ") + name);
+        void const* pointer = nullptr;
+        std::memcpy(&pointer, (*field).first, sizeof(pointer));
+        return pointer;
+    }
+
+    // solve() packs release-mode arguments, which carry no names. The bias
+    // reduction kernel takes the workspace it reads D from as its first argument.
+    void const* reductionWorkspace(KernelInvocation const& reduction)
+    {
+        void const* pointer = nullptr;
+        std::memcpy(&pointer, reduction.args.data(), sizeof(pointer));
+        return pointer;
+    }
+
+    // 8 x 3 = 24 tiles of 17 K iterations: below select_reduction's
+    // itersPerTile >= 64 band, so tree reduction.
+    constexpr size_t kOutputBiasM     = 1000;
+    constexpr size_t kOutputBiasN     = 300;
+    constexpr size_t kOutputBiasK     = 1031;
+    constexpr size_t kOutputBiasTiles = 24;
+    constexpr size_t kOutputBiasBytes = kOutputBiasM * kOutputBiasN * sizeof(float);
+}
+
+// An output-bias gradient (BiasSrc D) on an in-kernel-fixup launch has every
+// tile's owner write FP32 D to the workspace, which the bias reduction kernel
+// then reads. The partial tiles start at the workspace base, so the matrix has
+// to start after them, and both workspace queries have to count it.
+TEST(StreamKLaunchSummaryTest, TreeOutputBiasMatrixFollowsPartials)
+{
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    initOutputBiasSolution(solution);
+    auto problem = makeOutputBiasProblem(kOutputBiasM, kOutputBiasN, kOutputBiasK);
+    env.device.persistentFixedGrid = 64;
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel());
+
+    const size_t partialBytes = 128 * 128 * sizeof(float) * 64;
+    const auto   launch       = solution.resolvePersistentSettings(problem, env.device);
+    ASSERT_EQ(launch.reduction, origami::reduction_t::tree);
+    ASSERT_EQ(launch.grid, 64u);
+    ASSERT_EQ(launch.totalTiles, kOutputBiasTiles);
+    EXPECT_EQ(launch.workspaceLayout.partialBytes, partialBytes);
+    EXPECT_EQ(launch.workspaceLayout.biasOffset, partialBytes);
+    EXPECT_EQ(launch.workspaceLayout.biasBytes, kOutputBiasBytes);
+    EXPECT_EQ(launch.workspaceBytes, partialBytes + kOutputBiasBytes);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), partialBytes + kOutputBiasBytes);
+
+    const auto d = solution.computeStreamKDecisions(problem, env.device);
+    EXPECT_FALSE(d.workspaceDPFallbackFired);
+    EXPECT_EQ(d.requiredWorkspaceBytes, partialBytes + kOutputBiasBytes);
+    EXPECT_EQ(d.idealWorkspaceBytes, partialBytes + kOutputBiasBytes);
+    EXPECT_EQ(d.workspaceLayout.partialBytes, partialBytes);
+    EXPECT_EQ(d.workspaceLayout.biasOffset, partialBytes);
+    EXPECT_EQ(d.workspaceLayout.biasBytes, kOutputBiasBytes);
+
+    std::ostringstream os;
+    solution.printStreamKLaunchSummary(os, problem, d);
+    const std::string summary = collapseSpaces(os.str());
+    EXPECT_NE(summary.find("partialBytes = 4194304 (4.00 MiB)\n"), std::string::npos) << summary;
+    EXPECT_NE(summary.find("biasOffset = 4194304\n"), std::string::npos) << summary;
+    EXPECT_NE(summary.find("biasBytes = 1200000 ("), std::string::npos) << summary;
+
+    const auto     inputs = outputBiasInputs();
+    uint8_t const* ws     = static_cast<uint8_t const*>(inputs.ws);
+    const auto     main
+        = solution.generateSingleCall<true>(problem, inputs, env.device, launch, GSUSettings{});
+    EXPECT_EQ(pointerArgument(main.args, "ws"), ws);
+    EXPECT_EQ(pointerArgument(main.args, "ws_bias"), ws + partialBytes);
+
+    const auto calls = solution.solve(problem, inputs, env.device);
+    ASSERT_EQ(calls.size(), 2u) << "main kernel, then the bias reduction";
+    EXPECT_EQ(reductionWorkspace(calls.back()), ws + partialBytes);
+}
+
+// Partials plus the bias matrix overflow the workspace, so the launch falls back
+// to data-parallel. That launch has no partials but still writes the matrix, now
+// at the workspace base, so the caller-facing query keeps asking for it.
+TEST(StreamKLaunchSummaryTest, OutputBiasMatrixCountsTowardWorkspaceFallback)
+{
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    initOutputBiasSolution(solution);
+    auto problem = makeOutputBiasProblem(kOutputBiasM, kOutputBiasN, kOutputBiasK);
+    env.device.persistentFixedGrid = 64;
+
+    const size_t partialBytes = 128 * 128 * sizeof(float) * 64;
+    problem.setWorkspaceSize(partialBytes + kOutputBiasBytes - 1);
+    const auto launch = solution.resolvePersistentSettings(problem, env.device);
+    EXPECT_EQ(launch.reduction, origami::reduction_t::tree);
+    EXPECT_EQ(launch.grid, kOutputBiasTiles) << "the partials alone fit, the matrix does not";
+    EXPECT_EQ(launch.workspaceLayout.partialBytes, 0u);
+    EXPECT_EQ(launch.workspaceLayout.biasOffset, 0u);
+    EXPECT_EQ(launch.workspaceLayout.biasBytes, kOutputBiasBytes);
+    EXPECT_EQ(launch.workspaceBytes, kOutputBiasBytes);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), kOutputBiasBytes);
+
+    const auto d = solution.computeStreamKDecisions(problem, env.device);
+    EXPECT_TRUE(d.workspaceDPFallbackFired);
+    EXPECT_EQ(d.finalGrid, kOutputBiasTiles);
+    EXPECT_EQ(d.idealWorkspaceBytes, partialBytes + kOutputBiasBytes);
+    EXPECT_EQ(d.requiredWorkspaceBytes, kOutputBiasBytes);
+    EXPECT_EQ(d.workspaceLayout.biasOffset, 0u);
+
+    const auto     inputs = outputBiasInputs();
+    uint8_t const* ws     = static_cast<uint8_t const*>(inputs.ws);
+    const auto     main
+        = solution.generateSingleCall<true>(problem, inputs, env.device, launch, GSUSettings{});
+    EXPECT_EQ(pointerArgument(main.args, "ws_bias"), ws);
+    const auto calls = solution.solve(problem, inputs, env.device);
+    ASSERT_EQ(calls.size(), 2u);
+    EXPECT_EQ(reductionWorkspace(calls.back()), ws);
+
+    // Too small for the matrix itself: the workspace predicate must reject it.
+    problem.setWorkspaceSize(kOutputBiasBytes - 1);
+    EXPECT_GT(solution.requiredWorkspaceSize(problem, env.device), problem.workspaceSize());
+}
+
+// grid == tiles: no partials, so the matrix starts at the workspace base, but it
+// is still reserved.
+TEST(StreamKLaunchSummaryTest, OutputBiasMatrixWithoutPartialsStartsAtWorkspaceBase)
+{
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    initOutputBiasSolution(solution);
+    auto problem = makeOutputBiasProblem(kOutputBiasM, kOutputBiasN, kOutputBiasK);
+    env.device.persistentFixedGrid = kOutputBiasTiles;
+
+    const auto launch = solution.resolvePersistentSettings(problem, env.device);
+    ASSERT_EQ(launch.reduction, origami::reduction_t::tree);
+    ASSERT_EQ(launch.grid, kOutputBiasTiles);
+    EXPECT_EQ(launch.workspaceLayout.partialBytes, 0u);
+    EXPECT_EQ(launch.workspaceLayout.biasOffset, 0u);
+    EXPECT_EQ(launch.workspaceLayout.biasBytes, kOutputBiasBytes);
+    EXPECT_EQ(launch.workspaceBytes, kOutputBiasBytes);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), kOutputBiasBytes);
+
+    const auto d = solution.computeStreamKDecisions(problem, env.device);
+    EXPECT_FALSE(d.workspaceDPFallbackFired);
+    EXPECT_TRUE(d.workspaceAllocated);
+    EXPECT_EQ(d.requiredWorkspaceBytes, kOutputBiasBytes);
+    EXPECT_EQ(d.idealWorkspaceBytes, kOutputBiasBytes);
+
+    const auto inputs = outputBiasInputs();
+    const auto main
+        = solution.generateSingleCall<true>(problem, inputs, env.device, launch, GSUSettings{});
+    EXPECT_EQ(pointerArgument(main.args, "ws_bias"), inputs.ws);
+}
+
+// Parallel reduction keeps the FP32 D matrix in the first partials slice, and a
+// forward bias is read from the bias pointer: neither reserves a bias region.
+TEST(StreamKLaunchSummaryTest, OutputBiasRegionOnlyForInKernelFixup)
+{
+    {
+        SCOPED_TRACE("parallel");
+        AnalyticalEnv       env;
+        ContractionSolution solution;
+        initOutputBiasSolution(solution);
+        auto problem = makeOutputBiasProblem(128, 256, 4096);
+        env.device.persistentFixedGrid = 8;
+
+        const size_t partialBytes = 128 * 128 * sizeof(float) * 8;
+        const auto   launch       = solution.resolvePersistentSettings(problem, env.device);
+        ASSERT_EQ(launch.reduction, origami::reduction_t::parallel);
+        EXPECT_EQ(launch.workspaceLayout.partialBytes, partialBytes);
+        EXPECT_EQ(launch.workspaceLayout.biasOffset, 0u);
+        EXPECT_EQ(launch.workspaceLayout.biasBytes, 0u);
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), partialBytes);
+
+        const auto inputs = outputBiasInputs();
+        const auto main
+            = solution.generateSingleCall<true>(problem, inputs, env.device, launch, GSUSettings{});
+        EXPECT_EQ(pointerArgument(main.args, "ws_bias"), inputs.ws);
+        const auto calls = solution.solve(problem, inputs, env.device);
+        ASSERT_EQ(calls.size(), 3u) << "main kernel, output conversion, bias reduction";
+        EXPECT_EQ(reductionWorkspace(calls.back()), inputs.ws);
+    }
+    {
+        SCOPED_TRACE("forward bias");
+        AnalyticalEnv       env;
+        ContractionSolution solution;
+        initOutputBiasSolution(solution);
+        solution.problemType.useGradient = false;
+        auto problem = makeOutputBiasProblem(kOutputBiasM, kOutputBiasN, kOutputBiasK, false);
+        env.device.persistentFixedGrid = 64;
+
+        const size_t partialBytes = 128 * 128 * sizeof(float) * 64;
+        const auto   launch       = solution.resolvePersistentSettings(problem, env.device);
+        ASSERT_EQ(launch.reduction, origami::reduction_t::tree);
+        EXPECT_EQ(launch.workspaceLayout.partialBytes, partialBytes);
+        EXPECT_EQ(launch.workspaceLayout.biasBytes, 0u);
+        EXPECT_EQ(launch.workspaceBytes, partialBytes);
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), partialBytes);
+
+        const auto main = solution.generateSingleCall<true>(
+            problem, outputBiasInputs(), env.device, launch, GSUSettings{});
+        EXPECT_EQ(KernelArguments::const_iterator(main.args, "ws_bias"), main.args.end());
     }
 }
 
