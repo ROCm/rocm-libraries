@@ -2292,6 +2292,7 @@ def setup_multiple_gemm_dispatchers(
     configs: List[GemmKernelConfig],
     verbose: bool = True,
     max_workers: Optional[int] = None,
+    build_timeout: Optional[int] = None,
 ) -> List[Optional[Path]]:
     """Codegen + compile each config into its own .so. Returns .so paths.
 
@@ -2299,6 +2300,11 @@ def setup_multiple_gemm_dispatchers(
     codegen + hipcc, run massively in parallel -- and returns only ``Path``
     objects (``None`` for configs that failed to generate/compile), aligned to
     the input order. Benchmarking happens later, in an isolated worker.
+
+    ``build_timeout`` (seconds) replaces the per-step limits of every kernel's
+    codegen, compile and link. ``None`` keeps them: 300 s each, except 1200 s to
+    compile a fixed-vector-width kernel. Each step is a wall-clock limit, so a
+    build sharing the host with many parallel workers may need a larger one.
     """
     import sys
 
@@ -2404,6 +2410,8 @@ def setup_multiple_gemm_dispatchers(
                 "variant": c.variant,
             }
         )
+        if build_timeout:
+            codegen_args[-1]["timeout"] = build_timeout
 
     if verbose:
         print(
@@ -2435,6 +2443,8 @@ def setup_multiple_gemm_dispatchers(
         if hdr is None:
             continue
         job, _ = _build_compile_jobs(configs[i], hdr)
+        if build_timeout:
+            job["compile_timeout"] = job["link_timeout"] = build_timeout
         compile_jobs.append(job)
         job_index.append(i)
 
