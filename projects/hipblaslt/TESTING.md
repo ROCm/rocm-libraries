@@ -1527,6 +1527,9 @@ often it runs, whether it gates, what it costs, and who owns it.
 **Done when** "where does this run?" and "what covers this?" are answered by looking something up
 rather than by asking around.
 
+- **Keep [test_inventory.yaml](test_inventory.yaml) current.** It lists every suite in both products
+  with where it runs today, with evidence for each placement, and where this plan would put it. A new
+  lane, or a change to what an existing one gates, updates the inventory in the same pull request.
 - **Publish the required-check list**
   ([#12996](https://github.com/ROCm/rocm-libraries/issues/12996)). Document which checks actually
   block a merge, so contributors and reviewers stop guessing. The lane tables in this document and in
@@ -1702,12 +1705,21 @@ migration has a target.
 
 ### How this plan develops
 
-Two data files will follow this section in later changes, both in this directory and both covering
-hipBLASLt and TensileLite together. The first is an inventory of every suite and lane: where it runs
-today, where the plan would put it, and a proposed disposition (keep, merge, migrate, demote, retire).
-The second is a coverage model of the space of ways the library gets called, with a risk rating on
-each part of it, so that "are we testing the odd ways this library gets used?" has an answer that is
-more than a feeling.
+Two data files carry the plan's detail, both in this directory and both covering hipBLASLt and
+TensileLite together.
+
+[test_inventory.yaml](test_inventory.yaml) lists every suite and lane: its kind and mode from
+[Target test kinds](#target-test-kinds), where it runs today with evidence for each placement, where
+the plan would put it, and a proposed disposition (keep, merge, migrate, demote, retire, or review)
+with a rationale. Every target and disposition in it is a proposal; a retirement needs the owning
+team's agreement first. Building it surfaced three lanes this document does not describe yet (the
+GEKO component lane, the advisory rocjitsu race check, and an on-demand gfx1250 workflow), and one
+place where the two documents disagree, on whether Math CI measures C++ coverage. Those are recorded
+in the inventory as `review` items rather than settled here.
+
+The second file, a coverage model of the space of ways the library gets called with a risk rating on
+each part of it, follows in a later change, so that "are we testing the odd ways this library gets
+used?" has an answer that is more than a feeling.
 
 ## Known Risks and Gaps
 
