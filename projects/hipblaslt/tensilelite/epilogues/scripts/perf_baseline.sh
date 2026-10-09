@@ -28,7 +28,7 @@ echo "Output dir : $OUT_DIR" | tee -a "$RAW_LOG"
 echo "YAML       : $YAML"   | tee -a "$RAW_LOG"
 echo "" | tee -a "$RAW_LOG"
 
-./Tensile/bin/Tensile "$YAML" "$OUT_DIR" 2>&1 | tee -a "$RAW_LOG"
+./tensilelite/bin/Tensile "$YAML" "$OUT_DIR" 2>&1 | tee -a "$RAW_LOG"
 RC=$?
 
 echo ""
