@@ -5,11 +5,15 @@
 # prefetched redesign (see epilogues/docs/SUBTILE_MEGAFUSED_BATCHED_REDESIGN.md).
 # Fused: bf16 PartialRMS+ResidualAdd+StoreBf16D — RMSEpilogue path.
 #
-# Both shapes below share the same winning tile from the full benchmark_k1_bf16.yaml
-# sweep (MT512x128, MI16x16x32, MIWaveTile[16,4], MIWaveGroup[2,2], PGR2) — they
-# have equal total FLOPs (M*N*K), so the same solution wins both. Pinning it here
-# (rather than re-sweeping) gives a fixed, reproducible before/after benchmarking
-# target for the redesign's code changes.
+# Both shapes below share one pinned winning solution. The winner was identified by
+# the full benchmark_k1_bf16.yaml sweep run on the [2048, 16384, 1, 2048] shape ONLY:
+# MT256x256, MI16x16x32, MIWaveTile[4,16], MIWaveGroup[4,1], PGR2, GSU0, DTL0,
+# StaggerU0, PreloadKernArgs=False (~161.9 us / ~849 TFlops on MI355 / gfx950).
+# NOTE: the [4096, 4096, 1, 4096] shape was NOT independently swept. Pinning the same
+# tile for it is an ASSUMPTION carried over from this file's original design rationale
+# (equal total FLOPs M*N*K => same winner), not re-verified by this sweep. Pinning here
+# (rather than re-sweeping) gives a fixed, reproducible before/after benchmarking target
+# for the redesign's code changes.
 
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
@@ -21,6 +25,8 @@ GlobalParameters:
   DataInitTypeA: 12
   DataInitTypeB: 13
   DataInitTypeD: 12
+  DataInitTypeBeta: 1
+  DataInitTypeAlpha: 1
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   PreciseKernelTime: false
@@ -55,16 +61,17 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 32, 1,  1, 16, 4, 2, 2]  # MT 512x128 (winner for both shapes below)
+          - [16, 16, 32, 1,  1, 4, 16, 4, 1]  # MT 256x256, MIWaveTile[4,16], MIWaveGroup[4,1] (swept winner for [2048,16384,1,2048]; see note above).
         - RMSEpilogue: [True]
+        - RMSEpiloguePrefetchDepth: [1, 2, 3, 4]
         - StreamK: [3]
         - StreamKForceDPOnly: [1]
         - StreamKAtomic: [0]
-        - GlobalSplitU: [1]
+        - GlobalSplitU: [0]
         - ScheduleIterAlg: [3]
         - PrefetchGlobalRead: [2]
         - PrefetchAcrossPersistent: [0]
-        - DirectToLds: [1]
+        - DirectToLds: [0]
         - UseSubtileImpl: [True]
         - StaggerU: [0]
         - DepthU: [64]
@@ -79,7 +86,106 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
             - Exact: [2048, 16384, 1, 2048]
-            - Exact: [4096, 4096, 1, 4096]
+  -
+    -
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      UseRMSEpilogue: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 16, 4, 1]  # MT 256x256, MIWaveTile[4,16], MIWaveGroup[4,1] (swept winner for [2048,16384,1,2048]; see note above).
+        - RMSEpilogue: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [0]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [2048, 16384, 1, 2048]
+  -
+    -
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      UseRMSEpilogue: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 16, 4, 1]  # MT 256x256, MIWaveTile[4,16], MIWaveGroup[4,1] (swept winner for [2048,16384,1,2048]; see note above).
+        - RMSEpilogue: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [0]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [2048, 16384, 1, 2048]
 
 LibraryLogic:
   ScheduleName: "epilogues_rms_bf16_redesign_baseline"

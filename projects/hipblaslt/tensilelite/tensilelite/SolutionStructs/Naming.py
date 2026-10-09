@@ -253,12 +253,17 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if not state.get("RMSEpilogue", False):
     requiredParametersTemp.discard("RMSEpilogueGammaType")
     requiredParametersTemp.discard("RMSEpilogueResidualType")
+    requiredParametersTemp.discard("RMSEpiloguePrefetchDepth")
   else:
     if str(state.get("RMSEpilogueGammaType") or "b").lower() == "b":
       requiredParametersTemp.discard("RMSEpilogueGammaType")
     residualIsDefault = str(state.get("RMSEpilogueResidualType") or "b").lower() == "b"
     if residualIsDefault:
       requiredParametersTemp.discard("RMSEpilogueResidualType")
+    # Auto depth (-1, the default) keeps the untagged baseline name; only an
+    # explicit depth is named, so swept depths produce distinct kernels.
+    if state.get("RMSEpiloguePrefetchDepth", -1) == -1:
+      requiredParametersTemp.discard("RMSEpiloguePrefetchDepth")
 
   # DeepseekScale parameters are only meaningful when at least one scale flag is active.
   use_scale_a = state.get("UseDeepseekScaleA", False)

@@ -14,6 +14,11 @@ GlobalParameters:
   PrintSolutionRejectionReason: True
   KernelTime: True
   KeepBuildTmp: True
+  # The native RMS epilogue is gamma-only by design: it stores D = H*gamma directly
+  # and skips GlobalWriteBatch, so it does NOT apply alpha or beta*C (GWB normally
+  # does). Only alpha==1 and beta==0 configs are valid on this path; validated here
+  # at alpha=1.
+  DataInitTypeAlpha: 1
 
 BenchmarkProblems:
 
@@ -73,10 +78,14 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-            - Exact: [640, 640, 1, 640]
-            - Exact: [768, 640, 1, 512]
-            - Exact: [521, 521, 1, 521]
-            - Exact: [532, 64, 1, 64]
+            # Exact: [M, N, batch, K].  For TN GEMM (TransposeA=True), SizesFree+0 == M.
+            # _emitNative branches on (SizesFree+0 & 7): WIDE arm (rowExtent%8==0)
+            # when the remainder is zero, NARROW arm (rowExtent%8!=0) otherwise.
+            # Keep at least one WIDE and one NARROW entry to cover both code paths.
+            - Exact: [640, 640, 1, 640]   # M=640, 640%8==0 -> WIDE
+            - Exact: [768, 640, 1, 512]   # M=768, 768%8==0 -> WIDE
+            - Exact: [521, 521, 1, 521]   # M=521, 521%8==1 -> NARROW
+            - Exact: [532, 64, 1, 64]     # M=532, 532%8==4 -> NARROW
 
 LibraryLogic:
   ScheduleName: "bench_fused_bf16_partialrms_residualadd"

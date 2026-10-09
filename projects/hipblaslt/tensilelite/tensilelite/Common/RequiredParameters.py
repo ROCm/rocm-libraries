@@ -182,6 +182,7 @@ def getRequiredParametersMin() -> set:
         'RMSEpilogue',
         'RMSEpilogueGammaType',
         'RMSEpilogueResidualType',
+        'RMSEpiloguePrefetchDepth',
         'UseDeepseekScaleA',
         'UseDeepseekScaleB',
         'DeepseekScaleAq0',

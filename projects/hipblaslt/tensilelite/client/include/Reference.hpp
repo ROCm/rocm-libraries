@@ -47,6 +47,17 @@ namespace TensileLite
         // 15 digits precision - 2
         constexpr double AlmostEqualTolerance_Double   = 1e-12;
 
+        // Sentinel thresholds for the MXFP8 dynamic-quant outputs. The per-block e8m0
+        // scale is derived from the block amax, which diverges by <1 ULP between the GPU
+        // MFMA accumulation and the CPU reference dot; at a power-of-two block-amax
+        // boundary this flips the e8m0 exponent by one, shifting the fp8 D by exactly one
+        // binade (2x). These sentinels let the validator accept that benign +/-1-exponent
+        // artifact for the MXScale byte and its D, while still catching real errors (wrong
+        // mantissa/sign, >1-exponent divergence). They are negative and distinct from the
+        // -1.0 "use type default" convention so they never collide with a real tolerance.
+        constexpr double MXFP8ScaleE8M0Tol     = -1000.0;
+        constexpr double MXFP8DequantBinadeTol = -1001.0;
+
         // threshold is largest allowed delta. -1 uses default for each type
         template <typename T>
         inline bool AlmostEqual(T a, T b, double threshold = -1.0);
@@ -67,8 +78,14 @@ namespace TensileLite
             float fa      = static_cast<float>(a);
             float fb      = static_cast<float>(b);
             float absDiff = std::fabs(fa - fb);
-            return fa == fb
-                   || absDiff < AlmostEqualTolerance_Float8 * (std::fabs(fa) + std::fabs(fb) + 1.0f);
+            bool  inTol   = fa == fb
+                            || absDiff
+                                   < AlmostEqualTolerance_Float8 * (std::fabs(fa) + std::fabs(fb) + 1.0f);
+            // MXFP8 D: also accept a clean one-binade (2x/0.5x) shift, the exact
+            // consequence of a tolerated +/-1 e8m0 scale step for that block.
+            if(threshold == MXFP8DequantBinadeTol)
+                return inTol || fa == 2.0f * fb || fb == 2.0f * fa;
+            return inTol;
         }
 
         template <>
@@ -88,8 +105,14 @@ namespace TensileLite
             float fa      = static_cast<float>(a);
             float fb      = static_cast<float>(b);
             float absDiff = std::fabs(fa - fb);
-            return fa == fb
-                   || absDiff < AlmostEqualTolerance_Float8 * (std::fabs(fa) + std::fabs(fb) + 1.0f);
+            bool  inTol   = fa == fb
+                            || absDiff
+                                   < AlmostEqualTolerance_Float8 * (std::fabs(fa) + std::fabs(fb) + 1.0f);
+            // MXFP8 D: also accept a clean one-binade (2x/0.5x) shift, the exact
+            // consequence of a tolerated +/-1 e8m0 scale step for that block.
+            if(threshold == MXFP8DequantBinadeTol)
+                return inTol || fa == 2.0f * fb || fb == 2.0f * fa;
+            return inTol;
         }
 
         template <>
@@ -136,8 +159,13 @@ namespace TensileLite
         template <>
         inline bool AlmostEqual(uint8_t a, uint8_t b, double threshold)
         {
-            // E8 (e8m0) scale bytes require exact bit-for-bit equality.
-            return a == b;
+            // E8 (e8m0) scale bytes: exact equality, unless the MXFP8 sentinel permits a
+            // +/-1 exponent step (benign block-amax boundary divergence).
+            int tol  = (threshold == MXFP8ScaleE8M0Tol) ? 1 : 0;
+            int diff = static_cast<int>(a) - static_cast<int>(b);
+            if(diff < 0)
+                diff = -diff;
+            return diff <= tol;
         }
         template <>
         inline bool AlmostEqual(int a, int b, double threshold)

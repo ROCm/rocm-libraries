@@ -9855,6 +9855,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if self.states.doShadowInit and kernel["BufferStore"]:
       self.defineSgpr("SrdD", 4, 4)
       self.defineSgpr("SrdC", 4, 4)
+      # RMSEpilogue's bf16 residual-out store needs its own SRD. When beta==0 SrdC is
+      # unused, so alias SrdResidualOut onto it (avoids exceeding the SGPR budget);
+      # otherwise define a dedicated one. Mirrors the non-shadow-init path in
+      # KernelWriterAssembly.defineAndResources.
+      if kernel["RMSEpilogue"]:
+        if not kernel["ProblemType"]["UseBeta"]:
+          self.sgprs["SrdResidualOut"] = self.sgprs["SrdC"]
+        else:
+          self.defineSgpr("SrdResidualOut", 4, 4)
 
     self.defineSgpr("NumWorkGroups0", 1)
     self.defineSgpr("NumWorkGroups1", 1)
@@ -10570,6 +10579,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # epilogue computes it from SizesFree[1] and the compile-time MT1 constant.
       # 8-byte alignment for RMSNormGamma is handled purely by offset arithmetic:
       # the host uses appendAligned<>() and the loader advances via (offset+7)&~7.
+      #
+      # The four SRD pointers are 64-bit and require an even SGPR index for
+      # s_mov_b64. defineMultiSgprIndex packs the store block from an even base,
+      # so if the preceding args sum to an odd SGPR count RMSNormGamma (and every
+      # pointer that follows) would land on an odd SGPR, causing an assembler error.
+      # A 1-SGPR pad restores even alignment; loadStoreSgprsAligned already advances
+      # the byte offset to the same 8-byte boundary for RMSNormGamma, so byte/SGPR
+      # layouts stay consistent.
+      if sum(self.states.numStoreSgprNameSizes) % 2 != 0:
+        self.states.numStoreSgprNames.append("RMSEpilogueAlignPad")
+        self.states.numStoreSgprNameSizes.append(1)
+        storeSgprLoad += 1
       self.states.numStoreSgprNames.append("RMSNormGamma")
       self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
       self.states.numStoreSgprNames.append("PartialBuf")
