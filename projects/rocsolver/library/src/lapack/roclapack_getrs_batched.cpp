@@ -93,6 +93,9 @@ try
     work3 = mem[2];
     work4 = mem[3];
 
+    if(n == 0 || nrhs == 0)
+        return rocblas_status_success;
+
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
         I const bid = isweep * bid_inc;
