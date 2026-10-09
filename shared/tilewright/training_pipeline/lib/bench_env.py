@@ -7,12 +7,16 @@
 through `ProblemPredictionLibrary`, the library type the models are trained
 for and deployed into.
 
-Benches never inherit `TENSILE_USE_TILEWRIGHT` or any `TILEWRIGHT_*` variable
-from the caller. A training bench that ran with a previously deployed model
-switched on would order and skip-screen candidates with that model instead of
-Origami, so its labels and stage04's `is_origami_pick` column would be wrong.
-A caller that wants tilewright on (stage07's ML-on runs) passes the variables
-explicitly through `bench_env_with(..., tilewright={...})`.
+Benches never inherit `TENSILE_USE_TILEWRIGHT` or any `TILEWRIGHT_*` or
+`TENSILE_TILEWRIGHT_*` variable from the caller. A training bench that ran
+with a previously deployed model switched on would order and skip-screen
+candidates with that model instead of Origami, so its labels and stage04's
+`is_origami_pick` column would be wrong. `TENSILE_TILEWRIGHT_BANK` decides
+which kernels tilewright ranks and `TENSILE_TILEWRIGHT_PREPARE` when it
+builds its per-cell data, so inherited values would make stage07's pick
+parity and selection times follow the caller's shell. A caller that wants
+tilewright on (stage07's ML-on runs) passes the variables explicitly through
+`bench_env_with(..., tilewright={...})`.
 
 Benches do not inherit `HIPBLASLT_TENSILE_LIBPATH` either: hipBLASLt loads
 that directory verbatim instead of the library subtree matching the device's
@@ -31,7 +35,7 @@ import os
 from typing import Dict, Mapping, Optional, Tuple
 
 TILEWRIGHT_ENABLE_VAR = "TENSILE_USE_TILEWRIGHT"
-_TILEWRIGHT_PREFIX = "TILEWRIGHT_"
+_TILEWRIGHT_PREFIXES: Tuple[str, ...] = ("TILEWRIGHT_", "TENSILE_TILEWRIGHT_")
 LIBPATH_VAR = "HIPBLASLT_TENSILE_LIBPATH"
 SCHEDULE_OVERRIDE_VARS: Tuple[str, ...] = (
     "TENSILE_PERSISTENT_HYBRID_FORCE_MODE",
@@ -45,8 +49,9 @@ REQUIRED_BENCH_ENV: Dict[str, str] = {
 
 
 def is_tilewright_var(name: str) -> bool:
-    """True for `TENSILE_USE_TILEWRIGHT` and every `TILEWRIGHT_*` name."""
-    return name == TILEWRIGHT_ENABLE_VAR or name.startswith(_TILEWRIGHT_PREFIX)
+    """True for `TENSILE_USE_TILEWRIGHT` and every `TILEWRIGHT_*` and
+    `TENSILE_TILEWRIGHT_*` name."""
+    return name == TILEWRIGHT_ENABLE_VAR or name.startswith(_TILEWRIGHT_PREFIXES)
 
 
 def bench_env_with(
@@ -76,9 +81,9 @@ def bench_env_with(
         )
     foreign = sorted(k for k in tw_env if not is_tilewright_var(k))
     if foreign:
+        accepted = [TILEWRIGHT_ENABLE_VAR] + [f"{p}*" for p in _TILEWRIGHT_PREFIXES]
         raise ValueError(
-            f"bench_env_with(tilewright=...) accepts only "
-            f"{TILEWRIGHT_ENABLE_VAR} and {_TILEWRIGHT_PREFIX}* names; got {foreign}"
+            f"bench_env_with(tilewright=...) accepts only {accepted}; got {foreign}"
         )
     env = {
         k: v
