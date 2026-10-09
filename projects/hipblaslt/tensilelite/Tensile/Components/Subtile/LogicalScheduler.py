@@ -19,6 +19,7 @@ The schedule is built in these passes:
   remove_wait_lr_sync      — remove redundant wait_lr_sync after grouping
   remove_wait_gr_sync      — drop redundant wait_gr_sync on interior partition s1
   emit                     — produce List[EmittedModule] with before-link chains
+
 """
 
 from __future__ import annotations
