@@ -6,7 +6,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ### Added
 
-* Added C++ 17 style type_traits utilities
+* Added C++ 17 style type_traits utilities.
  * is_floating_point_v
  * is_integral_v
  * is_arithmetic_v
