@@ -84,38 +84,6 @@
       },
       {
         "cases": [
-          "1_16_16_16_fp32_nchw_cdtfp32_rlo0_norslope",
-          "1_16_3_3_fp32_nchw_cdtfp32_dil1x1_postpad0x0",
-          "1_16_3_3_fp32_nchw_cdtfp32_dil1x1_postpad1x1_b56042",
-          "1_16_3_3_fp32_nchw_cdtfp32_rlo0_norslope_ae5cc8"
-        ],
-        "support": {
-          "gfx1030": [
-            "windows"
-          ],
-          "gfx1101": [
-            "linux"
-          ],
-          "gfx1150": [
-            "linux"
-          ],
-          "gfx1151": [
-            "linux",
-            "windows"
-          ],
-          "gfx1201": [
-            "linux"
-          ],
-          "gfx942": [
-            "linux"
-          ],
-          "gfx950": [
-            "linux"
-          ]
-        }
-      },
-      {
-        "cases": [
           "1_16_16_16_16_fp32_ncdhw_cdtfp32_rlo0p1_norslope",
           "1_16_16_16_16_fp32_ndhwc_cdtfp32_dil1x1x1_postpad0x0x0",
           "1_16_16_16_fp32_nhwc_cdtfp32_norlo_norslope",
@@ -141,6 +109,38 @@
           "8_16_16_16_fp32_nhwc_cdtfp32_rlo0p1_norslope"
         ],
         "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "1_16_16_16_fp32_nchw_cdtfp32_rlo0_norslope",
+          "1_16_3_3_fp32_nchw_cdtfp32_dil1x1_postpad0x0",
+          "1_16_3_3_fp32_nchw_cdtfp32_dil1x1_postpad1x1_b56042",
+          "1_16_3_3_fp32_nchw_cdtfp32_rlo0_norslope_ae5cc8"
+        ],
+        "support": {
+          "gfx1030": [
+            "windows"
+          ],
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ],
