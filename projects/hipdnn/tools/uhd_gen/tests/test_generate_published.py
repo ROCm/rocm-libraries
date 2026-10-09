@@ -65,7 +65,7 @@ def published(tmp_path):
             arch="gfx942",
             selector_revision="miopen/abc",
             collected_at="2026-10-02T00:00:00+00:00",
-            contribution_id="perfdb-1",
+            label="perfdb-1",
             expand_descriptor=["kernel.descriptor"],
             scope_by="kernel.solver_id",
         ),

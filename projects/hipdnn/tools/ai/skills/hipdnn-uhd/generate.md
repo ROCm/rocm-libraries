@@ -142,8 +142,8 @@ binding decides everything below:
    ([data.md](data.md)), the revision and `collected_at` read from its
    `collection_manifest.json`. The engine reports one selector revision for all its
    operations, even when the revision's name mentions only one.
-   The directory's name becomes the contribution id in the dataset, which `--contribution`
-   selects by.
+   The directory's name becomes the contribution's label in the dataset, which
+   `--contribution` selects by.
 6. **Store**: `python3 -m uhd_gen.dataset add --into <store>/datasets/<engine>/<device>/<revision>/<role>[/under-<L2 id>]
    --collection <collections> --corpus-id <set>`.
 7. **Train** (CPU):

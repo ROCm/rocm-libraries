@@ -990,8 +990,11 @@ python -m uhd_gen generate --dataset store/sdpa_fwd --descriptor-tree tree ... -
 
 A dataset is `dataset.parquet` plus `dataset_manifest.json`, one entry per contribution
 (collection, one-shot `generate` folder via `--generation`, or §8.3 CSVs via `--csv` with the
-binding stated). Every contribution must share one engine binding. `generate --contribution
-ID...` trains on a subset; `python -m uhd_gen.dataset export` writes contributions' rows back
+binding stated). Every contribution must share one engine binding. A contribution is stored
+under an id derived from its binding and rows, so the same measurements are added once
+whatever they are called; `--label` names it. `add` only appends: `python -m uhd_gen.dataset
+remove`, `add --replace` and `retag` correct what is stored, each recorded in the manifest's
+`history`. `generate --contribution ID...` (ids or labels) trains on a subset; `python -m uhd_gen.dataset export` writes contributions' rows back
 out as JSON. A dataset of §8.3 CSVs alone trains as `train` would (`--target`, `--objective`,
 `--group-by-feature`, `--no-promote`).
 

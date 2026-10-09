@@ -140,8 +140,18 @@ segment is the selector revision with `/` as `-`.
   change (the engine's code changed) needs new measurements.
 - A **contribution** is one source's rows (a collection, an old generate folder, a CSV set).
   Each row records its contribution, when it was measured, its `purpose` (`training`,
-  `holdout` or `eval`) and its corpus. Training reads `training` rows only. Rows are only
-  appended; when a shape was measured more than once, training takes the newest.
+  `holdout` or `eval`) and its corpus. Training reads `training` rows only. When a shape was
+  measured more than once, training takes the newest.
+- A contribution's **id** is derived from its binding and rows, so the same measurements are
+  stored once whatever they are called. Its **label** is the name it was added under
+  (`--label`; default the collection's directory, the generate folder, or the first CSV's
+  name). `--contribution` takes either.
+- **Corrections**: `add` only appends. `python3 -m uhd_gen.dataset remove --from <dataset dir>
+  --contribution <ids or labels>` drops contributions; `add ... --replace <ids or labels>`
+  swaps them for the source being added, in one write; `python3 -m uhd_gen.dataset retag --in
+  <dataset dir> --contribution <ids or labels> --purpose <purpose>` (or `--corpus-id`) changes
+  a tag and keeps the measurements. Each is recorded in the manifest's `history`, with the
+  removed entry.
 
 ## Workflow
 
@@ -153,13 +163,13 @@ segment is the selector revision with `/` as `-`.
 3. **Add a collection**:
    `python3 -m uhd_gen.dataset add --into <dataset dir> --collection <collection dir>...
    --corpus-id <set>`. The binding (engine, role, revision) comes from the collection; one
-   that contradicts the dataset is refused whole. Adding the same contribution again adds
-   nothing.
+   that contradicts the dataset is refused whole. Adding the same measurements again adds
+   nothing, under any label.
 4. **Convert measurements made elsewhere** with `python3 -m uhd_gen.dataset add --into ...`:
 
    | Source | Flags | Notes |
    |---|---|---|
-   | hipdnn_bench / §8.3 CSVs | `--csv <files>` with `--engine`, `--engine-id`, `--arch`, `--selector-revision`, `--collected-at`, `--contribution-id`, and `--role` when it is not `sort_kernel_catalog` | CSV rows carry no binding, so all of it is stated; the dataset directory names the device. Where a column holds a configuration string, `--expand-descriptor <that column> --scope-by <the column naming its schema>` splits it into positional columns so a catalog ranker can tell configurations apart (e.g. `kernel.descriptor` scoped by `kernel.solver_id`); `--resolve-duplicates` / `--best-column` decide repeated rows |
+   | hipdnn_bench / §8.3 CSVs | `--csv <files>` with `--engine`, `--engine-id`, `--arch`, `--selector-revision`, `--collected-at`, and `--role` when it is not `sort_kernel_catalog`; `--label` names it | CSV rows carry no binding, so all of it is stated; the dataset directory names the device. Where a column holds a configuration string, `--expand-descriptor <that column> --scope-by <the column naming its schema>` splits it into positional columns so a catalog ranker can tell configurations apart (e.g. `kernel.descriptor` scoped by `kernel.solver_id`); `--resolve-duplicates` / `--best-column` decide repeated rows |
    | an old generate folder | `--generation <dir>` | its measurements, converted rather than re-measured |
    | raw collections | `--collection <dirs>` | as step 3 |
 
@@ -167,7 +177,7 @@ segment is the selector revision with `/` as `-`.
    for evaluation are `--purpose eval`, or they are trained on and every later evaluation on
    them is recall.
 5. **Train from stored data**: `uhd_gen generate --dataset <dataset dir>` (every training
-   contribution) or with `--contribution <ids>`; the rest of the command is as in
+   contribution) or with `--contribution <ids or labels>`; the rest of the command is as in
    [generate.md](generate.md). A descriptor engine's L1 trains from the dataset measured under its
    L2 (`under-<L2 id>`).
 6. **Size from stored data**: `uhd_gen size --dataset <dataset dir> --test-set
@@ -210,7 +220,7 @@ already) and its counts; for training, the contributions read and the model dire
 |---|---|
 | `dataset disagrees on selector_revision` / binding differs | the source was measured under another binding: another dataset |
 | `knob addressing contradicts the dataset` | the source encodes a knob differently from the rows stored; find which is stale |
-| `--csv needs ...: the rows carry no binding` | pass the flags it names (`--engine`, `--engine-id`, `--arch`, `--selector-revision`, `--collected-at`, `--contribution-id`) |
+| `--csv needs ...: the rows carry no binding` | pass the flags it names (`--engine`, `--engine-id`, `--arch`, `--selector-revision`, `--collected-at`) |
 | generate: no training data | nothing collected or converted for that engine/device/role at that revision |
 | generate: contribution not in the dataset | it is in another revision's or role's dataset, or is holdout/eval |
 | every engine declines every graph | the descriptor staging was emptied by a reconfigure: rebuild the staging targets |

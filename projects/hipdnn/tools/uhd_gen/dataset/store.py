@@ -9,20 +9,27 @@ the form training reads. A dataset is a directory:
 * `dataset.parquet` -- every converted row, tagged with its `contribution_id`, `collected_at`,
   metric `source`, `purpose` (training, holdout or eval) and `corpus_id`.
 * `dataset_manifest.json` -- one entry per contribution with what its collection manifest
-  recorded, and the binding every contribution must share.
+  recorded, the binding every contribution must share, and a `history` of every contribution
+  removed, replaced or retagged.
 
-Rows are append-only; `uhd_gen.generate.load_dataset` picks each shape's label when it reads.
+A contribution is stored under an id derived from its binding and its rows, so the same
+measurements added twice are added once and different measurements never share an id; its
+`label` is the readable name it was added under. `add` only appends. Removing, replacing and
+retagging are their own operations (`remove`, `add --replace`, `retag`).
+`uhd_gen.generate.load_dataset` picks each shape's label when it reads.
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import pathlib
 import sys
 import time
+from datetime import datetime, timezone
 from typing import Any, Iterable, Iterator
 
 import pandas as pd
@@ -50,6 +57,9 @@ SHARED = (
 )
 
 PURPOSES = ("training", "holdout", "eval")
+
+#: Hex digits of the digest a contribution id keeps.
+ID_LENGTH = 16
 
 #: The role an engine-immediate (L1) collection is taken for.
 IMMEDIATE_ROLE = "predict_engine"
@@ -140,11 +150,74 @@ def _agree(manifest: dict[str, Any], entry: dict[str, Any]) -> None:
             )
 
 
+def contribution_digest(
+    entry: dict[str, Any], rows_by_source: dict[Any, list[dict[str, Any]]]
+) -> str:
+    """The id a contribution is stored under: a digest of its binding and its rows.
+
+    The same measurements get the same id whatever they are called, and different measurements
+    never share one. What can change without the measurements changing (`label`, `purpose`,
+    `corpus_id`, `origin`) is not part of it.
+    """
+    payload = {
+        "binding": {key: entry.get(key) for key in SHARED},
+        "rows": [
+            [str(source), rows_by_source[source]]
+            for source in sorted(rows_by_source, key=str)
+        ],
+    }
+    text = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:ID_LENGTH]
+
+
+def select(
+    contributions: Iterable[dict[str, Any]], names: Iterable[str]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The contributions `names` designate, each name an id or a label, in their stored order,
+    and the names that designate none."""
+    names = set(names)
+    chosen = [
+        c
+        for c in contributions
+        if c["contribution_id"] in names or c.get("label") in names
+    ]
+    matched = {c["contribution_id"] for c in chosen} | {c.get("label") for c in chosen}
+    return chosen, sorted(names - matched)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _write_data(path: pathlib.Path, frame: pd.DataFrame) -> None:
+    if frame.empty:
+        path.unlink(missing_ok=True)
+        return
+    try:
+        _write_atomically(path, lambda target: frame.to_parquet(target, index=False))
+    except (
+        Exception
+    ) as error:  # pyarrow refuses a column whose types the rows disagree on
+        raise DatasetError(
+            f"rows cannot be stored as one Parquet table: {error}"
+        ) from None
+
+
+def _write_manifest(directory: pathlib.Path, manifest: dict[str, Any]) -> None:
+    _write_atomically(
+        directory / MANIFEST_FILE,
+        lambda path: path.write_text(
+            json.dumps(manifest, indent=1) + "\n", encoding="utf-8", newline="\n"
+        ),
+    )
+
+
 def _tag(
     entry: dict[str, Any], rows_by_source: dict[Any, list[dict[str, Any]]]
 ) -> tuple[dict, list]:
-    """The contribution's rows with the store's bookkeeping, and its entry with its columns."""
-    identity = entry["contribution_id"]
+    """The contribution's rows with the store's bookkeeping, and its entry with its id and
+    columns."""
+    identity = contribution_digest(entry, rows_by_source)
     if entry.get("purpose", "training") not in PURPOSES:
         raise DatasetError(f"purpose {entry.get('purpose')!r} is not one of {PURPOSES}")
     tagged = []
@@ -164,11 +237,14 @@ def _tag(
                 }
             )
     if not tagged:
-        raise DatasetError(f"contribution {identity} holds no rows")
+        raise DatasetError(
+            f"contribution {entry.get('label') or identity} holds no rows"
+        )
     # The keys each source's rows carried, so a row reads back without other contributions'
     # columns.
     entry = {
         **entry,
+        "contribution_id": identity,
         "columns": {
             str(source): sorted({key for row in rows for key in row})
             for source, rows in rows_by_source.items()
@@ -180,15 +256,29 @@ def _tag(
 def add_many(
     directory: pathlib.Path,
     contributions: list[tuple[dict[str, Any], dict[Any, list[dict[str, Any]]]]],
+    *,
+    replace: Iterable[str] = (),
 ) -> list[dict[str, Any]]:
     """Append contributions in one write: their rows, tagged, and their manifest entries.
 
-    Returns one {"added": bool, "rows": n, "contribution_id": id} per contribution. A
-    contribution already present is skipped. One whose rows are stored but whose manifest
+    Returns one {"added", "rows", "contribution_id", "label"} per contribution. Measurements
+    already stored (the same id) are skipped. One whose rows are stored but whose manifest
     entry is not (a write interrupted between the two files) gets its entry, never its rows a
     second time. A differing binding or contradicting knob addressing is refused, and then
     nothing of this call is written.
+
+    `replace` names contributions (ids or labels) removed in the same write, and recorded in
+    the manifest's history as replaced by these.
     """
+    return _write(directory, contributions, list(replace))[0]
+
+
+def _write(
+    directory: pathlib.Path,
+    contributions: list[tuple[dict[str, Any], dict[Any, list[dict[str, Any]]]]],
+    replace: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """`add_many`'s write; also returns the entries `replace` removed."""
     directory = pathlib.Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     prepared = [_tag(entry, rows) for entry, rows in contributions]
@@ -196,26 +286,39 @@ def add_many(
     with _locked(directory):
         manifest = read_manifest(directory)
         if manifest is None:
+            if replace or not prepared:
+                raise DatasetError(f"{directory} holds no dataset")
             first = prepared[0][0]
             manifest = {
                 "schema": DATASET_SCHEMA,
                 **{key: first.get(key) for key in SHARED},
                 "contributions": [],
             }
+        removed, unknown = select(manifest["contributions"], replace)
+        if unknown:
+            raise DatasetError(f"{directory} holds no contribution {unknown}")
+        removed_ids = {c["contribution_id"] for c in removed}
+        manifest["contributions"] = [
+            c
+            for c in manifest["contributions"]
+            if c["contribution_id"] not in removed_ids
+        ]
         present = {c["contribution_id"] for c in manifest["contributions"]}
         data = directory / DATA_FILE
+        existing = pd.read_parquet(data) if data.is_file() else None
+        if existing is not None and removed_ids:
+            existing = existing[~existing["contribution_id"].isin(removed_ids)]
         stored = (
-            pd.read_parquet(data, columns=["contribution_id"])["contribution_id"]
-            .value_counts()
-            .to_dict()
-            if data.is_file()
+            existing["contribution_id"].value_counts().to_dict()
+            if existing is not None
             else {}
         )
         fresh, frames = [], []
         for entry, tagged in prepared:
             identity = entry["contribution_id"]
+            result = {"contribution_id": identity, "label": entry.get("label")}
             if identity in present:
-                results.append({"added": False, "rows": 0, "contribution_id": identity})
+                results.append({**result, "added": False, "rows": 0})
                 continue
             _agree(manifest, entry)
             present.add(identity)
@@ -229,11 +332,9 @@ def add_many(
                     )
             else:
                 frames.append(pd.DataFrame(tagged))
-            results.append(
-                {"added": True, "rows": len(tagged), "contribution_id": identity}
-            )
-        if not fresh:
-            return results
+            results.append({**result, "added": True, "rows": len(tagged)})
+        if not fresh and not removed:
+            return results, removed
         try:
             addressing.merge_manifests(
                 [c.get("knob_encodings") for c in manifest["contributions"] + fresh]
@@ -242,28 +343,89 @@ def add_many(
             raise DatasetError(
                 f"knob addressing contradicts the dataset: {error}"
             ) from None
-        if frames:
-            if data.is_file():
-                frames.insert(0, pd.read_parquet(data))
-            frame = pd.concat(frames, ignore_index=True)
-            try:
-                _write_atomically(
-                    data, lambda path: frame.to_parquet(path, index=False)
-                )
-            except (
-                Exception
-            ) as error:  # pyarrow refuses a column whose types the rows disagree on
-                raise DatasetError(
-                    f"rows cannot be stored as one Parquet table: {error}"
-                ) from None
+        if frames or removed:
+            parts = ([] if existing is None else [existing]) + frames
+            _write_data(
+                data,
+                pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(),
+            )
         manifest["contributions"].extend(fresh)
-        _write_atomically(
-            directory / MANIFEST_FILE,
-            lambda path: path.write_text(
-                json.dumps(manifest, indent=1) + "\n", encoding="utf-8", newline="\n"
-            ),
-        )
-    return results
+        for entry in removed:
+            manifest.setdefault("history", []).append(
+                {
+                    "action": "replace" if prepared else "remove",
+                    "contribution_id": entry["contribution_id"],
+                    "label": entry.get("label"),
+                    "at": _now(),
+                    "replaced_by": [c["contribution_id"] for c in fresh],
+                    "entry": entry,
+                }
+            )
+        _write_manifest(directory, manifest)
+    return results, removed
+
+
+def remove(directory: pathlib.Path, names: Iterable[str]) -> list[dict[str, Any]]:
+    """Remove the named contributions (ids or labels), rows and entries, in one write, and
+    return their ids and labels; the manifest's history keeps each removed entry."""
+    names = list(names)
+    if not names:
+        raise DatasetError("name at least one contribution to remove")
+    return [
+        {"contribution_id": c["contribution_id"], "label": c.get("label")}
+        for c in _write(directory, [], names)[1]
+    ]
+
+
+def retag(
+    directory: pathlib.Path,
+    names: Iterable[str],
+    *,
+    purpose: str | None = None,
+    corpus_id: str | None = None,
+) -> list[str]:
+    """Change the purpose or corpus of the named contributions (ids or labels), on their
+    entries and their rows; returns their ids. The measurements, and so the ids, are kept.
+    """
+    if purpose is None and corpus_id is None:
+        raise DatasetError("retag needs --purpose or --corpus-id")
+    if purpose is not None and purpose not in PURPOSES:
+        raise DatasetError(f"purpose {purpose!r} is not one of {PURPOSES}")
+    directory = pathlib.Path(directory)
+    with _locked(directory):
+        manifest = read_manifest(directory)
+        if manifest is None:
+            raise DatasetError(f"{directory} holds no dataset")
+        chosen, unknown = select(manifest["contributions"], names)
+        if unknown or not chosen:
+            raise DatasetError(f"{directory} holds no contribution {unknown}")
+        changes = {
+            key: value
+            for key, value in (("purpose", purpose), ("corpus_id", corpus_id))
+            if value is not None
+        }
+        ids = [c["contribution_id"] for c in chosen]
+        data = directory / DATA_FILE
+        if data.is_file():
+            frame = pd.read_parquet(data)
+            mine = frame["contribution_id"].isin(ids)
+            for key, value in changes.items():
+                frame.loc[mine, key] = value
+            _write_data(data, frame)
+        for entry in chosen:
+            manifest.setdefault("history", []).append(
+                {
+                    "action": "retag",
+                    "contribution_id": entry["contribution_id"],
+                    "label": entry.get("label"),
+                    "at": _now(),
+                    "from": {key: entry.get(key) for key in changes},
+                    "to": changes,
+                }
+            )
+            entry.update(changes)
+        _write_manifest(directory, manifest)
+    return ids
 
 
 def add(
@@ -293,7 +455,7 @@ def from_collection(
     *,
     purpose: str = "training",
     corpus_id: str | None = None,
-    contribution_id: str | None = None,
+    label: str | None = None,
 ) -> tuple[dict[str, Any], dict[Any, list[dict[str, Any]]]]:
     """A raw collection (`generate --collect-only`) as a contribution."""
     collection = pathlib.Path(collection)
@@ -313,7 +475,7 @@ def from_collection(
         _check_immediate(rows_by_source)
     entry = {
         **{key: manifest.get(key) for key in manifest if key != "schema"},
-        "contribution_id": contribution_id or collection.name,
+        "label": label or collection.name,
         "origin": {"kind": "collection", "path": str(collection.resolve())},
         "purpose": purpose,
         "corpus_id": corpus_id,
@@ -326,7 +488,7 @@ def from_generation(
     *,
     purpose: str = "training",
     corpus_id: str | None = None,
-    contribution_id: str | None = None,
+    label: str | None = None,
 ) -> tuple[dict[str, Any], dict[Any, list[dict[str, Any]]]]:
     """A one-shot `generate` run's measurements, read from its model folder, as a contribution.
 
@@ -390,7 +552,7 @@ def from_generation(
         "graphs": recorded.get("graphs", []),
         "commands": recorded.get("commands", []),
         "failed_graphs": recorded.get("failed_graphs", []),
-        "contribution_id": contribution_id or f"generation-{generation.parent.name}",
+        "label": label or f"generation-{generation.parent.name}",
         "origin": {"kind": "generation", "path": str(generation.resolve())},
         "purpose": purpose,
         "corpus_id": corpus_id,
@@ -407,7 +569,7 @@ def from_csv(
     arch: str,
     selector_revision: str,
     collected_at: str,
-    contribution_id: str,
+    label: str | None = None,
     purpose: str = "training",
     corpus_id: str | None = None,
     expand_descriptor: Iterable[str] = (),
@@ -419,8 +581,9 @@ def from_csv(
     contribution. The rows carry no binding, so the caller states the engine and selector
     revision.
     """
+    csvs = [pathlib.Path(p) for p in csvs]
     frame = publish_frame(
-        [pathlib.Path(p) for p in csvs],
+        csvs,
         expand_descriptor=expand_descriptor,
         scope_by=scope_by,
         resolve_duplicates_by=resolve_duplicates_by,
@@ -465,10 +628,10 @@ def from_csv(
             "expand_descriptor": list(expand_descriptor),
             "scope_by": scope_by,
         },
-        "contribution_id": contribution_id,
+        "label": label or csvs[0].stem,
         "origin": {
             "kind": "csv",
-            "paths": [str(pathlib.Path(p).resolve()) for p in csvs],
+            "paths": [str(p.resolve()) for p in csvs],
         },
         "purpose": purpose,
         "corpus_id": corpus_id,
@@ -483,8 +646,8 @@ def export_rows(
     purposes: Iterable[str] | None = None,
     source: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Rows of the named contributions (or of every contribution with one of `purposes`), each
-    as its source wrote it: no bookkeeping, only the keys it carried.
+    """Rows of the named contributions (ids or labels; or of every contribution with one of
+    `purposes`), each as its source wrote it: no bookkeeping, only the keys it carried.
 
     `source` keeps one metric's rows where a contribution measured several; a single-metric
     contribution answers whatever `source` is.
@@ -492,19 +655,17 @@ def export_rows(
     manifest = read_manifest(directory)
     if manifest is None:
         raise DatasetError(f"{directory} holds no dataset")
-    wanted = set(contributions or [])
-    chosen = {
-        c["contribution_id"]: c
-        for c in manifest["contributions"]
-        if (
-            c["contribution_id"] in wanted
-            if wanted
-            else c.get("purpose", "training") in set(purposes or PURPOSES)
-        )
-    }
-    missing = sorted(wanted - set(chosen))
-    if missing:
-        raise DatasetError(f"{directory} holds no contribution {missing}")
+    if contributions:
+        selected, missing = select(manifest["contributions"], contributions)
+        if missing:
+            raise DatasetError(f"{directory} holds no contribution {missing}")
+    else:
+        selected = [
+            c
+            for c in manifest["contributions"]
+            if c.get("purpose", "training") in set(purposes or PURPOSES)
+        ]
+    chosen = {c["contribution_id"]: c for c in selected}
     rows = []
     for row in read_rows(directory):
         entry = chosen.get(row["contribution_id"])
@@ -554,7 +715,18 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--csv", nargs="+", type=pathlib.Path, help="§8.3 CSV files")
     parser.add_argument("--purpose", default="training", choices=PURPOSES)
     parser.add_argument("--corpus-id")
-    parser.add_argument("--contribution-id")
+    parser.add_argument(
+        "--label",
+        help="A readable name for the contribution (default: the collection's directory, the "
+        "generation's folder, or the first CSV's name); selectable wherever an id is",
+    )
+    parser.add_argument(
+        "--replace",
+        nargs="+",
+        default=[],
+        metavar="CONTRIBUTION",
+        help="Contributions (ids or labels) this one replaces, removed in the same write",
+    )
     # --csv only: the binding the rows do not carry, and publish's options.
     parser.add_argument("--engine")
     parser.add_argument("--engine-id", type=int)
@@ -571,19 +743,23 @@ def main(argv: list[str] | None = None) -> int:
     common = {
         "purpose": args.purpose,
         "corpus_id": args.corpus_id,
-        "contribution_id": args.contribution_id,
+        "label": args.label,
     }
     try:
         if args.collection:
-            if args.contribution_id and len(args.collection) > 1:
-                parser.error(
-                    "--contribution-id names one contribution; give one --collection"
-                )
+            if args.label and len(args.collection) > 1:
+                parser.error("--label names one contribution; give one --collection")
             results = add_many(
-                args.into, [from_collection(c, **common) for c in args.collection]
+                args.into,
+                [from_collection(c, **common) for c in args.collection],
+                replace=args.replace,
             )
         elif args.generation:
-            results = [add(args.into, *from_generation(args.generation, **common))]
+            results = add_many(
+                args.into,
+                [from_generation(args.generation, **common)],
+                replace=args.replace,
+            )
         else:
             missing = [
                 flag
@@ -593,7 +769,6 @@ def main(argv: list[str] | None = None) -> int:
                     ("--arch", args.arch),
                     ("--selector-revision", args.selector_revision),
                     ("--collected-at", args.collected_at),
-                    ("--contribution-id", args.contribution_id),
                 )
                 if value is None
             ]
@@ -601,10 +776,10 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error(
                     f"--csv needs {', '.join(missing)}: the rows carry no binding"
                 )
-            results = [
-                add(
-                    args.into,
-                    *from_csv(
+            results = add_many(
+                args.into,
+                [
+                    from_csv(
                         args.csv,
                         engine=args.engine,
                         engine_id=args.engine_id,
@@ -617,9 +792,10 @@ def main(argv: list[str] | None = None) -> int:
                         resolve_duplicates_by=args.resolve_duplicates,
                         best_column=args.best_column,
                         **common,
-                    ),
-                )
-            ]
+                    )
+                ],
+                replace=args.replace,
+            )
     except (DatasetError, ValidationError, ValueError, OSError) as error:
         print(f"uhd_gen.dataset add: {error}", file=sys.stderr)
         return 1
@@ -655,4 +831,53 @@ def export_main(argv: list[str] | None = None) -> int:
         return 1
     args.out.write_text(json.dumps(rows) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps({"out": str(args.out), "rows": len(rows)}))
+    return 0
+
+
+def remove_main(argv: list[str] | None = None) -> int:
+    """`python -m uhd_gen.dataset remove --from DIR --contribution NAME...`."""
+    parser = argparse.ArgumentParser(
+        prog="python -m uhd_gen.dataset remove",
+        description="Remove contributions' rows and entries; the manifest's history keeps "
+        "each removed entry.",
+    )
+    parser.add_argument("--from", dest="source", required=True, type=pathlib.Path)
+    parser.add_argument(
+        "--contribution", nargs="+", required=True, help="Contribution ids or labels"
+    )
+    args = parser.parse_args(argv)
+    try:
+        removed = remove(args.source, args.contribution)
+    except DatasetError as error:
+        print(f"uhd_gen.dataset remove: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps({"dataset": str(args.source), "removed": removed}))
+    return 0
+
+
+def retag_main(argv: list[str] | None = None) -> int:
+    """`python -m uhd_gen.dataset retag --in DIR --contribution NAME... [--purpose P]
+    [--corpus-id C]`."""
+    parser = argparse.ArgumentParser(
+        prog="python -m uhd_gen.dataset retag",
+        description="Change contributions' purpose or corpus; their measurements are kept.",
+    )
+    parser.add_argument("--in", dest="target", required=True, type=pathlib.Path)
+    parser.add_argument(
+        "--contribution", nargs="+", required=True, help="Contribution ids or labels"
+    )
+    parser.add_argument("--purpose", choices=PURPOSES)
+    parser.add_argument("--corpus-id")
+    args = parser.parse_args(argv)
+    try:
+        ids = retag(
+            args.target,
+            args.contribution,
+            purpose=args.purpose,
+            corpus_id=args.corpus_id,
+        )
+    except DatasetError as error:
+        print(f"uhd_gen.dataset retag: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps({"dataset": str(args.target), "retagged": ids}))
     return 0
