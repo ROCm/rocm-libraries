@@ -1138,6 +1138,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       isBarrier = self.states.syncPlrMfmaIndex // self.states.numMfmaPerIter
     hasLocalRead = countLocalRead(localReadCode)
     scheduleIterAlg = self.states.scheduleIterAlg
+    # ForceUnrollSubIter + single buffer: next-loop local reads refill sub-tile 0 of
+    # buffer X0 while the last MFMAs still read sub-tile 1. When one local read spans
+    # more tile elements than a sub-tile (lrvwTile > MIWaveTile/numSubTiles), it also
+    # overwrites sub-tile 1 (WAR), so the reads must be issued after the MFMAs.
+    def _nextLoopReadSpansSubTiles(lrvwTile, waveTile):
+      return lrvwTile > waveTile // kernel["numSubTiles"]
+    deferNextLoopReadsWAR = kernel["ForceUnrollSubIter"] and self.states.numVgprBuffer == 1 \
+                            and not kernel["UseF32XEmulation"] \
+                            and (_nextLoopReadSpansSubTiles(self.states.lrvwTileA, kernel["MIWaveTile"][0]) \
+                                 or _nextLoopReadSpansSubTiles(self.states.lrvwTileB, kernel["MIWaveTile"][1]))
     if (NLLlast and tailloopInNll):
       # use scheduleIterAlg = 0 for NLLlast and tailloopInNll case
       scheduleIterAlg = 0
@@ -1214,12 +1224,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       iterCode.add(waitLWCode)
       iterCode.add(syncCode)
 
-      # ForceUnrollSubIter + single buffer + complex GEMM: defer next-loop local
-      # reads until after MFMAs to prevent WAR hazard on shared VGPR buffer X0.
-      # F32X emulation kernels have ForceUnrollSubIter but no WAR hazard (reads
-      # and MFMAs target disjoint VGPR ranges within the buffer).
-      deferNextLoopReads = (kernel["ForceUnrollSubIter"] and self.states.numVgprBuffer == 1
-                            and not kernel["UseF32XEmulation"]
+      deferNextLoopReads = (deferNextLoopReadsWAR
                             and self.states.numItersPLR and iteration >= isBarrier)
       deferredReadItems = []
 
@@ -2161,7 +2166,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             startLR = numMfmaPerIter - numMfmaForLR
             if self.states.doPackPreSchedulingNextLoop:
               startLR = min(numMfmaPerIter -1 , (self.states.syncPlrMfmaIndex % numMfmaPerIter) + 1)
-            if kernel["ForceUnrollSubIter"] and self.states.numVgprBuffer == 1 and not kernel["UseF32XEmulation"]:
+            if deferNextLoopReadsWAR:
               startLR = numMfmaPerIter
             if i < startLR:
               readLeftLREven = 0
@@ -2169,13 +2174,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             # rest mfma help to schedule those localReads
             else:
               readLeftLREven = numReadsInst / (numMfmaPerIter - i)
-          # ForceUnrollSubIter + single buffer + complex GEMM: suppress ALL
-          # next-loop reads at iterations after barrier to avoid WAR hazard.
-          # Reads will be flushed after MFMAs complete for this iteration.
-          # F32X emulation excluded: reads and MFMAs use disjoint VGPR ranges.
-          if kernel["ForceUnrollSubIter"] and self.states.numVgprBuffer == 1 and not kernel["UseF32XEmulation"] and iteration > isBarrier:
-            readLeftLREven = 0
-            readLeftLROPT = 0
           # if there are too many localreads, change strategy to even.
           readLeft = checkLocalReadFIFOFull(mfmaIndex, self.localReadNextLoopFIFO, localReadItemsNextLoop, readLeftLROPT, readLeftLREven)
         for j in range(readLeft):
@@ -2707,7 +2705,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             iterCode.add(SSetPrior(prior=0, comment="store optimization"))
       while macIterItems:
         iterCode.add(macIterItems.pop(0))
-      if kernel["ForceUnrollSubIter"] and self.states.numVgprBuffer == 1 and not kernel["UseF32XEmulation"]:
+      if deferNextLoopReadsWAR:
         while localReadItemsNextLoop:
           iterCode.add(localReadItemsNextLoop.pop(0))
     else:
@@ -7226,8 +7224,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       stinky_module_options["PrefetchLeadWmmas"] = \
         4 if not kernel["HalfPLR"] else \
         25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 40
+      # ds_load issue cap shape (see GlobalParameters); 0/0 keeps the scheduler defaults.
+      stinky_module_options["DsIssueCapMode"] = int(globalParameters.get("StinkyTofuDsIssueCapMode") or 0)
+      stinky_module_options["DsIssueCapSpanCycles"] = int(globalParameters.get("StinkyTofuDsIssueCapSpanCycles") or 0)
       if self.states.localReadSideOrder[0] == "B":
         stinky_module_options["DsReadOrder"] = 0  # Preserve selected B-then-A emission.
+      # Tuning overrides from GlobalParameters win over the values above.
+      stinky_module_options.update(globalParameters.get("StinkyTofuModuleOptions") or {})
 
       print2(f"StinkyTofu module options: {stinky_module_options}")
       # Convert rocisa module to stinkytofu with signature

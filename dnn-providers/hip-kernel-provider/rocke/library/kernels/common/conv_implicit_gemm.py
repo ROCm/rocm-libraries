@@ -633,12 +633,18 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     # builder would otherwise only find out halfway through a build. The
     # wavelet loaders pick their own width, so they cannot fail this way.
     if spec.async_dma:
+        if target.async_lds_max_dwords < 1:
+            return False, f"async_dma: {arch} has no DRAM->LDS DMA instruction"
         try:
-            async_tile_loaders(spec)
+            async_tile_loaders(spec, arch)
         except ValueError:
+            # Includes the arch width cap: on an arch whose buffer_load_lds
+            # only moves a dword per lane, a tile that needs a wider chunk to
+            # divide evenly over the block has no valid async configuration.
             return False, (
                 f"async_dma: no usable chunk width for the A/B tiles with "
-                f"block_size {spec.block_size}"
+                f"block_size {spec.block_size} and at most "
+                f"{target.async_lds_max_dwords} dword(s) per lane on {arch}"
             )
     elif spec.pipeline != "wavelet":
         try:
@@ -1206,8 +1212,9 @@ def _build_implicit_gemm_conv_impl(
         # Async DRAM -> LDS via `raw_ptr_buffer_load_lds`. Each wave
         # writes lane-contiguous LDS at the wave-uniform base computed
         # by AsyncTileLoader. Consumers (the MFMA phase) must place an
-        # `s_waitcnt(vmcnt=0)` before the first ds_read.
-        a_loader, b_loader = async_tile_loaders(spec)
+        # `s_waitcnt(vmcnt=0)` before the first ds_read. The chunk width is
+        # capped by the arch (CDNA3 moves only a dword per lane to LDS).
+        a_loader, b_loader = async_tile_loaders(spec, arch)
         a_sync_loader = None
         b_sync_loader = None
     else:
@@ -1909,7 +1916,7 @@ def _build_implicit_gemm_conv_impl(
 
 
 def async_tile_loaders(
-    spec: "ImplicitGemmConvSpec",
+    spec: "ImplicitGemmConvSpec", arch: str = "gfx950"
 ) -> Tuple[AsyncTileLoader, AsyncTileLoader]:
     """The A and B loaders of the ``async_dma`` path, built from ``spec``.
 
@@ -1921,14 +1928,25 @@ def async_tile_loaders(
     cpg its chunk widths divide. That makes them a capability of the binary,
     which is why this is a function the kernel cache can call too rather than
     inline builder code.
+
+    ``arch`` caps the chunk width at what the target's ``buffer_load_lds`` can
+    actually move per lane (``ArchTarget.async_lds_max_dwords``): CDNA3 has
+    only the dword form, the b96/b128 forms arrived with CDNA4. Passing a
+    wider one is not a compile error -- the AMDGPU backend aborts the process
+    with ``LLVM ERROR: Do not know how to expand this operator's operand!`` --
+    so the cap has to be applied here, where the width is chosen.
     """
+    from rocke.core.arch import ArchTarget
+
     p = spec.problem
+    max_dwords = ArchTarget.from_gfx(arch).async_lds_max_dwords
     a_loader = AsyncTileLoader.from_tile(
         tile_rows=spec.tile_m,
         tile_cols=spec.tile_k,
         block_size=spec.block_size,
         wave_size=spec.wave_size,
         elem_dtype=_ir_dtype(spec.data.dtype_a),
+        max_dwords=max_dwords,
         contig_cols=p.cpg,
     )
     b_loader = AsyncTileLoader.from_tile(
@@ -1937,6 +1955,7 @@ def async_tile_loaders(
         block_size=spec.block_size,
         wave_size=spec.wave_size,
         elem_dtype=_ir_dtype(spec.data.dtype_b),
+        max_dwords=max_dwords,
         contig_cols=p.cpg,
     )
     return a_loader, b_loader
