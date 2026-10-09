@@ -11,7 +11,9 @@
 #include <cstring>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace tilewright {
@@ -222,6 +224,34 @@ KernelShape kernel_shape(const Config& c) {
   return k;
 }
 
+std::vector<std::uint8_t> family_bits(const std::vector<Config>& configs) {
+  struct Family {
+    std::uint8_t members = 0;
+    std::pair<int, int> lowest{std::numeric_limits<int>::max(), std::numeric_limits<int>::max()};
+  };
+  const auto family_of = [](const Config& c) {
+    return std::array<std::size_t, 6>{c.mt.m, c.mt.n, c.mt.k, c.mi.m, c.mi.n, c.mi.k};
+  };
+  std::map<std::array<std::size_t, 6>, Family> families;
+  for (const Config& c : configs) {
+    Family& f = families[family_of(c)];
+    if (c.cache_hints_a == 0 && c.cache_hints_b == 0) f.members |= kFamilyPlain;
+    if (c.cache_hints_a == 4) f.members |= kFamilyNtA;
+    if (c.cache_hints_b == 4) f.members |= kFamilyNtB;
+    f.lowest = std::min(f.lowest, std::make_pair(c.cache_hints_a, c.cache_hints_b));
+  }
+  std::vector<std::uint8_t> out;
+  out.reserve(configs.size());
+  for (const Config& c : configs) {
+    const Family& f = families[family_of(c)];
+    const std::pair<int, int> kept =
+        (f.members & kFamilyPlain) != 0 ? std::make_pair(0, 0) : f.lowest;
+    const bool fallback = std::make_pair(c.cache_hints_a, c.cache_hints_b) == kept;
+    out.push_back(static_cast<std::uint8_t>(f.members | (fallback ? kFamilyFallback : 0)));
+  }
+  return out;
+}
+
 Feasibility::Feasibility(const Problem& p,
                          const Hardware& hardware,
                          bool nt_a_available,
@@ -249,6 +279,19 @@ Feasibility::Feasibility(const Problem& p,
   skinny_a_          = a_trans && skinny(M_, a_bits_, N_, b_bits);
   nt_a_              = nt_a_available;
   nt_b_              = nt_b_available;
+  family_ = soft.non_temporal && soft.non_temporal_family && in_family_region(M_, N_, K, p.batch);
+}
+
+bool Feasibility::family_keeps(bool aligned, bool by_b, bool by_a, unsigned family) const {
+  if (!family_) return false;
+  if (aligned && by_b) return nt_b_ && (family & kFamilyNtB) == 0;
+  if (aligned && by_a) return nt_a_ && (family & kFamilyNtA) == 0;
+  return (family & kFamilyPlain) == 0;
+}
+
+void Feasibility::family_keep_table(unsigned char keep[64]) const {
+  for (unsigned u = 0; u < 64; ++u)
+    keep[u] = family_keeps(u & 1, (u >> 1) & 1, (u >> 2) & 1, u >> 3) ? 1 : 0;
 }
 
 bool never_feasible(const CellBounds& b,
@@ -262,6 +305,11 @@ bool never_feasible(const CellBounds& b,
       b.k_hi < 1024 && (k.mt_m < b.m_lo || k.mt_n < b.n_lo))
     return true;
   if (!soft.non_temporal || (k.cache_hints_a == 0 && k.cache_hints_b == 0)) return false;
+  // A family's kept member may pass anywhere in the family-wise rule's region.
+  if (soft.non_temporal_family && (k.family & kFamilyFallback) != 0 && b.batch_many &&
+      b.k_lo <= 512 &&
+      ((b.m_lo <= 32 && b.n_hi > 32) || (b.m_lo <= 128 && b.m_hi > 32 && b.n_lo <= 32)))
+    return false;
   // A hinted kernel passes only through the skinny branches of rules_pass.
   const auto half = [](std::uint64_t v) { return (v >> 1) + (v & 1); };
   const bool no_b = half(b.m_lo) > k.mt_m || (nt_b_available && k.cache_hints_b != 4);

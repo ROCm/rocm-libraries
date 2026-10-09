@@ -48,7 +48,23 @@ struct ModelInfo {
   bool small_batched_rule  = true;
   bool dot2_rule           = true;
   bool non_temporal_rule   = true;
-  bool clip                = false;
+  // MLREC_v3: batched problems with K <= 512 that are thin along exactly one
+  // of M and N (M <= 32 < N, or 32 < M <= 128 with N <= 32) keep one signature
+  // of each kernel family (equal mt and mi) the non-temporal rule rejects
+  // whole: its hint-free one, else the one with the lowest (cache_hints_a,
+  // cache_hints_b), with every kernel of it whatever its attributes or launch
+  // key.
+  bool non_temporal_family_rule = false;
+  bool clip                     = false;
+  // MLREC_v3: the model was trained on the integration's bank as well as its
+  // table, so an integration with a bank serves both. Ranking does not read it.
+  bool bank = false;
+  // MLREC_v3: only kernels whose view key had training data (the file lists
+  // `trained_keys` of them) are scored, unless none of them is feasible for
+  // the problem; then every feasible kernel is (CandidateSet::untrained_keys).
+  // What the non-temporal rule reads of the pool still counts every kernel.
+  bool trained_key_gate    = false;
+  std::size_t trained_keys = 0;
   // Base grid labels with no node in the split tree. An MLREC_v3 model scores
   // their problems through the nearest base label that has a trained cell.
   std::size_t uncovered_base_labels = 0;
@@ -177,6 +193,12 @@ class CandidateSet {
 
   const Model& model() const noexcept;
   const std::vector<Config>& configs() const noexcept;
+
+  // The groups of configs a model with the trained-key gate
+  // (ModelInfo::trained_key_gate) leaves out while a trained one is feasible,
+  // and their configs; 0 for any other model.
+  std::size_t untrained_keys() const noexcept;
+  std::size_t untrained_configs() const noexcept;
 
   // Ranks for exclusive use of the device (a default ExecutionContext).
   // Returns one Result per config. Scored configs come first: survivors of the

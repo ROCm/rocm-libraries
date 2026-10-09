@@ -92,7 +92,16 @@ base index), and scores it with the first trained cell found.
    while every other problem rejects hinted kernels. MLREC_v2 models apply the
    first two soft rules and the non-temporal rule unless their file says they
    are served without it; MLREC_v3 models apply each soft rule only when their
-   serving flags switch it on;
+   serving flags switch it on. An MLREC_v3 model may also refine the
+   non-temporal rule family-wise: for a batched problem with K ≤ 512 that is
+   thin along exactly one of M and N (M ≤ 32 < N, or 32 < M ≤ 128 with
+   N ≤ 32), a kernel family (the pool's kernels with equal `mt` and `mi`)
+   whose every member the rule rejects keeps one of its signatures, the
+   hint-free one if it has one, else the one with the lowest
+   `(cache_hints_a, cache_hints_b)`. The rule then passes every kernel of that
+   signature, so with spec attributes or launch keys a family can keep
+   several candidates. A `CandidateSet` finds each kernel's family once, when
+   it is built;
 3. the cell's whitelist: kernel signatures
    `(mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, cache_hints_a, cache_hints_b)` and, in
    MLREC_v3 files, view-key hashes (see below). An MLREC_v3 model whose serving
@@ -102,6 +111,17 @@ The feasible whitelisted kernels form tier 1. If the whitelist rejects every
 feasible kernel, all feasible kernels form tier 1. When the caller asks for
 more results than tier 1 holds (`min_scored`), the other feasible kernels are
 scored as tier 2.
+
+An MLREC_v3 model with the trained-key gate lists the view keys (see below)
+that had training data. A `CandidateSet` marks the pool's other kernels when
+it is built, and the tiers hold only listed kernels unless no listed kernel
+is feasible for the problem; then every feasible kernel takes part as above.
+A model never trained on a kernel's view key cannot rank it reliably, so a
+pool that grows after training ranks what the model knows. The gate does not
+change what the non-temporal rule reads from the pool: whether it holds a
+non-temporal variant of each operand, and which signature each family keeps,
+count every kernel, listed or not, so kernels added after training can still
+change which listed kernels that rule passes.
 
 A model with a cascade width K (in its file) scores a tier 1 that is not a
 whitelist, and in an MLREC_v3 model also tier 2, in two stages when the tier
@@ -217,7 +237,7 @@ A model file is little-endian:
 | q_dim, i_dim, x_dim | `u32` each | 55, 12, 37 |
 | n_cells, n_splits | `u32` each | |
 | feature_catalog_hash | `u16` length + ASCII | must equal `feature_catalog_hash()` |
-| arch | `u16` length + ASCII | for example `gfx950`, `gfx1250v0` |
+| arch | `u16` length + ASCII | for example `gfx950`, `gfx1250-strict` |
 | parallel_mi_cu | `f64` | > 0 |
 | bw_c0, bw_c1, bw_c2 | `f64` each | `bw_occ = min(1, c0*a*a + c1*a + c2)`, `a = min(total tiles, N_CU)` |
 | mi_default_cycles | `f64` | cycles for an MI shape missing from the table |
@@ -260,12 +280,13 @@ width) must be 0. The header tail is:
 | arch | `u16` length + ASCII | |
 | parallel_mi_cu, mi_default_cycles | `f64` each | > 0 |
 | n_mi, MI table | as in v2 | |
-| serving_flags | `u32` | bit 0 small-batched rule, bit 1 Dot2 rule, bit 2 non-temporal rule (each applied when set), bit 3 no whitelist tier, bit 4 launch keys (the pool is grouped by launch key); other bits 0 |
+| serving_flags | `u32` | bit 0 small-batched rule, bit 1 Dot2 rule, bit 2 non-temporal rule (each applied when set), bit 3 no whitelist tier, bit 4 launch keys (the pool is grouped by launch key), bit 5 family-wise non-temporal rule (only with bit 2), bit 6 trained on the integration's bank as well as its table (ranking ignores it; an integration with a bank serves both), bit 7 trained-key gate; other bits 0 |
 | cascade_keys | `u32` | the cascade width, 0 for none |
 | min_cu_fraction, max_cu_fraction | `f64` each | `0 < min <= max <= 1`: the `N_eff / N_CU` the model supports |
 | schedules | `u8` | bit 0 Default, bit 1 Dynamic, bit 2 Auto; not 0 |
 | clip | `u8` | 1: cells carry feature bounds |
 | n_attributes | `u16` | at most 64, then per attribute: `u16`+name, `i64` default, `u8` transform (0 identity, 1 log2p1, 2 nonzero, 3 onehot) and, for onehot, `u16` value count (1-64) and distinct `i64` values |
+| trained keys | with bit 7 only | `u32` count (at least 1), then that many `u64` view-key hashes, strictly ascending: the view keys with training data |
 | provenance | optional | present when header bytes remain: `u16` entry count (1-5), then per entry a `u16`+key and a `u16`+value (printable ASCII without spaces), the keys `config_id`, `training_data_hash`, `source_revision`, `date` and `launch_model`, each at most once |
 
 `i_dim` is 8 plus the attribute features: one per identity, log2p1 and
@@ -430,8 +451,12 @@ if (!tilewright::supports(*model, context, hw)) { /* use another ranking */ }
 - `route(model, problem)` and `cell_label(model, cell)` expose routing;
   `describe(model)` returns the arch, hash, weight type and sizes, the bytes of
   the packed weights and of the fp32 weights of every cell, and for v3
-  the spec hash, supported contexts, serving flags, the number of base
+  the spec hash, supported contexts, serving flags (with `bank`, which an
+  integration reads to decide whether it serves its bank, and the number of
+  view keys the trained-key gate lists), the number of base
   labels without a trained cell and the provenance the file records;
+  `CandidateSet::untrained_keys()` and `untrained_configs()` count the pool's
+  kernels the gate leaves out;
   `compute_features(model, problem, config, hardware[, context[, plan]])`
   returns the raw (unwhitened, unclamped) feature vectors for the config
   launched as `plan` (default `LaunchPlan{}`).

@@ -92,6 +92,9 @@ struct ModelSpec {
   std::uint8_t schedules         = 1;
   std::uint8_t clip              = 0;
   std::vector<AttrSpec> attributes;
+  // The trained-key section, written as given when the serving flags ask
+  // for the trained-key gate (0x80).
+  std::vector<std::uint64_t> trained_keys;
   // Written instead of the spec's hash when nonzero.
   std::uint64_t spec_hash_override = 0;
   // MLREC_v3 provenance entries (key, value), written when not empty, then

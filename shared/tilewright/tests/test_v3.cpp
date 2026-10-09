@@ -18,6 +18,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace tw = tilewright;
@@ -370,7 +371,20 @@ TEST_CASE("v3 header defects are rejected", "[v3][loader]") {
   CHECK(mentions(with([](ModelSpec& s) { s.i_dim += 1; }), "feature dims"));
   CHECK(mentions(with([](ModelSpec& s) { s.q_dim = 55; }), "feature dims"));
   CHECK(mentions(with([](ModelSpec& s) { s.x_dim = 37; }), "feature dims"));
-  CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x20; }), "unknown serving flags"));
+  CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x100; }), "unknown serving flags"));
+  CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x20; }),
+                 "without the non-temporal rule"));
+  CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x80; }), "no trained key"));
+  CHECK(mentions(with([](ModelSpec& s) {
+                   s.v3_serving_flags = 0x80;
+                   s.trained_keys     = {7, 5};
+                 }),
+                 "not strictly ascending"));
+  CHECK(mentions(with([](ModelSpec& s) {
+                   s.v3_serving_flags = 0x80;
+                   s.trained_keys     = {5, 5};
+                 }),
+                 "not strictly ascending"));
   CHECK(mentions(with([](ModelSpec& s) { s.min_cu_fraction = 0.0; }), "CU fraction"));
   CHECK(mentions(with([](ModelSpec& s) { s.min_cu_fraction = -0.5; }), "CU fraction"));
   CHECK(mentions(with([](ModelSpec& s) {
@@ -1583,32 +1597,40 @@ TEST_CASE("pruning and the feasibility shortcuts agree with the rules", "[v3][ru
     soft.dot2_small_m           = rnd.below(2) != 0;
     soft.non_temporal           = rnd.below(4) != 0;
     soft.leading_free           = rnd.below(2) != 0;
+    soft.non_temporal_family    = rnd.below(2) != 0;
     tw::detail::CellBounds b;
-    b.reached                          = true;
-    b.m_lo                             = rnd.pick<std::uint64_t>({1, 2, 3, 33, 129, 513});
-    b.m_hi                             = b.m_lo + rnd.pick<std::uint64_t>({0, 31, 200, 5000});
-    b.n_lo                             = rnd.pick<std::uint64_t>({1, 2, 33, 129, 513});
-    b.n_hi                             = b.n_lo + rnd.pick<std::uint64_t>({0, 31, 200, 5000});
-    b.k_hi                             = rnd.pick<std::uint64_t>({32, 512, 1023, 9000});
-    b.batch_one                        = rnd.below(2) != 0;
-    const std::vector<tw::Config> pool = rnd.pool(12, 12);
+    b.reached                    = true;
+    b.m_lo                       = rnd.pick<std::uint64_t>({1, 2, 3, 33, 129, 513});
+    b.m_hi                       = b.m_lo + rnd.pick<std::uint64_t>({0, 31, 200, 5000});
+    b.n_lo                       = rnd.pick<std::uint64_t>({1, 2, 33, 129, 513});
+    b.n_hi                       = b.n_lo + rnd.pick<std::uint64_t>({0, 31, 200, 5000});
+    b.k_hi                       = rnd.pick<std::uint64_t>({32, 512, 1023, 9000});
+    b.k_lo                       = std::min(b.k_hi, rnd.pick<std::uint64_t>({1, 33, 513}));
+    const int batches            = static_cast<int>(rnd.below(3));
+    b.batch_one                  = batches != 1;
+    b.batch_many                 = batches != 0;
+    std::vector<tw::Config> pool = rnd.pool(12, 12);
+    for (tw::Config& c : pool) c.cache_hints_b = rnd.pick<int>({0, 0, 1, 4});
+    const std::vector<std::uint8_t> family = tw::detail::family_bits(pool);
     std::vector<tw::detail::KernelShape> shapes;
     bool nt_a = false, nt_b = false;
-    for (tw::Config c : pool) {
-      c.cache_hints_b = rnd.pick<int>({0, 0, 1, 4});
-      shapes.push_back(tw::detail::kernel_shape(c));
-      nt_a |= c.cache_hints_a == 4;
-      nt_b |= c.cache_hints_b == 4;
+    for (std::size_t i = 0; i < pool.size(); ++i) {
+      shapes.push_back(tw::detail::kernel_shape(pool[i]));
+      shapes.back().family = family[i];
+      nt_a |= pool[i].cache_hints_a == 4;
+      nt_b |= pool[i].cache_hints_b == 4;
     }
     tw::detail::PlainBounds plain, hinted_bounds;
     for (const tw::detail::KernelShape& k : shapes)
       (k.cache_hints_a == 0 && k.cache_hints_b == 0 ? plain : hinted_bounds).include(k);
     for (int i = 0; i < 20; ++i) {
       tw::Problem p = rnd.problem();
-      p.size        = {in(b.m_lo, b.m_hi), in(b.n_lo, b.n_hi), in(1, b.k_hi)};
+      p.size        = {in(b.m_lo, b.m_hi), in(b.n_lo, b.n_hi), in(b.k_lo, b.k_hi)};
       if (rnd.below(2) != 0) p.size.k = 64 * in(1, std::max<std::uint64_t>(b.k_hi / 64, 1));
-      p.size.k = std::min<std::uint64_t>(p.size.k, b.k_hi);
-      p.batch  = b.batch_one ? rnd.pick<std::size_t>({1, 2}) : rnd.pick<std::size_t>({2, 8});
+      p.size.k = std::min<std::uint64_t>(std::max(p.size.k, b.k_lo), b.k_hi);
+      p.batch  = batches == 0   ? 1
+                 : batches == 1 ? rnd.pick<std::size_t>({2, 8})
+                                : rnd.pick<std::size_t>({1, 2});
       const tw::detail::Feasibility rules(p, hw, nt_a, nt_b, soft);
       const bool all_pass = rules.all_pass(plain), hinted = rules.hinted_may_pass();
       const bool all_but_non_temporal        = rules.all_but_non_temporal_pass(plain);
@@ -1617,7 +1639,8 @@ TEST_CASE("pruning and the feasibility shortcuts agree with the rules", "[v3][ru
         return rules.non_temporal_rule(rules.tile_aligned(k.mt_k % 1024),
                                        rules.b_branch(k.mt_m),
                                        rules.a_branch(k.mt_n),
-                                       tw::detail::hint_class(k.cache_hints_a, k.cache_hints_b));
+                                       tw::detail::hint_class(k.cache_hints_a, k.cache_hints_b),
+                                       k.family);
       };
       if (all_pass) CHECK(all_but_non_temporal);
       for (const tw::detail::KernelShape& k : shapes) {
@@ -1729,6 +1752,410 @@ TEST_CASE("v3 pools rank alike through every entry point", "[v3][pool]") {
                 *m, p, test_hardware(), ctx, pool, min_scored, tw::TieBreak::PoolOrder)));
         CHECK(same_results(set.rank_top(p, test_hardware(), ctx, min_scored),
                            scored_prefix(a, min_scored)));
+      }
+    }
+  }
+}
+
+namespace {
+
+// MLREC_v3 serving flags of the non-temporal rule, the whitelist switch, the
+// family-wise rule, the bank and the trained-key gate.
+constexpr std::uint32_t kNonTemporal = 0x04;
+constexpr std::uint32_t kNoWhitelist = 0x08;
+constexpr std::uint32_t kFamilyRule  = 0x20;
+constexpr std::uint32_t kBank        = 0x40;
+constexpr std::uint32_t kGate        = 0x80;
+
+// The non-temporal rule as lib/feasibility.py states it, refined family-wise
+// over `pool` when `family` is set: per config, whether it passes.
+std::vector<bool> reference_non_temporal(const tw::Problem& p,
+                                         const std::vector<tw::Config>& pool,
+                                         bool family) {
+  const auto bits = [](tw::DataType d) -> std::uint64_t {
+    switch (d) {
+      case tw::DataType::Float:
+      case tw::DataType::XFloat32: return 32;
+      case tw::DataType::Float8:
+      case tw::DataType::Float8_fnuz:
+      case tw::DataType::BFloat8:
+      case tw::DataType::BFloat8_fnuz: return 8;
+      default: return 16;
+    }
+  };
+  const std::uint64_t M = p.size.m, N = p.size.n, K = p.size.k;
+  const std::uint64_t a = bits(p.a_dtype), b = bits(p.b_dtype);
+  const bool a_trans = p.a_transpose == tw::Transpose::T;
+  const bool b_trans = p.b_transpose == tw::Transpose::T;
+  bool nt_a = false, nt_b = false;
+  for (const tw::Config& c : pool) {
+    nt_a = nt_a || c.cache_hints_a == 4;
+    nt_b = nt_b || c.cache_hints_b == 4;
+  }
+  std::vector<bool> pass;
+  for (const tw::Config& c : pool) {
+    const bool aligned = K * a % 1024 == 0 && c.mt.k * a % 1024 == 0;
+    const bool to_b = M <= 2 * c.mt.m && !b_trans && N * b / std::max<std::uint64_t>(M * a, 1) > 5;
+    const bool to_a =
+        !to_b && N <= 2 * c.mt.n && a_trans && M * a / std::max<std::uint64_t>(N * b, 1) > 5;
+    const bool hinted = c.cache_hints_a != 0 || c.cache_hints_b != 0;
+    pass.push_back(aligned ? !((to_b && nt_b && c.cache_hints_b != 4) ||
+                               (to_a && nt_a && c.cache_hints_a != 4) || (!to_b && !to_a && hinted))
+                           : !hinted);
+  }
+  const bool region =
+      p.batch > 1 && K <= 512 && ((M <= 32 && N > 32) || (M > 32 && M <= 128 && N <= 32));
+  if (!family || !region) return pass;
+  const auto same_family = [](const tw::Config& x, const tw::Config& y) {
+    return x.mt.m == y.mt.m && x.mt.n == y.mt.n && x.mt.k == y.mt.k && x.mi.m == y.mi.m &&
+           x.mi.n == y.mi.n && x.mi.k == y.mi.k;
+  };
+  std::vector<bool> out = pass;
+  for (std::size_t i = 0; i < pool.size(); ++i) {
+    bool any = false, plain = false;
+    std::pair<int, int> lowest{std::numeric_limits<int>::max(), 0};
+    for (std::size_t j = 0; j < pool.size(); ++j) {
+      if (!same_family(pool[i], pool[j])) continue;
+      any    = any || pass[j];
+      plain  = plain || (pool[j].cache_hints_a == 0 && pool[j].cache_hints_b == 0);
+      lowest = std::min(lowest, std::make_pair(pool[j].cache_hints_a, pool[j].cache_hints_b));
+    }
+    const std::pair<int, int> kept = plain ? std::make_pair(0, 0) : lowest;
+    if (!any && std::make_pair(pool[i].cache_hints_a, pool[i].cache_hints_b) == kept) out[i] = true;
+  }
+  return out;
+}
+
+bool lds_fits(const tw::Problem& p, const tw::Config& c) {
+  const tw::Hardware hw = test_hardware();
+  return tw::detail::check_lds_capacity(hw, c.mt, p.a_dtype, p.b_dtype);
+}
+
+// The configs a v3 model with `flags` (no cascade) scores for `p`, ascending,
+// after checking that every entry point agrees.
+std::vector<std::size_t> scored_under(std::uint32_t flags,
+                                      const tw::Problem& p,
+                                      const std::vector<tw::Config>& pool,
+                                      std::vector<std::uint64_t> trained = {}) {
+  ModelSpec spec        = v3_grid({});
+  spec.v3_serving_flags = flags;
+  spec.trained_keys     = std::move(trained);
+  const tw::ModelPtr m  = load_spec(spec);
+  const tw::Hardware hw = test_hardware();
+  const tw::ExecutionContext ctx;
+  const std::vector<tw::Result> r = tw::rank_configs(*m, p, hw, ctx, pool, kAll);
+  const tw::CandidateSet lazy(m, pool), ready(m, pool);
+  ready.prepare();
+  CHECK(same_results(lazy.rank(p, hw, ctx, kAll), r));
+  CHECK(same_results(ready.rank(p, hw, ctx, kAll), r));
+  CHECK(same_results(ready.rank_top(p, hw, ctx, 3), scored_prefix(r, 3)));
+  std::vector<std::size_t> out = scored_indices(r);
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("v3 models describe the family-wise rule, the bank and the trained-key gate",
+          "[v3][loader]") {
+  ModelSpec spec            = v3_one_cell("Large|Large|LargeK|Bnone", sample_attributes());
+  const tw::ModelInfo plain = tw::describe(*load_spec(spec));
+  CHECK_FALSE(plain.non_temporal_family_rule);
+  CHECK_FALSE(plain.bank);
+  CHECK_FALSE(plain.trained_key_gate);
+  CHECK(plain.trained_keys == 0);
+
+  spec.v3_serving_flags   = kNonTemporal | kFamilyRule | kBank | kGate;
+  spec.trained_keys       = {3, 9, 0xFFFFFFFFFFFFFFFFull};
+  spec.provenance         = {{"config_id", "cfg"}};
+  const tw::ModelPtr m    = load_spec(spec);
+  const tw::ModelInfo all = tw::describe(*m);
+  CHECK(all.non_temporal_rule);
+  CHECK(all.non_temporal_family_rule);
+  CHECK(all.bank);
+  CHECK(all.trained_key_gate);
+  CHECK(all.trained_keys == 3);
+  CHECK(all.provenance.config_id == "cfg");
+  CHECK(m->trained_keys == std::vector<std::uint64_t>{3, 9, 0xFFFFFFFFFFFFFFFFull});
+
+  Image image = write_model(spec);
+  put_u32(image, image.at.at("n_trained_keys"), 1000);
+  CHECK(mentions(load_error(image), "exceeds the header"));
+  // Without the gate's flag the section is not read, so its bytes are an
+  // error where the header ends.
+  image = write_model(spec);
+  put_u32(image, image.at.at("v3_serving_flags"), kNonTemporal);
+  CHECK_FALSE(load_error(image).empty());
+}
+
+TEST_CASE("the family-wise rule keeps one member of a family the rule rejects whole",
+          "[v3][rules][family]") {
+  // Families: H has only hinted members, Q a hint-free member and no NTB4
+  // member, R an NTB4 member; P gives the pool both NT4 variants.
+  std::vector<tw::Config> pool = {make_config(8, 512, 32, 4, 4, 4, 3, 1),  // 0 H
+                                  make_config(8, 512, 32, 4, 4, 4, 1, 1),  // 1 H, its lowest hints
+                                  make_config(16, 128, 32),                // 2 P
+                                  make_config(16, 128, 32, 16, 16, 32, 4, 0),   // 3 P
+                                  make_config(16, 128, 32, 16, 16, 32, 0, 4),   // 4 P
+                                  make_config(16, 128, 64),                     // 5 Q
+                                  make_config(16, 128, 64, 16, 16, 32, 4, 0),   // 6 Q
+                                  make_config(16, 128, 64, 16, 16, 16),         // 7 R
+                                  make_config(16, 128, 64, 16, 16, 16, 0, 4)};  // 8 R
+  for (std::size_t i = 0; i < pool.size(); ++i) pool[i].index = i;
+  const std::uint32_t today = kNonTemporal | kNoWhitelist, family = today | kFamilyRule;
+  const auto check = [&](const tw::Problem& p,
+                         std::vector<std::size_t> today_scored,
+                         std::vector<std::size_t> family_scored) {
+    CHECK(scored_under(today, p, pool) == today_scored);
+    CHECK(scored_under(family, p, pool) == family_scored);
+  };
+  // K not 128-byte aligned: every hinted kernel is rejected, so H keeps its
+  // lowest-hint member inside the region (M <= 32 < N, batched, K <= 512).
+  check(make_problem(2, 1792, 4, 4096), {2, 5, 7}, {1, 2, 5, 7});
+  check(make_problem(1280, 53, 48, 4096), {2, 5, 7}, {2, 5, 7});
+  check(make_problem(2, 1792, 4, 1), {2, 5, 7}, {2, 5, 7});
+  check(make_problem(64, 20, 4, 8), {2, 5, 7}, {1, 2, 5, 7});
+  // Aligned K and a skinny B: the rule requires NTB4 members. Q has none and
+  // keeps its hint-free member; R keeps its NTB4 member; the 32-deep tiles
+  // stay unaligned.
+  check(make_problem(16, 1792, 64, 8), {2, 8}, {1, 2, 5, 8});
+  check(make_problem(16, 1792, 1024, 8), {2, 8}, {2, 8});
+  // Without a family of hinted members only, an unaligned K keeps nothing.
+  pool.erase(pool.begin(), pool.begin() + 2);
+  for (std::size_t i = 0; i < pool.size(); ++i) pool[i].index = i;
+  check(make_problem(2, 1792, 4, 4096), {0, 3, 5}, {0, 3, 5});
+}
+
+TEST_CASE("the family-wise rule matches a reference on random pools and problems",
+          "[v3][rules][family]") {
+  Random rnd(53);
+  const tw::Hardware hw = test_hardware();
+  for (int round = 0; round < 12; ++round) {
+    std::vector<tw::Config> pool;
+    for (int f = 0; f < 6 + static_cast<int>(rnd.below(6)); ++f) {
+      const tw::Config base = make_config(rnd.pick<std::size_t>({4, 16, 64, 128}),
+                                          rnd.pick<std::size_t>({16, 64, 256, 512}),
+                                          rnd.pick<std::size_t>({32, 64, 128}),
+                                          16,
+                                          16,
+                                          rnd.pick<std::size_t>({16, 32}));
+      for (int v = 0; v < 1 + static_cast<int>(rnd.below(4)); ++v) {
+        tw::Config c    = base;
+        c.cache_hints_a = rnd.pick<int>({0, 0, 1, 3, 4});
+        c.cache_hints_b = rnd.pick<int>({0, 0, 1, 4, 7});
+        c.index         = pool.size();
+        pool.push_back(c);
+      }
+    }
+    for (const bool family : {false, true}) {
+      const std::uint32_t flags = kNonTemporal | kNoWhitelist | (family ? kFamilyRule : 0);
+      ModelSpec spec            = v3_grid({});
+      spec.v3_serving_flags     = flags;
+      const tw::ModelPtr m      = load_spec(spec);
+      const tw::CandidateSet set(m, pool);
+      if (round % 2 == 0) set.prepare();
+      for (int i = 0; i < 60; ++i) {
+        tw::Problem p = rnd.problem();
+        if (i % 2 == 0) {
+          p.size  = {1 + rnd.below(160), 1 + rnd.below(3000), 1 + rnd.below(600)};
+          p.batch = rnd.pick<std::size_t>({1, 2, 64});
+          if (rnd.below(2) != 0) std::swap(p.size.m, p.size.n);
+          if (rnd.below(2) != 0) p.size.k = 64 * (1 + rnd.below(9));
+        }
+        const std::vector<bool> nt = reference_non_temporal(p, pool, family);
+        std::vector<std::size_t> want;
+        for (std::size_t c = 0; c < pool.size(); ++c)
+          if (nt[c] && lds_fits(p, pool[c])) want.push_back(c);
+        const std::vector<tw::Result> r = set.rank(p, hw, tw::ExecutionContext{}, kAll);
+        std::vector<std::size_t> got    = scored_indices(r);
+        std::sort(got.begin(), got.end());
+        CHECK(got == want);
+        CHECK(same_results(r, tw::rank_configs(*m, p, hw, tw::ExecutionContext{}, pool, kAll)));
+      }
+    }
+  }
+}
+
+TEST_CASE("the trained-key gate scores trained keys while one is feasible", "[v3][gate]") {
+  const std::vector<AttrSpec> attr = sample_attributes();
+  const tw::Hardware hw            = test_hardware();
+  std::vector<tw::Config> pool;
+  pool.push_back(with_attributes(make_config(128, 256, 64), {{"param_a", 0}}));   // 0 trained
+  pool.push_back(with_attributes(make_config(128, 256, 64), {{"param_a", 16}}));  // 1
+  pool.push_back(make_config(256, 256, 64));                                      // 2 trained
+  pool.push_back(make_config(64, 64, 64));                                        // 3
+  pool.push_back(make_config(64, 64, 64));                                        // 4
+  pool.push_back(make_config(256, 256, 64));                                      // 5 trained
+  for (std::size_t i = 0; i < pool.size(); ++i) pool[i].index = i;
+  std::vector<std::uint64_t> trained = {key_hash(pool[0], attr), key_hash(pool[2], attr)};
+  std::sort(trained.begin(), trained.end());
+
+  ModelSpec open        = v3_grid(attr);
+  open.v3_serving_flags = kNoWhitelist;
+  ModelSpec gated       = open;
+  gated.v3_serving_flags |= kGate;
+  gated.trained_keys    = trained;
+  const tw::ModelPtr om = load_spec(open), gm = load_spec(gated);
+  const tw::CandidateSet os(om, pool), gs(gm, pool), ready(gm, pool);
+  ready.prepare();
+  CHECK(gs.untrained_keys() == 2);
+  CHECK(gs.untrained_configs() == 3);
+  CHECK(os.untrained_keys() == 0);
+  CHECK(os.untrained_configs() == 0);
+
+  // A trained key fits: only trained keys are scored, as without the gate.
+  const tw::Problem bf16           = make_problem(1000, 2000, 512);
+  const std::vector<tw::Result> og = os.rank(bf16, hw, kAll);
+  const std::vector<tw::Result> gr = gs.rank(bf16, hw, kAll);
+  std::vector<std::size_t> scored  = scored_indices(gr);
+  std::sort(scored.begin(), scored.end());
+  CHECK(scored == std::vector<std::size_t>{0, 2, 5});
+  for (const tw::Result& r : gr) {
+    if (!r.scored) continue;
+    const auto same = std::find_if(og.begin(), og.end(), [&](const tw::Result& o) {
+      return o.config_index == r.config_index;
+    });
+    REQUIRE(same != og.end());
+    CHECK(std::memcmp(&same->score, &r.score, sizeof(double)) == 0);
+  }
+  CHECK(same_results(ready.rank(bf16, hw, kAll), gr));
+  CHECK(same_results(tw::rank_configs(*gm, bf16, hw, pool, kAll), gr));
+
+  // In fp32 no trained tile fits the LDS but the untrained 64x64x64 does, so
+  // every feasible key is scored.
+  const tw::Problem fp32                  = make_problem(1000, 2000, 512, 1, tw::DataType::Float);
+  const std::vector<std::size_t> fallback = scored_indices(gs.rank(fp32, hw, kAll));
+  CHECK(fallback == scored_indices(os.rank(fp32, hw, kAll)));
+  CHECK_FALSE(fallback.empty());
+  CHECK(same_results(ready.rank(fp32, hw, kAll), gs.rank(fp32, hw, kAll)));
+  CHECK(same_results(tw::rank_configs(*gm, fp32, hw, pool, kAll), gs.rank(fp32, hw, kAll)));
+
+  // A gate that lists every key ranks like no gate.
+  ModelSpec every = gated;
+  every.trained_keys.clear();
+  for (const tw::Config& c : pool) every.trained_keys.push_back(key_hash(c, attr));
+  std::sort(every.trained_keys.begin(), every.trained_keys.end());
+  every.trained_keys.erase(std::unique(every.trained_keys.begin(), every.trained_keys.end()),
+                           every.trained_keys.end());
+  const tw::CandidateSet es(load_spec(every), pool);
+  CHECK(es.untrained_keys() == 0);
+  for (const tw::Problem& p : {bf16, fp32})
+    for (std::size_t min_scored : {std::size_t{0}, std::size_t{1}, kAll})
+      CHECK(same_results(es.rank(p, hw, min_scored), os.rank(p, hw, min_scored)));
+}
+
+TEST_CASE("the trained-key gate holds through whitelists, tier 2, the cascade and launch keys",
+          "[v3][gate]") {
+  Random rnd(59);
+  const std::vector<AttrSpec> attr = sample_attributes();
+  const tw::Hardware hw            = test_hardware();
+  for (int round = 0; round < 8; ++round) {
+    std::vector<tw::Config> pool = rnd.pool(6 + rnd.below(10), 20 + rnd.below(30));
+    for (tw::Config& c : pool) {
+      c.attributes = {{"param_a", static_cast<std::int64_t>(rnd.below(2)) * 16}};
+      c.occupancy  = 1 + static_cast<int>(rnd.below(3));
+    }
+    std::vector<std::uint64_t> all, trained;
+    for (const tw::Config& c : pool) all.push_back(key_hash(c, attr));
+    std::sort(all.begin(), all.end());
+    all.erase(std::unique(all.begin(), all.end()), all.end());
+    for (std::uint64_t h : all)
+      if (rnd.below(3) != 0) trained.push_back(h);
+    if (trained.empty()) trained.push_back(all.front());
+    ModelSpec spec        = v3_grid(attr);
+    spec.v3_cascade_keys  = rnd.pick<std::uint32_t>({0, 2, 5});
+    spec.v3_serving_flags = kGate | (rnd.below(2) != 0 ? kNoWhitelist : 0) |
+                            (rnd.below(2) != 0 ? kNonTemporal : 0) |
+                            (rnd.below(2) != 0 ? kLaunchKeys : 0);
+    spec.trained_keys = trained;
+    for (CellSpec& cell : spec.cells)
+      if (cell.seed % 2 == 0) cell.view_key_hashes = {all[rnd.below(all.size())]};
+    const tw::ModelPtr m = load_spec(spec);
+    const tw::PoolOptions options{tw::TieBreak::PoolOrder, std::make_shared<OccupancyLaunch>()};
+    const tw::CandidateSet set(m, pool, options);
+    if (round % 2 == 0) set.prepare();
+    for (int i = 0; i < 30; ++i) {
+      const tw::Problem p = rnd.problem();
+      for (std::size_t min_scored : {std::size_t{0}, std::size_t{1}, std::size_t{9}, kAll}) {
+        const std::vector<tw::Result> r = set.rank(p, hw, tw::ExecutionContext{}, min_scored);
+        CHECK(same_results(
+            r, tw::rank_configs(*m, p, hw, tw::ExecutionContext{}, pool, options, min_scored)));
+        CHECK(same_results(set.rank_top(p, hw, tw::ExecutionContext{}, min_scored),
+                           scored_prefix(r, min_scored)));
+        const std::vector<std::size_t> scored = scored_indices(r);
+        const bool any_trained = std::any_of(scored.begin(), scored.end(), [&](std::size_t c) {
+          return std::binary_search(trained.begin(), trained.end(), key_hash(pool[c], attr));
+        });
+        for (std::size_t c : scored)
+          if (any_trained)
+            CHECK(std::binary_search(trained.begin(), trained.end(), key_hash(pool[c], attr)));
+      }
+    }
+  }
+}
+
+TEST_CASE("the bank flag never changes a ranking", "[v3][rules]") {
+  Random rnd(61);
+  ModelSpec spec        = v3_grid({});
+  spec.v3_serving_flags = kNonTemporal;
+  spec.v3_cascade_keys  = 3;
+  ModelSpec bank        = spec;
+  bank.v3_serving_flags |= kBank;
+  const std::vector<tw::Config> pool = rnd.pool(10, 40);
+  const tw::CandidateSet a(load_spec(spec), pool), b(load_spec(bank), pool);
+  for (int i = 0; i < 40; ++i) {
+    const tw::Problem p = rnd.problem();
+    CHECK(same_results(a.rank(p, test_hardware(), 1), b.rank(p, test_hardware(), 1)));
+  }
+}
+
+TEST_CASE("the family-wise rule ranks alike through the cascade, launch keys and the cache",
+          "[v3][rules][family][pool]") {
+  Random rnd(67);
+  for (const bool keyed : {false, true}) {
+    ModelSpec spec        = v3_grid({});
+    spec.v3_serving_flags = kNonTemporal | kFamilyRule | (keyed ? kLaunchKeys : 0u);
+    spec.v3_cascade_keys  = 3;
+    const tw::ModelPtr m  = load_spec(spec);
+    const tw::PoolOptions options{tw::TieBreak::PoolOrder, std::make_shared<OccupancyLaunch>()};
+    for (int round = 0; round < 6; ++round) {
+      std::vector<tw::Config> pool;
+      for (int f = 0; f < 10 + static_cast<int>(rnd.below(10)); ++f) {
+        const tw::Config base  = make_config(rnd.pick<std::size_t>({4, 8, 16, 32}),
+                                            rnd.pick<std::size_t>({64, 128, 256}),
+                                            rnd.pick<std::size_t>({32, 64}),
+                                            rnd.pick<std::size_t>({4, 16}),
+                                            rnd.pick<std::size_t>({4, 16}),
+                                            rnd.pick<std::size_t>({4, 32}));
+        const bool hinted_only = rnd.below(2) != 0;
+        for (int v = 0; v < 1 + static_cast<int>(rnd.below(3)); ++v) {
+          tw::Config c    = base;
+          c.cache_hints_a = hinted_only ? rnd.pick<int>({1, 3}) : rnd.pick<int>({0, 4});
+          c.cache_hints_b = hinted_only ? rnd.pick<int>({1, 7}) : rnd.pick<int>({0, 4});
+          c.occupancy     = 1 + static_cast<int>(rnd.below(3));
+          c.index         = pool.size();
+          pool.push_back(c);
+        }
+      }
+      const tw::CandidateSet set(m, pool, options);
+      if (round % 2 == 0) set.prepare();
+      for (int i = 0; i < 30; ++i) {
+        tw::Problem p = make_problem(1 + rnd.below(32),
+                                     33 + rnd.below(3000),
+                                     1 + rnd.below(512),
+                                     rnd.pick<std::size_t>({2, 8, 64}));
+        if (i % 3 == 1) std::swap(p.size.m, p.size.n);
+        if (i % 3 == 2) p.size.k = 64 * (1 + rnd.below(8));
+        for (std::size_t min_scored : {std::size_t{1}, std::size_t{5}, kAll}) {
+          const std::vector<tw::Result> a =
+              set.rank(p, test_hardware(), tw::ExecutionContext{}, min_scored);
+          CHECK(same_results(
+              a,
+              tw::rank_configs(
+                  *m, p, test_hardware(), tw::ExecutionContext{}, pool, options, min_scored)));
+          CHECK(same_results(set.rank_top(p, test_hardware(), tw::ExecutionContext{}, min_scored),
+                             scored_prefix(a, min_scored)));
+        }
       }
     }
   }

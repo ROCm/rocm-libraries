@@ -118,10 +118,12 @@ bool walk_bounds(const Model& model,
     b.reached     = true;
     b.m_lo        = std::min(b.m_lo, box.lo[0]);
     b.n_lo        = std::min(b.n_lo, box.lo[1]);
+    b.k_lo        = std::min(b.k_lo, box.lo[2]);
     b.m_hi        = std::max(b.m_hi, box.hi[0]);
     b.n_hi        = std::max(b.n_hi, box.hi[1]);
     b.k_hi        = std::max(b.k_hi, box.hi[2]);
     b.batch_one   = b.batch_one || (!box.no_batch_one && box.lo[3] <= 1 && 1 <= box.hi[3]);
+    b.batch_many  = b.batch_many || box.hi[3] > 1;
     return true;
   }
   const Split& s       = model.splits[static_cast<std::size_t>(nd.split)];
@@ -405,7 +407,8 @@ constexpr std::uint32_t kNoSlot = ~std::uint32_t{0};
 
 // Pool data a CandidateSet keeps for one cell, per view key: the cell's
 // whitelisted keys with their item embeddings and, with `all_keys`, the item
-// embeddings of the other keys.
+// embeddings of the other keys. With a trained-key gate, `whitelist_keys`,
+// `possible` and `plain` hold trained keys only.
 struct CellCache {
   std::vector<std::size_t> whitelist_keys;  // ascending
   std::vector<std::uint32_t> slot;          // per key: its row of whitelist_emb, or kNoSlot
@@ -424,19 +427,36 @@ struct CellCache {
     std::uint64_t mt_m, mt_n;
     std::uint16_t mt_k_low;  // mt_k % 1024
     std::uint8_t hints;      // hint_class
+    std::uint8_t family;     // KernelShape::family
   };
   std::vector<Possible> possible_shape;
   PlainBounds plain_bounds, hinted_bounds;  // of the keys without, with a cache hint
   std::size_t plain_configs = 0;            // configs of the keys of `plain`
   std::size_t hinted_keys   = 0;
   bool pruned               = false;
+
+  // Read only where the family-wise non-temporal rule applies, so they follow
+  // the fields every ranking reads. With `pruned`, the kept members of
+  // families without a hint-free member, ascending, the union of them and
+  // `plain`, and their configs.
+  std::vector<std::uint32_t> kept_hinted, plain_and_kept;
+  std::size_t kept_configs = 0;
+  // With `all_keys`, the rows of other_emb of the views of `kept_hinted` again,
+  // contiguous in ascending view order (kept_emb, BlockWeights layout), and
+  // per view its row there or kNoSlot; empty without such views. They are
+  // scattered over other_emb, so a cascade reads them here.
+  std::vector<std::uint32_t> kept_row;
+  std::vector<float> kept_emb;
+  std::size_t kept_views = 0;
 };
 
 inline std::size_t cache_bytes(const CellCache& c) noexcept {
   return sizeof(CellCache) + c.whitelist_keys.size() * sizeof(std::size_t) +
-         (c.slot.size() + c.possible.size() + c.plain.size()) * sizeof(std::uint32_t) +
+         (c.slot.size() + c.possible.size() + c.plain.size() + c.kept_hinted.size() +
+          c.plain_and_kept.size() + c.kept_row.size()) *
+             sizeof(std::uint32_t) +
          c.possible_shape.size() * sizeof(CellCache::Possible) +
-         (c.whitelist_emb.size() + c.other_emb.size()) * sizeof(float);
+         (c.whitelist_emb.size() + c.other_emb.size() + c.kept_emb.size()) * sizeof(float);
 }
 
 // The item embedding of `key`, or of its view in `row` when outside the
@@ -577,13 +597,20 @@ void rank_in_cell(const Model& model,
     s.in_tier1[key] = epoch;
     tier1_configs += size_of(key);
   };
+  // With a trained-key gate the untrained keys are candidates only when no
+  // trained key is feasible (`all_keys`); the cell cache then holds trained
+  // keys only.
+  bool all_keys        = false;
+  const auto candidate = [&](std::size_t key) {
+    return all_keys || keys.trained.empty() || keys.trained[key] != 0;
+  };
   if (have_whitelist) {
     if (cache != nullptr) {
       for (std::size_t key : cache->whitelist_keys)
         if (feasible(key)) add_tier1(key);
     } else {
       for (std::size_t key = 0; key < nk; ++key)
-        if (feasible(key) &&
+        if (candidate(key) && feasible(key) &&
             whitelisted(model, cell, configs[keys.first[key]], keys.attributes(key)))
           add_tier1(key);
     }
@@ -598,28 +625,36 @@ void rank_in_cell(const Model& model,
   std::vector<std::uint32_t>& passing = s.passing;
   std::size_t n_passing               = 0;
   bool listed_passing                 = false;
-  // Calls `f` on every feasible key, ascending.
-  const auto each_feasible = [&](auto&& f) {
-    if (!pruned) {
-      for (std::size_t key = 0; key < nk; ++key)
-        if (feasible(key)) f(key);
+  const auto plain_and_kept           = [&]() -> const std::vector<std::uint32_t>& {
+    return cache->kept_hinted.empty() ? cache->plain : cache->plain_and_kept;
+  };
+  // Lists in `passing` the feasible keys of a pruned cell, ascending.
+  const auto list_passing = [&] {
+    if (plain_pass && rules.only_kept_hinted_may_pass()) {
+      // The plain keys and the kept members the other rules pass, merged.
+      const std::vector<std::uint32_t>& plain = cache->plain;
+      if (passing.size() < plain.size() + cache->kept_hinted.size())
+        passing.resize(plain.size() + cache->kept_hinted.size());
+      std::size_t i = 0;
+      for (const std::uint32_t key : cache->kept_hinted) {
+        if (!hinted_tile && !feasible(key)) continue;
+        for (; i < plain.size() && plain[i] < key; ++i) passing[n_passing++] = plain[i];
+        passing[n_passing++] = key;
+      }
+      for (; i < plain.size(); ++i) passing[n_passing++] = plain[i];
       return;
     }
-    if (plain_pass && !hinted) {
-      for (const std::uint32_t key : cache->plain) f(key);
-      return;
-    }
-    if (!listed_passing) {
-      const std::vector<std::uint32_t>& possible = cache->possible;
-      if (passing.size() < possible.size()) passing.resize(possible.size());
-      const std::vector<CellCache::Possible>& shape = cache->possible_shape;
-      if (plain_tile && (hinted_tile || !hinted)) {
-        // The rule's outcome for each value of its tests.
-        unsigned char pass[64];
-        for (unsigned t = 0; t < 64; ++t) {
-          const bool r = rules.non_temporal_rule(t & 1, (t >> 1) & 1, (t >> 2) & 1, t >> 3);
-          pass[t]      = (t >> 3 == 0 ? plain_pass || r : hinted && r) ? 1 : 0;
-        }
+    const std::vector<std::uint32_t>& possible = cache->possible;
+    if (passing.size() < possible.size()) passing.resize(possible.size());
+    const std::vector<CellCache::Possible>& shape = cache->possible_shape;
+    if (plain_tile && (hinted_tile || !hinted)) {
+      // The rule's outcome for each value of its tests.
+      unsigned char pass[64];
+      for (unsigned t = 0; t < 64; ++t) {
+        const bool r = rules.non_temporal_rule(t & 1, (t >> 1) & 1, (t >> 2) & 1, t >> 3);
+        pass[t]      = (t >> 3 == 0 ? plain_pass || r : hinted && r) ? 1 : 0;
+      }
+      if (!rules.family_region()) {
         for (std::size_t i = 0; i < possible.size(); ++i) {
           const CellCache::Possible& k = shape[i];
           const unsigned t             = (rules.tile_aligned(k.mt_k_low) ? 1u : 0u) |
@@ -629,24 +664,59 @@ void rank_in_cell(const Model& model,
           n_passing += pass[t];
         }
       } else {
+        // Whether a family's kept member passes, for each value of the rule's
+        // tests and of the family's members (kFamilyPlain, NtA, NtB).
+        unsigned char keep[64];
+        rules.family_keep_table(keep);
         for (std::size_t i = 0; i < possible.size(); ++i) {
-          const std::size_t key        = possible[i];
           const CellCache::Possible& k = shape[i];
-          const auto rule              = [&] {
-            return rules.non_temporal_rule(rules.tile_aligned(k.mt_k_low),
-                                           rules.b_branch(k.mt_m),
-                                           rules.a_branch(k.mt_n),
-                                           k.hints);
-          };
-          const bool ok      = k.hints == 0 ? plain_pass || (plain_tile ? rule() : feasible(key))
-                                            : hinted && (hinted_tile ? rule() : feasible(key));
-          passing[n_passing] = static_cast<std::uint32_t>(key);
-          n_passing += ok ? 1 : 0;
+          const unsigned tests         = (rules.tile_aligned(k.mt_k_low) ? 1u : 0u) |
+                                 (rules.b_branch(k.mt_m) ? 2u : 0u) |
+                                 (rules.a_branch(k.mt_n) ? 4u : 0u);
+          const unsigned kept = (k.family & kFamilyFallback) != 0 ? 1u : 0u;
+          passing[n_passing]  = possible[i];
+          n_passing += pass[tests | (unsigned{k.hints} << 3)] |
+                       (keep[tests | (unsigned{k.family & 7u} << 3)] & kept);
         }
       }
+    } else {
+      for (std::size_t i = 0; i < possible.size(); ++i) {
+        const std::size_t key        = possible[i];
+        const CellCache::Possible& k = shape[i];
+        const auto rule              = [&] {
+          return rules.non_temporal_rule(rules.tile_aligned(k.mt_k_low),
+                                         rules.b_branch(k.mt_m),
+                                         rules.a_branch(k.mt_n),
+                                         k.hints,
+                                         k.family);
+        };
+        const bool ok      = k.hints == 0 ? plain_pass || (plain_tile ? rule() : feasible(key))
+                                          : hinted && (hinted_tile ? rule() : feasible(key));
+        passing[n_passing] = static_cast<std::uint32_t>(key);
+        n_passing += ok ? 1 : 0;
+      }
+    }
+  };
+  // Calls `f` on every feasible candidate key, ascending.
+  const auto each_feasible = [&](auto&& f) {
+    if (!pruned || all_keys) {
+      for (std::size_t key = 0; key < nk; ++key)
+        if (candidate(key) && feasible(key)) f(key);
+      return;
+    }
+    if (plain_pass && !hinted) {
+      for (const std::uint32_t key : cache->plain) f(key);
+      return;
+    }
+    if (!listed_passing) {
+      list_passing();
       listed_passing = true;
     }
     for (std::size_t i = 0; i < n_passing; ++i) f(passing[i]);
+  };
+  const auto add_feasible = [&](std::size_t key) {
+    tier1.push_back(key);
+    tier1_configs += size_of(key);
   };
   bool tier1_is_whitelist = have_whitelist;
   if (tier1.empty()) {
@@ -654,12 +724,16 @@ void rank_in_cell(const Model& model,
     if (plain_pass && !hinted) {
       tier1.assign(cache->plain.begin(), cache->plain.end());
       tier1_configs = cache->plain_configs;
+    } else if (plain_pass && hinted_tile && rules.only_kept_hinted_may_pass()) {
+      tier1.assign(plain_and_kept().begin(), plain_and_kept().end());
+      tier1_configs = cache->plain_configs + cache->kept_configs;
     } else {
-      each_feasible([&](std::size_t key) {
-        tier1.push_back(key);
-        tier1_configs += size_of(key);
-      });
+      each_feasible(add_feasible);
     }
+  }
+  if (tier1.empty() && !keys.trained.empty()) {
+    all_keys = true;
+    each_feasible(add_feasible);
   }
   if (tier1.empty()) return write_unscored(n, out);
 
@@ -739,15 +813,54 @@ void rank_in_cell(const Model& model,
       const std::size_t views = keys.views();
       float raw[16]           = {};
       std::size_t block       = views;
-      for (const std::size_t c : candidates) {
-        if (c / 16 != block) {
-          block = c / 16;
-          const BlockWeights rows{BlockWeights::Type::F32, &cache->other_emb[block * 16 * e], 1.0f};
-          k.linear_blocks(
-              rows, nullptr, q_emb.data(), std::min<std::size_t>(16, views - block * 16), e, raw);
+      if (!rules.family_region() || cache->kept_row.empty()) {
+        for (const std::size_t c : candidates) {
+          if (c / 16 != block) {
+            block = c / 16;
+            const BlockWeights rows{
+                BlockWeights::Type::F32, &cache->other_emb[block * 16 * e], 1.0f};
+            k.linear_blocks(
+                rows, nullptr, q_emb.data(), std::min<std::size_t>(16, views - block * 16), e, raw);
+          }
+          const float v = raw[c % 16] / w.temperature;
+          emb[c]        = finite(v) ? v : -std::numeric_limits<float>::infinity();
         }
-        const float v = raw[c % 16] / w.temperature;
-        emb[c]        = finite(v) ? v : -std::numeric_limits<float>::infinity();
+      } else {
+        float kept_raw[16]     = {};
+        std::size_t kept_block = cache->kept_views;
+        for (const std::size_t c : candidates) {
+          const std::uint32_t r = cache->kept_row[c];
+          float raw_c           = 0.0f;
+          if (r == kNoSlot) {
+            if (c / 16 != block) {
+              block = c / 16;
+              const BlockWeights rows{
+                  BlockWeights::Type::F32, &cache->other_emb[block * 16 * e], 1.0f};
+              k.linear_blocks(rows,
+                              nullptr,
+                              q_emb.data(),
+                              std::min<std::size_t>(16, views - block * 16),
+                              e,
+                              raw);
+            }
+            raw_c = raw[c % 16];
+          } else {
+            if (r / 16 != kept_block) {
+              kept_block = r / 16;
+              const BlockWeights rows{
+                  BlockWeights::Type::F32, &cache->kept_emb[kept_block * 16 * e], 1.0f};
+              k.linear_blocks(rows,
+                              nullptr,
+                              q_emb.data(),
+                              std::min<std::size_t>(16, cache->kept_views - kept_block * 16),
+                              e,
+                              kept_raw);
+            }
+            raw_c = kept_raw[r % 16];
+          }
+          const float v = raw_c / w.temperature;
+          emb[c]        = finite(v) ? v : -std::numeric_limits<float>::infinity();
+        }
       }
     } else {
       for (std::size_t c : candidates) {
@@ -1218,6 +1331,13 @@ PoolKeys pool_keys(const Model& model,
         p.shape.push_back(kernel_shape(c));
         p.attribute_values.insert(p.attribute_values.end(), attrs, attrs + n_attr);
         key_hash.push_back(h);
+        if (model.trained_key_gate) {
+          const bool trained = std::binary_search(model.trained_keys.begin(),
+                                                  model.trained_keys.end(),
+                                                  view_key_hash(value, model.view_key_size));
+          p.trained.push_back(trained ? 1 : 0);
+          p.untrained += trained ? 0 : 1;
+        }
         if (launch != nullptr) {
           first_launch.push_back(value[model.view_key_size]);
           add_view(value, p.first.size() - 1);
@@ -1234,6 +1354,12 @@ PoolKeys pool_keys(const Model& model,
     }
   }
   const std::size_t nk = p.first.size();
+  // A gate that keeps every key changes nothing.
+  if (p.untrained == 0) p.trained.clear();
+  if (model.soft_rules.non_temporal && model.soft_rules.non_temporal_family) {
+    const std::vector<std::uint8_t> family = family_bits(configs);
+    for (std::size_t key = 0; key < nk; ++key) p.shape[key].family = family[p.first[key]];
+  }
   if (view_first.size() == nk) {
     p.view_of.clear();
   } else if (!p.view_of.empty()) {
@@ -1377,6 +1503,10 @@ struct CandidateSet::Impl final : detail::CellCacheSource {
     }
     std::sort(wl.begin(), wl.end());
     wl.erase(std::unique(wl.begin(), wl.end()), wl.end());
+    if (!keys.trained.empty())
+      wl.erase(std::remove_if(
+                   wl.begin(), wl.end(), [&](std::size_t key) { return keys.trained[key] == 0; }),
+               wl.end());
     c.slot.assign(nk, detail::kNoSlot);
     c.whitelist_emb.resize(wl.size() * e);
     std::vector<float> hidden(cell.hidden_dim), norm(model->item_dim);
@@ -1392,21 +1522,35 @@ struct CandidateSet::Impl final : detail::CellCacheSource {
     const detail::CellBounds& b = bounds[cell_index];
     for (std::size_t key = 0; key < keys.first.size(); ++key) {
       const detail::KernelShape& k = keys.shape[key];
+      if (!keys.trained.empty() && keys.trained[key] == 0) continue;
       if (detail::never_feasible(b, k, keys.nt_a, keys.nt_b, model->soft_rules)) continue;
       c.possible.push_back(static_cast<std::uint32_t>(key));
       c.possible_shape.push_back(
           {k.mt_m,
            k.mt_n,
            static_cast<std::uint16_t>(k.mt_k % 1024),
-           static_cast<std::uint8_t>(detail::hint_class(k.cache_hints_a, k.cache_hints_b))});
+           static_cast<std::uint8_t>(detail::hint_class(k.cache_hints_a, k.cache_hints_b)),
+           k.family});
       if (k.cache_hints_a != 0 || k.cache_hints_b != 0) {
         c.hinted_bounds.include(k);
         ++c.hinted_keys;
+        if ((k.family & detail::kFamilyFallback) != 0 && (k.family & detail::kFamilyPlain) == 0) {
+          c.kept_hinted.push_back(static_cast<std::uint32_t>(key));
+          c.kept_configs += keys.member_begin[key + 1] - keys.member_begin[key];
+        }
       } else {
         c.plain.push_back(static_cast<std::uint32_t>(key));
         c.plain_bounds.include(k);
         c.plain_configs += keys.member_begin[key + 1] - keys.member_begin[key];
       }
+    }
+    if (!c.kept_hinted.empty()) {
+      c.plain_and_kept.resize(c.plain.size() + c.kept_hinted.size());
+      std::merge(c.plain.begin(),
+                 c.plain.end(),
+                 c.kept_hinted.begin(),
+                 c.kept_hinted.end(),
+                 c.plain_and_kept.begin());
     }
     c.pruned = true;
   }
@@ -1439,6 +1583,9 @@ struct CandidateSet::Impl final : detail::CellCacheSource {
       built->whitelist_emb  = c->whitelist_emb;
       built->possible       = c->possible;
       built->plain          = c->plain;
+      built->kept_hinted    = c->kept_hinted;
+      built->plain_and_kept = c->plain_and_kept;
+      built->kept_configs   = c->kept_configs;
       built->possible_shape = c->possible_shape;
       built->plain_bounds   = c->plain_bounds;
       built->hinted_bounds  = c->hinted_bounds;
@@ -1459,6 +1606,25 @@ struct CandidateSet::Impl final : detail::CellCacheSource {
         embed(cell, w, key, hidden, norm, row.data());
         for (std::size_t j = 0; j < e; ++j)
           built->other_emb[(v / 16 * e + j) * 16 + v % 16] = row[j];
+      }
+      std::vector<std::size_t> kept;
+      for (const std::uint32_t key : built->kept_hinted) {
+        const std::size_t v = keys.view(key);
+        if (built->slot[keys.first_of_view(v)] == detail::kNoSlot) kept.push_back(v);
+      }
+      std::sort(kept.begin(), kept.end());
+      kept.erase(std::unique(kept.begin(), kept.end()), kept.end());
+      if (!kept.empty()) {
+        built->kept_row.assign(nv, detail::kNoSlot);
+        built->kept_emb.assign((kept.size() + 15) / 16 * 16 * e, 0.0f);
+        built->kept_views = kept.size();
+        for (std::size_t r = 0; r < kept.size(); ++r) {
+          const std::size_t v = kept[r];
+          built->kept_row[v]  = static_cast<std::uint32_t>(r);
+          for (std::size_t j = 0; j < e; ++j)
+            built->kept_emb[(r / 16 * e + j) * 16 + r % 16] =
+                built->other_emb[(v / 16 * e + j) * 16 + v % 16];
+        }
       }
       built->all_keys = true;
     }
@@ -1533,6 +1699,16 @@ CandidateSet::~CandidateSet() = default;
 const Model& CandidateSet::model() const noexcept { return *impl_->model; }
 
 const std::vector<Config>& CandidateSet::configs() const noexcept { return impl_->configs; }
+
+std::size_t CandidateSet::untrained_keys() const noexcept { return impl_->keys.untrained; }
+
+std::size_t CandidateSet::untrained_configs() const noexcept {
+  const detail::PoolKeys& keys = impl_->keys;
+  std::size_t n                = 0;
+  for (std::size_t key = 0; key < keys.trained.size(); ++key)
+    if (keys.trained[key] == 0) n += keys.member_begin[key + 1] - keys.member_begin[key];
+  return n;
+}
 
 std::vector<Result> CandidateSet::rank(const Problem& problem,
                                        const Hardware& hardware,
@@ -1679,26 +1855,30 @@ std::vector<std::string> feature_catalog_hashes() {
 
 ModelInfo describe(const Model& model) {
   ModelInfo info;
-  info.arch                 = model.arch;
-  info.feature_catalog_hash = model.feature_hash;
-  info.weight_type          = model.weight_type;
-  info.n_cells              = model.cells.size();
-  info.n_splits             = model.splits.size();
-  info.format_version       = model.format_version;
-  info.feature_spec_hash    = model.feature_spec_hash;
-  info.query_dim            = model.query_dim;
-  info.item_dim             = model.item_dim;
-  info.inter_dim            = model.inter_dim;
-  info.min_cu_fraction      = model.min_cu_fraction;
-  info.max_cu_fraction      = model.max_cu_fraction;
-  info.schedules            = model.schedules;
-  info.cascade_keys         = model.cascade_keys;
-  info.whitelist_tier       = model.whitelist_tier;
-  info.launch_keys          = model.launch_keys;
-  info.small_batched_rule   = model.soft_rules.small_batched_one_tile;
-  info.dot2_rule            = model.soft_rules.dot2_small_m;
-  info.non_temporal_rule    = model.soft_rules.non_temporal;
-  info.clip                 = model.clip;
+  info.arch                     = model.arch;
+  info.feature_catalog_hash     = model.feature_hash;
+  info.weight_type              = model.weight_type;
+  info.n_cells                  = model.cells.size();
+  info.n_splits                 = model.splits.size();
+  info.format_version           = model.format_version;
+  info.feature_spec_hash        = model.feature_spec_hash;
+  info.query_dim                = model.query_dim;
+  info.item_dim                 = model.item_dim;
+  info.inter_dim                = model.inter_dim;
+  info.min_cu_fraction          = model.min_cu_fraction;
+  info.max_cu_fraction          = model.max_cu_fraction;
+  info.schedules                = model.schedules;
+  info.cascade_keys             = model.cascade_keys;
+  info.whitelist_tier           = model.whitelist_tier;
+  info.launch_keys              = model.launch_keys;
+  info.small_batched_rule       = model.soft_rules.small_batched_one_tile;
+  info.dot2_rule                = model.soft_rules.dot2_small_m;
+  info.non_temporal_rule        = model.soft_rules.non_temporal;
+  info.non_temporal_family_rule = model.soft_rules.non_temporal_family;
+  info.clip                     = model.clip;
+  info.bank                     = model.bank;
+  info.trained_key_gate         = model.trained_key_gate;
+  info.trained_keys             = model.trained_keys.size();
   for (std::size_t b = 0; b < detail::kBaseCells; ++b)
     if (model.base_nodes[b] < 0) ++info.uncovered_base_labels;
   info.provenance   = model.provenance;
