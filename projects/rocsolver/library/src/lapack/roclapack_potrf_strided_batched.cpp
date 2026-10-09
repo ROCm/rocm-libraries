@@ -76,8 +76,8 @@ try
     size_t size_iinfo;
 
     I const max_batch_count = 64 * 1024;
-    I const nsweep = (batch_count_arg == 0) ? 0 : ceildiv(batch_count_arg, max_batch_count);
-    I const bid_inc = (batch_count_arg == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     {
         auto const batch_count = bid_inc;
