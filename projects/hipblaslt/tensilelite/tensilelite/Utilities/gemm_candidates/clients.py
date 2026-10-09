@@ -7,19 +7,8 @@ from pathlib import Path
 
 import yaml
 
-from .candidates import GemmCase
-
-_BENCH_TYPES = {
-    "Float": "f32_r",
-    "Half": "f16_r",
-    "BFloat16": "bf16_r",
-    "Float8": "f8_r",
-    "BFloat8": "bf8_r",
-    "Float8_fnuz": "f8_fnuz_r",
-    "BFloat8_fnuz": "bf8_fnuz_r",
-    "Int8": "i8_r",
-    "Int32": "i32_r",
-}
+from ..ClientConfig import problemTypeOptions
+from .models import GemmCase, bench_type
 
 
 def bench_yaml(cases: Iterable[GemmCase], *, workspace_bytes: int = 128 * 1024 * 1024) -> str:
@@ -48,17 +37,17 @@ def bench_yaml(cases: Iterable[GemmCase], *, workspace_bytes: int = 128 * 1024 *
             "batch_count": s.batch_count,
             "transA": "T" if p.trans_a else "N",
             "transB": "T" if p.trans_b else "N",
-            "a_type": _BENCH_TYPES[p.a_type],
-            "b_type": _BENCH_TYPES[p.b_type],
-            "c_type": _BENCH_TYPES[p.c_type],
-            "d_type": _BENCH_TYPES[p.d_type],
+            "a_type": bench_type(p.a_type),
+            "b_type": bench_type(p.b_type),
+            "c_type": bench_type(p.c_type),
+            "d_type": bench_type(p.d_type),
             "compute_type": "c_i32_r" if p.compute_type == "Int32" else "c_f32_r",
-            "scale_type": _BENCH_TYPES[p.compute_type],
+            "scale_type": bench_type(p.compute_type),
             "alpha": 1,
             "beta": 0,
             "initialization": "rand_int",
             "bias_vector": p.use_bias,
-            "bias_type": _BENCH_TYPES[p.bias_type],
+            "bias_type": bench_type(p.bias_type),
             "bias_source": {0: "a", 1: "b", 3: "d"}[p.bias_source],
             "scaleA": p.scale_ab or "none",
             "scaleB": p.scale_ab or "none",
@@ -80,8 +69,8 @@ def bench_yaml(cases: Iterable[GemmCase], *, workspace_bytes: int = 128 * 1024 *
         # Bench accepts only floating-point compute-input overrides. Integer
         # computation is selected through compute_type instead.
         if p.compute_type != "Int32":
-            row["compute_input_typeA"] = _BENCH_TYPES[p.compute_input_a]
-            row["compute_input_typeB"] = _BENCH_TYPES[p.compute_input_b]
+            row["compute_input_typeA"] = bench_type(p.compute_input_a)
+            row["compute_input_typeB"] = bench_type(p.compute_input_b)
         if p.math_op == "XFloat32":
             row["compute_type"] = "c_xf32_r"
         row.update(zip(("lda", "ldb", "ldc", "ldd"), case.leading_dimensions))
@@ -127,28 +116,9 @@ def tensile_ini(
         "results-file": results_file,
         "solution-start-idx": first.solution_index,
         "num-solutions": 1,
-        "problem-identifier": p.operation_identifier,
-        "a-type": p.a_type,
-        "b-type": p.b_type,
-        "c-type": p.c_type,
-        "d-type": p.d_type,
-        "alpha-type": p.compute_type,
-        "beta-type": p.compute_type,
-        "compute-input-type-A": p.compute_input_a,
-        "compute-input-type-B": p.compute_input_b,
-        "high-precision-accumulate": p.high_precision_accumulate,
-        "f32-xdl-math-op": p.math_op,
-        "strided-batched": True,
-        "use-bias": int(p.use_bias),
+        **problemTypeOptions(p.as_problem_type()),
         "bias-type-args": p.bias_type,
-        "bias-source": p.bias_source,
-        "use-scaleAB": p.scale_ab,
-        "use-scaleCD": p.scale_cd,
-        "use-scaleAlphaVec": int(p.scale_alpha_vector),
-        "activation-type": p.activation_type,
-        "activation-compute-type": p.activation_compute_type,
         "activation-enum-args": "None",
-        "activation-no-guard": p.activation_no_guard,
         "activation-additional-args": "2.0,2.0",
         "init-seed": 1,  # Zero asks the client to seed from the clock.
         "init-a": "Random",

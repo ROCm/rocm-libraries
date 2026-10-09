@@ -3,13 +3,14 @@
 """Read packaged solution records once, without constructing heuristic tables."""
 
 import re
-import zlib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
 import msgpack
+
+from ..LibraryIO import iterSolutionRecords
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,39 +38,6 @@ class LibraryMetadata:
     target: str
     indices: tuple[int, ...]
     _solutions: Mapping[int, _Solution] = field(repr=False)
-
-
-def _read_solutions(path: Path):
-    """Skip the large selection tables beside the ``solutions`` array.
-
-    MessagePack's skip operation traverses those values without materializing
-    their Python objects. Only one decompressed shard is held at a time.
-    """
-    data = path.read_bytes()
-    if path.suffix == ".zlib":
-        decoder = zlib.decompressobj()
-        data = decoder.decompress(data) + decoder.flush()
-        if not decoder.eof or decoder.unused_data:
-            raise ValueError(f"{path}: incomplete or trailing zlib data")
-
-    unpacker = msgpack.Unpacker(raw=False, strict_map_key=False, max_buffer_size=0)
-    unpacker.feed(data)
-    found = False
-    try:
-        for _ in range(unpacker.read_map_header()):
-            key = unpacker.unpack()
-            if key != "solutions":
-                unpacker.skip()
-                continue
-            if found:
-                raise ValueError("duplicate solutions field")
-            found = True
-            for _ in range(unpacker.read_array_header()):
-                yield unpacker.unpack()
-        if unpacker.tell() != len(data):
-            raise ValueError("trailing MessagePack data")
-    except (msgpack.UnpackException, ValueError) as error:
-        raise ValueError(f"{path}: invalid solution metadata: {error}") from error
 
 
 def load_library_metadata(
@@ -126,14 +94,11 @@ def load_library_metadata(
         # Lazy shards have a matching code object; monolithic metadata may need
         # all objects in its architecture directory. Metadata-only use is valid.
         objects = (main_object, *helpers) if main_object in object_set else code_objects
-        for record in _read_solutions(path):
-            index = record["index"]
-            if type(index) is not int or index < 0:
-                raise ValueError(f"{path}: invalid solution index {index!r}")
+        for index, record in iterSolutionRecords(path, wanted):
             if index in seen:
                 raise ValueError(f"{path}: duplicate solution index {index}")
             seen.add(index)
-            if wanted is None or index in wanted:
+            if record is not None:
                 mapping = record["sizeMapping"]
                 records[index] = _Solution(
                     index=index,

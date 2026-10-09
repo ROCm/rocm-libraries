@@ -4,170 +4,9 @@
 
 from dataclasses import dataclass
 from math import lcm
-from pathlib import Path
 
 from .metadata import LibraryMetadata, _Solution
-
-_TYPE_BYTES = {
-    "Float": 4,
-    "Half": 2,
-    "BFloat16": 2,
-    "Float8": 1,
-    "BFloat8": 1,
-    "Float8_fnuz": 1,
-    "BFloat8_fnuz": 1,
-    "Int8": 1,
-    "Int32": 4,
-}
-
-
-@dataclass(frozen=True, slots=True)
-class GemmShape:
-    """Positive GEMM dimensions, with batch count separate from matrix axes."""
-
-    m: int
-    n: int
-    k: int
-    batch_count: int = 1
-
-    @property
-    def tensile_sizes(self) -> tuple[int, int, int, int]:
-        """The client's index order is M, N, batch, K."""
-        return self.m, self.n, self.batch_count, self.k
-
-
-@dataclass(frozen=True, slots=True)
-class GemmProfile:
-    """Types, transposes and optional features taken from one solution.
-
-    Both adapters use alpha=1, beta=0, no activation and packed column-major
-    matrices. Bias/scales follow the metadata; this is not an epilogue sweep.
-    Type names are Tensile names, such as ``Half`` and ``Float``.
-    """
-
-    a_type: str
-    b_type: str
-    c_type: str
-    d_type: str
-    compute_type: str
-    trans_a: bool
-    trans_b: bool
-    compute_input_a: str
-    compute_input_b: str
-    high_precision_accumulate: bool
-    use_bias: bool
-    bias_type: str
-    bias_source: int
-    scale_ab: str
-    scale_cd: bool
-    scale_alpha_vector: bool
-    math_op: str
-    activation_type: str
-    activation_compute_type: str
-    activation_no_guard: bool
-
-    @property
-    def operation_identifier(self) -> str:
-        a = "lik" if self.trans_a else "ilk"
-        b = "jlk" if self.trans_b else "ljk"
-        return f"Contraction_l_A{a}_B{b}_Cijk_Dijk"
-
-
-@dataclass(frozen=True, slots=True)
-class GemmCase:
-    """One candidate, its intended purpose, and enough data for either client.
-
-    The case has passed the generator's necessary dimensional constraints.
-    It has not been checked against the native library or a GPU. ``reason``
-    describes selection intent, not measured control-flow coverage.
-    """
-
-    solution_index: int
-    solution_name: str
-    kernel_name: str
-    metadata_file: Path
-    code_objects: tuple[Path, ...]
-    shape: GemmShape
-    profile: GemmProfile
-    id: str
-    reason: str
-
-    @property
-    def leading_dimensions(self) -> tuple[int, int, int, int]:
-        """Column strides of packed A/B/C/D matrices, in elements."""
-        s, p = self.shape, self.profile
-        return s.k if p.trans_a else s.m, s.n if p.trans_b else s.k, s.m, s.m
-
-    @property
-    def batch_strides(self) -> tuple[int, int, int, int]:
-        """Batch strides of packed A/B/C/D matrices, in elements."""
-        s = self.shape
-        return s.m * s.k, s.n * s.k, s.m * s.n, s.m * s.n
-
-
-def _profile(solution: _Solution) -> GemmProfile:
-    p = solution.problem
-    unsupported = (
-        "groupedGemm",
-        "fusedGemmA2A",
-        "sparse",
-        "useGradient",
-        "useE",
-        "useGateResidual",
-        "outputAmaxD",
-        "mxBlockA",
-        "mxBlockB",
-        "useInitialStridesAB",
-        "useInitialStridesCD",
-        "swizzleTensorA",
-        "swizzleTensorB",
-        "mirrorDimsA",
-        "mirrorDimsB",
-    )
-    features = [key for key in unsupported if p.get(key)]
-    if features:
-        raise ValueError(f"Solution {solution.index}: unsupported features: {', '.join(features)}")
-    if (
-        any(p[f"{t}Type"] not in _TYPE_BYTES for t in "abcd")
-        or p["cType"] != p["dType"]
-        or p["computeType"] not in {"Float", "Int32"}
-        or not p.get("stridedBatched", True)
-        or p.get("activationType", "None") not in {"None", "All", "Hipblaslt_all"}
-        or p.get("useScaleAB", "") not in {"", "Scalar", "Vector"}
-        or p.get("useBias", 0) not in {0, 1}
-        or p.get("useScaleAlphaVec", 0) not in {0, 1}
-        or p.get("f32XdlMathOp", "Float") not in {"Float", "XFloat32"}
-    ):
-        raise ValueError(f"Solution {solution.index}: unsupported GEMM profile")
-    profile = GemmProfile(
-        a_type=p["aType"],
-        b_type=p["bType"],
-        c_type=p["cType"],
-        d_type=p["dType"],
-        compute_type=p["computeType"],
-        trans_a=bool(p["transA"]),
-        trans_b=bool(p["transB"]),
-        compute_input_a=p.get("computeInputTypeA", p.get("computeInputType", p["aType"])),
-        compute_input_b=p.get("computeInputTypeB", p.get("computeInputType", p["bType"])),
-        high_precision_accumulate=bool(p.get("highPrecisionAccumulate")),
-        use_bias=bool(p.get("useBias")),
-        bias_type=(p.get("biasDataTypeWhiteList") or [p["computeType"]])[0],
-        bias_source=(p.get("biasSrcWhiteList") or [3])[0],
-        scale_ab=p.get("useScaleAB", ""),
-        scale_cd=bool(p.get("useScaleCD")),
-        scale_alpha_vector=bool(p.get("useScaleAlphaVec")),
-        math_op=p.get("f32XdlMathOp", "Float"),
-        activation_type=p.get("activationType", "None"),
-        activation_compute_type=p.get("activationComputeDataType", p["computeType"]),
-        activation_no_guard=bool(p.get("activationNoGuard")),
-    )
-    if p["operationIdentifier"] != profile.operation_identifier:
-        raise ValueError(f"Solution {solution.index}: not an ordinary Cijk GEMM")
-    if profile.bias_source not in {0, 1, 3} or profile.bias_type not in _TYPE_BYTES:
-        raise ValueError(f"Solution {solution.index}: unsupported bias profile")
-    if any(t not in _TYPE_BYTES for t in (profile.compute_input_a, profile.compute_input_b)):
-        raise ValueError(f"Solution {solution.index}: unsupported compute input types")
-    return profile
+from .models import GemmCase, GemmProfile, GemmShape
 
 
 @dataclass
@@ -283,7 +122,10 @@ def candidate_gemms(
     if any(type(n) is not int or n <= 0 for n in (max_cases, max_dimension, max_data_bytes)):
         raise ValueError("Candidate limits must be positive integers")
     solution = library._solutions[solution_index]
-    profile = _profile(solution)
+    try:
+        profile = GemmProfile.from_problem_type(solution.problem)
+    except ValueError as error:
+        raise ValueError(f"Solution {solution_index}: {error}") from error
     bounds = _bounds(solution, max_dimension)
     first = {name: bound.at_least(1) for name, bound in bounds.items()}
     if any(value is None for value in first.values()):
@@ -308,10 +150,7 @@ def candidate_gemms(
         if any(value is None for value in fitted.values()):
             return False
         shape = GemmShape(**fitted)
-        sizes = (shape.m * shape.k, shape.n * shape.k, shape.m * shape.n, shape.m * shape.n)
-        types = (profile.a_type, profile.b_type, profile.c_type, profile.d_type)
-        data_bytes = shape.batch_count * sum(n * _TYPE_BYTES[t] for n, t in zip(sizes, types))
-        if shape in seen or data_bytes > max_data_bytes:
+        if shape in seen or profile.data_bytes(shape) > max_data_bytes:
             return False
         seen.add(shape)
         cases.append(

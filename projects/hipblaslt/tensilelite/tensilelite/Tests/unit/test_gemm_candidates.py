@@ -6,13 +6,13 @@ import zlib
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
+import msgpack
 import pytest
 import yaml
-
-import msgpack
-from tensilelite.Utilities.gemm_candidates.candidates import GemmShape, candidate_gemms
+from tensilelite.Utilities.gemm_candidates.candidates import candidate_gemms
 from tensilelite.Utilities.gemm_candidates.clients import bench_yaml, tensile_ini
 from tensilelite.Utilities.gemm_candidates.metadata import load_library_metadata
+from tensilelite.Utilities.gemm_candidates.models import GemmShape
 
 pytestmark = pytest.mark.unit
 
@@ -49,6 +49,54 @@ def write_shard(directory, records, name="TensileLibrary_test_gfx942.dat", *, co
     data = msgpack.packb({"solutions": records, "library": {"type": "Matching", "table": []}})
     path.write_bytes(zlib.compress(data) if compressed else data)
     return path
+
+
+@pytest.mark.parametrize("library_format", ["msgpack", "msgpack-indexed"])
+@pytest.mark.parametrize("compressed", [False, True])
+def test_loads_native_library_formats(tmp_path, library_format, compressed):
+    """The library writer's two binary formats must both reach the requested solution."""
+    from tensilelite.LibraryIO import write
+
+    record = solution()
+    write(
+        str(tmp_path / "TensileLibrary_test_gfx942"),
+        {"solutions": [record], "library": {"type": "Matching", "table": []}},
+        library_format,
+    )
+    if not compressed:
+        path = tmp_path / "TensileLibrary_test_gfx942.dat.zlib"
+        path.with_suffix("").write_bytes(zlib.decompress(path.read_bytes()))
+        path.unlink()
+    for requested in (None, [17]):
+        library = load_library_metadata(tmp_path, target="gfx942", solution_indices=requested)
+        assert library.indices == (17,)
+        assert candidate_gemms(library, 17)[0].solution_name == record["name"]
+
+
+@pytest.mark.parametrize(
+    "data_type",
+    [
+        "Float",
+        "Half",
+        "BFloat16",
+        "Float8",
+        "BFloat8",
+        "Float8_fnuz",
+        "BFloat8_fnuz",
+        "Int8",
+        "Int32",
+    ],
+)
+def test_storage_budget_matches_generator_type_registry(data_type):
+    """The lightweight client type subset must agree with the generator's byte sizes."""
+    from tensilelite.Common.DataType import DataType
+    from tensilelite.Utilities.gemm_candidates import GemmProfile
+
+    record = solution(problem={"aType": data_type, "bType": data_type})
+    profile = GemmProfile.from_problem_type(record["problemType"])
+    shape = GemmShape(m=3, n=5, k=7, batch_count=2)
+    expected = 2 * ((3 * 7 + 5 * 7) * DataType(data_type).numBytes() + 2 * 3 * 5 * 4)
+    assert profile.data_bytes(shape) == expected
 
 
 @pytest.fixture

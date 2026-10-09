@@ -97,17 +97,40 @@ library = load_library_metadata(
 by_solution = {i: candidate_gemms(library, i) for i in indices}
 ```
 
-The optional `solution_indices` filter reduces retained memory. Loading scans
-the matching `.dat`/`.dat.zlib` shards once, skips their heuristic tables without
+Loading supports both ordinary MessagePack (`solutions` arrays) and indexed
+MessagePack (`format_version=2`, `solutions_index` and `solutions_blob`), in
+`.dat` or `.dat.zlib` files. The optional `solution_indices` filter reduces
+retained memory. For indexed files, it also avoids decoding unrequested
+solution records. Compressed shards still need to be decompressed in full;
+ordinary arrays require decoding each record to find its index.
+
+Loading scans the matching shards once, skips their heuristic tables without
 constructing Python objects, and shares repeated problem/predicate records.
-Omit the filter to load every index into `library.indices`. Compressed
-copies take precedence. The path may name an architecture directory or its
-parent. Missing requested indices raise `KeyError`; duplicate indices across
-shards raise `ValueError`.
+Omit the filter to load every index into `library.indices`. Compressed copies
+take precedence. The path may name an architecture directory or its parent.
+Missing requested indices raise `KeyError`; malformed containers, unsupported
+format versions and duplicate indices raise `ValueError`. Duplicate indices
+are checked even outside the requested selection, including across shards.
 
 Candidate generation performs no further file reads or native calls. It has a
 bounded number of proposals per solution and is independent of call order.
 A separate bulk-generation API is unnecessary.
+
+## Implementation boundaries
+
+The package shares binary I/O with the generator through
+[`Utilities/LibraryIO.py`](../LibraryIO.py), and Tensile client problem options
+through [`Utilities/ClientConfig.py`](../ClientConfig.py). The existing
+`LibraryIO` writers and `ClientWriter` call those same helpers. Neither helper
+imports generator classes or rocisa.
+
+Within this package, `metadata.py` discovers library files and builds the
+reusable lookup; `models.py` holds immutable cases, profile normalization and
+packed layouts; `candidates.py` owns the shape-selection policy; and
+`clients.py` formats inputs. The small table of supported storage types and
+bench spellings lives with the models and is checked against the generator's
+`DataType` registry in tests. This keeps the installed utility independent of
+the generator while sharing serialization rules with its existing clients.
 
 ## Run with either client
 
