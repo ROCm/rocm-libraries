@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // hipcub API
 #include <hipcub/device/device_select.hpp>
@@ -46,7 +47,7 @@ struct DeviceSelectParams
 };
 
 template<class Params>
-class HipcubDeviceSelectTests : public ::testing::Test
+class HipcubDeviceSelectTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type                 = typename Params::input_type;
@@ -90,7 +91,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -227,7 +228,10 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST(HipcubDeviceSelectTests, FlagNormalization)
+class HipcubDeviceSelectSingleTests : public test_controller::ControlledTest<>
+{};
+
+TEST_F(HipcubDeviceSelectSingleTests, FlagNormalization)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -241,7 +245,7 @@ TEST(HipcubDeviceSelectTests, FlagNormalization)
 
     unsigned int seed_value = rand();
 
-    for(size_t size : test_utils::get_sizes(seed_value))
+    for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
         rocprim::counting_iterator<T>    d_input(0);
@@ -354,7 +358,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -509,7 +513,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -677,7 +681,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             for(auto p : probabilities)
@@ -794,7 +798,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST(HipcubDeviceSelectTests, UniqueDiscardOutputIterator)
+TEST_F(HipcubDeviceSelectSingleTests, UniqueDiscardOutputIterator)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -804,7 +808,7 @@ TEST(HipcubDeviceSelectTests, UniqueDiscardOutputIterator)
 
     unsigned int seed_value = rand();
 
-    for(size_t size : test_utils::get_sizes(seed_value))
+    for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
         rocprim::counting_iterator<unsigned int>    d_input(0);
@@ -866,7 +870,7 @@ struct TestLargeIndicesSelectOp
     }
 };
 
-class HipcubDeviceSelectLargeIndicesTests : public ::testing::TestWithParam<unsigned int>
+class HipcubDeviceSelectLargeIndicesTests : public test_controller::ControlledTestWithParam<unsigned int>
 {
 public:
     const bool debug_synchronous = false;
@@ -878,7 +882,6 @@ INSTANTIATE_TEST_SUITE_P(HipcubDeviceSelectLargeIndicesTest,
 
 TEST_P(HipcubDeviceSelectLargeIndicesTests, LargeIndicesSelectOp)
 {
-    GTEST_SKIP_ASAN();
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
@@ -891,15 +894,9 @@ TEST_P(HipcubDeviceSelectLargeIndicesTests, LargeIndicesSelectOp)
 
     const auto selected_size = GetParam();
 
-    for(size_t size : test_utils::get_large_sizes(0))
+    for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_large_sizes(0)))
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-
-// Support for large indices in DeviceSelect is not implemented in CUB yet. Disable test meanwhile.
-#ifdef __HIP_PLATFORM_NVIDIA__
-        std::cout << "Test disabled for large sizes until support is present in CUB" << std::endl;
-        GTEST_SKIP();
-#endif
 
         // Generate data
         rocprim::counting_iterator<T>    d_input(0);
@@ -991,7 +988,7 @@ struct DeviceUniqueByKeyParams
 };
 
 template<class Params>
-class HipcubDeviceUniqueByKeyTests : public ::testing::Test
+class HipcubDeviceUniqueByKeyTests : public test_controller::ControlledTest<>
 {
 public:
     using key_type                   = typename Params::key_type;
@@ -1002,6 +999,9 @@ public:
     using selected_count_type        = typename Params::selected_count_type;
     static constexpr bool use_graphs = Params::use_graphs;
 };
+
+class HipcubDeviceUniqueByKeySingleTests : public test_controller::ControlledTest<>
+{};
 
 struct TestUniqueEqualityOp
 {
@@ -1053,7 +1053,7 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -1215,10 +1215,8 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST(HipcubDeviceUniqueByKeyTests, LargeIndicesUniqueByKey)
+TEST_F(HipcubDeviceUniqueByKeySingleTests, LargeIndicesUniqueByKey)
 {
-    GTEST_SKIP_ASAN();
-
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
@@ -1235,7 +1233,7 @@ TEST(HipcubDeviceUniqueByKeyTests, LargeIndicesUniqueByKey)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_large_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_large_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             TestUniqueEqualityOp equality_op;

@@ -27,6 +27,7 @@
 
 #include "common_test_header.hpp"
 #include "test_utils_assertions.hpp"
+#include "test_utils_controller.hpp"
 
 hipcub::CachingDeviceAllocator g_allocator;
 
@@ -55,7 +56,7 @@ struct DeviceSpmvParams
 // ---------------------------------------------------------
 
 template<class Params>
-class HipcubDeviceSpmvTests : public ::testing::Test
+class HipcubDeviceSpmvTests : public test_controller::ControlledTest<>
 {
 public:
     using value_type                    = typename Params::value_type;

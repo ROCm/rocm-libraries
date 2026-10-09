@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 #include "hipcub/device/device_transform.hpp"
 
@@ -101,7 +102,7 @@ struct HipcubDeviceTransformParams
 };
 
 template<class Params>
-struct HipcubDeviceTransformTests : public ::testing::Test
+struct HipcubDeviceTransformTests : public test_controller::ControlledTest<>
 {
     using input_type                        = typename Params::input_type;
     using output_type                       = typename Params::output_type;
@@ -129,7 +130,7 @@ TYPED_TEST(HipcubDeviceTransformTests, Transform)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             hipStream_t stream = hipStreamDefault;
             SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -187,7 +188,7 @@ TYPED_TEST(HipcubDeviceTransformTests, TransformAddrStableNonCopyable)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             hipStream_t stream = hipStreamDefault;
             SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -248,7 +249,7 @@ TYPED_TEST(HipcubDeviceTransformTests, TransformAddrStablePointerDiff)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             hipStream_t stream = hipStreamDefault;
             SCOPED_TRACE(testing::Message() << "with size = " << size);
