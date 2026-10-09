@@ -151,8 +151,8 @@
     X(DsCapTdmEndCycles, int, -1)                                                                 \
     X(DsCapTdmPerCap, int, -1) /* >0: ds cap per span in the TDM window; 0 = off; -1 = unset      \
                                   (TDM kernels: policy 576-840 cycles x1) */                      \
-    X(TdmStageBytes, int,                                                                         \
-      -1) /* LDS bytes TDM writes per stage; -1 = unknown (policy uses 576-840) */
+    X(TdmStageBytes, int, -1)  /* LDS bytes TDM writes per stage; -1 = unknown */                 \
+    X(DsPaceTdm, int, 0)       /* 1: plan ds_load release times around the TDM landing window */
 
 namespace stinkytofu {
 /**

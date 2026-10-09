@@ -43,6 +43,7 @@
 #include <vector>
 
 #include "DsIssueCap.hpp"
+#include "DsPacePlan.hpp"
 #include "InFlightQueue.hpp"
 #include "ReadyQueue.hpp"
 #include "RegionDAG.hpp"
@@ -608,11 +609,20 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const bool own = dsCapOwnTlClock_ >= 0 && in(clock_ - dsCapOwnTlClock_);
         return (carried || own) ? std::min(f.dsCapTdmPerCap, dsIssueCap_.depth()) : 0;
     }
+    // Pacing plan (DsPacePlan.hpp): the k-th ds_load of the region may not issue before
+    // dsPacePlan_[k]. Empty = ASAP.
+    bool dsPaceHeld() const {
+        const size_t k = static_cast<size_t>(dsIssuedThisRegion_);
+        return k < dsPacePlan_.size() && clock_ < dsPacePlan_[k];
+    }
+    int dsPaceResidual() const {
+        return dsPaceHeld() ? dsPacePlan_[static_cast<size_t>(dsIssuedThisRegion_)] - clock_ : 0;
+    }
     bool dsCapFull() const {
-        return dsIssueCap_.full(dsCapWindowLimit());
+        return dsIssueCap_.full(dsCapWindowLimit()) || dsPaceHeld();
     }
     int dsCapMinResidual() const {
-        return dsIssueCap_.minResidual(dsCapWindowLimit());
+        return std::max(dsIssueCap_.minResidual(dsCapWindowLimit()), dsPaceResidual());
     }
     int dsReadThrottleWait() const {
         return dsReadInflight_.throttleWait();
@@ -820,8 +830,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     };
 
     int wmmaIssuedCountThisRegion_ = 0;
-    int dsCapOwnTlClock_ = -1;   // clock_ at this region's tensor_load issue; -1 = none yet
-    int dsCapTdmCarryAge_ = -1;  // previous region's tensor_load age at region start; -1 = none
+    int dsCapOwnTlClock_ = -1;     // clock_ at this region's tensor_load issue; -1 = none yet
+    std::vector<int> dsPacePlan_;  // planned ds_load release clocks for this region; empty = ASAP
+    int dsCapTdmCarryAge_ = -1;    // previous region's tensor_load age at region start; -1 = none
 
     BasicBlock* currentBB_ = nullptr;
     std::vector<Layer2BarrierOverlapCandidate> layer2BarrierOverlapCandidates_;
@@ -2944,6 +2955,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaIssuedCountThisRegion_ = 0;
     dsCapOwnTlClock_ = -1;
     dsCapTdmCarryAge_ = -1;
+    dsPacePlan_.clear();
     lastPickedNode_ = nullptr;
     // SCC chain locks are per-region: chain ids index the prior region's
     // DAGNodeList, and region boundaries are side-effect cuts no reordering
@@ -3550,6 +3562,36 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                     ? wmmaIssueConfig.latency
                                     : std::max(1, config_.dsIssueCapSpanCycles);
             if (tlWmma >= 0) dsCapTdmCarryAge_ = std::max(0, totalWmma - tlWmma) * latency;
+
+            // ds pacing plan: pace the region's ds_loads that no barrier gates (their data has
+            // already landed): spread them evenly from the region start until the before-barrier,
+            // thinned to the window rate inside the TDM landing window, count kept. The loads a
+            // before-barrier gates stay ASAP behind it.
+            const auto& pace = getPassContext().getPassFeatureConfig().dagFeatures;
+            if (pace.dsPaceTdm && dsCapTdmCarryAge_ >= 0 && pace.dsCapTdmPerCap > 0 &&
+                pace.dsCapTdmEndCycles > pace.dsCapTdmBeginCycles) {
+                int dsCount = 0;
+                for (auto it = regionStart; it != regionEnd; ++it)
+                    if (auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr()))
+                        dsCount += isDSRead(*inst);
+                int t0 = INT_MAX;
+                int gated = 0;
+                for (const auto& group : exclusiveBeforeGroups)
+                    for (StinkyInstruction* barrier : group.barriers) {
+                        auto th = barrierWmmaThresholds_.find(barrier);
+                        if (th != barrierWmmaThresholds_.end())
+                            t0 = std::min(t0, th->second * latency);
+                        auto cnt = barrierDsLoadCounts_.find(barrier);
+                        if (cnt != barrierDsLoadCounts_.end()) gated = std::max(gated, cnt->second);
+                    }
+                if (t0 == INT_MAX) t0 = totalWmma * latency;
+                const int freeCount = std::max(0, dsCount - gated);
+                const double span = std::max(1, dsIssueCapSpan());
+                dsPacePlan_ = planDsRelease(freeCount, 0, t0, dsReadPerCap() / span,
+                                            std::min(pace.dsCapTdmPerCap, dsReadPerCap()) / span,
+                                            {{pace.dsCapTdmBeginCycles - dsCapTdmCarryAge_,
+                                              pace.dsCapTdmEndCycles - dsCapTdmCarryAge_}});
+            }
         }
 
         // Publish the final, normalized threshold together with each barrier
