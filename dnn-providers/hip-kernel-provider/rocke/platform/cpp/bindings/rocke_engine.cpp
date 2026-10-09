@@ -39,6 +39,7 @@ extern "C" {
 #include "rocke/instance_batched_gemm.h"
 #include "rocke/instance_block_scale_gemm.h"
 #include "rocke/instance_conv_direct_grouped.h"
+#include "rocke/instance_conv_direct_nongrouped.h"
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 #include "rocke/instance_conv_wgrad_workspace_reduce.h"
@@ -52,6 +53,7 @@ extern "C" {
 #include "rocke/instance_mfma_gemm.h"
 #include "rocke/instance_mx_gemm.h"
 #include "rocke/instance_streamk_gemm.h"
+#include "rocke/instance_tf32_mma_probe.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
@@ -1585,6 +1587,8 @@ void fill_direct_conv_problem(rocke_direct_conv_problem_t* p, const py::dict& d)
     p->KW = dict_int(d, "KW", p->KW);
     p->PAD = dict_int(d, "PAD", p->PAD);
     p->stride = dict_int(d, "stride", p->stride);
+    p->dil_h = dict_int(d, "dil_h", p->dil_h);
+    p->dil_w = dict_int(d, "dil_w", p->dil_w);
 }
 
 std::string conv_direct_grouped_kind(const py::dict& d)
@@ -1711,6 +1715,95 @@ std::vector<std::string> conv_direct_grouped_verify(const py::dict& d, const std
     std::vector<std::string> out = verify_kernel(k);
     rocke_ir_builder_free(&b);
     return out;
+}
+
+/* ======================== conv_direct_nongrouped ========================== */
+
+/* Non-grouped (groups == 1) direct conv. The dict mirrors DirectNongroupedConvSpec
+ * with the problem nested; `iglp` / `waves_per_eu` may be None (absent knob). */
+rocke_direct_conv_nongrouped_spec_t dnongrouped_build_spec(const py::dict& d,
+                                                           std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_direct_conv_nongrouped_spec_t s = rocke_direct_conv_nongrouped_spec_default();
+    if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
+    {
+        py::dict pd = d["problem"].cast<py::dict>();
+        std::string v;
+        fill_direct_conv_problem(&s.problem, pd);
+        if(dict_str(pd, "dtype", v))
+            s.problem.dtype = keep(v);
+    }
+    {
+        std::string v;
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+        if(dict_str(d, "atom", v))
+            s.atom = keep(v);
+    }
+    s.tile_h = dict_int(d, "tile_h", s.tile_h);
+    s.tile_w = dict_int(d, "tile_w", s.tile_w);
+    s.tile_k = dict_int(d, "tile_k", s.tile_k);
+    s.ck = dict_int(d, "ck", s.ck);
+    s.waves_m = dict_int(d, "waves_m", s.waves_m);
+    s.waves_n = dict_int(d, "waves_n", s.waves_n);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.lds_pad = dict_int(d, "lds_pad", s.lds_pad);
+    s.chiplet_swizzle = dict_bool(d, "chiplet_swizzle", s.chiplet_swizzle);
+    s.swizzle_wgm = dict_int(d, "swizzle_wgm", s.swizzle_wgm);
+    s.chiplet_chunk = dict_int(d, "chiplet_chunk", s.chiplet_chunk);
+    s.num_xcds = dict_int(d, "num_xcds", s.num_xcds);
+    s.double_buffer = dict_bool(d, "double_buffer", s.double_buffer);
+    /* The C spec encodes None as a sentinel (-1 / 0). An explicit value in the
+     * sentinel range would silently read as None here, so reject it with the
+     * message Python's validate() raises for the same spec. */
+    if(d.contains("iglp") && !d["iglp"].is_none())
+    {
+        s.iglp = d["iglp"].cast<int>();
+        if(s.iglp < 0)
+            throw std::runtime_error("iglp must be None or >= 0 (got " + std::to_string(s.iglp)
+                                     + ")");
+    }
+    if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
+    {
+        s.waves_per_eu = d["waves_per_eu"].cast<int>();
+        if(s.waves_per_eu < 1)
+            throw std::runtime_error("waves_per_eu must be None or >= 1 (got "
+                                     + std::to_string(s.waves_per_eu) + ")");
+    }
+    return s;
+}
+
+std::string conv_direct_nongrouped_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    std::deque<std::string> store;
+    rocke_direct_conv_nongrouped_spec_t s = dnongrouped_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_direct_conv_nongrouped_lower_to_llvm(
+        &s, arch_or_default(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_engine.conv_direct_nongrouped_lower_llvm");
+}
+
+std::string conv_direct_nongrouped_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_SERIALIZE_BODY(
+        "rocke_engine.conv_direct_nongrouped_serialize_ir",
+        rocke_direct_conv_nongrouped_spec_t,
+        dnongrouped_build_spec,
+        rocke_build_direct_conv_nongrouped_new(&b, &s, arch_or_default(arch)));
+}
+
+std::vector<std::string> conv_direct_nongrouped_verify(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_direct_nongrouped_verify",
+                             rocke_direct_conv_nongrouped_spec_t,
+                             dnongrouped_build_spec,
+                             rocke_build_direct_conv_nongrouped_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ======================= deep_fused_conv_pool ======================= */
@@ -2169,7 +2262,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
     s.split_k = dict_int(d, "split_k", s.split_k);
     s.two_stage = dict_bool(d, "two_stage", s.two_stage);
-    s.force_deterministic = dict_bool(d, "force_deterministic", s.force_deterministic);
+    s.ws_replicas = dict_int(d, "ws_replicas", s.ws_replicas);
     {
         std::string v;
         if(dict_str(d, "name", v))
@@ -2241,6 +2334,11 @@ rocke_wgrad_reduce_spec_t conv_wgrad_reduce_build_spec(const py::dict& d,
     s.wg_M = dict_int(d, "wg_M", s.wg_M);
     s.wg_N = dict_int(d, "wg_N", s.wg_N);
     s.groups = dict_int(d, "groups", s.groups);
+    /* Must track the Stage 1 spec's ws_replicas: folding fewer slabs than
+     * Stage 1 wrote drops part of the sum, folding more reads past the
+     * scratch. Defaulting here instead of parsing would silently do one or the
+     * other for every non-default Stage 1 count. */
+    s.ws_replicas = dict_int(d, "ws_replicas", s.ws_replicas);
     {
         std::string v;
         if(dict_str(d, "dtype_d", v))
@@ -3512,6 +3610,25 @@ PYBIND11_MODULE(rocke_engine, m)
         []() { return std::string(rocke_engine_version()); },
         "Human-readable engine version of this module.");
 
+    m.def(
+        "tf32_mma_probe_serialize_ir",
+        [](int shape, const std::string& preparation) {
+            rocke_ir_builder_t b;
+            rocke_kernel_def_t* kernel = rocke_build_tf32_mma_probe(&b, shape, preparation.c_str());
+            char* text = nullptr;
+            rocke_status_t status
+                = kernel ? rocke_ir_serialize(kernel, &text) : rocke_ir_builder_status(&b);
+            std::string error = rocke_ir_builder_error(&b);
+            std::string result = text ? text : "";
+            free(text);
+            rocke_ir_builder_free(&b);
+            if(status != ROCKE_OK)
+                throw std::runtime_error(error);
+            return result;
+        },
+        py::arg("m") = 16,
+        py::arg("preparation") = "raw");
+
     /* ---- family-agnostic lower-from-serialized-IR ----
      * The keystone of the ROCKE_BACKEND=cpp default for Python-authored
      * kernels: a Python front end serializes any KernelDef to ck.dsl.ir/v1
@@ -3634,6 +3751,10 @@ PYBIND11_MODULE(rocke_engine, m)
          &conv_direct_grouped_lower_llvm,
          &conv_direct_grouped_serialize_ir,
          &conv_direct_grouped_verify);
+    reg3("conv_direct_nongrouped",
+         &conv_direct_nongrouped_lower_llvm,
+         &conv_direct_nongrouped_serialize_ir,
+         &conv_direct_nongrouped_verify);
     register_img2col(m); /* separate TU; see note at top of file */
     reg3("deep_fused_conv_pool",
          &deep_fused_conv_pool_lower_llvm,
@@ -3738,9 +3859,9 @@ PYBIND11_MODULE(rocke_engine, m)
             return rocke_wgrad_conv_workspace_bytes(&s);
         },
         py::arg("spec"),
-        "Return workspace bytes for the two-stage deterministic wgrad path.\n"
-        "Formula: groups * split_k * wg_M * wg_N * 4 (always f32).\n"
-        "Returns 0 when two_stage=false and force_deterministic=false, or split_k <= 1.");
+        "Return workspace bytes for the two-stage wgrad path.\n"
+        "Formula: groups * ws_replicas * wg_M * wg_N * 4 (always f32).\n"
+        "Returns 0 when two_stage=false, or split_k <= 1.");
 
     /* ---- attention families (separate TU; shared fmha/tiled struct tags) ---- */
     register_attention(m);

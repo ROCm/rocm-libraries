@@ -45,7 +45,7 @@ static int ll_elem_bytes(const char* name)
     {
         return 2;
     }
-    if(strcmp(name, "i32") == 0 || strcmp(name, "f32") == 0)
+    if(strcmp(name, "i32") == 0 || strcmp(name, "tf32") == 0 || strcmp(name, "f32") == 0)
     {
         return 4;
     }
@@ -301,6 +301,41 @@ static void op_memref_global_atomic_add_pk_f16(rocke_lower_t* L, const rocke_op_
                    rocke_ll_operand(L, val));
 }
 
+/* Python STREAMING_ARCHS (rocke/core/ir.py): the targets whose STREAMING
+ * lowering is validated. Other admitted targets map !nontemporal to different
+ * cache bits or are unverified, so the hint is rejected there. */
+static bool ll_streaming_arch(const char* gfx)
+{
+    return gfx && (strcmp(gfx, "gfx942") == 0 || strcmp(gfx, "gfx950") == 0);
+}
+
+/* Python _Lowerer._nontemporal_md: ", !nontemporal !5" when the op carries
+ * nontemporal=True, "" when the attr is absent/false. A non-bool attr is
+ * rejected rather than coerced, and so is a streaming op on a target outside
+ * gfx942 / gfx950. */
+static const char* ll_nontemporal_md(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "nontemporal");
+    if(!v)
+        return "";
+    if(v->kind != ROCKE_ATTR_BOOL)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s: nontemporal attr must be a bool",
+                      rocke_opcode_name(op->opcode));
+    if(!v->u.b)
+        return "";
+    const char* gfx = L->backend ? L->backend->gfx : nullptr;
+    if(!ll_streaming_arch(gfx))
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s: temporal_hint STREAMING requires gfx942 or gfx950, got %s",
+                      rocke_opcode_name(op->opcode),
+                      gfx ? gfx : "(unknown)");
+    L->needs_nontemporal_md = true;
+    return ", !nontemporal !5";
+}
+
 static void op_memref_global_load_vN(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* ptr = op->operands[0];
@@ -319,12 +354,13 @@ static void op_memref_global_load_vN(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, idx));
     align = ll_attr_int(op, "align", vec * 2);
     rocke_ll_emitf(L,
-                   "  %s = load <%lld x %s>, ptr addrspace(1) %s, align %lld",
+                   "  %s = load <%lld x %s>, ptr addrspace(1) %s, align %lld%s",
                    ll_res(op),
                    (long long)vec,
                    elem_ty,
                    gep,
-                   (long long)align);
+                   (long long)align,
+                   ll_nontemporal_md(L, op));
 }
 
 static void op_memref_global_store_vN(rocke_lower_t* L, const rocke_op_t* op)
@@ -338,7 +374,10 @@ static void op_memref_global_store_vN(rocke_lower_t* L, const rocke_op_t* op)
                                                : rocke_ll_llvm_type(L, val->type);
     const char* elem_name = ll_is_vec(val->type) ? val->type->elem->name : val->type->name;
     int elem_bytes = ll_elem_bytes(elem_name);
-    int64_t align = vec * elem_bytes;
+    int64_t align = ll_attr_int(op, "align", vec * elem_bytes);
+    if(align <= 0 || (align & (align - 1)))
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "global_store_vN: alignment must be a positive power of two");
     const char* ty = rocke_ll_llvm_type(L, val->type);
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",
@@ -347,11 +386,12 @@ static void op_memref_global_store_vN(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, ptr),
                    rocke_ll_operand(L, idx));
     rocke_ll_emitf(L,
-                   "  store %s %s, ptr addrspace(1) %s, align %lld",
+                   "  store %s %s, ptr addrspace(1) %s, align %lld%s",
                    ty,
                    rocke_ll_operand(L, val),
                    gep,
-                   (long long)align);
+                   (long long)align,
+                   ll_nontemporal_md(L, op));
 }
 
 static void op_memref_cooperative_global_store(rocke_lower_t* L, const rocke_op_t* op)
@@ -561,7 +601,7 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
         {
             elem_bytes = 2;
         }
-        else if(strcmp(en, "i32") == 0 || strcmp(en, "f32") == 0)
+        else if(strcmp(en, "i32") == 0 || strcmp(en, "tf32") == 0 || strcmp(en, "f32") == 0)
         {
             elem_bytes = 4;
         }
@@ -570,7 +610,8 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
             elem_bytes = 8;
         }
     }
-    int64_t align = vec * elem_bytes;
+    /* New 96-bit widths guarantee only element alignment, including FP8. */
+    int64_t align = (vec == 3 || vec == 6 || vec == 12) ? 12 / vec : vec * elem_bytes;
     /* gfx1250: vec==8 loads are marked volatile to block the WMMA-aware backend
      * pass from substituting ds_load_tr16_b128 (transposed) for the plain
      * sequential ds_read_b128. Mirrors Python _op_tile_smem_load_vN lines

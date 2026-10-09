@@ -29,6 +29,10 @@ const char* const kForwardingEnvVar = "MIOPEN_HIPDNN_FORWARDING";
 //         "miopenConvolutionForward",
 //     };
 //
+// While this is empty, the forwarding parity tests (script/run_forwarding_parity.py)
+// run the same code twice and cannot fail. The first name added here makes them a
+// real check.
+//
 // constexpr so it lands in .rodata: no initialization order or exit-time
 // destructor to worry about.
 constexpr std::array<std::string_view, 0> kForwardingEntries{};

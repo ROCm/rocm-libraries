@@ -592,17 +592,6 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
         DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
         COMPONENT runtime
     )
-    # The gfx1250 v0 GEMM tree builds into its own directory (see
-    # device-library/CMakeLists.txt) but installs as one more subdir of the same
-    # library/ root. The property is only set when that tree is built.
-    get_property(_gfx1250v0_library_dir GLOBAL PROPERTY HIPBLASLT_GFX1250V0_LIBRARY_DIR)
-    if(_gfx1250v0_library_dir)
-        rocm_install(
-            DIRECTORY "${_gfx1250v0_library_dir}"
-            DESTINATION "${HIPBLASLT_TENSILE_LIBRARY_DIR}/library"
-            COMPONENT runtime
-        )
-    endif()
 endif()
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
@@ -724,7 +713,7 @@ endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
     rocm_install(
-        TARGETS hipblaslt-test
+        TARGETS hipblaslt-test hipblaslt-test-tuning-store
         COMPONENT tests
     )
     rocm_install(
@@ -740,7 +729,8 @@ endif()
 
 # Install TensileLite Python packages and test tools for artifact-based testing.
 # Produces:
-#   share/hipblaslt/tensilelite/Tensile/     — Tensile Python package
+#   share/hipblaslt/tensilelite/tensilelite/ — Tensile Python package
+#   share/hipblaslt/tensilelite/Tensile/     — legacy import compatibility shim
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
@@ -749,12 +739,17 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
 
     # Tensile Python package
     install(
-        DIRECTORY "${_tensilelite_src}/Tensile/"
-        DESTINATION "${_tensilelite_install_dest}/Tensile"
+        DIRECTORY "${_tensilelite_src}/tensilelite/"
+        DESTINATION "${_tensilelite_install_dest}/tensilelite"
         COMPONENT tests
         PATTERN "__pycache__" EXCLUDE
         PATTERN ".pytest_cache" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
+    )
+    install(
+        FILES "${_tensilelite_src}/Tensile/__init__.py"
+        DESTINATION "${_tensilelite_install_dest}/Tensile"
+        COMPONENT tests
     )
 
     # Scripts used by unit tests
@@ -766,11 +761,12 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMPONENT tests
     )
 
-    # Imported directly by unit tests, so these generators must ship at the
+    # Imported or executed directly by unit tests, so these must ship at the
     # tensilelite root, not under scripts/.
     install(
         FILES
             "${_tensilelite_src}/AMaxGenerator.py"
+            "${_tensilelite_src}/SoftmaxGenerator.py"
             "${_tensilelite_src}/LayerNormGenerator.py"
         DESTINATION "${_tensilelite_install_dest}"
         COMPONENT tests
@@ -778,9 +774,9 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     # Preserve executable permissions on entry points
     install(
         PROGRAMS
-            "${_tensilelite_src}/Tensile/bin/Tensile"
-            "${_tensilelite_src}/Tensile/bin/TensileCreateLibrary"
-        DESTINATION "${_tensilelite_install_dest}/Tensile/bin"
+            "${_tensilelite_src}/tensilelite/bin/Tensile"
+            "${_tensilelite_src}/tensilelite/bin/TensileCreateLibrary"
+        DESTINATION "${_tensilelite_install_dest}/tensilelite/bin"
         COMPONENT tests
     )
 

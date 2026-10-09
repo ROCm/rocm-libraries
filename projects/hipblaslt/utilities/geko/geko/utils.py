@@ -10,6 +10,7 @@ import shutil
 import sys
 import logging
 import hashlib
+import os
 
 from typing import List
 from pathlib import Path
@@ -31,7 +32,18 @@ def compute_file_sha256(path: str | Path) -> str:
 
 
 
-def run_silent_command(cmd: List[str], cwd: str | Path = None) -> None:
+def _rocm_subprocess_env() -> dict[str, str]:
+    """Return env with ROCm tools on PATH for invoke / Tensile subprocesses."""
+    env = os.environ.copy()
+    rocm = env.get("ROCM_PATH", "/opt/rocm")
+    env["ROCM_PATH"] = rocm
+    rocm_bins = f"{rocm}/bin:{rocm}/hip/bin:{rocm}/llvm/bin"
+    if rocm_bins not in env.get("PATH", ""):
+        env["PATH"] = f"{rocm_bins}:{env.get('PATH', '')}"
+    return env
+
+
+def run_silent_command(cmd: List[str], cwd: str | Path = None, env: dict[str, str] | None = None) -> None:
     """Execute a shell command with silent stdout and error handling.
 
     Args:
@@ -48,6 +60,7 @@ def run_silent_command(cmd: List[str], cwd: str | Path = None) -> None:
         stderr=subprocess.PIPE,
         cwd=cwd,
         text=True,
+        env=env if env is not None else _rocm_subprocess_env(),
     )
     _, err = proc.communicate()
     logger.debug(f"Silent command completed: returncode={proc.returncode}")
@@ -57,7 +70,11 @@ def run_silent_command(cmd: List[str], cwd: str | Path = None) -> None:
         raise ValueError(err)
 
 
-def build_tensilelite_client(hipblaslt_path: str | Path, build_dir: str | Path = None) -> Path | None:
+def build_tensilelite_client(
+    hipblaslt_path: str | Path,
+    build_dir: str | Path = None,
+    gpu_targets: str | None = None,
+) -> Path | None:
     """Builds the tensilelite client if not found or outdated.
 
     Args:
@@ -130,7 +147,10 @@ def build_tensilelite_client(hipblaslt_path: str | Path, build_dir: str | Path =
         shutil.rmtree(build_dir, ignore_errors=True)
 
         logger.info(f"Building tensilelite client in '{build_dir}'")
-        run_silent_command(["invoke", "build-client", "--build-dir", build_dir], cwd=tensilelite_path)
+        cmd = ["invoke", "build-client", "--build-dir", str(build_dir)]
+        if gpu_targets:
+            cmd.extend(["--gpu-targets", gpu_targets])
+        run_silent_command(cmd, cwd=tensilelite_path)
 
         Path(hash_file_path).parent.mkdir(parents=True, exist_ok=True)
         with open(hash_file_path, "w") as f:

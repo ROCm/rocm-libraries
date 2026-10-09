@@ -18,14 +18,17 @@ from __future__ import annotations
 from typing import List, Optional
 
 from .arch.wmma_scale import gfx1250_scaled_wmma
+from .dtypes import dtype_info
 from .ir import (
     KernelDef,
     Op,
     PtrType,
     Region,
     SmemType,
+    Type,
     Value,
     VectorType,
+    require_streaming_arch,
 )
 
 
@@ -34,6 +37,7 @@ _HIP_TYPE = {
     "i8": "int8_t",
     "i16": "int16_t",
     "i32": "int",
+    "tf32": "int",
     "i64": "int64_t",
     "f16": "fp16",
     "bf16": "bf16",
@@ -65,7 +69,7 @@ def _type_to_hip(t) -> str:
             return f"bf16x{t.count}"
         if elem == "f32":
             return f"f32x{t.count}"
-        if elem == "i32":
+        if elem in ("i32", "tf32"):
             return f"i32x{t.count}"
         if elem == "i16":
             return f"i16x{t.count}"
@@ -180,11 +184,20 @@ _VEC_PREFIX = {
     "bf16": "bf16x",
     "f32": "f32x",
     "i32": "i32x",
+    "tf32": "i32x",
     "i16": "i16x",
     "i8": "i8x",
     "fp8e4m3": "i8x",
     "bf8e5m2": "i8x",
 }
+
+
+def _nontemporal(op: Op) -> bool:
+    """The op's ``nontemporal`` attr; absent means False, non-bool is rejected."""
+    nt = op.attrs.get("nontemporal", False)
+    if not isinstance(nt, bool):
+        raise ValueError(f"{op.name}: nontemporal attr must be a bool, got {nt!r}")
+    return nt
 
 
 def _vec_prefix(elem_name: str, op_desc: str) -> str:
@@ -310,6 +323,11 @@ class _Lowerer:
         self._indent -= 1
 
     def lower_op(self, op: Op) -> None:
+        from .tf32 import tf32_op_error
+
+        error = tf32_op_error(op)
+        if error:
+            raise ValueError(error)
         if op.name.startswith("tile.") and gfx1250_scaled_wmma(op.name) is not None:
             self._emit_wmma_gfx1250_scaled(op)
             return
@@ -485,10 +503,38 @@ class _Lowerer:
         vec = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_load_vN")
-        self._emit(
-            f"{prefix}{vec} {_name(op.result)} = "
-            f"*reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)});"
-        )
+        byte_count = vec * (dtype_info(elem_name).encoded_bits // 8)
+        align = int(op.attrs.get("align", vec * 2))
+        if align <= 0 or align & (align - 1):
+            raise ValueError(
+                "global_load_vN: alignment must be a positive power of two"
+            )
+        nontemporal = _nontemporal(op)
+        if nontemporal:
+            require_streaming_arch(op.name, self.arch.gfx)
+        if align < byte_count or byte_count & (byte_count - 1):
+            if nontemporal:
+                raise NotImplementedError(
+                    "global_load_vN: the HIP backend does not yet lower "
+                    "nontemporal on the memcpy path (under-aligned or "
+                    "non-power-of-two payload)"
+                )
+            # Non-power-of-two vector objects include padding. Copy only the
+            # payload, using only the alignment guaranteed by the IR.
+            self._emit(
+                f"{prefix}{vec} {_name(op.result)}; "
+                f"__builtin_memcpy(&{_name(op.result)}, "
+                f"__builtin_assume_aligned({_name(ptr)} + {_name(idx)}, {align}), "
+                f"{byte_count});"
+            )
+            return
+        src = f"reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)})"
+        if nontemporal:
+            self._emit(
+                f"{prefix}{vec} {_name(op.result)} = __builtin_nontemporal_load({src});"
+            )
+            return
+        self._emit(f"{prefix}{vec} {_name(op.result)} = *{src};")
 
     def _op_tile_smem_store_vN(self, op: Op) -> None:
         smem = op.operands[0]
@@ -534,6 +580,19 @@ class _Lowerer:
         This keeps the HIP emission identical to the legacy ISA-named path while
         the IRBuilder helpers route through :meth:`IRBuilder.mma`.
         """
+        from .tf32 import TF32_MMA
+
+        op_id = op.attrs["op_id"]
+        if op_id in TF32_MMA:
+            if self.arch.gfx != "gfx942":
+                raise ValueError("XF32 MMA requires gfx942")
+            a, b, c = op.operands
+            self._emit(
+                f"f32x{TF32_MMA[op_id]} {_name(op.result)} = __builtin_amdgcn_{op_id}("
+                f"__builtin_bit_cast(f32x2, {_name(a)}), "
+                f"__builtin_bit_cast(f32x2, {_name(b)}), {_name(c)}, 0, 0, 0);"
+            )
+            return
         op_id = op.attrs["op_id"]
         legacy = Op(
             name=f"tile.{op_id}",
@@ -1799,10 +1858,33 @@ class _Lowerer:
         n = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_store_vN")
-        self._emit(
-            f"*reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)}) = "
-            f"{_name(val)};"
-        )
+        byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
+        align = int(op.attrs.get("align", byte_count))
+        if align <= 0 or align & (align - 1):
+            raise ValueError(
+                "global_store_vN: alignment must be a positive power of two"
+            )
+        nontemporal = _nontemporal(op)
+        if nontemporal:
+            require_streaming_arch(op.name, self.arch.gfx)
+        if align < byte_count or byte_count & (byte_count - 1):
+            if nontemporal:
+                raise NotImplementedError(
+                    "global_store_vN: the HIP backend does not yet lower "
+                    "nontemporal on the memcpy path (under-aligned or "
+                    "non-power-of-two payload)"
+                )
+            self._emit(
+                f"__builtin_memcpy("
+                f"__builtin_assume_aligned({_name(ptr)} + {_name(idx)}, {align}), "
+                f"&{_name(val)}, {byte_count});"
+            )
+            return
+        dst = f"reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)})"
+        if nontemporal:
+            self._emit(f"__builtin_nontemporal_store({_name(val)}, {dst});")
+            return
+        self._emit(f"*{dst} = {_name(val)};")
 
     def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
         ptr, idx, val = op.operands
@@ -1821,6 +1903,14 @@ class _Lowerer:
         if storage is None:
             raise RuntimeError("smem load_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
+        byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
+        if byte_count & (byte_count - 1):
+            # Clang rounds vector object sizes up; LDS payloads have no padding.
+            self._emit(
+                f"{prefix}{n} {_name(op.result)}; "
+                f"__builtin_memcpy(&{_name(op.result)}, &{storage}[{idx_str}], {byte_count});"
+            )
+            return
         self._emit(
             f"{prefix}{n} {_name(op.result)} = "
             f"*reinterpret_cast<const {prefix}{n}*>(&{storage}[{idx_str}]);"
@@ -2440,6 +2530,41 @@ def _find_enclosing_for(region: Region, target: Op) -> Optional[Op]:
     return None
 
 
+def _extra_vector_declarations(kernel: KernelDef) -> list[str]:
+    """Declare encountered widths absent from the fixed compatibility prologue."""
+    declarations: dict[str, str] = {}
+
+    def visit_type(t: Type) -> None:
+        if isinstance(t, PtrType):
+            visit_type(t.pointee)
+        elif isinstance(t, SmemType):
+            visit_type(t.elem)
+        elif isinstance(t, VectorType):
+            name = _type_to_hip(t)
+            prefix = (
+                "boolx"
+                if t.elem.name == "i1"
+                else _vec_prefix(t.elem.name, "vector type")
+            )
+            scalar = "int8_t" if prefix == "i8x" else _HIP_TYPE[t.elem.name]
+            if f"_ROCKE_VEC({scalar}, {prefix}, {t.count})" not in HIP_PROLOGUE:
+                declarations[name] = (
+                    f"using {name} = {scalar} __attribute__((ext_vector_type({t.count})));"
+                )
+
+    def visit_region(region: Region) -> None:
+        for op in region.ops:
+            for value in (*op.operands, *op.results):
+                visit_type(value.type)
+            for child in op.regions:
+                visit_region(child)
+
+    for param in kernel.params:
+        visit_type(param.type)
+    visit_region(kernel.body)
+    return list(declarations.values())
+
+
 def lower_kernel_to_hip(
     kernel: KernelDef,
     *,
@@ -2452,9 +2577,9 @@ def lower_kernel_to_hip(
     The output is:
     1. The :data:`HIP_PROLOGUE` (typedefs + ``<hip/hip_runtime.h>``
     include + AMDGPU vector typedefs). Disable with
-    ``include_prologue=False`` when you want only the body text
-    (e.g. for embedding into a larger TU that already has these
-    typedefs).
+    ``include_prologue=False`` for embedding into a larger TU that already
+    has the shared prologue. Required per-kernel vector typedefs are still
+    emitted.
     2. The kernel's ``__global__`` signature, derived from
     :attr:`KernelDef.params`. Pointer params get ``__restrict__``;
     ``__launch_bounds__`` is taken from
@@ -2507,6 +2632,7 @@ def lower_kernel_to_hip(
     parts: List[str] = []
     if include_prologue:
         parts.append(HIP_PROLOGUE)
+    parts.extend(_extra_vector_declarations(kernel))
     parts.append(head)
     if smem_block:
         parts.append(smem_block)

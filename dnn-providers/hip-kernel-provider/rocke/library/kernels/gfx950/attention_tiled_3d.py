@@ -28,6 +28,12 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from kernels.common._attention_strided_kv import (
+    declare_strided_kv_params,
+    strided_kv_offset,
+    strided_kv_resource,
+)
+
 from rocke.core.ir import (
     BF16,
     F16,
@@ -56,7 +62,6 @@ from rocke.helpers.attention import (
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.transforms import TensorDescriptor, indirect, unmerge
-
 
 MFMA_M = 16
 MFMA_N = 16
@@ -143,8 +148,20 @@ class UnifiedAttention3DTiledSpec:
     # this when the cache is actually that large (see ``_enable_i64_kv_addr``),
     # so the default (small-cache) build is byte-identical to before.
     use_i64_kv_addr: bool = False
+    # Direct non-paged [B,H,S,D] addressing; D remains contiguous.
+    kv_layout: str = "paged"
 
     def __post_init__(self):
+        if self.kv_layout not in ("paged", "strided"):
+            raise ValueError("kv_layout must be 'paged' or 'strided'")
+        if self.kv_layout == "strided" and (
+            self.kv_storage_dtype is not None
+            or self.use_i64_kv_addr
+            or self.use_wide_kv_load
+        ):
+            raise ValueError(
+                "strided KV requires fp16/bf16 async loads without paged i64 addressing"
+            )
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
             raise ValueError(
                 f"kv_storage_dtype must be None or 'fp8e4m3' (got {self.kv_storage_dtype!r})"
@@ -193,6 +210,7 @@ class UnifiedAttention3DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            "stridedkv" if self.kv_layout == "strided" else "",
         )
 
 
@@ -369,6 +387,9 @@ def build_unified_attention_3d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    if spec.kv_layout == "strided":
+        k_strides = declare_strided_kv_params(b, "k")
+        v_strides = declare_strided_kv_params(b, "v")
 
     q_block_global_idx = b.block_id_x()
     kv_head_idx = b.block_id_y()
@@ -576,8 +597,12 @@ def build_unified_attention_3d_tiled(
 
     # ---------------- async K/V infra (identical to 2D) ----------------
     big_bytes = b.const_i32(0x7FFF0000)
-    key_rsrc = b.buffer_rsrc(key, big_bytes)
-    value_rsrc = b.buffer_rsrc(value, big_bytes)
+    if spec.kv_layout == "strided":
+        key_rsrc = strided_kv_resource(b, key, k_strides, seq_idx, kv_head_idx)
+        value_rsrc = strided_kv_resource(b, value, v_strides, seq_idx, kv_head_idx)
+    else:
+        key_rsrc = b.buffer_rsrc(key, big_bytes)
+        value_rsrc = b.buffer_rsrc(value, big_bytes)
 
     KV_HALVES_PER_CALL = THREADS * 8
     assert (T * HD) % KV_HALVES_PER_CALL == 0
@@ -606,7 +631,7 @@ def build_unified_attention_3d_tiled(
     # by ``unmerge(linear_half -> (token, dim))`` to split the per-lane
     # half offset, plus the byte-stride 4D base. One ``.offset()`` call
     # produces the final byte address for one async DMA call.
-    seq_base = b.mul(seq_idx, bt_stride_p)
+    seq_base = b.mul(seq_idx, bt_stride_p) if spec.kv_layout == "paged" else None
     paged_kv_desc = TensorDescriptor.naive(
         "paged_kv_bytes",
         lengths=[1 << 24, T, NUM_KV, HD],
@@ -624,7 +649,11 @@ def build_unified_attention_3d_tiled(
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
             call_rsrc = key_rsrc
-            if I64_KV_ADDR:
+            if spec.kv_layout == "strided":
+                voff = strided_kv_offset(
+                    b, k_strides, kv_tile_idx, linear_half, seq_len, HD, T
+                )
+            elif I64_KV_ADDR:
                 base_i64, voff, _ = paged_kv_desc.offset_i64_split(
                     b,
                     "physical_block",
@@ -652,7 +681,11 @@ def build_unified_attention_3d_tiled(
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
             call_rsrc = value_rsrc
-            if I64_KV_ADDR:
+            if spec.kv_layout == "strided":
+                voff = strided_kv_offset(
+                    b, v_strides, kv_tile_idx, linear_half, seq_len, HD, T
+                )
+            elif I64_KV_ADDR:
                 base_i64, voff, _ = paged_kv_desc.offset_i64_split(
                     b,
                     "physical_block",
