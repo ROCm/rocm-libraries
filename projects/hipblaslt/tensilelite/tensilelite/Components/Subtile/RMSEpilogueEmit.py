@@ -916,9 +916,10 @@ class RMSEpilogueEmitter:
                                comment=f"+= gammaLdsBase({self.gammaLdsBase})."))
 
     def _issueGammaLds(self, module, g8Bank, mp):
-        """Issue the pair's two gamma DS reads early; latency is hidden by the
-        accumulator-stage, residual-cvt, H8 add, and ssq tree that follow before
-        the matching wait in _waitConvertGammaLds."""
+        """Issue the mp's two gamma DS reads early; called once per mp by _emitBody
+        when mp advances. Latency is hidden by the accumulator-stage, residual-cvt,
+        H8 add, and ssq tree that follow before the matching wait in
+        _waitConvertGammaLds on the first column-tile of the mp."""
         vgprPool = self.writer.vgprPool
         m = 2 * mp
         gldsAddr = vgprPool.checkOut(1, tag="rms_gldsAddr")
@@ -1072,6 +1073,10 @@ class RMSEpilogueEmitter:
         module.addComment1("zero-init ssqAcc[0..T_N-1].")
         for n in range(self.T_N):
             module.add(VMovB32(dst=vgpr(ssqAcc + n), src=0, comment=f"ssqAcc[{n}] = 0.0"))
+        # Gamma is a per-row (M) scale with no N dependence, so its value is identical
+        # across all T_N column-tiles of a given pair mp. Track the last mp whose gamma
+        # was loaded so we issue the LDS read once per mp instead of once per (mp, n).
+        prevMp = -1
         for grp in range(0, self.numPairs, P):
             # The last group is partial when P does not divide numPairs.
             groupSize = min(P, self.numPairs - grp)
@@ -1103,7 +1108,14 @@ class RMSEpilogueEmitter:
                 if self._pendingGammaDTLPublish:
                     self._publishGammaDTL(module)
                     self._pendingGammaDTLPublish = False
-                self._computePair(module, vgprTiles, resBanks[d], accStage, g8Bank, ssqAcc, mp, n, isX4)
+                # Issue the pair's gamma LDS reads only when mp advances; reuse the
+                # converted g8Bank across every n of this mp. gammaFresh drives the
+                # matching wait+convert (Step 4) inside _computePair for the first n only.
+                gammaFresh = mp != prevMp
+                if gammaFresh:
+                    self._issueGammaLds(module, g8Bank, mp)
+                    prevMp = mp
+                self._computePair(module, vgprTiles, resBanks[d], accStage, g8Bank, ssqAcc, mp, n, isX4, gammaFresh)
         vgprPool.checkIn(g8Bank)
         vgprPool.checkIn(accStage)
         for b in reversed(resBanks):
@@ -1506,7 +1518,7 @@ class RMSEpilogueEmitter:
                                comment=f"{comment} ({2 * p + 1})."))
 
     def _computePair(self, module, vgprTiles, resBank, accStage, g8Bank,
-                     ssqAccBase, mp, n, isX4):
+                     ssqAccBase, mp, n, isX4, gammaFresh):
         """Per-pair compute: H = residual + acc, ssq partial, residualOut, D = H*gamma.
 
         Faithful port of @mega_fused_body (MLIR 352-396) for pair ``mp``,
@@ -1516,7 +1528,8 @@ class RMSEpilogueEmitter:
         and Dout after the gamma multiply. ``accStage`` stages AGPR accumulator
         reads, ``g8Bank`` receives the pair's native gamma, and ``ssqAccBase`` is
         the T_N-wide f32 column partial array (caller zero-inits before the pair
-        loop).
+        loop). ``g8Bank`` is loaded and converted once per mp by the caller
+        (_emitBody) and reused across all n of that mp when gammaFresh is False.
 
         The one sanctioned deviation from MLIR is H = extf(native) + acc; the
         reference uses H = residual directly.
@@ -1524,10 +1537,9 @@ class RMSEpilogueEmitter:
         vgprPool = self.writer.vgprPool
         sgprPool = self.writer.sgprPool
         lsc = self.laneSGPRCount
-        # ---- Step 0: issue gamma LDS reads first; Steps 1-3 below hide the read
-        # latency. The matching wait stays at Step 4 (gamma data must land before
-        # D = H8*gamma). ----
-        self._issueGammaLds(module, g8Bank, mp)
+        # ---- Step 0: gamma LDS reads are issued once per pair mp by the caller
+        # (_emitBody) when mp advances, not per (mp, n); Steps 1-3 below hide that
+        # read's latency for the first n, and the matching wait is gated at Step 4. ----
         # ---- Step 1: read the accumulator into native-order accRegs ----
         accRegs = []
         slot = 0
@@ -1568,8 +1580,12 @@ class RMSEpilogueEmitter:
                            comment=f"ssqAcc[{n}] += s."))
         vgprPool.checkIn(sq)
 
-        # ---- Step 4: wait for the early-issued gamma LDS reads and convert bf16->f32 ----
-        self._waitConvertGammaLds(module, g8Bank)
+        # ---- Step 4: on the first column-tile of this pair mp (gammaFresh), wait for the
+        # early-issued gamma LDS reads and convert bf16->f32 in place. Subsequent n reuse
+        # the already-converted g8Bank -- nothing between here and Step 5 clobbers it -- so
+        # no re-read or re-convert is needed. ----
+        if gammaFresh:
+            self._waitConvertGammaLds(module, g8Bank)
 
         # ---- Step 5: D = H8 * gamma into a SEPARATE bank (MLIR 372). Computing out
         # of place keeps residualF32 = H8 live so the residual store below still
