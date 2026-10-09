@@ -110,6 +110,7 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->dense_to_sparse_alg  = rocsparse_dense_to_sparse_alg_default;
         this->gtsv_interleaved_alg = static_cast<rocsparse_gtsv_interleaved_alg>(0);
         this->gpsv_interleaved_alg = static_cast<rocsparse_gpsv_interleaved_alg>(0);
+        this->spsort_alg           = rocsparse_spsort_alg_default;
 
         this->matrix                              = static_cast<rocsparse_matrix_init>(0);
         this->matrix_init_kind                    = static_cast<rocsparse_matrix_init_kind>(0);
@@ -455,6 +456,10 @@ void rocsparse_arguments_config::set_description(options_description& desc)
       value<rocsparse_int>(&this->b_gtsv_interleaved_alg)->default_value(rocsparse_gtsv_interleaved_alg_default),
       "Indicates what algorithm to use when running rocsparse_gtsv_interleaved_batch. Possibly choices are thomas: 1, lu: 2, qr: 3 (default:3)")
 
+    ("spsort_alg",
+      value<rocsparse_int>(&this->b_spsort_alg)->default_value(rocsparse_spsort_alg_default),
+      "Indicates what algorithm to use when running rocsparse_spsort. Possibly choices are rocsparse_spsort_alg_default: 0, rocsparse_spsort_alg_radix_sort: 1 (default: 0)")
+
       ("sparsity-pattern-statistics",
        "enable sparsity pattern statistics: min,max and median of the number of non-zeros per row and per column of the sparsity pattern of the matrix A will be part of benchmarking results.")
 
@@ -561,6 +566,13 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
         return -1;
     }
 
+    if(this->b_spsort_alg != rocsparse_spsort_alg_default
+       && this->b_spsort_alg != rocsparse_spsort_alg_radix_sort)
+    {
+        std::cerr << "Invalid value for --spsort_alg" << std::endl;
+        return -1;
+    }
+
     if(this->b_gtsv_interleaved_alg != rocsparse_gtsv_interleaved_alg_default
        && this->b_gtsv_interleaved_alg != rocsparse_gtsv_interleaved_alg_thomas
        && this->b_gtsv_interleaved_alg != rocsparse_gtsv_interleaved_alg_lu
@@ -642,6 +654,7 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
     this->spmm_alg             = (rocsparse_spmm_alg)this->b_spmm_alg;
     this->sddmm_alg            = (rocsparse_sddmm_alg)this->b_sddmm_alg;
     this->gtsv_interleaved_alg = (rocsparse_gtsv_interleaved_alg)this->b_gtsv_interleaved_alg;
+    this->spsort_alg           = (rocsparse_spsort_alg)this->b_spsort_alg;
 
 #ifdef ROCSPARSE_WITH_MEMSTAT
     rocsparse_status status = rocsparse_memstat_report(this->b_memory_report_filename.c_str());

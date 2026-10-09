@@ -36,7 +36,7 @@ Tests:
   N: [33]
   batch_count_A: [1, 7]
   batch_count_B: [7]
-  algo: [0]
+  spsort_alg: [rocsparse_spsort_alg_default]
   baseA: [rocsparse_index_base_zero]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_zero]
@@ -50,7 +50,7 @@ Tests:
   N: [242]
   batch_count_A: [1]
   batch_count_B: [1]
-  algo: [1]
+  spsort_alg: [rocsparse_spsort_alg_radix_sort]
   baseA: *all_rocsparse_index_base
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
@@ -64,7 +64,7 @@ Tests:
   N: [1, 242]
   batch_count_A: [1]
   batch_count_B: [1]
-  algo: [0]
+  spsort_alg: [rocsparse_spsort_alg_default]
   baseA: [rocsparse_index_base_zero]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
@@ -78,7 +78,7 @@ Tests:
   N: [33]
   batch_count_A: [1, 2]
   batch_count_B: [2]
-  algo: [1]
+  spsort_alg: [rocsparse_spsort_alg_radix_sort]
   baseA: [rocsparse_index_base_one]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
@@ -92,7 +92,7 @@ Tests:
   N: [33]
   batch_count_A: [1, 2]
   batch_count_B: [2]
-  algo: [0]
+  spsort_alg: [rocsparse_spsort_alg_default]
   baseA: [rocsparse_index_base_zero]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_zero]
@@ -106,7 +106,7 @@ Tests:
   N: [0, 33]
   batch_count_A: [1, 2]
   batch_count_B: [2]
-  algo: [1]
+  spsort_alg: [rocsparse_spsort_alg_radix_sort]
   baseA: [rocsparse_index_base_zero]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
@@ -120,7 +120,7 @@ Tests:
   N: 1
   batch_count_A: [1]
   batch_count_B: [1]
-  algo: [1]
+  spsort_alg: [rocsparse_spsort_alg_radix_sort]
   baseA: [rocsparse_index_base_zero]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_file_rocalution]
@@ -142,7 +142,7 @@ Tests:
   N: [1623]
   batch_count_A: [1]
   batch_count_B: [1]
-  algo: [0]
+  spsort_alg: [rocsparse_spsort_alg_default]
   baseA: *all_rocsparse_index_base
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
@@ -156,7 +156,7 @@ Tests:
   N: [1623]
   batch_count_A: [1]
   batch_count_B: [1]
-  algo: [1]
+  spsort_alg: [rocsparse_spsort_alg_radix_sort]
   baseA: [rocsparse_index_base_zero]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
@@ -170,7 +170,7 @@ Tests:
   N: [1623]
   batch_count_A: [1, 2]
   batch_count_B: [2]
-  algo: [0]
+  spsort_alg: [rocsparse_spsort_alg_default]
   baseA: *all_rocsparse_index_base
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
@@ -184,7 +184,7 @@ Tests:
   N: [1623]
   batch_count_A: [1, 17]
   batch_count_B: [17]
-  algo: [1]
+  spsort_alg: [rocsparse_spsort_alg_radix_sort]
   baseA: [rocsparse_index_base_zero]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
@@ -198,7 +198,7 @@ Tests:
   N: 1
   batch_count_A: [1]
   batch_count_B: [1]
-  algo: [0]
+  spsort_alg: [rocsparse_spsort_alg_default]
   baseA: [rocsparse_index_base_one]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_file_rocalution]
@@ -213,7 +213,7 @@ Tests:
   N: 1
   batch_count_A: [1]
   batch_count_B: [1]
-  algo: [0]
+  spsort_alg: [rocsparse_spsort_alg_default]
   baseA: [rocsparse_index_base_one]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_file_rocalution]
@@ -229,7 +229,7 @@ Tests:
   N: [9173, 82940, 538192]
   batch_count_A: [1]
   batch_count_B: [1]
-  algo: [1]
+  spsort_alg: [rocsparse_spsort_alg_radix_sort]
   baseA: [rocsparse_index_base_zero]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
@@ -243,7 +243,7 @@ Tests:
   N: [82940]
   batch_count_A: [1, 2]
   batch_count_B: [2]
-  algo: [0]
+  spsort_alg: [rocsparse_spsort_alg_default]
   baseA: [rocsparse_index_base_zero]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
@@ -257,7 +257,7 @@ Tests:
   N: [9173, 82940]
   batch_count_A: [1, 4]
   batch_count_B: [4]
-  algo: [1]
+  spsort_alg: [rocsparse_spsort_alg_radix_sort]
   baseA: [rocsparse_index_base_zero]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
@@ -271,7 +271,7 @@ Tests:
   N: 1
   batch_count_A: [1]
   batch_count_B: [1]
-  algo: [0]
+  spsort_alg: [rocsparse_spsort_alg_default]
   baseA: [rocsparse_index_base_one]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_file_rocalution]
@@ -287,7 +287,7 @@ Tests:
   N: 1
   batch_count_A: [1]
   batch_count_B: [1]
-  algo: [1]
+  spsort_alg: [rocsparse_spsort_alg_radix_sort]
   baseA: [rocsparse_index_base_zero]
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_file_rocalution]
