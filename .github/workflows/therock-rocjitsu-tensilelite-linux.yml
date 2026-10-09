@@ -50,6 +50,9 @@ jobs:
       PER_TEST_TIMEOUT: "2700"
       # Leave time within the 345-minute step for cleanup and report generation.
       SUITE_TIMEOUT_SECONDS: "19800"
+      # TEMPORARY: build rocjitsu at this rocm-systems develop commit (has #13122, mixed-format
+      # WMMA fix) until therock_ref ships it. Empty uses TheRock's rocjitsu.
+      ROCJITSU_OVERRIDE_REF: 63802eae5b80bac357c314911b89b6f6dff328c0
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -83,6 +86,38 @@ jobs:
         run: |
           python -m unittest discover -v -s "${SCRIPTS_DIR}/tests" -p 'rocjitsu*_test.py'
 
+      - name: Checkout rocm-systems for rocjitsu override
+        if: ${{ env.ROCJITSU_OVERRIDE_REF != '' }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ROCm/rocm-systems
+          ref: ${{ env.ROCJITSU_OVERRIDE_REF }}
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+            shared/machine-readable-isa/isa
+          sparse-checkout-cone-mode: true
+
+      # mirage loads ROCJITSU_LIB instead of the artifact's librocjitsu.so.
+      - name: Build rocjitsu override
+        if: ${{ env.ROCJITSU_OVERRIDE_REF != '' }}
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential libdrm-dev
+          build_dir="${GITHUB_WORKSPACE}/rocjitsu-build"
+          cmake -S rocm-systems/emulation/rocjitsu -B "${build_dir}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DLTO=ON \
+            -DROCM_PATH="${ROCM_PATH}" -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
+            -DCMAKE_C_COMPILER="${ROCM_PATH}/bin/amdclang" \
+            -DCMAKE_CXX_COMPILER="${ROCM_PATH}/bin/amdclang++" \
+            -DCMAKE_CXX_FLAGS="-march=x86-64-v3 -Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
+          cmake --build "${build_dir}" --parallel "$(nproc)" --target rocjitsu_shared
+          {
+            echo "ROCJITSU_LIB=${build_dir}/librocjitsu.so"
+            echo "ROCJITSU_CONFIG_DIR=${GITHUB_WORKSPACE}/rocm-systems/emulation/rocjitsu/configs"
+          } >> "${GITHUB_ENV}"
+
       - name: Configure rocjitsu emulation
         run: |
           set -euo pipefail
@@ -94,8 +129,10 @@ jobs:
           esac
           tensilelite_root="${ROCM_PATH}/share/hipblaslt/tensilelite"
           client="${ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
-          for required in "${ROCM_PATH}/bin/mirage" "${ROCM_PATH}/lib/librocjitsu.so" \
-              "${ROCM_PATH}/share/rocjitsu/configs/${config}" "${tensilelite_root}" "${client}"; do
+          rocjitsu_lib="${ROCJITSU_LIB:-${ROCM_PATH}/lib/librocjitsu.so}"
+          config="${ROCJITSU_CONFIG_DIR:-${ROCM_PATH}/share/rocjitsu/configs}/${config}"
+          for required in "${ROCM_PATH}/bin/mirage" "${rocjitsu_lib}" \
+              "${config}" "${tensilelite_root}" "${client}"; do
             [[ -e "${required}" ]] || { echo "::error::Missing from artifacts: ${required}"; exit 1; }
           done
 
@@ -105,7 +142,7 @@ jobs:
           workers=$(( cores < 16 ? cores : 16 ))
           budget=$(( cores / workers ))
           mkdir -p "${REPORT_DIR}/junit"
-          python - "${ROCM_PATH}/share/rocjitsu/configs/${config}" \
+          python - "${config}" \
               "${REPORT_DIR}/rocjitsu-config.json" "${budget}" <<'PY'
           import json, sys
           source, destination, budget = sys.argv[1:]
@@ -140,7 +177,8 @@ jobs:
           echo "target=${target} profile=${profile} config=${config}"
           echo "host_cores=${cores} xdist_workers=${workers} cpu_thread_budget=${budget} omp_thread_limit=${budget}"
           "${ROCM_PATH}/bin/mirage" --version
-          grep -a -oE 'git (revision|commit): [^[:cntrl:]]+' "${ROCM_PATH}/lib/librocjitsu.so" | sort -u || true
+          echo "rocjitsu library: ${rocjitsu_lib}"
+          grep -a -oE 'git (revision|commit): [^[:cntrl:]]+' "${rocjitsu_lib}" | sort -u || true
           python -c 'import sys; print(sys.version)'
           # The test venv has no pip, so list packages through importlib.
           python - > "${REPORT_DIR}/python-packages.txt" <<'PY'
