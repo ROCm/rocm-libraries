@@ -52,6 +52,7 @@ test_categories:
       - "uhd_gen_tests"
       - "uhd_gen_dataset_tests"
       - "mine_shapes_tests"
+      - "uhd_skill_scripts_tests"
       # Build tree only: CMake driver scripts (tools/corpus_gen/tests/CliExitStatus.cmake)
       # checking hipdnn_corpus_gen's exit status for its arguments; not installed.
       - "hipdnn_corpus_gen_cli_help"

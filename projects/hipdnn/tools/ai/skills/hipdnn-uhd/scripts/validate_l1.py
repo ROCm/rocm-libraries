@@ -25,6 +25,10 @@ A descriptor engine's L1 (`--promote`, in order: the L2 its rows were measured u
 the candidate) predicts the selection its L2 makes, so its truth is measured under the
 candidate tree; the incumbent model's truth is measured under the build's own tree.
 
+Every call reads only the tree named for it and gets an empty cache of its own, so neither a
+descriptor root in the caller's environment nor a benchmark winner record answers in a
+model's place (engine_run.py).
+
 Writes the rows; `decide.py l1` turns them into the verdict.
 
     validate_l1.py --bench <hipdnn_bench> --plugin-dir <dir> --engine-id <id>
@@ -38,13 +42,12 @@ from __future__ import annotations
 import argparse
 import filecmp
 import json
-import os
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import candidate_tree  # noqa: E402  (beside this script)
+import engine_run  # noqa: E402
 
 
 def _load(path: Path) -> dict:
@@ -82,35 +85,6 @@ def promoted_tree(descriptor_root: Path, farm: Path, promotes: list, candidate_d
             "candidate_id": str(_load(source).get("id", "")).lower(),
             "carrying_declared_id": [str(p.relative_to(farm)) for p in found],
             "unique": len(found) == 1, "byte_equal": equal}
-
-
-def graphs_of(sample: str | None, roots: list[str], limit: int | None) -> list[Path]:
-    if sample:
-        found = [Path(g["path"]) for g in _load(Path(sample)).get("graphs") or []]
-    else:
-        found = []
-        for root in roots:
-            path = Path(root)
-            if path.is_file():
-                found.append(path)
-                continue
-            for pattern in ("*.fb", "*.json"):
-                found.extend(p for p in path.rglob(pattern) if not p.name.startswith("manifest"))
-        found = sorted(set(found))
-    return found[:limit] if limit else found
-
-
-def ask(command: list[str], env: dict, timeout: int) -> dict:
-    try:
-        proc = subprocess.run(command, capture_output=True, text=True, env=env, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": f"no answer within {timeout} s", "timed_out": True}
-    if proc.returncode != 0:
-        return {"ok": False, "returncode": proc.returncode, "error": (proc.stderr or proc.stdout)[-800:]}
-    try:
-        return {"ok": True, "response": json.loads(proc.stdout[proc.stdout.index("{"):])}
-    except ValueError:
-        return {"ok": False, "returncode": 0, "error": "hipdnn_bench emitted no JSON object"}
 
 
 def prediction(answer: dict) -> dict:
@@ -178,27 +152,29 @@ def main(argv: list[str] | None = None) -> int:
         tree = opaque_tree(Path(args.descriptor_root), work / "descriptor_tree",
                            Path(args.candidate_dir), declared)
 
-    base_env = {k: v for k, v in os.environ.items() if k not in (
-        "HIPDNN_DESCRIPTOR_DIR", "HIPDNN_DESCRIPTOR_RUNTIME_DIR", "HIPDNN_DESCRIPTOR_PATH")}
-    candidate_env = dict(base_env, HIPDNN_DESCRIPTOR_DIR=tree["farm"])
+    base_env = engine_run.isolated_env()
+    candidate_env = engine_run.isolated_env(Path(tree["farm"]))
+    caches = work / "caches"
 
-    def command(graph: Path, mode: str) -> list[str]:
-        return [args.bench, "--graph", str(graph), "--engine-id", str(args.engine_id),
-                "--plugin-dir", args.plugin_dir, mode, "--json", "--ranking-metric", args.metric]
+    def ask(graph: Path, mode: str, env: dict) -> dict:
+        command = [args.bench, "--graph", str(graph), "--engine-id", str(args.engine_id),
+                   "--plugin-dir", args.plugin_dir, mode, "--json",
+                   "--ranking-metric", args.metric]
+        return engine_run.call(command, env, args.timeout, caches)
 
     rows = []
-    graphs = graphs_of(args.sample, args.graphs or [], args.limit)
+    graphs = engine_run.graphs_of(args.sample, args.graphs or [], args.limit)
     for index, graph in enumerate(graphs):
         row: dict = {"graph": str(graph)}
         if not args.no_measure:
             truth_env = candidate_env if args.promote else base_env
-            row["measured"] = measurement(ask(command(graph, "--collect-immediate"), truth_env,
-                                              args.timeout), args.metric)
+            row["measured"] = measurement(ask(graph, "--collect-immediate", truth_env),
+                                          args.metric)
             if args.promote:
                 row["measured_incumbent"] = measurement(
-                    ask(command(graph, "--collect-immediate"), base_env, args.timeout), args.metric)
+                    ask(graph, "--collect-immediate", base_env), args.metric)
         for side, env in (("incumbent", base_env), ("candidate", candidate_env)):
-            row[side] = prediction(ask(command(graph, "--predict-engine"), env, args.timeout))
+            row[side] = prediction(ask(graph, "--predict-engine", env))
         rows.append(row)
         if index % 25 == 0:
             print(f"[{index + 1}/{len(graphs)}] {graph.name}: candidate "

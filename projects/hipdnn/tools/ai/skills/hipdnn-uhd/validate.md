@@ -48,6 +48,8 @@ python3 $UHD/scripts/decide.py l1 --rows rows.json --candidate-dir <model dir> -
 - **Descriptor engine**: `--declared-id` is the model's own `id`, and `--promote` installs, in
   order, the L2 its rows were measured under and then the candidate. The candidate's truth is
   measured under that tree, the incumbent's under the build's own.
+- Every engine call reads only the tree named for it (`HIPDNN_DESCRIPTOR_RUNTIME_DIR` and
+  `HIPDNN_DESCRIPTOR_PATH` are cleared) and gets an empty `HIPDNN_CACHE_DIR`.
 - Gates: `identity` (the engine could only have read the candidate), `available` (it predicts
   for every graph it executes; `--min-available` relaxes it), `metric` (every answer names its
   declared metric), `selector_revision` (the engine reports the revision the model was trained
@@ -80,11 +82,11 @@ python3 $UHD/scripts/decide.py l1 --rows rows.json --candidate-dir <model dir> -
    python3 $UHD/scripts/decide.py l2 --rows rows.json --candidate-report candidate.json \
      [--incumbent-report incumbent.json] [--baseline model|native|none] --out report.json
    ```
-   Every run gets an empty `HIPDNN_CACHE_DIR` and INFO logging. Gates: `available`, `read` (the
-   runtime never said "the model is not used", "ranking degrades to static_order" or "cannot
-   be brought up"), `winner_records` (no benchmark winner record ordered the catalog), `regret`
-   (candidate mean top-1 regret no worse than the incumbent's plus noise slack; `--baseline
-   none` when the build binds no L2 for the arch).
+   Every run reads only the tree named for it, gets an empty `HIPDNN_CACHE_DIR`, and logs at
+   INFO. Gates: `available`, `read` (the runtime never said "the model is not used", "ranking
+   degrades to static_order" or "cannot be brought up"), `winner_records` (no benchmark winner
+   record ordered the catalog), `regret` (candidate mean top-1 regret no worse than the
+   incumbent's plus noise slack; `--baseline none` when the build binds no L2 for the arch).
 
 `passed` is true only when every gate holds, and `decide.py` exits 1 otherwise; the report
 names each failing gate's problems. For a smoke round, read the gates, not the exit code: a

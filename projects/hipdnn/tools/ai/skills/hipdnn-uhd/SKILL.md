@@ -33,6 +33,7 @@ skill's installed directory.
 |---|---|
 | [`eval_slice.py`](scripts/eval_slice.py) | a set's evaluation slice; the union `--eval-benchmarks` reads; a regime-even sample; the slice's stored rows |
 | [`candidate_tree.py`](scripts/candidate_tree.py) | a real copy of the build's descriptor tree with candidate models installed |
+| [`engine_run.py`](scripts/engine_run.py) | used by the three below: one `hipdnn_bench` call that reads only the tree named for it, with an empty cache of its own |
 | [`validate_l1.py`](scripts/validate_l1.py) | per graph: measured, incumbent prediction, candidate prediction |
 | [`validate_l2.py`](scripts/validate_l2.py) | per graph: the engine run under the build's tree and the candidate tree, with the runtime's refusals |
 | [`decide.py`](scripts/decide.py) | the Stage V gates from those rows |
