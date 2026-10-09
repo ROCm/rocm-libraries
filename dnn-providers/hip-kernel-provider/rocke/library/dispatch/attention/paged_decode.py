@@ -10,6 +10,8 @@ may mutate valid values in place between launches. Pass
 at bind time; rebind after mutation when relying on that validation.
 """
 
+from dataclasses import replace
+
 from kernels.common.attention_unified import _3d_signature, _num_segments
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
 
@@ -24,6 +26,13 @@ from .common import (
     _selector_matches,
 )
 from .tuning_specs import ExplicitAttention3DConfig, make_explicit_attention_3d_specs
+
+
+def _validate_feature_inputs(values):
+    if values.get("softcap", 0.0) or any(
+        values.get(name) is not None for name in ("sinks", "alibi_slopes", "qq_bias")
+    ):
+        raise ValueError("paged decode binding does not support softcap, sinks or bias")
 
 
 def make_candidate():
@@ -86,10 +95,28 @@ def make_candidate():
         tensors.setdefault("problem", _problem(request))
         if tensors["problem"].sliding_window != request.sliding_window:
             raise ValueError("request sliding_window disagrees with problem")
+        problem = tensors["problem"]
+        if (
+            problem.softcap
+            or problem.use_sinks
+            or problem.use_alibi
+            or problem.use_qq_bias
+        ):
+            raise ValueError(
+                "paged decode binding does not support softcap, sinks or bias"
+            )
+        _validate_feature_inputs(tensors)
+        _validate_feature_inputs(kwargs)
         kwargs.setdefault("unsafe_skip_paged_value_validation", True)
         kwargs.setdefault("grid", spec.launch_grid(tensors["problem"]))
         kwargs.setdefault("block", spec.launch_block())
-        return bind_tuning_attention_torch(request, spec, tensors, **kwargs)
+        binding = bind_tuning_attention_torch(request, spec, tensors, **kwargs)
+
+        def launch(**overrides):
+            _validate_feature_inputs(overrides)
+            return binding.launch(**overrides)
+
+        return replace(binding, launch=launch)
 
     candidate = KernelCandidate(
         name="attention_paged_decode_t32",

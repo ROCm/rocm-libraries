@@ -268,6 +268,11 @@ def make_explicit_attention_3d_specs(
         raise ValueError(f"waves_per_eu must be one of {WAVES_PER_EU}")
 
     tile = resolve_tile_policy(problem.block_size, config.tile_policy, path="3d")
+    if tile not in (16, 32, 64):
+        raise ValueError(
+            f"explicit 3D tile policy {config.tile_policy!r} resolves to unsupported "
+            f"tile_size={tile}; expected 16, 32 or 64"
+        )
     spec_type, reduce_type, _, _, supports = _tiled_3d_impl(arch)
     knobs = _checked_knobs(config.knob_dict())
     if arch == "gfx950" and any(

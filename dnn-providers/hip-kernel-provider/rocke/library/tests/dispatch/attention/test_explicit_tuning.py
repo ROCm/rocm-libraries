@@ -58,6 +58,36 @@ def _request(arch="gfx950", **kw):
 
 
 class TestExplicitAttentionBuilders(unittest.TestCase):
+    def test_page_one_explicit_small_tiles_reject(self):
+        problem = _problem(total_q=1, max_seqlen_q=1, block_size=1)
+        for arch in ("gfx942", "gfx950"):
+            for token in ("1x", " 1X ", "2x", "4x", "8x"):
+                with (
+                    self.subTest(arch=arch, token=token),
+                    self.assertRaisesRegex(ValueError, "unsupported tile_size"),
+                ):
+                    make_explicit_attention_3d_specs(
+                        problem,
+                        ExplicitAttention3DConfig(num_segments=8, tile_policy=token),
+                        arch=arch,
+                    )
+            with self.assertRaisesRegex(ValueError, "unsupported tile_size=1"):
+                make_explicit_attention_3d_specs(
+                    problem, ExplicitAttention3DConfig(num_segments=8), arch=arch
+                )
+
+    def test_full_page_explicit_tiles_preserve_default_identity(self):
+        for arch in ("gfx942", "gfx950"):
+            for page in (16, 32, 64):
+                with self.subTest(arch=arch, page=page):
+                    segment, _ = make_explicit_attention_3d_specs(
+                        _problem(total_q=1, max_seqlen_q=1, block_size=page),
+                        ExplicitAttention3DConfig(num_segments=8),
+                        arch=arch,
+                    )
+                    self.assertEqual(segment.tile_size, page)
+                    self.assertIsNone(segment.tile_size_override)
+
     def test_normalized_3d_tile_policies_preserve_geometry(self):
         for arch in ("gfx942", "gfx950"):
             for page in (1, 16, 32, 64):

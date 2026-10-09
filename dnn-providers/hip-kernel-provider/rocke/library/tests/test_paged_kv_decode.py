@@ -786,3 +786,82 @@ def test_paged_binding_skip_still_validates_structure(paged_binding_case, invali
         tensors["seqused_k"].device = "cuda:1"
     with pytest.raises(ValueError):
         result.candidate.bind_torch(req, result.spec, tensors)
+
+
+def _retarget_binding_case(case, arch, page):
+    from dispatch.attention import dispatch_attention
+
+    req, _, tensors = case
+    req = replace(req, arch=arch, kv_block_size=page, algorithm="paged_decode_t32")
+    tensors = dict(tensors)
+    tensors["problem"] = replace(tensors["problem"], clamp_arch=arch, block_size=page)
+    tensors["k"] = Tensor((99, page, 2, 64))
+    tensors["v"] = Tensor((99, page, 2, 64))
+    return req, dispatch_attention(req), tensors
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize(
+    "feature", ["softcap", "use_sinks", "use_alibi", "use_qq_bias"]
+)
+def test_paged_binding_rejects_unsupported_problem_features(
+    paged_binding_case, arch, page, feature
+):
+    req, result, tensors = _retarget_binding_case(paged_binding_case, arch, page)
+    tensors["problem"] = replace(
+        tensors["problem"], **{feature: 1.0 if feature == "softcap" else True}
+    )
+    with pytest.raises(ValueError, match="does not support softcap, sinks or bias"):
+        result.candidate.bind_torch(req, result.spec, tensors)
+    assert tensors["seqused_k"].reads == []
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+@pytest.mark.parametrize("feature", ["softcap", "sinks", "alibi_slopes", "qq_bias"])
+@pytest.mark.parametrize("stage", ["tensor", "bind", "launch"])
+def test_paged_binding_rejects_unsupported_feature_inputs(
+    paged_binding_case, monkeypatch, arch, page, feature, stage
+):
+    from kernels.common import attention_unified as au
+
+    req, result, tensors = _retarget_binding_case(paged_binding_case, arch, page)
+    calls = []
+    monkeypatch.setattr(
+        au, "run_unified_attention_torch", lambda **kw: calls.append(kw)
+    )
+    override = {feature: 1.0 if feature == "softcap" else object()}
+    with pytest.raises(ValueError, match="does not support softcap, sinks or bias"):
+        if stage == "tensor":
+            result.candidate.bind_torch(req, result.spec, dict(tensors, **override))
+        elif stage == "bind":
+            result.candidate.bind_torch(req, result.spec, tensors, **override)
+        else:
+            binding = result.candidate.bind_torch(req, result.spec, tensors)
+            binding.launch(**override)
+    assert calls == []
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("page", [1, 16, 32, 64])
+def test_paged_binding_preserves_window_and_launch_overrides(
+    paged_binding_case, monkeypatch, arch, page
+):
+    from dispatch.attention import dispatch_attention
+    from kernels.common import attention_unified as au
+
+    req, _, tensors = _retarget_binding_case(paged_binding_case, arch, page)
+    req = replace(req, sliding_window=17)
+    result = dispatch_attention(req)
+    tensors["problem"] = replace(tensors["problem"], sliding_window=17)
+    calls = []
+    monkeypatch.setattr(
+        au, "run_unified_attention_torch", lambda **kw: calls.append(kw)
+    )
+    binding = result.candidate.bind_torch(req, result.spec, tensors)
+    binding.launch(softmax_scale=0.25, stream=29, softcap=0.0, sinks=None)
+    assert calls[0]["softmax_scale"] == 0.25 and calls[0]["stream"] == 29
+    assert calls[0]["problem"].sliding_window == 17
+    assert binding.grid == result.spec.launch_grid(tensors["problem"])
+    assert binding.block == result.spec.launch_block()
