@@ -110,6 +110,12 @@ The generated census test (`tests/Test<Name>Packs.cpp`) carries no UUIDs and is 
 the provider's clang-format form, so copy it over the live one. The native and matcher
 stubs are never copied over hand-maintained files.
 
+For a provider that exports an engine-name constant in
+`IngestorPacks.hpp`, set `engine.census_name_symbol` to that C++ identifier.
+The generated census then uses the provider's name for its lookup and names
+a descriptor/pack mismatch explicitly. Omit the field for engines without
+an exported constant; their census uses the literal `engine.name`.
+
 Review descriptor diffs with `--diff-algorithm=histogram` (or `patience`). Kernel entries
 are near-identical blocks, and Git's default (Myers) algorithm can pair the wrong ones:
 inserting 52 entries between existing ones in the 840-entry gfx950 KDP reads as 5249

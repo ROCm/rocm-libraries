@@ -19,6 +19,9 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
+{% if config.engine.census_name_symbol %}
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+{% endif %}
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 /**
@@ -134,13 +137,25 @@ protected:
 
         const auto& sets = discoverDescriptorSets();
         const auto match = std::find_if(sets.begin(), sets.end(), [](const auto& set) {
+{% if config.engine.census_name_symbol %}
+            return set.engine.name == {{ config.engine.census_name_symbol }};
+{% else %}
             return set.engine.name == "{{ config.engine.name | cpp_escape }}";
+{% endif %}
         });
         ASSERT_NE(match, sets.end())
+{% if config.engine.census_name_symbol %}
+            << "descriptor set '" << {{ config.engine.census_name_symbol }}
+            << "' did not load. Either its descriptors were never installed under the tree "
+               "this binary reads, its UED declares a different engine name than "
+               "{{ config.engine.census_name_symbol | cpp_escape }}, or its pack failed to register its "
+               "native symbols and every descriptor naming one of them was dropped.";
+{% else %}
             << "descriptor set '{{ config.engine.name | cpp_escape }}' did not load. Either its "
                "descriptors were never installed under the tree this binary reads, or "
                "its pack failed to register its native symbols and every descriptor "
                "naming one of them was dropped.";
+{% endif %}
         _set = &*match;
     }
 

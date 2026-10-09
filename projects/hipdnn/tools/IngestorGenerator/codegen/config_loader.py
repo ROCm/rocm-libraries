@@ -179,6 +179,7 @@ def load_config(path: Path) -> IngestorConfig:
         ),
         knobs=_require_sequence(engine_raw.get("knobs"), "engine.knobs"),
         heuristic=engine_raw.get("heuristic", "native"),
+        census_name_symbol=engine_raw.get("census_name_symbol"),
     )
 
     kmd_fields = []
@@ -944,6 +945,7 @@ _KNOWN_ENGINE = frozenset(
         "behavior_notes",
         "knobs",
         "heuristic",
+        "census_name_symbol",
     }
 )
 _KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value"})
@@ -1830,6 +1832,15 @@ def _check_emitted_identifiers(config: IngestorConfig) -> None:
     check #1. A pack's name is the other half of that stem (`kdp_stem` builds
     ``<engine-slug>_<pack-name>``) and is checked for every engine.
     """
+    symbol = config.engine.census_name_symbol
+    if symbol is not None and (
+        not isinstance(symbol, str) or not CXX_IDENTIFIER_PATTERN.fullmatch(symbol)
+    ):
+        raise ConfigError(
+            f"engine.census_name_symbol {symbol!r} must be a C++ identifier "
+            "declared by IngestorPacks.hpp."
+        )
+
     for derived, emitted_as in (
         (
             config.engine.pascal_name,
