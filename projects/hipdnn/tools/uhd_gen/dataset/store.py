@@ -8,6 +8,8 @@ the form training reads. A dataset is a directory:
 
 * `dataset.parquet` -- every converted row, tagged with its `contribution_id`, `collected_at`,
   metric `source`, `purpose` (training, holdout or eval) and `corpus_id`.
+* `training.parquet` -- what training reads, rebuilt after every change: the training
+  contributions' usable rows, one per configuration per shape, the best (training_table.py).
 * `dataset_manifest.json` -- one entry per contribution with what its collection manifest
   recorded, the binding every contribution must share, and a `history` of every contribution
   removed, replaced or retagged.
@@ -39,6 +41,7 @@ from .publish import ValidationError, publish_frame
 
 DATASET_SCHEMA = "uhd_gen.dataset/1"
 DATA_FILE = "dataset.parquet"
+TRAINING_FILE = "training.parquet"
 MANIFEST_FILE = "dataset_manifest.json"
 COLLECTION_SCHEMA = "uhd_gen.collection/1"
 COLLECTION_MANIFEST = "collection_manifest.json"
@@ -97,7 +100,15 @@ def _native(value: Any) -> Any:
 def read_rows(directory: pathlib.Path) -> list[dict[str, Any]]:
     """Every row of the dataset as records, missing values None, as a collection's JSON
     corpus held them."""
-    path = pathlib.Path(directory) / DATA_FILE
+    return _read(pathlib.Path(directory) / DATA_FILE)
+
+
+def read_training_rows(directory: pathlib.Path) -> list[dict[str, Any]]:
+    """`training.parquet`'s rows, as `read_rows` returns the dataset's."""
+    return _read(pathlib.Path(directory) / TRAINING_FILE)
+
+
+def _read(path: pathlib.Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     frame = pd.read_parquet(path)
@@ -105,6 +116,90 @@ def read_rows(directory: pathlib.Path) -> list[dict[str, Any]]:
         {key: _native(value) for key, value in record.items()}
         for record in frame.to_dict(orient="records")
     ]
+
+
+def training_contributions(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """The contributions training reads by default: purpose `training`, oldest first."""
+    return sorted(
+        (
+            c
+            for c in manifest["contributions"]
+            if c.get("purpose", "training") == "training"
+        ),
+        key=lambda c: (c["collected_at"], c["contribution_id"]),
+    )
+
+
+def measurements(
+    rows: Iterable[dict[str, Any]], chosen: list[dict[str, Any]], sources: Iterable[Any]
+) -> dict[Any, list[tuple[tuple, dict[str, Any], dict[str, Any]]]]:
+    """source -> [((contribution order, device), record, stored row)] for the `chosen`
+    contributions' rows, in the order measured. A record is the row exactly as its source
+    wrote it: no bookkeeping, only the keys it carried."""
+    order = {c["contribution_id"]: index for index, c in enumerate(chosen)}
+    columns = {c["contribution_id"]: c.get("columns") for c in chosen}
+    buckets: dict = {}
+    for row in rows:
+        identity = row["contribution_id"]
+        if identity not in order:
+            continue
+        kept = columns[identity] and columns[identity].get(str(row["source"]))
+        record = {
+            key: value
+            for key, value in row.items()
+            if key not in BOOKKEEPING and (key in kept if kept else value is not None)
+        }
+        buckets.setdefault((row["source"], order[identity]), []).append((record, row))
+    measured = {}
+    for source in sources:
+        key = None if source is None else str(source)
+        measured[source] = [
+            ((index, str(record["device"])), record, row)
+            for index in range(len(chosen))
+            for record, row in buckets.get((key, index), [])
+        ]
+    return measured
+
+
+def _training_view(
+    manifest: dict[str, Any], frame: pd.DataFrame | None
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """`training.parquet`'s rows and the manifest's summary of them, from the dataset's rows."""
+    from .training_table import best_per_shape
+
+    chosen = training_contributions(manifest)
+    sources = sorted(
+        {source for c in chosen for source in c.get("sources") or [None]},
+        key=lambda source: "" if source is None else str(source),
+    )
+    rows = [] if frame is None else frame.to_dict(orient="records")
+    rows = [{key: _native(value) for key, value in row.items()} for row in rows]
+    kept, summary = [], {}
+    try:
+        for source, measured in measurements(rows, chosen, sources).items():
+            indices, superseded, excluded = best_per_shape(
+                [(session, record) for session, record, _ in measured]
+            )
+            kept.extend(measured[index][2] for index in indices)
+            summary[str(source)] = {
+                "rows": len(indices),
+                "superseded": superseded,
+                "excluded": excluded,
+            }
+    except ValueError as error:
+        raise DatasetError(str(error)) from None
+    return pd.DataFrame(kept), {
+        "file": TRAINING_FILE,
+        "contributions": [c["contribution_id"] for c in chosen],
+        "sources": summary,
+    }
+
+
+def _write_training_view(
+    directory: pathlib.Path, manifest: dict[str, Any], view: pd.DataFrame, summary
+) -> None:
+    _write_data(directory / TRAINING_FILE, view)
+    manifest["training_view"] = summary
 
 
 # ---------------------------------------------------------------------------------------------
@@ -343,13 +438,13 @@ def _write(
             raise DatasetError(
                 f"knob addressing contradicts the dataset: {error}"
             ) from None
-        if frames or removed:
-            parts = ([] if existing is None else [existing]) + frames
-            _write_data(
-                data,
-                pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(),
-            )
+        parts = ([] if existing is None else [existing]) + frames
+        full = pd.concat(parts, ignore_index=True) if parts else None
         manifest["contributions"].extend(fresh)
+        view, summary = _training_view(manifest, full)
+        if frames or removed:
+            _write_data(data, pd.DataFrame() if full is None else full)
+        _write_training_view(directory, manifest, view, summary)
         for entry in removed:
             manifest.setdefault("history", []).append(
                 {
@@ -406,12 +501,11 @@ def retag(
         }
         ids = [c["contribution_id"] for c in chosen]
         data = directory / DATA_FILE
-        if data.is_file():
-            frame = pd.read_parquet(data)
+        frame = pd.read_parquet(data) if data.is_file() else None
+        if frame is not None:
             mine = frame["contribution_id"].isin(ids)
             for key, value in changes.items():
                 frame.loc[mine, key] = value
-            _write_data(data, frame)
         for entry in chosen:
             manifest.setdefault("history", []).append(
                 {
@@ -424,6 +518,10 @@ def retag(
                 }
             )
             entry.update(changes)
+        view, summary = _training_view(manifest, frame)
+        if frame is not None:
+            _write_data(data, frame)
+        _write_training_view(directory, manifest, view, summary)
         _write_manifest(directory, manifest)
     return ids
 
@@ -512,7 +610,17 @@ def from_generation(
     ]
     rows_by_source = {}
     for metric in metrics:
-        name = "corpus.json" if len(metrics) == 1 else f"corpus_{metric}.json"
+        # Everything the run measured; a run that predates measurements.json kept it in
+        # its corpus files.
+        stem = "" if len(metrics) == 1 else f"_{metric}"
+        name = next(
+            (
+                f"{kind}{stem}.json"
+                for kind in ("measurements", "corpus")
+                if (generation / f"{kind}{stem}.json").is_file()
+            ),
+            f"corpus{stem}.json",
+        )
         rows_by_source[metric] = json.loads(
             (generation / name).read_text(encoding="utf-8")
         )

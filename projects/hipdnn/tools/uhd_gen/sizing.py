@@ -22,9 +22,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .dataset import store
+from .dataset.training_table import measurement_key
 from .generate import (
-    _measurement_key,
     _write_json,
+    best_measurements,
     dataset_contributions,
     dataset_measurements,
     load_dataset,
@@ -142,7 +143,7 @@ def ceiling_from_repeats(
     """
     errors = []
     for session, row in measurements:
-        key = _measurement_key(row)
+        key = measurement_key(row)
         if key not in labels or key[0] not in shapes:
             continue
         label_session, label = labels[key]
@@ -302,15 +303,16 @@ def default_sizes(pool: int) -> list:
 def _load_everything(dataset: str, metric: str, only=None) -> tuple[dict, list, dict]:
     """(labels, every measurement, the merge) for `metric`'s rows in `dataset`.
 
-    Labels follow training's newest-session-wins rule but keep the session, so the
-    ceiling can tell a label from its repeats; `load_dataset` validates the merge.
+    Labels are the measurements training reads (`best_measurements`), with their session, so
+    the ceiling can tell a label from its repeats; `load_dataset` validates the merge.
     """
     merged = load_dataset(dataset, role=ROLE, sources=[metric], only=only)
     directory, chosen = dataset_contributions(dataset, role=ROLE, only=only)
     measurements = dataset_measurements(directory, chosen, [metric])[metric]
-    labels = {}
-    for session, row in measurements:
-        labels[_measurement_key(row)] = (session, row)
+    labels = {
+        measurement_key(row): (session, row)
+        for session, row in best_measurements(measurements)[0]
+    }
     if len(labels) != len(merged["rows"][metric]):
         raise ValueError(
             "sizing and training disagree on which measurement is each shape's label"

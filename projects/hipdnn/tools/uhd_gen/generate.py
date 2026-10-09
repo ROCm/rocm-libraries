@@ -24,7 +24,6 @@ from .catalog import CatalogDensity, DeterministicCatalogError, candidate_densit
 from .correctness import (
     REASON,
     VERDICT,
-    known_wrong,
     numerical_verdict,
     suppress_timings,
 )
@@ -36,6 +35,7 @@ from .features import (
     require_admissible_kernel_axes,
     signature_references,
 )
+from .dataset.training_table import best_per_shape
 from .knobs import graph_bound_twins
 from .provenance import ROLES, descriptor_id, snapshot_provenance
 from .immediate import (
@@ -358,56 +358,11 @@ def parse_shard(text: str) -> tuple[int, int]:
     return index, count
 
 
-def _measurement_key(row: dict) -> tuple:
-    """What a measurement is of: a configuration on a graph, on an arch.
-
-    `benchmark` is the graph's content key, so one graph is one key however it was named or
-    generated. A collected row names its configuration by `kernel` and `knob_settings`; a
-    published row, by its `kernel.*` fields. An L1 row carries no configuration, so its key is
-    the graph alone.
-    """
-    published = tuple(
-        (name, str(row[name])) for name in sorted(row) if name.startswith("kernel.")
-    )
-    return (
-        str(row["benchmark"]),
-        str(row["arch"]),
-        str(row.get("kernel")),
-        str(row.get("knob_settings")),
-        published if row.get("kernel") is None else (),
-    )
-
-
-def one_measurement_per_shape(measured: list) -> tuple[list, int]:
-    """Keep exactly one measurement of each configuration on each graph: the newest.
-
-    `measured` is `(session, row)` in measurement order; returns (rows, dropped). A repeat
-    kept twice is weighted twice, a repeat within one session as much as one across
-    sessions. A repeat under another binding is
-    refused, not superseded, so a mix cannot hide. The binding's `provider_build` is
-    diagnostic: a rebuilt provider's measurement supersedes.
-    """
-    last: dict = {}
-    binding: dict = {}
-    for index, (session, row) in enumerate(measured):
-        key = _measurement_key(row)
-        current = row.get("binding")
-        if current is not None:
-            current = binding_identity(
-                json.loads(current) if isinstance(current, str) else current
-            )
-        if binding.setdefault(key, current) != current:
-            raise ValueError(
-                f"{key[0]} on {key[1]} was measured under two engine bindings; "
-                "the selector or descriptor provenance changed between measurements"
-            )
-        last[key] = index
-    kept = [
-        row
-        for index, (_, row) in enumerate(measured)
-        if last[_measurement_key(row)] == index
-    ]
-    return kept, len(measured) - len(kept)
+def best_measurements(measured: list) -> tuple[list, int, dict[str, int]]:
+    """`(session, row)` pairs, oldest first, reduced to what training reads (`best_per_shape`):
+    the kept pairs, the usable repeats set aside, and the rows removed per reason."""
+    kept, superseded, excluded = best_per_shape(measured)
+    return [measured[index] for index in kept], superseded, excluded
 
 
 def dataset_contributions(
@@ -453,31 +408,46 @@ def dataset_measurements(directory: Path, chosen: list, sources: list) -> dict:
     """source -> [((contribution order, device), record)], in the order measured: every
     measurement the chosen contributions hold, each record exactly as its collection wrote it.
     """
-    from .dataset.store import BOOKKEEPING, read_rows
+    from .dataset.store import measurements, read_rows
 
-    order = {c["contribution_id"]: index for index, c in enumerate(chosen)}
-    columns = {c["contribution_id"]: c.get("columns") for c in chosen}
-    buckets: dict = {}
-    for row in read_rows(directory):
-        identity = row["contribution_id"]
-        if identity not in order:
-            continue
-        kept = columns[identity] and columns[identity].get(str(row["source"]))
-        record = {
-            key: value
-            for key, value in row.items()
-            if key not in BOOKKEEPING and (key in kept if kept else value is not None)
-        }
-        buckets.setdefault((row["source"], order[identity]), []).append(record)
-    measured = {}
-    for source in sources:
-        key = None if source is None else str(source)
-        measured[source] = [
-            ((index, str(record["device"])), record)
-            for index in range(len(chosen))
-            for record in buckets.get((key, index), [])
-        ]
-    return measured
+    return {
+        source: [(session, record) for session, record, _ in measured]
+        for source, measured in measurements(
+            read_rows(directory), chosen, sources
+        ).items()
+    }
+
+
+def _training_rows(directory: Path, chosen: list, sources: list, only, purposes):
+    """source -> rows training reads, the usable repeats set aside, and the rows removed per
+    reason: from `training.parquet` when it was built from exactly `chosen`, else computed
+    from every stored row the same way (`best_per_shape`)."""
+    from .dataset.store import measurements, read_manifest, read_training_rows
+
+    view = read_manifest(directory).get("training_view") or {}
+    current = (
+        only is None
+        and tuple(purposes) == ("training",)
+        and view.get("contributions") == [c["contribution_id"] for c in chosen]
+        and all(str(source) in view.get("sources", {}) for source in sources)
+    )
+    rows, superseded, excluded = {}, 0, {}
+    if current:
+        stored = read_training_rows(directory)
+        for source, measured in measurements(stored, chosen, sources).items():
+            rows[source] = [record for _, record, _ in measured]
+            summary = view["sources"][str(source)]
+            superseded += summary["superseded"]
+            for reason, count in summary["excluded"].items():
+                excluded[reason] = excluded.get(reason, 0) + count
+        return rows, superseded, excluded
+    for source, measured in dataset_measurements(directory, chosen, sources).items():
+        kept, dropped, removed = best_measurements(measured)
+        rows[source] = [record for _, record in kept]
+        superseded += dropped
+        for reason, count in removed.items():
+            excluded[reason] = excluded.get(reason, 0) + count
+    return rows, superseded, excluded
 
 
 def _all_published(chosen: list) -> bool:
@@ -498,11 +468,11 @@ def load_dataset(
     purposes: tuple = ("training",),
     only=None,
 ) -> dict:
-    """The training rows of a stored dataset: one measurement per shape, the newest winning.
+    """The training rows of a stored dataset: its usable measurements, one per configuration
+    per shape, the best (`training_table.best_per_shape`).
 
     Contributions are read oldest to newest by `collected_at`, only those whose purpose is in
-    `purposes`; `one_measurement_per_shape` picks each label and the superseded count is
-    returned. Binding mismatches are refused when a contribution is added; this refuses
+    `purposes`; the counts of repeats set aside and of rows removed are returned. Binding mismatches are refused when a contribution is added; this refuses
     another role, an unmeasured metric, or contradicting knob addressing.
     """
     directory, chosen = dataset_contributions(
@@ -525,11 +495,10 @@ def load_dataset(
         raise ValueError(
             f"contributions disagree on knob addressing: {error}"
         ) from None
-    measured = dataset_measurements(directory, chosen, sources)
-    rows, superseded, published = {source: [] for source in sources}, 0, set()
-    for source in sources:
-        rows[source], dropped = one_measurement_per_shape(measured[source])
-        superseded += dropped
+    rows, superseded, excluded = _training_rows(
+        directory, chosen, sources, only, purposes
+    )
+    published = set()
     for contribution in chosen:
         published.update(contribution["published"])
     first = chosen[0]
@@ -537,6 +506,7 @@ def load_dataset(
         "rows": rows,
         "published": published,
         "superseded_rows": superseded,
+        "excluded_rows": excluded,
         "provenance": first["trained_against"],
         "knob_encodings": knob_encodings,
         "shipping_knobs": first["shipping_knobs"],
@@ -1494,6 +1464,7 @@ def _generate_published(
             "trained_against": measured["provenance"],
             "collections": measured["collections"],
             "superseded_rows": measured["superseded_rows"],
+            "excluded_rows": measured["excluded_rows"],
             "published_dataset": True,
             "training_options": measured["training_options"],
             "models": [
@@ -1589,15 +1560,9 @@ def _usable_rows(
     A deterministic catalog is refused here, naming the cause, rather than after training
     on the "no evaluable candidate ranking" symptom.
     """
-    # §13.2 label gate: ran (`succeeded`), measured (`is_valid`), and not known wrong.
-    # A null (undecidable) verdict passes. Excluded rows stay in the corpus files with
-    # their timings suppressed. An immediate row is always `is_valid`.
-    usable = {}
-    for source, frame in frames.items():
-        keep = ~known_wrong(frame)
-        if not immediate:
-            keep &= frame["is_valid"] & frame["succeeded"].eq(True)
-        usable[source] = frame[keep].copy()
+    # The §13.2 label gate ran when the rows were chosen (`best_per_shape`): every row here
+    # ran, was measured, and was not shown wrong.
+    usable = {source: frame.copy() for source, frame in frames.items()}
     if any(candidates.empty for candidates in usable.values()):
         raise ValueError("the benchmark produced no successful valid timings")
     # Such an engine wants the L1 role, and the preserved stage keeps its measurements for
@@ -1778,7 +1743,7 @@ def run_generate(args: argparse.Namespace) -> int:
         sources = metrics if immediate else [None]
         output.parent.mkdir(parents=True, exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix=".uhd-generate-", dir=output.parent))
-        superseded, collections = 0, None
+        superseded, excluded, collections = 0, {}, None
         if args.graphs:
             measured = _measure(args, tree, stage, sources, immediate)
             engine_id = args.engine_id
@@ -1824,11 +1789,17 @@ def run_generate(args: argparse.Namespace) -> int:
                 )
                 return 0
             graph_inputs = measured["graph_inputs"]
+            # measurements.json keeps every measurement this run made; training reads the
+            # usable ones, one per configuration per shape, the best.
+            recorded = {source: list(measured["rows"][source]) for source in sources}
             for source in sources:
-                measured["rows"][source], dropped = one_measurement_per_shape(
+                kept, dropped, removed = best_measurements(
                     [(str(row["device"]), row) for row in measured["rows"][source]]
                 )
+                measured["rows"][source] = [row for _, row in kept]
                 superseded += dropped
+                for reason, count in removed.items():
+                    excluded[reason] = excluded.get(reason, 0) + count
         else:
             # Rows and everything training reads come back from the dataset.
             measured = load_dataset(
@@ -1842,15 +1813,19 @@ def run_generate(args: argparse.Namespace) -> int:
                 args.engine_id if args.engine_id is not None else measured["engine_id"]
             )
             graph_inputs = measured["graphs"]
-            superseded, collections = (
+            superseded, excluded, collections = (
                 measured["superseded_rows"],
+                measured["excluded_rows"],
                 measured["collections"],
             )
             logger.info(
-                "training from %d collection(s); %d row(s) superseded by a newer "
-                "measurement of the same configuration on the same shape",
+                "training from %d collection(s); %d row(s) set aside for a better "
+                "measurement of the same configuration on the same shape, %d removed as "
+                "unusable %s",
                 len(collections),
                 superseded,
+                sum(excluded.values()),
+                excluded,
             )
         rows, published, commands = (
             measured["rows"],
@@ -1888,6 +1863,16 @@ def run_generate(args: argparse.Namespace) -> int:
             return stem if len(sources) == 1 else f"{stem}_{source}"
 
         frames, corpora = {}, {}
+        if args.graphs:
+            # Everything measured, failures and repeats included; the corpus files hold
+            # what training read. (A dataset keeps its own.)
+            for source in sources:
+                _write_json(
+                    stage / f"{staged('measurements', source)}.json",
+                    _absent_as_null(recorded[source]),
+                )
+        if any(not rows[source] for source in sources):
+            raise ValueError("the benchmark produced no successful valid timings")
         for source in sources:
             frame = pd.DataFrame(rows[source])
             if immediate:
@@ -2086,10 +2071,11 @@ def run_generate(args: argparse.Namespace) -> int:
                 "schema": "uhd_gen.generation/2",
                 "trained_against": provenance,
                 "graphs": graph_inputs,
-                # Source collections (when nothing was measured) and rows dropped as
-                # superseded repeats.
+                # Source collections (when nothing was measured), repeats set aside for a
+                # better measurement, and rows removed as unusable, per reason.
                 "collections": collections,
                 "superseded_rows": superseded,
+                "excluded_rows": excluded,
                 # Graphs skipped within the --max-graph-failures budget, each with its
                 # error; their staged copies stay under graphs/.
                 "failed_graphs": failed_graphs,

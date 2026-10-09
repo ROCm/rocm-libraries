@@ -73,9 +73,9 @@ def test_the_ceiling_scores_repeats_against_the_label_never_the_label_itself():
     label = {"benchmark": "g", "arch": "gfx", "tflops": 100.0}
     same_gpu_again = {"benchmark": "g", "arch": "gfx", "tflops": 104.0}
     other_gpu = {"benchmark": "g", "arch": "gfx", "tflops": 130.0}
-    from uhd_gen.generate import _measurement_key
+    from uhd_gen.dataset.training_table import measurement_key
 
-    key = _measurement_key(label)
+    key = measurement_key(label)
     labels = {key: ((2, "gpu0"), label)}
     measurements = [
         ((0, "gpu0"), same_gpu_again),

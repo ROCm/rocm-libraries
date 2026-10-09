@@ -140,8 +140,10 @@ segment is the selector revision with `/` as `-`.
   change (the engine's code changed) needs new measurements.
 - A **contribution** is one source's rows (a collection, an old generate folder, a CSV set).
   Each row records its contribution, when it was measured, its `purpose` (`training`,
-  `holdout` or `eval`) and its corpus. Training reads `training` rows only. When a shape was
-  measured more than once, training takes the newest.
+  `holdout` or `eval`) and its corpus. `dataset.parquet` keeps every row, failures and
+  repeats included. `training.parquet`, rewritten after every change, is what training reads:
+  the `training` rows that carry a usable measurement, one per configuration per shape, the
+  one with the lowest `avgTimeMs`.
 - A contribution's **id** is derived from its binding and rows, so the same measurements are
   stored once whatever they are called. Its **label** is the name it was added under
   (`--label`; default the collection's directory, the generate folder, or the first CSV's
