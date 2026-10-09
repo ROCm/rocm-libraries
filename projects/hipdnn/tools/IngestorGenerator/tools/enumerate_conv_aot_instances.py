@@ -9,11 +9,12 @@ Implicit GEMM is a filtered slice of the AOT sweep grid
 (``benchmarks/common/kernel_sweep.py``): every valid gfx950 forward implicit-GEMM
 ``KernelIdentity``, then
 
-1. the knob rule (:data:`KNOB_RULE`): only the listed values of each compile-time
-   knob are kept; every other knob value is dominated by a kept one;
+1. the knob rule (:data:`KNOB_RULE`, :data:`VECTOR_SIZES`,
+   :data:`EPILOGUE_BY_VECTOR_SIZE_C`): only the listed knob values, load/store
+   width pairs and epilogues are kept. The rule is a policy choice of which knob
+   combinations to ship; narrowing it further is left to later steps;
 2. rule R1: drop every instance whose compiled kernel uses scratch (VGPR spills).
-   A spilling kernel is never the fastest one, and each has a spill-free sibling
-   of the same tile geometry.
+   ``--keep-spilling`` skips R1 and keeps every candidate of the knob rule.
 
 R1 needs a compile of every candidate, so its verdict is committed as an exclusion
 list of ``stable_hash()`` values (``configs/gfx950_conv_fwd_aot.spills.json``). The
@@ -42,6 +43,8 @@ tool's ``instance_spec`` before anything is written::
         --output configs/gfx950_conv_fwd_aot.instances.json
     python tools/enumerate_conv_aot_instances.py --rocke-root "$ROCKE" \\
         --recompute-spills --output configs/gfx950_conv_fwd_aot.instances.json
+    python tools/enumerate_conv_aot_instances.py --rocke-root "$ROCKE" \\
+        --keep-spilling --output "$WORK"/with_spilling.instances.json
 """
 
 from __future__ import annotations
@@ -62,27 +65,27 @@ from pathlib import Path
 ARCH = "gfx950"
 DTYPES = ("fp16", "bf16")
 
-#: The knob rule: the values each compile-time knob may take. An identity whose
-#: knob holds any other value is dropped. Every value the grid has for a knob that
-#: is not listed is dominated by a listed one.
+#: The knob rule, part 1: the values each listed compile-time knob may take. An
+#: identity whose knob holds any other value is dropped.
 KNOB_RULE = {
-    # compv4 emits compv3's code plus one s_setprio, and is never faster than it;
-    # mem alone loses on strided filters, so both stay.
-    "pipeline": ("mem", "compv3"),
-    # The default epilogue is never faster than cshuffle, and cshuffle with C width
-    # 1 serves every K/groups, so no problem loses coverage.
-    "epilogue": ("cshuffle",),
-    # A and B load widths (always equal in the grid). Width 2 is never needed:
-    # 8 or 4 serve wherever it does. Width 4 is needed for channel counts 8 does
-    # not divide, width 1 is the universal fallback.
-    "vector_size_a": (8, 4, 1),
-    "vector_size_b": (8, 4, 1),
-    # C store width: as for A/B, width 2 is never needed.
-    "vector_size_c": (8, 4, 1),
-    # K loop: plain and unrolled both win; the async DMA loop never does.
+    # All three implicit-GEMM pipelines of the grid ship.
+    "pipeline": ("mem", "compv3", "compv4"),
+    # K loop: plain or unrolled. The async DMA loop is not shipped.
     "unroll_k": (False, True),
     "async_dma": (False,),
 }
+
+#: The knob rule, part 2: the ``(load width, store width)`` pairs that ship, where
+#: the load width is ``vector_size_a``, always equal to ``vector_size_b``, and the
+#: store width is ``vector_size_c``. Equal widths 1, 2, 4 and 8, plus the two mixed
+#: pairs of widths 1 and 4, so that channel counts that only one side's width
+#: divides keep a wide load or a wide store.
+VECTOR_SIZES = ((1, 1), (2, 2), (4, 4), (8, 8), (1, 4), (4, 1))
+
+#: The knob rule, part 3: the epilogue is tied to the store width. A store width
+#: of 1 ships the default epilogue, a wider one cshuffle. In the grid the default
+#: epilogue only exists with a store width of 1.
+EPILOGUE_BY_VECTOR_SIZE_C = {1: "default", 2: "cshuffle", 4: "cshuffle", 8: "cshuffle"}
 
 #: Rule R1, as applied to the code-object metadata of the compiled kernel.
 R1 = (
@@ -117,12 +120,35 @@ def _converter():
 
 
 def knob_rule_rejection(identity: dict) -> str:
-    """The first knob of ``identity`` outside :data:`KNOB_RULE`, as a reason; ``""``
-    when the identity passes."""
+    """Why ``identity`` falls outside the knob rule, as a reason naming the first
+    offending knob; ``""`` when the identity passes."""
     for knob, kept in KNOB_RULE.items():
         if identity[knob] not in kept:
             return f"{knob}={identity[knob]!r} not in {kept!r}"
+    load, store = identity["vector_size_a"], identity["vector_size_c"]
+    if identity["vector_size_b"] != load:
+        return f"vector_size_b={identity['vector_size_b']!r} != vector_size_a={load!r}"
+    if (load, store) not in VECTOR_SIZES:
+        return f"vector_size_a/c=({load!r}, {store!r}) not in {VECTOR_SIZES!r}"
+    epilogue = EPILOGUE_BY_VECTOR_SIZE_C[store]
+    if identity["epilogue"] != epilogue:
+        return (
+            f"epilogue={identity['epilogue']!r} with vector_size_c={store!r} "
+            f"is not {epilogue!r}"
+        )
     return ""
+
+
+def knob_rule_document() -> dict:
+    """The knob rule as JSON data, recorded in the spill list."""
+    return {
+        **{knob: list(kept) for knob, kept in KNOB_RULE.items()},
+        "vector_sizes": [list(pair) for pair in VECTOR_SIZES],
+        "epilogue_by_vector_size_c": {
+            str(width): epilogue
+            for width, epilogue in EPILOGUE_BY_VECTOR_SIZE_C.items()
+        },
+    }
 
 
 def grid_identities(dtype: str, jobs: int) -> list:
@@ -242,6 +268,7 @@ def spill_entry(identity: dict, usage: dict) -> dict:
             identity["warp_tile_k"],
         ],
         "pipeline": identity["pipeline"],
+        "epilogue": identity["epilogue"],
         "vector_size_ab": identity["vector_size_a"],
         "vector_size_c": identity["vector_size_c"],
         "unroll_k": identity["unroll_k"],
@@ -287,7 +314,7 @@ def write_spill_list(path: Path, entries: list, candidates: dict) -> None:
         "generated_by": "tools/enumerate_conv_aot_instances.py --recompute-spills",
         "arch": ARCH,
         "rule": R1,
-        "knob_rule": {knob: list(kept) for knob, kept in KNOB_RULE.items()},
+        "knob_rule": knob_rule_document(),
         "candidates": {
             dtype: {"count": len(hashes), "sha256": candidates_digest(hashes)}
             for dtype, hashes in sorted(candidates.items())
@@ -384,6 +411,11 @@ def main(argv=None) -> int:
         help="Compile every candidate (CPU only) and rewrite --spills.",
     )
     parser.add_argument(
+        "--keep-spilling",
+        action="store_true",
+        help="Skip R1: keep the candidates that spill as well.",
+    )
+    parser.add_argument(
         "--jobs",
         type=int,
         default=os.cpu_count() or 1,
@@ -408,7 +440,7 @@ def main(argv=None) -> int:
             f"R1: {len(entries)} spill(s) written to {args.spills} "
             f"({time.perf_counter() - started:.0f}s)"
         )
-    excluded = read_spill_list(args.spills, hashes)
+    excluded = set() if args.keep_spilling else read_spill_list(args.spills, hashes)
 
     kept = []
     print(

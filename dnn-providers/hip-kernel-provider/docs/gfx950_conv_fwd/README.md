@@ -58,11 +58,11 @@ claims about rocKE's broader capabilities.
 Shape-generic AOT instances, each one rocKE `KernelIdentity` built once against
 the AOT sweep's probe problem rather than a catalog shape, ship as a separate
 engine, `hipkernel:Gfx950ConvFwdAot`; see [AOT instances](aot_instances.md). It
-ships every instance rocKE's sweeps offer that its launch runs, after a knob rule
-and a no-scratch rule: 16,828 implicit-GEMM and 84 direct depthwise instances per
-dtype, in one descriptor shard per dtype. A test-only engine over a small seed of
-them, `hipkernel:Gfx950ConvFwdAotSeed`, is what the GPU suite pins instance by
-instance.
+ships the instances of rocKE's sweeps that its launch runs, after a knob rule and
+a no-scratch rule: 17,530 (fp16) and 17,526 (bf16) implicit-GEMM and 84 direct
+depthwise instances per dtype, in one descriptor shard per dtype. A test-only
+engine over a small seed of them, `hipkernel:Gfx950ConvFwdAotSeed`, is what the
+GPU suite pins instance by instance.
 
 [Verification and coverage](coverage.md) records what the shipped catalog is
 verified against.

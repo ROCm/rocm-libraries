@@ -94,25 +94,86 @@ def synthetic_grid():
 
 def test_knob_rule_keeps_exactly_the_listed_values(synthetic_grid):
     kept = [i for i in synthetic_grid if not tool.knob_rule_rejection(i)]
-    # pipeline 2 x epilogue 1 x A/B width 3 x C width 3 x K loop 2
-    assert len(kept) == 2 * 1 * 3 * 3 * 2
+    # pipeline 3 x width pair 6 (epilogue tied to the store width) x K loop 2
+    assert len(kept) == 3 * 6 * 2
     for knob, values in tool.KNOB_RULE.items():
         assert {i[knob] for i in kept} == set(values), knob
+    assert {(i["vector_size_a"], i["vector_size_c"]) for i in kept} == set(
+        tool.VECTOR_SIZES
+    )
+    for identity in kept:
+        assert identity["vector_size_b"] == identity["vector_size_a"]
+        expected = tool.EPILOGUE_BY_VECTOR_SIZE_C[identity["vector_size_c"]]
+        assert identity["epilogue"] == expected
+
+
+def test_knob_rule_ties_the_epilogue_to_the_store_width():
+    for store, epilogue in ((1, "default"), (4, "cshuffle")):
+        other = "cshuffle" if epilogue == "default" else "default"
+        load = 1
+        assert (
+            tool.knob_rule_rejection(
+                _identity(
+                    vector_size_a=load,
+                    vector_size_b=load,
+                    vector_size_c=store,
+                    epilogue=epilogue,
+                )
+            )
+            == ""
+        )
+        assert tool.knob_rule_rejection(
+            _identity(
+                vector_size_a=load,
+                vector_size_b=load,
+                vector_size_c=store,
+                epilogue=other,
+            )
+        ).startswith("epilogue=")
 
 
 @pytest.mark.parametrize(
     ("change", "knob"),
     [
-        ({"pipeline": "compv4"}, "pipeline"),
-        ({"epilogue": "default"}, "epilogue"),
-        ({"vector_size_a": 2, "vector_size_b": 2}, "vector_size_a"),
-        ({"vector_size_c": 2}, "vector_size_c"),
         ({"async_dma": True}, "async_dma"),
+        ({"vector_size_a": 2, "vector_size_b": 2}, "vector_size_a/c"),
+        ({"vector_size_c": 2}, "vector_size_a/c"),
+        (
+            {"vector_size_a": 8, "vector_size_b": 8, "vector_size_c": 4},
+            "vector_size_a/c",
+        ),
+        ({"vector_size_b": 4}, "vector_size_b"),
+        ({"epilogue": "default"}, "epilogue"),
     ],
 )
 def test_knob_rule_names_the_rejected_knob(change, knob):
     assert tool.knob_rule_rejection(_identity()) == ""
     assert tool.knob_rule_rejection(_identity(**change)).startswith(f"{knob}=")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"pipeline": "compv4"},
+        {"unroll_k": True},
+        {"vector_size_a": 2, "vector_size_b": 2, "vector_size_c": 2},
+        {"vector_size_a": 1, "vector_size_b": 1, "vector_size_c": 4},
+        {
+            "vector_size_a": 4,
+            "vector_size_b": 4,
+            "vector_size_c": 1,
+            "epilogue": "default",
+        },
+        {
+            "vector_size_a": 1,
+            "vector_size_b": 1,
+            "vector_size_c": 1,
+            "epilogue": "default",
+        },
+    ],
+)
+def test_knob_rule_keeps(change):
+    assert tool.knob_rule_rejection(_identity(**change)) == ""
 
 
 def test_spill_list_round_trip(tmp_path, synthetic_grid):
@@ -127,7 +188,7 @@ def test_spill_list_round_trip(tmp_path, synthetic_grid):
 
     assert tool.read_spill_list(path, hashes) == {tool.stable_hash(i) for i in spilling}
     document = json.loads(path.read_text())
-    assert document["knob_rule"] == {k: list(v) for k, v in tool.KNOB_RULE.items()}
+    assert document["knob_rule"] == tool.knob_rule_document()
     assert document["spills"] == entries
 
 
@@ -147,14 +208,15 @@ def test_r1_reads_scratch_or_spill():
 
 def test_committed_spill_list_is_hashes_of_knob_rule_candidates():
     document = json.loads(_SPILLS.read_text())
-    assert document["knob_rule"] == {k: list(v) for k, v in tool.KNOB_RULE.items()}
+    assert document["knob_rule"] == tool.knob_rule_document()
     for entry in document["spills"]:
         assert len(entry["instance_id"]) == 40
         assert entry["dtype"] in tool.DTYPES
         assert entry["vgpr_spill"] > 0 or entry["scratch_bytes"] > 0
         assert entry["pipeline"] in tool.KNOB_RULE["pipeline"]
-        assert entry["vector_size_ab"] in tool.KNOB_RULE["vector_size_a"]
-        assert entry["vector_size_c"] in tool.KNOB_RULE["vector_size_c"]
+        pair = (entry["vector_size_ab"], entry["vector_size_c"])
+        assert pair in tool.VECTOR_SIZES
+        assert entry["epilogue"] == tool.EPILOGUE_BY_VECTOR_SIZE_C[pair[1]]
 
 
 @pytest.mark.parametrize(
@@ -203,14 +265,22 @@ def test_written_instances_are_one_compact_entry_per_line(tmp_path, synthetic_gr
 
 
 def test_make_conv_aot_config_accepts_the_written_instances(tmp_path):
+    """Every knob combination the rule keeps converts."""
     import make_conv_aot_config
     import yaml
 
     kept = [
-        _identity(pipeline=p, vector_size_c=c, unroll_k=u)
-        for p in ("mem", "compv3")
-        for c in (8, 4)
-        for u in (False, True)
+        _identity(
+            pipeline=p,
+            vector_size_a=ab,
+            vector_size_b=ab,
+            vector_size_c=c,
+            epilogue=tool.EPILOGUE_BY_VECTOR_SIZE_C[c],
+            unroll_k=u,
+        )
+        for p in tool.KNOB_RULE["pipeline"]
+        for ab, c in tool.VECTOR_SIZES
+        for u in tool.KNOB_RULE["unroll_k"]
     ]
     instances = tmp_path / "instances.json"
     tool.write_instances(instances, kept)
@@ -257,8 +327,9 @@ def test_direct_identities_round_trip_through_the_compact_form(direct_fp16):
         assert KernelIdentity.from_dict(compact).to_dict() == identity
 
 
-def _fake_main(tmp_path, monkeypatch, implicit, direct):
-    """Run main() over a synthetic grid and direct list; returns the written list."""
+def _fake_main(tmp_path, monkeypatch, implicit, direct, excluded=(), extra=()):
+    """Run main() over a synthetic grid and direct list, with ``excluded`` as the R1
+    exclusion list; returns the written list."""
     monkeypatch.setattr(
         tool,
         "grid_identities",
@@ -266,7 +337,7 @@ def _fake_main(tmp_path, monkeypatch, implicit, direct):
             dict(i, dtype_a=dtype, dtype_b=dtype, dtype_d=dtype) for i in implicit
         ],
     )
-    monkeypatch.setattr(tool, "read_spill_list", lambda path, candidates: set())
+    monkeypatch.setattr(tool, "read_spill_list", lambda path, candidates: set(excluded))
     monkeypatch.setattr(
         tool,
         "direct_identities",
@@ -277,7 +348,7 @@ def _fake_main(tmp_path, monkeypatch, implicit, direct):
     )
     out = tmp_path / "instances.json"
     argv = ["--rocke-root", str(_ROCKE), "--output", str(out), "--jobs", "1"]
-    assert tool.main(argv) == 0
+    assert tool.main(argv + list(extra)) == 0
     return json.loads(out.read_text())
 
 
@@ -330,3 +401,21 @@ def test_committed_instance_list_is_what_the_tool_enumerates(tmp_path):
     argv = ["--rocke-root", str(_ROCKE), "--output", str(out), "--jobs", jobs]
     assert tool.main(argv) == 0
     assert out.read_bytes() == committed.read_bytes()
+
+
+def test_r1_drops_the_listed_spills_unless_asked_to_keep_them(
+    tmp_path, monkeypatch, synthetic_grid
+):
+    kept = [i for i in synthetic_grid if not tool.knob_rule_rejection(i)][:6]
+    spilling = {
+        tool.stable_hash(dict(i, dtype_a=d, dtype_b=d, dtype_d=d))
+        for i in kept[:2]
+        for d in tool.DTYPES
+    }
+    filtered = _fake_main(tmp_path, monkeypatch, kept, [], spilling)
+    assert len(filtered) == 2 * 4
+    assert not {tool.stable_hash(e) for e in filtered} & spilling
+    everything = _fake_main(
+        tmp_path, monkeypatch, kept, [], spilling, ["--keep-spilling"]
+    )
+    assert len(everything) == 2 * 6
