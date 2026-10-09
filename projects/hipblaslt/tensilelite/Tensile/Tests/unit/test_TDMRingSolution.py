@@ -152,6 +152,18 @@ def test_divergent_ring_pins_the_loop_to_the_shallower_side(capsys, pgrA, pgrB):
     assert "TDM LDS ring" not in out
 
 
+@pytest.mark.parametrize("halfPlr", [1, 2, 3])
+def test_halfplr_ring_is_valid(capsys, halfPlr):
+    """HalfPLR turns SuppressNoLoadLoop on only after the ring check, which takes HalfPLR as
+    suppressing it already."""
+    solution = _solution(PrefetchGlobalRead=3, HalfPLR=halfPlr, MIWaveTile=[2, 2])
+    out = capsys.readouterr().out
+    assert solution["Valid"] is True, out
+    assert tdmDeepRing(solution)
+    assert solution["SuppressNoLoadLoop"]
+    assert "TDM LDS ring" not in out
+
+
 @pytest.mark.parametrize("cms, valid", [pytest.param(0, True, id="cms-off"),
                                         pytest.param(1, False, id="cms-on")])
 def test_ring_custom_main_loop_schedule_set_explicitly(capsys, cms, valid):

@@ -16,12 +16,16 @@ from Tensile.Components.TDMRing import (
     tdmInflightPerWaveBound,
     tdmInflightRejectReason,
     tdmRingFenceShape,
+    tdmRingIncrementMaskThreshold,
     tdmRingIssuesPerStage,
+    tdmRingLoopEntryThreshold,
     tdmRingNoLoadWait,
+    tdmRingNullThreshold,
     tdmRingPrologueWait,
     tdmRingPublishWait,
     tdmRingRejectReason,
     tdmRingSideStages,
+    tdmRingTailLead,
     tdmWaveIssueMembers,
 )
 
@@ -222,6 +226,15 @@ def _ringState(**overrides):
         pytest.param({"PrefetchGlobalReadA": 4, "PrefetchGlobalReadB": 4}, 8,
                      id="ring4-equal-pair"),
         pytest.param({"PrefetchLocalRead": 3, "LoopIters": 4}, 8, id="ring4-plr3"),
+        pytest.param({"HalfPLR": 1}, 9, id="ring4-mx-halfplr"),
+        pytest.param({"HalfPLR": 3, "SuppressNoLoadLoop": True, "PrefetchGlobalRead": 5, "NumLdsBlk": 5}, 11,
+                     id="ring5-mx-halfplr-snll"),
+        pytest.param({"HalfPLR": 2, "PrefetchGlobalRead": 11, "NumLdsBlk": 11, "ProblemType": dict(_DENSE)}, 11,
+                     id="ring11-dense-halfplr"),
+        pytest.param({"HalfPLR": 3, "PrefetchGlobalRead": 2, "PrefetchGlobalReadA": 4, "PrefetchGlobalReadB": 2},
+                     9, id="ring-4-2-mx-halfplr"),
+        pytest.param({"HalfPLR": 1, "PrefetchGlobalRead": 1, "PrefetchGlobalReadA": 1, "PrefetchGlobalReadB": 4},
+                     9, id="ring-1-4-mx-halfplr"),
     ],
 )
 def test_ring_supported_subset(overrides, bound):
@@ -253,7 +266,7 @@ def test_ring_supported_subset(overrides, bound):
         pytest.param({"LoopIters": 1}, "LoopIters=1", id="loopiters1"),
         pytest.param({"LocalReadVectorWidthA": 32}, "LoopIters=2", id="wide-read"),
         pytest.param({"1LDSBuffer": 1}, "1LDSBuffer=1", id="one-lds-buffer"),
-        pytest.param({"HalfPLR": 1}, "HalfPLR", id="halfplr"),
+        pytest.param({"HalfPLR": 1, "StaggerU": 32}, "HalfPLR with StaggerU=32", id="halfplr-stagger"),
         pytest.param({"PrefetchAcrossPersistent": 1}, "PrefetchAcrossPersistent", id="pap"),
         pytest.param({"StreamK": 3}, "StreamK", id="streamk"),
         pytest.param({"SuppressNoLoadLoop": True}, "SuppressNoLoadLoop", id="suppress-nll"),
@@ -286,7 +299,6 @@ _RING_FLAGS_ON = {
     "StreamK": 3,
     "PrefetchAcrossPersistent": 1,
     "ReuseAcrossPersistent": 1,
-    "HalfPLR": 1,
     "SuppressNoLoadLoop": True,
     "UseSubtileImpl": True,
     "TDMSplit": True,
@@ -649,3 +661,273 @@ def test_one_slot_side_ring_lands_every_tile_it_publishes(pgrA, pgrB):
         assert unsafe == [], (tiles, unsafe)
         assert peak == deep * perStage, (tiles, peak)
     assert _ringReplay(state, 1, fence, prologueWait=deep * perStage)[1]
+
+
+def _halfPlrRingState(pgrA, pgrB, problemType=_MX):
+    shallow = min(pgrA, pgrB)
+    return _ringState(HalfPLR=1, PrefetchGlobalRead=shallow, NumLdsBlk=shallow,
+                      PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB,
+                      ProblemType=dict(problemType))
+
+
+@pytest.mark.parametrize(
+    "pgrA, pgrB, armed, masks, leads",
+    [
+        pytest.param(4, 4, True, (3, 3), {3: (0, 0), 4: (0, 0)}, id="equal"),
+        pytest.param(5, 3, True, (4, 2), {2: (0, 0), 3: (1, 0), 4: (0, 0)}, id="pgr3-deep-a"),
+        pytest.param(2, 4, True, (1, 4), {1: (0, 0), 2: (0, 2), 4: (0, 0)}, id="pgr2-wrap"),
+        pytest.param(2, 4, False, (1, 3), {2: (0, 1), 3: (0, 0)}, id="pgr2"),
+        pytest.param(4, 1, True, (4, 0), {0: (0, 0), 1: (3, 0), 4: (0, 0)}, id="one-slot-wrap"),
+        pytest.param(4, 1, False, (3, 0), {1: (2, 0), 3: (0, 0)}, id="one-slot"),
+    ],
+)
+def test_halfplr_ring_thresholds(pgrA, pgrB, armed, masks, leads):
+    """Mask S_side - 1, one more on a deeper side under PrefetchGlobalRead 3 with the StaggerU
+    wrap armed; lead max(0, mask - N) once N reaches PrefetchGlobalRead; null S_side; entry 0."""
+    state = _halfPlrRingState(pgrA, pgrB)
+    assert tuple(tdmRingIncrementMaskThreshold(state, side, armed) for side in "AB") == masks
+    for tiles, lead in leads.items():
+        assert tuple(tdmRingTailLead(state, side, tiles, armed) for side in "AB") == lead
+    assert tuple(tdmRingNullThreshold(state, side) for side in "AB") == (pgrA, pgrB)
+    assert tdmRingLoopEntryThreshold(state) == 0
+
+
+def test_halfplr_ring_rules_keep_todays_values():
+    """HalfPLR off a ring keeps its mask at 1; a ring keeps entering at PrefetchGlobalRead behind
+    a NoLoadLoop, and SuppressNoLoadLoop on its own drops it as HalfPLR does."""
+    assert tdmRingIncrementMaskThreshold(_tdmState(HalfPLR=1), "A", True) == 1
+    assert tdmRingLoopEntryThreshold(_ringState()) == 4
+    assert tdmRingLoopEntryThreshold(_ringState(SuppressNoLoadLoop=True)) == 0
+
+
+def _halfPlrRingReplay(state, tiles, fence, armed, tail, **control):
+    """Replay N = `tiles` K-tiles of a HalfPLR ring, StaggerU 0, into its tail; return what fails.
+
+    Per side it follows the descriptor's tile, the slot each fill writes, the local reads not yet
+    retired and the TDMs in flight on the waves issuing that side. The prologue fills tile 0 and
+    advances (prefetch index PGR - 1, or 1 under 3; not with one slot); stage k = 1..PGR-1 leaves
+    early, draining, when LoopCounter == k, else fills, and below PGR - 1 advances and swaps.
+    Unless it left early, a deeper side then advances (no wrap test), swaps from stage 2 and fills
+    each extra stage, null past K. The main loop runs above tdmRingLoopEntryThreshold. Body b
+    advances: HalfPLR's mask zeroes the increment for good at or below
+    tdmRingIncrementMaskThreshold, and an `armed` StaggerU wrap adds WrapU = 1 - N instead. The
+    merged fence then waits, retires the reads, publishes tile b + 1, swaps and refills tile
+    b + S_side, null at or below tdmRingNullThreshold but counted; two barriers retire, refill,
+    wait and publish. Tile b + 1's two read halves follow, a dummy after the last tile. The tail
+    removes the stagger, re-enables the descriptors, retires the dummy read, rewinds
+    tdmRingTailLead tiles at the side's own increment and resets the slots: its TDM must load
+    tile N into slot 0.
+    """
+    stages = state["PrefetchGlobalRead"]
+    perStage = tdmRingIssuesPerStage(state)
+    slots = {x: tdmRingSideStages(state, x) for x in "AB"}
+    formulaArmed = control.get("formulaArmed", armed)
+    mask = control.get("mask") or (lambda x: tdmRingIncrementMaskThreshold(state, x, formulaArmed))
+    null = control.get("null") or (lambda x: tdmRingNullThreshold(state, x))
+    lead = control.get("lead") or (lambda x, n: tdmRingTailLead(state, x, n, formulaArmed))
+    entry = control.get("entry", tdmRingLoopEntryThreshold(state))
+    waits = {x: tdmRingPublishWait(state, fence, x) + control.get("slack", 0) for x in slots}
+    prologueWaits = {x: tdmRingPrologueWait(state, x) + control.get("prologueSlack", 0)
+                     for x in slots}
+    wrapCounter = (1 if stages == 1 else 2) if armed and stages < 3 else None
+    wrapU = 1 - tiles
+    firstHalves = (1,) if control.get("halfAfterFence") else (1, 2)
+    sides = {x: {"tile": 0, "live": True, "enabled": True, "swaps": 0, "slots": {},
+                 "halves": collections.defaultdict(set), "reads": set(),
+                 "inFlight": collections.deque()} for x in slots}
+    errors = []
+
+    def advance(x, counter, prefetch, deepPrologue=False):
+        side = sides[x]
+        if prefetch == 0 and (control.get("maskDeep") or not deepPrologue) and counter <= mask(x):
+            side["live"] = False
+        if not deepPrologue and counter + prefetch == wrapCounter:
+            side["tile"] += wrapU
+        else:
+            side["tile"] += side["live"]
+
+    def fill(x, tile):
+        side = sides[x]
+        slot = side["swaps"] % slots[x]
+        if side["enabled"] != (tile < tiles):
+            errors.append(("null" if tile < tiles else "past K", x, tile))
+        if side["enabled"]:
+            if side["tile"] != tile:
+                errors.append(("address", x, tile, side["tile"]))
+            old = side["slots"].get(slot)
+            if old is not None and (side["halves"][old] != {1, 2}
+                                    or any(t % slots[x] == slot for t, _ in side["reads"])):
+                errors.append(("WAR", x, tile, old))
+            side["slots"][slot] = tile
+        if side["enabled"] or not control.get("nullSkip"):
+            side["inFlight"].extend([tile if side["enabled"] else None] * perStage)
+        if len(side["inFlight"]) > slots[x] * perStage:
+            errors.append(("in flight", x, tile))
+
+    def read(x, tile, halves):
+        side = sides[x]
+        if tile < tiles and side["slots"].get(tile % slots[x]) != tile:
+            errors.append(("read", x, tile))
+        side["halves"][tile].update(halves)
+        side["reads"].update((tile, half) for half in halves)
+
+    def wait(counts):
+        for x, count in counts.items():
+            while len(sides[x]["inFlight"]) > count:
+                sides[x]["inFlight"].popleft()
+
+    def retireReads():
+        for side in sides.values():
+            side["reads"].clear()
+
+    def publish(tile):
+        errors.extend(("RAW", x, tile) for x in slots if tile in sides[x]["inFlight"])
+
+    def refill(computing):
+        for x in slots:
+            sides[x]["swaps"] += 1
+            fill(x, computing + slots[x])
+
+    if tiles:
+        for x in slots:
+            fill(x, 0)
+            if stages > 1:
+                advance(x, tiles, 1 if stages < 3 else stages - 1)
+            sides[x]["swaps"] += 1
+        leftEarly = tiles < stages
+        for stage in range(1, min(tiles, stages)):
+            for x in slots:
+                fill(x, stage)
+                if stage < stages - 1:
+                    advance(x, tiles, stages - 1 - stage)
+                    sides[x]["swaps"] += 1
+        if leftEarly:
+            wait(dict.fromkeys(slots, 0))
+        else:
+            for x in slots:
+                for stage in range(stages, slots[x]):
+                    advance(x, tiles, 0, deepPrologue=True)
+                    sides[x]["swaps"] += stage > 1
+                    sides[x]["enabled"] &= tiles > stage
+                    fill(x, stage)
+                if control.get("leadAtPrologue"):
+                    sides[x]["tile"] -= lead(x, tiles)
+        wait(prologueWaits)
+        publish(0)
+        for x in slots:
+            read(x, 0, firstHalves)
+    for computing in range(max(0, tiles - entry)):
+        counter = tiles - computing
+        for x in slots:
+            advance(x, counter, 0)
+            sides[x]["enabled"] &= counter > null(x)
+        if fence == "fused":
+            wait(waits)
+            retireReads()
+            publish(computing + 1)
+            refill(computing)
+        else:
+            if control.get("refillEarly"):
+                refill(computing)
+            retireReads()
+            if not control.get("refillEarly"):
+                refill(computing)
+            wait(waits)
+            publish(computing + 1)
+        for x in slots:
+            if control.get("halfAfterFence"):
+                read(x, computing, (2,))
+            read(x, computing + 1, firstHalves)
+    for x in slots:
+        if any(sides[x]["halves"][t] != {1, 2} for t in range(tiles)):
+            errors.append(("unread", x))
+    if not tail:
+        return errors
+    reenable = control.get("reenable", True)
+    for x in slots:
+        side = sides[x]
+        if wrapCounter and tiles:
+            side["tile"] += 1 - wrapU    # removeStagger at StaggerUIter = its own pf
+        if tiles:
+            side["enabled"] |= reenable
+            if control.get("tailDscnt", True):
+                side["reads"].clear()
+        if slots["A"] != slots["B"]:
+            side["enabled"] |= reenable
+        if not control.get("leadAtPrologue"):
+            side["tile"] -= 0 if control.get("leadIncs") and not side["live"] else lead(x, tiles)
+        if not side["enabled"] or side["tile"] != tiles:
+            errors.append(("tail", x, side["enabled"], side["tile"]))
+        if any(t % slots[x] == 0 for t, _ in side["reads"]) or \
+           any(t is not None and t % slots[x] == 0 for t in side["inFlight"]):
+            errors.append(("tail slot 0 busy", x))
+        if len(side["inFlight"]) + perStage > tdmInflightPerWaveBound(state):
+            errors.append(("tail in flight", x))
+    return errors
+
+
+_HALFPLR_RING_PAIRS = {
+    "equal": [(stages, stages) for stages in range(3, 12)],
+    "unequal": [pair for lo in range(2, 7) for hi in range(lo + 1, 9) for pair in ((hi, lo), (lo, hi))],
+    "one-slot": [pair for hi in range(3, 9) for pair in ((hi, 1), (1, hi))],
+}
+
+
+def _halfPlrRingReplays(kinds, control=None):
+    """(case, errors) of every replay: each pair of `kinds` the in-flight limit admits, MX and
+    dense, both fences (two barriers with one slot), the wrap armed or not, N = 0..max(16, 2S+3),
+    with and without the tail. `control(state)` gives the replay's keyword overrides."""
+    for kind in kinds:
+        for problemType in (_MX, _DENSE):
+            for pgrA, pgrB in _HALFPLR_RING_PAIRS[kind]:
+                state = _halfPlrRingState(pgrA, pgrB, problemType)
+                if tdmInflightRejectReason(state) is not None:
+                    continue
+                overrides = control(state) if control else {}
+                for fence in sorted({tdmRingFenceShape(f, state) for f in ("fused", "twoBarrier")}):
+                    for armed in (False, True):
+                        for tiles in range(max(17, 2 * max(pgrA, pgrB) + 4)):
+                            for tail in (False, True):
+                                yield ((pgrA, pgrB, problemType["MXBlockA"], fence, armed, tiles, tail),
+                                       _halfPlrRingReplay(state, tiles, fence, armed, tail, **overrides))
+
+
+@pytest.mark.parametrize("kind", sorted(_HALFPLR_RING_PAIRS))
+@pytest.mark.parametrize("leadAtPrologue", [False, True], ids=["lead-at-tail", "lead-at-prologue"])
+def test_halfplr_ring_replay(kind, leadAtPrologue):
+    """HalfPLR on a ring: every fill loads its own tile into a slot whose reads have retired, every
+    read finds its tile, every publish has landed, at most S_side stages are in flight, and the
+    tail loads tile N into slot 0 within the per-wave bound, whether a deeper side's lead is taken
+    back at the tail or, as the writer does, at the end of its prologue."""
+    failing = [(case, errors[0]) for case, errors in
+               _halfPlrRingReplays((kind,), lambda st: {"leadAtPrologue": leadAtPrologue}) if errors]
+    assert not failing, failing[:3]
+
+
+@pytest.mark.parametrize(
+    "kinds, control",
+    [
+        pytest.param(("equal",), lambda st: {"mask": lambda side: 1}, id="mask-1"),
+        pytest.param(("unequal", "one-slot"), lambda st: {"formulaArmed": False}, id="no-wrap-term"),
+        pytest.param(("unequal",), lambda st: {"maskDeep": True}, id="mask-in-deep-prologue"),
+        pytest.param(("unequal", "one-slot"), lambda st: {"lead": lambda side, n: 0}, id="no-lead"),
+        pytest.param(("unequal", "one-slot"), lambda st: {"leadIncs": True}, id="lead-at-masked-inc"),
+        pytest.param(("unequal",), lambda st: {
+            "lead": lambda side, n: 0 if n < st["PrefetchGlobalRead"]
+            else tdmRingSideStages(st, side) - st["PrefetchGlobalRead"]}, id="todays-rewind"),
+        pytest.param(("unequal", "one-slot"),
+                     lambda st: {"null": lambda side: st["PrefetchGlobalRead"]}, id="null-at-pgr"),
+        pytest.param(("equal",), lambda st: {"entry": st["PrefetchGlobalRead"]}, id="entry-at-pgr"),
+        pytest.param(("one-slot",), lambda st: {"refillEarly": True}, id="refill-before-protect"),
+        pytest.param(("equal",), lambda st: {"halfAfterFence": True}, id="half-after-fence"),
+        pytest.param(("equal",), lambda st: {"tailDscnt": False}, id="tail-without-dscnt"),
+        pytest.param(("equal",), lambda st: {"reenable": False}, id="tail-without-reenable"),
+        pytest.param(("equal",), lambda st: {"slack": tdmRingIssuesPerStage(st)}, id="loop-wait-loose"),
+        pytest.param(("equal",), lambda st: {"prologueSlack": tdmRingIssuesPerStage(st)},
+                     id="prologue-wait-loose"),
+        pytest.param(("equal",), lambda st: {"nullSkip": True}, id="nulls-not-counted"),
+    ],
+)
+def test_halfplr_ring_replay_controls(kinds, control):
+    """Positive controls: each fault the formulas and the writer guard against fails a replay."""
+    assert any(errors for _, errors in _halfPlrRingReplays(kinds, control))

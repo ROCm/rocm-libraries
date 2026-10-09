@@ -185,6 +185,7 @@ def tdmRingPublishWait(ks, fenceShape, side="A"):
 
     Tiles i+1 .. i+S-1 are in flight at the merged fence, which fills tile i+S after its
     barrier; the two-barrier variant has issued tile i+S as well. Only tile i+1 must land.
+    Without a NoLoadLoop it holds for all N bodies: the null descriptors of the last S count.
     """
     stages = tdmRingSideStages(ks, side)
     inFlight = stages - 1 if fenceShape == "fused" else stages
@@ -193,9 +194,57 @@ def tdmRingPublishWait(ks, fenceShape, side="A"):
 
 def tdmRingNoLoadWait(ks, remainPgr, side="A"):
     """tensorcnt before the publish barrier of the NGLL that has remainPgr skeleton stages in
-    flight; a deeper side also keeps the stages it issued past the skeleton."""
+    flight; a deeper side also keeps the stages it issued past the skeleton. A ring without a
+    NoLoadLoop has no NGLL."""
     extra = tdmRingSideStages(ks, side) - ks["PrefetchGlobalRead"]
     return (extra + remainPgr - 1) * tdmRingIssuesPerStage(ks)
+
+
+def tdmRingSuppressesNoLoadLoop(ks):
+    """True when the loop has no NoLoadLoop. HalfPLR turns SuppressNoLoadLoop on only after
+    Solution checks the ring (in depthUIteration), so it counts on its own."""
+    return bool(ks.get("SuppressNoLoadLoop") or ks.get("HalfPLR"))
+
+
+def tdmRingLoopEntryThreshold(ks):
+    """LoopCounter a deep ring's main loop runs above. Without a NoLoadLoop it runs all N bodies,
+    whose fills past K are null descriptors; otherwise the NGLLs take the last
+    PrefetchGlobalRead tiles."""
+    if tdmDeepRing(ks) and tdmRingSuppressesNoLoadLoop(ks):
+        return 0
+    return ks["PrefetchGlobalRead"]
+
+
+def tdmRingNullThreshold(ks, side):
+    """LoopCounter at or below which a main-loop body's fill on `side`, S_side tiles ahead of the
+    tile it computes, lies past K and issues a null descriptor."""
+    return tdmRingSideStages(ks, side)
+
+
+def tdmRingIncrementMaskThreshold(ks, side, staggerWrapArmed):
+    """LoopCounter at or below which HalfPLR zeroes `side`'s main-loop increment, for good.
+
+    The prologue advances a ring side S_side - 1 times, so masking as many bodies leaves its
+    descriptor on the tail's first tile. Below PrefetchGlobalRead 3 the StaggerU wrap is armed
+    even at StaggerU 0 (`staggerWrapArmed`, the writer's staggerUCode), at LoopCounter 2, or 1
+    with one slot; on a deeper side that is a masked body, so removeStagger restores an
+    increment the mask zeroed, and one more masked body cancels it. 1 off a ring.
+    """
+    if not tdmDeepRing(ks):
+        return 1
+    pgr = ks["PrefetchGlobalRead"]
+    stages = tdmRingSideStages(ks, side)
+    wrapCounter = 1 if pgr == 1 else 2
+    return stages - 1 + int(staggerWrapArmed and pgr < 3 and wrapCounter <= stages - 1)
+
+
+def tdmRingTailLead(ks, side, tiles, staggerWrapArmed):
+    """Tiles `side`'s descriptor is past tile N, the tail's first, after N = `tiles` bodies
+    without a NoLoadLoop: a deeper side's prologue stages that fewer bodies than its mask
+    threshold did not take back. 0 after an early exit, which skips them."""
+    if tiles < ks["PrefetchGlobalRead"]:
+        return 0
+    return max(0, tdmRingIncrementMaskThreshold(ks, side, staggerWrapArmed) - tiles)
 
 
 def _tdmRingItersPLR(ks):
@@ -209,7 +258,7 @@ def _tdmRingItersPLR(ks):
 
 
 _TDM_RING_UNSUPPORTED_FLAGS = (
-    "StreamK", "PrefetchAcrossPersistent", "ReuseAcrossPersistent", "HalfPLR",
+    "StreamK", "PrefetchAcrossPersistent", "ReuseAcrossPersistent",
     "SuppressNoLoadLoop", "UseSubtileImpl", "TDMSplit", "PrefetchGL2",
     "UnrollLoopSwapGlobalReadOrder", "UseCustomMainLoopSchedule", "ForceUnrollSubIter",
     "UsePLRPack", "ExpertSchedulingMode", "TDMPlusLdsBuf", "ExpandPointerSwap",
@@ -236,7 +285,8 @@ def tdmRingRejectReason(ks):
 
     Supported: PrefetchGlobalReadA/B of 1 or more each, 3 or more on at least one side, under
     ScheduleIterAlg 0, whose fences and waits the writer emits itself, with TDM A and B on two
-    or more waves, TDMFuse 0 and MX on both sides or neither. None when `ks` is not a deep ring.
+    or more waves, TDMFuse 0 and MX on both sides or neither; HalfPLR at StaggerU 0. None when
+    `ks` is not a deep ring.
     """
     if not tdmDeepRing(ks):
         return None
@@ -257,6 +307,8 @@ def tdmRingRejectReason(ks):
                 yield ("AssertSummationElementMultiple=%u with PrefetchGlobalReadA != "
                        "PrefetchGlobalReadB on a PrefetchGlobalRead=%u loop"
                        % (ks["AssertSummationElementMultiple"], stages))
+        if ks.get("HalfPLR") and ks.get("StaggerU", 0):
+            yield "HalfPLR with StaggerU=%u" % ks["StaggerU"]
         if any(ks.get(key) for key in _TDM_RING_DIRECT_KEYS):
             yield "DirectToLds or DirectToVgpr"
         if not tdmWaveSeparated(ks):
@@ -270,7 +322,9 @@ def tdmRingRejectReason(ks):
                    % (ks.get("PrefetchLocalRead", 0), ks.get("LoopIters", 0)))
         if ks.get("1LDSBuffer") == 1:
             yield "1LDSBuffer=1"
-        flags = [key for key in _TDM_RING_UNSUPPORTED_FLAGS if _tdmRingFlagOn(ks, key)]
+        # HalfPLR suppresses the NoLoadLoop with its own end-of-loop mask, which the ring follows.
+        flags = [key for key in _TDM_RING_UNSUPPORTED_FLAGS if _tdmRingFlagOn(ks, key)
+                 and not (key == "SuppressNoLoadLoop" and ks.get("HalfPLR"))]
         if flags:
             yield ", ".join(flags)
         if any(dim != 1 for dim in (ks.get("ClusterDim") or [1, 1])):

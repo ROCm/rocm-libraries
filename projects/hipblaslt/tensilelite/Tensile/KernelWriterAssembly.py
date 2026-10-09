@@ -80,7 +80,8 @@ from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGat
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
-from .Components.TDMRing import tdmRingPrologueWait, tdmRingSideStages
+from .Components.TDMRing import tdmRingIncrementMaskThreshold, tdmRingLoopEntryThreshold, \
+  tdmRingPrologueWait, tdmRingSideStages
 from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmSeparateABDescriptors, tdmWaveSeparated, \
                                 tdmSharedScaleSetOwner, tdmSetOwner, tdmSetGroup, \
@@ -1047,6 +1048,8 @@ class KernelWriterAssembly(KernelWriter):
         # The TDM writes rotate in each side's descriptor (_tdmSwapLdsOffsetDecoupled).
         module.add(self.defineSgpr("LDSBufferReadIncB", 1))
         module.add(self.defineSgpr("TdmRingStages", 1))
+        if kernel["HalfPLR"]:
+          module.add(self.defineSgpr("TdmRingIncMask", 1))
       else:
         module.add(self.defineSgpr("LDSBufferWriteInc", 1))
 
@@ -8082,8 +8085,10 @@ class KernelWriterAssembly(KernelWriter):
               hplrReadTiles.append(tPB["MX"])
             if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
               hplrReadTiles.append(tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"])
-            for tP in hplrReadTiles:
-              module.add(self.localReadSwapOffsets(kernel, False, tP))
+            # A ring's tail puts both back on block 0 instead (localReadResetOffsets).
+            if not self.states.tdmDeepRing:
+              for tP in hplrReadTiles:
+                module.add(self.localReadSwapOffsets(kernel, False, tP))
             # Undo HPLR last-body dangling +=split (matching -= lives in next body).
             # Leak only happens when >= 2 unrolled bodies executed (LC_init > 1), since
             # the first body's end-of-body +=split is undone by the next body's incCode.
@@ -8130,10 +8135,12 @@ class KernelWriterAssembly(KernelWriter):
         if self.states.tdmRingDivergent:
           # The deeper side's sets were nulled past K, and its addresses lead the skeleton's by
           # the stages it issued past PrefetchGlobalRead, unless an early exit skipped them.
+          # HalfPLR's mask takes that lead back instead, the rest in _tdmRingDeepPrologue.
           module.addComment0("TDM ring: re-enable the deeper side and rewind its lead")
           module.add(SMovB32(dst=sgpr("tdmAGroup0+0"), src=1, comment=""))
           if kernel["ProblemType"]["MXBlockA"]:
             module.add(SMovB32(dst=sgpr("tdmMXSAGroup0+0"), src=1, comment=""))
+        if self.states.tdmRingDivergent and not kernel["HalfPLR"]:
           module.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr("TdmRingStages"), src1=kernel["PrefetchGlobalRead"],
                              comment="tiles this wave's side leads"))
           module.add(SCmpLtU32(src0=sgpr("OrigLoopCounter"), src1=kernel["PrefetchGlobalRead"],
@@ -8319,8 +8326,8 @@ class KernelWriterAssembly(KernelWriter):
     if pgr == 2:
       return (0 if kernel["HalfPLR"] else 1) if kernel["SuppressNoLoadLoop"] else 2
     if pgr >= 3:
-      # openLoop early-exits to NoGlobalLoadLoop for LoopCounter <= PGR.
-      return pgr
+      # openLoop early-exits to NoGlobalLoadLoop for LoopCounter <= PGR, unless a ring has none.
+      return tdmRingLoopEntryThreshold(kernel)
     return 0
 
   ##############################################################################
@@ -8388,7 +8395,7 @@ class KernelWriterAssembly(KernelWriter):
               comment="LoopCounter%s == 1 (PGR>=2, not Suppress: single-loop -> toPGR1)"%(loopChar) ))
           toPGR1 = Label.getFormatting(self.rapGetName("toPGR1"))
           module.add(SCBranchSCC1(labelName=toPGR1, comment="PGR=2 but only 1 loop, toPGR1"))
-        if kernel["PrefetchGlobalRead"] >= 3:
+        if kernel["PrefetchGlobalRead"] >= 3 and tdmRingLoopEntryThreshold(kernel):
           # early exit 1 (2<=loopCounter<=PGR-1) to second NGLL (no need GR Inc)
           endCounter = kernel["PrefetchGlobalRead"]-1
           module.add(SCmpLeU32(
@@ -10975,7 +10982,7 @@ class KernelWriterAssembly(KernelWriter):
                     comment="gra += inc%s%s (upper)"%(tP["tensorChar"], loopChar)))
               graIdx += self.states.rpga
 
-  def globalReadIncrementAB(self, kernel, tPA, tPB, loopIdx, prefetchIndex):
+  def globalReadIncrementAB(self, kernel, tPA, tPB, loopIdx, prefetchIndex, incrementMask=True):
     imod = Module("globalReadIncrementAB")
     tdmA: bool = kernel["enableTDMA"]
     tdmB: bool = kernel["enableTDMB"]
@@ -10986,7 +10993,7 @@ class KernelWriterAssembly(KernelWriter):
     #TDM Wave Separated
     if tdmA and tdmB and tPA and tPB and numWaves > 1:
       incCodeA = imod.add(Module("globalReadIncrementA"))
-      if kernel["HalfPLR"] and prefetchIndex == 0:
+      if kernel["HalfPLR"] and prefetchIndex == 0 and incrementMask:
         incCodeA.add(self.graIncrementMask(kernel, tPA, tPB))
       incCodeA.add(self.tdmIncrementABWaveSperated(kernel, tPA, tPB, loopIdx, prefetchIndex,
                                                   hoistedWrapUSel=self.tdmWrapUSelHoisted(kernel)))
@@ -11004,7 +11011,7 @@ class KernelWriterAssembly(KernelWriter):
       if not tdmA:
         self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA, prefetchIndex)
       else:
-        if kernel["HalfPLR"] and prefetchIndex == 0:
+        if kernel["HalfPLR"] and prefetchIndex == 0 and incrementMask:
           incCodeA.add(self.graIncrementMask(kernel, tPA, tPB))
         incCodeA.add(self.tdmIncrementAB(kernel, tPA, loopIdx, prefetchIndex))
       if "MX" in tPA and not tdmA:
@@ -11899,7 +11906,8 @@ class KernelWriterAssembly(KernelWriter):
         # -- the load is issued in the densest part of the interleaved schedule,
         # and a branch there would split the block the scheduler works in.
         if kernel["HalfPLR"] or kernel["ReuseAcrossPersistent"]: # only support TDM
-          if kernel["PrefetchGlobalRead"] > 0:
+          # A divergent ring nulls each side at its own depth below, the shallower one at this one.
+          if kernel["PrefetchGlobalRead"] > 0 and not self.states.tdmRingDivergent:
             # Wave-separated TDM aliases one descriptor set, with even waves
             # carrying A/MXSA and odd waves B/MXSB, so zeroing A's enable word
             # silences whichever this wave holds and two writes cover all four
@@ -18166,7 +18174,8 @@ class KernelWriterAssembly(KernelWriter):
       elif idxPgr == 1 and self.states.tdmDeepRing:
         # Every early exit lands here with fewer stages in flight than the waits after it
         # assume: skipPGR{PGR}_{PGR} waits for the oldest of PGR stages, and openLoop sends
-        # 2..PGR-1 tiles to NoGlobalLoadLoop_{PGR-2}.
+        # 2..PGR-1 tiles to NoGlobalLoadLoop_{PGR-2}, or without a NoLoadLoop into the main
+        # loop, whose fills are all null.
         imod.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1,
                             "TDM ring: wait for all prefetch (for early exit)"))
       elif self.states.tdmDeepRing:
@@ -21624,6 +21633,10 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.tdmRingDivergent and tcA == "A":
       mod.add(SCSelectB32(sgpr("TdmRingStages"), tdmRingSideStages(kernel, dcpLdsSide(tcOdd)),
                           tdmRingSideStages(kernel, dcpLdsSide(tcEven)), "stages of this wave's side"))
+      if kernel["HalfPLR"]:
+        mask = lambda tc: tdmRingIncrementMaskThreshold(kernel, dcpLdsSide(tc), self.states.staggerUCode)
+        mod.add(SCSelectB32(sgpr("TdmRingIncMask"), mask(tcOdd), mask(tcEven),
+                            "HalfPLR increment mask threshold of this wave's side"))
     return mod
 
   def resetTDMDescriptorForTail(self, kernel: Mapping, tP: Mapping, tmpSgprWaveOffset = None) -> Module:
@@ -21913,7 +21926,8 @@ class KernelWriterAssembly(KernelWriter):
           comment="is this the last iters (and not primed)"))
     else:
       mod.add(SCmpLeI32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
-        src1=1, \
+        src1=sgpr("TdmRingIncMask") if self.states.tdmRingDivergent else \
+          tdmRingIncrementMaskThreshold(kernel, "A", self.states.staggerUCode), \
         comment="%s"%"is this the last iters"))
     if kernel["NumWaves"] > 1 and tdmSharedScaleSetActive(kernel):
       # Shared set zeros tdmABIncs; the separate data tensor (not tdmSharedScaleSetOwner) zeros its own GlobalReadIncs.

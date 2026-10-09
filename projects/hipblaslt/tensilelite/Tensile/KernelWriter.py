@@ -41,7 +41,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB192
   GlobalLoadB64, GlobalLoadB96, GlobalLoadD16B16, GlobalLoadD16U8, GlobalLoadD16HIU8, \
   GlobalStoreB128, GlobalStoreB32, GlobalStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, MXMFMAInstruction, SAddU32, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
-  SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
+  SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubBU32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
 from rocisa.instruction import SSchedulingFence
 from rocisa.register import RegisterPool
@@ -59,8 +59,9 @@ from .Components.Subtile.Kernel import *
 from .Components.Subtile.SubtileLdsLayout import applyLdsLayout
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
-from .Components.TDMRing import tdmDeepRing, tdmRingDivergent, tdmRingFenceShape, tdmRingNoLoadWait, \
-  tdmRingPrologueWait, tdmRingPublishWait, tdmRingSideStages
+from .Components.TDMRing import tdmDeepRing, tdmRingDivergent, tdmRingFenceShape, \
+  tdmRingIncrementMaskThreshold, tdmRingNoLoadWait, tdmRingPrologueWait, tdmRingPublishWait, \
+  tdmRingSideStages, tdmRingTailLead
 from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
@@ -826,7 +827,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
     for stage in range(kernel["PrefetchGlobalRead"], stages[deep]):
       module.addComment1("TDM ring: %s stage %u" % (deep, stage))
-      module.add(self.globalReadIncrementAB(kernel, tPA, tPB, None, 0))
+      module.add(self.globalReadIncrementAB(kernel, tPA, tPB, None, 0, incrementMask=False))
       # Every prologue moves the slots and tokens on right after tile 0; a one-slot ring
       # leaves only its increment to stage 1 (setupNewTile).
       if stage > 1:
@@ -839,6 +840,22 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(self.globalReadDo(kernel, 0, tPA))
       if "MX" in tPA:
         module.add(self.globalReadDo(kernel, 0, tPA["MX"]))
+    if kernel["HalfPLR"] and tdmRingTailLead(kernel, deep, kernel["PrefetchGlobalRead"], self.states.staggerUCode):
+      # With fewer tiles than its mask threshold, every main-loop fill of this side is null and
+      # the masked bodies leave the descriptor past tile N (tdmRingTailLead). Rewind it now,
+      # while tdmABIncs still holds the increment the mask zeroes for the tail.
+      threshold = tdmRingIncrementMaskThreshold(kernel, deep, self.states.staggerUCode)
+      leads = [("tdmAGroup0", "tdmABIncs")] + ([("tdmMXSAGroup0", "tdmMXSAMXSBIncs")] if "MX" in tPA else [])
+      with self.allocTmpSgpr(3, tag="tdmRingDeepLead") as tmpSgprInfo:
+        tmp = tmpSgprInfo.idx
+        module.add(SSubU32(dst=sgpr(tmp), src0=threshold, src1=loopCounter, comment="tiles this side leads"))
+        module.add(SCMovB32(dst=sgpr(tmp), src=0, comment="none past the threshold"))
+        for group, inc in leads:
+          module.add(self.s_mul_u64_u32(sgpr(tmp+1), sgpr(tmp+2), sgpr(tmp), sgpr(inc), comment="lead in bytes"))
+          module.add(SSubU32(dst=sgpr(f"{group}+2"), src0=sgpr(f"{group}+2"), src1=sgpr(tmp+1),
+                             comment="rewind the lead"))
+          module.add(SSubBU32(dst=sgpr(f"{group}+3"), src0=sgpr(f"{group}+3"), src1=sgpr(tmp+2),
+                              comment="rewind the lead (hi)"))
     module.add(lblEnd)
     return module
 
@@ -1247,7 +1264,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # simple schedule, just add the modules in-order
       if kernel["HalfPLR"]:
         assert len(packCode.flatitems()) == 0, "Pack code should be empty for half PLR case"
-        if kernel["PrefetchGlobalRead"] < 2:
+        # A ring's one-slot side refills after the protect barrier, not ahead of it.
+        if kernel["PrefetchGlobalRead"] < 2 and not self.states.tdmDeepRing:
           iterCode.add(globalReadCode)
         iterCode.add(waitLWCode)
         iterCode.add(syncCode)
@@ -1275,7 +1293,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           macItems = []
         iterCode.add(pointerLWCode)
         iterCode.add(pointerLRCode)
-        if kernel["PrefetchGlobalRead"] >= 2: 
+        if kernel["PrefetchGlobalRead"] >= 2 or self.states.tdmDeepRing:
           iterCode.add(globalReadCode)
         # add rest of the mac here
         iterCode.addItems(macItems)
