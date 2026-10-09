@@ -127,41 +127,57 @@ def ctest_ready(build_root: Path, config: str) -> bool:
     return False
 
 
+# Native C++ test binaries that a pytest file drives through an env var. With a
+# configured build each one is resolved from CTest, so its pytest cases run
+# instead of skipping: (env var, CTest name, label).
+NATIVE_PARITY_TESTS = (
+    ("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),
+    (
+        "ROCKE_NONTEMPORAL_HIP_TEST",
+        "rocke_nontemporal_hip",
+        "native nontemporal HIP parity",
+    ),
+    (
+        "ROCKE_OPTIMIZATION_BARRIER_TEST",
+        "rocke_optimization_barrier",
+        "native barrier HIP parity",
+    ),
+)
+
+
+def _native_executable(
+    env: dict[str, str], build_root: Path, config: str, var: str, ctest_name: str
+) -> str | None:
+    """An explicit env value wins; otherwise ask CTest for the built binary."""
+    executable = env.get(var)
+    if not executable and (build_root / "CMakeCache.txt").is_file():
+        tests = ctest_tests(build_root, config, f"^{ctest_name}$")
+        commands = [
+            test.get("command", []) for test in tests if test["name"] == ctest_name
+        ]
+        if len(commands) != 1 or not commands[0]:
+            raise ValueError(f"CTest did not resolve the built {ctest_name} executable")
+        executable = commands[0][0]
+    return executable
+
+
 def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     """Build the configured suite and supply native parity to both pytest passes."""
     env = dict(os.environ)
-    configured = (build_root / "CMakeCache.txt").is_file()
-    if configured:
+    if (build_root / "CMakeCache.txt").is_file():
         subprocess.run(
             ["cmake", "--build", str(build_root), "--config", config], check=True
         )
-    for target, variable, label in (
-        ("rocke_storage", "ROCKE_STORAGE_TEST", "storage parity"),
-        (
-            "rocke_optimization_barrier",
-            "ROCKE_OPTIMIZATION_BARRIER_TEST",
-            "barrier HIP parity",
-        ),
-    ):
-        executable = env.get(variable)
-        if configured and not executable:
-            tests = ctest_tests(build_root, config, f"^{target}$")
-            commands = [
-                test.get("command", []) for test in tests if test["name"] == target
-            ]
-            if len(commands) != 1 or not commands[0]:
-                raise ValueError(f"CTest did not resolve the built {target} executable")
-            executable = commands[0][0]
+    for var, ctest_name, label in NATIVE_PARITY_TESTS:
+        executable = _native_executable(env, build_root, config, var, ctest_name)
         if executable:
             path = Path(executable).resolve()
             if not path.is_file():
-                raise ValueError(f"native test executable does not exist: {path}")
-            env[variable] = str(path)
-            print(f"\n== native {label}: {path} ==")
+                raise ValueError(f"{label} test executable does not exist: {path}")
+            env[var] = str(path)
+            print(f"\n== {label}: {path} ==")
         else:
-            print(
-                f"\n== native {label}: SKIPPED (no configured build or {variable}) =="
-            )
+            print(f"\n== {label}: SKIPPED (no configured build or {var}) ==")
     return env
 
 
@@ -290,7 +306,7 @@ def main() -> int:
         try:
             pytest_env = native_pytest_env(Path(args.build_root).resolve(), args.config)
         except (OSError, ValueError, subprocess.CalledProcessError) as exc:
-            print(f"native storage parity setup failed: {exc}", file=sys.stderr)
+            print(f"native parity test setup failed: {exc}", file=sys.stderr)
             return 1
         print("\n== pytest ==")
         status |= subprocess.run(

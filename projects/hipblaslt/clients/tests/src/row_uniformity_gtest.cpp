@@ -537,19 +537,8 @@ namespace
                                        enumerated);
             enumeratedCount = static_cast<int>(enumerated.size());
 
-            // getAllAlgos walks a std::set of shared_ptr, so the order follows
-            // heap addresses and varies from process to process. Sorting on the
-            // solution index -- a value baked into the library -- is what makes
-            // the sweep below pick the same candidates on every run.
-            std::sort(
-                enumerated.begin(),
-                enumerated.end(),
-                [](hipblasLtMatmulHeuristicResult_t lhs, hipblasLtMatmulHeuristicResult_t rhs) {
-                    return hipblaslt_ext::getIndexFromAlgo(lhs.algo)
-                           < hipblaslt_ext::getIndexFromAlgo(rhs.algo);
-                });
-
-            // Neighbouring entries are near-identical kernels that behave the
+            // getAllAlgos returns algorithms in solution-index order, where
+            // neighbouring entries are near-identical kernels that behave the
             // same way, so the list is swept twice -- once from the front, once
             // with a coarse stride -- each with its own share of the budget:
             // whether a shape has a non-uniform algorithm at all turned out to

@@ -21,6 +21,55 @@ target_sources(hipblaslt
 )
 target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
 
+# The tuning file's row format and store. A library of its own so the
+# host-only tests can link it without the rest of hipBLASLt or a device.
+add_library(hipblaslt-tuning-store STATIC)
+target_sources(hipblaslt-tuning-store
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/TuningCacheStore.cpp"
+)
+set_target_properties(hipblaslt-tuning-store
+    PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+)
+target_compile_features(hipblaslt-tuning-store PUBLIC cxx_std_17)
+target_compile_definitions(hipblaslt-tuning-store PRIVATE ROCM_USE_FLOAT16)
+# TensileLite's headers, not tensilelite-host itself: the store calls nothing in
+# it, and linking it would bring the solution library and HIP's device runtime.
+target_include_directories(hipblaslt-tuning-store
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:$<TARGET_PROPERTY:tensilelite-host,INTERFACE_INCLUDE_DIRECTORIES>>
+    PRIVATE
+        "${PROJECT_SOURCE_DIR}/library/src/amd_detail/include"
+        "${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include"
+        "${PROJECT_BINARY_DIR}/library/include"
+        "${PROJECT_SOURCE_DIR}/library/include"
+)
+target_link_libraries(hipblaslt-tuning-store
+    PUBLIC
+        $<BUILD_INTERFACE:rocisa::rocisa-cpp>
+    PRIVATE
+        roc::${hipblas_target}
+        hip::host
+)
+if(HIPBLASLT_ENABLE_COVERAGE)
+    target_compile_options(hipblaslt-tuning-store PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(hipblaslt-tuning-store PUBLIC -fprofile-instr-generate)
+endif()
+if(HIPBLASLT_ENABLE_ASAN OR HIPBLASLT_ENABLE_TSAN)
+    hipblaslt_target_configure_sanitizers(hipblaslt-tuning-store PUBLIC)
+endif()
+target_link_libraries(hipblaslt PRIVATE hipblaslt-tuning-store)
+
+if(NOT BUILD_SHARED_LIBS)
+    install(TARGETS hipblaslt-tuning-store
+        EXPORT hipblaslt-targets
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel)
+endif()
+
 if(HIPBLASLT_ENABLE_ROCROLLER)
     add_subdirectory(rocroller)
 endif()

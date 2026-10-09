@@ -442,9 +442,9 @@ namespace TensileLite
             }
             else
             {
-                static_cast<void>(hipEventCreate(&start));
-                static_cast<void>(hipEventCreate(&stop));
-                static_cast<void>(hipEventRecord(start, stream));
+                HIP_CHECK_EXC(hipEventCreate(&start));
+                HIP_CHECK_EXC(hipEventCreate(&stop));
+                HIP_CHECK_EXC(hipEventRecord(start, stream));
             }
         }
 
@@ -459,8 +459,9 @@ namespace TensileLite
             }
             else
             {
-                static_cast<void>(hipEventRecord(stop, stream));
-                static_cast<void>(hipEventSynchronize(stop));
+                // Surfaces kernel faults, which would otherwise yield bogus timings.
+                HIP_CHECK_EXC(hipEventRecord(stop, stream));
+                HIP_CHECK_EXC(hipEventSynchronize(stop));
             }
         }
 
@@ -487,10 +488,10 @@ namespace TensileLite
                 else
                 {
                     float eventMs = 0.0f;
-                    static_cast<void>(hipEventElapsedTime(&eventMs, start, stop));
+                    HIP_CHECK_EXC(hipEventElapsedTime(&eventMs, start, stop));
                     totalTime = double_millis(eventMs);
-                    static_cast<void>(hipEventDestroy(start));
-                    static_cast<void>(hipEventDestroy(stop));
+                    HIP_CHECK_EXC(hipEventDestroy(start));
+                    HIP_CHECK_EXC(hipEventDestroy(stop));
                 }
             }
             else

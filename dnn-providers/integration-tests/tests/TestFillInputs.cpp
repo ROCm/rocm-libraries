@@ -3,12 +3,16 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <ostream>
 #include <set>
+#include <stdexcept>
 #include <vector>
 
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -22,6 +26,22 @@
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests;
+
+namespace hipdnn_integration_tests
+{
+
+// Lets EXPECT_EQ on recipes print both sides on failure.
+static void PrintTo(const FillRecipe& f, std::ostream* os)
+{
+    if(f.kind == FillRecipe::Kind::FIXED)
+    {
+        *os << "FIXED(" << f.value << ")";
+        return;
+    }
+    *os << "FREE[" << f.lo << ", " << f.hi << "]";
+}
+
+} // namespace hipdnn_integration_tests
 
 namespace
 {
@@ -467,6 +487,112 @@ GraphResult buildMoeGroupedMatmulBwdGraph()
     return r;
 }
 
+// ── Matmul with a configurable A data type (single node) ────────────────────
+// Leaf inputs: a(1), b(2). Output: c(3). Matmul registers no per-op fills, so
+// a's recipe comes from its data type alone.
+
+GraphResult buildMatmulGraph(DataType aType,
+                             const std::vector<int64_t>& aDims = kDims,
+                             const std::vector<int64_t>& aStrides = kStrides)
+{
+    GraphResult r;
+    auto& b = r.builder;
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(b, 1, "a", aType, &aStrides, &aDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 2, "b", DataType::FLOAT, &kStrides, &kDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 3, "c", DataType::FLOAT, &kStrides, &kDims));
+
+    auto matmul = CreateMatmulAttributes(b, 1, 2, 3);
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(
+        b, "matmul", DataType::FLOAT, NodeAttributes::MatmulAttributes, matmul.Union()));
+
+    auto graph = CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    b.Finish(graph);
+
+    r.graph = GetGraph(b.GetBufferPointer());
+    return r;
+}
+
+// ── Block-scale dequantize + matmul (MX matmul, 2-node fused) ───────────────
+// Leaf inputs: x(1), scale(2), b(3). dequant.y (uid 10) is virtual. Output: c(4).
+
+GraphResult buildBlockScaleDequantizeMatmulGraph(DataType xType)
+{
+    GraphResult r;
+    auto& b = r.builder;
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", xType, &kStrides, &kDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 2, "scale", DataType::FP8_E8M0, &kStrides, &kDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(b, 10, "dequant_y", DataType::FLOAT, &kStrides, &kDims, true));
+    tensors.push_back(CreateTensorAttributesDirect(b, 3, "b", DataType::FLOAT, &kStrides, &kDims));
+    tensors.push_back(CreateTensorAttributesDirect(b, 4, "c", DataType::FLOAT, &kStrides, &kDims));
+
+    auto dequant = CreateBlockScaleDequantizeAttributesDirect(b, 1, 2, 10);
+    auto matmul = CreateMatmulAttributes(b, 10, 3, 4);
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(b,
+                                     "dequant",
+                                     DataType::FLOAT,
+                                     NodeAttributes::BlockScaleDequantizeAttributes,
+                                     dequant.Union()));
+    nodes.push_back(CreateNodeDirect(
+        b, "matmul", DataType::FLOAT, NodeAttributes::MatmulAttributes, matmul.Union()));
+
+    auto graph = CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    b.Finish(graph);
+
+    r.graph = GetGraph(b.GetBufferPointer());
+    return r;
+}
+
+// Fills the MX matmul graph and returns the recipes in effect. Pre-set
+// `recipes` entries act as test overrides.
+InputFillRecipes fillBlockScaleDequantizeMatmul(DataType xType, InputFillRecipes recipes = {})
+{
+    const auto gr = buildBlockScaleDequantizeMatmulGraph(xType);
+    const auto leafUids = gr.leafInputUids({4});
+    auto inputs = makeTensorsFromGraph(gr, leafUids);
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+    EXPECT_TRUE(result.filled) << result.reason;
+    return recipes;
+}
+
+// Distinct |value|s a default fill puts into a typed (unpacked) A operand.
+template <typename T>
+std::set<float> filledMagnitudes(DataType aType)
+{
+    // 64K draws keep even the narrowest rounding bin (E3M2's zero, ~0.1% of the
+    // range) populated many times over.
+    const std::vector<int64_t> dims = {256, 256};
+    const std::vector<int64_t> strides = {256, 1};
+    const auto gr = buildMatmulGraph(aType, dims, strides);
+    const std::vector<int64_t> ownedUids = {1};
+    auto inputs = makeTensorsFromGraph(gr, ownedUids);
+    InputFillRecipes recipes;
+
+    const auto result = fillInputs(*gr.graph, inputs, ownedUids, recipes, nullptr);
+    EXPECT_TRUE(result.filled) << result.reason;
+
+    auto& tensor = *inputs.at(1);
+    const auto* values = static_cast<const T*>(tensor.rawHostData());
+    std::set<float> magnitudes;
+    for(size_t i = 0; i < tensor.elementCount(); ++i)
+    {
+        magnitudes.insert(std::fabs(static_cast<float>(values[i])));
+    }
+    return magnitudes;
+}
+
 FillResult runFill(const GraphResult& gr, const std::set<int64_t>& outputUids)
 {
     const auto leafUids = gr.leafInputUids(outputUids);
@@ -768,6 +894,133 @@ TEST(TestFillInputs, DeviceFillerThresholdIsInclusiveOfMinElements)
     EXPECT_FALSE(device.tryFill(below, recipe, 1));
     EXPECT_TRUE(device.tryFill(at, recipe, 1));
     device.waitForFills();
+}
+
+// ── Data-type defaults ──────────────────────────────────────────────────────
+
+// A data type added to the schema without a fill decision would otherwise fall
+// back to [-1, 1] silently, which is how FP4 ended up reaching 3 of its 8
+// magnitudes.
+TEST(TestFillInputs, DefaultFillCoversEveryDataType)
+{
+    for(const auto dataType : EnumValuesDataType())
+    {
+        if(dataType == DataType::UNSET)
+        {
+            EXPECT_THROW(defaultFillFor(dataType), std::invalid_argument);
+            continue;
+        }
+        EXPECT_NO_THROW(defaultFillFor(dataType)) << EnumNameDataType(dataType);
+    }
+}
+
+// The default must reach every representable magnitude, including 0 and the
+// largest finite value: 8 for E2M1, 32 for each FP6 format.
+TEST(TestFillInputs, NarrowFloatDefaultsReachFullRange)
+{
+    namespace types = hipdnn_data_sdk::types;
+
+    const auto fp4 = filledMagnitudes<types::fp4_e2m1>(DataType::FP4_E2M1);
+    EXPECT_EQ(fp4.size(), 8u);
+    EXPECT_FLOAT_EQ(*fp4.rbegin(), 6.0f);
+
+    const auto e2m3 = filledMagnitudes<types::fp6_e2m3>(DataType::FP6_E2M3);
+    EXPECT_EQ(e2m3.size(), 32u);
+    EXPECT_FLOAT_EQ(*e2m3.rbegin(), 7.5f);
+
+    const auto e3m2 = filledMagnitudes<types::fp6_e3m2>(DataType::FP6_E3M2);
+    EXPECT_EQ(e3m2.size(), 32u);
+    EXPECT_FLOAT_EQ(*e3m2.rbegin(), 28.0f);
+}
+
+// The dtype default reaches inputs of ops that register no fills of their own,
+// and is recorded so meta.inputs names the range.
+TEST(TestFillInputs, NarrowDtypeOnGenericOpGetsDtypeDefault)
+{
+    const auto gr = buildMatmulGraph(DataType::FP4_E2M1);
+    const auto leafUids = gr.leafInputUids({3});
+    auto inputs = makeTensorsFromGraph(gr, leafUids);
+    InputFillRecipes recipes;
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+
+    ASSERT_TRUE(result.filled) << result.reason;
+    EXPECT_EQ(recipes.fill(1), FillRecipe::free(-6.0f, 6.0f));
+    EXPECT_EQ(recipes.fills().count(2), 0u);
+}
+
+// Float graphs keep the generic fill and record nothing, so their recaptured
+// meta.inputs stay byte-identical.
+TEST(TestFillInputs, FloatGraphRecordsNoDtypeDefaults)
+{
+    const auto gr = buildConvFwdGraph();
+    const auto leafUids = gr.leafInputUids({3});
+    auto inputs = makeTensors(leafUids);
+    InputFillRecipes recipes;
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+
+    ASSERT_TRUE(result.filled) << result.reason;
+    EXPECT_TRUE(recipes.fills().empty());
+}
+
+// ── Block-scale dequantize (MX matmul) ──────────────────────────────────────
+
+// Scale is 2^-floor(log2(amax)) * [0.5, 2] against the operand's range, so the
+// dequantized FP4/FP6 block peaks at 3 to 3.75. FP8 keeps today's [-1, 1] /
+// [0.5, 2], and its generic operand range is not recorded.
+TEST(TestFillInputs, BlockScaleDequantizeScaleNormalized)
+{
+    struct Case
+    {
+        DataType xType;
+        FillRecipe x;
+        FillRecipe scale;
+    };
+    const std::vector<Case> cases = {
+        {DataType::FP4_E2M1, FillRecipe::free(-6.0f, 6.0f), FillRecipe::free(0.125f, 0.5f)},
+        {DataType::FP6_E2M3, FillRecipe::free(-7.5f, 7.5f), FillRecipe::free(0.125f, 0.5f)},
+        {DataType::FP6_E3M2, FillRecipe::free(-28.0f, 28.0f), FillRecipe::free(0.03125f, 0.125f)},
+        {DataType::FP8_E4M3, FillRecipe{}, FillRecipe::free(0.5f, 2.0f)},
+        {DataType::FP8_E5M2, FillRecipe{}, FillRecipe::free(0.5f, 2.0f)},
+    };
+
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(EnumNameDataType(c.xType));
+        const auto recipes = fillBlockScaleDequantizeMatmul(c.xType);
+        EXPECT_EQ(recipes.fill(1), c.x);
+        EXPECT_EQ(recipes.fills().count(1), c.x != FillRecipe{} ? 1u : 0u);
+        EXPECT_EQ(recipes.fill(2), c.scale);
+        EXPECT_EQ(recipes.fills().count(3), 0u);
+    }
+}
+
+// A test override of the operand range renormalizes the scale default.
+TEST(TestFillInputs, OverrideOfOperandRenormalizesScale)
+{
+    InputFillRecipes overrides;
+    overrides.set(1, FillRecipe::free(-2.0f, 2.0f));
+
+    const auto recipes = fillBlockScaleDequantizeMatmul(DataType::FP4_E2M1, overrides);
+
+    EXPECT_EQ(recipes.fill(1), FillRecipe::free(-2.0f, 2.0f));
+    EXPECT_EQ(recipes.fill(2), FillRecipe::free(0.25f, 1.0f));
+}
+
+// Recaptured bundles carry the operand and scale ranges in metadata.inputs.
+TEST(TestFillInputs, BlockScaleDequantizeRangesRecordedInMetadata)
+{
+    const auto inputs = fillBlockScaleDequantizeMatmul(DataType::FP4_E2M1).toJson();
+
+    ASSERT_TRUE(inputs.contains("1"));
+    EXPECT_EQ(inputs.at("1").at("kind").get<std::string>(), "free");
+    EXPECT_FLOAT_EQ(inputs.at("1").at("lo").get<float>(), -6.0f);
+    EXPECT_FLOAT_EQ(inputs.at("1").at("hi").get<float>(), 6.0f);
+
+    ASSERT_TRUE(inputs.contains("2"));
+    EXPECT_FLOAT_EQ(inputs.at("2").at("lo").get<float>(), 0.125f);
+    EXPECT_FLOAT_EQ(inputs.at("2").at("hi").get<float>(), 0.5f);
 }
 
 // NOLINTEND(readability-identifier-naming)

@@ -18,11 +18,15 @@ from sdpa_reference.contract import checked_inputs
 from reference_common.numeric import decode, encode
 from sdpa_reference.architectures import ARCHITECTURES, get_architecture
 from reference_common.session import reuse_workers
-from sdpa_reference.paths import default_bundle_path
+from reference_common.paths import default_bundle_path
 
 
 @pytest.fixture(scope="module")
-def reference_bundle():
+def reference_bundle(pytestconfig):
+    operation = pytestconfig.getoption("--rocke-reference-operation")
+    if operation and operation != "sdpa":
+        pytest.skip("reference options select another operation")
+    configured = pytestconfig.getoption("--rocke-reference-bundle")
     from rocke.runtime.hip_module import get_device_arch
 
     arch = get_device_arch()
@@ -33,25 +37,22 @@ def reference_bundle():
             for name in ARCHITECTURES
             for family in get_architecture(name).FAMILIES
         )
-        required = os.environ.get("ROCKE_TEST_REQUIRE_SDPA_GPU") == "1" or any(
-            key.startswith("ROCKE_TEST_SDPA_REFERENCE_BUNDLE_") and value
-            for key, value in os.environ.items()
-        )
+        required = operation or configured
         if expected or (not arch and required):
             pytest.fail("the required enrolled SDPA GPU is not available")
         pytest.skip(f"no SDPA reference cohort is enrolled for {arch}")
     target = get_architecture(arch)
-    configured = os.environ.get(f"ROCKE_TEST_SDPA_REFERENCE_BUNDLE_{arch.upper()}")
     bundle = (
         Path(configured).resolve()
         if configured
-        else default_bundle_path(Path(__file__).parent, arch)
+        else default_bundle_path(Path(__file__).parent, arch, operation="sdpa")
     )
     if not bundle.is_dir():
-        if os.environ.get("ROCKE_TEST_REQUIRE_SDPA_GPU") == "1" or configured:
+        if operation or configured:
             pytest.fail(f"required {arch} SDPA reference bundle is missing: {bundle}")
         pytest.skip("qualified SDPA bundle not installed; see TESTING.md")
-    manifest = load_bundle(bundle, architecture=arch)
+    lock = pytestconfig.getoption("--rocke-reference-lock")
+    manifest = load_bundle(bundle, Path(lock) if lock else None, architecture=arch)
     with reuse_workers("sdpa_reference.worker"):
         yield target, bundle, manifest
 

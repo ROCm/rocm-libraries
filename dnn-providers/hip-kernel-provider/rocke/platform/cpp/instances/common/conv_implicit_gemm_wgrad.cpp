@@ -36,6 +36,7 @@
 #include <cstring> /* strcmp, memset, memcpy */
 
 #include "rocke/error_boundary.hpp"
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_async_lds_max_dwords */
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_abi.h"
@@ -354,6 +355,17 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     {
         if(reason && reason_cap)
             snprintf(reason, reason_cap, "block_size %d > 1024", block_size);
+        return false;
+    }
+    /* Explicit vector widths fit one 16-byte per-lane access (Python:
+     * vector_width_reason in is_valid_wgrad_spec). */
+    if(!rocke_conv_vector_width_ok(
+           "a", s->has_vector_size_a, s->vector_size_a, s->dtype_a, reason, reason_cap)
+       || !rocke_conv_vector_width_ok(
+           "b", s->has_vector_size_b, s->vector_size_b, s->dtype_b, reason, reason_cap)
+       || !rocke_conv_vector_width_ok(
+           "c", s->has_vector_size_c, s->vector_size_c, s->dtype_d, reason, reason_cap))
+    {
         return false;
     }
 
@@ -2187,17 +2199,22 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          * operands, which is exactly what the intrinsic requires. contig_cols
          * keeps a chunk inside one such run: kpg for dY (NHWK, dense over the
          * output-channel slab) and cpg for X (NHWC, dense only within one
-         * filter position). Mirrors the Python call. */
+         * filter position). Mirrors the Python call.
+         * max_dwords is the arch's own buffer_load_lds width cap (CDNA3 moves
+         * only a dword per lane; the b96/b128 forms arrived with CDNA4). An
+         * over-wide one is not diagnosed -- the backend aborts the process. */
         const int a_rows = ctx->lds_k_outer ? ctx->block_k : ctx->block_m;
         const int a_cols = ctx->lds_k_outer ? ctx->block_m : ctx->block_k;
         const int b_rows = ctx->lds_k_outer ? ctx->block_k : ctx->block_n;
         const int b_cols = ctx->lds_k_outer ? ctx->block_n : ctx->block_k;
         const int a_contig = ctx->lds_k_outer ? rocke_conv_problem_kpg(&spec->problem) : 0;
         const int b_contig = ctx->lds_k_outer ? rocke_conv_problem_cpg(&spec->problem) : 0;
+        const int max_dwords
+            = rocke_archtarget_async_lds_max_dwords(rocke_archtarget_from_gfx(ctx->arch));
         rocke_status_t sa = rocke_async_tile_loader_from_tile(
-            a_rows, a_cols, ctx->threads, spec->wave_size, 4, a_contig, &ctx->a_loader);
+            a_rows, a_cols, ctx->threads, spec->wave_size, max_dwords, a_contig, &ctx->a_loader);
         rocke_status_t sb = rocke_async_tile_loader_from_tile(
-            b_rows, b_cols, ctx->threads, spec->wave_size, 4, b_contig, &ctx->b_loader);
+            b_rows, b_cols, ctx->threads, spec->wave_size, max_dwords, b_contig, &ctx->b_loader);
         if(sa != ROCKE_OK || sb != ROCKE_OK)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: async tile loader init failed");

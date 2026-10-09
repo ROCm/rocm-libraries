@@ -303,6 +303,8 @@ def check(
     mode: str,
     arch: str | None = None,
     payloads: Payloads | None = None,
+    *,
+    provenance_root: str | None = None,
 ):
     """Run every property this mode can honestly claim, and name the rest.
 
@@ -311,8 +313,10 @@ def check(
     `unchecked` is a check this run could not run, a gap that fails the gate
     under `--mode full`; `unverified` is a check that ran and found nothing to
     bind, which neither fails the gate nor joins the pass line.
+
+    `provenance_root` is as for `descriptor_context.Index`.
     """
-    index = descriptor_context.Index(root)
+    index = descriptor_context.Index(root, provenance_root=provenance_root)
     schemas = index.schemas()
     all_bundles = descriptor_context.resolve_bundles(index)
     bundles = select(all_bundles, profile)
@@ -610,11 +614,36 @@ def main(argv=None) -> int:
         "bytes a packed descriptor names under --mode full. Omit it to use the "
         "installed one.",
     )
+    parser.add_argument(
+        "--provenance-root",
+        action="append",
+        default=[],
+        metavar="LABEL=DIR",
+        help="Where one packed root's provenance sidecars live when they are not "
+        "beside its descriptors, as in an installed production tree; repeatable, "
+        "one per LABEL. DIR mirrors that label's ROOT: the sidecar of "
+        "<ROOT>/<rel>/<name>.kdp.json is "
+        "<DIR>/<rel>/<name>.kdp.provenance.json.gz. Every descriptor directory "
+        "under ROOT must hold the packer's hkp-packed.marker.",
+    )
     args = parser.parse_args(argv)
 
     if len(args.pairs) % 2:
         parser.error("arguments must be LABEL ROOT pairs")
     roots = list(zip(args.pairs[::2], args.pairs[1::2]))
+    labels = dict(roots)
+
+    provenance_roots = {}
+    for text in args.provenance_root:
+        label, separator, directory = text.partition("=")
+        if not separator or not label or not directory:
+            parser.error(f"--provenance-root {text!r} is not LABEL=DIR")
+        if label not in labels:
+            parser.error(
+                f"--provenance-root names label {label!r}, which no LABEL ROOT "
+                "pair does"
+            )
+        provenance_roots[label] = directory
 
     profile = Profile.load(args.profile) if args.profile else Profile.empty()
 
@@ -628,12 +657,20 @@ def main(argv=None) -> int:
         arch = None
         if args.mode == "full":
             probe = descriptor_context.resolve_bundles(
-                descriptor_context.Index(roots[0][1])
+                descriptor_context.Index(
+                    roots[0][1], provenance_root=provenance_roots.get(roots[0][0])
+                )
             )
             arch = effective_arch(probe, args.arch)
         for label, root in roots:
             binaries, descriptors, failures, unchecked, unbound, declared = check(
-                label, root, profile, args.mode, arch, payloads
+                label,
+                root,
+                profile,
+                args.mode,
+                arch,
+                payloads,
+                provenance_root=provenance_roots.get(label),
             )
             sets[label] = binaries
             by_label[label] = descriptors

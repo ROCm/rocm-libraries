@@ -1156,6 +1156,7 @@ int main(int argc, const char* argv[])
                         ScopedTimer timer("pre_solution");
                         listeners.preSolution(solution.get());
                     }
+                    bool deviceLost = false;
                     if(solutionIterator->runCurrentSolution() && runKernels)
                     {
                         try
@@ -1302,6 +1303,16 @@ int main(int argc, const char* argv[])
                             reporters->report(ResultKey::Validation, "INVALID");
                             reporters->log(LogLevel::Error,
                                            concatenate("Exception occurred: ", err.what(), "\n"));
+                            // A sticky error (e.g. a kernel memory fault) leaves the device unusable.
+                            hipError_t syncErr = hipDeviceSynchronize();
+                            if(syncErr != hipSuccess)
+                            {
+                                deviceLost = true;
+                                reporters->log(LogLevel::Error,
+                                               concatenate("Device unusable (",
+                                                           hipGetErrorName(syncErr),
+                                                           "), aborting.\n"));
+                            }
                         }
                     }
 
@@ -1310,11 +1321,11 @@ int main(int argc, const char* argv[])
                         listeners.postSolution();
                     }
 
-                    if(exitOnError && listeners.error() > 0)
+                    if(deviceLost || (exitOnError && listeners.error() > 0))
                     {
                         flushTimingBuffer();
                         // error range in shell is [0-255]
-                        return std::min(listeners.error(), 255);
+                        return std::clamp(listeners.error(), 1, 255);
                     }
                 }
 

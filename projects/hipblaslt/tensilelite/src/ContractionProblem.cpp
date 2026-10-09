@@ -40,6 +40,8 @@ namespace TensileLite
     ContractionProblem::ContractionProblem(size_t size, size_t workspaceSize)
         : m_workspaceSize(workspaceSize)
         , m_f32XdlMathOp(rocisa::DataType::Float)
+        , m_computeInputTypeA(rocisa::DataType::Float)
+        , m_computeInputTypeB(rocisa::DataType::Float)
     {
         m_tensors.resize(size);
         m_names.resize(size);
@@ -630,6 +632,8 @@ namespace TensileLite
         m_tensors[ContractionProblemGemm::TENSOR::SCALEALPHAVEC] = scaleAlphaVec;
         m_tensors[ContractionProblemGemm::TENSOR::GATE_RESIDUAL] = gate;
         m_tensors[ContractionProblemGemm::TENSOR::D].setAsOutput(true); // Set d as output
+        m_computeInputTypeA = a.dataType();
+        m_computeInputTypeB = b.dataType();
         m_betaRestriction = toScalarValueEnum(
             m_beta); // Set enum using beta to potentially allow for faster solutions
         consistencyCheck();
@@ -682,6 +686,8 @@ namespace TensileLite
         m_tensors[ContractionProblemGemm::TENSOR::SCALEALPHAVEC] = scaleAlphaVec;
         m_tensors[ContractionProblemGemm::TENSOR::GATE_RESIDUAL] = gate;
         m_tensors[ContractionProblemGemm::TENSOR::D].setAsOutput(true); // Set d as output
+        m_computeInputTypeA = a.dataType();
+        m_computeInputTypeB = b.dataType();
         m_betaRestriction = toScalarValueEnum(
             m_beta); // Set enum using beta to potentially allow for faster solutions
         consistencyCheck();

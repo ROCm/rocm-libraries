@@ -312,6 +312,15 @@ def _scale_coordinates(block_k):
 CONFIGS.extend((_scale_coordinates(block), "gfx1250") for block in (32, 16))
 
 
+CONFIGS.extend(
+    (_wmma_scaled(a, b, mode), "gfx1250")
+    for mode in ("scale", "scale16")
+    for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
+    for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
+    if a != b
+)
+
+
 def _spec(idx: int):
     """Config selector: the (builder, arch) pair the shared driver expects."""
     if not 0 <= idx < len(CONFIGS):

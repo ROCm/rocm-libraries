@@ -25,7 +25,10 @@ split-KV) the production dispatcher chooses between. §8 additionally documents 
 | $O$ | $S_q \times H_q \times d$ | output (same shape as $Q$) |
 | $S_q, S_k$ | scalar | query / key sequence length (per sequence) |
 | $d$ | scalar | head dimension (`head_size`, 64/128/256) |
-| $\tau$ | scalar | softmax scale, $\tau = 1/\sqrt{d}$ |
+| $\tau$ | scalar | softmax scale, a runtime argument (default $1/\sqrt{d}$) |
+| $\kappa$ | scalar | `qk_scale` $= \tau \log_2 e$, the scale folded into the $\log_2$ domain |
+| $\tilde s$ | per score | raw score $Q_i K_j^{\top}$, the fp32 QK-MFMA output before any scaling |
+| $s_2$ | per score | $\log_2$-domain score $\kappa\,\tilde s$; the running max $m$ is in the same units |
 | $b$ | scalar | paged-cache `block_size` (16, 32, or 64) |
 | $g$ | scalar | GQA group size, $g = H_q / H_k$ (queries per KV head) |
 
@@ -89,6 +92,8 @@ $\log_2 e$ into it once per kernel on the device
 (`qk_scale = scale * 1.4426950408889634`, i.e. $\tau \log_2 e$), so every
 `exp2(s - m)` is one instruction. Softcap, ALiBi, and QQ-bias are likewise
 applied in the $\log_2$ domain (e.g. `apply_softcap_log2`).
+In symbols (§0): §1's $s$ is $\tau\,\tilde s$, and the `s` inside `exp2(s - m)`
+is $s_2 = \kappa\,\tilde s$.
 
 Where the two paths differ is **who owns which keys**, which is dictated entirely
 by occupancy — how many CTAs the shape can keep the device busy with.
@@ -326,7 +331,12 @@ the shape into the kernel and reshapes the schedule around a 256-row query tile.
 
 - **Compile-time-sized ABI.** `batch / seqlen / heads / head_size / causal /
   dtype` are constants baked at build time (dense, statically-sized). The only
-  runtime args are the `q/k/v/o` pointers and the `f32` softmax scale. `block_n`
+  runtime args are the `q/k/v/o` pointers and the `f32` softmax scale $\tau$.
+  The scale is supported in $[2^{-64}, 2^4]$: `run_attention_dense_torch` raises
+  `ValueError` for a NaN or infinite scale and `NotImplementedError` for a
+  finite one outside the range (including $\tau \le 0$), and the hipDNN matcher
+  declines such graphs. The range is a chosen safety margin for the default
+  grid's exp2 argument (§8.1), not a hardware limit. `block_n`
   (KV tile), `waves_per_eu`, and the persistent knobs are the tuning parameters;
   every algorithmic lever below is always-on.
 - **256-row query tile, `32×32×16` MFMA.** `_BLOCK_M = 256` query rows per CTA
@@ -344,11 +354,11 @@ the shape into the kernel and reshapes the schedule around a 256-row query tile.
 | **CK-1 transposed PV** | $P$ feeds the PV MFMA in its native QK-output layout via a half-local V load (`pv32_v_load_paired`); the cross-half P-relayout shuffle is gone (~96 `ds_bpermute` removed). | +35% |
 | **LDS bank-conflict pad on K** (`[NBUF, BN, D+8]`) | kills the 8-way conflict on the QK K-reads. | +80% (base win) |
 | **LDS V pad** (`+32`) | the transposed PV read (`ds_read_b64_tr_b16`) has a stricter bank pattern than K; a `+32` V-row pad fully clears its conflicts. | +~5% |
-| **native `exp2_fast`** (`v_exp_f32`, no overflow guard — softmax arg ≤ 0) | one instruction per exp. | +11.5% |
-| **depth-1 cluster** | fuses `exp2(s − m)` into the PV-MFMA loop so the softmax VALU/TRANS co-executes in the MFMA shadow (`sched_group_barrier` names the full DS_READ/MFMA/VALU/TRANS population per step). | — |
+| **native `exp2_fast`** (`v_exp_f32`, no overflow guard — softmax arg bounded: at most the lazy threshold, plus, in the default grid, the rounding residue of $m = \mathrm{fl}(\max \tilde s \cdot \kappa)$ that the single-rounding fma exposes: at most half an ulp of $\max \tilde s \cdot \kappa$, which is ≤ 1 for scale ≤ $2^4$ and \|raw score\| ≤ $10^6$. Nothing bounds the raw score, so beyond that the residue keeps growing, and at pre-softmax logits of about $2\times10^8$ (fp16 $P$) to $1.5\times10^9$ (any dtype) the default grid's output becomes inf/NaN — a known, accepted limitation; see the note at `_MAX_SCALE` in the kernel) | one instruction per exp. | faster |
+| **depth-1 cluster** | fuses the exp2 into the PV-MFMA loop so the softmax VALU/TRANS co-executes in the MFMA shadow (`sched_group_barrier` names the DS_READ/MFMA/VALU/TRANS population per step; the VALU count is an upper bound when the compiler packs the exp-argument FMAs). The default grid computes the argument as one $\mathrm{fma}(\tilde s, \kappa, -m)$ on raw scores; the persistent grid as $s_2 - m$ on scores scaled after the MFMA. | — |
 | **partial-vmcnt software prefetch** | per-tile K/V DMA drains to a *partial* `vmcnt` (keeps the freshest V prefetch in flight across the barrier) instead of a full `vmcnt(0)` serialize. | raises MfmaUtil |
 | **PV-only `s_setprio`** | the PV MFMA cluster is bracketed at raised priority so it wins issue slots; paired with the prefetch. | +3.5% |
-| **lazy online rescale** | keep the running max as a *lazy* max that only re-anchors when a tile exceeds it by >8 (log2); when every lane is within 8 (a `wave_all` vote) skip the O/ℓ rescale entirely (a 0/1-trip `scf.for` → a wave-uniform scalar branch), cutting the VALU between the QK and PV clusters. Numerically approximate ($P$ bounded by $2^8$) but parity-identical at bf16/fp16 tolerance. | +~2% |
+| **lazy online rescale** | keep the running max as a *lazy* max that only re-anchors when a tile exceeds it by >8 (log2); when every lane is within 8 (a `wave_all` vote) skip the O/ℓ rescale entirely (a 0/1-trip `scf.for` → a wave-uniform scalar branch), cutting the VALU between the QK and PV clusters. Numerically approximate ($P$ bounded by $2^8$, or $2^9$ in the default grid with its fma residue, under the same scale and raw-score premise) but parity-identical at bf16/fp16 tolerance. | small speedup |
 
 **Diagonal-only causal masking.** For causal, below-diagonal KV tiles need no
 mask (~94% of tiles at $S = 8192$); the KV loop is split into a mask-free body
@@ -364,7 +374,7 @@ byte-identically for D=128, so D=64 support costs the D=128 schedule nothing.
 
 ### 8.2 Two grids: default and persistent
 
-Same inner pipeline, different outer work assignment:
+Same tiling and MFMA/LDS schedule, different outer work assignment:
 
 - **Default** — one CTA per $(\text{q-block}, \text{query-head}, \text{batch})$.
   Grid `(⌈S_q/256⌉, H_q, B)`. Simple; the per-CTA launch/dispatch + scalar setup
@@ -373,9 +383,14 @@ Same inner pipeline, different outer work assignment:
   (256 = exactly one 8-wave block per CU on MI355X's 256 CUs at 2 waves/SIMD).
   Each CTA grid-strides over the flattened work-item space
   $W = ⌈S_q/256⌉ \cdot H_q \cdot B$, so the fixed per-CTA cold-start is amortized
-  once **per CU** instead of once per query block. The inner compute is
-  byte-identical to the default path; the difference is the outer work loop, the
-  work-item decode, and per-item state reset.
+  once **per CU** instead of once per query block. The tile pipeline (LDS
+  layout, MFMA schedule, prefetch) is shared; the softmax arithmetic is not. The
+  default grid takes the row max on raw scores $\tilde s$, computes
+  $\mathrm{fma}(\tilde s, \kappa, -m)$, and masks with an exact $-2^{99}$
+  sentinel ($P \le 2^9$). The persistent grid scales each score right after the
+  MFMA, computes $s_2 - m$, and masks with $-10^{30}$ ($P \le 2^8$). Beyond that,
+  the difference is the outer work loop, the work-item decode, and per-item
+  state reset.
 
 **Persistent work-item decode (`persist_decode`).** How $W$ is unflattened to
 $(\text{qb}, h_q, \text{bt})$ decides load balance *and* L2 locality:

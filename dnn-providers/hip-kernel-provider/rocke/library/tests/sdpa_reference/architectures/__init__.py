@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Explicit SDPA enrollments shared by qualification, verification, and CMake."""
+"""Explicit SDPA enrollments shared by offline qualification and reference verification."""
 
 from __future__ import annotations
 

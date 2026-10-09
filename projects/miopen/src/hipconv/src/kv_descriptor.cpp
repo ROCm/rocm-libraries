@@ -126,7 +126,7 @@ bool KVDescriptor::match(std::string_view spec)
                 }
             if(!field)
                 return fail("unknown key '" + std::string(key) + "'");
-            if(!field->matches(val))
+            if(!field->matches(*this, val))
                 return false;
         }
         if(comma == std::string_view::npos)
@@ -136,12 +136,12 @@ bool KVDescriptor::match(std::string_view spec)
     return true;
 }
 
-std::string KVDescriptor::describe() const
+std::string KVDescriptor::describe(bool include_defaults) const
 {
     std::string out;
     for(const auto& f : fields_)
     {
-        std::string rendered = f.render();
+        std::string rendered = f.render(include_defaults);
         if(rendered.empty())
             continue;
         if(!out.empty())

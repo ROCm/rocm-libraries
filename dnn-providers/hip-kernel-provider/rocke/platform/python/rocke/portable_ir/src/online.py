@@ -15,6 +15,7 @@
 import ctypes
 import os
 import subprocess
+import sys
 import tempfile
 from ctypes import (
     POINTER,
@@ -147,6 +148,7 @@ def build_lib(out_path: Optional[str] = None) -> str:
             core,
             "-Wl,--no-whole-archive",
             "-lm",
+            *(["-ldl", "-pthread"] if sys.platform == "linux" else []),
             "-o",
             out_path,
         ],

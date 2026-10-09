@@ -239,8 +239,9 @@ share:
 | `EXECUTED` | the graph ran, but no oracle compared its outputs |
 | `VERIFIED` | outputs compared against golden data or a reference |
 
-The fallback chain is unchanged — golden → GPU ref → CPU ref → skip — it just
-returns these values instead of skipping from six levels down.
+The fallback chain is golden → GPU ref → CPU ref → FAIL: a bundle no oracle can
+verify fails rather than skips. Each step returns these values instead of skipping
+from six levels down.
 
 ### Phase 3 — commit with the outcome
 
@@ -469,7 +470,7 @@ can become an engine run.
 | engine involved | yes | **no** |
 | support claims | queried and enforced | **not linked in** |
 | verification modes | `auto` / `golden` / `gpu` / `cpu` | n/a |
-| skip path | yes (no oracle, engine declines, TOML skip) | no *verification* skip; skips only when the machine cannot host it — no device, too little VRAM, wrong arch |
+| skip path | yes (engine declines, TOML skip); no oracle is a FAIL | no *verification* skip; skips only when the machine cannot host it — no device, too little VRAM, wrong arch |
 | TOML config | engine's own `config/<ENGINE>.toml`: skip list and tolerance overrides both apply | **none** — an engine's config cannot skip or loosen a check on our own data |
 | device | yes | GPU reference only; the CPU one is host-only |
 | ctest registration | per provider, via `add_external_integration_test_target()` | once, via `add_integration_test_target()` |

@@ -1587,6 +1587,8 @@ void fill_direct_conv_problem(rocke_direct_conv_problem_t* p, const py::dict& d)
     p->KW = dict_int(d, "KW", p->KW);
     p->PAD = dict_int(d, "PAD", p->PAD);
     p->stride = dict_int(d, "stride", p->stride);
+    p->dil_h = dict_int(d, "dil_h", p->dil_h);
+    p->dil_w = dict_int(d, "dil_w", p->dil_w);
 }
 
 std::string conv_direct_grouped_kind(const py::dict& d)

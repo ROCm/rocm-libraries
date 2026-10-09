@@ -486,6 +486,9 @@ jobs:
           printf '%s\n' "${kpacks[@]}"
 
       - name: Run tests
+        env:
+          # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
+          ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
         run: ctest --test-dir build --output-on-failure
 
       # Golden-data validation used to live here as a schedule-gated re-run of the

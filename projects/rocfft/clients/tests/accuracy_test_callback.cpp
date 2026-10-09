@@ -40,6 +40,8 @@ std::vector<std::vector<size_t>> callback_sizes = {
     // prime
     {23},
     {29},
+    // multi-kernel Bluestein (PAD_MUL ... RES_MUL)
+    {196597},
 
     // 2D_SINGLE sizes, small and big
     {16, 8},
