@@ -786,44 +786,46 @@ TYPED_TEST(AsyncReduceTests, test_async_reduce_allocator_on_then_after)
     thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(
       StreamCreateWithFlags)(&stream1, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking)));
 
-    auto f0 = thrust::async::reduce(thrust::device(thrust::device_allocator<void>{}).on(stream0), d0.begin(), d0.end());
+    {
+      auto f0 = thrust::async::reduce(thrust::device(thrust::device_allocator<void>{}).on(stream0), d0.begin(), d0.end());
 
-    ASSERT_EQ_QUIET(stream0, f0.stream().native_handle());
+      ASSERT_EQ_QUIET(stream0, f0.stream().native_handle());
 
-    auto f1 = thrust::async::reduce(thrust::device(thrust::device_allocator<void>{}).after(f0), d0.begin(), d0.end());
+      auto f1 = thrust::async::reduce(thrust::device(thrust::device_allocator<void>{}).after(f0), d0.begin(), d0.end());
 
-    ASSERT_THROW(
-      auto x = thrust::async::reduce(thrust::device(thrust::device_allocator<void>{}).after(f0), d0.begin(), d0.end());
-      THRUST_UNUSED_VAR(x), thrust::event_error);
+      ASSERT_THROW(
+        auto x = thrust::async::reduce(thrust::device(thrust::device_allocator<void>{}).after(f0), d0.begin(), d0.end());
+        THRUST_UNUSED_VAR(x), thrust::event_error);
 
-    ASSERT_EQ_QUIET(stream0, f1.stream().native_handle());
+      ASSERT_EQ_QUIET(stream0, f1.stream().native_handle());
 
-    auto f2 = thrust::async::reduce(
-      thrust::device(thrust::device_allocator<void>{}).on(stream1).after(f1), d0.begin(), d0.end());
+      auto f2 = thrust::async::reduce(
+        thrust::device(thrust::device_allocator<void>{}).on(stream1).after(f1), d0.begin(), d0.end());
 
-    ASSERT_THROW(auto x = thrust::async::reduce(
-                   thrust::device(thrust::device_allocator<void>{}).on(stream1).after(f1), d0.begin(), d0.end());
-                 THRUST_UNUSED_VAR(x), thrust::event_error);
+      ASSERT_THROW(auto x = thrust::async::reduce(
+                     thrust::device(thrust::device_allocator<void>{}).on(stream1).after(f1), d0.begin(), d0.end());
+                   THRUST_UNUSED_VAR(x), thrust::event_error);
 
-    // KNOWN_FAILURE;
-    // FIXME: The below fails because you can't combine allocator attachment,
-    // `.on`, and `.after`.
-    // The `#if 0` can be removed once the KNOWN_FAILURE is resolved.
+      // KNOWN_FAILURE;
+      // FIXME: The below fails because you can't combine allocator attachment,
+      // `.on`, and `.after`.
+      // The `#if 0` can be removed once the KNOWN_FAILURE is resolved.
 #  if 0
-    ASSERT_EQ_QUIET(stream1, f2.stream().native_handle());
+      ASSERT_EQ_QUIET(stream1, f2.stream().native_handle());
 
-    // This potentially runs concurrently with the copies.
-    T const r0 = thrust::reduce(h0.begin(), h0.end());
+      // This potentially runs concurrently with the copies.
+      T const r0 = thrust::reduce(h0.begin(), h0.end());
 
-    T r1;
+      T r1;
 
-    test_future_value_retrieval(f2, r1);
+      test_future_value_retrieval(f2, r1);
 
-    ASSERT_EQ(r0, r1);
+      ASSERT_EQ(r0, r1);
+#  endif
+    }
 
     thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream0));
     thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream1));
-#  endif
   }
 }
 
@@ -990,7 +992,7 @@ TEST(AsyncReduceTests, test_async_reduce_bug1886)
   {
     // Create zip_begin and zip_end iterators
     IteratorType zip_begin = thrust::make_zip_iterator(thrust::make_tuple(d_data1.begin(), d_data2.begin()));
-    IteratorType zip_end   = thrust::make_zip_iterator(thrust::make_tuple(d_data2.end(), d_data2.end()));
+    IteratorType zip_end   = thrust::make_zip_iterator(thrust::make_tuple(d_data1.end(), d_data2.end()));
 
     // Initialize the starting tuple
     TupleType init = thrust::make_tuple(0, 0);
