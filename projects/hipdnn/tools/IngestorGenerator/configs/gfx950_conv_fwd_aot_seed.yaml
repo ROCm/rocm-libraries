@@ -102,6 +102,74 @@ kmd_fields:
   type: int
   default_value: 0
   builder_default: true
+- name: block_h
+  type: int
+  default_value: 0
+  builder_default: true
+- name: unroll_rows
+  type: int
+  default_value: 0
+  builder_default: true
+- name: block_q
+  type: int
+  default_value: 0
+  builder_default: true
+- name: block_groups
+  type: int
+  default_value: 0
+  builder_default: true
+- name: double_buffer
+  type: int
+  default_value: 0
+  builder_default: true
+- name: cpg
+  type: int
+  default_value: 0
+  builder_default: true
+- name: kpg
+  type: int
+  default_value: 0
+  builder_default: true
+- name: tile_h
+  type: int
+  default_value: 0
+  builder_default: true
+- name: tile_w
+  type: int
+  default_value: 0
+  builder_default: true
+- name: tile_k_out
+  type: int
+  default_value: 0
+  builder_default: true
+- name: ck
+  type: int
+  default_value: 0
+  builder_default: true
+- name: waves_m
+  type: int
+  default_value: 0
+  builder_default: true
+- name: waves_n
+  type: int
+  default_value: 0
+  builder_default: true
+- name: atom
+  type: string
+  default_value: none
+  builder_default: true
+- name: swizzle_wgm
+  type: int
+  default_value: 0
+  builder_default: true
+- name: iglp
+  type: int
+  default_value: -1
+  builder_default: true
+- name: waves_per_eu
+  type: int
+  default_value: 0
+  builder_default: true
 kernel_source_kind: rocke
 workspace_policy: none
 graph_match:
@@ -143,6 +211,23 @@ specialization:
   - dilation_w
   - block_w
   - block_waves
+  - block_h
+  - unroll_rows
+  - block_q
+  - block_groups
+  - double_buffer
+  - cpg
+  - kpg
+  - tile_h
+  - tile_w
+  - tile_k_out
+  - ck
+  - waves_m
+  - waves_n
+  - atom
+  - swizzle_wgm
+  - iglp
+  - waves_per_eu
   matcher_only_fields: []
   bindings:
     dtype:
@@ -213,6 +298,40 @@ specialization:
       field: block_w
     block_waves:
       field: block_waves
+    block_h:
+      field: block_h
+    unroll_rows:
+      field: unroll_rows
+    block_q:
+      field: block_q
+    block_groups:
+      field: block_groups
+    double_buffer:
+      field: double_buffer
+    cpg:
+      field: cpg
+    kpg:
+      field: kpg
+    tile_h:
+      field: tile_h
+    tile_w:
+      field: tile_w
+    tile_k_out:
+      field: tile_k_out
+    ck:
+      field: ck
+    waves_m:
+      field: waves_m
+    waves_n:
+      field: waves_n
+    atom:
+      field: atom
+    swizzle_wgm:
+      field: swizzle_wgm
+    iglp:
+      field: iglp
+    waves_per_eu:
+      field: waves_per_eu
 packs:
 - name: bf16
   arch:
