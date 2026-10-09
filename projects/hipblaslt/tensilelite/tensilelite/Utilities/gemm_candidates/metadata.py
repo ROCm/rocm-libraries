@@ -11,6 +11,7 @@ from types import MappingProxyType
 import msgpack
 
 from ..LibraryIO import iterSolutionRecords
+from .models import GemmCase
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +39,31 @@ class LibraryMetadata:
     target: str
     indices: tuple[int, ...]
     _solutions: Mapping[int, _Solution] = field(repr=False)
+
+    def get_problems(
+        self,
+        solution_index: int,
+        number_of_problems: int,
+        *,
+        max_dimension: int = 8192,
+        max_data_bytes: int = 128 * 1024 * 1024,
+    ) -> list[GemmCase]:
+        """Select deterministic candidate problems from this loaded library.
+
+        Returns the requested count, or every candidate in the bounded
+        dimensional domain if that is smaller. See ``candidate_gemms`` for
+        the policy and the distinction between candidates and native support.
+        The returned cases can be formatted for either native client.
+        """
+        from .candidates import candidate_gemms
+
+        return candidate_gemms(
+            self,
+            solution_index,
+            max_cases=number_of_problems,
+            max_dimension=max_dimension,
+            max_data_bytes=max_data_bytes,
+        )
 
 
 def load_library_metadata(
@@ -73,11 +99,12 @@ def load_library_metadata(
         raise ValueError(f"No {target} solution metadata in {directory}")
 
     # Flat installations may contain several architectures. Untagged helper
-    # objects are shared; tagged objects must match the requested architecture.
+    # objects are shared; tagged objects must match the requested architecture,
+    # including gfx1250-strict's distinct compiler target.
     code_objects = tuple(
         path
         for path in sorted((*directory.glob("*.co"), *directory.glob("*.hsaco")))
-        if not (arches := re.findall(r"gfx[0-9a-f]+", path.name)) or target in arches
+        if not (arches := re.findall(r"gfx[0-9a-f]+(?:-strict)?", path.name)) or target in arches
     )
     object_set = set(code_objects)
     helpers = tuple(path for path in code_objects if path.suffix == ".hsaco")

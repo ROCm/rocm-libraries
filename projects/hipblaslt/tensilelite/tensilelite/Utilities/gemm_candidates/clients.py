@@ -15,16 +15,17 @@ def bench_yaml(cases: Iterable[GemmCase], *, workspace_bytes: int = 128 * 1024 *
     """Format cases for ``hipblaslt-bench --yaml cases.yaml``.
 
     Each row explicitly selects its solution and enables numerical validation.
-    Rows may mix solutions and profiles from the same library installation.
+    Rows may mix solutions and profiles for one target in a library installation.
     Set ``HIPBLASLT_TENSILE_LIBPATH`` when running bench against that library.
     Neither the library nor the code objects are opened by this formatter.
     """
     rows = []
-    directory = None
+    library = None
     for case in cases:
-        if directory is not None and directory != case.metadata_file.parent:
-            raise ValueError("Bench cases must come from the same library directory")
-        directory = case.metadata_file.parent
+        source = (case.metadata_file.parent, case.target)
+        if library is not None and library != source:
+            raise ValueError("Bench cases must come from the same library directory and target")
+        library = source
         p, s = case.profile, case.shape
         row = {
             "function": "matmul",
@@ -43,18 +44,18 @@ def bench_yaml(cases: Iterable[GemmCase], *, workspace_bytes: int = 128 * 1024 *
             "d_type": bench_type(p.d_type),
             "compute_type": "c_i32_r" if p.compute_type == "Int32" else "c_f32_r",
             "scale_type": bench_type(p.compute_type),
-            "alpha": 1,
-            "beta": 0,
+            "alpha": case.alpha,
+            "beta": case.beta,
             "initialization": "rand_int",
             "bias_vector": p.use_bias,
             "bias_type": bench_type(p.bias_type),
             "bias_source": {0: "a", 1: "b", 3: "d"}[p.bias_source],
-            "scaleA": p.scale_ab or "none",
-            "scaleB": p.scale_ab or "none",
+            "scaleA": p.bench_scale("a", case.target),
+            "scaleB": p.bench_scale("b", case.target),
             "scaleC": p.scale_cd,
             "scaleD": p.scale_cd,
             "scaleAlpha_vector": p.scale_alpha_vector,
-            "activation_type": "none",
+            "activation_type": case.activation.lower(),
             "norm_check": 1,
             "norm_check_assert": True,
             "allclose_check": 1,
@@ -104,13 +105,24 @@ def tensile_ini(
             case.solution_name,
             case.kernel_name,
             case.profile,
+            case.target,
             case.metadata_file,
             case.code_objects,
+            case.alpha,
+            case.beta,
+            case.activation,
         )
 
     if any(identity(case) != identity(first) for case in cases[1:]):
-        raise ValueError("A Tensile configuration must contain only one solution and profile")
+        raise ValueError(
+            "A Tensile configuration must contain only one solution and runtime profile"
+        )
     p = first.profile
+    # The client exposes scalar initialization modes rather than arbitrary
+    # scalar literals. Keep this translation out of the selection policy.
+    scalar_modes = {0: "Zero", 1: "One", 2: "Two"}
+    if first.alpha not in scalar_modes or first.beta not in scalar_modes:
+        raise ValueError("Tensile scalar initialization currently supports only 0, 1 and 2")
     options = {
         "library-file": first.metadata_file,
         "results-file": results_file,
@@ -118,15 +130,15 @@ def tensile_ini(
         "num-solutions": 1,
         **problemTypeOptions(p.as_problem_type()),
         "bias-type-args": p.bias_type,
-        "activation-enum-args": "None",
+        "activation-enum-args": first.activation,
         "activation-additional-args": "2.0,2.0",
         "init-seed": 1,  # Zero asks the client to seed from the clock.
         "init-a": "Random",
         "init-b": "Random",
         "init-c": "Zero",
         "init-d": "Zero",
-        "init-alpha": "One",
-        "init-beta": "Zero",
+        "init-alpha": scalar_modes[first.alpha],
+        "init-beta": scalar_modes[first.beta],
         "init-bias": "Random",
         "init-scaleA": "Two",
         "init-scaleB": "Two",
@@ -149,6 +161,17 @@ def tensile_ini(
         "log-level": "Debug",
         "use-user-args": False,
     }
+    if p.has_mx:
+        # Both clients use their existing MX generator to initialize data and
+        # scales together. The client flag enables its architecture-specific
+        # scale transform; the solution's mxScaleFormat selects the layout.
+        options.update(
+            {
+                "init-mx-a": "Random",
+                "init-mx-b": "Random",
+                "mx-scale-format": int(p.mx_scale_format != 0),
+            }
+        )
     lines = [f"{key}={value}" for key, value in options.items()]
     lines += [f"code-object={path}" for path in first.code_objects]
     for case in cases:

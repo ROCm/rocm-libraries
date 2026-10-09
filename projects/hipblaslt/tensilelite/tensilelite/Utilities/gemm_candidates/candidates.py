@@ -3,6 +3,7 @@
 """A bounded, deterministic set of GEMMs around a solution's size boundaries."""
 
 from dataclasses import dataclass
+from heapq import heappop, heappush
 from math import lcm
 
 from .metadata import LibraryMetadata, _Solution
@@ -91,6 +92,34 @@ def _bounds(solution: _Solution, max_dimension: int) -> dict[str, _Dimension]:
     return dimensions
 
 
+def _small_shapes(bounds: dict[str, _Dimension], profile: GemmProfile, max_data_bytes: int):
+    """Enumerate the bounded dimensional domain in increasing GEMM volume.
+
+    Every feasible shape is reachable by increasing one axis from the minimum.
+    Storage grows monotonically along those edges, so over-budget neighbors
+    need not be expanded. The frontier grows with the requested count, rather
+    than materializing a Cartesian product of every dimension.
+    """
+    names = tuple(bounds)
+    first = tuple(bound.at_least(1) for bound in bounds.values())
+    frontier = [(first[0] * first[1] * first[2] * first[3], first)]
+    seen = {first}
+    while frontier:
+        _, values = heappop(frontier)
+        yield GemmShape(**dict(zip(names, values)))
+        for i, bound in enumerate(bounds.values()):
+            next_value = values[i] + bound.multiple
+            if next_value > bound.maximum:
+                continue
+            neighbor = values[:i] + (next_value,) + values[i + 1 :]
+            if neighbor in seen:
+                continue
+            seen.add(neighbor)
+            shape = GemmShape(**dict(zip(names, neighbor)))
+            if profile.data_bytes(shape) <= max_data_bytes:
+                heappush(frontier, (shape.m * shape.n * shape.k * shape.batch_count, neighbor))
+
+
 def candidate_gemms(
     library: LibraryMetadata,
     solution_index: int,
@@ -103,8 +132,11 @@ def candidate_gemms(
 
     The fixed priority is: minimum, short/long K reductions, K tail and split
     remainder, full/partial/multiple output tiles, then multiple batches.
-    ``max_cases`` selects a prefix; it is a cap, not a promise to fill a quota.
-    Constraints can make proposals coincide or exceed the dimension/data caps.
+    ``max_cases`` selects a prefix. After the primary cases, larger budgets
+    exercise more boundary combinations, then additional small GEMMs. A shorter
+    result means the entire domain allowed by the extracted dimensional bounds,
+    packed layout and dimension/data caps has been enumerated. It does not mean
+    every kernel path or every natively supported problem has been covered.
 
     Fixed split-K uses ``DepthU * GlobalSplitU`` as its reduction scale. For
     automatic split-K and Stream-K, the scale is DepthU alone: their actual
@@ -112,7 +144,7 @@ def candidate_gemms(
     native support is inferred from a candidate's label.
 
     Matrices are packed and strided-batched. ``max_data_bytes`` bounds their
-    combined A/B/C/D storage; workspace and optional bias/scale buffers are
+    combined A/B/C/D storage; workspace, bias and scalar/MX scale buffers are
     separate. Unsupported profiles and an empty feasible candidate set raise
     ``ValueError``. An index not loaded in ``library`` raises ``KeyError``.
     This function performs no file I/O, GPU calls or random sampling.
@@ -127,6 +159,8 @@ def candidate_gemms(
     except ValueError as error:
         raise ValueError(f"Solution {solution_index}: {error}") from error
     bounds = _bounds(solution, max_dimension)
+    for axis, packing in profile.packing_multiples:
+        bounds[axis].multiple = lcm(bounds[axis].multiple, packing)
     first = {name: bound.at_least(1) for name, bound in bounds.items()}
     if any(value is None for value in first.values()):
         raise ValueError(f"Solution {solution_index}: no positive shape within the dimension limit")
@@ -160,6 +194,7 @@ def candidate_gemms(
                 kernel_name=solution.kernel_name,
                 metadata_file=solution.metadata_file,
                 code_objects=solution.code_objects,
+                target=library.target,
                 shape=shape,
                 profile=profile,
                 id=case_id,
@@ -227,4 +262,64 @@ def candidate_gemms(
         batch_count=max(2, first["batch_count"]),
         k=reference_k,
     )
+
+    # Broaden coverage at larger budgets without multiplying a dense M/N/K
+    # grid. Pair reduction boundaries with full/partial tiles, and vary each
+    # output axis separately to include narrow and wide GEMMs.
+    multipliers = [1, 2, 3] + [2**bit for bit in range(2, max_dimension.bit_length())]
+    for multiplier in multipliers:
+        if len(cases) == max_cases:
+            break
+        for offset in (-1, 0, 1):
+            k = (
+                k_bound.at_least(multiplier * full_k + offset * k_bound.multiple)
+                if full_k is not None
+                else None
+            )
+            for label, m, n, batch, purpose in (
+                ("full", full_m, full_n, first["batch_count"], "full output tiles"),
+                ("m_edge", edge_m, full_n, first["batch_count"], "a partial M tile"),
+                ("n_edge", full_m, edge_n, first["batch_count"], "a partial N tile"),
+                (
+                    "edges_batch",
+                    edge_m,
+                    edge_n,
+                    max(2, first["batch_count"]),
+                    "partial M/N tiles and multiple batches",
+                ),
+            ):
+                add(
+                    f"boundary_k_{multiplier}_{offset}_{label}",
+                    f"K near {multiplier} × the first aligned reduction length; {purpose}",
+                    m=m,
+                    n=n,
+                    k=k,
+                    batch_count=batch,
+                )
+            for axis, first_full in (("m", full_m), ("n", full_n)):
+                if first_full is None:
+                    continue
+                axes = {"m": full_m, "n": full_n, "k": reference_k}
+                axes[axis] = bounds[axis].at_least(
+                    multiplier * first_full + offset * bounds[axis].multiple
+                )
+                add(
+                    f"boundary_{axis}_{multiplier}_{offset}",
+                    f"{axis.upper()} near {multiplier} × its first full-tile size; "
+                    "the other output axis is fixed",
+                    **axes,
+                )
+
+    if len(cases) < max_cases:
+        for shape in _small_shapes(bounds, profile, max_data_bytes):
+            add(
+                f"additional_{len(cases)}",
+                "Additional small GEMM after the boundary cases",
+                m=shape.m,
+                n=shape.n,
+                k=shape.k,
+                batch_count=shape.batch_count,
+            )
+            if len(cases) == max_cases:
+                break
     return cases

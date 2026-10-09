@@ -5,25 +5,31 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-# Supported candidate types: (storage bytes, hipblaslt-bench spelling).
+# Supported candidate types: (container bytes, elements per container, bench spelling).
 # Generator DataType supports a wider domain and depends on rocisa. Keep this
 # small client-facing subset together, checked against that registry in tests.
 _TYPE_INFO = {
-    "Float": (4, "f32_r"),
-    "Half": (2, "f16_r"),
-    "BFloat16": (2, "bf16_r"),
-    "Float8": (1, "f8_r"),
-    "BFloat8": (1, "bf8_r"),
-    "Float8_fnuz": (1, "f8_fnuz_r"),
-    "BFloat8_fnuz": (1, "bf8_fnuz_r"),
-    "Int8": (1, "i8_r"),
-    "Int32": (4, "i32_r"),
+    "Float": (4, 1, "f32_r"),
+    "Half": (2, 1, "f16_r"),
+    "BFloat16": (2, 1, "bf16_r"),
+    "Float8": (1, 1, "f8_r"),
+    "BFloat8": (1, 1, "bf8_r"),
+    "Float8_fnuz": (1, 1, "f8_fnuz_r"),
+    "BFloat8_fnuz": (1, 1, "bf8_fnuz_r"),
+    "Float4": (1, 2, "f4_r"),
+    "Float6": (24, 32, "f6_r"),
+    "BFloat6": (24, 32, "bf6_r"),
+    "Int8": (1, 1, "i8_r"),
+    "Int32": (4, 1, "i32_r"),
 }
+# hipblaslt_scaling_format values. The bench YAML schema only gives symbolic
+# names to none/Scalar/Vector; block modes must use the numeric enum values.
+_MX_SCALE_TYPES = {"E8": {32: 3, 16: 4}, "Float8": {32: 5, 16: 6}, "E5M3": {32: 7, 16: 8}}
 
 
 def bench_type(name: str) -> str:
     """Convert a supported Tensile type name to a bench input type."""
-    return _TYPE_INFO[name][1]
+    return _TYPE_INFO[name][2]
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,8 +51,7 @@ class GemmShape:
 class GemmProfile:
     """Types, transposes and optional features taken from one solution.
 
-    Both adapters use alpha=1, beta=0, no activation and packed column-major
-    matrices. Bias/scales follow the metadata; this is not an epilogue sweep.
+    Bias/scales follow the metadata; this is not an epilogue sweep.
     Type names are Tensile names, such as ``Half`` and ``Float``.
     """
 
@@ -70,6 +75,11 @@ class GemmProfile:
     activation_type: str
     activation_compute_type: str
     activation_no_guard: bool
+    mx_block_a: int = 0
+    mx_block_b: int = 0
+    mx_type_a: str = "E8"
+    mx_type_b: str = "E8"
+    mx_scale_format: int = 0
 
     @classmethod
     def from_problem_type(cls, p: dict) -> "GemmProfile":
@@ -82,8 +92,6 @@ class GemmProfile:
             "useE",
             "useGateResidual",
             "outputAmaxD",
-            "mxBlockA",
-            "mxBlockB",
             "useInitialStridesAB",
             "useInitialStridesCD",
             "swizzleTensorA",
@@ -97,6 +105,7 @@ class GemmProfile:
         if (
             any(p[f"{t}Type"] not in _TYPE_INFO for t in "abcd")
             or p["cType"] != p["dType"]
+            or _TYPE_INFO[p["dType"]][1] != 1
             or p["computeType"] not in {"Float", "Int32"}
             or not p.get("stridedBatched", True)
             or p.get("activationType", "None") not in {"None", "All", "Hipblaslt_all"}
@@ -120,13 +129,21 @@ class GemmProfile:
             use_bias=bool(p.get("useBias")),
             bias_type=(p.get("biasDataTypeWhiteList") or [p["computeType"]])[0],
             bias_source=(p.get("biasSrcWhiteList") or [3])[0],
-            scale_ab=p.get("useScaleAB", ""),
+            # Bench has one scale mode per operand. MX block scales take its
+            # place; optional scalar/vector A/B scaling can be disabled by the
+            # runtime UseScaleAB predicate. Both clients use that same choice.
+            scale_ab="" if p.get("mxBlockA") or p.get("mxBlockB") else p.get("useScaleAB", ""),
             scale_cd=bool(p.get("useScaleCD")),
             scale_alpha_vector=bool(p.get("useScaleAlphaVec")),
             math_op=p.get("f32XdlMathOp", "Float"),
             activation_type=p.get("activationType", "None"),
             activation_compute_type=p.get("activationComputeDataType", p["computeType"]),
             activation_no_guard=bool(p.get("activationNoGuard")),
+            mx_block_a=p.get("mxBlockA", 0),
+            mx_block_b=p.get("mxBlockB", 0),
+            mx_type_a=p.get("mxTypeA", "E8"),
+            mx_type_b=p.get("mxTypeB", "E8"),
+            mx_scale_format=p.get("mxScaleFormat", 0),
         )
         if p["operationIdentifier"] != profile.operation_identifier:
             raise ValueError("not an ordinary Cijk GEMM")
@@ -134,6 +151,16 @@ class GemmProfile:
             raise ValueError("unsupported bias profile")
         if any(t not in _TYPE_INFO for t in (profile.compute_input_a, profile.compute_input_b)):
             raise ValueError("unsupported compute input types")
+        for block, scale_type in (
+            (profile.mx_block_a, profile.mx_type_a),
+            (profile.mx_block_b, profile.mx_type_b),
+        ):
+            if type(block) is not int or block not in {0, 16, 32}:
+                raise ValueError(f"unsupported MX block size: {block}")
+            if block and scale_type not in _MX_SCALE_TYPES:
+                raise ValueError(f"unsupported MX scale type: {scale_type}")
+        if profile.has_mx and profile.mx_scale_format not in {0, 1, 2}:
+            raise ValueError(f"unsupported MX scale layout: {profile.mx_scale_format}")
         return profile
 
     def as_problem_type(self) -> dict:
@@ -161,15 +188,52 @@ class GemmProfile:
             "activationType": self.activation_type,
             "activationComputeDataType": self.activation_compute_type,
             "activationNoGuard": self.activation_no_guard,
+            "mxBlockA": self.mx_block_a,
+            "mxBlockB": self.mx_block_b,
+            "mxTypeA": self.mx_type_a,
+            "mxTypeB": self.mx_type_b,
+            "mxScaleFormat": self.mx_scale_format,
         }
 
+    @property
+    def has_mx(self) -> bool:
+        return bool(self.mx_block_a or self.mx_block_b)
+
+    @property
+    def packing_multiples(self) -> tuple[tuple[str, int], ...]:
+        """Keep each stored column and batch aligned to whole packed containers."""
+        return (
+            ("k" if self.trans_a else "m", _TYPE_INFO[self.a_type][1]),
+            ("n" if self.trans_b else "k", _TYPE_INFO[self.b_type][1]),
+        )
+
+    def bench_scale(self, tensor: str, target: str) -> str | int:
+        """Translate the operand's block/type/layout to a native bench scale mode."""
+        block, scale_type = (
+            (self.mx_block_a, self.mx_type_a)
+            if tensor == "a"
+            else (self.mx_block_b, self.mx_type_b)
+        )
+        if not block:
+            return self.scale_ab or "none"
+        if self.mx_scale_format == 1:
+            if target != "gfx950" or (block, scale_type) != (32, "E8"):
+                raise ValueError("Bench host-preswizzled MX scales require gfx950, block 32, E8")
+            return 1001  # Block_32_UE8M0_32_8_EXT
+        if self.mx_scale_format == 0 and target.startswith("gfx1250"):
+            raise ValueError(
+                "Bench always swizzles gfx1250 MX scales; use tensile_ini for NoSwizzle"
+            )
+        return _MX_SCALE_TYPES[scale_type][block]
+
     def data_bytes(self, shape: GemmShape) -> int:
-        """Combined A/B/C/D storage, excluding workspace and optional vectors."""
+        """Combined A/B/C/D storage, excluding workspace, bias and scale buffers."""
         m, n, k = shape.m, shape.n, shape.k
         elements = (m * k, n * k, m * n, m * n)
         types = (self.a_type, self.b_type, self.c_type, self.d_type)
         return shape.batch_count * sum(
-            count * _TYPE_INFO[t][0] for count, t in zip(elements, types)
+            ((count + packing - 1) // packing) * size
+            for count, (size, packing, _) in zip(elements, (_TYPE_INFO[t] for t in types))
         )
 
     @property
@@ -193,10 +257,16 @@ class GemmCase:
     kernel_name: str
     metadata_file: Path
     code_objects: tuple[Path, ...]
+    target: str
     shape: GemmShape
     profile: GemmProfile
     id: str
     reason: str
+    # Selected runtime values, separate from the solution's allowed profile.
+    # The initial policy chooses these defaults; formatters consume the values.
+    alpha: float = 1
+    beta: float = 0
+    activation: str = "None"
 
     @property
     def leading_dimensions(self) -> tuple[int, int, int, int]:

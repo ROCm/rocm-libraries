@@ -4,6 +4,7 @@
 
 import zlib
 from dataclasses import FrozenInstanceError, replace
+from itertools import product
 from pathlib import Path
 
 import msgpack
@@ -83,6 +84,9 @@ def test_loads_native_library_formats(tmp_path, library_format, compressed):
         "BFloat8",
         "Float8_fnuz",
         "BFloat8_fnuz",
+        "Float4",
+        "Float6",
+        "BFloat6",
         "Int8",
         "Int32",
     ],
@@ -94,34 +98,34 @@ def test_storage_budget_matches_generator_type_registry(data_type):
 
     record = solution(problem={"aType": data_type, "bType": data_type})
     profile = GemmProfile.from_problem_type(record["problemType"])
-    shape = GemmShape(m=3, n=5, k=7, batch_count=2)
-    expected = 2 * ((3 * 7 + 5 * 7) * DataType(data_type).numBytes() + 2 * 3 * 5 * 4)
+    shape = GemmShape(m=3, n=5, k=32, batch_count=2)
+    expected = 2 * ((3 * 32 + 5 * 32) * DataType(data_type).numBytes() + 2 * 3 * 5 * 4)
     assert profile.data_bytes(shape) == expected
 
 
 @pytest.fixture
 def library(tmp_path):
-    def load(*records):
-        write_shard(tmp_path, records or [solution()])
-        return load_library_metadata(tmp_path, target="gfx942")
+    def load(*records, target="gfx942"):
+        write_shard(tmp_path, records or [solution()], name=f"TensileLibrary_test_{target}.dat")
+        return load_library_metadata(tmp_path, target=target)
 
     return load
 
 
-def test_compressed_shards_aliases_and_architecture_objects(tmp_path):
-    directory = tmp_path / "gfx942"
+@pytest.mark.parametrize("target", ["gfx942", "gfx1250", "gfx1250-strict"])
+def test_compressed_shards_aliases_and_architecture_objects(tmp_path, target):
+    directory = tmp_path / target
     directory.mkdir()
+    stem = f"TensileLibrary_test_{target}"
     # The compressed copy is authoritative, including when the plain copy is stale.
-    write_shard(directory, [solution(999)])
-    shard = write_shard(directory, [solution(17), solution(9)], compressed=True)
-    for name in [
-        "TensileLibrary_test_gfx942.co",
-        "Kernels-gfx942.hsaco",
-        "Kernels-gfx950.hsaco",
-        "helper.hsaco",
+    write_shard(directory, [solution(999)], name=f"{stem}.dat")
+    shard = write_shard(directory, [solution(17), solution(9)], name=f"{stem}.dat", compressed=True)
+    # gfx1250 and gfx1250-strict share an ISA but load different code objects.
+    for name in [f"{stem}.co", "helper.hsaco"] + [
+        f"Kernels-{arch}.hsaco" for arch in ("gfx942", "gfx950", "gfx1250", "gfx1250-strict")
     ]:
         (directory / name).touch()
-    loaded = load_library_metadata(tmp_path, target="gfx942")
+    loaded = load_library_metadata(tmp_path, target=target)
     assert loaded.indices == (9, 17)
     a, b = (candidate_gemms(loaded, i)[0] for i in loaded.indices)
     assert a.solution_name == b.solution_name
@@ -129,16 +133,16 @@ def test_compressed_shards_aliases_and_architecture_objects(tmp_path):
     assert a.solution_index != b.solution_index
     assert a.metadata_file == shard
     assert {p.name for p in a.code_objects} == {
-        "TensileLibrary_test_gfx942.co",
-        "Kernels-gfx942.hsaco",
+        f"{stem}.co",
+        f"Kernels-{target}.hsaco",
         "helper.hsaco",
     }
-    subset = load_library_metadata(directory, target="gfx942", solution_indices=[17])
+    subset = load_library_metadata(directory, target=target, solution_indices=[17])
     assert subset.indices == (17,)
     with pytest.raises(KeyError):
         candidate_gemms(subset, 9)
     with pytest.raises(KeyError, match="404"):
-        load_library_metadata(directory, target="gfx942", solution_indices=[404])
+        load_library_metadata(directory, target=target, solution_indices=[404])
 
 
 def test_skips_heuristic_tables_without_decoding(tmp_path):
@@ -184,6 +188,36 @@ def test_generation_reuses_metadata_and_is_independent_of_call_order(library, mo
         expected[17][0].shape.m = 100
 
 
+def test_requested_count_extends_the_boundary_menu_and_preserves_prefixes(library):
+    loaded = library()
+    cases = loaded.get_problems(17, 100)
+    assert len(cases) == len({c.shape for c in cases}) == 100
+    for count in (1, 4, 10, 25):
+        assert loaded.get_problems(17, count) == cases[:count]
+    # The extension includes individual output edges and reductions on both
+    # sides of DepthU, not only more repetitions of the first ten shapes.
+    shapes = {c.shape for c in cases}
+    assert GemmShape(128, 96, 63) in shapes
+    assert GemmShape(128, 96, 65) in shapes
+    assert GemmShape(129, 96, 128) in shapes
+    assert GemmShape(128, 97, 128) in shapes
+
+
+@pytest.mark.parametrize("data_limit", [32, 128, 4096])
+def test_short_result_exhausts_the_bounded_domain(library, data_limit):
+    loaded = library()
+    cases = loaded.get_problems(17, 1000, max_dimension=3, max_data_bytes=data_limit)
+    # Independent, small exhaustive oracle. The primary menu alone cannot
+    # cover all these shapes, and storage pruning must not lose a neighbor.
+    expected = {
+        GemmShape(m, n, k, b)
+        for m, n, k, b in product(range(1, 4), repeat=4)
+        if 4 * b * (m * k + n * k + 2 * m * n) <= data_limit
+    }
+    assert len(cases) == len(expected)
+    assert {c.shape for c in cases} == expected
+
+
 def test_fixed_split_boundaries_and_partial_tiles(library):
     # Reduced from a native-validated gfx942 solution: M >= 4 is not M % 4 == 0.
     loaded = library(
@@ -219,11 +253,15 @@ def test_automatic_or_stream_k_does_not_claim_fixed_split_work(library, split, s
 
 def test_large_minimum_still_gets_distinct_k_lengths(library):
     loaded = library(solution(predicates=[{"type": "SizeGreaterThan", "index": 3, "value": 1023}]))
-    cases = {case.id: case.shape.k for case in candidate_gemms(loaded, 17)}
+    selected = loaded.get_problems(17, 100)
+    cases = {case.id: case.shape.k for case in selected}
     assert cases["minimum"] == 1024
     assert cases["k_2"] == 1088
     assert cases["k_3"] == 1152
     assert cases["k_long"] == 8192
+    # Larger requests must reach both sides of a legal reduction boundary,
+    # even when the minimum is many DepthU blocks long.
+    assert {GemmShape(128, 96, k) for k in (2047, 2048, 2049)} <= {c.shape for c in selected}
 
 
 @pytest.mark.parametrize("multiple, remainder", [(128, 1664), (192, None)])
@@ -317,7 +355,7 @@ def test_invalid_limits(library, options):
         ("useE", True),
         ("useBias", 2),
         ("useScaleAlphaVec", 3),
-        ("aType", "Float4"),
+        ("aType", "ComplexDouble"),
     ],
 )
 def test_unsupported_profiles_fail_explicitly(library, feature, value):
@@ -402,6 +440,129 @@ def test_integer_and_fp8_client_types(library, dtype, compute, bench_compute):
     assert f"compute-input-type-A={dtype}\n" in tensile_ini(cases)
 
 
+@pytest.mark.parametrize(
+    "a_type, b_type, scale_type, block, target, layout, bench_scale",
+    [
+        ("Float8", "BFloat8", "E8", 32, "gfx950", 1, 1001),
+        ("Float4", "Float4", "E8", 32, "gfx950", 1, 1001),
+        ("Float6", "BFloat6", "E8", 32, "gfx1250", 2, 3),
+        ("Float4", "Float4", "Float8", 16, "gfx1250", 2, 6),
+        ("Float4", "Float4", "E5M3", 16, "gfx1250", 2, 8),
+        ("Float8", "Float8", "E8", 32, "gfx950", 0, 3),
+    ],
+)
+def test_mx_profiles_reach_both_clients(
+    library, a_type, b_type, scale_type, block, target, layout, bench_scale
+):
+    loaded = library(
+        solution(
+            problem={
+                "aType": a_type,
+                "bType": b_type,
+                "mxBlockA": block,
+                "mxBlockB": block,
+                "mxTypeA": scale_type,
+                "mxTypeB": scale_type,
+                "mxScaleFormat": layout,
+                "useScaleAB": "Scalar",
+            }
+        ),
+        target=target,
+    )
+    cases = loaded.get_problems(17, 10)
+    rows = yaml.safe_load(bench_yaml(cases))
+    assert len(rows) == len(cases) == 10
+    assert all(row["scaleA"] == row["scaleB"] == bench_scale for row in rows)
+    ini = dict(line.split("=", 1) for line in tensile_ini(cases).splitlines())
+    assert ini["mx-a-block"] == ini["mx-b-block"] == str(block)
+    assert ini["mx-a-type"] == ini["mx-b-type"] == scale_type
+    assert ini["mx-scale-format"] == str(int(layout != 0))
+    assert ini["init-mx-a"] == ini["init-mx-b"] == "Random"
+    assert ini["use-scaleAB"] == ""  # Optional scalar scales are disabled for both clients.
+    assert ini["a-type"] == a_type and ini["b-type"] == b_type
+
+
+@pytest.mark.parametrize("mx_side", ["a", "b"])
+def test_mixed_mx_and_ordinary_operands(library, mx_side):
+    loaded = library(
+        solution(
+            problem={
+                "aType": "Half",
+                "bType": "Half",
+                f"{mx_side}Type": "Float8",
+                f"mxBlock{mx_side.upper()}": 32,
+                f"mxType{mx_side.upper()}": "E8",
+            }
+        )
+    )
+    (row,) = yaml.safe_load(bench_yaml(loaded.get_problems(17, 1)))
+    assert row[f"scale{mx_side.upper()}"] == 3
+    assert row["scaleB" if mx_side == "a" else "scaleA"] == "none"
+
+
+@pytest.mark.parametrize("trans_a, trans_b", list(product((False, True), repeat=2)))
+def test_packed_inputs_keep_columns_and_batches_in_whole_containers(library, trans_a, trans_b):
+    a, b = ("lik" if trans_a else "ilk"), ("jlk" if trans_b else "ljk")
+    loaded = library(
+        solution(
+            problem={
+                "aType": "Float4",
+                "bType": "Float6",
+                "transA": trans_a,
+                "transB": trans_b,
+                "operationIdentifier": f"Contraction_l_A{a}_B{b}_Cijk_Dijk",
+                "mxBlockA": 32,
+                "mxBlockB": 32,
+            }
+        )
+    )
+    cases = loaded.get_problems(17, 40)
+    assert len(cases) == 40
+    for case in cases:
+        s = case.shape
+        assert case.leading_dimensions[0] % 2 == 0
+        assert case.leading_dimensions[1] % 32 == 0
+        assert case.batch_strides[0] % 2 == case.batch_strides[1] % 32 == 0
+        expected = s.batch_count * (s.m * s.k // 2 + s.n * s.k * 3 // 4 + 8 * s.m * s.n)
+        assert case.profile.data_bytes(s) == expected
+
+
+@pytest.mark.parametrize(
+    "update, message",
+    [
+        ({"mxBlockA": 8}, "block size"),
+        ({"mxTypeA": "Half"}, "scale type"),
+        ({"mxScaleFormat": 3}, "scale layout"),
+    ],
+)
+def test_unrepresentable_mx_metadata_is_explicit(library, update, message):
+    loaded = library(solution(problem={"mxBlockA": 32, "mxTypeA": "E8", **update}))
+    with pytest.raises(ValueError, match=message):
+        loaded.get_problems(17, 1)
+
+
+def test_bench_rejects_a_scale_layout_it_cannot_upload(library):
+    cases = library(
+        solution(problem={"mxBlockA": 32, "mxTypeA": "E8", "mxScaleFormat": 0}),
+        target="gfx1250",
+    ).get_problems(17, 1)
+    assert "mx-scale-format=0\n" in tensile_ini(cases)
+    with pytest.raises(ValueError, match="use tensile_ini"):
+        bench_yaml(cases)
+
+
+def test_adapters_take_runtime_settings_from_the_case(library):
+    case = library(solution(problem={"activationType": "All"})).get_problems(17, 1)[0]
+    selected = replace(case, alpha=2, beta=1, activation="Relu")
+    (row,) = yaml.safe_load(bench_yaml([selected]))
+    assert (row["alpha"], row["beta"], row["activation_type"]) == (2, 1, "relu")
+    ini = tensile_ini([selected])
+    assert "init-alpha=Two\n" in ini and "init-beta=One\n" in ini
+    assert "activation-enum-args=Relu\n" in ini
+    with pytest.raises(ValueError, match="runtime profile"):
+        tensile_ini([case, selected])
+
+
 def test_batching_preserves_solution_associations(library):
     loaded = library(solution(17), solution(9))
     a, b = [candidate_gemms(loaded, i, max_cases=4) for i in (17, 9)]
@@ -415,5 +576,7 @@ def test_batching_preserves_solution_associations(library):
     foreign = replace(a[0], metadata_file=a[0].metadata_file.parent / "other" / "library.dat")
     with pytest.raises(ValueError, match="same library directory"):
         bench_yaml([a[0], foreign])
+    with pytest.raises(ValueError, match="target"):
+        bench_yaml([a[0], replace(a[0], target="gfx950")])
     with pytest.raises(ValueError, match="at least one case"):
         tensile_ini([])

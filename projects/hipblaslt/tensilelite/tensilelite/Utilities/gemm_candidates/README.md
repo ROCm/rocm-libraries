@@ -1,6 +1,6 @@
 # GEMM candidates for a solution index
 
-`candidate_gemms` constructs a small, deterministic list of shapes and types to
+`library.get_problems(index, count)` returns a deterministic `list[GemmCase]` to
 try with one packaged TensileLite solution. It uses the solution's dimensional
 constraints and tile sizes to target different reduction lengths and matrix
 boundaries. It needs neither a GPU nor the kernel generator.
@@ -9,7 +9,6 @@ boundaries. It needs neither a GPU nor the kernel generator.
 from pathlib import Path
 from tensilelite.Utilities.gemm_candidates import (
     bench_yaml,
-    candidate_gemms,
     load_library_metadata,
     tensile_ini,
 )
@@ -18,7 +17,7 @@ index = 17  # Substitute a solution index from your library.
 library = load_library_metadata(
     "/path/to/hipblaslt/library", target="gfx942", solution_indices=[index]
 )
-cases = candidate_gemms(library, index, max_cases=10)
+cases = library.get_problems(index, 10)
 
 for case in cases:
     print(case.id, case.shape, case.profile.a_type, case.reason)
@@ -39,13 +38,22 @@ Each immutable `GemmCase` contains:
 - A `GemmShape` with named `m`, `n`, `k` and `batch_count` fields.
 - A `GemmProfile` with A/B/C/D types, computation types, transposes and the
   selected bias/scaling settings. Type strings use Tensile names, such as
-  `Half`, `BFloat16` and `Float`.
-- Solution index, solution name, kernel name, metadata file and code objects.
+  `Half`, `BFloat16` and `Float`. MX profiles include each operand's scale
+  block/type and the solution's scale layout.
+- Selected `alpha`, `beta` and `activation` values. The initial policy chooses
+  1, 0 and `None`; both adapters read these from the case. Future policies can
+  vary runtime settings without changing the list-of-cases interface.
+- Solution index, solution name, kernel name, target, metadata file and code objects.
 - An `id` and a readable `reason` explaining why the shape was selected.
 
 `leading_dimensions` and `batch_strides` give packed column-major layouts in
 A/B/C/D order. `shape.tensile_sizes` gives the Tensile client's **M,N,batch,K**
 order. The adapters handle that distinction.
+
+The return type is independent of the runner. `bench_yaml(cases)` and
+`tensile_ini(cases)` translate the same logical cases into the two clients'
+input formats. They use existing client data initialization and MX packing;
+the Python utility does not allocate GPU buffers or implement numerical GEMM.
 
 Indices identify records in a particular library build. Distinct indices with
 the same solution or kernel name remain distinct entries. Do not reuse an index
@@ -57,13 +65,15 @@ The generator first extracts necessary dimensional bounds from conjunctive
 predicates: minimum/maximum sizes, equalities, divisibility and fixed split-K
 minimum K. It intersects these bounds and rounds up to legal multiples.
 For example, `M >= 4` allows `M = 5`; it does not imply `M % 4 == 0`.
+For sub-byte inputs, stored columns and batch starts are aligned to whole
+native packed containers: 2 elements for FP4 and 32 for FP6/BF6.
 
 It then tries the following proposals in order, keeping distinct shapes that
 fit the limits:
 
 | Candidate | Selection intent |
 | --- | --- |
-| `minimum` | Smallest positive shape satisfying the extracted dimensional bounds. |
+| `minimum` | Smallest positive shape satisfying the extracted dimensional bounds and packed-layout requirements. |
 | `k_1` through `k_3` | First three legal full reduction lengths starting at the minimum. The reduction scale is `DepthU × GlobalSplitU` for fixed split-K, and `DepthU` otherwise. |
 | `k_long` | Eight times the first full reduction length, falling back to four times if necessary. |
 | `k_tail` | A legal K with a nonzero remainder modulo `DepthU`, near two reduction scales or the minimum. |
@@ -78,12 +88,24 @@ reduction among a configured number of workgroups. Automatic split-K and
 Stream-K decide the work distribution at runtime; their candidates use DepthU
 as a size reference, without predicting per-workgroup loop counts.
 
-The defaults are at most 10 cases, dimensions at most 8192, and at most 128 MiB
-of combined A/B/C/D storage per case. Workspace and bias/scaling buffers are
-separate. `max_cases`, `max_dimension` and `max_data_bytes` are keyword arguments.
-Reducing `max_cases` takes a prefix of the same ordered list. Restrictions and
-deduplication can produce fewer cases; raising the cap does not enumerate the
-GEMM space. An empty feasible set raises `ValueError`.
+Larger requests pair more reduction boundaries with full/partial output tiles
+and batches. They also vary M and N separately near 1, 2, 3, 4, 8, ... times
+the first legal full-tile size. After those boundary cases, the function
+enumerates additional shapes in increasing GEMM volume until it fills the
+request. A frontier of neighboring shapes avoids constructing a dense
+Cartesian product.
+
+The default limits are dimensions at most 8192 and at most 128 MiB of combined
+A/B/C/D storage per case, accounting for packed FP4/FP6 storage. Workspace,
+bias and scalar/MX scale buffers are separate. Pass `max_dimension` and
+`max_data_bytes` to change these limits. Requests are deterministic prefixes:
+asking for 10 returns the first 10 of the 100-case result with the same limits.
+
+A shorter list means every distinct shape in this **bounded dimensional
+domain** has been returned. It does not establish exhaustive kernel-path
+coverage, or exhaust all GEMMs beyond the configured limits, layouts and
+runtime settings. An empty feasible set raises `ValueError`. The equivalent
+free-function form is `candidate_gemms(library, index, max_cases=count)`.
 
 ## Reuse and batching
 
@@ -94,7 +116,7 @@ indices = [17, 42]  # Indices from the selected library.
 library = load_library_metadata(
     "/path/to/hipblaslt/library", target="gfx942", solution_indices=indices
 )
-by_solution = {i: candidate_gemms(library, i) for i in indices}
+by_solution = {i: library.get_problems(i, 10) for i in indices}
 ```
 
 Loading supports both ordinary MessagePack (`solutions` arrays) and indexed
@@ -112,8 +134,8 @@ Missing requested indices raise `KeyError`; malformed containers, unsupported
 format versions and duplicate indices raise `ValueError`. Duplicate indices
 are checked even outside the requested selection, including across shards.
 
-Candidate generation performs no further file reads or native calls. It has a
-bounded number of proposals per solution and is independent of call order.
+Candidate generation performs no further file reads or native calls. Its
+work grows with the requested count and is independent of call order.
 A separate bulk-generation API is unnecessary.
 
 ## Implementation boundaries
@@ -141,17 +163,32 @@ tensilelite-client --config-file cases.ini
 ```
 
 Use clients and code objects compatible with the metadata and GPU. Both
-adapters enable numerical validation, set alpha=1/beta=0, disable activation,
-and retain the supported per-solution bias/scaling defaults. They select one
-bias type/source rather than sweeping epilogues. Tensile uses the fixed input
+adapters enable numerical validation and apply each case's runtime settings.
+The initial policy uses alpha=1/beta=0, no activation, and supported
+per-solution bias/scaling defaults. It selects one bias type/source rather
+than sweeping epilogues. Tensile uses the fixed input
 initialization seed `1`; its seed `0` would select the current time.
 
-`bench_yaml` can combine rows for several solutions from the same installation;
-each row carries its explicit index. `tensile_ini` accepts cases for **one
-solution and profile** and rejects mixed inputs, because the client otherwise
-applies all shapes to all selected solutions. Both accept `workspace_bytes` to
-override the 128 MiB workspace limit. The formatters return strings and do not
-execute clients.
+MX cases support FP8/BF8, packed FP4/FP6/BF6 inputs, and mixed MX/ordinary
+operands. Scale blocks of 16 or 32 use E8M0, E4M3 or E5M3 scale types from the
+metadata. Optional scalar/vector A/B scales are disabled for MX so both clients
+select the same block-scaling operation. Native predicates still determine
+which type combinations a particular solution accepts.
+
+The adapters distinguish canonical scales, gfx950 host-preswizzled scales,
+and gfx1250 swizzled scales. Bench's host-preswizzled mode supports gfx950
+block-32 E8M0 only. Bench always swizzles MX scales on gfx1250, so its formatter
+rejects a gfx1250 `NoSwizzle` solution and directs callers to `tensile_ini`.
+Unsupported client representations raise an error rather than emit a different
+scale layout. Native MX execution requires a compatible GPU; host-side
+generation and formatting do not establish numerical or race correctness.
+
+`bench_yaml` can combine rows for several solutions for one target in the same
+installation; each row carries its explicit index. `tensile_ini` accepts cases for **one
+solution and runtime profile** and rejects mixed inputs, because the client
+otherwise applies all shapes to all selected solutions. Both accept
+`workspace_bytes` to override the 128 MiB workspace limit. The formatters return
+strings and do not execute clients.
 
 ## Limits of the result
 
@@ -161,10 +198,11 @@ Native clients may reject a candidate; callers must inspect actual execution,
 solution identity and numerical results rather than treating generation or a
 zero exit code as proof of support.
 
-This initial implementation covers ordinary positive strided GEMMs with
-FP32/FP16/BF16/FP8/INT8/INT32 storage and FP32 or INT32 computation. It supports
-the standard M-axis bias/alpha-vector profile and scalar/vector A/B scales.
-Grouped, sparse, MX, gradient, auxiliary-output, swizzled and other unsupported
+This implementation covers positive strided GEMMs, including MX, with
+FP32/FP16/BF16/FP8/FP6/FP4/INT8/INT32 storage and FP32 or INT32 computation.
+Packed FP4/FP6 are input types. It supports the standard M-axis
+bias/alpha-vector profile and scalar/vector A/B scales.
+Grouped, sparse, gradient, auxiliary-output, swizzled A/B and other unsupported
 profiles raise `ValueError`. Null dimensions, arbitrary layouts, heuristic
 default selection, exhaustive epilogues and runtime coverage measurement are
 outside this function's scope.
