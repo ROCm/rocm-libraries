@@ -316,15 +316,22 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # subtree per architecture: it rewrites an authored hip descriptor to kpack and writes
     # the archive beside it. An embedded_source descriptor names a kernel compiled into a
     # binary and JIT-compiled at load; for one of those the packer stamps the shard
-    # architecture and records the authored values in a provenance block, and the subtree
-    # gets descriptors and no archive. Both roots stage into the build tree rather than
-    # being read from the source tree, so the build tree matches the install tree.
+    # architecture and records the authored values in the descriptor's provenance sidecar,
+    # and the subtree gets descriptors and no archive. Both roots stage into the build tree
+    # rather than being read from the source tree, so the build tree matches the install
+    # tree.
     set(HIPKERNELPROVIDER_TEST_SET_UNIT "unit")
     set(HIPKERNELPROVIDER_TEST_SET_INTEGRATION "integration")
     set(HIPKERNELPROVIDER_UNIT_BUILD_DIR
         "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}")
     set(HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR
         "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}")
+
+    # Not a test root: the production tree's provenance sidecars install here. It shares
+    # the folder with the test sets, so it must not reuse unit, integration,
+    # test_kpack_binary (src/tests/CMakeLists.txt) or the census folder HkpPackaging.cmake
+    # installs.
+    set(HIPKERNELPROVIDER_TEST_SET_PROVENANCE "provenance")
 
     set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/test_descriptors")
@@ -529,16 +536,20 @@ install(TARGETS hip_kernel_provider EXPORT hip-kernel-provider
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The two descriptor trees are installed here and nowhere else. Every producer --
     # the packer, or a step added later -- delivers content into one of these two
-    # build-tree folders, and these two rules ship them wholesale. Each installed
-    # descriptor tree is then a copy of its build-tree folder, so a test that passes
-    # against one is evidence about the other, and a set cannot be staged for testing
-    # yet silently missing from the package.
+    # build-tree folders, and these rules ship them wholesale. Each installed descriptor
+    # tree is then a copy of its build-tree folder, so a test that passes against one is
+    # evidence about the other, and a set cannot be staged for testing yet silently
+    # missing from the package. The one carve-out is the production tree's provenance
+    # sidecars: the loader opens only .kdp.json and .ukd.json files, so the runtime
+    # package omits them and the test package carries them instead. The packer's empty
+    # hkp-packed.marker stays in the runtime tree on purpose: it holds no provenance, and
+    # it is what tells a reader an installed tree is packed.
     #
     # This holds for these two trees only. Other content under the engine directory
     # installs from the source tree, so it has no build-tree counterpart at the same
     # relative path.
     #
-    # Neither rule is OPTIONAL: each is emitted only when something was wired to fill its
+    # No rule here is OPTIONAL: each is emitted only when something was wired to fill its
     # tree, so a directory missing at install time means the build did not run to
     # completion, and saying so beats shipping a package with no descriptors in it.
     #
@@ -560,9 +571,22 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
 
     if(TARGET hkp_packaging_product)
+        # cmake-lint: disable=E1122
         install(DIRECTORY "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/"
                 DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
-                PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE)
+                PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE
+                PATTERN "*.provenance.json.gz" EXCLUDE)
+
+        # Same relative layout as the runtime tree, so a reader given this folder as its
+        # provenance root finds each descriptor's sidecar at the descriptor's own relative
+        # path, and TheRock's arch splitting prunes each sidecar with its <arch> folder.
+        # FILES_MATCHING still creates every source directory, so the folders holding no
+        # sidecar (each shard's kpack/) install empty; nothing reads them.
+        if(HIPKERNELPROVIDER_ENABLE_TESTS)
+            install(DIRECTORY "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/"
+                    DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}/${HIPKERNELPROVIDER_TEST_SET_PROVENANCE}"
+                    FILES_MATCHING PATTERN "*.provenance.json.gz")
+        endif()
     endif()
 
     # The test packing roots are wired under this gate, each unless it has nothing to pack

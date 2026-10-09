@@ -26,6 +26,8 @@ CASES = tuple(
         ("dilation2", {"dH": 2, "dW": 2, "pH": 2, "pW": 2}),
         ("groups2", {"groups": 2}),
         ("asymmetric", {"Hi": 7, "Wi": 11, "N": 2}),
+        ("multi-tile", {"K": 96}),
+        ("odd-channels", {"K": 33}),
     )
     for dtype in ("fp16", "bf16")
 )

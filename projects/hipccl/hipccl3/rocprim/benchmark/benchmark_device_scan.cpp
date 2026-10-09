@@ -27,6 +27,7 @@ int main(int argc, char* argv[])
 {
     primbench::settings settings;
     settings.size = 128 * primbench::MiB;
+    settings.stream_blocking_timeout_secs = 30;
     primbench::executor executor(argc, argv, settings);
 
 #ifndef BENCHMARK_CONFIG_TUNING

@@ -28,6 +28,7 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    require_streaming_arch,
 )
 
 
@@ -189,6 +190,14 @@ _VEC_PREFIX = {
     "fp8e4m3": "i8x",
     "bf8e5m2": "i8x",
 }
+
+
+def _nontemporal(op: Op) -> bool:
+    """The op's ``nontemporal`` attr; absent means False, non-bool is rejected."""
+    nt = op.attrs.get("nontemporal", False)
+    if not isinstance(nt, bool):
+        raise ValueError(f"{op.name}: nontemporal attr must be a bool, got {nt!r}")
+    return nt
 
 
 def _vec_prefix(elem_name: str, op_desc: str) -> str:
@@ -500,7 +509,16 @@ class _Lowerer:
             raise ValueError(
                 "global_load_vN: alignment must be a positive power of two"
             )
+        nontemporal = _nontemporal(op)
+        if nontemporal:
+            require_streaming_arch(op.name, self.arch.gfx)
         if align < byte_count or byte_count & (byte_count - 1):
+            if nontemporal:
+                raise NotImplementedError(
+                    "global_load_vN: the HIP backend does not yet lower "
+                    "nontemporal on the memcpy path (under-aligned or "
+                    "non-power-of-two payload)"
+                )
             # Non-power-of-two vector objects include padding. Copy only the
             # payload, using only the alignment guaranteed by the IR.
             self._emit(
@@ -510,10 +528,13 @@ class _Lowerer:
                 f"{byte_count});"
             )
             return
-        self._emit(
-            f"{prefix}{vec} {_name(op.result)} = "
-            f"*reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)});"
-        )
+        src = f"reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)})"
+        if nontemporal:
+            self._emit(
+                f"{prefix}{vec} {_name(op.result)} = __builtin_nontemporal_load({src});"
+            )
+            return
+        self._emit(f"{prefix}{vec} {_name(op.result)} = *{src};")
 
     def _op_tile_smem_store_vN(self, op: Op) -> None:
         smem = op.operands[0]
@@ -1843,17 +1864,27 @@ class _Lowerer:
             raise ValueError(
                 "global_store_vN: alignment must be a positive power of two"
             )
+        nontemporal = _nontemporal(op)
+        if nontemporal:
+            require_streaming_arch(op.name, self.arch.gfx)
         if align < byte_count or byte_count & (byte_count - 1):
+            if nontemporal:
+                raise NotImplementedError(
+                    "global_store_vN: the HIP backend does not yet lower "
+                    "nontemporal on the memcpy path (under-aligned or "
+                    "non-power-of-two payload)"
+                )
             self._emit(
                 f"__builtin_memcpy("
                 f"__builtin_assume_aligned({_name(ptr)} + {_name(idx)}, {align}), "
                 f"&{_name(val)}, {byte_count});"
             )
             return
-        self._emit(
-            f"*reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)}) = "
-            f"{_name(val)};"
-        )
+        dst = f"reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)})"
+        if nontemporal:
+            self._emit(f"__builtin_nontemporal_store({_name(val)}, {dst});")
+            return
+        self._emit(f"*{dst} = {_name(val)};")
 
     def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
         ptr, idx, val = op.operands

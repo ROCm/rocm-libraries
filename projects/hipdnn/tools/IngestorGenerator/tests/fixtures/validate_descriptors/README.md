@@ -40,10 +40,10 @@ The pack's second inline kernel carries the same completed metadata tuple as the
 (`block_size: 64, dtype: FLOAT`), and neither narrows its own `arch` (both inherit the
 pack's `["gfx942"]`), so they occupy one overlapping-arch group.
 
-Expected failure: `KernelIngestorStateManager.hpp`'s `validateAndIndexPacks()`, run inside
-`loadValidatedDescriptorSets`'s throwaway `makeStateManager` probe, throws on a
-metadata-tuple collision within one overlapping-arch group (`archOverlaps`); the loader
-catches it and drops the whole engine.
+Expected failure: `KernelIngestorStateManager.hpp`'s `validateAndIndexPacks()`, run when
+`loadValidatedDescriptorSets` builds the set's state manager through `makeStateManager`,
+throws on a metadata-tuple collision within one overlapping-arch group (`archOverlaps`);
+the loader catches it and drops the whole engine.
 
 ## `undeclared_knob/`
 

@@ -55,6 +55,10 @@ from benchmarks.common.direct_kernel_sweep import (
     DW_BLOCK_W_DGRAD as _DW_BLOCK_W_DGRAD,
     DW_BLOCK_W_FWD as _DW_BLOCK_W_FWD,
     DW_BLOCK_WAVES as _DW_BLOCK_WAVES,
+    DW_TILED_BLOCK_H as _DW_TILED_BLOCK_H,
+    DW_TILED_BLOCK_W as _DW_TILED_BLOCK_W,
+    DW_TILED_BLOCK_WAVES as _DW_TILED_BLOCK_WAVES,
+    DW_TILED_UNROLL as _DW_TILED_UNROLL,
     DW_COL_BLOCK_H as _DW_COL_BLOCK_H,
     DW_COL_BLOCK_W as _DW_COL_BLOCK_W,
 )
@@ -101,6 +105,9 @@ class DepthwiseResult:
     tflops: float
     gbps: float
     passed: "bool | None" = None
+    # The config column for an entry _dw_config_label cannot describe (the
+    # output-stationary kernel's tile).
+    label: "str | None" = None
     # Output-row tile of the col variant; None for preload and spatial.
     block_h: "int | None" = None
 
@@ -218,9 +225,12 @@ def parse_miopen_cmd_direct(cmd: str):
             f"cpg={cpg} (C/groups) must be 1 (depthwise) or a positive multiple of 4"
         )
 
-    if miopen_args.dH != 1 or miopen_args.dW != 1:
+    dilated = miopen_args.dH != 1 or miopen_args.dW != 1
+    if dilated and (miopen_args.forw != 1 or groups != 1):
         raise ValueError(
-            f"direct conv has no dilation (got -l {miopen_args.dH} -j {miopen_args.dW})"
+            f"direct conv computes a dilated convolution only forward and "
+            f"ungrouped (got -l {miopen_args.dH} -j {miopen_args.dW}, "
+            f"-F {miopen_args.forw}, -g {groups})"
         )
 
     sH = miopen_args.sH
@@ -249,8 +259,16 @@ def parse_miopen_cmd_direct(cmd: str):
         PAD=miopen_args.pH,
         stride=sH,
         dtype=dtype if dtype in ("fp16", "bf16") else "fp16",
+        dil_h=miopen_args.dH,
+        dil_w=miopen_args.dW,
     )
     return problem, dtype, miopen_args.forw
+
+
+def _dw_tiled_label(block_h, block_w, block_waves, unroll_rows) -> str:
+    """An output-stationary depthwise entry's knobs."""
+    ur = " ur" if unroll_rows else ""
+    return f"tiled   bh={block_h:>4d} bw={block_w:>3d} bwv={block_waves}{ur}"
 
 
 def _sample_combos(combos: list, frac: float, seed: int) -> list:
@@ -403,8 +421,8 @@ class _DirectConvProblemAdapter:
         self.sW = p.stride
         self.pH = p.PAD
         self.pW = p.PAD
-        self.dH = 1
-        self.dW = 1
+        self.dH = p.dil_h
+        self.dW = p.dil_w
         self.groups = p.groups
 
 
@@ -465,7 +483,7 @@ def _print_depthwise_results(
     print(hdr)
     print("-" * width)
     for rank, r in enumerate(results[:top_n], 1):
-        cfg = (
+        cfg = r.label or (
             f"{r.variant:<7} bh={str(r.block_h):>4s} bw={str(r.block_w):>3s} "
             f"bwv={r.block_waves}"
         )
@@ -511,13 +529,17 @@ def _run_depthwise_sweep(
         DirectDepthwiseColSpec,
         DirectDepthwiseSpec,
         DirectDepthwiseSpatialSpec,
+        DirectDepthwiseTiledSpec,
         direct_launch_geometry,
         build_direct_depthwise,
         build_direct_depthwise_col,
         build_direct_depthwise_spatial,
+        build_direct_depthwise_tiled,
+        depthwise_stream_register_reason,
         is_valid_depthwise_col_spec,
         is_valid_depthwise_spec,
         is_valid_depthwise_spatial_spec,
+        is_valid_depthwise_tiled_spec,
     )
     from rocke.runtime.hip_module import HipError
 
@@ -546,21 +568,31 @@ def _run_depthwise_sweep(
 
     # For the spatial layout block_w is derived from block_waves internally,
     # so sweeping block_w would produce duplicate kernels; use a dummy value.
-    # Combos are (variant, block_h, block_w, block_waves); block_h is the col
-    # variant's output-row tile and None for the other two.
+    # Combos are (variant, block_h, block_w, block_waves, unroll_rows); block_h
+    # is the col/tiled output-row tile and unroll_rows is tiled-only.
     _col_combos = [
-        ("col", bh, bw, bwv)
+        ("col", bh, bw, bwv, None)
         for bh, bw, bwv in itertools.product(
             _DW_COL_BLOCK_H, _DW_COL_BLOCK_W, _DW_BLOCK_WAVES
         )
     ]
     if _use_spatial:
-        combos = [("spatial", None, None, bw) for bw in _DW_BLOCK_WAVES]
+        combos = [("spatial", None, None, bw, None) for bw in _DW_BLOCK_WAVES]
     else:
         combos = [
-            ("preload", None, bw, bwv)
+            ("preload", None, bw, bwv, None)
             for bw, bwv in itertools.product(_DW_BLOCK_W_FWD, _DW_BLOCK_WAVES)
         ] + _col_combos
+    # The output-stationary kernel serves any group count.
+    combos += [
+        ("tiled", bh, bw, wv, ur)
+        for bw, bh, wv, ur in itertools.product(
+            _DW_TILED_BLOCK_W,
+            _DW_TILED_BLOCK_H,
+            _DW_TILED_BLOCK_WAVES,
+            _DW_TILED_UNROLL,
+        )
+    ]
 
     if args.sample is not None:
         total = len(combos)
@@ -580,8 +612,19 @@ def _run_depthwise_sweep(
     n_skipped = 0
     pending = []
     for combo in combos:
-        variant, block_h, block_w, block_waves = combo
-        if variant == "spatial":
+        variant, block_h, block_w, block_waves, unroll_rows = combo
+        if variant == "tiled":
+            spec = DirectDepthwiseTiledSpec(
+                problem=p,
+                name="rocke_bench_direct_depthwise_tiled",
+                block_w=block_w,
+                block_h=block_h,
+                block_waves=block_waves,
+                unroll_rows=unroll_rows,
+            )
+            ok, _ = is_valid_depthwise_tiled_spec(spec, arch=arch)
+            build = build_direct_depthwise_tiled
+        elif variant == "spatial":
             spec = DirectDepthwiseSpatialSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise_spatial",
@@ -609,6 +652,10 @@ def _run_depthwise_sweep(
             )
             ok, _ = is_valid_depthwise_spec(spec, arch=arch)
             build = build_direct_depthwise
+        # A spilling row-streaming kernel takes minutes to build and is left to
+        # the output-stationary kernel (as in the AOT grid).
+        if variant in ("preload", "spatial"):
+            ok = ok and depthwise_stream_register_reason(spec) is None
         if not ok:
             n_skipped += 1
             continue
@@ -645,7 +692,10 @@ def _run_depthwise_sweep(
     _stop = EarlyStop.for_case(args, problem, dtype, "fwd")
     n_run = 0
     for combo, spec, kernel in pending:
-        variant, block_h, block_w, block_waves = combo
+        variant, block_h, block_w, block_waves, unroll_rows = combo
+        tiled_label = None
+        if variant == "tiled":
+            tiled_label = _dw_tiled_label(block_h, block_w, block_waves, unroll_rows)
         artifact = artifact_map[kernel.name]
 
         try:
@@ -725,12 +775,17 @@ def _run_depthwise_sweep(
                 tflops=cur_tflops,
                 gbps=cur_gbps,
                 passed=kernel_passed,
+                label=tiled_label,
             )
         )
         print(
-            f"[{n_run:4d}] {variant:<7} bh={str(block_h):>4s} bw={str(block_w):>3s} "
-            f"bwv={block_waves}"
-            f"  {cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
+            f"[{n_run:4d}] "
+            + (
+                tiled_label
+                or f"{variant:<7} bh={str(block_h):>4s} bw={str(block_w):>3s} "
+                f"bwv={block_waves}"
+            )
+            + f"  {cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
 
@@ -2568,9 +2623,12 @@ def main() -> int:
             )
             return 2
 
-        if args.dH != 1 or args.dW != 1:
+        if (args.dH != 1 or args.dW != 1) and (
+            args.direction != "fwd" or args.groups != 1
+        ):
             print(
-                f"error: direct conv has no dilation (got dH={args.dH}, dW={args.dW})",
+                f"error: direct conv computes a dilated convolution only forward "
+                f"and ungrouped (got dH={args.dH}, dW={args.dW})",
                 file=sys.stderr,
             )
             return 2
@@ -2598,6 +2656,8 @@ def main() -> int:
             PAD=args.pH,
             stride=args.sH,
             dtype=args.dtype,
+            dil_h=args.dH,
+            dil_w=args.dW,
         )
         cases = [(problem, args.dtype, args.direction)]
 

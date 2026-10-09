@@ -3,7 +3,8 @@ set" against real rocKE output: the `desk_check` fixture packed through the rocK
 producer, and the rocKE bundles the repository ships.
 
 Invariant 1 reads the authored spec, which packing moves from ``kernel_source`` to
-``provenance.spec``, so a check reading ``kernel_source.spec`` on packed output
+``provenance.spec`` (shipped in the ``<name>.kdp.provenance.json.gz`` sidecar and
+reattached on read), so a check reading ``kernel_source.spec`` on packed output
 always sees ``{}`` and reports "none" regardless of real drift
 (``test_runbook_scripts_invariant_1_is_dead_on_packed_output`` pins that against a
 real ``run_pipeline`` pack with injected drift). Invariants 2-4 read only
@@ -27,7 +28,15 @@ from hkp_pack.desk_check import (
     toc_key_uniqueness,
 )
 from hkp_pack.pipeline import run_pipeline
-from pack_helpers import _EXAMPLES, _ROOT_IDS, _read, _require_bundles, _run_cli
+from pack_helpers import (
+    _EXAMPLES,
+    _ROOT_IDS,
+    _read,
+    _require_bundles,
+    _run_cli,
+    read_shipped,
+    write_shipped,
+)
 
 ARCH = "gfx950"
 # The KMD fields the desk-check compares -- `DEFAULT_MATCHER_FIELDS`, narrowed
@@ -60,7 +69,7 @@ def packed_desk_check(tmp_path_factory, desk_check_fixture, hipcc, rocm_kpack_di
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
-    return _read(tmp_path / "out" / ARCH / "attention.kdp.json")
+    return read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
 
 
 def _pack_mutated(tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate):
@@ -80,7 +89,7 @@ def _pack_mutated(tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate):
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
-    return _read(tmp_path / "out" / ARCH / "attention.kdp.json")
+    return read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
 
 
 # ---------------------------------------------------------------------------
@@ -244,9 +253,7 @@ class TestInvariant4SymbolNonUniquenessTolerated:
 class TestCliEndToEnd:
     def test_clean_real_pack_exits_zero(self, packed_desk_check, tmp_path):
         kdp_path = tmp_path / "clean.kdp.json"
-        kdp_path.write_text(
-            json.dumps({"kernelDescriptors": _kernels(packed_desk_check)})
-        )
+        write_shipped(kdp_path, {"kernelDescriptors": _kernels(packed_desk_check)})
         proc = _run_cli(str(kdp_path))
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "metadata/authored-spec drift: none" in proc.stdout
@@ -270,7 +277,7 @@ class TestCliEndToEnd:
         kernels = json.loads(json.dumps(_kernels(packed_desk_check)))
         kernels[1]["metadata"]["head_size"] = 999
         kdp_path = tmp_path / "drifted.kdp.json"
-        kdp_path.write_text(json.dumps({"kernelDescriptors": kernels}))
+        write_shipped(kdp_path, {"kernelDescriptors": kernels})
 
         proc = _run_cli(str(kdp_path))
 

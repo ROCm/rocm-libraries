@@ -11,6 +11,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <string>
 #include <thread>
@@ -266,6 +267,19 @@ protected:
         return false;
     }
 
+    // A measured span holds device work, so its elapsed time must not be negative. On
+    // Windows, hipEventElapsedTime can return a negative value for a short span
+    // (https://github.com/ROCm/rocm-systems/issues/12925), so check only that the value
+    // is finite there. Restore the sign check on Windows when the runtime fix ships.
+    static bool isValidElapsed(float elapsedMs)
+    {
+#if defined(_WIN32)
+        return std::isfinite(elapsedMs);
+#else
+        return elapsedMs >= 0.0f;
+#endif
+    }
+
     std::unique_ptr<NiceMock<MockHandle>> _mockHandle = nullptr;
     hipStream_t _testStream = nullptr;
     void* _timingScratch = nullptr;
@@ -288,7 +302,7 @@ TEST_F(TestGpuProfilingControlDescriptor, HappyPathCompletesLifecycle)
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, &elementCount, &elapsed));
     EXPECT_EQ(elementCount, 1);
-    EXPECT_GE(elapsed, 0.0f);
+    EXPECT_TRUE(isValidElapsed(elapsed)) << "elapsed=" << elapsed << " ms";
 }
 
 TEST_F(TestGpuProfilingControlDescriptor, RebindingCannotChangeTheTimingContext)
@@ -479,8 +493,8 @@ TEST_F(TestGpuProfilingControlDescriptor, StallGateExcludesHostSubmissionDelay)
     // Reported unconditionally: a timing bound that flakes in CI is not diagnosable
     // without the two numbers that produced it.
     GTEST_LOG_(INFO) << "unstalled=" << unstalledMs << " ms, stalled=" << stalledMs << " ms";
-    EXPECT_GE(unstalledMs, 0.0f) << "unstalled timing returned an invalid elapsed value";
-    EXPECT_GE(stalledMs, 0.0f) << "stalled timing returned an invalid elapsed value";
+    EXPECT_TRUE(isValidElapsed(unstalledMs)) << "unstalledMs=" << unstalledMs << " ms";
+    EXPECT_TRUE(isValidElapsed(stalledMs)) << "stalledMs=" << stalledMs << " ms";
 
 #if !defined(_WIN32)
     // The 20 ms host sleep lands inside the unstalled span on Linux. Windows/PAL
@@ -661,7 +675,7 @@ TEST_F(TestGpuProfilingControlDescriptor, FinalizeReleasesUnreleasedStall)
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, &elementCount, &elapsed));
-    EXPECT_GE(elapsed, 0.0f);
+    EXPECT_TRUE(isValidElapsed(elapsed)) << "elapsed=" << elapsed << " ms";
 }
 
 // finalize() must release an armed gate before any precondition check can throw, not
@@ -870,7 +884,7 @@ TEST_F(TestGpuProfilingControlDescriptor, ResetAfterSuccessfulMeasurementAllowsR
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, &elementCount, &elapsed));
-    EXPECT_GE(elapsed, 0.0f);
+    EXPECT_TRUE(isValidElapsed(elapsed)) << "elapsed=" << elapsed << " ms";
 }
 
 // The staleness this guards against: STALL_TIMED_OUT_EXT is latched at finalize(), not

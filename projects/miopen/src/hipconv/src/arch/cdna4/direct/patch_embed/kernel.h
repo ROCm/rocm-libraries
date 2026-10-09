@@ -1262,17 +1262,7 @@ public:
 
     std::string_view name() const override { return "patch_embed"; }
 
-    std::string describe_config() const override { return ConfigMatcher(cfg_).describe(); }
-
-    bool matches_descriptor(std::string_view spec, std::string* error) const override
-    {
-        ConfigMatcher matcher(cfg_);
-        if(matcher.match(spec))
-            return true;
-        if(error)
-            *error = matcher.error();
-        return false;
-    }
+    KVDescriptor config_descriptor() const override { return ConfigMatcher(cfg_); }
 
     // Does not chain to DirectConvKernel::is_applicable, which rejects any stride but one.
     // A patch embedding is exactly the case where the stride equals the filter.

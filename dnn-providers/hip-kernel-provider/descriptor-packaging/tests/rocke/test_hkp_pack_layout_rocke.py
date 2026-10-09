@@ -15,6 +15,7 @@ from pack_helpers import (
     _nest,
     _read,
     _run,
+    read_shipped,
 )
 
 
@@ -39,7 +40,7 @@ def test_mixed_hip_rocke_one_kpack_per_arch(
     # the nested output tree.
     kinds = {}
     for kdp in out.rglob("*.kdp.json"):
-        for ukd in _read(kdp)["kernelDescriptors"]:
+        for ukd in read_shipped(kdp)["kernelDescriptors"]:
             if isinstance(ukd, str):
                 continue
             ks = ukd["kernel_source"]
@@ -105,7 +106,7 @@ def test_example_tree_packs_both_producers(
     # Both producers contributed, asserted via provenance rather than filename.
     kinds = set()
     for kdp in out.rglob("*.kdp.json"):
-        for ukd in _read(kdp)["kernelDescriptors"]:
+        for ukd in read_shipped(kdp)["kernelDescriptors"]:
             if isinstance(ukd, str):
                 continue
             kinds.add(ukd["provenance"]["origin_kind"])
@@ -158,7 +159,7 @@ def test_provenance_records_the_toolchain_that_built_each_kernel(
 
     by_kind = {}
     for kdp in (tmp_path / "out" / ARCH).rglob("*.kdp.json"):
-        for ukd in _read(kdp)["kernelDescriptors"]:
+        for ukd in read_shipped(kdp)["kernelDescriptors"]:
             if isinstance(ukd, str):
                 continue
             by_kind[ukd["provenance"]["origin_kind"]] = ukd["provenance"]

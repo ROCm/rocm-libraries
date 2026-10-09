@@ -2230,8 +2230,8 @@ rocblas_status rocblas_internal_trmm_launcher(rocblas_handle    handle,
         if constexpr(!BATCHED)
         {
             // single bathc so applying offset here
-            rocblas_set_matrix_zero_if_alpha_zero_template(
-                handle, m, n, &alpha_0<T>, 0, dC + offset_c, ldc, 0, 1);
+            RETURN_IF_ROCBLAS_ERROR((rocblas_set_matrix_zero_if_alpha_zero_template(
+                handle, m, n, &alpha_0<T>, 0, dC + offset_c, ldc, 0, 1)));
             return rocblas_internal_trmm_outofplace_template<T>(handle,
                                                                 side,
                                                                 uplo,

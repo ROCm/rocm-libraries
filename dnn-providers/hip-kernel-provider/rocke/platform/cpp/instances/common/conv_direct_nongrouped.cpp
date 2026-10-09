@@ -102,12 +102,12 @@ static bool nongrouped_is_bf16(const rocke_direct_conv_nongrouped_spec_t* spec)
 
 static int nongrouped_ho(const rocke_direct_conv_problem_t* p)
 {
-    return (p->H + 2 * p->PAD - p->KH) / p->stride + 1;
+    return (p->H + 2 * p->PAD - (p->KH - 1) * p->dil_h - 1) / p->stride + 1;
 }
 
 static int nongrouped_wo(const rocke_direct_conv_problem_t* p)
 {
-    return (p->W + 2 * p->PAD - p->KW) / p->stride + 1;
+    return (p->W + 2 * p->PAD - (p->KW - 1) * p->dil_w - 1) / p->stride + 1;
 }
 
 static void nongrouped_set_reason(char* reason, size_t reason_cap, const char* msg)
@@ -162,8 +162,8 @@ long rocke_direct_conv_nongrouped_lds_bytes(const rocke_direct_conv_nongrouped_s
     {
         return 0;
     }
-    lds_in_h = (long)(spec->tile_h - 1) * p->stride + p->KH;
-    lds_in_w = (long)(spec->tile_w - 1) * p->stride + p->KW;
+    lds_in_h = (long)(spec->tile_h - 1) * p->stride + (long)(p->KH - 1) * p->dil_h + 1;
+    lds_in_w = (long)(spec->tile_w - 1) * p->stride + (long)(p->KW - 1) * p->dil_w + 1;
     x_halves = lds_in_h * lds_in_w * (spec->ck + spec->lds_pad);
     w_halves = (long)spec->tile_k * p->KH * p->KW * spec->ck;
     /* + one scratch fragment per array (see the builder). */
@@ -219,7 +219,8 @@ rocke_status_t rocke_direct_conv_nongrouped_kernel_name(
     char g_buf[24];
     char iglp_buf[24];
     char we_buf[24];
-    const char* parts[10];
+    char d_buf[32];
+    const char* parts[11];
 
     if(spec == NULL || out == NULL || out_cap == 0)
     {
@@ -251,17 +252,24 @@ rocke_status_t rocke_direct_conv_nongrouped_kernel_name(
     {
         snprintf(we_buf, sizeof(we_buf), "we%d", spec->waves_per_eu);
     }
+    /* f"d{dil_h}x{dil_w}" only for a dilated problem: undilated names are unchanged. */
+    d_buf[0] = '\0';
+    if(spec->problem.dil_h != 1 || spec->problem.dil_w != 1)
+    {
+        snprintf(d_buf, sizeof(d_buf), "d%dx%d", spec->problem.dil_h, spec->problem.dil_w);
+    }
     parts[0] = prob_short;
-    parts[1] = t_buf;
-    parts[2] = ck_buf;
-    parts[3] = w_buf;
-    parts[4] = a_buf;
-    parts[5] = g_buf;
-    parts[6] = spec->double_buffer ? "db" : "";
-    parts[7] = iglp_buf;
-    parts[8] = we_buf;
-    parts[9] = nongrouped_is_bf16(spec) ? "bf16" : "";
-    return rocke_kernel_name_join(spec->name, parts, 10, NULL, NULL, 0, out, out_cap, NULL);
+    parts[1] = d_buf;
+    parts[2] = t_buf;
+    parts[3] = ck_buf;
+    parts[4] = w_buf;
+    parts[5] = a_buf;
+    parts[6] = g_buf;
+    parts[7] = spec->double_buffer ? "db" : "";
+    parts[8] = iglp_buf;
+    parts[9] = we_buf;
+    parts[10] = nongrouped_is_bf16(spec) ? "bf16" : "";
+    return rocke_kernel_name_join(spec->name, parts, 11, NULL, NULL, 0, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -316,6 +324,11 @@ rocke_status_t rocke_direct_conv_nongrouped_validate(
     {
         NONGROUPED_REJECT("DirectNongroupedConvSpec: tile, wave, stride and channel parameters "
                           "must be positive");
+    }
+    if(p->dil_h < 1 || p->dil_w < 1)
+    {
+        NONGROUPED_REJECT(
+            "DirectNongroupedConvSpec: dilation must be positive (got %dx%d)", p->dil_h, p->dil_w);
     }
     t = at->tile;
     if(spec->tile_w % t != 0)
@@ -551,6 +564,7 @@ struct nongrouped_ctx
 
     /* Build-time geometry (Python all-caps locals). */
     int KH, KW, S, PAD;
+    int DH, DW; /* filter dilation */
     int TH, TW, TK, CK, THREADS, WAVE, FRAG, AK, AT, ACC, QUADS;
     int NCB, M_TILES, KATOMS, ROWS_W, MT_W, NT_W, CSTRIDE, LDS_IN_H, LDS_IN_W;
     int X_CV, X_VECS, X_PASSES, W_SLOTS, W_PASSES;
@@ -623,6 +637,8 @@ bool nongrouped_prologue(nongrouped_ctx& c, const char* arch)
     c.KW = c.p.KW;
     c.S = c.p.stride;
     c.PAD = c.p.PAD;
+    c.DH = c.p.dil_h;
+    c.DW = c.p.dil_w;
 
     c.TH = spec->tile_h;
     c.TW = spec->tile_w;
@@ -642,8 +658,8 @@ bool nongrouped_prologue(nongrouped_ctx& c, const char* arch)
     c.MT_W = c.M_TILES / spec->waves_m;
     c.NT_W = c.ROWS_W * c.NCB;
     c.CSTRIDE = c.CK + spec->lds_pad;
-    c.LDS_IN_H = (c.TH - 1) * c.S + c.KH;
-    c.LDS_IN_W = (c.TW - 1) * c.S + c.KW;
+    c.LDS_IN_H = (c.TH - 1) * c.S + (c.KH - 1) * c.DH + 1;
+    c.LDS_IN_W = (c.TW - 1) * c.S + (c.KW - 1) * c.DW + 1;
 
     c.X_CV = c.CK / ROCKE_DCONV_NONGROUPED_X_LOAD_VEC;
     c.X_VECS = c.LDS_IN_H * c.LDS_IN_W * c.X_CV;
@@ -1013,11 +1029,12 @@ rocke_value_t*
 }
 
 /* One activation fragment, addressed by *input* row inside the wave window, so
- * the KH taps of a column share ``(ROWS_W - 1) * stride + KH`` fragments. */
+ * the KH taps of a column share ``(ROWS_W - 1) * stride + (KH - 1) * dil_h + 1``
+ * fragments. Filter column s sits s * dil_w columns in. */
 rocke_value_t* nongrouped_read_b_frag(
     nongrouped_ctx& c, rocke_value_t* base, int in_row, int cb, int s, int katom)
 {
-    int64_t pos = (int64_t)in_row * c.LDS_IN_W + (int64_t)cb * c.AT * c.S + s;
+    int64_t pos = (int64_t)in_row * c.LDS_IN_W + (int64_t)cb * c.AT * c.S + (int64_t)s * c.DW;
     int64_t off = pos * c.CSTRIDE + (int64_t)katom * c.AK;
     rocke_value_t* k = nongrouped_c(c, off);
     rocke_value_t* ind[2];
@@ -1032,7 +1049,7 @@ void nongrouped_emit_mfmas(nongrouped_ctx& c,
                            rocke_value_t* x_base,
                            rocke_value_t* w_base)
 {
-    const int n_in_rows = (c.ROWS_W - 1) * c.S + c.KH;
+    const int n_in_rows = (c.ROWS_W - 1) * c.S + (c.KH - 1) * c.DH + 1;
     std::vector<rocke_value_t*> b_frags((size_t)n_in_rows * c.NCB);
     std::vector<rocke_value_t*> a_frags((size_t)c.MT_W);
     int katom, s_c, r_c, ir, cb, mt, row;
@@ -1060,7 +1077,7 @@ void nongrouped_emit_mfmas(nongrouped_ctx& c,
                 }
                 for(row = 0; row < c.ROWS_W; ++row)
                 {
-                    int bf_row = row * c.S + r_c;
+                    int bf_row = row * c.S + r_c * c.DH;
                     for(cb = 0; cb < c.NCB; ++cb)
                     {
                         int nt = row * c.NCB + cb;

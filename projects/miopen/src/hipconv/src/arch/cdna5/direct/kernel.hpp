@@ -850,7 +850,7 @@ public:
     {
     }
 
-    std::string describe_config() const override { return ConfigMatcher(cfg_).describe(); }
+    KVDescriptor config_descriptor() const override { return ConfigMatcher(cfg_); }
 
     // The base predicate verbatim, plus the tf32 operand types. TF32 is stored as fp32, so its
     // operands are tf32 and its result fp32; the base only knows the fp16/bf16 same-type form.
@@ -875,16 +875,6 @@ public:
         if(par.k == par.c && par.channels_per_group() == 1)
             return false;
         return true;
-    }
-
-    bool matches_descriptor(std::string_view spec, std::string* error) const override
-    {
-        ConfigMatcher matcher(cfg_);
-        if(matcher.match(spec))
-            return true;
-        if(error)
-            *error = matcher.error();
-        return false;
     }
 
     bool is_valid_config(const hipconv::ConvParams& par) const override

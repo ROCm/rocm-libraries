@@ -431,7 +431,7 @@ bool AssignmentPolicy::CheckAssignmentValid(ExecPlan& execPlan)
             return compute_ptrdiff(node->length, node->inStride, node->batch, node->iDist);
         else
         {
-            return compute_ptrdiff(node->UseOutputLengthForPadding() ? outputLen : node->length,
+            return compute_ptrdiff(node->OutputLengthMatchesOutStride() ? outputLen : node->length,
                                    node->outStride,
                                    node->batch,
                                    node->oDist);
@@ -1244,11 +1244,8 @@ void CollectTempBufOps(TreeNode&               node,
             CollectTempBufOps(**child, buf, users);
 
         // Store this write
-        insertOp({node.UseOutputLengthForPadding() ? node.GetOutputLength() : node.length,
-                  node.outStride,
-                  node.oDist,
-                  TempBufOp::BufWrite,
-                  node});
+        insertOp(
+            {node.LengthForOutStride(), node.outStride, node.oDist, TempBufOp::BufWrite, node});
 
         // If we have a parent node, tail-recurse into our following sibling node.
         //

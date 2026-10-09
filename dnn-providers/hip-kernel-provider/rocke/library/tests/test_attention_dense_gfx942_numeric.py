@@ -103,7 +103,17 @@ _NON_DEFAULT_SCALE_ROWS = [
 
 
 def _spec(
-    dtype, d, hq, hkv, persistent, *, causal=True, batch=1, sq=512, sliding_window=0
+    dtype,
+    d,
+    hq,
+    hkv,
+    persistent,
+    *,
+    causal=True,
+    batch=1,
+    sq=512,
+    sliding_window=0,
+    persist_decode="auto",
 ):
     """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
     candidate (``gfx942_dense`` via ``dispatch.attention``) rather than hand-rolled.
@@ -126,14 +136,16 @@ def _spec(
 
     Only the ``persistent`` knob is set rather than left at the default: the cohort
     asserts BOTH grid variants at one fixed Sq, where the default picks one. Every
-    other lever -- block_n, the D64 K row-group pad, persist_decode, ragged -- is
-    whatever the shipped path folds in.
+    other lever -- block_n, the D64 K row-group pad, ragged -- is whatever the
+    shipped path folds in. ``persist_decode`` stays "auto" unless a test pins one
+    order to hold it fixed across shapes "auto" would resolve differently; a pinned
+    order is set on the spec, since the knob refuses one that restates "auto".
     """
     # Imported lazily, mirroring the golden sibling: keeps module import (and hence
     # CPU collection of this gpu-marked file) independent of the dispatch package.
     from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
-    return tuning_spec_with_knobs(
+    spec = tuning_spec_with_knobs(
         AttentionRequest(
             batch=batch,
             nhead_q=hq,
@@ -150,6 +162,9 @@ def _spec(
         "gfx942_dense",
         {"persistent": bool(persistent)},
     ).kernel_spec
+    if persist_decode == "auto":
+        return spec
+    return dataclasses.replace(spec, persist_decode=persist_decode)
 
 
 def _sdpa_reference(q, k, v, scale, *, causal=True, attn_mask=None):
@@ -387,6 +402,82 @@ def test_one_binary_serves_every_shape():
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
+def test_one_binary_serves_every_head_config():
+    """One compiled artifact, four head configs, correct numerics at each.
+
+    The head-count twin of :func:`test_one_binary_serves_every_shape`: on the
+    runtime-shape path ``num_query_heads`` / ``num_kv_heads`` are kernel params,
+    so the GQA ratio and the token strides are computed at run time. A body that
+    still baked one of them would compute wrong strides for every config but the
+    first one compiled -- caught here by the numeric check, while the ``is`` /
+    single-entry assertions catch a key or lookup regression that recompiles per
+    head config. Covers GQA 16, non-pow2 GQA 5 and 7, and MHA.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx942.attention_dense import _DENSE_LAUNCHER_CACHE
+
+    dtype, d, B, S = "fp16", 128, 1, 512  # flagship default, non-persistent
+    tol = 2e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+
+    heads = ((128, 8), (40, 8), (28, 4), (32, 32))
+    specs = [
+        _as_gfx942_spec(_spec(dtype, d, hq, hkv, False, batch=B, sq=S))
+        for hq, hkv in heads
+    ]
+
+    # Preconditions: all on the runtime path and sharing one key -- otherwise the
+    # reuse assertion below is vacuous.
+    assert all(s.runtime_shape for s in specs), "a head config left the runtime path"
+    keys = [attention_dense_cache_key(s, arch="gfx942") for s in specs]
+    assert len(set(keys)) == 1, f"head configs {heads} did not share a cache key"
+
+    _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
+    before = set(_DENSE_LAUNCHER_CACHE)
+
+    launchers = []
+    for (hq, hkv), spec in zip(heads, specs):
+        torch.manual_seed(0)
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+        out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        launchers.append(_launcher_for(spec))
+
+        rep = hq // hkv
+        ref = F.scaled_dot_product_attention(
+            q.transpose(1, 2).float(),
+            k.transpose(1, 2).float().repeat_interleave(rep, dim=1),
+            v.transpose(1, 2).float().repeat_interleave(rep, dim=1),
+            is_causal=True,
+            scale=scale,
+        ).transpose(1, 2)
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < tol, f"Hq={hq} Hkv={hkv}: max_abs={max_abs:.3e} >= {tol}"
+
+    assert launchers[0] is not None, (
+        "no launcher cached after a successful run; _DENSE_LAUNCHER_CACHE is no "
+        "longer keyed by attention_dense_cache_key and this test is blind"
+    )
+    assert all(lau is launchers[0] for lau in launchers), (
+        f"head configs {heads} share a cache key but were served by DIFFERENT "
+        "launcher objects -- the runtime-heads kernel recompiled per head config"
+    )
+    assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (
+        "four head configs on the runtime path added more than one cache entry: "
+        f"{sorted(set(_DENSE_LAUNCHER_CACHE) - before)}"
+    )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype,d,hq,hkv,persistent,sliding_window,scale", _SWA_COHORT)
 def test_dense_swa_numeric_vs_fp32_sdpa(
     dtype, d, hq, hkv, persistent, sliding_window, scale
@@ -436,6 +527,233 @@ def test_dense_swa_numeric_vs_fp32_sdpa(
     assert max_abs < tol, (
         f"{dtype} D{d} GQA{hq}/{hkv} swa{sliding_window} scale={scale:g} "
         f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+    )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+def test_one_sliding_window_binary_serves_every_shape_and_head_config():
+    """The sliding-window twin of :func:`test_one_binary_serves_every_head_config`.
+
+    Non-persistent SWA is on the runtime-shape path: the window stays baked, while
+    batch, both seqlens and both head counts are kernel params. Varying all of them
+    at once under one window must reuse one launcher, and the band must still be
+    right at every config -- a prune or mask that kept a baked shape term would pass
+    the first config compiled and fail the rest.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx942.attention_dense import _DENSE_LAUNCHER_CACHE
+
+    dtype, d, window = "bf16", 128, 128
+    tol = 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+
+    # (batch, seqlen, Hq, Hkv): GQA 16, non-pow2 GQA 5 and 7, MHA.
+    configs = ((1, 512, 128, 8), (2, 1024, 40, 8), (1, 2048, 28, 4), (4, 512, 32, 32))
+    specs = [
+        _as_gfx942_spec(
+            _spec(dtype, d, hq, hkv, False, batch=b, sq=s, sliding_window=window)
+        )
+        for b, s, hq, hkv in configs
+    ]
+
+    assert all(s.runtime_shape for s in specs), "an SWA config left the runtime path"
+    keys = [attention_dense_cache_key(s, arch="gfx942") for s in specs]
+    assert len(set(keys)) == 1, f"SWA configs {configs} did not share a cache key"
+
+    _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
+    before = set(_DENSE_LAUNCHER_CACHE)
+
+    launchers = []
+    for (B, S, hq, hkv), spec in zip(configs, specs):
+        torch.manual_seed(0)
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+        out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        launchers.append(_launcher_for(spec))
+
+        qi = torch.arange(S, device="cuda").view(-1, 1)
+        ki = torch.arange(S, device="cuda").view(1, -1)
+        keep = (ki <= qi) & (ki > qi - window)
+        rep = hq // hkv
+        ref = F.scaled_dot_product_attention(
+            q.transpose(1, 2).float(),
+            k.transpose(1, 2).float().repeat_interleave(rep, dim=1),
+            v.transpose(1, 2).float().repeat_interleave(rep, dim=1),
+            attn_mask=keep,
+            scale=scale,
+        ).transpose(1, 2)
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < tol, (
+            f"swa{window} B={B} S={S} Hq={hq} Hkv={hkv}: "
+            f"max_abs={max_abs:.3e} >= {tol}"
+        )
+
+    assert launchers[0] is not None, (
+        "no launcher cached after a successful run; _DENSE_LAUNCHER_CACHE is no "
+        "longer keyed by attention_dense_cache_key and this test is blind"
+    )
+    assert all(lau is launchers[0] for lau in launchers), (
+        f"SWA configs {configs} share a cache key but were served by DIFFERENT "
+        "launcher objects -- the runtime-shape SWA kernel recompiled per config"
+    )
+    assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (
+        "four SWA configs on the runtime path added more than one cache entry: "
+        f"{sorted(set(_DENSE_LAUNCHER_CACHE) - before)}"
+    )
+
+
+# (batch, seqlen, Hq, Hkv) served by ONE persistent binary. W = NQB*Hq*B is the
+# grid-stride work-item count (NQB = seqlen // 256); NP is the shipped 304:
+#   W=40   < NP, NQB=1 (most CTAs idle; the interleave flip degenerates to qb=0)
+#   W=320  in (NP, 2*NP), W % NP = 16
+#   W=672  > 2*NP, W % NP = 64, odd B (non-pow2 batch magic)
+#   W=384  MHA (gqa=1), W % NP = 80
+#   W=608  == 2*NP exactly -- the tail-free control
+#   W=120  odd Hq, even NQB=4: an interleave flip keyed on rem = qb0*Hq + hq
+#          (instead of hq) maps qb0 {0,1,2,3} -> {0,2,2,0}, skipping tiles
+# Non-pow2 GQA 5 and 7 put a real magic on the gqa divide.
+_PERSIST_CONFIGS = (
+    (1, 256, 40, 8),
+    (2, 1024, 40, 8),
+    (3, 2048, 28, 4),
+    (2, 1536, 32, 32),
+    (19, 512, 16, 4),
+    (2, 1024, 15, 5),
+)
+
+# (dtype, persist_decode, interleave, sliding_window). Both decode orders pinned
+# explicitly: "auto" resolves per shape, which would split the set across two keys.
+# interleave only changes the qb_major body, so it rides that order alone.
+_PERSIST_ONE_BINARY = [
+    pytest.param("fp16", "hkv_major", False, 0, id="hkv_major"),
+    pytest.param("fp16", "qb_major", False, 0, id="qb_major"),
+    pytest.param("fp16", "qb_major", True, 0, id="qb_major-interleave"),
+    pytest.param("bf16", "hkv_major", False, 128, id="hkv_major-swa128"),
+    pytest.param("bf16", "qb_major", False, 128, id="qb_major-swa128"),
+]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype,persist_decode,interleave,window", _PERSIST_ONE_BINARY)
+def test_one_persistent_binary_serves_every_shape_and_head_config(
+    dtype, persist_decode, interleave, window
+):
+    """The persistent-grid twin of the one-binary tests above.
+
+    The persistent grid takes batch, both seqlens and both head counts as kernel
+    params too; only D, dtype, mask, window, ``num_persistent`` and the decode order
+    stay baked. Its work-item count W is derived in the prologue and the grid-stride
+    decode divides by runtime B / Hq / gqa / NQB through host-computed fast-division
+    magics. A decode that kept a baked shape term, or a magic computed for the wrong
+    divisor, would map work items to the wrong (qb, hq, bt) for every config but the
+    first compiled -- duplicated or skipped tiles that only the numeric check sees.
+    The configs straddle NP (W < NP, NP < W < 2*NP, W > 2*NP, W % NP != 0) so the
+    grid-stride bound is exercised with idle CTAs, ragged tails and multiple trips.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx942.attention_dense import _DENSE_LAUNCHER_CACHE
+
+    d = 128
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+
+    specs = [
+        dataclasses.replace(
+            _as_gfx942_spec(
+                _spec(
+                    dtype,
+                    d,
+                    hq,
+                    hkv,
+                    True,
+                    batch=b,
+                    sq=s,
+                    sliding_window=window,
+                    persist_decode=persist_decode,
+                )
+            ),
+            interleave=interleave,
+        )
+        for b, s, hq, hkv in _PERSIST_CONFIGS
+    ]
+
+    # Preconditions: persistent, on the runtime path, the pinned order, one key --
+    # and the configs really straddle NP, or the grid-stride claims are vacuous.
+    assert all(
+        s.persistent and s.runtime_shape for s in specs
+    ), "a config left the persistent runtime-shape path"
+    assert {s.resolved_persist_decode for s in specs} == {persist_decode}
+    assert all(s.fastdiv_divisors for s in specs), "persistent decode has no fastdiv"
+    np_ = specs[0].num_persistent
+    work = [(s.seqlen_q // s.block_m) * s.num_query_heads * s.batch for s in specs]
+    assert min(work) < np_ and max(work) > 2 * np_, (work, np_)
+    assert any(w % np_ for w in work), (work, np_)
+    keys = [attention_dense_cache_key(s, arch="gfx942") for s in specs]
+    assert (
+        len(set(keys)) == 1
+    ), f"persistent configs {_PERSIST_CONFIGS} did not share a cache key"
+
+    _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
+    before = set(_DENSE_LAUNCHER_CACHE)
+
+    launchers = []
+    for (B, S, hq, hkv), spec in zip(_PERSIST_CONFIGS, specs):
+        torch.manual_seed(0)
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+        # NaN-filled so a work item the decode skips cannot pass as stale zeros.
+        out = torch.full((B, S, hq, d), float("nan"), device="cuda", dtype=tdt)
+
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        launchers.append(_launcher_for(spec))
+
+        qi = torch.arange(S, device="cuda").view(-1, 1)
+        ki = torch.arange(S, device="cuda").view(1, -1)
+        keep = ki <= qi
+        if window:
+            keep &= ki > qi - window
+        rep = hq // hkv
+        ref = F.scaled_dot_product_attention(
+            q.transpose(1, 2).float(),
+            k.transpose(1, 2).float().repeat_interleave(rep, dim=1),
+            v.transpose(1, 2).float().repeat_interleave(rep, dim=1),
+            attn_mask=keep,
+            scale=scale,
+        ).transpose(1, 2)
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < tol, (
+            f"persist {persist_decode}{'+intl' if interleave else ''} "
+            f"swa{window} B={B} S={S} Hq={hq} Hkv={hkv}: "
+            f"max_abs={max_abs:.3e} >= {tol}"
+        )
+
+    assert launchers[0] is not None, (
+        "no launcher cached after a successful run; _DENSE_LAUNCHER_CACHE is no "
+        "longer keyed by attention_dense_cache_key and this test is blind"
+    )
+    assert all(lau is launchers[0] for lau in launchers), (
+        f"persistent configs {_PERSIST_CONFIGS} share a cache key but were served "
+        "by DIFFERENT launcher objects -- the persistent kernel recompiled per config"
+    )
+    assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (
+        "persistent configs on the runtime path added more than one cache entry: "
+        f"{sorted(set(_DENSE_LAUNCHER_CACHE) - before)}"
     )
 
 

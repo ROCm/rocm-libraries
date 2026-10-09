@@ -175,9 +175,11 @@ Tests:
     category: stress
     arguments:
       - { N: 2147483649, incx: 1, incy: 1, batch_count: 1 }
+      - { N: 2147483649, incx: -1, incy: -1, batch_count: 1 }
       - { N: 2, incx: 2147483649, incy: 1, batch_count: 1 }
       - { N: 2, incx: 1, incy: 2147483649, batch_count: 1 }
       - { N: 3, incx: 1, incy: 1, stride_x: 3, stride_y: 3, batch_count: *c_grid_yz_require_passes }
+      - { N: 1, incx: 1, incy: -2147483649, stride_x: 1, stride_y: 1, batch_count: *c_grid_yz_require_passes }
       - { N: 2, incx: -2147483649, incy:  1, batch_count: 1 }
       - { N: 2, incx:  1, incy: -2147483649, batch_count: 1 }
     api: [ C_64 ]

@@ -1,0 +1,17 @@
+{% extends "common/base.cpp.jinja2" %}
+
+{% block benchmarking_include %}
+#include "benchmark_{{algo_type}}_transform.hpp"
+{% endblock %}
+
+{% block config_constructor -%}
+rocprim::transform_pointer_config<{{ config.block_size_x }}, {{ config.ipt }}, ROCPRIM_GRID_SIZE_LIMIT, {{ config.load_type }}>
+{%- endblock %}
+
+{% block type_definitions %}
+using value_type = {{ value_type }};
+{% endblock %}
+
+{% block benchmark_type %}
+using benchmark_type = {{algo_type}}_transform_benchmark<value_type, true, false, config>;
+{% endblock %}
