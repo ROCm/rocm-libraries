@@ -8,6 +8,7 @@
  *   ------------------------------    --------------------------------------
  *   TDM_PAD_INTERVAL_MAX           ->  ROCKE_TDM_PAD_INTERVAL_MAX
  *   TDM_PAD_AMOUNT_MAX             ->  ROCKE_TDM_PAD_AMOUNT_MAX
+ *   TDM_MAX_DIM0_STRIDE            ->  ROCKE_TDM_MAX_DIM0_STRIDE
  *   TDM_MAX_DIM1_STRIDE            ->  ROCKE_TDM_MAX_DIM1_STRIDE
  *   tdm_data_size_code()           ->  rocke_tdm_data_size_code()
  *   encode_tdm_padding()           ->  rocke_tdm_encode_padding()
@@ -35,7 +36,10 @@ extern "C" {
 
 #define ROCKE_TDM_PAD_INTERVAL_MAX 7
 #define ROCKE_TDM_PAD_AMOUNT_MAX 127
-#define ROCKE_TDM_MAX_DIM1_STRIDE 0xFFFF
+/* Both tensor strides are 48-bit fields; only their halves are split
+ * differently (see rocke_tdm_pack_group1_2d). */
+#define ROCKE_TDM_MAX_DIM0_STRIDE ((int64_t)((1LL << 48) - 1))
+#define ROCKE_TDM_MAX_DIM1_STRIDE ((int64_t)((1LL << 48) - 1))
 
 rocke_status_t
     rocke_tdm_data_size_code(int64_t elem_bytes, int* out_code, char* reason, size_t reason_cap);

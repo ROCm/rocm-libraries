@@ -25,10 +25,11 @@ TDM_PAD_INTERVAL_MAX = 7
 TDM_PAD_AMOUNT_MAX = 127
 BYTES_PER_DWORD = 4
 
-# ``tensor_dim1_stride_lo`` is a 16-bit field, so CK's 64-bit assignment drops
-# bits [16, 32) of the dim-1 stride. Reproduced verbatim (see module docstring),
-# which caps the usable leading dimension.
-TDM_MAX_DIM1_STRIDE = 0xFFFF
+# Both tensor strides are 48-bit fields; the halves are just split differently
+# (see ``pack_tdm_group1_2d``). dim1 is the wider-``hi`` case: 16 bits in sgpr6
+# plus all 32 of sgpr7.
+TDM_MAX_DIM0_STRIDE = (1 << 48) - 1
+TDM_MAX_DIM1_STRIDE = (1 << 48) - 1
 
 # (word, lsb, width) for every field this builder sets. Groups 2/3/4 are zero
 # for rank<=2 non-gather transfers and have no table.
@@ -209,15 +210,22 @@ def pack_tdm_group1_2d(
     so a row-major ``MxK`` tensor wants ``dim0_stride = K`` and
     ``dim1_stride = 1``, matching the unreversed stride array CK hands the
     descriptor. Measured directly on gfx1250: the observed row step equals the
-    slot-0 value exactly, and slots for dim1 have no effect at rank 2. Strides
-    and extents are in elements, not bytes.
+    slot-0 value exactly, and slots for dim1 have no effect at rank 2.
+
+    Extents are in elements. ``dim0_stride`` is in elements; ``dim1_stride`` is
+    in units of ``dim0_stride``, per the gfx1250 SPG note CK carries in
+    ``buffer_view.hpp``. At rank 2 the only sensible value is 1, under which
+    both readings agree -- the distinction only starts to matter above rank 2.
     """
     dim0_stride = int(dim0_stride)
     dim1_stride = int(dim1_stride)
+    if dim0_stride > TDM_MAX_DIM0_STRIDE:
+        raise ValueError(
+            f"TDM dim0 stride {dim0_stride} exceeds the 48-bit descriptor field"
+        )
     if dim1_stride > TDM_MAX_DIM1_STRIDE:
         raise ValueError(
-            f"TDM dim1 stride {dim1_stride} exceeds the {TDM_MAX_DIM1_STRIDE}-element "
-            "field; the descriptor truncates it to 16 bits"
+            f"TDM dim1 stride {dim1_stride} exceeds the 48-bit descriptor field"
         )
     tensor_dim0 = int(tensor_dim0)
     tensor_dim1 = int(tensor_dim1)
@@ -241,11 +249,18 @@ def pack_tdm_group1_2d(
             "tile_dim0": int(tile_dim0),
             "tile_dim1": int(tile_dim1),
             "tile_dim2": 0,
+            # The two strides are both 48 bits but are NOT split alike, which is
+            # the trap. dim0 is lo(32) + hi(16), so it splits at bit 32; dim1 is
+            # lo(16) + hi(32), so it splits at bit 16. dim1 is the only field in
+            # the descriptor where lo is narrower than hi -- everywhere else
+            # lo >= hi and the symmetric shift is right, which is what makes the
+            # wrong one read as correct code. Splitting dim1 at 32 leaves lo
+            # correct by accidental truncation and silently drops bits [16, 48)
+            # of the stride: masked below 2**16, a wild DMA address above it.
             "tensor_dim0_stride_lo": dim0_stride & 0xFFFFFFFF,
             "tensor_dim0_stride_hi": (dim0_stride >> 32) & 0xFFFF,
-            # CK truncates the dim-1 stride to 16 bits here; see TDM_MAX_DIM1_STRIDE.
             "tensor_dim1_stride_lo": dim1_stride & 0xFFFF,
-            "tensor_dim1_stride_hi": (dim1_stride >> 32) & 0xFFFFFFFF,
+            "tensor_dim1_stride_hi": (dim1_stride >> 16) & 0xFFFFFFFF,
         },
     )
 
@@ -290,9 +305,10 @@ def build_tdm_descriptor_2d(
     extents are IR values. ``dim0_stride`` (the row pitch) may be an int or an
     i32 IR value; a runtime pitch fills only the low 32 bits of its 48-bit
     slot. Everything else, ``dim1_stride`` included, is a compile-time
-    constant folded into the static word pattern; ``dim1_stride`` must not
-    exceed :data:`TDM_MAX_DIM1_STRIDE`. Returns ``(d0, d1, d2, d3, d4)`` ready
-    for :meth:`IRBuilder.tensor_load_to_lds`.
+    constant folded into the static word pattern; both strides must fit their
+    48-bit fields (:data:`TDM_MAX_DIM0_STRIDE`, :data:`TDM_MAX_DIM1_STRIDE`).
+    Returns ``(d0, d1, d2, d3, d4)`` ready for
+    :meth:`IRBuilder.tensor_load_to_lds`.
     """
     from rocke.core.ir import I32
 

@@ -182,10 +182,72 @@ static void test_group1(void)
     CHECK(strcmp(reason, "TDM field 'tile_dim0' is 16 bits, cannot hold 65536 (0x10000)") == 0,
           "tile_dim0 overflow message matches Python");
 
+    /* dim1 is the one field where lo is narrower than hi: lo is 16 bits in the
+     * high half of word 6, hi is all 32 bits of word 7, so the split is at bit
+     * 16. Splitting at 32 -- what every other field wants -- leaves lo correct
+     * by accidental truncation and drops bits [16, 48). Every value below
+     * 2**16 encodes the same either way, so only a wider stride separates
+     * them. Mirrors test_tdm.py::test_dim1_stride_splits_at_bit_16. */
+    {
+        static const int64_t kDim1[] = {0x10000, 0x12345, 1 << 20, (1LL << 48) - 1};
+        for(size_t i = 0; i < sizeof kDim1 / sizeof kDim1[0]; ++i)
+        {
+            uint64_t s = (uint64_t)kDim1[i];
+            a = base_group1();
+            a.dim1_stride = kDim1[i];
+            CHECK(rocke_tdm_pack_group1_2d(&a, w, NULL, 0) == ROCKE_OK, "pack wide dim1 stride");
+            CHECK(field(w, 6, 16, 16) == (uint32_t)(s & 0xFFFF), "dim1_stride_lo splits at bit 16");
+            CHECK(field(w, 7, 0, 32) == (uint32_t)(s >> 16), "dim1_stride_hi takes bits [16, 48)");
+            /* The hardware reassembles lo | hi<<16; the round-trip must be exact. */
+            CHECK((((uint64_t)field(w, 7, 0, 32) << 16) | field(w, 6, 16, 16)) == s,
+                  "dim1 stride round-trips");
+        }
+    }
+
+    /* dim0 is the opposite split: lo(32) in word 5, hi(16) in word 6. */
+    {
+        static const int64_t kDim0[] = {0x10000, 0x123456789LL, (1LL << 48) - 1};
+        for(size_t i = 0; i < sizeof kDim0 / sizeof kDim0[0]; ++i)
+        {
+            uint64_t s = (uint64_t)kDim0[i];
+            a = base_group1();
+            a.dim0_stride = kDim0[i];
+            CHECK(rocke_tdm_pack_group1_2d(&a, w, NULL, 0) == ROCKE_OK, "pack wide dim0 stride");
+            CHECK(field(w, 5, 0, 32) == (uint32_t)(s & 0xFFFFFFFF),
+                  "dim0_stride_lo splits at bit 32");
+            CHECK(field(w, 6, 0, 16) == (uint32_t)(s >> 32), "dim0_stride_hi takes bits [32, 48)");
+            CHECK((((uint64_t)field(w, 6, 0, 16) << 32) | field(w, 5, 0, 32)) == s,
+                  "dim0 stride round-trips");
+        }
+    }
+
+    /* Word 6 packs dim0's high half and dim1's low half side by side. */
     a = base_group1();
-    a.dim1_stride = 1 << 17;
-    CHECK(rocke_tdm_pack_group1_2d(&a, w, NULL, 0) == ROCKE_ERR_VALUE,
-          "dim1_stride overflow rejected");
+    a.dim0_stride = (1LL << 48) - 1;
+    a.dim1_stride = (1LL << 48) - 1;
+    CHECK(rocke_tdm_pack_group1_2d(&a, w, NULL, 0) == ROCKE_OK, "pack both strides wide");
+    CHECK(field(w, 6, 0, 16) == 0xFFFF, "dim0 high half of word 6");
+    CHECK(field(w, 6, 16, 16) == 0xFFFF, "dim1 low half of word 6");
+
+    a = base_group1();
+    a.dim1_stride = 1LL << 48;
+    reason[0] = 0;
+    CHECK(rocke_tdm_pack_group1_2d(&a, w, reason, sizeof reason) == ROCKE_ERR_VALUE,
+          "dim1_stride past 48 bits rejected");
+    CHECK(strcmp(reason,
+                 "TDM dim1 stride 281474976710656 exceeds the 48-bit descriptor field")
+              == 0,
+          "dim1_stride overflow message matches Python");
+
+    a = base_group1();
+    a.dim0_stride = 1LL << 48;
+    reason[0] = 0;
+    CHECK(rocke_tdm_pack_group1_2d(&a, w, reason, sizeof reason) == ROCKE_ERR_VALUE,
+          "dim0_stride past 48 bits rejected");
+    CHECK(strcmp(reason,
+                 "TDM dim0 stride 281474976710656 exceeds the 48-bit descriptor field")
+              == 0,
+          "dim0_stride overflow message matches Python");
 }
 
 int main(void)

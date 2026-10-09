@@ -283,18 +283,29 @@ rocke_status_t rocke_tdm_pack_group1_2d(const rocke_tdm_group1_2d_args_t* a,
     rocke_status_t st;
     int data_size;
     int i;
+    if(a->dim0_stride > ROCKE_TDM_MAX_DIM0_STRIDE)
+        return tdm_fail(reason,
+                        reason_cap,
+                        "TDM dim0 stride %lld exceeds the 48-bit descriptor field",
+                        (long long)a->dim0_stride);
     if(a->dim1_stride > ROCKE_TDM_MAX_DIM1_STRIDE)
         return tdm_fail(reason,
                         reason_cap,
-                        "TDM dim1 stride %lld exceeds the %d-element field; the descriptor "
-                        "truncates it to 16 bits",
-                        (long long)a->dim1_stride,
-                        ROCKE_TDM_MAX_DIM1_STRIDE);
+                        "TDM dim1 stride %lld exceeds the 48-bit descriptor field",
+                        (long long)a->dim1_stride);
     st = rocke_tdm_data_size_code(a->elem_bytes, &data_size, reason, reason_cap);
     if(st != ROCKE_OK)
         return st;
     /* Same field order as the Python values dict, so the first bad field wins.
-     * CK truncates the dim-1 stride to 16 bits; see ROCKE_TDM_MAX_DIM1_STRIDE. */
+     *
+     * The two strides are both 48 bits but are NOT split alike, which is the
+     * trap. dim0 is lo(32) + hi(16), so it splits at bit 32; dim1 is lo(16) +
+     * hi(32), so it splits at bit 16. dim1 is the only field in the descriptor
+     * where lo is narrower than hi -- everywhere else lo >= hi and the
+     * symmetric shift is right, which is what makes the wrong one read as
+     * correct code. Splitting dim1 at 32 leaves lo correct by accidental
+     * truncation and silently drops bits [16, 48) of the stride: masked below
+     * 2**16, a wild DMA address above it. */
     if((st = tdm_put(w, &k_g1_workgroup_mask, a->workgroup_mask, reason, reason_cap)) != ROCKE_OK
        || (st = tdm_put(w, &k_g1_data_size, data_size, reason, reason_cap)) != ROCKE_OK
        || (st = tdm_put(
@@ -340,7 +351,7 @@ rocke_status_t rocke_tdm_pack_group1_2d(const rocke_tdm_group1_2d_args_t* a,
               != ROCKE_OK
        || (st = tdm_put(w,
                         &k_g1_tensor_dim1_stride_hi,
-                        (a->dim1_stride >> 32) & 0xFFFFFFFF,
+                        (a->dim1_stride >> 16) & 0xFFFFFFFF,
                         reason,
                         reason_cap))
               != ROCKE_OK)

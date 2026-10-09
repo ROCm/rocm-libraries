@@ -130,12 +130,49 @@ class TestTdmGroup1(unittest.TestCase):
         self.assertEqual(_field(words, 0, 19, 1), 0)  # iterate_enable
         self.assertEqual(_field(words, 0, 21, 1), 0)  # early_timeout
 
+    def test_dim1_stride_splits_at_bit_16(self):
+        """dim1 is the one field where ``lo`` is narrower than ``hi``.
+
+        ``lo`` is 16 bits in the high half of word 6; ``hi`` is all 32 bits of
+        word 7. Splitting at 32 -- the symmetric-looking choice every other
+        field wants -- leaves ``lo`` correct by accidental truncation and
+        silently drops bits [16, 48). Every value below 2**16 encodes the same
+        under both rules, so only a wider stride can tell them apart.
+        """
+        for stride in (0x1_0000, 0x1_2345, 1 << 20, (1 << 48) - 1):
+            with self.subTest(stride=stride):
+                words = self._pack(dim1_stride=stride)
+                lo = _field(words, 6, 16, 16)
+                hi = _field(words, 7, 0, 32)
+                self.assertEqual(lo, stride & 0xFFFF)
+                self.assertEqual(hi, stride >> 16)
+                # The hardware reassembles lo | hi<<16; round-trip must be exact.
+                self.assertEqual(lo | (hi << 16), stride)
+
+    def test_dim0_stride_splits_at_bit_32(self):
+        """dim0 is the opposite split: lo(32) in word 5, hi(16) in word 6."""
+        for stride in (0x1_0000, 0x1_2345_6789, (1 << 48) - 1):
+            with self.subTest(stride=stride):
+                words = self._pack(dim0_stride=stride)
+                lo = _field(words, 5, 0, 32)
+                hi = _field(words, 6, 0, 16)
+                self.assertEqual(lo, stride & 0xFFFFFFFF)
+                self.assertEqual(hi, stride >> 32)
+                self.assertEqual(lo | (hi << 32), stride)
+
+    def test_strides_do_not_collide_in_word_6(self):
+        """Word 6 packs dim0's high half and dim1's low half side by side."""
+        words = self._pack(dim0_stride=(1 << 48) - 1, dim1_stride=(1 << 48) - 1)
+        self.assertEqual(_field(words, 6, 0, 16), 0xFFFF)
+        self.assertEqual(_field(words, 6, 16, 16), 0xFFFF)
+
     def test_rejects_oversized_fields(self):
         with self.assertRaises(ValueError):
             self._pack(tile_dim0=1 << 16)
         with self.assertRaises(ValueError):
-            # dim1_stride lands in a 16-bit field that silently truncates.
-            self._pack(dim1_stride=1 << 17)
+            self._pack(dim0_stride=1 << 48)
+        with self.assertRaises(ValueError):
+            self._pack(dim1_stride=1 << 48)
 
 
 if __name__ == "__main__":
