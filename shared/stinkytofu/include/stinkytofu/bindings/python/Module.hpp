@@ -124,24 +124,34 @@
 // knobs via SchedulingKnobHeuristics before DAG scheduling / cluster-barrier insertion (user value
 // wins; degenerate main-loop IR falls back to today's static HW/CDNA5/Rule3 defaults). See
 // SchedulingKnobHeuristics.hpp.
-#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                                                    \
-    X(LockDsReadOrder, bool, true)                                                              \
-    X(EvenSpreadFillers, bool, true)                                                            \
-    X(DsSlotFirst, bool, true)            /* saturated ds stream: ds_load before fillers */     \
-    X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */ \
-    X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */ \
-    X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                  \
-    X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                 \
-    X(DsReadThrottleTransitionFactor, double, 1.0)                                              \
-    X(DsReadThrottleTransitionEntries, int, 0)                                                  \
-    X(DsReadThrottleLatency, int, -1)                                                           \
-    X(DsIssueCapSpanCycles, int, 0) /* 0 = one batch window */                                  \
-    X(DsIssueCapMode, int, 0)       /* 0 Sliding, 1 Periodic */                                 \
-    X(DsReadPerCap, int, -1)                                                                    \
-    X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */                           \
-    X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                             \
-    X(TensorLoadDsLoadGapCycles, int, 64)                                                       \
-    X(BarrierHalfSlack, int, 0) /* WMMA windows inside a signal/wait pair; 0 = together */
+#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                                                      \
+    X(LockDsReadOrder, bool, true)                                                                \
+    X(EvenSpreadFillers, bool, true)                                                              \
+    X(DsSlotFirst, bool, true)            /* saturated ds stream: ds_load before fillers */       \
+    X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */   \
+    X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */   \
+    X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                    \
+    X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                   \
+    X(DsReadThrottleTransitionFactor, double, 1.0)                                                \
+    X(DsReadThrottleTransitionEntries, int, 0)                                                    \
+    X(DsReadThrottleLatency, int, -1)                                                             \
+    X(DsIssueCapSpanCycles, int, 0) /* 0 = one batch window */                                    \
+    X(DsIssueCapMode, int, 0)       /* 0 Sliding, 1 Periodic */                                   \
+    X(DsReadPerCap, int, -1)                                                                      \
+    X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */                             \
+    X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                               \
+    X(ClusterBarrierWaitHideWmmas, int, 0) /* >0: hide the cluster wait behind N WMMAs */         \
+    X(TensorLoadDsLoadGapCycles, int, 64)                                                         \
+    X(BarrierHalfSlack, int, 0)        /* WMMA windows inside a signal/wait pair; 0 = together */ \
+    X(WmmaQueueLowCoverCycles, int, 0) /* >0: hysteresis low mark for WmmaQueueCoverCycles */     \
+    X(BarrierAfterShiftWmmas, int, 0)  /* shift of tensor_load-feeding barrier groups */          \
+    X(BarrierBeforeShiftWmmas, int, 0) /* shift of ds_load-feeding barrier groups */              \
+    X(DsCapWindow1Begin, int, -1) /* ds cap window [Begin,End) in region WMMA index; -1 = off */  \
+    X(DsCapWindow1End, int, -1)                                                                   \
+    X(DsCapWindow2Begin, int, -1)                                                                 \
+    X(DsCapWindow2End, int, -1)                                                                   \
+    X(DsCapWindowPerCap, int, -1) /* >0: ds cap per span inside the windows; 0 = off; -1 = unset  \
+                                     (TDM kernels: policy [8,40) x1) */
 
 namespace stinkytofu {
 /**

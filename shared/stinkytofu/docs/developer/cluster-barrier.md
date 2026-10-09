@@ -207,6 +207,31 @@ cluster wait into or out of a live SCC range.
     tensor_load_to_lds ...
 ```
 
+### Cluster wait slot (`ClusterBarrierWaitHideWmmas`)
+
+Off by default (0), and then nothing below applies. The cluster wait is not in
+the scheduler's DAG, so the scheduler cannot reserve WMMA cover for its stall.
+With N > 0 (and `ClusterBarrier`):
+
+1. `StinkyDAGSchedulerPass` plants a `CLUSTER_WAIT_SLOT` pseudo-instruction
+   (carries `ClusterWaitSlotData{trigger}`, emits no assembly) before each Rule 3
+   trigger in a loop body: a movable `s_barrier_signal -1` ahead of a
+   `tensor_load_to_lds`. A DAG edge makes it precede the trigger, and its WMMA
+   threshold is `max(0, threshold(trigger) - N)`, so the barrier queue promotes it
+   N WMMAs before the `-1` pair.
+2. This pass puts the real `s_barrier_wait -3` at the slot instead of above the
+   trigger's drains, measures the signal lead from that spot, and deletes the
+   slot. A trigger whose slot is not usable (another workgroup barrier or a
+   segment edge between them, or SCC live at the slot) keeps the original
+   placement. Slots never reach the emitter: every one is erased at the end of
+   `run`, and the option being 0 (pass argument or `DagFeatures`) ignores them.
+3. A re-run recognizes a cluster wait anywhere between the previous workgroup
+   barrier and the trigger, not only an adjacent one (option on only).
+
+Not covered: the loop-split copy (`ClusterBarrierSplitWaveLoop`) keeps the
+original placement, since its slot names the original trigger; and
+`WaitAwareScheduleRepairPass` may still nudge the slot by a WMMA or so.
+
 ---
 
 ## Rule 4 -- Tail-loop cluster handshake (paired)

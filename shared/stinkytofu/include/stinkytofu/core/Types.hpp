@@ -133,6 +133,23 @@ struct PassFeatureConfig {
         /// ready WMMA goes first so the pipe never runs dry. Picks the scheduler is forced
         /// to make (a promoted barrier) are not held. 0 = off; ignored at depth 1.
         int wmmaQueueCoverCycles = 0;
+        /// Experimental hysteresis for the cover: non-WMMA picks need only this much cover
+        /// until it drops below it, then the queue refills to wmmaQueueCoverCycles first.
+        /// 0, or >= wmmaQueueCoverCycles = single threshold.
+        int wmmaQueueLowCoverCycles = 0;
+        /// Experimental: WMMAs added to every after (tensor_load-feeding) / before (ds_load-
+        /// feeding) barrier-group threshold at the end of onInitRegion; may be negative.
+        /// Clamped to [0, region WMMAs]. 0 = off.
+        int barrierAfterShiftWmmas = 0;
+        int barrierBeforeShiftWmmas = 0;
+        /// Experimental: inside half-open ranges [Begin, End) of the region's issued-WMMA count,
+        /// the ds_load cap is min(dsCapWindowPerCap, normal cap) per span. Window -1 = unused;
+        /// dsCapWindowPerCap 0 = off.
+        int dsCapWindow1Begin = -1;
+        int dsCapWindow1End = -1;
+        int dsCapWindow2Begin = -1;
+        int dsCapWindow2End = -1;
+        int dsCapWindowPerCap = 0;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
         /// WMMA windows by the region's matrix latency. 0 disables the extra
@@ -160,6 +177,11 @@ struct PassFeatureConfig {
         /// CDNA5ReadyQueue paths that enforce it (see
         /// ReadyQueue::clusterBarrierEnabled).
         bool clusterBarrier = false;
+        /// Mirrors ModuleOptions::ClusterBarrierWaitHideWmmas (the backend sets it only with
+        /// ClusterBarrier). N > 0: plant a placeholder before each Rule 3 trigger and schedule it N
+        /// WMMAs ahead of the trigger's workgroup barrier, so the cluster wait is hidden behind N
+        /// WMMAs. 0 = off.
+        int clusterBarrierWaitHideWmmas = 0;
         /// Mirrors ModuleOptions::LockDsReadOrder. Defaults on: ds_loads that
         /// share a PSEUDO memory token are chained into dsReadPriority order.
         /// Loads on different tokens are not ordered against each other. Set

@@ -1014,6 +1014,39 @@ bool isImmediatelyPrecededByClusterBarrierWait(StinkyInstruction* anchor) {
     return false;
 }
 
+/// What stands between \p trigger and the previous segment edge or workgroup barrier: the
+/// CLUSTER_WAIT_SLOT the scheduler left for it, and whether a cluster wait is already there
+/// (a re-run; that wait is no longer adjacent to the trigger once the slot moved it up).
+struct TriggerWaitWindow {
+    StinkyInstruction* slot = nullptr;
+    bool hasClusterWait = false;
+};
+
+TriggerWaitWindow scanTriggerWaitWindow(StinkyInstruction* trigger) {
+    TriggerWaitWindow window;
+    BasicBlock* parent = trigger->getParent();
+    if (parent == nullptr) return window;
+    for (auto it = BasicBlock::iterator(trigger); it != parent->begin();) {
+        --it;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isSegmentBoundary(*inst) || isWorkgroupBarrierSignal(*inst) ||
+            isWorkgroupBarrierWait(*inst))
+            break;
+        if (isClusterBarrierWait(*inst)) {
+            window.hasClusterWait = true;
+            break;
+        }
+        if (!isClusterWaitSlot(*inst)) continue;
+        const auto* data = inst->getModifier<ClusterWaitSlotData>();
+        if (data != nullptr && data->trigger == trigger) {
+            window.slot = inst;
+            break;
+        }
+    }
+    return window;
+}
+
 struct PreLoopSignalAnchor {
     IRBase* anchor = nullptr;
     /// True when the climb found no workgroup barrier to sit behind. Only wave 0
@@ -1525,11 +1558,12 @@ class InsertClusterBarrierPassImpl : public Pass {
     static char ID;
 
     InsertClusterBarrierPassImpl(bool streamKMulticast, int pgrValue, int rule3SignalLeadCycles,
-                                 bool splitWaveLoop)
+                                 bool splitWaveLoop, int waitHideWmmas)
         : streamKMulticast_(streamKMulticast),
           pgrValue_(pgrValue),
           rule3SignalLeadCycles_(std::max(0, rule3SignalLeadCycles)),
-          splitWaveLoop_(splitWaveLoop) {}
+          splitWaveLoop_(splitWaveLoop),
+          waitHideWmmas_(std::max(0, waitHideWmmas)) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -1542,6 +1576,11 @@ class InsertClusterBarrierPassImpl : public Pass {
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         const auto& arch = passCtx.getGemmTileConfig().arch;
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+
+        // Off (0): slots are ignored and deleted below, so the output is the original one.
+        const bool slotsEnabled =
+            std::max(waitHideWmmas_,
+                     passCtx.getPassFeatureConfig().dagFeatures.clusterBarrierWaitHideWmmas) > 0;
 
         static const std::unordered_map<const StinkyInstruction*, uint32_t> kEmptyCycleMap;
         const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap =
@@ -1603,6 +1642,8 @@ class InsertClusterBarrierPassImpl : public Pass {
                 // instruction for the cycle-lead measurement.
                 IRBase* waitAnchor = nullptr;
                 StinkyInstruction* waitAnchorInst = nullptr;
+                // waitAnchor is the scheduler's CLUSTER_WAIT_SLOT, not the trigger's drains.
+                bool atSlot = false;
             };
             std::vector<TriggerSite> triggers;
             std::unordered_set<StinkyInstruction*> seenTriggers;
@@ -1627,6 +1668,9 @@ class InsertClusterBarrierPassImpl : public Pass {
                     if (trigger == nullptr) continue;
                     if (!seenTriggers.insert(trigger).second) continue;
                     if (isImmediatelyPrecededByClusterBarrierWait(trigger)) continue;
+                    const TriggerWaitWindow window =
+                        slotsEnabled ? scanTriggerWaitWindow(trigger) : TriggerWaitWindow{};
+                    if (window.hasClusterWait) continue;
 
                     // Rule 3 speaks for the loop body and nowhere else. Outside a loop
                     // there is no next trip to hand a token to and no exit to compensate
@@ -1637,8 +1681,16 @@ class InsertClusterBarrierPassImpl : public Pass {
                     // already anchored on this workgroup signal.
                     IRBase* waitAnchor = hoistAboveLeadingWaitCnts(trigger);
                     auto* hoistedInst = dyn_cast<StinkyInstruction>(waitAnchor);
-                    triggers.push_back({trigger, segBegin, waitAnchor,
-                                        (hoistedInst != nullptr) ? hoistedInst : trigger});
+                    TriggerSite site{trigger, segBegin, waitAnchor,
+                                     (hoistedInst != nullptr) ? hoistedInst : trigger};
+                    // The scheduler hid the wait behind WMMAs at the slot. SCC live there
+                    // would make the signal's wave-id compare unplaceable: keep the old spot.
+                    if (window.slot != nullptr && !isSccLiveIn(window.slot)) {
+                        site.waitAnchor = window.slot;
+                        site.waitAnchorInst = firstRealInstAfter(window.slot);
+                        site.atSlot = true;
+                    }
+                    triggers.push_back(site);
 
                     // Record the instruction right after this cooperative
                     // tensor_load group so a producer-side tensor drain can be
@@ -1723,7 +1775,12 @@ class InsertClusterBarrierPassImpl : public Pass {
                                 "spot for the compensating signal");
                     }
                 }
-                pending.emplace_back(trigger, found.anchor, site.waitAnchor,
+                // A climb that stops on the instruction after the slot would put the signal
+                // below its wait.
+                IRBase* signalAnchor = found.anchor;
+                if (site.atSlot && signalAnchor == site.waitAnchorInst)
+                    signalAnchor = site.waitAnchor;
+                pending.emplace_back(trigger, signalAnchor, site.waitAnchor,
                                      handshakeKindFor(head));
             }
 
@@ -1804,6 +1861,15 @@ class InsertClusterBarrierPassImpl : public Pass {
             }
         }
 
+        // Every slot is gone by now: used as an anchor above, or never usable.
+        std::vector<StinkyInstruction*> slots;
+        for (BasicBlock& bb : func)
+            for (auto it = bb.begin(); it != bb.end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst != nullptr && isClusterWaitSlot(*inst)) slots.push_back(inst);
+            }
+        for (StinkyInstruction* slot : slots) slot->erase();
+
         // The gates above carry placeholder indices (see makeSymbolicSgpr).
         // Resolve them here: downstream, a register is its index alone.
         std::vector<SymbolicOperandFix> fixes;
@@ -1827,6 +1893,7 @@ class InsertClusterBarrierPassImpl : public Pass {
     const int pgrValue_ = 1;
     const int rule3SignalLeadCycles_ = 100;
     const bool splitWaveLoop_ = false;
+    const int waitHideWmmas_ = 0;
 };
 
 char InsertClusterBarrierPassImpl::ID = 0;
@@ -1834,10 +1901,10 @@ char InsertClusterBarrierPassImpl::ID = 0;
 }  // namespace
 
 std::unique_ptr<Pass> createInsertClusterBarrierPass(bool streamKMulticast, int pgrValue,
-                                                     int rule3SignalLeadCycles,
-                                                     bool splitWaveLoop) {
-    return std::make_unique<InsertClusterBarrierPassImpl>(streamKMulticast, pgrValue,
-                                                          rule3SignalLeadCycles, splitWaveLoop);
+                                                     int rule3SignalLeadCycles, bool splitWaveLoop,
+                                                     int waitHideWmmas) {
+    return std::make_unique<InsertClusterBarrierPassImpl>(
+        streamKMulticast, pgrValue, rule3SignalLeadCycles, splitWaveLoop, waitHideWmmas);
 }
 
 namespace cluster_barrier {

@@ -28,6 +28,7 @@
 #include <iostream>
 #include <sstream>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "TestHelpers.hpp"
@@ -1825,6 +1826,107 @@ TEST_F(DAGSchedulerPassTest, DsIssueCapPeriodic_NonDsSeparatesPeriods) {
     EXPECT_EQ(shape, "WddddWddddWddddW");
 }
 
+// DsCapWindow: inside half-open ranges of the region's issued-WMMA count the ds cap is
+// min(DsCapWindowPerCap, normal cap); outside, the normal cap is untouched.
+// 24 ds_loads and 16 WMMAs; shape string uses 'W' for a WMMA and 'd' for a ds_load.
+struct DsCapWindowArgs {
+    int perCap = 0, cap = 4, b1 = -1, e1 = -1, b2 = -1, e2 = -1;
+};
+
+// ds_loads issued while the WMMA count is in [b, e) (the same counter the cap reads).
+static std::string dsCapWindowSlice(const std::string& shape, int b, int e) {
+    std::string out;
+    int w = 0;
+    for (char c : shape) {
+        if (c == 'W')
+            ++w;
+        else if (w >= b && w < e)
+            out += c;
+    }
+    return out;
+}
+
+static bool dsCapWindowHasBurst(const std::string& shape, int b, int e) {
+    std::string slice;
+    int w = 0;
+    for (char c : shape) {
+        if (c == 'W') {
+            ++w;
+            slice += (w > b && w <= e) ? "|" : "";
+        } else if (w >= b && w < e) {
+            slice += c;
+        }
+    }
+    return slice.find("dd") != std::string::npos;
+}
+
+TEST_F(DAGSchedulerPassTest, DsCapWindow_ShapeHelpers) {
+    EXPECT_EQ(dsCapWindowSlice("WddWdW", 1, 2), "dd");
+    EXPECT_TRUE(dsCapWindowHasBurst("WddWdW", 1, 2));
+    EXPECT_FALSE(dsCapWindowHasBurst("WdWdW", 1, 3));
+}
+
+class DsCapWindowTest : public DAGSchedulerPassTest {
+   protected:
+    std::string run(const DsCapWindowArgs& a) {
+        SetUp();
+        for (int i = 0; i < 24; i++) createMovableDsLoad(i * 4, 80, i + 1);
+        for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(200 + 8 * i, 300 + 8 * i);
+        runWithDsCapMode(PassFeatureConfig::DsIssueCapMode::Sliding, [&](PassFeatureConfig& p) {
+            p.dagFeatures.dsReadPerCap = a.cap;
+            p.dagFeatures.dsIssueCapSpanCycles = 8;
+            p.dagFeatures.dsReadQueueDepth = 32;
+            p.dagFeatures.dsReadThrottleLatency = 1;
+            p.dagFeatures.dsCapWindowPerCap = a.perCap;
+            p.dagFeatures.dsCapWindow1Begin = a.b1;
+            p.dagFeatures.dsCapWindow1End = a.e1;
+            p.dagFeatures.dsCapWindow2Begin = a.b2;
+            p.dagFeatures.dsCapWindow2End = a.e2;
+        });
+        std::string shape;
+        for (const std::string& m : mnemonicSequence(*bb))
+            shape += m.find("wmma") != std::string::npos ? 'W' : (m == "ds_load_b128" ? 'd' : '?');
+        return shape;
+    }
+};
+
+// (a) Off: windows without PerCap, or PerCap without windows, equal the plain schedule.
+TEST_F(DsCapWindowTest, OffEqualsExistingSchedule) {
+    const std::string base = run({});
+    EXPECT_EQ(base, "WddddWddddWddddWddddWddddWddddWWWWWWWWWW");
+    EXPECT_EQ(run({0, 4, 4, 8, -1, -1}), base);
+    EXPECT_EQ(run({1, 4, -1, -1, -1, -1}), base);
+    EXPECT_EQ(run({1, 4, -1, 8, -1, -1}), base);  // Begin unset = window unused
+}
+
+// (b) One window: no adjacent ds_loads inside it; the default pattern resumes after it.
+TEST_F(DsCapWindowTest, OneWindowBreaksUpBursts) {
+    const std::string base = run({});
+    const std::string w = run({1, 4, 4, 8, -1, -1});
+    EXPECT_FALSE(dsCapWindowHasBurst(w, 4, 8)) << w;
+    EXPECT_NE(dsCapWindowSlice(w, 4, 8).size(), 0u) << w;
+    // Before the window the schedule is the default one.
+    EXPECT_EQ(w.substr(0, 15), base.substr(0, 15)) << w;
+    EXPECT_NE(w, base);
+    EXPECT_EQ(std::count(w.begin(), w.end(), 'd'), 24);
+    EXPECT_EQ(std::count(w.begin(), w.end(), 'W'), 16);
+}
+
+// (c) Two windows: both are free of bursts, the stretch between them keeps the normal cap.
+TEST_F(DsCapWindowTest, TwoWindows) {
+    const std::string w = run({1, 4, 2, 4, 10, 12});
+    EXPECT_FALSE(dsCapWindowHasBurst(w, 2, 4)) << w;
+    EXPECT_FALSE(dsCapWindowHasBurst(w, 10, 12)) << w;
+    EXPECT_TRUE(dsCapWindowHasBurst(w, 4, 10)) << w;
+    EXPECT_EQ(std::count(w.begin(), w.end(), 'd'), 24);
+}
+
+// (d) A PerCap above the normal cap never loosens anything.
+TEST_F(DsCapWindowTest, LargerPerCapDoesNotLoosen) {
+    EXPECT_EQ(run({9, 4, 4, 8, -1, -1}), run({}));
+    EXPECT_EQ(run({9, 4, 2, 4, 10, 12}), run({}));
+}
+
 TEST_F(DAGSchedulerPassTest, DsIssueCapMode_BothModesBoundTheBurst) {
     for (auto mode : {PassFeatureConfig::DsIssueCapMode::Sliding,
                       PassFeatureConfig::DsIssueCapMode::Periodic}) {
@@ -3229,6 +3331,169 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_LiveInSccReaderWithoutDefAbor
         "region has SCC reader\\(s\\) but no SCC writer");
 }
 
+// ClusterBarrierWaitHideWmmas. The shape is the loop's stage barrier: a token-0 ds_load
+// feeds the first WMMA, a long WMMA run follows, then the workgroup barrier pair and the
+// tensor_load it publishes. A second barrier pair (token 1, ahead of its ds_load) competes
+// for the same WMMA windows.
+class ClusterWaitSlotTest : public DAGSchedulerPassTest {
+   protected:
+    struct Stage {
+        StinkyInstruction* signal = nullptr;
+        StinkyInstruction* wait = nullptr;
+        StinkyInstruction* load = nullptr;
+        StinkyInstruction* otherSignal = nullptr;
+    };
+
+    Stage buildStage() {
+        bb->addSuccessor(bb);
+        Stage stage;
+        createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
+        for (int i = 0; i < 22; ++i)
+            createWmmaF32_16x16x16_bf16(/*destStart=*/400 + i * 16, /*src0Start=*/64 + i * 16);
+        std::tie(stage.signal, stage.wait) = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+        stage.load = createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/0);
+        stage.otherSignal = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1).first;
+        createMovableDsLoad(/*destReg=*/500, /*addrReg=*/204, /*ldsToken=*/1);
+        createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
+        return stage;
+    }
+
+    void run(int hideWmmas) {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.clusterBarrier = true;
+        pfc.dagFeatures.clusterBarrierWaitHideWmmas = hideWmmas;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        if (testDumpEnabled())
+            std::cerr << "\n=== OUTPUT (hideWmmas=" << hideWmmas << "):" << scheduleOrder(*bb)
+                      << "\n";
+    }
+
+    StinkyInstruction* findSlot() const {
+        for (IRBase& ir : *bb) {
+            auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst != nullptr && isClusterWaitSlot(*inst)) return inst;
+        }
+        return nullptr;
+    }
+
+    int wmmasBetween(const StinkyInstruction* from, const StinkyInstruction* to) const {
+        int count = 0;
+        bool started = false;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == to) return started ? count : -1;
+            if (started && isMatrixInstruction(*inst)) ++count;
+            if (inst == from) started = true;
+        }
+        return -1;
+    }
+
+    int wmmasBefore(const StinkyInstruction* to) const {
+        int count = 0;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == to) return count;
+            if (inst != nullptr && isMatrixInstruction(*inst)) ++count;
+        }
+        return -1;
+    }
+
+    // Schedule with slots left out, as one string per instruction.
+    std::vector<std::string> realSchedule() const {
+        std::vector<std::string> out;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr || isClusterWaitSlot(*inst)) continue;
+            std::ostringstream os;
+            inst->dump(os);
+            out.push_back(os.str());
+        }
+        return out;
+    }
+};
+
+TEST_F(ClusterWaitSlotTest, SlotIsScheduledNWmmasAheadOfTheWorkgroupBarrier) {
+    Stage stage = buildStage();
+
+    run(/*hideWmmas=*/3);
+
+    StinkyInstruction* slot = findSlot();
+    ASSERT_NE(slot, nullptr) << scheduleOrder(*bb);
+    ASSERT_NE(slot->getModifier<ClusterWaitSlotData>(), nullptr);
+    EXPECT_EQ(slot->getModifier<ClusterWaitSlotData>()->trigger, stage.signal);
+    EXPECT_EQ(wmmasBetween(slot, stage.signal), 3) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, stage.signal), positionOf(*bb, stage.wait));
+    EXPECT_LT(positionOf(*bb, stage.wait), positionOf(*bb, stage.load));
+    EXPECT_LT(positionOf(*bb, stage.signal), positionOf(*bb, stage.otherSignal))
+        << "the competing barrier keeps its place behind the stage barrier:" << scheduleOrder(*bb);
+}
+
+TEST_F(ClusterWaitSlotTest, LargerNMovesTheSlotEarlierAndKeepsTheBarrierPut) {
+    Stage stage = buildStage();
+    run(/*hideWmmas=*/3);
+    const int signalPos3 = wmmasBefore(stage.signal);
+
+    SetUp();
+    stage = buildStage();
+    run(/*hideWmmas=*/5);
+    StinkyInstruction* slot = findSlot();
+    ASSERT_NE(slot, nullptr);
+    EXPECT_EQ(wmmasBetween(slot, stage.signal), 5) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBefore(stage.signal), signalPos3)
+        << "N moves the slot only; the workgroup barrier stays at its threshold:"
+        << scheduleOrder(*bb);
+}
+
+TEST_F(ClusterWaitSlotTest, ZeroLeavesNoSlotAndTheScheduleUntouched) {
+    buildStage();
+    run(/*hideWmmas=*/0);
+    EXPECT_EQ(findSlot(), nullptr) << scheduleOrder(*bb);
+    const std::string off = scheduleOrder(*bb);
+
+    // The same IR through the pre-existing entry point, which never sets the option.
+    SetUp();
+    buildStage();
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+    EXPECT_EQ(scheduleOrder(*bb), off);
+}
+
+TEST_F(ClusterWaitSlotTest, SlotOnlyAddsAPseudoAndDoesNotReorderRealInstructions) {
+    buildStage();
+    run(/*hideWmmas=*/0);
+    const std::vector<std::string> off = realSchedule();
+
+    SetUp();
+    buildStage();
+    run(/*hideWmmas=*/3);
+    ASSERT_NE(findSlot(), nullptr);
+    EXPECT_EQ(realSchedule(), off);
+}
+
+TEST_F(ClusterWaitSlotTest, NoSlotOutsideALoopOrWithoutATensorLoad) {
+    // Straight-line block: Rule 3 speaks for loop bodies only.
+    createMovableDsLoad(0, 200, 0);
+    createWmmaF32_16x16x16_bf16(100, 0);
+    createMovableWorkgroupBarrier(bb, 0);
+    createMovableTensorLoad(bb, 220, 224, 0);
+    run(/*hideWmmas=*/3);
+    EXPECT_EQ(findSlot(), nullptr) << scheduleOrder(*bb);
+
+    // Loop body whose barrier guards no tensor_load.
+    SetUp();
+    bb->addSuccessor(bb);
+    createMovableDsLoad(0, 200, 0);
+    createWmmaF32_16x16x16_bf16(100, 0);
+    createMovableWorkgroupBarrier(bb, 0);
+    run(/*hideWmmas=*/3);
+    EXPECT_EQ(findSlot(), nullptr) << scheduleOrder(*bb);
+}
+
 // All instructions are preserved regardless of throttle (count invariant).
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_PreservesInstructionCount) {
     BasicBlock* body = bb;
@@ -3324,4 +3589,247 @@ TEST_F(DAGSchedulerPassTest, WmmaQueue_KeepsTheQueueFed) {
     ctx.setPassFeatureConfig(pfc);
     pass->run(*func, ctx, am);
     EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WWWddddddWddWWWW");
+}
+
+// WmmaQueueLowCoverCycles and BarrierAfter/BeforeShiftWmmas. Loop body: a token-0 ds_load
+// feeding the first WMMA, 22 free WMMAs, the after barrier group (feeds a tensor_load), the
+// before barrier group, and a token-1 ds_load feeding the last WMMA.
+class QueueHysteresisAndShiftTest : public DAGSchedulerPassTest {
+   protected:
+    struct Opts {
+        int depth = 8, cover = 0, low = 0, afterShift = 0, beforeShift = 0, halfSlack = 0;
+    };
+    StinkyInstruction *afterSignal = nullptr, *afterWait = nullptr, *tensorLoad = nullptr,
+                      *beforeSignal = nullptr, *beforeWait = nullptr;
+
+    void build(int numFreeWmmas = 22, int numDs = 6) {
+        bb->addSuccessor(bb);
+        for (int i = 0; i < numDs; ++i)
+            createMovableDsLoad(/*destReg=*/4 * i, /*addrReg=*/200, /*ldsToken=*/0);
+        for (int i = 0; i < numDs; ++i)
+            createWmmaF32_16x16x16_bf16(/*destStart=*/100 + 8 * i, /*src0Start=*/4 * i);
+        for (int i = 0; i < numFreeWmmas; ++i)
+            createWmmaF32_16x16x16_bf16(/*destStart=*/400 + i * 16, /*src0Start=*/64 + i * 16);
+        std::tie(afterSignal, afterWait) = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+        tensorLoad = createMovableTensorLoad(bb, 220, 224, 0);
+        std::tie(beforeSignal, beforeWait) = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+        for (int i = 0; i < 4; ++i) createMovableDsLoad(500 + i * 4, 204, /*ldsToken=*/1);
+        createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
+    }
+    void run(const Opts& o) {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.dsReadThrottleLatency = 1;
+        pfc.dagFeatures.dsReadPerCap = 100;
+        pfc.dagFeatures.wmmaQueueDepth = o.depth;
+        pfc.dagFeatures.wmmaQueueCoverCycles = o.cover;
+        pfc.dagFeatures.wmmaQueueLowCoverCycles = o.low;
+        pfc.dagFeatures.barrierAfterShiftWmmas = o.afterShift;
+        pfc.dagFeatures.barrierBeforeShiftWmmas = o.beforeShift;
+        pfc.dagFeatures.barrierHalfSlack = o.halfSlack;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+    }
+    std::string scheduleFor(const Opts& o) {
+        SetUp();
+        build();
+        run(o);
+        return scheduleOrder(*bb);
+    }
+    int wmmasBefore(const StinkyInstruction* target) const {
+        int count = 0;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == target) return count;
+            if (isMatrixInstruction(*inst)) ++count;
+        }
+        return -1;
+    }
+    // Lengths of the W runs that follow a ds_load (what the refill is).
+    std::vector<int> wRunsAfterDs() const {
+        std::vector<int> runs;
+        const std::string s = wdShape(mnemonicSequence(*bb));
+        for (size_t i = 0; i < s.size(); ++i) {
+            if (s[i] != 'd') continue;
+            size_t j = i + 1;
+            while (j < s.size() && s[j] == 'd') ++j;
+            size_t k = j;
+            while (k < s.size() && s[k] == 'W') ++k;
+            runs.push_back(static_cast<int>(k - j));
+            i = j > i + 1 ? j - 1 : i;
+        }
+        return runs;
+    }
+};
+
+// With H=40 every ds_load pick needs 40 cycles of cover, so ds_loads trickle out between WMMAs.
+// With L=32 they run down to 32 first; below that the next WMMAs refill to 40 before a ds_load.
+TEST_F(QueueHysteresisAndShiftTest, HysteresisLetsDsLoadsRunDownToLowThenRefills) {
+    auto shape = [&](Opts o) {
+        SetUp();
+        build(/*numFreeWmmas=*/22, /*numDs=*/14);
+        run(o);
+        return wdShape(mnemonicSequence(*bb)).substr(0, 24);
+    };
+    Opts single;
+    single.cover = 40;
+    Opts hyst = single;
+    hyst.low = 32;
+    EXPECT_EQ(shape(single), "WWWWWWdddWdddddddWddddWW");
+    // Run of ds_loads down to cover < 32, then 2 WMMAs refill, then ds_loads again.
+    EXPECT_EQ(shape(hyst), "WWWWWWdddddddddddWWdddWW");
+    // A smaller band (36..40) refills sooner: each refill is a single WMMA.
+    hyst.low = 36;
+    EXPECT_EQ(shape(hyst), "WWWWWWdddddddWdddddddWWW");
+}
+
+// L = 0, L < 0 and L >= H are all the single-threshold schedule, and the queue model off
+// ignores L.
+TEST_F(QueueHysteresisAndShiftTest, HysteresisOffIsTheSingleThresholdSchedule) {
+    Opts base;
+    base.cover = 40;
+    const std::string expected = scheduleFor(base);
+    for (int low : {-8, 0, 40, 64}) {
+        Opts o = base;
+        o.low = low;
+        EXPECT_EQ(scheduleFor(o), expected) << "low=" << low;
+    }
+    Opts noQueue;
+    noQueue.depth = 1;
+    noQueue.cover = 40;
+    const std::string expectedNoQueue = scheduleFor(noQueue);
+    noQueue.low = 16;
+    EXPECT_EQ(scheduleFor(noQueue), expectedNoQueue);
+    Opts noCover;
+    const std::string expectedNoCover = scheduleFor(noCover);
+    noCover.low = 16;
+    EXPECT_EQ(scheduleFor(noCover), expectedNoCover);
+}
+
+// A promoted barrier group and its tensor_load are not held by the refill state.
+TEST_F(QueueHysteresisAndShiftTest, HysteresisKeepsEveryInstructionAndTheBarrierGroups) {
+    build(22, 14);
+    const int before = countStinkyInstructions(*bb);
+    Opts o;
+    o.cover = 40;
+    o.low = 32;
+    run(o);
+    EXPECT_EQ(countStinkyInstructions(*bb), before);
+    EXPECT_LT(positionOf(*bb, afterSignal), positionOf(*bb, afterWait));
+    EXPECT_LT(positionOf(*bb, afterWait), positionOf(*bb, tensorLoad));
+    EXPECT_LT(positionOf(*bb, beforeSignal), positionOf(*bb, beforeWait));
+}
+
+TEST_F(QueueHysteresisAndShiftTest, ZeroShiftsLeaveTheScheduleUnchanged) {
+    for (int slack : {0, 2}) {
+        Opts base;
+        base.halfSlack = slack;
+        const std::string expected = scheduleFor(base);
+        EXPECT_EQ(scheduleFor(base), expected);  // default fields are the zero shifts
+        base.cover = 24;
+        const std::string withQueue = scheduleFor(base);
+        EXPECT_EQ(scheduleFor(base), withQueue);
+    }
+}
+
+// The after group (feeds the tensor_load) moves by exactly its shift in WMMAs, the before group
+// does not move, and the tensor_load follows its barrier.
+TEST_F(QueueHysteresisAndShiftTest, AfterShiftMovesOnlyTheAfterGroup) {
+    SetUp();
+    build();
+    run(Opts{});
+    const int aBase = wmmasBefore(afterSignal), bBase = wmmasBefore(beforeSignal);
+    ASSERT_GT(aBase, 4);
+    for (int shift : {-4, 3, 6}) {
+        SetUp();
+        build();
+        Opts o;
+        o.afterShift = shift;
+        run(o);
+        EXPECT_EQ(wmmasBefore(afterSignal), aBase + shift) << "shift=" << shift;
+        EXPECT_EQ(wmmasBefore(afterWait), aBase + shift) << "shift=" << shift;
+        EXPECT_EQ(wmmasBefore(beforeSignal), bBase) << "shift=" << shift;
+        EXPECT_EQ(wmmasBefore(beforeWait), bBase) << "shift=" << shift;
+        EXPECT_LT(positionOf(*bb, afterWait), positionOf(*bb, tensorLoad));
+    }
+}
+
+TEST_F(QueueHysteresisAndShiftTest, BeforeShiftMovesOnlyTheBeforeGroup) {
+    SetUp();
+    build();
+    run(Opts{});
+    const int aBase = wmmasBefore(afterSignal), bBase = wmmasBefore(beforeSignal);
+    for (int shift : {-4, 3}) {
+        SetUp();
+        build();
+        Opts o;
+        o.beforeShift = shift;
+        run(o);
+        EXPECT_EQ(wmmasBefore(beforeSignal), bBase + shift) << "shift=" << shift;
+        EXPECT_EQ(wmmasBefore(beforeWait), bBase + shift) << "shift=" << shift;
+        EXPECT_EQ(wmmasBefore(afterSignal), aBase) << "shift=" << shift;
+    }
+}
+
+// Thresholds clamp to [0, region WMMAs]; the schedule stays legal (every instruction kept,
+// signal before wait, tensor_load after its wait).
+TEST_F(QueueHysteresisAndShiftTest, ShiftsClampToTheRegion) {
+    SetUp();
+    build();
+    const int total = [&] {
+        int n = 0;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst != nullptr && isMatrixInstruction(*inst)) ++n;
+        }
+        return n;
+    }();
+    const int count = countStinkyInstructions(*bb);
+    for (int shift : {-1000, 1000}) {
+        SetUp();
+        build();
+        Opts o;
+        o.afterShift = shift;
+        o.beforeShift = shift;
+        run(o);
+        EXPECT_EQ(countStinkyInstructions(*bb), count);
+        if (shift < 0) {
+            // The after signal still waits for the WMMA that reads its ds_load (dependency).
+            EXPECT_LE(wmmasBefore(afterSignal), 1) << scheduleOrder(*bb);
+            EXPECT_EQ(wmmasBefore(beforeSignal), 0) << scheduleOrder(*bb);
+        } else {
+            // The last WMMA reads the before group's ds_loads, so it stays behind them.
+            EXPECT_EQ(wmmasBefore(afterSignal), total - 1) << scheduleOrder(*bb);
+            EXPECT_EQ(wmmasBefore(beforeSignal), total - 1) << scheduleOrder(*bb);
+        }
+        EXPECT_LT(positionOf(*bb, afterSignal), positionOf(*bb, afterWait));
+        EXPECT_LT(positionOf(*bb, afterWait), positionOf(*bb, tensorLoad));
+        EXPECT_LT(positionOf(*bb, beforeSignal), positionOf(*bb, beforeWait));
+    }
+}
+
+// BarrierHalfSlack spreads a pair; the shift moves both halves together and keeps the spread.
+TEST_F(QueueHysteresisAndShiftTest, ShiftKeepsThePairSpread) {
+    SetUp();
+    build();
+    Opts o;
+    o.halfSlack = 2;
+    run(o);
+    const int aSig = wmmasBefore(afterSignal), aWait = wmmasBefore(afterWait);
+    const int bSig = wmmasBefore(beforeSignal), bWait = wmmasBefore(beforeWait);
+    EXPECT_EQ(aWait - aSig, 2);
+    EXPECT_EQ(bWait - bSig, 2);
+    SetUp();
+    build();
+    o.afterShift = 3;
+    o.beforeShift = -1;
+    run(o);
+    EXPECT_EQ(wmmasBefore(afterSignal), aSig + 3);
+    EXPECT_EQ(wmmasBefore(afterWait), aWait + 3);
+    EXPECT_EQ(wmmasBefore(beforeSignal), bSig - 1);
+    EXPECT_EQ(wmmasBefore(beforeWait), bWait - 1);
 }

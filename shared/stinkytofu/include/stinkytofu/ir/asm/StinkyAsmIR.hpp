@@ -373,6 +373,16 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
         return create(&execGroupMCID, insertBefore);
     }
 
+    /// Pseudo placeholder (emits nothing) for the cluster wait InsertClusterBarrierPass will
+    /// plant for \p trigger. The DAG scheduler positions it; the pass replaces or deletes it.
+    StinkyInstruction* createClusterWaitSlot(StinkyInstruction* trigger) {
+        static const HwInstDesc slotMCID{GFX::CLUSTER_WAIT_SLOT, GFX::CLUSTER_WAIT_SLOT, 0, 0, 0, 0,
+                                         "CLUSTER_WAIT_SLOT",    makeFlagSet({})};
+        StinkyInstruction* inst = create(&slotMCID, trigger);
+        inst->addModifier<ClusterWaitSlotData>(ClusterWaitSlotData{trigger});
+        return inst;
+    }
+
     /// Creates and inserts a PHI instruction at the beginning of the block.
     /// The PHI defines one DWORD register and has one placeholder srcReg per
     /// predecessor. sources and users are NOT initialized — the caller
@@ -498,13 +508,19 @@ inline bool isExecMaskGroup(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::EXEC_GROUP;
 }
 
-/// Check if instruction is a pseudo instruction (LABEL, PHI, FENCE, or
-/// FUNCTION_ASM_PLACEMENT_MARKER) that should be skipped for def-use chain
+/// Check if instruction is the scheduler's placeholder for a Rule 3 cluster wait.
+inline bool isClusterWaitSlot(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::CLUSTER_WAIT_SLOT;
+}
+
+/// Check if instruction is a pseudo instruction (LABEL, PHI, FENCE,
+/// FUNCTION_ASM_PLACEMENT_MARKER, or CLUSTER_WAIT_SLOT) that should be skipped for def-use chain
 /// processing of "real" instructions.
 inline bool isPseudoInst(const StinkyInstruction* inst) {
     return inst->getUnifiedOpcode() == GFX::LABEL || inst->getUnifiedOpcode() == GFX::PHI ||
            inst->getUnifiedOpcode() == GFX::FENCE ||
-           inst->getUnifiedOpcode() == GFX::FUNCTION_ASM_PLACEMENT_MARKER;
+           inst->getUnifiedOpcode() == GFX::FUNCTION_ASM_PLACEMENT_MARKER ||
+           inst->getUnifiedOpcode() == GFX::CLUSTER_WAIT_SLOT;
 }
 
 inline bool isGlobalMemLoad(const StinkyInstruction& inst) {

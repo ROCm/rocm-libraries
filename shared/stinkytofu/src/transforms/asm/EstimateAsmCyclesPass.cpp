@@ -825,6 +825,11 @@ class EstimateAsmCyclesPassImpl : public Pass {
         }
         for (std::size_t idx = startIdx; idx < instructions.size(); ++idx) {
             StinkyInstruction* inst = instructions[idx];
+            // Emits nothing: must not take a co-issue slot or reset the LR run.
+            if (isClusterWaitSlot(*inst)) {
+                perInstCycles_[inst] = static_cast<uint32_t>(cycles < 0 ? 0 : cycles);
+                continue;
+            }
             bool isCoIssued =
                 (!isMatrixInstruction(*inst) &&
                  canCoExecAtCurrentCycle(cycles, activeWmmaStartCycle, activeWmmaCoExecAdvance,

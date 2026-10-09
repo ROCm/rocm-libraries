@@ -63,8 +63,11 @@ class Pass;
 /// \p splitWaveLoop duplicates each Rule 3 loop. Wave 0 falls into the original
 /// body and posts a bare cluster signal; every other wave takes the copy, which
 /// keeps the wait and omits the signal. Off by default.
+/// \p waitHideWmmas (or DagFeatures::clusterBarrierWaitHideWmmas in the pass context) > 0: Rule 3
+/// puts its wait at the scheduler's CLUSTER_WAIT_SLOT, and a re-run recognizes a wait that far from
+/// its trigger. 0 ignores slots. Any slot left in the IR is deleted; none is ever emitted.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
     bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100,
-    bool splitWaveLoop = false);
+    bool splitWaveLoop = false, int waitHideWmmas = 0);
 
 }  // namespace stinkytofu

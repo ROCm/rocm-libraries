@@ -188,6 +188,15 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.wmmaQueueDepth = moduleOptions.WmmaQueueDepth;
                 passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                     moduleOptions.WmmaQueueCoverCycles;
+                passFeatureConfig.dagFeatures.wmmaQueueLowCoverCycles =
+                    moduleOptions.WmmaQueueLowCoverCycles;
+                passFeatureConfig.dagFeatures.barrierAfterShiftWmmas =
+                    moduleOptions.BarrierAfterShiftWmmas;
+                passFeatureConfig.dagFeatures.barrierBeforeShiftWmmas =
+                    moduleOptions.BarrierBeforeShiftWmmas;
+                // dsCapWindow1*/PerCap come from resolvedKnobs (applyResolvedSchedulingKnobs).
+                passFeatureConfig.dagFeatures.dsCapWindow2Begin = moduleOptions.DsCapWindow2Begin;
+                passFeatureConfig.dagFeatures.dsCapWindow2End = moduleOptions.DsCapWindow2End;
                 passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
                     moduleOptions.DsIssueCapSpanCycles;
                 passFeatureConfig.dagFeatures.dsIssueCapMode =
@@ -199,6 +208,10 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 // Same option as InsertClusterBarrierPass below (see
                 // cluster-barrier.md).
                 passFeatureConfig.dagFeatures.clusterBarrier = moduleOptions.ClusterBarrier;
+                passFeatureConfig.dagFeatures.clusterBarrierWaitHideWmmas =
+                    moduleOptions.ClusterBarrier
+                        ? std::max(0, moduleOptions.ClusterBarrierWaitHideWmmas)
+                        : 0;
                 passFeatureConfig.dagFeatures.lockDsReadOrder = moduleOptions.LockDsReadOrder;
                 passFeatureConfig.dagFeatures.evenSpreadFillers = moduleOptions.EvenSpreadFillers;
                 passFeatureConfig.dagFeatures.dsSlotFirst = moduleOptions.DsSlotFirst;
@@ -283,7 +296,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 /*pgrValue=*/moduleOptions.PrefetchGlobalRead,
                 /*rule3SignalLeadCycles=*/
                 resolvedKnobs.clusterBarrierRule3SignalLeadCycles,
-                /*splitWaveLoop=*/moduleOptions.ClusterBarrierSplitWaveLoop));
+                /*splitWaveLoop=*/moduleOptions.ClusterBarrierSplitWaveLoop,
+                /*waitHideWmmas=*/std::max(0, moduleOptions.ClusterBarrierWaitHideWmmas)));
         }
 
         // Build the CFG after the flat region splice-backs so RegionClonePass can

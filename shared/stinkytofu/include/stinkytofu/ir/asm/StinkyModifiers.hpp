@@ -314,6 +314,7 @@ struct Modifier {
         WMMA_POOL_INDEX,
         CALL_TARGETS,
         EXEC_GROUP,
+        CLUSTER_WAIT_SLOT,
     };
 
     Modifier(Type type) : type(type) {}
@@ -1097,6 +1098,17 @@ struct WmmaPoolData : public TypedModifier<WmmaPoolData> {
     uint32_t poolIndex = 0;
 
     explicit WmmaPoolData(uint32_t idx) : TypedModifier<WmmaPoolData>(), poolIndex(idx) {}
+};
+
+/// Ties a CLUSTER_WAIT_SLOT placeholder to the Rule 3 trigger (workgroup
+/// `s_barrier_signal -1`) it was planted ahead of. Non-owning, compared only.
+struct ClusterWaitSlotData : public TypedModifier<ClusterWaitSlotData> {
+    static constexpr Modifier::Type Type = Modifier::Type::CLUSTER_WAIT_SLOT;
+
+    const StinkyInstruction* trigger = nullptr;
+
+    explicit ClusterWaitSlotData(const StinkyInstruction* trigger)
+        : TypedModifier<ClusterWaitSlotData>(), trigger(trigger) {}
 };
 
 /// Holds raw (non-owning) pointers to the original instructions grouped into an
