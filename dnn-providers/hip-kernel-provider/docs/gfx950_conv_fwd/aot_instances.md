@@ -122,37 +122,45 @@ engine.
 
 ## The shipped catalog
 
-`hipkernel:Gfx950ConvFwdAot` ships every instance the packaged launch runs from
-rocKE's sweeps, listed in `projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd_aot.instances.json`:
+`hipkernel:Gfx950ConvFwdAot` ships the instances of rocKE's sweeps that the packaged
+launch runs and that the rules below keep, listed in
+`projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd_aot.instances.json`:
 
 | Family | fp16 | bf16 |
 |---|---:|---:|
-| Implicit GEMM | 16,828 | 16,828 |
+| Implicit GEMM | 17,530 | 17,526 |
 | Direct depthwise, `std` | 54 | 54 |
 | Direct depthwise, `spatial` | 30 | 30 |
-| **Total** | **16,912** | **16,912** |
+| **Total** | **17,614** | **17,610** |
 
-33,824 instances in all. `tools/enumerate_conv_aot_instances.py` writes the list.
+35,224 instances in all. `tools/enumerate_conv_aot_instances.py` writes the list.
 
 **Implicit GEMM** is the AOT sweep's valid gfx950 forward grid with two rules applied:
 
-1. **Knob rule.** Each compile-time knob keeps only the values that are not dominated
-   by another kept value (`KNOB_RULE` in the tool):
-   - `pipeline`: `mem` and `compv3`. `compv4` emits `compv3`'s code plus one priority
-     hint and is never faster. `mem` stays because it wins on strided filters.
-   - `epilogue`: `cshuffle` only. The default epilogue is never faster, and `cshuffle`
-     with a store width of 1 still serves every K/groups.
-   - Load and store widths: 8, 4 and 1. Width 2 is never needed, because 8 or 4 serve
-     wherever it does. Width 4 covers channel counts that 8 does not divide, and width 1
-     is the universal fallback.
-   - K loop: plain and unrolled. The async DMA loop is dropped because it never wins.
+1. **Knob rule.** The tool states which knob values ship, as data at its top
+   (`KNOB_RULE`, `VECTOR_SIZES`, `EPILOGUE_BY_VECTOR_SIZE_C`). The rule is a policy
+   choice of which combinations to ship; any further narrowing is left to later steps.
+   - `pipeline`: `mem`, `compv3` and `compv4`.
+   - K loop: plain and unrolled. The async DMA loop is not shipped.
+   - Load and store widths, as (`vector_size_a` = `vector_size_b`, `vector_size_c`):
+     (1, 1), (2, 2), (4, 4), (8, 8), (1, 4) and (4, 1). The two mixed pairs keep a wide
+     load or a wide store for channel counts that only one side's width divides.
+   - `epilogue`: tied to the store width. A store width of 1 ships the default
+     epilogue, a wider one `cshuffle`. The grid builds the default epilogue only with a
+     store width of 1.
+   - Every tile and warp geometry of the grid.
+
+   This keeps 20,412 identities per dtype: 6,804 per pipeline.
 2. **No-scratch rule (R1).** An instance whose compiled kernel spills or uses scratch
-   is dropped. A spilling kernel is never the fastest, and each one has a spill-free
-   sibling of the same tile geometry. R1 needs a compile of every candidate, so its
-   verdict is committed as `configs/gfx950_conv_fwd_aot.spills.json`, keyed by
-   `stable_hash()`. The file records a digest of the candidate set it was computed for,
-   so a changed grid or knob rule is refused rather than filtered with a stale list.
-   `--recompute-spills` rebuilds it on the CPU.
+   is dropped. R1 needs a compile of every candidate, so its verdict is committed as
+   `configs/gfx950_conv_fwd_aot.spills.json`, keyed by `stable_hash()`. The file
+   records a digest of the candidate set it was computed for, so a changed grid or
+   knob rule is refused rather than filtered with a stale list. `--recompute-spills`
+   rebuilds it on the CPU. `--keep-spilling` skips R1 and lists every candidate of the
+   knob rule. R1 drops the (1, 1) instances of 84 tile geometries in each dtype. Of
+   those, 3 geometries in fp16 and 4 in bf16 lose every instance, and the others keep
+   wider pairs. Every channel count is still served by the (1, 1) instances of the
+   remaining geometries.
 
 **Direct depthwise** is every forward identity of the direct sweep whose algorithm the
 packaged direct launch runs and that `make_conv_aot_config.py` accepts: all 54 `std`
@@ -172,8 +180,8 @@ and `gfx950_conv_fwd_aot_bf16.kdp.json`. Each holds that dtype's implicit-GEMM a
 direct variants. The packs declare no `discriminator`, so they are shards of one
 catalog: the engine's graph matcher and the one shared kernel matcher admit both, and
 there is no operation-scoped matcher (the IngestorGenerator README, "UMD policy"). A
-single KDP for the whole catalog would be about 56 MB, above the 50 MB that GitHub warns
-about. Each authored shard is about 28 MB.
+single KDP for the whole catalog would be about 59 MB, above the 50 MB that GitHub warns
+about. Each authored shard is about 29 MB.
 
 ### Regenerating the bundle
 
@@ -217,7 +225,9 @@ regenerates it from the list on every run. The tests hold the pieces together:
   enumerates from the rocKE tree beside it.
 - `tests/test_make_conv_aot_config.py` fails when a shipped shard is not exactly the
   list's instances of its dtype, with instance-derived ids, or when a file is 50 MB or
-  larger.
+  larger. It also fails when a problem class loses its last implicit-GEMM instance:
+  odd C/groups or K/groups, C/groups or K/groups of 2 mod 4, grouped, pointwise and
+  depthwise graphs.
 
 Then rebuild with the pack stamps removed, so every instance is compiled from the
 current sources.
@@ -229,10 +239,11 @@ The product pack compiles every instance. On one 64-core host, with a warm comgr
 | Artifact | Size |
 |---|---:|
 | Instance list (committed) | about 13 MB |
-| Authored KDP shard, each (committed) | about 28 MB |
+| R1 spill list (committed) | about 1.7 MB |
+| Authored KDP shard, each (committed) | about 29 MB |
 | Census `TestGfx950ConvFwdAotPacks.cpp` (committed) | about 2.5 MB |
-| gfx950 kpack archive (build output, all product bundles) | about 238 MB |
-| Packed KDP shard, each (build output) | about 61 MB |
+| gfx950 kpack archive (build output, all product bundles) | about 258 MB |
+| Packed KDP shard, each (build output) | about 64 MB |
 
 Packing all product bundles with 64 workers takes about 1 to 4 minutes, depending on the
 comgr cache. `HIPKERNELPROVIDER_PRODUCT_PACK_JOBS` sets the worker count of the
@@ -253,15 +264,19 @@ limit.
 
 ## The seed engine and the GPU tests
 
-`hipkernel:Gfx950ConvFwdAotSeed` is a test-only engine over a 24-instance seed, taken
+`hipkernel:Gfx950ConvFwdAotSeed` is a test-only engine over a 32-instance seed, taken
 verbatim from the sweeps' valid forward grids
-(`configs/gfx950_conv_fwd_aot_seed.instances.json`). It has 8 implicit-GEMM instances
+(`configs/gfx950_conv_fwd_aot_seed.instances.json`). It has 12 implicit-GEMM instances
 per dtype, covering:
 
-- vector widths 8/8/8, 8/8/4, 4/4/2, 2/2/1 and 1/1/1;
-- both epilogues;
+- every load and store width pair the catalog ships, (1, 1), (2, 2), (4, 4), (8, 8),
+  (1, 4) and (4, 1), plus 8/8/4, 4/4/2 and a `cshuffle` 2/2/1 from outside it;
+- both epilogues, the default one with a store width of 1;
 - the `mem`, `compv3` and `compv4` pipelines;
 - `unroll_k` and `async_dma`.
+
+`tests/test_make_conv_aot_config.py` checks that the seed holds every pipeline, width
+pair and epilogue of the shipped catalog, in each dtype.
 
 It also has 4 direct instances per dtype: std 3x3 stride 1 (`block_w` 4, one wave),
 std 5x5 stride 2 (`block_w` 16, two waves), spatial 3x3 stride 1 (one wave) and
@@ -292,7 +307,8 @@ engines, 9 of them depthwise over several group counts, batches and images:
   is checked, and so is its reuse.
 
 Each row of the table states how many instances of each family serve the graph, in the
-seed and in the full catalog. `tests/test_make_conv_aot_config.py` recomputes the
+seed and in the full catalog, with the full catalog's implicit-GEMM count per dtype
+because R1 drops a few more instances in bf16. `tests/test_make_conv_aot_config.py` recomputes the
 counts with `gfx950_conv_fwd_aot_serves` over the two committed lists. The integration
 CMake compiles each engine's suite only where that engine ships: the seed's where the
 integration root packs it for gfx950, the product's where the product root offers it.
