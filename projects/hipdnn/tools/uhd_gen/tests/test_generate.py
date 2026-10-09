@@ -731,7 +731,7 @@ def test_an_opaque_engine_is_never_trained_under_an_undeclared_id(
 def test_l1_generation_never_trains_on_picks_checked_wrong(
     monkeypatch, tmp_path, evaluator, caplog
 ):
-    """§13.2: all picks invalid means no labels; the staged corpus keeps verdicts."""
+    """§13.2: all picks invalid means no labels; the staged measurements keep verdicts."""
     main = _cli()
 
     tree = _ued_tree(tmp_path / "descriptors")
@@ -752,7 +752,7 @@ def test_l1_generation_never_trains_on_picks_checked_wrong(
     assert "no successful valid timings" in caplog.text
     assert not output.exists()
     [stage] = tmp_path.glob(".uhd-generate-*")
-    corpus = json.loads((stage / "corpus.json").read_text(encoding="utf-8"))
+    corpus = json.loads((stage / "measurements.json").read_text(encoding="utf-8"))
     assert len(corpus) == 16
     assert all(
         row["numerically_valid"] is False

@@ -294,23 +294,22 @@ def test_a_generation_of_another_role_is_not_converted(world, evaluator, tmp_pat
         store.from_generation(one_shot)
 
 
-def test_the_newest_measurement_of_a_graph_on_a_device_is_the_label(world, evaluator):
-    older = _collect(
+def test_the_best_measurement_of_a_graph_is_the_label(world, evaluator):
+    faster = _collect(
         world, "older", collected_at="2026-09-28T10:00:00+00:00", scale=1.0
     )
-    newer = _collect(
+    slower = _collect(
         world, "newer", collected_at="2026-09-30T10:00:00+00:00", scale=2.0
     )
-    # Passed newest-first: collection time, not argument order, decides.
-    code, output = _train(world, "merged", evaluator, collections=[newer, older])
+    code, output = _train(world, "merged", evaluator, collections=[slower, faster])
     assert code == 0
-    labels, newest = _labels(output), _labels(newer)
-    assert labels == newest, "an older measurement survived the merge"
+    assert _labels(output) == _labels(faster), "a slower repeat survived the merge"
     manifest = json.loads(
         (output / "generation_manifest.json").read_text(encoding="utf-8")
     )
     assert manifest["superseded_rows"] == GRAPHS
-    assert [c["path"] for c in manifest["collections"]] == [str(older), str(newer)]
+    # Collection time, not argument order, orders them.
+    assert [c["path"] for c in manifest["collections"]] == [str(faster), str(slower)]
 
 
 def test_a_rebuilt_provider_measures_repeats_not_another_binding(world, evaluator):
@@ -327,11 +326,11 @@ def test_a_rebuilt_provider_measures_repeats_not_another_binding(world, evaluato
         "newer",
         collected_at="2026-09-30T10:00:00+00:00",
         provider_build={**build, "version": "1.0+bbbbbbb"},
-        scale=2.0,
+        scale=0.5,
     )
     code, output = _train(world, "rebuilt", evaluator, collections=[older, newer])
     assert code == 0
-    assert _labels(output) == _labels(newer)
+    assert _labels(output) == _labels(newer), "the rebuilt provider's faster repeat"
     manifest = json.loads(
         (output / "generation_manifest.json").read_text(encoding="utf-8")
     )
@@ -339,7 +338,7 @@ def test_a_rebuilt_provider_measures_repeats_not_another_binding(world, evaluato
 
 
 def test_a_shape_measured_on_two_gpus_of_the_arch_is_trained_on_once(world, evaluator):
-    """Another GPU of the same arch measures the same problem: one label, the newest."""
+    """Another GPU of the same arch measures the same problem: one label, the best."""
     older = _collect(
         world,
         "a",
@@ -352,7 +351,7 @@ def test_a_shape_measured_on_two_gpus_of_the_arch_is_trained_on_once(world, eval
         "b",
         collected_at="2026-09-29T10:00:00+00:00",
         device="board-b",
-        scale=2.0,
+        scale=0.5,
     )
     code, output = _train(world, "both", evaluator, collections=[older, newer])
     assert code == 0
@@ -366,7 +365,8 @@ def test_a_shape_measured_on_two_gpus_of_the_arch_is_trained_on_once(world, eval
 
 
 def test_one_run_on_several_gpus_trains_on_each_shape_once(world, evaluator):
-    """Repeated `--device` measures each shape per GPU; the last GPU's is the label."""
+    """Repeated `--device` measures each shape per GPU; the faster GPU's is the label, and
+    measurements.json keeps both."""
     world["engine"][
         "drift"
     ] = 1.01  # every measurement differs, so the label is traceable
@@ -378,8 +378,10 @@ def test_one_run_on_several_gpus_trains_on_each_shape_once(world, evaluator):
         extra=["--device", "0", "--device", "1"],
     )
     assert code == 0 and world["engine"]["calls"] == 2 * GRAPHS
+    measured = json.loads((output / "measurements.json").read_text(encoding="utf-8"))
+    assert len(measured) == 2 * GRAPHS
     rows = json.loads((output / "corpus.json").read_text(encoding="utf-8"))
-    assert len(rows) == GRAPHS and {r["device"] for r in rows} == {"board-1"}
+    assert len(rows) == GRAPHS and {r["device"] for r in rows} == {"board-0"}
     manifest = json.loads(
         (output / "generation_manifest.json").read_text(encoding="utf-8")
     )
@@ -388,36 +390,35 @@ def test_one_run_on_several_gpus_trains_on_each_shape_once(world, evaluator):
 
 def test_distinct_configurations_on_one_shape_are_distinct_rows():
     """Only a repeat of the same configuration on a shape is a duplicate."""
-    from uhd_gen.generate import one_measurement_per_shape
+    from uhd_gen.generate import best_measurements
 
-    def row(graph, kernel, knobs, arch="gfx942"):
+    def row(graph, kernel, knobs, arch="gfx942", time=1.0):
         return {
             "benchmark": graph,
             "arch": arch,
             "kernel": kernel,
             "knob_settings": knobs,
+            "avgTimeMs": time,
         }
 
     measured = [
-        ("a", row("g", "k1", '{"tile": 64}')),
+        ("a", row("g", "k1", '{"tile": 64}', time=2.0)),
         ("a", row("g", "k1", '{"tile": 128}')),
         ("a", row("g", "k2", '{"tile": 64}')),
         ("a", row("g", "k1", '{"tile": 64}', "gfx950")),
-        (
-            "b",
-            row("g", "k1", '{"tile": 64}'),
-        ),  # a repeat, on another GPU: supersedes a's
+        # A repeat, on another GPU, and faster: it is kept over a's.
+        ("b", row("g", "k1", '{"tile": 64}', time=1.5)),
         ("b", row("h", "k1", '{"tile": 64}')),
     ]
-    kept, dropped = one_measurement_per_shape(measured)
-    assert dropped == 1
-    assert kept == [m[1] for m in measured[1:]]
+    kept, superseded, excluded = best_measurements(measured)
+    assert (superseded, excluded) == (1, {})
+    assert kept == measured[1:]
     # An L1 row names no configuration (the engine chose): its shape is its identity.
     l1 = [
-        ("a", {"benchmark": "g", "arch": "gfx942"}),
-        ("b", {"benchmark": "g", "arch": "gfx942"}),
+        ("a", {"benchmark": "g", "arch": "gfx942", "avgTimeMs": 1.0}),
+        ("b", {"benchmark": "g", "arch": "gfx942", "avgTimeMs": 1.0}),
     ]
-    assert one_measurement_per_shape(l1) == ([l1[1][1]], 1)
+    assert best_measurements(l1) == ([l1[1]], 1, {}), "a tie keeps the newer"
 
     # A repeat under another binding is a revision change, never a silent supersede.
     def bound(revision, build):
@@ -425,34 +426,57 @@ def test_distinct_configurations_on_one_shape_are_distinct_rows():
         return dict(l1[0][1], binding=json.dumps(binding))
 
     with pytest.raises(ValueError, match="two engine bindings"):
-        one_measurement_per_shape([("a", bound("r1", "x")), ("b", bound("r2", "x"))])
+        best_measurements([("a", bound("r1", "x")), ("b", bound("r2", "x"))])
     rebuilt = [("a", bound("r1", "x")), ("b", bound("r1", "y"))]
-    assert one_measurement_per_shape(rebuilt) == ([rebuilt[1][1]], 1)
+    assert best_measurements(rebuilt) == ([rebuilt[1]], 1, {})
 
 
-def test_one_graph_measured_twice_in_one_session_is_kept_once():
-    """A graph supplied twice to one run (two files, two names) is one content key: the
-    later measurement is the label and the earlier is dropped, never both trained on."""
-    from uhd_gen.generate import one_measurement_per_shape
+def test_the_best_measurement_of_a_repeat_is_kept_and_failures_are_removed():
+    """Repeats of one configuration keep the lowest avgTimeMs; a row with no usable
+    measurement is never a candidate, however fast it claims to be."""
+    from uhd_gen.generate import best_measurements
 
-    first = {"benchmark": "key-1", "arch": "gfx942", "avgTimeMs": 1.0}
-    again = {"benchmark": "key-1", "arch": "gfx942", "avgTimeMs": 1.1}
+    slow = {"benchmark": "key-1", "arch": "gfx942", "avgTimeMs": 1.1}
+    fast = {"benchmark": "key-1", "arch": "gfx942", "avgTimeMs": 1.0}
+    wrong = dict(fast, avgTimeMs=0.1, numerically_valid=False)
+    invalid = dict(fast, avgTimeMs=0.1, is_valid=False)
+    not_run = dict(fast, avgTimeMs=0.1, succeeded=False)
+    errored = dict(fast, avgTimeMs=0.1, error="timeout")
+    unmeasured = dict(fast, avgTimeMs=None)
     other = {"benchmark": "key-2", "arch": "gfx942", "avgTimeMs": 2.0}
-    kept, dropped = one_measurement_per_shape(
-        [("gpu0", first), ("gpu0", other), ("gpu0", again)]
+    kept, superseded, excluded = best_measurements(
+        [
+            ("gpu0", fast),
+            ("gpu0", other),
+            ("gpu0", wrong),
+            ("gpu1", invalid),
+            ("gpu1", not_run),
+            ("gpu1", errored),
+            ("gpu1", unmeasured),
+            ("gpu1", slow),
+        ]
     )
-    assert (kept, dropped) == ([other, again], 1)
+    assert [row for _, row in kept] == [fast, other]
+    assert superseded == 1
+    assert excluded == {
+        "numerically_wrong": 1,
+        "invalid": 1,
+        "not_run": 1,
+        "errored": 1,
+        "unmeasured": 1,
+    }
 
 
 def test_published_candidates_of_one_problem_stay_distinct_rows():
     """A published row names its candidate by `kernel.*` fields, not `kernel`."""
-    from uhd_gen.generate import one_measurement_per_shape
+    from uhd_gen.generate import best_measurements
 
     rows = [
-        {"benchmark": "p", "arch": "gfx942", "kernel.solver_id": 1},
-        {"benchmark": "p", "arch": "gfx942", "kernel.solver_id": 2},
+        {"benchmark": "p", "arch": "gfx942", "kernel.solver_id": 1, "avgTimeMs": 1.0},
+        {"benchmark": "p", "arch": "gfx942", "kernel.solver_id": 2, "avgTimeMs": 1.0},
     ]
-    assert one_measurement_per_shape([("s", r) for r in rows]) == (rows, 0)
+    measured = [("s", r) for r in rows]
+    assert best_measurements(measured) == (measured, 0, {})
 
 
 def test_a_bench_that_names_no_graph_key_cannot_collect(world, caplog):
@@ -795,3 +819,70 @@ def test_a_run_can_train_on_some_contributions_of_a_dataset(world, evaluator):
     assert (
         main([*common, "--contribution", "absent", "--output-dir", str(refused)]) == 1
     )
+
+
+def test_training_reads_the_stored_table_and_a_subset_computes_the_same(tmp_path):
+    """load_dataset's rows from training.parquet equal those computed from the history."""
+    from uhd_gen import generate
+    from uhd_gen.dataset import store
+
+    def collection(name, at, times):
+        directory = tmp_path / name
+        directory.mkdir()
+        rows = [
+            {
+                "benchmark": f"g{index}",
+                "device": "d0",
+                "arch": "gfx942",
+                "kernel": "k0",
+                "knob_settings": "{}",
+                "avgTimeMs": time,
+            }
+            for index, time in enumerate(times)
+        ]
+        (directory / "corpus.json").write_text(json.dumps(rows))
+        (directory / store.COLLECTION_MANIFEST).write_text(
+            json.dumps(
+                {
+                    "schema": store.COLLECTION_SCHEMA,
+                    "collected_at": at,
+                    "role": "sort_kernel_catalog",
+                    "engine": "e",
+                    "engine_id": 7,
+                    "engine_name": None,
+                    "sources": [None],
+                    "trained_against": {"ued": {"id": "u"}},
+                    "selector_revision": None,
+                    "arches": ["gfx942"],
+                    "devices": ["d0"],
+                    "graph_count": len(rows),
+                    "row_counts": {"None": len(rows)},
+                    "published": [],
+                    "kernel_fields": [],
+                    "knob_encodings": {},
+                    "shipping_knobs": [],
+                    "collection_knobs": [],
+                    "graphs": [],
+                    "commands": [],
+                    "failed_graphs": [],
+                }
+            )
+        )
+        return directory
+
+    dataset = tmp_path / "ds"
+    store.add(
+        dataset, *store.from_collection(collection("a", "2026-10-01", [1.0, 3.0]))
+    )
+    store.add(
+        dataset, *store.from_collection(collection("b", "2026-10-02", [2.0, 2.0]))
+    )
+    labels = [c["label"] for c in store.read_manifest(dataset)["contributions"]]
+
+    stored = generate.load_dataset(dataset, role="sort_kernel_catalog", sources=[None])
+    computed = generate.load_dataset(
+        dataset, role="sort_kernel_catalog", sources=[None], only=labels
+    )
+    assert stored["rows"] == computed["rows"]
+    assert [r["avgTimeMs"] for r in stored["rows"][None]] == [1.0, 2.0]
+    assert stored["superseded_rows"] == computed["superseded_rows"] == 2

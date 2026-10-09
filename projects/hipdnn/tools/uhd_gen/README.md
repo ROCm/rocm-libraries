@@ -998,13 +998,17 @@ remove`, `add --replace` and `retag` correct what is stored, each recorded in th
 out as JSON. A dataset of §8.3 CSVs alone trains as `train` would (`--target`, `--objective`,
 `--group-by-feature`, `--no-promote`).
 
-Training takes **one measurement of each configuration on each shape**: the newest session's
-(a session is one collection on one device). The same shape measured on two GPUs of an arch is
-one problem, not two. Kept twice, it would be weighted twice, and the held-out split, which is
-keyed on (graph, device), would score the model on a shape it trained on. For a catalog sweep,
-distinct kernel configurations on one shape are distinct rows. A repeat taken under another
-engine binding is refused rather than superseded. `superseded_rows` in the generation manifest
-counts what training set aside.
+Training reads **one measurement of each configuration on each shape**, from the usable ones:
+a row checked numerically wrong, not measured (`is_valid`), not run (`succeeded`), errored, or
+without a finite `avgTimeMs` is removed, and of the repeats left the lowest `avgTimeMs` is kept
+(the newer on a tie). The same shape measured on two GPUs of an arch is one problem, not two;
+kept twice, it would be weighted twice. For a catalog sweep, distinct kernel configurations on
+one shape are distinct rows. A repeat taken under another engine binding is refused rather
+than set aside. A dataset writes this table as `training.parquet` after every change and
+`generate` reads it; training on a subset (`--contribution`) computes it the same way from the
+history. `superseded_rows` and `excluded_rows` (per reason) in the generation manifest count
+what training set aside. A run measuring `--graphs` keeps everything it measured in
+`measurements.json`; its corpus files hold what training read.
 
 A collected row carries its regime (`regime`, `regime.<facet>`, `regime.operation`) from the
 `manifest.csv` `hipdnn_corpus_gen` wrote beside the graphs. These are envelope columns, never

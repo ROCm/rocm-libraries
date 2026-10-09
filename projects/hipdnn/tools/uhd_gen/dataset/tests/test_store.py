@@ -472,3 +472,79 @@ def test_a_held_lock_times_out_naming_itself(tmp_path):
         with store._locked(tmp_path, timeout_s=0.0):
             pass
     assert (tmp_path / ".lock").is_dir(), "another writer's lock is left alone"
+
+
+def _timed(name, times, **extra):
+    """Rows of one configuration on graph g, one per time; `extra` marks them."""
+    return [
+        {
+            "benchmark": "g",
+            "device": "d0",
+            "arch": "gfx942",
+            "kernel": "k0",
+            "knob_settings": "{}",
+            "avgTimeMs": time,
+            "note": name,
+            **extra,
+        }
+        for time in times
+    ]
+
+
+def test_the_training_table_keeps_the_best_usable_measurement(tmp_path):
+    """training.parquet: errors removed, repeats reduced to the lowest avgTimeMs."""
+    dataset = tmp_path / "ds"
+    (tmp_path / "x").mkdir()
+    (tmp_path / "y").mkdir()
+    store.add(
+        dataset,
+        *store.from_collection(
+            _collection(tmp_path / "x", "a", rows=_timed("a", [2.0]))
+        ),
+    )
+    store.add(
+        dataset,
+        *store.from_collection(
+            _collection(
+                tmp_path / "y",
+                "b",
+                at="2026-10-02T00:00:00+00:00",
+                rows=_timed("b", [1.5])
+                + _timed("wrong", [0.1], numerically_valid=False)
+                + _timed("failed", [None], is_valid=False),
+            )
+        ),
+    )
+    assert len(store.read_rows(dataset)) == 4, "the history keeps everything"
+    (row,) = store.read_training_rows(dataset)
+    assert (row["note"], row["avgTimeMs"]) == ("b", 1.5)
+    summary = store.read_manifest(dataset)["training_view"]["sources"]["None"]
+    assert summary == {
+        "rows": 1,
+        "superseded": 1,
+        "excluded": {"numerically_wrong": 1, "invalid": 1},
+    }
+
+
+def test_the_training_table_follows_remove_and_retag(tmp_path):
+    dataset = tmp_path / "ds"
+    (tmp_path / "x").mkdir()
+    (tmp_path / "y").mkdir()
+    store.add(
+        dataset,
+        *store.from_collection(
+            _collection(tmp_path / "x", "a", rows=_timed("a", [1.0]))
+        ),
+    )
+    store.add(
+        dataset,
+        *store.from_collection(
+            _collection(tmp_path / "y", "b", rows=_timed("b", [2.0]))
+        ),
+    )
+    assert [r["note"] for r in store.read_training_rows(dataset)] == ["a"]
+    store.retag(dataset, ["a"], purpose="eval")
+    assert [r["note"] for r in store.read_training_rows(dataset)] == ["b"]
+    store.remove(dataset, ["b"])
+    assert store.read_training_rows(dataset) == []
+    assert store.read_manifest(dataset)["training_view"]["contributions"] == []
