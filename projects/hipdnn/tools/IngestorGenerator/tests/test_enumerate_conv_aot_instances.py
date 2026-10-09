@@ -232,16 +232,12 @@ def test_direct_identities_are_every_forward_direct_identity_the_converter_accep
         spec, why = make_conv_aot_config.instance_spec(identity)
         assert spec is not None and spec.is_direct, why
     assert len({tool.stable_hash(i) for i in packaged}) == len(packaged)
-    # Today the packaged direct launch runs the std and spatial depthwise kernels;
-    # every other forward direct algorithm is refused with the converter's reason.
+    # The packaged direct launch runs every forward direct kernel of the sweep, so
+    # every identity of the direct grid is packaged and nothing is refused.
     assert sorted({i["algorithm"] for i in packaged}) == sorted(
-        make_conv_aot_config.DIRECT_ALGORITHMS
+        make_conv_aot_config.PACKAGED_DIRECT_ALGORITHMS
     )
-    assert refused and all(
-        algorithm not in make_conv_aot_config.DIRECT_ALGORITHMS
-        and "has no packaged launch" in reason
-        for algorithm, reason in refused
-    )
+    assert not refused, refused
 
 
 def test_direct_identities_round_trip_through_the_compact_form(direct_fp16):

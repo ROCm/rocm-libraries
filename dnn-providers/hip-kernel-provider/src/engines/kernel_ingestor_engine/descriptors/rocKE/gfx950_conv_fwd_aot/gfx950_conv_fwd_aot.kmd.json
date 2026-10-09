@@ -150,6 +150,91 @@
       "name": "block_waves",
       "type": "int",
       "default_value": 0
+    },
+    {
+      "name": "block_h",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "unroll_rows",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "block_q",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "block_groups",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "double_buffer",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "cpg",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "kpg",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "tile_h",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "tile_w",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "tile_k_out",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "ck",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "waves_m",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "waves_n",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "atom",
+      "type": "string",
+      "default_value": "none"
+    },
+    {
+      "name": "swizzle_wgm",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "iglp",
+      "type": "int",
+      "default_value": -1
+    },
+    {
+      "name": "waves_per_eu",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

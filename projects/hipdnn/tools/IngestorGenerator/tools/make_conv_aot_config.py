@@ -197,11 +197,11 @@ _INT_FIELDS = tuple(
     f for f in DIRECT_SPEC_ORDER + tuple(DIRECT_KNOB_FIELDS) if f not in _STRING_FIELDS
 )
 #: Direct-sweep algorithm -> the instance's direct_variant, for the algorithms the
-#: exact-shape engine's direct launch runs. tools/enumerate_conv_aot_instances.py
-#: ships these.
+#: exact-shape engine's direct launch runs.
 DIRECT_ALGORITHMS = {"direct_depthwise": "std", "direct_depthwise_spatial": "spatial"}
 #: Every forward direct-sweep algorithm the packaged AOT launch runs, and its
 #: direct_variant: AOT_DIRECT_ALGORITHMS of the rocKE adapter.
+#: tools/enumerate_conv_aot_instances.py ships every identity of these.
 PACKAGED_DIRECT_ALGORITHMS = {
     **DIRECT_ALGORITHMS,
     "direct_depthwise_tiled": "tiled",
