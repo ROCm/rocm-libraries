@@ -22,38 +22,16 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
     clang_tidy_check(hipdnn_corpus_gen_tool)
     install(TARGETS hipdnn_corpus_gen_tool RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-    # The exit status is what scripts branch on: 0 for --help, 1 for arguments it cannot use.
-    # Each entry is name, comma-separated arguments, expected exit, expected output. Build-tree
-    # only: the driver script is not installed.
+    # 0 for --help, 1 for arguments it cannot use.
     if(NOT HIPDNN_SKIP_TESTS)
-        set(_cli_cases
+        include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CliExitTests.cmake)
+        hipdnn_add_cli_exit_tests(hipdnn_corpus_gen_cli hipdnn_corpus_gen_tool
             "help|--help|0|Usage:"
             "unknown_flag|--operations,.,--no-such-flag|1|Unknown argument: --no-such-flag"
             "flag_as_value|--operations,.,--output,--count,5|1|--output needs a value"
-            "trailing_flag|--without-engine,--operations|1|--operations needs a value")
-        foreach(_case IN LISTS _cli_cases)
-            string(REPLACE "|" ";" _fields "${_case}")
-            list(GET _fields 0 _name)
-            list(GET _fields 1 _args)
-            list(GET _fields 2 _exit)
-            list(GET _fields 3 _output)
-            set(_test hipdnn_corpus_gen_cli_${_name})
-            add_test(NAME ${_test}
-                COMMAND ${CMAKE_COMMAND} "-DCORPUS_GEN_TOOL=$<TARGET_FILE:hipdnn_corpus_gen_tool>"
-                        "-DCLI_ARGS=${_args}" "-DEXPECTED_EXIT=${_exit}"
-                        "-DEXPECTED_OUTPUT=${_output}"
-                        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/CliExitStatus.cmake")
-            set_tests_properties(${_test} PROPERTIES TIMEOUT 60)
-            if(DEFINED TEST_ENVIRONMENT)
-                set_tests_properties(${_test} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
-            endif()
-            # The tool loads the backend DLL from the build tree's bin directory on Windows.
-            if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
-                set_tests_properties(${_test} PROPERTIES
-                    ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
-            endif()
-            _apply_hipdnn_test_category_labels(${_test})
-        endforeach()
+            "trailing_flag|--without-engine,--operations|1|--operations needs a value"
+            "count_not_a_number|--without-engine,--operations,.,--count,abc|1|--count needs a number"
+            "share_not_a_number|--without-engine,--operations,.,--sweep-share,x|1|--sweep-share needs a number")
     endif()
 endif()
 

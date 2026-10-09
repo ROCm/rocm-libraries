@@ -6,7 +6,7 @@ find_package(Threads REQUIRED)
 # Host-only tests: no device or plugin required.
 add_executable(hipdnn_bench_tests
     TestVariantPackBuilder.cpp
-    TestCandidatePageJson.cpp TestCsvOutput.cpp TestNumericalValidation.cpp)
+    TestCandidatePageJson.cpp TestCliNumbers.cpp TestCsvOutput.cpp TestNumericalValidation.cpp)
 
 target_compile_options(hipdnn_bench_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 

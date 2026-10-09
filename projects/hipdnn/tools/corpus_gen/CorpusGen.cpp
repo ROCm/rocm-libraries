@@ -9,6 +9,7 @@
  * modelled. Output: the problems the engine accepts, as graphs plus one bench command each.
  */
 
+#include <hipdnn_corpus_gen/CliNumbers.hpp>
 #include <hipdnn_corpus_gen/CorpusManifest.hpp>
 #include <hipdnn_corpus_gen/CorpusOutput.hpp>
 #include <hipdnn_corpus_gen/EngineCoverage.hpp>
@@ -43,6 +44,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace
@@ -280,6 +282,22 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
             }
             return args[++i];
         };
+        // The whole value is the number, or the argument is refused: `--count abc` must not
+        // run as `--count 0` (the whole pool).
+        std::string badNumber;
+        const auto number = [&](auto& target, const auto& parse) {
+            const auto text = next();
+            const auto value = parse(text);
+            if(value)
+            {
+                target = static_cast<std::remove_reference_t<decltype(target)>>(*value);
+            }
+            else if(!missingValue)
+            {
+                badNumber = text;
+            }
+        };
+        const auto integer = [&](auto& target) { number(target, hipdnn_corpus_gen::parseInteger); };
 
         if(arg == "--help" || arg == "-h")
         {
@@ -302,7 +320,7 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--engine-id")
         {
-            options.engineId = static_cast<int64_t>(std::strtoull(next().c_str(), nullptr, 0));
+            number(options.engineId, hipdnn_corpus_gen::parseEngineId);
             options.haveEngineId = true;
         }
         else if(arg == "--without-engine")
@@ -327,11 +345,11 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--count")
         {
-            options.count = std::strtoll(next().c_str(), nullptr, 10);
+            integer(options.count);
         }
         else if(arg == "--per-combination")
         {
-            options.exploration.pointsPerCombination = std::strtoll(next().c_str(), nullptr, 10);
+            integer(options.exploration.pointsPerCombination);
         }
         else if(arg == "--kdp-root" || arg == "--kdp")
         {
@@ -343,15 +361,15 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--model-share")
         {
-            options.shares["model"] = std::strtod(next().c_str(), nullptr);
+            number(options.shares["model"], hipdnn_corpus_gen::parseReal);
         }
         else if(arg == "--kernel-share")
         {
-            options.shares["kernel"] = std::strtod(next().c_str(), nullptr);
+            number(options.shares["kernel"], hipdnn_corpus_gen::parseReal);
         }
         else if(arg == "--sweep-share")
         {
-            options.shares["sweep"] = std::strtod(next().c_str(), nullptr);
+            number(options.shares["sweep"], hipdnn_corpus_gen::parseReal);
         }
         else if(arg == "--keep")
         {
@@ -371,8 +389,15 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
             }
             else
             {
-                options.regimeQuotas[""][clause.substr(0, split)]
-                    = std::strtoll(clause.substr(split + 1).c_str(), nullptr, 10);
+                const auto quota = hipdnn_corpus_gen::parseInteger(clause.substr(split + 1));
+                if(quota && *quota >= 0)
+                {
+                    options.regimeQuotas[""][clause.substr(0, split)] = *quota;
+                }
+                else
+                {
+                    options.quotaError = "--regime-quota takes <regime>=<n>, not '" + clause + "'";
+                }
             }
         }
         else if(arg == "--regime-quotas")
@@ -381,7 +406,7 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--regime-floor")
         {
-            options.regimeFloor = std::strtoll(next().c_str(), nullptr, 10);
+            integer(options.regimeFloor);
         }
         else if(arg == "--include-extremes")
         {
@@ -389,11 +414,11 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--budget")
         {
-            options.exploration.budgetPerCombination = std::strtoll(next().c_str(), nullptr, 10);
+            integer(options.exploration.budgetPerCombination);
         }
         else if(arg == "--ceiling")
         {
-            options.exploration.numericCeiling = std::strtoll(next().c_str(), nullptr, 10);
+            integer(options.exploration.numericCeiling);
         }
         else if(arg == "--probe")
         {
@@ -401,24 +426,23 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--restarts")
         {
-            options.exploration.restarts = std::strtoll(next().c_str(), nullptr, 10);
+            integer(options.exploration.restarts);
         }
         else if(arg == "--steps")
         {
-            options.exploration.stepsPerStart = std::strtoll(next().c_str(), nullptr, 10);
+            integer(options.exploration.stepsPerStart);
         }
         else if(arg == "--max-bytes")
         {
-            options.maxBytes = std::strtoll(next().c_str(), nullptr, 10);
+            integer(options.maxBytes);
         }
         else if(arg == "--max-skeleton")
         {
-            options.exploration.maxSkeleton
-                = static_cast<size_t>(std::strtoull(next().c_str(), nullptr, 10));
+            integer(options.exploration.maxSkeleton);
         }
         else if(arg == "--seed")
         {
-            options.exploration.seed = std::strtoull(next().c_str(), nullptr, 10);
+            integer(options.exploration.seed);
         }
         else
         {
@@ -429,6 +453,11 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         if(missingValue)
         {
             std::cerr << arg << " needs a value\n";
+            return ParseOutcome::INVALID;
+        }
+        if(!badNumber.empty())
+        {
+            std::cerr << arg << " needs a number, not '" << badNumber << "'\n";
             return ParseOutcome::INVALID;
         }
     }
@@ -928,7 +957,13 @@ int runGenerator(const std::vector<std::string>& args)
             }
             else
             {
-                point[name] = static_cast<int64_t>(std::strtoll(text.c_str(), nullptr, 10));
+                const auto value = hipdnn_corpus_gen::parseInteger(text);
+                if(!value)
+                {
+                    std::cerr << "--probe " << name << " needs a number, not '" << text << "'\n";
+                    return 1;
+                }
+                point[name] = *value;
             }
         }
 

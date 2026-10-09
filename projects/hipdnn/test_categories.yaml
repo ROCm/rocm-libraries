@@ -52,12 +52,24 @@ test_categories:
       - "uhd_gen_tests"
       - "uhd_gen_dataset_tests"
       - "mine_shapes_tests"
-      # Build tree only: CMake driver scripts (tools/corpus_gen/tests/CliExitStatus.cmake)
-      # checking hipdnn_corpus_gen's exit status for its arguments; not installed.
+      - "uhd_skill_scripts_tests"
+      # Build tree only: CMake driver scripts (tools/cmake/CliExitStatus.cmake)
+      # checking hipdnn_corpus_gen's and hipdnn_bench's exit status for their arguments;
+      # not installed.
       - "hipdnn_corpus_gen_cli_help"
       - "hipdnn_corpus_gen_cli_unknown_flag"
       - "hipdnn_corpus_gen_cli_flag_as_value"
       - "hipdnn_corpus_gen_cli_trailing_flag"
+      - "hipdnn_corpus_gen_cli_count_not_a_number"
+      - "hipdnn_corpus_gen_cli_share_not_a_number"
+      - "hipdnn_bench_cli_help"
+      - "hipdnn_bench_cli_unknown_flag"
+      - "hipdnn_bench_cli_flag_as_value"
+      - "hipdnn_bench_cli_trailing_flag"
+      - "hipdnn_bench_cli_warmup_not_a_number"
+      - "hipdnn_bench_cli_stability_not_a_number"
+      - "hipdnn_bench_cli_engine_id_not_a_number"
+      - "hipdnn_bench_cli_error_before_help"
 
   integration:
     description: "Current hipDNN integration-check coverage"
