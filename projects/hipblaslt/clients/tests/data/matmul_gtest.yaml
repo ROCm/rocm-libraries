@@ -127,6 +127,35 @@ Tests:
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
 
+# Port of the rocBLAS gemm_ex case hipblaslt_f16 (gemm_gtest.yaml, use_hipblaslt: 1),
+# instance NN_2_2_2_5_2_2_0_2_2: a 2x2x2 NN GEMM with alpha != 1 and beta == 0, run
+# directly through hipBLASLt instead of via the rocBLAS backend.
+- name: matmul_hipblaslt_f16_2x2x2_NN
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M: 2, N: 2, K: 2, lda: 2, ldb: 2, ldc: 2, ldd: 2 }
+  transA: N
+  transB: N
+  alpha: 5
+  beta: 0
+
+# Port of the rocBLAS gemm_ex case gemm_ex_h2f (f16 in, f32 out), instance
+# TT_1_1_64_1_64_1_1_1_1. A 1x1x64 TT GEMM: a single dot product of length 64, which
+# the GridBased heuristic answers from the (M=1,N=1) cell whose only tabulated K is 1.
+- name: matmul_hipblaslt_h2f_1x1x64_TT
+  category: pre_checkin
+  function:
+    matmul: { a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r,
+              compute_type: c_f32_r, scale_type: f32_r }
+  matrix_size:
+    - { M: 1, N: 1, K: 64, lda: 64, ldb: 1, ldc: 1, ldd: 1 }
+  transA: T
+  transB: T
+  alpha: 1
+  beta: 1
+
 # Special floating-point inputs on 64x64, FP types only. The inf, neg_inf and nan cases exercise
 # check_special_value_consistency(): CPU and GPU must agree on the IEEE class (no Inf->NaN).
 # The zero and neg_zero cases are ordinary initialization coverage that flows through the normal

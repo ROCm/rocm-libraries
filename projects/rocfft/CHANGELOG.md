@@ -19,6 +19,11 @@ Documentation for rocFFT is available at
 
 * Added further support for very large FFTs (length greater than 2^32).
 
+### Optimized
+
+* Improved performance of unit-strided, interleaved, complex-to-real FFTs for the following lengths:
+  * (216,104,100)
+
 ## rocFFT 1.0.40 for ROCm 10.1
 
 ### Added
