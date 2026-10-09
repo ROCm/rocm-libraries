@@ -62,6 +62,12 @@ struct Config
     // carry no single-C branch.
     bool single_c = false;
 
+    // Element width the tile is sized for: 2 for fp16/bf16, 4 for tf32.
+    //
+    // A tile is sized for exactly one width (tf32's LDS tile holds two bf16 planes, so
+    // it is twice a 16-bit one); is_valid_config rejects a mismatched input type.
+    int elem_bytes = 2;
+
     // When true, address global memory with a per-tile row-origin fold (large tensors).
     //
     // The baseline folds only the image origin into the 64-bit base, capping one

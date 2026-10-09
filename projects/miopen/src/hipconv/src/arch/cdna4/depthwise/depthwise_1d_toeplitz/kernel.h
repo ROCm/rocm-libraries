@@ -11,9 +11,10 @@
 // and the off-diagonal work is discarded for free (depthwise is memory-bound). Only the
 // weight prologue differs (a one-hot diagonal tap); the rest is inherited.
 //
-// Scope: kw in {3,5,7,9,11}; kh is the vertical loop bound. Fprop stride 1/2; Dgrad =
-// rot180 correlation of dY (stride 2 runs it over dY upsampled 2x via cfg.dilation). 5x5
-// is also served by depthwise_2d_toeplitz; this path wins large-spatial.
+// Scope: fp16/bf16 and tf32 (stored fp32, split into a bf16 pair for the MFMA); kw in
+// {3,5,7,9,11}; kh is the vertical loop bound. Fprop stride 1/2; Dgrad = rot180 correlation
+// of dY (stride 2 runs it over dY upsampled 2x via cfg.dilation). 5x5 is also served by
+// depthwise_2d_toeplitz; this path wins large-spatial.
 
 #include "conv_kernel.h"
 #include "config_table.h"
@@ -76,6 +77,101 @@ __device__ void load_scatter(RegTile& rt, MemT* base, SlotMap&& slot, OffsetMap&
     }
 }
 
+// The kernel's LDS layout, as one interface over two element widths:
+//
+//   offset_uint4(x, cblk)   uint4 (16 B) offset of a column's c-block -- the DTL slot unit
+//   offset_c4blk(x, c4)     offset of a 4-channel block, in units of 4 elements
+//   x(off) / cblk(off)      inverses of offset_uint4, used to aim the DTL v-offsets
+//
+// The two widths disagree on what a uint4 holds -- 8 channels at 2 B per element, 4 at 4 B --
+// so offset_uint4's second argument is an 8-channel block for 16-bit and a 4-channel block
+// for tf32, and only offset_c4blk means the same thing to both. Naming them alike is what
+// lets the kernel body stay width-agnostic.
+
+// 16-bit: the shared SwizzleT, renamed into the interface above.
+template <int C_>
+struct DwSwizzle16
+{
+    using S = SwizzleT<C_>;
+    static constexpr int offset_uint4(int x_, int c8_) { return S::offset_uint4(x_, c8_); }
+    static constexpr int offset_c4blk(int x_, int c4_) { return S::offset_uint2(x_, c4_); }
+    static constexpr int x(int off) { return S::x(off); }
+    static constexpr int cblk(int off) { return S::c8(off); }
+};
+
+// tf32: xor the packed (column, 4-channel-block) address with the column bits just above it.
+// An involution, so one expression is both the layout and its inverse, and a uint4 already
+// *is* the 4-channel block, so offset_c4blk is offset_uint4.
+//
+// Not in swizzle.h because it is not a general scheme -- it is fitted to this kernel's two
+// lane maps, and both were checked against the gfx950 phase tables (ds_read_b128 is 4
+// phases of 16 scrambled lanes, ds_write_b128 is 8 of 8 consecutive ones).
+//
+// SwizzleT_fp32 does not fit them. Its 4*x skew was searched for the grouped-4c read, where
+// x spans 4 columns while c4 spans the group. Both accesses here are the transpose: c4 is
+// constant across an instruction and x sweeps 16 columns, so a term in 4*x repeats every 4
+// columns in the bank index and a phase's 16 lanes collapse onto 4 banks. Measured 27.6
+// conflict cycles per B-fragment read and 55.1 per staging store at block_c 32, against 0.00
+// and 0.01 for this.
+//
+// What the lane maps want instead is a rotation by x >> (4 - log2 C4) -- the same adaptive
+// rotation SwizzleT runs for 16-bit, and conflict-free here because (x >> t) mod 16 is a
+// complete residue system in every read phase. Folding it into the packed address collapses
+// it to one xor and, because the xor no longer has to stay inside a single axis, extends it
+// to C4 = 24 (block_c 96), whose odd factor 3 has no cheap per-axis form. This is CuTe's
+// Swizzle<B = log2 C4, M = 0, S = 4>; M + B <= S is what makes it an involution.
+template <int C_>
+struct DwSwizzleTf32
+{
+    static constexpr int C  = C_;
+    static constexpr int C4 = C / 4; // uint4 per column, and the 4-channel block count
+
+    static_assert(C > 0, "DwSwizzleTf32 requires positive C");
+    static_assert(C % 4 == 0, "DwSwizzleTf32 requires C divisible by 4 (uint4 = 4 channels)");
+    // A power-of-two C4 masks with C4 - 1, which from 32 up reaches bit 4 and overlaps the
+    // `a >> 4` it is xored against, so B > S and fold is no longer an involution.
+    static_assert((C4 & (C4 - 1)) != 0 || C4 <= 16,
+                  "DwSwizzleTf32 needs a power-of-two C4 <= 16 (block_c 64) or a new swizzle");
+
+    // Unsigned internals for the same reason SwizzleT uses them: / C4 and % C4 lower to a
+    // shift and a mask on the power-of-two widths. Callers pass non-negative coordinates.
+    static constexpr int offset_uint4(int x_, int c4_)
+    {
+        return fold(static_cast<unsigned>(x_) * C4 + static_cast<unsigned>(c4_));
+    }
+    static constexpr int offset_c4blk(int x_, int c4_) { return offset_uint4(x_, c4_); }
+
+    static constexpr int x(int off) { return static_cast<unsigned>(fold(off)) / C4; }
+    static constexpr int cblk(int off) { return static_cast<unsigned>(fold(off)) % C4; }
+
+private:
+    // Bits below log2 C4 carry c4, bits from 4 up carry the column, and the mask keeps the
+    // two apart -- which is both why this is a bijection and why it is its own inverse.
+    static constexpr int fold(int packed)
+    {
+        constexpr unsigned MASK = ((C4 & (C4 - 1)) == 0) ? unsigned(C4 - 1) : 7u;
+        const unsigned a        = packed;
+        return static_cast<int>(a ^ ((a >> 4) & MASK));
+    }
+
+    // Same guard SwizzleT_fp32 carries: a future edit cannot desync the LDS write side from
+    // the v-offsets the DTL loads are aimed with. The fold is periodic in x with period 16,
+    // so 16 rows cover every case.
+    static constexpr bool inverses_round_trip()
+    {
+        for(int x_ = 0; x_ < 16; ++x_)
+            for(int c4_ = 0; c4_ < C4; ++c4_)
+            {
+                const int off = offset_uint4(x_, c4_);
+                if(x(off) != x_ || cblk(off) != c4_)
+                    return false;
+            }
+        return true;
+    }
+    static_assert(inverses_round_trip(),
+                  "DwSwizzleTf32::offset_uint4 and x()/cblk() are not mutual inverses");
+};
+
 template <Config cfg, DataType DT>
 __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restrict__ in,
                                                        const ToType<DT>* __restrict__ wei,
@@ -91,23 +187,36 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
 {
     using namespace grouped_8c_transforms;
     using element_t = ToType<DT>;
-    using Sw        = SwizzleT<cfg.block_c()>;
 
-    // One 16x16x32 MFMA per horizontal tap.
+    constexpr bool is_tf32 = (DT == DataType::tf32);
+
+    using Sw =
+        std::conditional_t<is_tf32, DwSwizzleTf32<cfg.block_c()>, DwSwizzle16<cfg.block_c()>>;
+
+    // One 16x16x32 MFMA per horizontal tap (three, for a tf32 pair).
     //
     // A = one-hot diagonal weights (16x32), B = streamed input (32x16), Acc = fp32 ring
     // (16x16); layouts match the raw fp16x8/fp32x4 vectors, so these wrappers are zero-cost.
-    constexpr auto half_fmt = (DT == DataType::bf16) ? bunnies::fpfmt::e8m7 : bunnies::fpfmt::e5m10;
-    using mat_a             = arch::matrix<half_fmt, 16, 32, bunnies::use::A>;
-    using mat_b             = arch::matrix<half_fmt, 32, 16, bunnies::use::B>;
-    using mat_acc           = arch::matrix<bunnies::fpfmt::e8m23, 16, 16, bunnies::use::Acc>;
-    // acc narrowed to element_t for the LDS staging store
-    using mat_out = arch::matrix<half_fmt, 16, 16, bunnies::use::Acc>;
+    constexpr auto data_fmt =
+        is_tf32 ? bunnies::fpfmt::e8m10
+                : ((DT == DataType::bf16) ? bunnies::fpfmt::e8m7 : bunnies::fpfmt::e5m10);
+    constexpr auto compute_fmt = is_tf32 ? bunnies::fpfmt::e8m10_e8m7x2split : data_fmt;
+    using mat_a_data           = arch::matrix<data_fmt, 16, 32, bunnies::use::A>;
+    using mat_a                = arch::matrix<compute_fmt, 16, 32, bunnies::use::A>;
+    using mat_b_data           = arch::matrix<data_fmt, 32, 16, bunnies::use::B>;
+    using mat_b                = arch::matrix<compute_fmt, 32, 16, bunnies::use::B>;
+    using mat_acc              = arch::matrix<bunnies::fpfmt::e8m23, 16, 16, bunnies::use::Acc>;
+    // acc narrowed to element_t for the LDS staging store (a no-op for tf32, whose storage is
+    // already fp32 -- it just widens the store from a b64 to a b128).
+    using mat_out        = arch::matrix<data_fmt, 16, 16, bunnies::use::Acc>;
+    using out_store_inst = std::conditional_t<is_tf32, arch::ds_store_b128, arch::ds_store_b64>;
 
     using ResultLayout = MatrixLayout<16, 16, 1, float>;
 
-    constexpr int CH_PER_UINT4 = 8;
-    constexpr int GROUP_UINT4  = cfg.group_size / CH_PER_UINT4; // == 1
+    // Channels per uint4, and how many of them a wave's channel group spans (1 at 2 B per
+    // element, 2 at 4 B).
+    constexpr int CH_PER_UINT4 = 16 / (int)sizeof(element_t);
+    constexpr int GROUP_UINT4  = cfg.group_size / CH_PER_UINT4;
 
     constexpr int BLOCK_W = BLOCK_Q + (cfg.kw - 1);
     // Dense horizontal passes: one MFMA contracts 4 input positions (K==32); a tile
@@ -117,18 +226,21 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
     // Structured-sparse (smfmac) path: the one-hot diagonal fits 2:4 sparsity trivially.
     //
     // One tap per 4-wide K group. An smfmac contracts 8 positions (K==64), halving the
-    // pass count (KSP == ceil(KWP/2)). Enabled only where it wins (KWP>=2, fp16/bf16);
-    // kw=3 stays dense (a K==64 pass would waste half its contraction).
-    constexpr bool USE_SPARSE = (KWP >= 2) && (DT == DataType::fp16 || DT == DataType::bf16);
+    // pass count (KSP == ceil(KWP/2)). Enabled only where it wins (KWP>=2); kw=3 stays dense
+    // (a K==64 pass would waste half its contraction). tf32 keeps the sparse path: the split
+    // just feeds the bf16 smfmac three times, same structure.
+    constexpr bool USE_SPARSE = (KWP >= 2);
     // Sparse passes: each smfmac spans 8 input positions (== 2 dense passes).
     constexpr int KSP = (KWP + 1) / 2;
     // Weights are staged 1:4 (one tap per group of 4) and cast to the 2:4 form smfmac
-    // consumes; see bunnies_cdna4.hpp.
+    // consumes -- for tf32 that cast also splits, so the fp32 2:4 operand never takes
+    // registers; see bunnies_cdna4.hpp.
     using smat_a_1of4 =
-        arch::sparse_matrix<half_fmt, 16, 64, bunnies::use::A, bunnies::sparsity::n1of4>;
+        arch::sparse_matrix<data_fmt, 16, 64, bunnies::use::A, bunnies::sparsity::n1of4>;
     using smat_a_2of4 =
-        arch::sparse_matrix<half_fmt, 16, 64, bunnies::use::A, bunnies::sparsity::n2of4>;
-    using smat_b = arch::matrix<half_fmt, 64, 16, bunnies::use::B>;
+        arch::sparse_matrix<compute_fmt, 16, 64, bunnies::use::A, bunnies::sparsity::n2of4>;
+    using smat_b_data = arch::matrix<data_fmt, 64, 16, bunnies::use::B>;
+    using smat_b      = arch::matrix<compute_fmt, 64, 16, bunnies::use::B>;
 
     constexpr int BLOCK_C_UINT4  = cfg.block_c() / CH_PER_UINT4;
     constexpr int BLOCK_GROUPS   = cfg.waves_per_wg;
@@ -163,6 +275,13 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
         (NARROW_LOAD_ELEMS + cfg.block_size() - 1) / cfg.block_size();
     constexpr int IO_LDS_SIZE =
         NUM_INPUT_LDS_BUFFERS * INPUT_LDS_BUFFER_UINT4 + OUTPUT_LDS_BUFFER_UINT4;
+    // Config::shared_bytes() is the host-side model of this, which the table uses to drop a
+    // rung whose ring will not fit; these two assert that the model and the geometry agree
+    // and that what it let through is actually within the bound.
+    static_assert(IO_LDS_SIZE * sizeof(uint4) == (size_t)cfg.shared_bytes(),
+                  "Config::shared_bytes() must model the kernel's static allocation exactly");
+    static_assert(cfg.shared_bytes() <= kMaxSharedBytes,
+                  "input ring + output staging must fit the static shared limit");
 
     __shared__ uint4 lds_buf[IO_LDS_SIZE];
     uint4* input_lds  = lds_buf;
@@ -238,6 +357,8 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
     // at c==k_val, so the g-block is diagonal. For KWP>1, pass ph covers input positions
     // [4*ph, 4*ph+4) at tap column s_val = 4*ph + gg - q (out-of-range taps stay zero).
     // Issued up front so the weight loads overlap the input-load setup + first DMA below.
+    // Held in compute form: the weights outlive every input row, so a tf32 split here is paid
+    // once for the whole stream.
     bunnies::reg_tile<mat_a, KWP, cfg.kh> weights_reg{};        // dense: off-diagonal stays 0
     bunnies::reg_tile<smat_a_2of4, KSP, cfg.kh> sweights_reg{}; // sparse: compressed diagonal + idx
     if constexpr(!USE_SPARSE)
@@ -251,8 +372,11 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
         const int k_val = GT::k(row);
         const int q_val = GT::q(row);
         const int gch   = block_k + wave_group * cfg.group_size + k_val;
+        // Scattered into the data form (one element per lane), then cast: the split has no
+        // element-wise slot to load into.
+        bunnies::reg_tile<mat_a_data, KWP, cfg.kh> weights_data{};
         load_scatter<arch::global_load<sizeof(element_t)>>(
-            weights_reg,
+            weights_data,
             const_cast<element_t*>(wei),
             [&](int, int, int) { return k_val; }, // one-hot slot: the lane's own channel
             [&](int ph, int r, int) -> size_t {
@@ -273,6 +397,7 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
                 return gch < C;
             return true;
         });
+        bunnies::tile_cast(weights_reg, weights_data);
     }
     else
     {
@@ -345,7 +470,7 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
             static_for<F>([&]<int s>() { pl.lds[s][p] = &input_lds[s * SEG_UINT4 + loc]; });
 
             const int col        = Sw::x(loc);
-            const int c_uint4_p  = Sw::c8(loc);
+            const int c_uint4_p  = Sw::cblk(loc);
             const int global_col = (block_q - px) + col; // virtual-grid column
             const bool zero_col  = (UPS > 1) && ((global_col % UPS) != 0);
             const int dY_col     = (UPS > 1) ? (global_col / UPS) : global_col;
@@ -391,7 +516,7 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
                 const int slot       = e / CH_PER_UINT4;
                 const int ch         = e % CH_PER_UINT4;
                 const int col        = Sw::x(slot);
-                const int c_uint4_p  = Sw::c8(slot);
+                const int c_uint4_p  = Sw::cblk(slot);
                 const int global_col = (block_q - px) + col;
                 const bool zero_col  = (UPS > 1) && ((global_col % UPS) != 0);
                 const int dY_col     = (UPS > 1) ? (global_col / UPS) : global_col;
@@ -446,46 +571,86 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
     const int seg_lane = (lane % 16) / SUBTILES; // sub-image index of this lane
     const int n_local  = (lane % 16) % SUBTILES; // tile-column within the sub-image
     const int seg_off  = seg_lane * SEG_UINT4;   // this lane's segment base in LDS
-    // Clamp reads to a segment's last column: columns >= SEG_W are always zero-weight
-    // taps, so this keeps B finite (else the spill hits uninitialized LDS -> 0*NaN).
-    const auto seg_col = [](int c) { return c < SEG_W ? c : (SEG_W - 1); };
+    // Fold reads back into the segment: a sparse pass spans 8 input positions where the tile
+    // needs kw+1, so the trailing columns run past SEG_W. They are always zero-weight taps,
+    // and folding keeps B finite (else the spill hits uninitialized LDS -> 0*NaN).
+    //
+    // Any in-range column is equally correct, and which one is chosen decides whether the
+    // read stays bank-free. Subtracting a whole 16 keeps the lane's bank under
+    // DwSwizzleTf32 -- 16 columns move the row term by a multiple of 16 and the rotation
+    // term by a multiple of C4 -- so the phase keeps the complete residue system the swizzle
+    // relies on. Pinning to SEG_W - 1 loses it and costs conflicts at kw 5/9/11, the widths
+    // whose last pass overhangs. One subtraction always suffices, and never goes negative:
+    // the overhang peaks at 5 columns (kw 9), and c >= SEG_W >= 16 on entry.
+    //
+    // 16-bit keeps the old clamp. The same argument holds for SwizzleT and it would gain
+    // there too, but one shipped rung (block_c 32, w_fold 2, kw 11) comes out slightly worse,
+    // so that is a separate change to measure rather than a rider on this one.
+    constexpr bool FOLD_CLAMP = is_tf32 && SEG_W >= 16;
+    const auto seg_col        = [](int c) {
+        if constexpr(FOLD_CLAMP)
+            return c < SEG_W ? c : c - 16;
+        else
+            return c < SEG_W ? c : (SEG_W - 1);
+    };
     // B fragment LDS uint4 offsets, precomputed once (recomputing in the load hot
     // loop regresses sparse badly). Dense reads one uint4/pass; sparse two, because
     // the B map splits a lane's K into a low and a high 32-deep half, 4 input
     // columns apart.
-    int input_lds_offset_pass[KWP];
-    int sinput_lds_offset[KSP][2];
+    //
+    // A b128 is the widest LDS read, so it covers a lane's whole channel group only at 2 B
+    // per element; tf32's group is two uint4s and takes a round each. The two sit at the same
+    // column but adjacent c-blocks, which the swizzle's per-row rotation does not keep
+    // adjacent in LDS, so each needs its own offset. CH_ROUNDS is that second axis.
+    constexpr int CH_ROUNDS = GROUP_UINT4;
+    int input_lds_offset_pass[KWP][CH_ROUNDS];
+    int sinput_lds_offset[KSP][2][CH_ROUNDS];
     if constexpr(USE_SPARSE)
     {
         const int sinput_x = 2 * n_local + (lane / 16);
         static_for<KSP>([&]<int sp>() {
-            sinput_lds_offset[sp][0] =
-                seg_off + Sw::offset_uint4(seg_col(sinput_x + 8 * sp), wave_group * GROUP_UINT4);
-            sinput_lds_offset[sp][1] = seg_off + Sw::offset_uint4(seg_col(sinput_x + 8 * sp + 4),
-                                                                  wave_group * GROUP_UINT4);
+            static_for<CH_ROUNDS>([&]<int cr>() {
+                const int c_blk = wave_group * GROUP_UINT4 + cr;
+                sinput_lds_offset[sp][0][cr] =
+                    seg_off + Sw::offset_uint4(seg_col(sinput_x + 8 * sp), c_blk);
+                sinput_lds_offset[sp][1][cr] =
+                    seg_off + Sw::offset_uint4(seg_col(sinput_x + 8 * sp + 4), c_blk);
+            });
         });
     }
     else
     {
         const int input_x = 2 * n_local + lane / 16;
         for(int ph = 0; ph < KWP; ph++)
-            input_lds_offset_pass[ph] =
-                seg_off + Sw::offset_uint4(seg_col(input_x + 4 * ph), wave_group * GROUP_UINT4);
+            static_for<CH_ROUNDS>([&]<int cr>() {
+                input_lds_offset_pass[ph][cr] =
+                    seg_off +
+                    Sw::offset_uint4(seg_col(input_x + 4 * ph), wave_group * GROUP_UINT4 + cr);
+            });
     }
-    // Map-driven loads over the precomputed offsets: map_fun drives the round layout,
-    // and the round's K half selects the uint4 (dense: 1; sparse: 2).
+    // Map-driven loads over the precomputed offsets: map_fun drives the round layout, and the
+    // round's representative K selects the offset. K is 8*t + c for input position t and
+    // channel c, so K/32 is the sparse column half and (K%8)/4 the channel round.
+    const auto ch_round = [](int k) { return CH_ROUNDS == 1 ? 0 : (k % 8) / 4; };
+    // Loaded in the data form and cast: LDS carries fp32 for tf32, and holding B split means
+    // the conversion is once per row rather than once per MFMA.
     auto load_dinput = [&](int base, int ph) {
-        bunnies::reg_tile<mat_b, 1, 1> tile;
-        bunnies::load_tile<arch::ds_load_b128>(
-            tile, input_lds + base, [&](int, int, int, int) { return input_lds_offset_pass[ph]; });
-        return tile.block(0, 0);
+        bunnies::reg_tile<mat_b_data, 1, 1> tile;
+        bunnies::load_tile<arch::ds_load_b128>(tile, input_lds + base, [&](int, int, int k, int) {
+            return input_lds_offset_pass[ph][ch_round(k)];
+        });
+        bunnies::reg_tile<mat_b, 1, 1> compute;
+        bunnies::tile_cast(compute, tile);
+        return compute.block(0, 0);
     };
     auto load_sinput = [&](int base, int sp) {
-        bunnies::reg_tile<smat_b, 1, 1> tile;
+        bunnies::reg_tile<smat_b_data, 1, 1> tile;
         bunnies::load_tile<arch::ds_load_b128>(tile, input_lds + base, [&](int, int, int k, int) {
-            return sinput_lds_offset[sp][k / 32];
+            return sinput_lds_offset[sp][k / 32][ch_round(k)];
         });
-        return tile.block(0, 0);
+        bunnies::reg_tile<smat_b, 1, 1> compute;
+        bunnies::tile_cast(compute, tile);
+        return compute.block(0, 0);
     };
 
     // Output store plan (LDS staging -> global, one uint2 per lane): global destination
@@ -517,10 +682,12 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
             const int q_local       = col % OUT_W_SUB;
             const int q_out = (cfg.stride == 2) ? (block_q / 2) + q_local : block_q + q_local;
             const int n_out = block_g_idx + s_out * n_groups;
-            o.load_lds      = &output_lds[Sw::offset_uint4(col, c_uint4)];
-            o.q_out         = q_out;
-            o.ch_base       = (block_c_uint4 + c_uint4) * CH_PER_UINT4;
-            o.store_active  = (q_out < wo);
+            // One uint4 either way -- 8 channels at 2 B per element, 4 at 4 B -- and
+            // STORE_VECS grows to match, so the drain still covers the tile.
+            o.load_lds     = &output_lds[Sw::offset_uint4(col, c_uint4)];
+            o.q_out        = q_out;
+            o.ch_base      = (block_c_uint4 + c_uint4) * CH_PER_UINT4;
+            o.store_active = (q_out < wo);
             if constexpr(!cfg.narrow_c)
             {
                 if(q_out < wo)
@@ -547,9 +714,12 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
             o.lane_active = true;
             output_col    = 2 * result_n + GT::q(result_row);
         }
-        o.store_lds = reinterpret_cast<element_t*>(output_lds) +
-                      Sw::offset_uint2(output_col, wave_group * GROUP_UINT4 * 2 + c4_within_group) *
-                          (sizeof(uint2) / sizeof(element_t));
+        // A lane holds 4 of the group's channels, so the staging unit is a 4-channel block --
+        // a uint2 at 2 B per element, a uint4 at 4 B, four elements wide either way. The
+        // group spans cfg.group_size/4 such blocks whichever width it is.
+        o.store_lds =
+            reinterpret_cast<element_t*>(output_lds) +
+            Sw::offset_c4blk(output_col, wave_group * (cfg.group_size / 4) + c4_within_group) * 4;
         return o;
     }();
 
@@ -592,7 +762,7 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
 
         // The swizzle already resolved the destination, so the map ignores the coords.
         auto stage_out = [&] {
-            bunnies::store_tile<arch::ds_store_b64>(
+            bunnies::store_tile<out_store_inst>(
                 out_tile, ostore.store_lds, [](int, int, int, int) { return 0; });
         };
         if constexpr(cfg.stride == 2)
@@ -610,7 +780,7 @@ __device__ void conv2d_depthwise_1d_toeplitz_nhwc_impl(const ToType<DT>* __restr
         if constexpr(cfg.narrow_c)
         {
             // Per-channel drain: write only this group's channels < C (last group is
-            // partial), one b16 element at a time.
+            // partial), one element at a time.
             if(ostore.store_active)
             {
                 const int wo_row = (cfg.stride == 2) ? (p_out / 2) : p_out;
@@ -829,7 +999,11 @@ void launch_impl(const LaunchParams& lp,
             view.pad_h(),
             view.pad_w());
     };
-    if(par.input_type == DataType::bf16)
+    if constexpr(cfg.elem_bytes == 4)
+    {
+        typed_launch.template operator()<DataType::tf32>();
+    }
+    else if(par.input_type == DataType::bf16)
         typed_launch.template operator()<DataType::bf16>();
     else
         typed_launch.template operator()<DataType::fp16>();
@@ -890,9 +1064,6 @@ public:
     {
         if(!DepthwiseConvKernel::is_applicable(par))
             return false;
-        // 16-bit only: the base admits tf32 for the CDNA5 1D path, which this has none.
-        if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
-            return false;
         // Dgrad (backward-data) is the rot180 correlation of dY; stride 1 runs it
         // directly, stride 2 runs it over a 2x-upsampled dY (zeros between samples).
         if(par.direction != Direction::Fprop && par.direction != Direction::Dgrad)
@@ -926,6 +1097,8 @@ public:
     bool is_valid_config(const ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
+            return false;
+        if((int)sizeof_data_type(par.input_type) != cfg_.elem_bytes)
             return false;
         if(par.kh != cfg_.kh || par.kw != cfg_.kw)
             return false;

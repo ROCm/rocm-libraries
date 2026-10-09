@@ -1098,10 +1098,6 @@ catch(hipfftResult e)
 {
     return e;
 }
-catch(const DEVICEBUF_MEM_USAGE& e)
-{
-    return HIPFFT_ALLOC_FAILED;
-}
 catch(const std::exception& e)
 {
     return HIPFFT_INTERNAL_ERROR;

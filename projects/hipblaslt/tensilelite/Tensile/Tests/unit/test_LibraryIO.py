@@ -283,6 +283,38 @@ def test_reorder_solutions_params_puts_naming_keys_first() -> None:
     assert keys[3:] == ["WorkGroupMapping", "NumThreads"]
 
 
+def test_reorder_solutions_params_puts_solution_uid_after_index() -> None:
+    """Verify that ``SolutionUID`` follows ``SolutionIndex``.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If solution fields are not in canonical order.
+    """
+    data = {
+        "Solutions": [
+            {
+                "WorkGroupMapping": 8,
+                "SolutionUID": "0u34Z1KlVFjgl",
+                "SolutionIndex": 3,
+                "KernelNameMin": "kern_min",
+                "SolutionNameMin": "sol_min",
+                "NumThreads": 256,
+            }
+        ]
+    }
+    LibraryIO.reorderSolutionsParams(data)
+    keys = list(data["Solutions"][0].keys())
+    assert keys[:4] == [
+        "SolutionIndex",
+        "SolutionUID",
+        "KernelNameMin",
+        "SolutionNameMin",
+    ]
+    assert keys[4:] == ["WorkGroupMapping", "NumThreads"]
+
+
 def test_reorder_solutions_params_no_solutions_is_noop() -> None:
     """``reorderSolutionsParams`` returns immediately when ``Solutions`` is absent."""
     data: dict[str, Any] = {}

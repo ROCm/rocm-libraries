@@ -36,7 +36,7 @@ from ..AsmStoreState import VectorDataTypes
 from ..Activation import ActivationType
 from ..AsmStoreState import VectorDataTypes
 from ..Common import assignParameterWithDefault, IsaInfo, \
-                    print2, printExit, printWarning, \
+                    print1, print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
                     clusterEnabled, streamKCluster, streamKMulticast, \
@@ -686,6 +686,8 @@ def isExtractableIndex(ks, index, tc='x'):
 ################################################################################
 # Solution
 ################################################################################
+_stinkyTuneAnnounced = set()  # print the StinkyTofuParameters notice once per distinct value
+
 class Solution(collections.abc.Mapping):
   MAX_NUM_DS_LOAD_VGPRS: int = 4
   MAX_NUM_DS_LOAD_BYTES: int = 4 * MAX_NUM_DS_LOAD_VGPRS
@@ -765,6 +767,19 @@ class Solution(collections.abc.Mapping):
     for key in config:
       if (key != "ProblemType" or key != "InternalSupportParams") and key not in self._state:
         self._state[key] = config[key]
+    # User-facing StinkyTofuParameters -> internal _StinkyTofuParameters. The public key is
+    # removed; the internal copy tags the kernel name when set and is dropped before the logic yaml.
+    self._state.pop("StinkyTofuParameters", None)
+    stinkyTune = config.get("StinkyTofuParameters") or config.get("_StinkyTofuParameters")
+    if stinkyTune:
+      self._state["_StinkyTofuParameters"] = dict(stinkyTune)
+    userTune = config.get("StinkyTofuParameters")
+    if userTune:
+      tuneKey = tuple(sorted(userTune.items()))
+      if tuneKey not in _stinkyTuneAnnounced:
+        _stinkyTuneAnnounced.add(tuneKey)
+        print1(f"# INFO: StinkyTofuParameters {dict(userTune)} is tuning-only and will NOT appear "
+               "in the generated logic yaml.")
     self["Valid"] = True
     # this could prevent OriginalSolution from re-assigning the parameters, save lots of time
     if "AssignedProblemIndependentDerivedParameters" not in self._state:
@@ -1882,7 +1897,9 @@ class Solution(collections.abc.Mapping):
 
     Raises:
       RuntimeError: If a macrotile component is supplied by neither the
-        CustomKernel block nor the consuming logic file.
+        CustomKernel block nor the consuming logic file, or if the solution
+        can split K (GlobalSplitU other than 0 or 1) but its grid launches one
+        GSU slice per tile.
     """
     ck = state["CustomKernel"]
 
@@ -1909,6 +1926,24 @@ class Solution(collections.abc.Mapping):
     # ContractionSolution reads customKernel.macrotile directly for custom-kernel
     # tile and workspace sizing.
     ck["macrotile"] = macrotile
+
+    # A split-K kernel reduces into D only once every GSU slice of a tile has
+    # arrived, so a grid sized from tile counts alone would return success with D
+    # unwritten. GSU and persistent grids account for the split themselves.
+    # GlobalSplitU -1 lets the runtime pick a split above 1.
+    gsu = state.get("GlobalSplitU", 1)
+    grid = ck.get("grid", [])
+    oneSlicePerTile = all(
+      g in ("One", "TilesX", "TilesY", "Batch", "TilesXY", "TilesXYBatch") for g in grid)
+    if gsu not in (0, 1) and oneSlicePerTile:
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' runs with GlobalSplitU {gsu}, but its "
+        f"CustomKernel grid {grid} launches one GSU slice per tile; use TilesYGSU "
+        f"or TilesXYBatchGSU.")
+    # The same grid cannot honor a runtime GSU override either; clearing the flag
+    # rejects one during solution selection instead of failing at launch.
+    if oneSlicePerTile:
+      state.setdefault("InternalSupportParams", {})["SupportUserGSU"] = False
 
     # Derive _GlobalAccumulation from GlobalSplitUAlgorithm so the C++
     # runtime sees a non-zero sizeMapping.globalAccumulation for GSU>1
@@ -6916,8 +6951,10 @@ class Solution(collections.abc.Mapping):
       if isPersistent(state) and not hasStaticAssignment(state):
         reject(state, printRejectionReason, "PrefetchGL2 with persistent execution requires WorkAssignment=StaticGrid")
         return
+      # General batch is supported on StridedBatched SupportUserArgs kernels,
+      # where ArgType == 3 selects it at runtime. StridedBatched=False is not.
       if state["ProblemType"]["Batched"] and not state["ProblemType"]["StridedBatched"]:
-        reject(state, printRejectionReason, "PrefetchGL2 does not support general batch")
+        reject(state, printRejectionReason, "PrefetchGL2 does not support StridedBatched=False")
         return
       if state["ProblemType"]["Sparse"]:
         if state["DirectToVgprSparseMetadata"]:
@@ -7115,8 +7152,8 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "Use E does not support len(PackedC1IndicesX) > 1.")
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Use E only supports BufferStore due to no suppress no store.")
-      if state["StoreRemapVectorWidth"] and (state["GlobalSplitU"] == 1 or state["GlobalSplitU"] == -1):
-        reject(state, printRejectionReason, "Use E does not support StoreRemapVectorWidth if GSU == 1.")
+      if state["StoreRemapVectorWidth"] and (state["GlobalSplitU"] == 1 or state["GlobalSplitU"] == -1 or isPersistent(state)):
+        reject(state, printRejectionReason, "Use E does not support StoreRemapVectorWidth if GSU == 1 or with a persistent TileProcessingStrategy.")
       if state["GroupLoadStore"]:
         reject(state, printRejectionReason, "Use E does not support GroupLoadStore.")
 
@@ -7296,6 +7333,11 @@ class Solution(collections.abc.Mapping):
   def __setitem__(self, key, value):
     self._name = None
     self._state[key] = value
+
+  def dropStinkyTofuParameters(self):
+    """Remove the tuning-only _StinkyTofuParameters (call after naming, before writing yaml)."""
+    self._name = None
+    self._state.pop("_StinkyTofuParameters", None)
 
   def __str__(self):
     if self._name is None:

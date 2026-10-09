@@ -20783,23 +20783,32 @@ class KernelWriterAssembly(KernelWriter):
       if tcA != "A":
         return mod
       tcShared, tcSep = tdmSharedSetOrder(kernel, tcA, tcB)
-      with self.allocTmpSgpr(1, tag="tdmApplyTileOffsetSharedScale_tmpSgprRes") as tmpSgprRes:
+      with self.allocTmpSgpr(2, tag="tdmApplyTileOffsetSharedScale_tmpSgprRes") as tmpSgprRes:
         tmpSgpr = tmpSgprRes.idx
         for group0, incs in ((f"tdm{tcShared}Group0", incSgprName),
                              (f"tdm{tcSep}Group0", sgpr(f"GlobalReadIncs{tcSep}"))):
           src1 = incs if isinstance(incs, RegisterContainer) else sgpr(incs)
+          mod.add(SMulHIU32(dst=sgpr(tmpSgpr+1), src0=sgpr("StreamKLocalStart"), src1=src1,
+                            comment="StreamK K-offset high word"))
           mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=src1,
                            comment=f"StreamK K-offset for {group0} = localStart * increment"))
           mod.add(SAddU32(dst=sgpr(f"{group0}+2"), src0=sgpr(f"{group0}+2"), src1=sgpr(tmpSgpr),
                            comment=f"Apply StreamK K-offset to TDM {group0}"))
+          mod.add(SAddCU32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=sgpr(tmpSgpr+1),
+                            comment="Apply K-offset high word and address carry"))
       return mod
 
-    with self.allocTmpSgpr(1, tag="tdmApplyTileOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
+    with self.allocTmpSgpr(2, tag="tdmApplyTileOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
       tmpSgpr = tmpSgprRes.idx
+      # Keep both the product high word and the carry from adding its low word.
+      mod.add(SMulHIU32(dst=sgpr(tmpSgpr+1), src0=sgpr("StreamKLocalStart"), src1=sgpr(incSgprName),
+                        comment="StreamK K-offset high word"))
       mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=sgpr(incSgprName),
                        comment="StreamK K-offset = localStart * increment"))
       mod.add(SAddU32(dst=sgpr(f"{group0Name}+2"), src0=sgpr(f"{group0Name}+2"), src1=sgpr(tmpSgpr),
                        comment="Apply StreamK K-offset to TDM global addr"))
+      mod.add(SAddCU32(dst=sgpr(f"{group0Name}+3"), src0=sgpr(f"{group0Name}+3"), src1=sgpr(tmpSgpr+1),
+                        comment="Apply K-offset high word and address carry"))
 
     return mod
 
@@ -20811,7 +20820,7 @@ class KernelWriterAssembly(KernelWriter):
     incSgprName = f"tdm{tcA}{tcB}Incs"
     group0Name = f"tdm{self._tdmPairedParityOrder(kernel, tPA, tPB)[0]['tensorChar']}Group0"
 
-    with self.allocTmpSgpr(1) as tmpSgprRes:
+    with self.allocTmpSgpr(2) as tmpSgprRes:
       tmpSgpr = tmpSgprRes.idx
       # DP-only: StreamKLocalEnd == ItersPerTile (every WG spans a full tile), so
       # the tail iteration index is (ItersPerTile - 1). StreamKLocalEnd is not
@@ -20827,10 +20836,15 @@ class KernelWriterAssembly(KernelWriter):
       else:
         mod.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalEnd"), src1=1,
                         comment="tail iteration index within current StreamK tile"))
+      # Calculate the high word before the low multiply overwrites the iteration index.
+      mod.add(SMulHIU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr), src1=sgpr(incSgprName),
+                       comment="StreamK tail K-offset high word"))
       mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=sgpr(incSgprName),
                       comment="StreamK tail K-offset = (localEnd - 1) * increment"))
       mod.add(SAddU32(dst=sgpr(f"{group0Name}+2"), src0=sgpr(f"{group0Name}+2"), src1=sgpr(tmpSgpr),
                       comment="Apply StreamK tail K-offset to TDM global addr"))
+      mod.add(SAddCU32(dst=sgpr(f"{group0Name}+3"), src0=sgpr(f"{group0Name}+3"), src1=sgpr(tmpSgpr+1),
+                       comment="Apply tail K-offset high word and address carry"))
 
     return mod
 

@@ -1,5 +1,65 @@
 # Changelog for hipconv
 
+## v0.3.2 - 2026-10-02
+
+### Added
+
+| Kernel                   | Architecture     | Layer type             | Direction           | Data type           | Filter, stride                        |
+|--------------------------|------------------|------------------------|---------------------|---------------------|---------------------------------------|
+| `patch_embed`            | CDNA 4 (gfx950)  | patch-embedding conv2d | fprop, dgrad, wgrad | fp16, bf16; dW fp32 | stride = filter, no padding           |
+| `depthwise_wgrad_hankel` | CDNA 5 (gfx1250) | depthwise conv2d       | wgrad               | fp16, bf16; dW fp32 | 3×3 … 11×11 odd square, stride 1 or 2 |
+
+* tf32 on three CDNA 4 kernels, stored as fp32 and computed as three bf16 MFMAs on a
+  (big, small) bf16 split: `depthwise_1d_toeplitz` fprop and dgrad (#223), `direct_l1`
+  fprop and dgrad at 2×2 … 5×5 (#226), and `direct_wgrad` at 2×2, 3×1, 3×3, 4×4 and 5×5
+  (#234).
+* In builds with `HIPCONV_ENABLE_EXPLICIT_GEMM=ON` (default OFF; MIOpen leaves it off),
+  tf32 on pointwise layers, stored as fp32 and computed by hipBLASLt's
+  `HIPBLAS_COMPUTE_32F_FAST_TF32`. That compute type asks for "at least tf32 precision"
+  and leaves the method to the backend, so the accuracy it delivers is
+  architecture-dependent: an architecture without xf32 MFMA decomposes into bf16 and
+  lands inside the error bound hipconv derives for tf32, while one with xf32 computes a
+  single lower-precision pass that the bound does not cover (#229).
+* `find_arch()`, which resolves a GFX name to an `ArchHandle` without the device-code
+  check `resolve_arch()` makes, and `arch_names()`, which lists the architectures the
+  registry holds. Neither needs a device or a HIP context, so a host with no gfx1250 can
+  enumerate which layers the gfx1250 kernels claim. Call `resolve_arch()` before a launch
+  (#245).
+
+### Changed
+
+* Renamed the `pointwise` algorithm to `explicit_gemm`, which now serves non-overlapping
+  patch-embedding convolutions as well as 1×1 through hipBLASLt. Its CMake option
+  `HIPCONV_ENABLE_POINTWISE` is now `HIPCONV_ENABLE_EXPLICIT_GEMM`, still default OFF and
+  left off by MIOpen. CMake ignores the old name without a warning, so a consumer that sets
+  it must rename it (#237).
+* CDNA 4 `depthwise_wgrad_hankel` stores each partition's dW with plain stores into a
+  channel-major workspace, and a fold kernel sums the partitions, replacing per-tap
+  atomics: geometric mean +88% over fifteen shapes (#227). With `weight_grad_type` equal
+  to the input type, it writes dW as fp16 or bf16 in that final store, so a caller needs
+  no separate cast kernel (#235).
+* CDNA 5 `direct` launches a one-dimensional grid and unfolds the block index into batch,
+  group, spatial and K tiles. It rejects depthwise layers (`k == c`, one channel per
+  group) and configs whose thread count exceeds 2^32 (#274).
+
+### Fixed
+
+* CDNA 5 `direct` put groups × batch tiles in the grid's z dimension, so a layer with more
+  than 65535 of them crashed. Reported as ALMIOPEN-2624 (#265, #274).
+* CDNA 5 `direct`: a TDM load could overwrite an LDS buffer another wave was still
+  reading, because the compiler placed that wave's `s_wait_dscnt` in the following stage.
+  The kernel now drains `dscnt` after each tile load, and the odd-K dgrad restriction
+  from #224 is lifted (#248).
+* CDNA 5 `direct` sized its output staging LDS for one image of a batch-folded tile
+  (`tile_size_n > 1`).
+* CDNA 4 `direct_wgrad` ordered its staging reuse only between partitions, so on
+  single-partition configs clang 24 let a lane's next-position stores reach LDS words
+  other lanes were still draining, and dW came back holding the next position's gradient.
+  Already in MIOpen develop through rocm-libraries #12406; this release is its first
+  hipconv version (#231).
+* Fixed builds with compilers that reject implicit conversions between vector types
+  (`-flax-vector-conversions=none`): builtin operands are now converted explicitly (#264).
+
 ## v0.3.1 - 2026-09-17
 
 ### Added

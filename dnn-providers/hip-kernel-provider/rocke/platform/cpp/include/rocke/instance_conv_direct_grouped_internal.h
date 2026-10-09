@@ -653,8 +653,8 @@ typedef struct rocke_dconv_32c_ctx
  *  KH*KW scalar FMA products into a BLOCK_W * KH circular register array.
  * ===================================================================== */
 #define ROCKE_DCONV_DW_MAX_BLOCK_W 64
-#define ROCKE_DCONV_DW_MAX_KH 8
-#define ROCKE_DCONV_DW_MAX_KW 8
+/* ROCKE_DCONV_DW_MAX_KH / _MAX_KW live in the public header: they bound the
+ * weight tables below AND are enforced by both validators. */
 
 typedef struct rocke_dconv_dw_ctx
 {
@@ -715,6 +715,77 @@ typedef struct rocke_dconv_dw_ctx
     /* acc[w_out][slot]: BLOCK_W x KH f32 circular accumulators */
     rocke_value_t* acc[ROCKE_DCONV_DW_MAX_BLOCK_W][ROCKE_DCONV_MAX_ACC_SLOTS];
 } rocke_dconv_dw_ctx_t;
+
+/* ===================================================================== *
+ *  rocke_dconv_dwcol_ctx_t  --  shared state for build_direct_depthwise_col.
+ *
+ *  Column-streamed sibling of the above: the KW axis is a runtime scf.for
+ *  whose iter_args carry a BLOCK_H x BLOCK_W accumulator band, so the only
+ *  register arrays are KH weights and BLOCK_H*BLOCK_W accumulators -- both
+ *  bounded by the validator's live-f32 ceiling (arch VGPRs * 3/8), not by a
+ *  small compile-time cap.  KH reaches 31+ in the covered space, so neither
+ *  array is a fixed ctx member: the emitter alloca's them per call.
+ *
+ *  AOT: the image extents, group count and tensor strides come from the
+ *  kernarg block; only the filter, PAD, stride and the tile geometry are
+ *  build-time, so every bounds guard is emitted against a kernarg.
+ * ===================================================================== */
+typedef struct rocke_dconv_dwcol_ctx
+{
+    rocke_ir_builder_t* b;
+    const rocke_direct_depthwise_col_spec_t* spec;
+    const char* arch;
+    rocke_direct_conv_problem_t p;
+    rocke_dconv_params_t params; /* the AOT kernarg block (ABI order)    */
+
+    int BLOCK_H; /* output rows per block (the unrolled row tile)  */
+    int BLOCK_W;
+    int BLOCK_WAVES;
+    int WAVE;
+    int THREADS;
+    int BLOCK_CH;
+    int n_iters; /* (BLOCK_H - 1) * stride + KH                    */
+    int ELEM_BYTES; /* 2 for f16/bf16                                 */
+    const rocke_type_t* DT; /* dtype_to_ir(spec->dtype)                   */
+
+    rocke_value_t* A;
+    rocke_value_t* Bp;
+    rocke_value_t* D;
+    rocke_value_t* A_bytes;
+    rocke_value_t* B_bytes;
+    rocke_value_t* D_bytes;
+
+    rocke_value_t* c0;
+    rocke_value_t* c1; /* emitted SECOND, unlike the preload prologue */
+    rocke_value_t* c_wave;
+    rocke_value_t* c_W; /* p_Wo kernarg -- output width           */
+    rocke_value_t* c_groups; /* p_groups kernarg                      */
+    rocke_value_t* c_elem_bytes;
+    rocke_value_t* oob_sentinel;
+    rocke_value_t* zero_f32;
+    rocke_value_t* ch_in_range; /* ch < groups                            */
+
+    rocke_value_t* tid;
+    rocke_value_t* wave_id;
+    rocke_value_t* lane;
+
+    rocke_value_t* bx;
+    rocke_value_t* by;
+    rocke_value_t* bz;
+    rocke_value_t* n; /* bz / n_h_tiles                          */
+    rocke_value_t* ho_start; /* (bz % n_h_tiles) * BLOCK_H              */
+    rocke_value_t* y_start; /* ho_start * stride: first padded input row */
+    rocke_value_t* q_tile_start;
+    rocke_value_t* ch; /* absolute channel: by*BLOCK_CH + wave_id*WAVE + lane */
+
+    rocke_value_t* a_rsrc;
+    rocke_value_t* b_rsrc;
+    rocke_value_t* d_rsrc;
+
+    const rocke_tensor_descriptor_t* a_desc; /* A[N,H,W,C] runtime + 2 embeds */
+    const rocke_tensor_descriptor_t* b_desc; /* B[total_k,KH,KW,1] naive      */
+    const rocke_tensor_descriptor_t* d_desc; /* D[N,Ho,Wo,total_k] runtime    */
+} rocke_dconv_dwcol_ctx_t;
 
 /* ===================================================================== *
  *  8c PHASE FUNCTIONS
@@ -926,6 +997,17 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx);
 void rocke_dconv_dw_load_weights(rocke_dconv_dw_ctx_t* ctx);
 void rocke_dconv_dw_build_descriptors(rocke_dconv_dw_ctx_t* ctx);
 rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx);
+
+/* ===================================================================== *
+ *  Depthwise-column PHASE FUNCTIONS
+ *
+ *  There is no separate load_weights phase: the KH weights of one filter
+ *  column depend on the runtime `s` induction variable, so they are loaded
+ *  inside the column loop rather than in the prologue.
+ * ===================================================================== */
+bool rocke_dconv_dwcol_prologue(rocke_dconv_dwcol_ctx_t* ctx);
+void rocke_dconv_dwcol_build_descriptors(rocke_dconv_dwcol_ctx_t* ctx);
+rocke_kernel_def_t* rocke_dconv_dwcol_col_loop(rocke_dconv_dwcol_ctx_t* ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

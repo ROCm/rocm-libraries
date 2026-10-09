@@ -582,6 +582,20 @@ Document unsupported combinations explicitly during release planning rather than
 | Sparse checkout without `shared/ctest` | Low | `ROCBLAS_ENABLE_CTEST=OFF`; no install CTest labels |
 | Stress tests and OOM on small hosts | Medium | `ROCBLAS_CLIENT_RAM_GB_LIMIT`; exclude `*stress*` |
 
+Tracked CI/CD infrastructure Gaps are the most significant known risks and live under [AIDEVOPS-392].  These lead to product regressions:
+
+**Table: `AIDEVOPS-392 tasks`**
+
+| Task | Summary | Priority | Status |
+| --- | --- | --- | --- |
+| [AIDEVOPS-393] | Expand GPU architecture coverage across CI runners on PRs | P1: High | Open |
+| [AIDEVOPS-394] | Add control opt in/out for downstream integration tests for rocBLAS consumers on PRs | P1: High | Open |
+| [AIDEVOPS-395] | Provide for dbgsym to be loaded for CI testing | P2: Medium | Open |
+| [AIDEVOPS-396] | Add stress test pipeline options to CI on PRs | P1: High | Open |
+| [AIDEVOPS-397] | Add multi-gpu test pipeline option to CI on PRs | P2: Medium | Open |
+| [AIDEVOPS-398] | Add comprehensive test pipeline option to CI on PRs | P1: High | Open |
+| [AIDEVOPS-399] | Add ASAN test pipeline option to CI on PRs | P2: Medium | Open |
+
 ## Improvement Roadmap
 
 Near term:

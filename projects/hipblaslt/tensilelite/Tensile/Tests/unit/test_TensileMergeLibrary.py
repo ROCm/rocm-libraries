@@ -226,6 +226,30 @@ class TestLoadData:
         assert keys[:3] == ["SolutionIndex", "KernelNameMin", "SolutionNameMin"]
         assert keys[3:] == sorted(keys[3:])
 
+    def test_convert_places_solution_uid_after_index(self, list_logic: list[Any]) -> None:
+        """Verify that conversion preserves canonical ``SolutionUID`` placement.
+
+        Args:
+            list_logic: Legacy list-format logic fixture.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: If conversion drops or misorders ``SolutionUID``.
+        """
+        data = deepcopy(list_logic)
+        data[5][0]["SolutionUID"] = "0u34Z1KlVFjgl"
+        out = convertToDict(data, "fixture.yaml")
+        keys = list(out["Solutions"][0].keys())
+        assert keys[:4] == [
+            "SolutionIndex",
+            "SolutionUID",
+            "KernelNameMin",
+            "SolutionNameMin",
+        ]
+        assert keys[4:] == sorted(keys[4:])
+
 
 class TestNormalizeDictLibraryLayout:
     """Tests for ``normalizeDictLibraryLayout`` (always runs on dict input)."""

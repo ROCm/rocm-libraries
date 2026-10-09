@@ -151,7 +151,8 @@ class ConvGeometry:
 
         Direct conv names the same quantities differently (``H``/``W`` for the
         input extents, ``KH``/``KW`` for the filter, one ``PAD`` and one
-        ``stride`` for both axes) and has no dilation. Mapping it onto the
+        ``stride`` for both axes, ``dil_h``/``dil_w`` for the dilation, which
+        only the non-grouped forward kernel computes). Mapping it onto the
         shared geometry here means the output-extent formula and the NHWC /
         NHWK stride layouts exist once for both algorithms rather than once
         per algorithm -- they were drifting apart by construction before.
@@ -173,8 +174,8 @@ class ConvGeometry:
             pH=problem.PAD,
             pW=problem.PAD,
             dD=1,
-            dH=1,
-            dW=1,
+            dH=problem.dil_h,
+            dW=problem.dil_w,
             groups=problem.groups,
             is_3d=False,
         )

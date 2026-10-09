@@ -184,7 +184,7 @@ class AddrCalculation:
                           sgpr("StrideC%s"%strideChar), rowInc, tmpS01, "ROWINC- Move cinRowPtr to next row"))
                 module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrD), vgpr(kw.vgprs.coutRowPtrD), \
                           sgpr("StrideD%s"%strideChar), rowInc, tmpS01, "Move coutRowPtrD to next row"))
-            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+            if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
                 ecomment = "coutRowPtrE.la: += StrideE%s*rowInc"%strideChar if lookahead else "Move coutRowPtrE to next row"
                 module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrE), vgpr(kw.vgprs.coutRowPtrE), \
                           sgpr("StrideE%s"%strideChar), rowInc, tmpS01, ecomment))
@@ -765,7 +765,7 @@ class AddrCalculation:
                              comment="new rowStart address += shift column * StridesD"))
                 module.add(VCndMaskB32(dst=vgpr(kw.vgprs.coutRowPtrD), src0=vgpr(kw.vgprs.coutRowPtrD), src1=vgpr(vTmp1), src2=sgpr(sTmp1,sgprCnt), \
                              comment="set new rowStart if meet conditions" ))
-                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
                     module.add(VMadI32I24(dst=vgpr(vTmp1), src0=sgpr(strideE1), src1=vgpr(vTmp2), src2=vgpr(kw.vgprs.coutRowPtrE), \
                              comment="new rowStart address += shift column * StridesE"))
                     module.add(VCndMaskB32(dst=vgpr(kw.vgprs.coutRowPtrE), src0=vgpr(kw.vgprs.coutRowPtrE), src1=vgpr(vTmp1), src2=sgpr(sTmp1,sgprCnt), \
@@ -784,7 +784,7 @@ class AddrCalculation:
                                 comment="new lds write address += shift column * Lds byte Stride"))
                     module.add(VCndMaskB32(dst=vgpr(kw.vgprs.storeRemapLW), src0=vgpr(kw.vgprs.storeRemapLW), src1=vgpr(vTmp1), \
                                   src2=sgpr(sTmp1,sgprCnt), comment="set new rowStart if meet conditions" ))
-                    if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                    if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
                         printExit("Output E does not support StoreRemapVectorWidth")
                     if kw.vgprs.coutRowPtrBias != -1:
                         printExit("Bias reduction does not support StoreRemapVectorWidth")

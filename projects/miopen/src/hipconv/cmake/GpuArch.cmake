@@ -67,6 +67,7 @@ function(hipconv_add_arch_lib name)
         "direct/direct_l1/*.cpp"
         "direct/direct/*.cpp"
         "direct/direct_wgrad/*.cpp"
+        "direct/patch_embed/*.cpp"
     )
     list(APPEND sources "${variant_sources}")
     add_library(hipconv_arch_${name} OBJECT ${sources})

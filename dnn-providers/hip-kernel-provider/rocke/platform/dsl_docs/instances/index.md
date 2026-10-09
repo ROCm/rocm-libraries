@@ -42,6 +42,7 @@ implementation.
 |-----------------------------------|-------------------------------------------------------------------|------------------------------|
 | `conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec` | `instances/convolution.md` |
 | `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` | `instances/convolution.md` |
+| `conv_direct_nongrouped.py` | `DirectNongroupedConvSpec` (`groups == 1`) | `instances/convolution.md` |
 | `img2col.py` | `Img2ColSpec` | `instances/convolution.md` |
 | `pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp` | `instances/convolution.md` |
 
@@ -180,6 +181,7 @@ From `helpers/README.md`:
 | grouped_gemm | - | planned | - | - | - | yes | - | (wraps gemm_universal) |
 | conv_implicit_gemm | yes (buffer) | full (unmerge+embed+pad) | - | - | - | yes | - | `AsyncTileLoader`, `CoalescedTileLoader`, `CShuffleEpilogue`, `MfmaAtom`, `WarpGrid`, `LdsLayout`, `SchedulePolicy` |
 | conv_direct_grouped | - | input/output/weight + H/W pad | - | - | - | yes | - | `MfmaAtom` (4x4x4 / 16x16x{16,32}) |
+| conv_direct_nongrouped | - | - | - | - | - | yes | - | `chiplet_aware_super_tile_dynamic` (`helpers.grid`), `emit_direct_params` (AOT kernargs) |
 | img2col | - | reuses A descriptor | - | yes | - | yes | - | - |
 | pooling | - | full (input + pad) | - | yes | - | yes | - | - |
 | attention_unified | - | Q + output + paged-KV | - | - | - | yes | - | `OnlineSoftmaxState`, `PagedKvDescriptor` |

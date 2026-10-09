@@ -303,7 +303,7 @@ namespace rocisa
                     = std::dynamic_pointer_cast<RegisterContainer>(dst)->splitRegContainer();
                 std::vector<InstructionInput> srcs1;
                 std::vector<InstructionInput> srcs2;
-                splitSrcs(srcs, srcs1, srcs2);
+                splitSrcs64(srcs, srcs1, srcs2);
                 // s_add_u32 sets SCC, s_addc_u32 consumes it (carry is implicit).
                 instructions
                     = {std::make_shared<SAddU32>(dst1, srcs1[0], srcs1[1], comment),
@@ -3564,7 +3564,23 @@ namespace rocisa
                     = std::dynamic_pointer_cast<RegisterContainer>(dst)->splitRegContainer();
                 std::vector<InstructionInput> srcs1;
                 std::vector<InstructionInput> srcs2;
-                splitSrcs(srcs, srcs1, srcs2);
+                splitSrcs64(srcs, srcs1, srcs2);
+                // VOP2 takes a literal only in src0, so an immediate goes first (the add is
+                // commutative). The carry-in add reads vcc as well, which leaves no room for a
+                // literal at all: its half of an immediate must be an inline constant.
+                if(std::holds_alternative<int>(srcs1[1]) && !std::holds_alternative<int>(srcs1[0]))
+                {
+                    std::swap(srcs1[0], srcs1[1]);
+                    std::swap(srcs2[0], srcs2[1]);
+                }
+                for(const auto& s : srcs2)
+                    if(std::holds_alternative<int>(s)
+                       && (std::get<int>(s) < -16 || std::get<int>(s) > 64))
+                        throw std::invalid_argument(
+                            "64-bit vector add: cannot split an immediate whose high half "
+                            + std::to_string(std::get<int>(s))
+                            + " is not an inline constant (-16 to 64); v_addc_co_u32 cannot "
+                              "encode it next to its carry");
                 auto vcc = std::make_shared<VCC>();
                 instructions
                     = {std::make_shared<VAddCOU32>(dst1, vcc, srcs1[0], srcs1[1], comment),

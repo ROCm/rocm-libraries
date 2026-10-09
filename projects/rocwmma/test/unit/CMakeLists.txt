@@ -2,7 +2,7 @@
  #
  # MIT License
  #
- # Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  #
  # Permission is hereby granted, free of charge, to any person obtaining a copy
  # of this software and associated documentation files (the "Software"), to deal
@@ -46,9 +46,16 @@ function(add_rocwmma_unit_test TEST_TARGET TEST_SOURCE)
 
   # Add dependency to custom target
   add_dependencies(rocwmma_unit_tests ${TEST_TARGET})
+  rocwmma_share_test_sources(${TEST_TARGET} common ${ROCWMMA_COMMON_TEST_SOURCES})
+  rocwmma_share_test_sources(${TEST_TARGET} unit ${UnitCommonSources})
 endfunction()
 
 # Add unit tests
+# These test the host-side generator and do not need device discovery or the
+# common kernel fixtures. Keep them runnable on build-only CI workers.
+add_rocwmma_unit_test(kernel_generator_test ${CMAKE_CURRENT_SOURCE_DIR}/kernel_generator_test.cpp)
+target_link_libraries(kernel_generator_test GTest::gtest_main)
+
 add_subdirectory(contamination_test)
 add_subdirectory(layout_test)
 add_subdirectory(layout_traits_test)

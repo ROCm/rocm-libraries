@@ -497,7 +497,7 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
 # adding or retuning a custom kernel forces the reconciliation to be redone
 # rather than shifting the ground truth underneath the gate.
 EXPECTED_CENSUS = {
-    "kernels": 126,
+    "kernels": 129,
     # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
     "declaredNonZero": 28,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
@@ -505,10 +505,11 @@ EXPECTED_CENSUS = {
     # SupportCustomStaggerU: False and why the gate refuses them.
     "declaredNonZeroWithLiteralStagger": 24,
     "declaredNonZeroReadingPackedArgument": 4,
-    # Includes the six kernels built outside Tensile (aiter, ck, rocroller,
-    # triton, wave), which declare StaggerU: 0 because they do not implement
-    # the in-loop wrap at all; the disassembly confirms none of them staggers.
-    "declaredZero": 66,
+    # Includes the nine kernels built outside Tensile (aiter, ck, rocblas,
+    # rocroller, triton, wave), which declare StaggerU: 0 because they do not
+    # implement the in-loop wrap at all; the disassembly confirms none of them
+    # staggers.
+    "declaredZero": 69,
     # No StaggerU key at all, so they inherit the default of 32.
     "undeclared": 32,
 }

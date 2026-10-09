@@ -384,7 +384,7 @@ typedef enum {
  */
 typedef enum {
   HIPBLASLT_MATMUL_PREF_SEARCH_MODE = 0,          /**<Search mode. Data type: ``uint32_t``. */
-  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,  /**<Maximum allowed workspace memory. Default is 0 (no workspace memory allowed). Data type: ``uint64_t``. */
+  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,  /**<Maximum allowed workspace memory. Default is 0 (no workspace memory allowed). Values above ``UINT32_MAX`` (4 GiB - 1) are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``uint64_t``. */
   HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET = 2,      /**<Bias heuristic algorithm selection toward kernels that perform well at this targeted compute-unit count. ``0`` (default) means no constraint. Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_PREF_MAX = 3
 } hipblasLtMatmulPreferenceAttributes_t;
@@ -1333,7 +1333,8 @@ hipblasStatus_t
  * selected device doesn't support the configured operation. \retval
  * HIPBLAS_STATUS_INVALID_VALUE     If the parameters are unexpectedly NULL, in
  * conflict, or in an impossible configuration. For example, when
- * workspaceSizeInBytes is less than the workspace required by the configured algorithm.
+ * workspaceSizeInBytes is less than the workspace required by the configured algorithm,
+ * or above ``UINT32_MAX`` (4 GiB - 1).
  *  \retval HIBLAS_STATUS_NOT_INITIALIZED    If the hipBLASLt handle has not been
  * initialized.
  */

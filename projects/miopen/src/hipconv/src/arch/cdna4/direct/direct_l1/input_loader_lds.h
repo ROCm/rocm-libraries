@@ -3,6 +3,7 @@
 #include "config.h"
 #include "input_lds_layout.h"
 #include "matrix_layout.h"
+#include "packed_ops.h"
 #include "types.h"
 
 #include <hip/hip_runtime.h>
@@ -18,13 +19,20 @@ using direct_l1::Config;
 //
 // One instance per wave; the per-lane swizzle seeds are recomputed from
 // __lane_id() at each use, so the loader holds no per-lane state.
+//
+// tf32 reads the same layout once per plane and pairs the fragments into one operand.
+// Both reads share the offset computation, so the second is a plain ds_read_b128 a
+// compile-time plane_stride away.
 template <Config cfg, typename datatype_t>
 class InputLoaderLds
 {
 public:
+    static constexpr bool is_tf32 = (cfg.elem_bytes == 4);
     static_assert(sizeof(datatype_t) == 2);
 
-    using datatypex8_t = std::conditional_t<std::is_same_v<datatype_t, bf16_t>, bf16x8_t, fp16x8_t>;
+    // One plane's fragment, and the operand the mma actually takes.
+    using planex8_t    = std::conditional_t<std::is_same_v<datatype_t, bf16_t>, bf16x8_t, fp16x8_t>;
+    using datatypex8_t = std::conditional_t<is_tf32, bf16_pair_x8, planex8_t>;
 
     using Layout        = InputLdsLayout<cfg>;
     using OperandLayout = MatrixLayout<16, 32, 1, datatype_t>;
@@ -107,7 +115,12 @@ public:
             static_cast<int>(static_cast<unsigned>(resid_seed() + q16 + 4 * c32_half) %
                              static_cast<unsigned>(Layout::block_size_c8));
         const int off = wave_uniform + lane_base() + residue;
-        return *reinterpret_cast<const datatypex8_t*>(&lds_uint4_[off]);
+        if constexpr(is_tf32)
+            return datatypex8_t(
+                *reinterpret_cast<const planex8_t*>(&lds_uint4_[off]),
+                *reinterpret_cast<const planex8_t*>(&lds_uint4_[off + Layout::plane_stride]));
+        else
+            return *reinterpret_cast<const datatypex8_t*>(&lds_uint4_[off]);
     }
 
     // Load a tile of W(16) x C(32) input matrices for one Kw-step.

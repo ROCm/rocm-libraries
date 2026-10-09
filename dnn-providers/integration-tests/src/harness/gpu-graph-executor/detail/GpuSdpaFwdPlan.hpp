@@ -208,6 +208,9 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->v_tensor_uid(), VDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->o_tensor_uid(), ODataTypeEnum);
 
+        // Ragged tensors need the ragged plan; read as dense they would give wrong results.
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         // Unsupported mask modes
         if(nodeAttributes->alibi_mask() || nodeAttributes->padding_mask())
         {

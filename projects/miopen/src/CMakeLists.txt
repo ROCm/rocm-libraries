@@ -9,8 +9,8 @@ if(MIOPEN_ENABLE_SQLITE)
 endif()
 
 if(MIOPEN_USE_HIPCONV)
-    # MIOpen provides its own 1x1/pointwise path, so drop hipconv's hipBLASLt-backed one.
-    set(HIPCONV_ENABLE_POINTWISE OFF CACHE BOOL "" FORCE)
+    # MIOpen provides its own 1x1/pointwise path, so drop hipconv's hipBLASLt-backed ones.
+    set(HIPCONV_ENABLE_EXPLICIT_GEMM OFF CACHE BOOL "" FORCE)
     add_subdirectory(hipconv)
 endif()
 

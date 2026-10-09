@@ -19,6 +19,7 @@ external manifest.
 | `tensile/`    | Kernels emitted by Tensile's own assembly writer. |
 | `aiter/`      | External: AITER-sourced GEMM kernels.             |
 | `ck/`         | External: Composable Kernel-sourced kernels.     |
+| `rocblas/`    | External: rocBLAS wvSpltK skinny-GEMM kernels.   |
 | `rocroller/`  | External: rocRoller-sourced kernels.              |
 | `wave/`       | External: Wave (handwritten) kernels.             |
 | `triton/`     | External: Triton-compiled GEMM kernels.           |
@@ -129,6 +130,12 @@ filled in by hand.
 
 The tool refuses to operate on a file that already contains a `custom.config`
 block; if you need to regenerate one, delete the existing block first.
+
+If library logic references the kernel, TensileCreateLibrary links it into the
+same code object as Tensile's kernels, and `ld.lld` rejects mixed ABI versions.
+The kernel must then be at code object version 4, the version hipBLASLt builds
+its libraries at: either strip its `.amdhsa_code_object_version` directive so the
+assembler's flag applies, or emit it with `-mcode-object-version=4`.
 
 ## Validation
 

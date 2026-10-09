@@ -22,12 +22,11 @@ from config_helpers import configMarks, findAvailableArchs
 pytestmark = pytest.mark.gfx1250
 
 # configMarks takes rootDir only to compute the config's relpath (for the
-# directory-name marks); the four gfx1250 configs live under Tensile/Tests.
+# directory-name marks); the real gfx1250 configs below live under Tensile/Tests.
 _COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
 _TESTS_ROOT = os.path.dirname(_COMMON_DIR)
 
-# A config tagged ``ffm_fail`` and a gfx1250 config that is not.
-_FFM_FAIL_CONFIG = os.path.join(_COMMON_DIR, "gemm", "gfx12", "tdm_multicast_gfx1250.yaml")
+# A gfx1250 config that is not tagged ``ffm_fail``.
 _PLAIN_GFX1250_CONFIG = os.path.join(
     _COMMON_DIR, "streamk", "gfx1250", "core", "data_parallel_static_mxf4.yaml"
 )
@@ -41,24 +40,44 @@ _STRICT_ONLY_CONFIG = os.path.join(_COMMON_DIR, "gemm", "gfx12", "bf16_gfx1250-s
 _FFM_MEMFILE = "/dev/shm/hsakmt_model_root_test"
 
 
-def test_ffm_fail_xfails_under_ffm(monkeypatch):
+@pytest.fixture
+def ffm_fail_config(tmp_path):
+    """A minimal gfx1250 config tagged ``ffm_fail``.
+
+    Synthetic, so the tests don't depend on which real configs currently carry
+    the mark: it comes off as soon as the emulator is fixed.
+    """
+    config = tmp_path / "ffm_fail_gfx1250.yaml"
+    config.write_text(
+        "TestParameters:\n"
+        "  marks: [ffm_fail]\n"
+        "GlobalParameters:\n"
+        "  Architecture: gfx1250\n"
+        "BenchmarkProblems:\n"
+        "  - - OperationType: GEMM\n"
+        "      DataType: s\n"
+    )
+    return str(config), str(tmp_path)
+
+
+def test_ffm_fail_xfails_under_ffm(monkeypatch, ffm_fail_config):
     """memfile set + gfx1250 available + ffm_fail marked -> xfail added."""
     monkeypatch.setenv("HSA_MODEL_MEMFILE", _FFM_MEMFILE)
-    marks = configMarks(_FFM_FAIL_CONFIG, _TESTS_ROOT, ["gfx1250"])
+    marks = configMarks(*ffm_fail_config, ["gfx1250"])
     assert pytest.mark.xfail in marks
 
 
-def test_ffm_fail_inert_on_hardware(monkeypatch):
+def test_ffm_fail_inert_on_hardware(monkeypatch, ffm_fail_config):
     """No memfile (real hardware) -> the ffm_fail config still runs."""
     monkeypatch.delenv("HSA_MODEL_MEMFILE", raising=False)
-    marks = configMarks(_FFM_FAIL_CONFIG, _TESTS_ROOT, ["gfx1250"])
+    marks = configMarks(*ffm_fail_config, ["gfx1250"])
     assert pytest.mark.xfail not in marks
 
 
-def test_ffm_fail_inert_on_other_arch(monkeypatch):
+def test_ffm_fail_inert_on_other_arch(monkeypatch, ffm_fail_config):
     """Under emulation but not gfx1250 -> the ffm_fail config still runs."""
     monkeypatch.setenv("HSA_MODEL_MEMFILE", _FFM_MEMFILE)
-    marks = configMarks(_FFM_FAIL_CONFIG, _TESTS_ROOT, ["gfx942"])
+    marks = configMarks(*ffm_fail_config, ["gfx942"])
     assert pytest.mark.xfail not in marks
 
 

@@ -58,6 +58,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/DAGSchedulerPassTest.cpp
     unit/asm/CDNA5ReadyQueueTest.cpp
     unit/asm/InFlightQueueTest.cpp
+    unit/asm/DsIssueCapTest.cpp
     unit/asm/ExecMaskGroupingTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/StinkyUnreachableBlockElimPassTest.cpp

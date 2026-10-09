@@ -134,8 +134,8 @@ auto to_string(Algorithm algo) -> char const*
         return "depthwise";
     case Algorithm::Direct:
         return "direct";
-    case Algorithm::Pointwise:
-        return "pointwise";
+    case Algorithm::ExplicitGemm:
+        return "explicit_gemm";
     }
     HIPCONV_UNREACHABLE();
 }

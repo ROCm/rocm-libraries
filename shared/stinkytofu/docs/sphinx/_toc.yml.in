@@ -19,6 +19,8 @@ subtrees:
     title: Virtual registers
   - file: user/long-branch-cfg.md
     title: Long-branch CFG construction
+  - file: user/scheduler-tuning-parameters.md
+    title: Scheduler tuning parameters
   - file: user/stinky-waitcnt-insertion-pass.md
     title: StinkyWaitCnt insertion pass
   - file: user/remove-instruction-pass.md

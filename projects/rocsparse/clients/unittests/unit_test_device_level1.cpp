@@ -100,11 +100,11 @@ namespace
         rocsparse::gthr_device<BS, I, T>(nnz, y, x_val, x_ind, base);
     }
 
-    template <typename T, typename I>
+    template <typename T, typename I, bool GRID_STRIDE = false>
     __global__ void
         k_roti(I nnz, T* x_val, const I* x_ind, T* y, T c, T s, rocsparse_index_base base)
     {
-        rocsparse::roti_device<BS, I, T>(nnz, x_val, x_ind, y, c, s, base);
+        rocsparse::roti_device<BS, GRID_STRIDE, I, T>(nnz, x_val, x_ind, y, c, s, base);
     }
 } // namespace
 
@@ -347,6 +347,60 @@ TEST(device_level1_roti, rotation_90deg)
     const std::vector<T> got_y    = host_from(d_y, y.size());
     EXPECT_EQ(got_xval, (std::vector<T>{10, 20})); // x' = y
     EXPECT_EQ(got_y, (std::vector<T>{-1, 0, -2, 0, 0})); // y' = -x
+
+    device_free(d_xval);
+    device_free(d_xind);
+    device_free(d_y);
+}
+
+// The grid-stride variant must rotate every element even when launched with
+// fewer blocks than ceil(nnz / BS).
+TEST(device_level1_roti, grid_stride)
+{
+    using T = float;
+    using I = int64_t;
+
+    const I        nnz = 2 * BS + 3;
+    std::vector<T> x_val(nnz);
+    std::vector<I> x_ind(nnz);
+    std::vector<T> y(nnz, 0);
+    for(I i = 0; i < nnz; ++i)
+    {
+        x_val[i] = static_cast<T>(i + 1);
+        x_ind[i] = i;
+    }
+
+    T* d_xval = device_from(x_val);
+    I* d_xind = device_from(x_ind);
+    T* d_y    = device_from(y);
+    ASSERT_NE(d_xval, nullptr);
+    ASSERT_NE(d_xind, nullptr);
+    ASSERT_NE(d_y, nullptr);
+
+    // c=2, s=1, y=0 -> x' = 2*x ; y' = -x
+    hipLaunchKernelGGL((k_roti<T, I, true>),
+                       dim3(1),
+                       dim3(BS),
+                       0,
+                       0,
+                       nnz,
+                       d_xval,
+                       d_xind,
+                       d_y,
+                       (T)2,
+                       (T)1,
+                       rocsparse_index_base_zero);
+    CHECK_HIP(hipDeviceSynchronize());
+
+    std::vector<T> want_xval(nnz);
+    std::vector<T> want_y(nnz);
+    for(I i = 0; i < nnz; ++i)
+    {
+        want_xval[i] = 2 * x_val[i];
+        want_y[i]    = -x_val[i];
+    }
+    EXPECT_EQ(host_from(d_xval, x_val.size()), want_xval);
+    EXPECT_EQ(host_from(d_y, y.size()), want_y);
 
     device_free(d_xval);
     device_free(d_xind);

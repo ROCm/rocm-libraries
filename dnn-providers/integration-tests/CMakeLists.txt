@@ -122,6 +122,14 @@ if(USE_ROCRAND AND NOT TARGET roc::rocrand)
     set(USE_ROCRAND OFF)
 endif()
 
+# FillInputs.cpp generates large inputs with rocRAND (DeviceInputFiller). Only that
+# file is built with USE_ROCRAND: rocrand.h declares a global `half`, which is
+# ambiguous in any file that also pulls in hipdnn_data_sdk::types::half unqualified.
+if(USE_ROCRAND)
+    set_source_files_properties(src/harness/input-init/FillInputs.cpp
+        PROPERTIES COMPILE_DEFINITIONS USE_ROCRAND)
+endif()
+
 include(Dependencies)
 fetch_gtest_dependency()
 
@@ -150,6 +158,20 @@ if(Python3_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_verify_support_claims.py
     )
     set(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST hipdnn_support_claim_verifier_python_tests)
+
+    add_test(
+        NAME hipdnn_support_claim_harvest_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_harvest_support_claims.py
+    )
+    set(HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST hipdnn_support_claim_harvest_python_tests)
+
+    add_test(
+        NAME hipdnn_support_sidecar_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_support_sidecar.py
+    )
+    set(HIPDNN_IT_SUPPORT_SIDECAR_TEST hipdnn_support_sidecar_python_tests)
 
     # Skips itself when PyTorch, which the generator needs, is not installed.
     add_test(
@@ -231,6 +253,7 @@ target_link_libraries(${GOLDEN_DATA_TESTS_EXE}
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<BOOL:${USE_ROCRAND}>:roc::rocrand>
         $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
@@ -266,6 +289,7 @@ target_link_libraries(${INTEGRATION_TESTS_EXE}
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<BOOL:${USE_ROCRAND}>:roc::rocrand>
         $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
@@ -296,6 +320,12 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     endif()
     if(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_SIDECAR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_SIDECAR_TEST})
     endif()
     if(HIPDNN_IT_GOLDEN_GENERATOR_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_GENERATOR_TEST})

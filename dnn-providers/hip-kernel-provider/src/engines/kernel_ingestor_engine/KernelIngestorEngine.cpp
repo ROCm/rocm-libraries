@@ -5,8 +5,10 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <filesystem>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -135,20 +137,114 @@ void registerNativeIngestorSymbols()
     std::call_once(s_registered, registerNativeIngestorSymbolsOnce);
 }
 
-const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescriptorSets()
+namespace
+{
+
+using StateManager = hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>;
+
+/// A validated state manager waiting for the first engine constructed from the set that has
+/// @p engineId. Carries the id itself, so a take never relies on a position in another vector.
+struct StateManagerSlot
+{
+    hipdnn_plugin_sdk::ingestor::DescriptorId engineId;
+    std::unique_ptr<StateManager> stateManager;
+};
+
+/// What one scan of descriptorSearchDirectories() produced.
+struct Scan
+{
+    std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> sets;
+    std::vector<StateManagerSlot> slots;
+};
+
+/// Scans descriptorSearchDirectories(), splitting each validated set from the state manager
+/// validation built for it. Discovery and rediscoverStateManagersForTesting() both scan
+/// through here.
+Scan scanDescriptorSets()
+{
+    // Register before scanning: validation checks each descriptor's symbol against the
+    // registry, so an unregistered pack drops its descriptors here instead of throwing at
+    // first use.
+    registerNativeIngestorSymbols();
+    auto validated = hipdnn_plugin_sdk::ingestor::loadValidatedDescriptorSets<Handle>(
+        descriptorSearchDirectories());
+
+    Scan scan;
+    scan.sets.reserve(validated.size());
+    scan.slots.reserve(validated.size());
+    for(auto& entry : validated)
+    {
+        scan.slots.push_back({entry.set.engine.id, std::move(entry.stateManager)});
+        scan.sets.push_back(std::move(entry.set));
+    }
+    return scan;
+}
+
+/// What discovery produced: the sets, and a slot holding the state manager validation built
+/// for each, waiting for the first engine constructed from that set.
+struct Discovery
+{
+    Discovery()
+    {
+        auto scan = scanDescriptorSets();
+        sets = std::move(scan.sets);
+        slots = std::move(scan.slots);
+    }
+
+    std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> sets;
+    std::vector<StateManagerSlot> slots;
+    std::mutex slotsMutex;
+};
+
+Discovery& discovery()
 {
     // Memoized: Container's static engine-id enumeration and its constructor both call
     // this and must agree on what shipped.
-    static const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> s_sets = [] {
-        // Register before scanning: validation checks each descriptor's symbol against the
-        // registry, so an unregistered pack drops its descriptors here instead of throwing
-        // at first use.
-        registerNativeIngestorSymbols();
-        return hipdnn_plugin_sdk::ingestor::loadValidatedDescriptorSets<Handle>(
-            descriptorSearchDirectories());
-    }();
+    static Discovery s_discovery;
+    return s_discovery;
+}
 
-    return s_sets;
+} // namespace
+
+const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescriptorSets()
+{
+    return discovery().sets;
+}
+
+std::unique_ptr<StateManager>
+    takeDiscoveredStateManager(const hipdnn_plugin_sdk::ingestor::DescriptorId& engineId)
+{
+    auto& found = discovery();
+    const std::lock_guard<std::mutex> guard(found.slotsMutex);
+    for(auto& slot : found.slots)
+    {
+        if(slot.engineId == engineId)
+        {
+            return std::move(slot.stateManager);
+        }
+    }
+    return nullptr;
+}
+
+void rediscoverStateManagersForTesting()
+{
+    auto& found = discovery();
+    auto rescan = scanDescriptorSets();
+    // A rescan that finds different engines than discovery retained would hand a state
+    // manager built from other descriptors to an engine of a retained set.
+    const auto sameEngine
+        = [](const auto& lhs, const auto& rhs) { return lhs.engine.id == rhs.engine.id; };
+    if(!std::equal(rescan.sets.begin(),
+                   rescan.sets.end(),
+                   found.sets.begin(),
+                   found.sets.end(),
+                   sameEngine))
+    {
+        throw std::logic_error("ingestor: rediscovery found different descriptor sets than "
+                               "discovery retained; the state-manager slots are unchanged");
+    }
+    const std::lock_guard<std::mutex> guard(found.slotsMutex);
+    found.slots = std::move(rescan.slots);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

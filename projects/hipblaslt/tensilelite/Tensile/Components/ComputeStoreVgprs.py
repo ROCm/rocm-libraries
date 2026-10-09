@@ -29,6 +29,7 @@ from rocisa.functions import vectorStaticRemainder, vectorStaticDivideAndRemaind
 
 from ..Component import ComputeStoreVgprs
 from ..Common import DataDirection, log2
+from ..ExecutionPolicy import isPersistent
 
 class ComputeStoreVgprsVALU(ComputeStoreVgprs):
     kernel = {"EnableMatrixInstruction": False,
@@ -201,7 +202,7 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
                 strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
                 module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(lsuTid1), src1=sgpr(strideC1), comment=" offset 1"))
                 module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
-                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
                     module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
                 if writer.vgprs.coutRowPtrGate != -1:
                     module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrGate), src=vgpr(lsuTid1), comment=" save offset 1 for Gate"))
@@ -332,7 +333,7 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
                 strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
                 module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(lsuTid1), src1=sgpr(strideC1), comment=" offset 1"))
                 module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
-                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
                     module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
                 if writer.vgprs.coutRowPtrGate != -1:
                     module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrGate), src=vgpr(lsuTid1), comment=" save offset 1 for Gate"))

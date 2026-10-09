@@ -19,6 +19,7 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 /**
@@ -956,13 +957,14 @@ protected:
 
         const auto& sets = discoverDescriptorSets();
         const auto match = std::find_if(sets.begin(), sets.end(), [](const auto& set) {
-            return set.engine.name == "hipkernel:Gfx950AttentionDense";
+            return set.engine.name == GFX950_ATTENTION_DENSE_ENGINE_NAME;
         });
         ASSERT_NE(match, sets.end())
-            << "descriptor set 'hipkernel:Gfx950AttentionDense' did not load. Either its "
-               "descriptors were never installed under the tree this binary reads, or "
-               "its pack failed to register its native symbols and every descriptor "
-               "naming one of them was dropped.";
+            << "descriptor set '" << GFX950_ATTENTION_DENSE_ENGINE_NAME
+            << "' did not load. Either its descriptors were never installed under the tree "
+               "this binary reads, its UED declares a different engine name than "
+               "GFX950_ATTENTION_DENSE_ENGINE_NAME, or its pack failed to register its "
+               "native symbols and every descriptor naming one of them was dropped.";
         _set = &*match;
     }
 

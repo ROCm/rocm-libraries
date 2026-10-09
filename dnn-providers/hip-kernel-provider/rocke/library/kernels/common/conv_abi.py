@@ -317,6 +317,11 @@ def conv_direct_arg_names(*, direction: str = "fwd") -> List[ArgSpec]:
     The weight tensor needs no stride args: its strides are products of
     ``KH``/``KW``/``cpg`` alone, all build-time.
 
+    The non-grouped forward kernel (``conv_direct_nongrouped``, ``groups ==
+    1``) takes the same block but bakes less: its channel counts only bound
+    its channel loop and masks, so it reads them from ``p_total_c`` /
+    ``p_total_k`` (and the weight row length from ``p_total_c``) instead.
+
     ``direction="wgrad"`` binds dY (NHWK) to ``A`` and X (NHWC) to ``B``; ``D``
     is the fp32 dW the kernel atomically accumulates into, which is
     filter-shaped and so needs no stride args either.

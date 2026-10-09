@@ -606,9 +606,11 @@ def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
 def reorderSolutionsParams(data: Dict[str, Any]) -> None:
     """Reorder solution dict keys after list-to-dict conversion.
 
-    Moves ``SolutionIndex``, ``KernelNameMin``, and ``SolutionNameMin`` to the
-    top of each entry in ``data["Solutions"]``. Used when migrating legacy
-    list-format logic to dict format and after :func:`reorderSolutionDictForDictMerge`.
+    Moves ``SolutionIndex``, ``SolutionUID``, ``KernelNameMin``, and
+    ``SolutionNameMin`` to the top of each entry in ``data["Solutions"]``.
+    ``SolutionUID`` is dropped from that lead list when the solution has no
+    such field. Used when migrating legacy list-format logic to dict format
+    and after :func:`reorderSolutionDictForDictMerge`.
 
     Args:
         data: Dict-format library logic data (mutated in place). Must contain
@@ -620,16 +622,19 @@ def reorderSolutionsParams(data: Dict[str, Any]) -> None:
     Raises:
         None.
     """
-    keys = ["SolutionIndex", "KernelNameMin", "SolutionNameMin"]
     sols = data.get("Solutions")
     if not sols:
         return
     for solIdx in range(len(sols)):
+        sol = sols[solIdx]
+        keys = ["SolutionIndex", "SolutionUID", "KernelNameMin", "SolutionNameMin"]
+        if "SolutionUID" not in sol:
+            keys.remove("SolutionUID")
         vals: Dict[str, Any] = {}
         for key in keys:
-            if key in sols[solIdx]:
-                vals[key] = sols[solIdx].pop(key)
-        sols[solIdx] = {**vals, **sols[solIdx]}
+            if key in sol:
+                vals[key] = sol.pop(key)
+        sols[solIdx] = {**vals, **sol}
 
 
 def reorderSolutionDictForDictMerge(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -977,7 +982,9 @@ def createLibraryLogic(
 
     Emits the root mapping written for YAML (``ProblemType``, ``Solutions``,
     ``ExactLogic``, etc.) including sorted ``ProblemType`` keys and merge-aligned
-    solution key layout. ``DefaultSolution`` is a sorted snapshot of
+    solution key layout (``SolutionIndex``, ``SolutionUID``,
+    ``KernelNameMin``, ``SolutionNameMin``, then remaining keys).
+    ``DefaultSolution`` is a sorted snapshot of
     ``defaultSolution`` at write time; any solution field equal to that snapshot
     is omitted from per-solution dicts so defaults live only under
     ``DefaultSolution``.
