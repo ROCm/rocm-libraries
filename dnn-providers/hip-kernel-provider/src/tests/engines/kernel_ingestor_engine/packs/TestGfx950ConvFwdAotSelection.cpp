@@ -171,7 +171,24 @@ KernelDefinition sampleKernel(const AotSample& sample)
                        {"dilation_h", int64_t{0}},
                        {"dilation_w", int64_t{0}},
                        {"block_w", int64_t{0}},
-                       {"block_waves", int64_t{0}}};
+                       {"block_waves", int64_t{0}},
+                       {"block_h", int64_t{0}},
+                       {"unroll_rows", int64_t{0}},
+                       {"block_q", int64_t{0}},
+                       {"block_groups", int64_t{0}},
+                       {"double_buffer", int64_t{0}},
+                       {"cpg", int64_t{0}},
+                       {"kpg", int64_t{0}},
+                       {"tile_h", int64_t{0}},
+                       {"tile_w", int64_t{0}},
+                       {"tile_k_out", int64_t{0}},
+                       {"ck", int64_t{0}},
+                       {"waves_m", int64_t{0}},
+                       {"waves_n", int64_t{0}},
+                       {"atom", std::string("none")},
+                       {"swizzle_wgm", int64_t{0}},
+                       {"iglp", int64_t{-1}},
+                       {"waves_per_eu", int64_t{0}}};
     return kernel;
 }
 
