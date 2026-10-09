@@ -59,10 +59,7 @@ BenchmarkProblems:
         - ForceDisableShadowInit: [True]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  4, 4,  2, 2]
-        # 512 with TDMPlusLdsBuf=1 (3 LDS buffers) is (512+4)*128*6 = 396288 B,
-        # over gfx1250 MaxLDS 327680. 384 keeps TDMIterateMode=3 (pad block 1536 > 1024)
-        # and lands at 297984 B.
-        - DepthU: [384]
+        - DepthU: [512]
         - TDMInst: [3]
         - HalfPLR: [0]
         - TDMIterateMode: [3]
@@ -78,7 +75,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMXSA: [-1]
         - LdsBlockSizePerPadMXSB: [-1]
         - LDSTrInst: [False]
-        - TDMPlusLdsBuf: [1]
+        #- TDMPlusLdsBuf: [0,1]
         - StaggerU: [0]
         - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
@@ -95,9 +92,7 @@ BenchmarkProblems:
         - SourceSwap: [True]
         - InitCIterWmma: [1]
         - ClusterDim: [[4,4]]
-        # Forced interleave needs A0+B0 to span a 64KB segment (tight) or a 2-buffer
-        # aligned layout. Both conflict with 3 LDS buffers inside MaxLDS.
-        - LDSSegmentInterleave: [0]
+        - LDSSegmentInterleave: [1]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
