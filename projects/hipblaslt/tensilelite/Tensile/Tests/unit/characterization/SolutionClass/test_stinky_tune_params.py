@@ -26,6 +26,8 @@
 to the internal ``_StinkyTofuParameters``, tags the kernel name only when set,
 and is dropped before the logic yaml is written."""
 
+import sys
+
 import pytest
 
 from Tensile.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
@@ -58,11 +60,18 @@ def test_set_tags_name_and_drop_restores_it(tuned):
     base = _names(tuned)
     tuned[KEY] = {"DsReadPerCap": 4}
     tagged = _names(tuned)
-    assert all("_STP" in n for n in tagged)
+    assert all("_STP_DsReadPerCap4" in n for n in tagged)
     assert tagged != base
     tuned.dropStinkyTofuParameters()
     assert KEY not in tuned
     assert _names(tuned) == base
+
+
+def test_tag_is_human_readable_and_filename_safe(tuned):
+    tuned[KEY] = {"WmmaBatchSize": 2, "DsReadPerCap": -1, "Scale": 0.5}
+    for n in _names(tuned):
+        assert "_STP_DsReadPerCapn1_Scale0p5_WmmaBatchSize2" in n
+        assert "/" not in n and " " not in n
 
 
 def test_tag_depends_on_values_not_order(tuned):
@@ -89,3 +98,16 @@ def test_constructor_unset_adds_no_key(solution, assembler, isa_info_map):
     s = Solution(config, False, False, False, assembler, isa_info_map)
     assert KEY not in s
     assert "StinkyTofuParameters" not in s
+
+
+def test_info_notice_announced_once_per_distinct_value(solution, assembler, isa_info_map, capsys):
+    S = sys.modules["Tensile.SolutionStructs.Solution"]  # the package re-exports the class
+    from Tensile.Common import setVerbosity
+
+    setVerbosity(1)
+    config = dict(solution)
+    config["StinkyTofuParameters"] = {"WmmaBatchSize": 7}
+    for _ in range(2):
+        Solution(dict(config), False, False, False, assembler, isa_info_map)
+    assert capsys.readouterr().out.count("StinkyTofuParameters {'WmmaBatchSize': 7}") == 1
+    assert (("WmmaBatchSize", 7),) in S._stinkyTuneAnnounced

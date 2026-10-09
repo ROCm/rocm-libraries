@@ -21,8 +21,7 @@
 # SOFTWARE.
 #
 ################################################################################
-import hashlib
-import json
+import re
 from functools import lru_cache
 
 from ..Common.Constants import MAX_FILENAME_LENGTH
@@ -148,6 +147,11 @@ def getParameterValueAbbreviation(key, value):
     return "_".join(f"{pos:d}{k:d}" for pos,k in value.items())
 
 
+def _nameSafe(value) -> str:
+  """Filename-safe text for a tuning value ('-' -> 'n', '.' -> 'p'; other symbols dropped)."""
+  return re.sub(r"[^A-Za-z0-9]", "", str(value).replace("-", "n").replace(".", "p"))
+
+
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
   ck = state.get("CustomKernel")
@@ -247,7 +251,8 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   # Tuning-only StinkyTofu overrides change the asm, so tag the name; absent when unused.
   stinkyTune = state.get("_StinkyTofuParameters")
   if stinkyTune:
-    components.append("STP" + hashlib.md5(json.dumps(stinkyTune, sort_keys=True).encode()).hexdigest()[:8])
+    components.append("STP")
+    components.extend(f"{k}{_nameSafe(v)}" for k, v in sorted(stinkyTune.items()))
 
   state["GlobalSplitU"] = gsuBackup
   state["ProblemType"]["GroupedGemm"] = ggBackup
