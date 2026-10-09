@@ -356,6 +356,101 @@ def test_a_failed_promotion_leaves_the_tree_as_it_was_and_can_be_retried(
     assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == [NEW]
 
 
+def _reinstall_plan(tmp_path):
+    """A tree with NEW installed, and a plan replacing its installed files in place."""
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    _apply(build_plan(model, tree))
+    (model / "model.bin").write_bytes(_weights(5.0))
+    plan = build_plan(model, tree)
+    [(_, artifact)] = plan.copies
+    assert artifact.exists(), "the plan replaces an installed file"
+    return tree, model, plan, artifact
+
+
+def test_a_failed_promotion_puts_back_every_file_it_replaced(tmp_path, monkeypatch):
+    tree, _, plan, artifact = _reinstall_plan(tmp_path)
+    before = _files(tmp_path)
+    _fail_on_ued_replace(monkeypatch, plan)
+    with pytest.raises(OSError):
+        _apply(plan)
+    assert (
+        _files(tmp_path) == before
+    ), "the installed artifact was swapped and not restored"
+
+
+class _Killed(BaseException):
+    """The process dying mid-swap: nothing after it runs."""
+
+
+def test_a_promotion_killed_mid_swap_is_undone_by_the_next(tmp_path, monkeypatch):
+    from uhd_gen import promote
+
+    tree, model, plan, artifact = _reinstall_plan(tmp_path)
+    replace = os.replace
+
+    def dying(source, destination):
+        if Path(destination) == plan.ued_path:
+            raise _Killed()
+        replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", dying)
+    monkeypatch.setattr(promote, "_undo", lambda journal: None)  # never ran
+    with pytest.raises(_Killed):
+        _apply(plan)
+    monkeypatch.undo()
+    assert artifact.read_bytes() == _weights(5.0), "half-swapped"
+    assert list(tree.rglob(promote.JOURNAL_NAME)), "the swap left its journal"
+
+    parser = argparse.ArgumentParser()
+    add_promote_arguments(parser)
+    dry = parser.parse_args(
+        ["--model-dir", str(model), "--descriptor-tree", str(tree), "--dry-run"]
+    )
+    assert run_promote(dry) == 1, "a dry run does not plan over a half-swapped tree"
+    promote_args = parser.parse_args(
+        ["--model-dir", str(model), "--descriptor-tree", str(tree)]
+    )
+    assert run_promote(promote_args) == 0, "undoes the interrupted swap, then promotes"
+    assert not list(tree.rglob(promote.JOURNAL_NAME))
+    assert artifact.read_bytes() == _weights(5.0)
+    assert not [p for p in tree.rglob("*") if p.name.endswith(".tmp")]
+
+
+def test_an_undo_that_cannot_restore_keeps_the_journal_and_the_backups(
+    tmp_path, monkeypatch
+):
+    from uhd_gen import promote
+
+    tree, _, plan, artifact = _reinstall_plan(tmp_path)
+    before = _files(tmp_path)
+    replace = os.replace
+    swapped = []
+
+    def failing(source, destination):
+        if Path(destination) == plan.ued_path:
+            raise OSError(28, "No space left on device")
+        if Path(destination) == artifact:
+            if swapped:
+                raise OSError(5, "Input/output error")  # the restore
+            swapped.append(destination)
+        replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", failing)
+    with pytest.raises(PromoteError, match="could not be undone"):
+        _apply(plan)
+    monkeypatch.undo()
+    [journal] = tree.rglob(promote.JOURNAL_NAME)
+    [entry] = [
+        e
+        for e in json.loads(journal.read_text())["entries"]
+        if e["destination"] == str(artifact)
+    ]
+    assert Path(entry["backup"]).read_bytes() == before[artifact.relative_to(tmp_path)]
+    assert promote.recover_interrupted(tree) == [journal]
+    assert _files(tmp_path) == before
+
+
 @pytest.mark.parametrize(
     "role,arch", [("sort_kernel_catalog", "gfx950"), ("predict_engine", "gfx942")]
 )
