@@ -3,14 +3,16 @@
 # SPDX-License-Identifier: MIT
 """Enumerate the rocKE gfx950 forward-conv AOT instances the hipkernel pack ships.
 
-The catalog is rocKE's own sweep grids, per dtype, in two families, with no
-selection of ours: the only limits are the sweeps' own validity checks.
+The catalog is rocKE's own sweep grids, per dtype, in two families. The only
+selection of ours is the implicit-GEMM exclusion policy (:func:`excluded_reason`).
 
 Implicit GEMM is every valid gfx950 forward implicit-GEMM ``KernelIdentity`` of the
-AOT sweep grid (``benchmarks/common/kernel_sweep.py``): every tile and warp
-geometry, pipeline, epilogue, load and store width, and K loop (plain, unrolled,
-async DMA with its chunk widths) the sweep enumerates. Every one must convert: an
-identity ``make_conv_aot_config.py`` refuses fails the run.
+AOT sweep grid (``benchmarks/common/kernel_sweep.py``) that the policy keeps: every
+tile and warp geometry, pipeline and epilogue the sweep enumerates, the plain and
+unrolled K loops, and the load and store widths of :data:`PACKAGED_VECTOR_WIDTHS`.
+The policy drops the async DMA K loop, every other width pair, and the ``cshuffle``
+epilogue with a store width of 1. Every kept identity must convert: an identity
+``make_conv_aot_config.py`` refuses fails the run.
 
 Direct is every forward identity of the direct sweep grid
 (``benchmarks/common/direct_kernel_sweep.py``) that ``make_conv_aot_config.py``
@@ -50,6 +52,12 @@ DTYPES = ("fp16", "bf16")
 #: 50 MB a source host accepts.
 INSTANCE_LIST = "gfx950_conv_fwd_aot_{dtype}.instances.json"
 
+#: The (load, store) width pairs the implicit-GEMM catalog ships, as
+#: ``(vector_size_a, vector_size_c)``; ``vector_size_b`` must equal ``vector_size_a``.
+#: The runtime selection keeps only the widest pair that serves a graph, so these
+#: are the pairs a graph can fall back to as its C and K lose powers of two.
+PACKAGED_VECTOR_WIDTHS = frozenset({(1, 1), (2, 2), (4, 4), (8, 8), (4, 1), (1, 4)})
+
 _HERE = Path(__file__).resolve().parent
 DEFAULT_OUTPUT_DIR = _HERE.parent / "configs"
 
@@ -70,7 +78,25 @@ def _converter():
     return make_conv_aot_config
 
 
-def grid_identities(dtype: str, jobs: int) -> list:
+def excluded_reason(identity: dict):
+    """Why the catalog leaves out an implicit-GEMM identity, or None to ship it.
+
+    - The async DMA K loop. Three in four of its instances compile to the IR of
+      another async instance.
+    - Load and store widths outside :data:`PACKAGED_VECTOR_WIDTHS`.
+    - ``cshuffle`` with a store width of 1: such a graph runs the default epilogue.
+    """
+    if identity["async_dma"]:
+        return "async DMA K loop"
+    load, store = identity["vector_size_a"], identity["vector_size_c"]
+    if identity["vector_size_b"] != load or (load, store) not in PACKAGED_VECTOR_WIDTHS:
+        return "width pair outside PACKAGED_VECTOR_WIDTHS"
+    if identity["epilogue"] == "cshuffle" and store == 1:
+        return "cshuffle with store width 1"
+    return None
+
+
+def sweep_identities(dtype: str, jobs: int) -> list:
     """Every valid identity of rocKE's forward implicit-GEMM AOT grid, as dicts."""
     from benchmarks.common import kernel_sweep
     from rocke.core.arch import ArchTarget
@@ -83,6 +109,11 @@ def grid_identities(dtype: str, jobs: int) -> list:
         jobs=jobs,
     )
     return [job.identity.to_dict() for job in found]
+
+
+def grid_identities(dtype: str, jobs: int) -> list:
+    """The identities of :func:`sweep_identities` the exclusion policy keeps."""
+    return [i for i in sweep_identities(dtype, jobs) if excluded_reason(i) is None]
 
 
 def direct_identities(dtype: str, jobs: int) -> tuple:
