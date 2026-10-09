@@ -336,10 +336,10 @@ the engine/knob plumbing — which the shim builds on as it lands. The shim
 will:
 
 - Accept all `HeurMode_t` values without error in
-  `create_execution_plans()`. **Interim**: map `A`, `B`, `FALLBACK`,
-  `OPENSOURCE` all to hipDNN's fallback/default selection, and **WARN on
-  first use per process** that the requested mode was not honored. Remap as
-  real hipDNN heuristics arrive.
+  `create_execution_plans()`. Map `A` and `B` to hipDNN's
+  `SelectionHeuristic::ModeA` / `ModeB` prediction policies (RFC 0019 §11.2),
+  and `FALLBACK` and `OPENSOURCE` to hipDNN's fallback/default selection,
+  **WARN**ing that `OPENSOURCE` was not honored.
 
 **Per-note triage.** `select_*` / `deselect_*` notes are not blanket
 no-ops; each note is classified by how it can be honored. The full table
