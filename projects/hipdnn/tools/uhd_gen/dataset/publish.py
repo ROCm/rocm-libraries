@@ -350,7 +350,8 @@ def build_dataset(frame: pd.DataFrame) -> pd.DataFrame:
     _validate(frame)
     frame = _mark_incomplete_where_errored(frame)
 
-    # Derived from `avgTimeMs`, the statistic calibrated labels are defined on (RFC 0019 §13.4).
+    # Derived from `avgTimeMs`, the statistic calibrated labels are defined on (RFC 0019 §13.4,
+    # RFC 0019.13 §11.2).
     query = _query_columns(frame)
     metrics = [
         derive_metrics(
