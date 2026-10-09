@@ -44,6 +44,7 @@
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -560,6 +561,28 @@ TEST(PredictionLibraryTest, TilewrightWarnsAndIsUnusedWhenTheIndexedModelCannotL
     EXPECT_EQ(lib.tilewright_ranker, nullptr);
     EXPECT_NE(warning.find("TensileLibrary_Probe_gfx950"), std::string::npos) << warning;
     EXPECT_NE(warning.find("ranking with origami"), std::string::npos) << warning;
+}
+
+TEST(PredictionLibraryTest, TilewrightBlocklistIsReadNextToTheIndex)
+{
+    ScratchDir        dir("tensilelite_tilewright_blocklist");
+    std::string const logic = (dir.path() / "TensileLibrary_Probe_gfx950.dat").string();
+    EXPECT_EQ(TilewrightRanker::loadBlocklist(logic), nullptr);
+
+    std::ofstream(dir.path() / "TensileLibrary_Probe_gfx950.tilewright.blocklist")
+        << "# a comment\n\n   \nCijk_A\n  Cijk_B\t\r\n#Cijk_C\n";
+    auto const blocklist = TilewrightRanker::loadBlocklist(logic);
+    ASSERT_NE(blocklist, nullptr);
+    EXPECT_EQ(*blocklist, (std::unordered_set<std::string>{"Cijk_A", "Cijk_B"}));
+    EXPECT_EQ(
+        TilewrightRanker::loadBlocklist((dir.path() / "TensileLibrary_Other_gfx950.dat").string()),
+        nullptr);
+
+    std::filesystem::create_directory(dir.path()
+                                      / "TensileLibrary_Dir_gfx950.tilewright.blocklist");
+    EXPECT_THROW(
+        TilewrightRanker::loadBlocklist((dir.path() / "TensileLibrary_Dir_gfx950.dat").string()),
+        std::runtime_error);
 }
 
 TEST(PredictionLibraryTest, TilewrightConfigKeepsTheCoreKernelFields)
@@ -1544,6 +1567,162 @@ TEST(PredictionLibraryTest, TilewrightBankFollowsTheAttributesOfAModelNotTrained
 {
     ScopedTilewrightBank unset(nullptr);
     expectBankRanked(0, {{"work_group_x", 0}}, true);
+}
+
+namespace
+{
+    std::shared_ptr<ContractionSolution> named(std::shared_ptr<ContractionSolution> solution)
+    {
+        solution->solutionName = "probe_" + std::to_string(solution->index);
+        return solution;
+    }
+
+    // 31 and 32 share one signature, so the model scores them as one
+    // candidate; 33 is another.
+    std::vector<int> const keyTable = {31, 32, 33};
+
+    void addKeyKernels(SolutionMap<ContractionSolution>& solutions)
+    {
+        solutions.emplace(31, named(withTile(31, 128, 128)));
+        solutions.emplace(32, named(withTile(32, 128, 128)));
+        solutions.emplace(33, named(withTile(33, 64, 256)));
+    }
+
+    // Loads keyTable with a writeV3Model model and a blocklist of `blocked`
+    // (none for an empty list).
+    void loadBlocked(ScratchDir const&                    dir,
+                     std::vector<std::string> const&      blocked,
+                     SolutionMap<ContractionSolution>&    solutions,
+                     ContractionProblemPredictionLibrary& lib,
+                     std::uint32_t                        servingFlags = 0)
+    {
+        if(!blocked.empty())
+        {
+            std::ofstream out(dir.path() / "TensileLibrary_Probe_gfx950.tilewright.blocklist");
+            out << "# kernels that compute wrong results\n\n";
+            for(auto const& name : blocked)
+                out << "  " << name << " \n";
+        }
+        addKeyKernels(solutions);
+        loadWithTilewright(dir, writeV3Model(dir, servingFlags, {}), keyTable, solutions, lib);
+    }
+
+    std::vector<size_t> configPositions(TilewrightRanker const& ranker)
+    {
+        std::vector<size_t> positions;
+        for(auto const& config : ranker.candidates().configs())
+            positions.push_back(config.index);
+        return positions;
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightServesTheNextMemberOfACandidateWhoseFirstIsBlocked)
+{
+    auto const problem = TensileLite::testing::dummyProblem();
+    auto const device  = makeGfx950Device();
+
+    SolutionMap<ContractionSolution>    plain;
+    ScratchDir                          plainDir("tensilelite_tilewright_unblocked");
+    ContractionProblemPredictionLibrary unblocked;
+    loadBlocked(plainDir, {}, plain, unblocked);
+    ASSERT_NE(unblocked.tilewright_ranker, nullptr);
+    EXPECT_FALSE(unblocked.tilewright_ranker->blocksAny());
+    auto const before = unblocked.tilewright_ranker->rank(problem, device, -1);
+    ASSERT_EQ(before.size(), 3u);
+    tilewright::Problem const twProblem{
+        .size     = {1024, 1024, 1024},
+        .batch    = 1,
+        .a_dtype  = tilewright::DataType::Float,
+        .b_dtype  = tilewright::DataType::Float,
+        .c_dtype  = tilewright::DataType::Float,
+        .d_dtype  = tilewright::DataType::Float,
+        .mi_dtype = tilewright::DataType::Float,
+    };
+    std::map<size_t, double> score;
+    {
+        TilewrightLaunchScope<ContractionProblemGemm> const scope(problem, device);
+        for(auto const& r :
+            unblocked.tilewright_ranker->candidates().rank(twProblem, {256, 163840, 4000000}, 3))
+            score[r.config_index] = r.score;
+    }
+    ASSERT_EQ(score.size(), 3u);
+    EXPECT_EQ(score.at(0), score.at(1)) << "31 and 32 are one candidate";
+    EXPECT_NE(score.at(0), score.at(2));
+
+    SolutionMap<ContractionSolution>    solutions;
+    ScratchDir                          dir("tensilelite_tilewright_blocked_member");
+    ContractionProblemPredictionLibrary lib;
+    loadBlocked(dir, {"probe_31"}, solutions, lib);
+    ASSERT_NE(lib.tilewright_ranker, nullptr);
+    auto const& ranker = *lib.tilewright_ranker;
+    EXPECT_EQ(configPositions(ranker), (std::vector<size_t>{1, 2}));
+    EXPECT_TRUE(ranker.blocked(0));
+    EXPECT_FALSE(ranker.blocked(1));
+    EXPECT_FALSE(ranker.blocked(5));
+
+    std::vector<size_t> expected;
+    for(size_t position : before)
+        if(position != 0)
+            expected.push_back(position);
+    EXPECT_EQ(ranker.rank(problem, device, -1), expected);
+
+    auto const top = solutionIndices(lib.findTopSolutions(problem, device, 3));
+    EXPECT_EQ(top.size(), 2u);
+    EXPECT_EQ(std::count(top.begin(), top.end(), 31), 0);
+    EXPECT_EQ(std::count(top.begin(), top.end(), 32), 1);
+}
+
+TEST(PredictionLibraryTest, TilewrightDropsACandidateWhoseMembersAreAllBlocked)
+{
+    SolutionMap<ContractionSolution>    solutions;
+    ScratchDir                          dir("tensilelite_tilewright_blocked_key");
+    ContractionProblemPredictionLibrary lib;
+    loadBlocked(dir, {"probe_31", "probe_32", "probe_of_another_library"}, solutions, lib);
+    ASSERT_NE(lib.tilewright_ranker, nullptr);
+    EXPECT_EQ(configPositions(*lib.tilewright_ranker), (std::vector<size_t>{2}));
+
+    auto const problem = TensileLite::testing::dummyProblem();
+    auto const device  = makeGfx950Device();
+    EXPECT_EQ(lib.tilewright_ranker->rank(problem, device, -1), (std::vector<size_t>{2}));
+    // Origami fills the remaining slots without the blocked kernels too.
+    EXPECT_EQ(solutionIndices(lib.findTopSolutions(problem, device, 3)), (std::vector<int>{33}));
+}
+
+TEST(PredictionLibraryTest, TilewrightIsUnusedWhenItsBlocklistCannotBeRead)
+{
+    SolutionMap<ContractionSolution> solutions;
+    ScratchDir                       dir("tensilelite_tilewright_bad_blocklist");
+    std::filesystem::create_directory(dir.path()
+                                      / "TensileLibrary_Probe_gfx950.tilewright.blocklist");
+    addKeyKernels(solutions);
+    ContractionProblemPredictionLibrary lib;
+    ::testing::internal::CaptureStderr();
+    loadWithTilewright(dir, writeV3Model(dir, 0, {}), keyTable, solutions, lib);
+    std::string const warning = ::testing::internal::GetCapturedStderr();
+    EXPECT_EQ(lib.tilewright_ranker, nullptr);
+    EXPECT_NE(warning.find("cannot read the blocklist"), std::string::npos) << warning;
+    EXPECT_NE(warning.find("ranking with origami"), std::string::npos) << warning;
+}
+
+TEST(PredictionLibraryTest, TilewrightLeavesBlockedKernelsOutOfTheBank)
+{
+    ScopedTilewrightBank                unset(nullptr);
+    SolutionMap<ContractionSolution>    solutions;
+    ScratchDir                          dir("tensilelite_tilewright_blocked_bank");
+    ContractionProblemPredictionLibrary lib;
+    loadBlocked(dir, {"probe_31", "probe_21"}, solutions, lib, TrainedOnBank);
+    ASSERT_NE(lib.tilewright_bank, nullptr);
+    setBankSources(lib, {named(withTile(21, 128, 64)), named(withTile(22, 256, 64))});
+
+    auto const problem = TensileLite::testing::dummyProblem();
+    auto const device  = makeGfx950Device();
+    auto       top     = solutionIndices(lib.findTopSolutions(problem, device, 5));
+    std::sort(top.begin(), top.end());
+    EXPECT_EQ(top, (std::vector<int>{22, 32, 33}));
+    auto const& pool = builtPool(lib, device);
+    EXPECT_EQ(bankIndices(pool), (std::vector<int>{21, 22}));
+    ASSERT_NE(pool.ranker, nullptr);
+    EXPECT_EQ(configPositions(*pool.ranker), (std::vector<size_t>{1, 2, 4}));
 }
 #endif
 #endif

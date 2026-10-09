@@ -364,6 +364,11 @@ namespace TensileLite
                             if(ranked[i] < solution_list.size())
                                 offered[ranked[i]] = true;
                         }
+                        if(ranker->blocksAny())
+                        {
+                            for(size_t i = 0; i < solution_list.size(); i++)
+                                offered[i] = offered[i] || ranker->blocked(i);
+                        }
                     }
 #endif
 
@@ -513,7 +518,9 @@ namespace TensileLite
                     [&](size_t i) -> std::shared_ptr<MySolution> const& {
                         return i < own ? solution_list[i].second : pool.bank[i - own];
                     },
-                    tilewright_ranker->arch());
+                    tilewright_ranker->arch(),
+                    true,
+                    tilewright_ranker->blocklist());
             }
             catch(std::exception const& e)
             {
