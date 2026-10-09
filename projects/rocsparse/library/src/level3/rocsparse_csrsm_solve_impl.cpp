@@ -38,8 +38,6 @@
 // kernel with a deliberately undersized grid.
 #include "csrsm_device.h"
 
-#include <limits>
-
 namespace rocsparse
 {
     template <typename I, typename J, typename T>
@@ -83,6 +81,21 @@ namespace rocsparse
             blockdim >>= 1;
         }
         blockdim <<= 1;
+
+        // A block is pinned to one row for its whole life, so the grid must hold at
+        // least one RHS panel: m blocks. get_grid_size_x is the launch limit for this
+        // block size, (2^32 - 1) / blockdim at most, which binds well below
+        // maxGridSize[0]: m > 4194303 once nrhs > 512. Launching past it would fail
+        // without an error unless ROCSPARSE_DEBUG_KERNEL_LAUNCH is set, so reject the
+        // size before anything is written to B or the temporary buffer.
+        if(static_cast<int64_t>(rocsparse::get_grid_size_x(handle, m, blockdim))
+           < static_cast<int64_t>(m))
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_invalid_size,
+                "csrsm_solve: m exceeds the largest grid.x supported for this number of "
+                "right hand sides.");
+        }
 
         const int narrays = (nrhs - 1) / blockdim + 1;
 
@@ -186,23 +199,19 @@ namespace rocsparse
         }
         {
             // One block per (RHS panel, row) pair, flattened onto grid.x. The count
-            // is formed in 64 bit and clamped to the device grid limit before it is
-            // narrowed; the kernel grid-strides over whatever is left over.
+            // is formed in 64 bit and clamped to the device grid limit; the kernel
+            // grid-strides over whatever is left over.
             //
             // The helper returns at most the get_grid_size_x clamp, rounded down
-            // to whole RHS panels, except when m alone exceeds it: then it returns
-            // m rather than a grid too small to hold one RHS panel, which the
-            // kernel cannot stride. Saturate the narrowing so that stays true if m
-            // also exceeds UINT32_MAX, rather than wrapping into a legal looking
-            // grid.
+            // to whole RHS panels. m itself was checked against that clamp above,
+            // so the result is never a grid past it.
             const int64_t csrsm_grid_x = rocsparse::csrsm_solve_grid_size(
                 m,
                 nrhs,
                 blockdim,
                 rocsparse::get_grid_size_x(
                     handle, rocsparse::csrsm_num_blocks(m, nrhs, blockdim), blockdim));
-            const dim3 csrsm_blocks(static_cast<uint32_t>(rocsparse::min(
-                csrsm_grid_x, static_cast<int64_t>(std::numeric_limits<uint32_t>::max()))));
+            const dim3 csrsm_blocks(static_cast<uint32_t>(csrsm_grid_x));
             const dim3 csrsm_threads(blockdim);
 
             // Determine gcnArch and ASIC revision

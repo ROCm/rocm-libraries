@@ -44,6 +44,11 @@
 // the whole footprint is a few tens of kilobytes and this runs on any GPU
 // (including the 15 GB gfx1201). No memory guard: this test always executes.
 //
+// The solve also has to refuse a problem whose m alone does not fit on grid.x:
+// one RHS panel needs m blocks and the kernel cannot stride below that. The last
+// cases drive the public rocsparse_scsrsm_solve entry point and expect
+// rocsparse_status_invalid_size instead of a launch that fails without an error.
+//
 // TARGET: csrsm_device.h is device code, so this file builds into
 // rocsparse-unit-test-device, NOT the host-only rocsparse-unit-test.
 //
@@ -52,9 +57,16 @@
 
 #include "csrsm_device.h"
 
+// ScopedMaxGridSizeX: shrinks handle->properties.maxGridSize[0], the limit
+// get_grid_size_x clamps the csrsm solve grid against.
+#include "unit_test_grid_clamp.hpp"
+
+#include "rocsparse.h"
+
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <limits>
+#include <memory>
 #include <vector>
 
 namespace
@@ -312,4 +324,295 @@ TEST(internal_level3_csrsm, solve_ragged_grid_is_not_a_multiple_of_m)
     ASSERT_NO_FATAL_FAILURE(solve_on_grid(grid_x, got, pivot));
     EXPECT_EQ(pivot, std::numeric_limits<test_J>::max());
     expect_exact_solution(got, grid_x);
+}
+
+// ---------------------------------------------------------------------------
+// Public rocsparse_scsrsm_solve: m beyond the grid.x limit is invalid_size.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    // Owns the handle, descriptor and info of a csrsm call so they are released on
+    // every return path.
+    struct CsrsmContext
+    {
+        rocsparse_handle    handle = nullptr;
+        rocsparse_mat_descr descr  = nullptr;
+        rocsparse_mat_info  info   = nullptr;
+
+        CsrsmContext() = default;
+
+        CsrsmContext(const CsrsmContext&) = delete;
+
+        CsrsmContext& operator=(const CsrsmContext&) = delete;
+
+        bool create()
+        {
+            return rocsparse_create_handle(&handle) == rocsparse_status_success
+                   && rocsparse_create_mat_descr(&descr) == rocsparse_status_success
+                   && rocsparse_set_mat_fill_mode(descr, rocsparse_fill_mode_lower)
+                          == rocsparse_status_success
+                   && rocsparse_create_mat_info(&info) == rocsparse_status_success;
+        }
+
+        ~CsrsmContext()
+        {
+            if(info != nullptr)
+            {
+                (void)rocsparse_destroy_mat_info(info);
+            }
+            if(descr != nullptr)
+            {
+                (void)rocsparse_destroy_mat_descr(descr);
+            }
+            if(handle != nullptr)
+            {
+                (void)rocsparse_destroy_handle(handle);
+            }
+        }
+    };
+
+    struct CsrsmSolveResult
+    {
+        rocsparse_status    status     = rocsparse_status_internal_error;
+        hipError_t          last_error = hipSuccess;
+        std::vector<test_T> B;
+    };
+
+    // Buffer size, analysis and solve of A * X = B for a lower triangular A that is
+    // already on the host. When max_grid_x > 0 the grid.x limit is shrunk to it for
+    // the solve only. B is read back after the solve, and hipGetLastError() is
+    // sampled right after it: a launch that failed without being reported leaves
+    // its error there.
+    CsrsmSolveResult csrsm_solve_call(rocsparse_operation        trans_B,
+                                      test_J                     m,
+                                      test_J                     nrhs,
+                                      const std::vector<test_I>& row_ptr,
+                                      const std::vector<test_J>& col_ind,
+                                      const std::vector<test_T>& val,
+                                      const std::vector<test_T>& B,
+                                      test_J                     ldb,
+                                      int                        max_grid_x)
+    {
+        CsrsmSolveResult result;
+
+        CsrsmContext ctx;
+        if(!ctx.create())
+        {
+            ADD_FAILURE() << "handle, descriptor or info creation failed";
+            return result;
+        }
+
+        rocsparse_ut::device_vector<test_I> d_row_ptr(row_ptr);
+        rocsparse_ut::device_vector<test_J> d_col_ind(col_ind);
+        rocsparse_ut::device_vector<test_T> d_val(val);
+        rocsparse_ut::device_vector<test_T> d_B(B);
+        if(d_row_ptr.ptr == nullptr || d_col_ind.ptr == nullptr || d_val.ptr == nullptr
+           || d_B.ptr == nullptr)
+        {
+            ADD_FAILURE() << "device allocation failed";
+            return result;
+        }
+
+        const test_T alpha = static_cast<test_T>(1);
+        const test_I nnz   = static_cast<test_I>(col_ind.size());
+
+        size_t buffer_size = 0;
+        if(rocsparse_scsrsm_buffer_size(ctx.handle,
+                                        rocsparse_operation_none,
+                                        trans_B,
+                                        m,
+                                        nrhs,
+                                        nnz,
+                                        &alpha,
+                                        ctx.descr,
+                                        d_val.ptr,
+                                        d_row_ptr.ptr,
+                                        d_col_ind.ptr,
+                                        d_B.ptr,
+                                        ldb,
+                                        ctx.info,
+                                        rocsparse_solve_policy_auto,
+                                        &buffer_size)
+           != rocsparse_status_success)
+        {
+            ADD_FAILURE() << "rocsparse_scsrsm_buffer_size failed";
+            return result;
+        }
+
+        rocsparse_ut::device_vector<char> d_buffer(buffer_size);
+        if(d_buffer.ptr == nullptr)
+        {
+            ADD_FAILURE() << "temporary buffer allocation failed";
+            return result;
+        }
+
+        if(rocsparse_scsrsm_analysis(ctx.handle,
+                                     rocsparse_operation_none,
+                                     trans_B,
+                                     m,
+                                     nrhs,
+                                     nnz,
+                                     &alpha,
+                                     ctx.descr,
+                                     d_val.ptr,
+                                     d_row_ptr.ptr,
+                                     d_col_ind.ptr,
+                                     d_B.ptr,
+                                     ldb,
+                                     ctx.info,
+                                     rocsparse_analysis_policy_reuse,
+                                     rocsparse_solve_policy_auto,
+                                     d_buffer.ptr)
+           != rocsparse_status_success)
+        {
+            ADD_FAILURE() << "rocsparse_scsrsm_analysis failed";
+            return result;
+        }
+
+        {
+            std::unique_ptr<rocsparse_ut::ScopedMaxGridSizeX> clamp;
+            if(max_grid_x > 0)
+            {
+                clamp.reset(new rocsparse_ut::ScopedMaxGridSizeX(ctx.handle, max_grid_x));
+            }
+
+            result.status = rocsparse_scsrsm_solve(ctx.handle,
+                                                   rocsparse_operation_none,
+                                                   trans_B,
+                                                   m,
+                                                   nrhs,
+                                                   nnz,
+                                                   &alpha,
+                                                   ctx.descr,
+                                                   d_val.ptr,
+                                                   d_row_ptr.ptr,
+                                                   d_col_ind.ptr,
+                                                   d_B.ptr,
+                                                   ldb,
+                                                   ctx.info,
+                                                   rocsparse_solve_policy_auto,
+                                                   d_buffer.ptr);
+        }
+
+        result.last_error = hipGetLastError();
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+        result.B = rocsparse_ut::to_host(d_B);
+        return result;
+    }
+
+    // The lower bidiagonal matrix of the kernel tests above, with m rows.
+    void make_bidiagonal(test_J               m,
+                         std::vector<test_I>& row_ptr,
+                         std::vector<test_J>& col_ind,
+                         std::vector<test_T>& val)
+    {
+        row_ptr.assign(1, 0);
+        for(test_J i = 0; i < m; ++i)
+        {
+            if(i > 0)
+            {
+                col_ind.push_back(i - 1);
+                val.push_back(static_cast<test_T>(-1));
+            }
+            col_ind.push_back(i);
+            val.push_back(static_cast<test_T>(1));
+            row_ptr.push_back(static_cast<test_I>(col_ind.size()));
+        }
+    }
+
+    // The solve block size is picked from nrhs (64 up to 64 right hand sides, then
+    // 128, 256, 512 and 1024 above 512), so one case per block size.
+    constexpr test_J csrsm_nrhs_per_blocksize[] = {2, 65, 129, 257, 513};
+}
+
+// grid.x is limited to get_grid_size_x(handle, m, blockdim) blocks. One RHS panel
+// needs m of them, so m past the limit has to be rejected: the launch would fail
+// and, without ROCSPARSE_DEBUG_KERNEL_LAUNCH, nothing would report it.
+//
+// The limit is shrunk to m - 1 instead of growing m to the real threshold. The
+// grid is then exactly one block short, and limit == m is the control that the
+// check is not off by one.
+TEST(internal_level3_csrsm, solve_rejects_m_above_grid_limit)
+{
+    constexpr test_J m = 16;
+
+    std::vector<test_I> row_ptr;
+    std::vector<test_J> col_ind;
+    std::vector<test_T> val;
+    make_bidiagonal(m, row_ptr, col_ind, val);
+
+    for(const test_J nrhs : csrsm_nrhs_per_blocksize)
+    {
+        SCOPED_TRACE(::testing::Message() << "nrhs=" << nrhs);
+
+        // Column major B with ldb = m and B(i, c) = c + 1.
+        std::vector<test_T> B(static_cast<size_t>(m) * nrhs);
+        for(test_J c = 0; c < nrhs; ++c)
+        {
+            for(test_J i = 0; i < m; ++i)
+            {
+                B[static_cast<size_t>(c) * m + i] = static_cast<test_T>(c + 1);
+            }
+        }
+
+        const CsrsmSolveResult rejected = csrsm_solve_call(
+            rocsparse_operation_none, m, nrhs, row_ptr, col_ind, val, B, m, m - 1);
+        EXPECT_EQ(rejected.status, rocsparse_status_invalid_size);
+        EXPECT_EQ(rejected.last_error, hipSuccess);
+        EXPECT_EQ(rejected.B, B) << "B must be left untouched";
+
+        const CsrsmSolveResult accepted
+            = csrsm_solve_call(rocsparse_operation_none, m, nrhs, row_ptr, col_ind, val, B, m, m);
+        EXPECT_EQ(accepted.status, rocsparse_status_success);
+        EXPECT_EQ(accepted.last_error, hipSuccess);
+        ASSERT_EQ(accepted.B.size(), B.size());
+        for(test_J c = 0; c < nrhs; ++c)
+        {
+            for(test_J i = 0; i < m; ++i)
+            {
+                ASSERT_EQ(accepted.B[static_cast<size_t>(c) * m + i], expected_at(i, c))
+                    << "wrong solution at row " << i << ", rhs " << c;
+            }
+        }
+    }
+}
+
+// The real thresholds, with the device limit left alone: (2^32 - 1) / blockdim
+// grid.x blocks, i.e. m > 4194303 for nrhs > 512 and m > 8388607 for
+// 256 < nrhs <= 512. A diagonal A keeps the footprint to a few hundred megabytes.
+// The size is rejected before any work is queued, so B is never read; with
+// trans_B == transpose only ldb >= nrhs is required, which lets B be a single row
+// instead of the m * nrhs floats (8.6 GB for the first case) it nominally holds.
+TEST(internal_level3_csrsm, solve_rejects_m_above_dispatch_limit)
+{
+    struct Case
+    {
+        test_J m;
+        test_J nrhs;
+    };
+    const Case cases[] = {{4194304, 513}, {8388608, 512}};
+
+    for(const Case& c : cases)
+    {
+        SCOPED_TRACE(::testing::Message() << "m=" << c.m << " nrhs=" << c.nrhs);
+
+        std::vector<test_I> row_ptr(static_cast<size_t>(c.m) + 1);
+        std::vector<test_J> col_ind(c.m);
+        std::vector<test_T> val(c.m, static_cast<test_T>(1));
+        for(test_J i = 0; i < c.m; ++i)
+        {
+            row_ptr[i] = i;
+            col_ind[i] = i;
+        }
+        row_ptr[c.m] = c.m;
+
+        const std::vector<test_T> B(c.nrhs, static_cast<test_T>(1));
+
+        const CsrsmSolveResult res = csrsm_solve_call(
+            rocsparse_operation_transpose, c.m, c.nrhs, row_ptr, col_ind, val, B, c.nrhs, 0);
+        EXPECT_EQ(res.status, rocsparse_status_invalid_size);
+        EXPECT_EQ(res.last_error, hipSuccess);
+        EXPECT_EQ(res.B, B);
+    }
 }
