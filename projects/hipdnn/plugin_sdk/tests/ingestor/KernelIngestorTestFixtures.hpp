@@ -142,18 +142,18 @@ private:
         _tensors;
 };
 
-inline GraphId makeNonV4GraphId(uint8_t seed)
+/// A TestGraph that supplies no `bytes()`, so it has no content key and its catalog is
+/// never memoized.
+class BytelessTestGraph : public TestGraph
 {
-    GraphId id{};
-    id.fill(seed);
-    id[6] = static_cast<uint8_t>(id[6] & 0x0fU);
-    return id;
-}
+public:
+    using TestGraph::TestGraph;
 
-inline GraphId makeNilGraphId()
-{
-    return GraphId{};
-}
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
+    {
+        return {};
+    }
+};
 
 inline DeviceProperties testDeviceProperties()
 {

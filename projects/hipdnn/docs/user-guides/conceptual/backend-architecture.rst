@@ -113,17 +113,30 @@ Frontend API control flow
         c. Backend: hipdnnBackendSetAttribute(heuristic, HEURISTIC_MODE, modes)
         d. Backend: hipdnnBackendFinalize(heuristic)
            -> EngineHeuristicDescriptor::finalize()
-              -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [per plugin]
-              -> Plugin: hipdnnEnginePluginGetEngineDetails()        [per applicable engine]
-        e. initializeEngineConfig() [selects best engine config from heuristic results]
+              -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
+              -> Heuristic policies rank the applicable engine IDs  [no GetEngineDetails]
+        e. initializeEngineConfig(heuristic)
+           -> detail::getEngineConfigs(configs, ids, heuristic, getAll=true)
+              -> Backend: hipdnnBackendGetAttribute(heuristic, ENGINEHEUR_RESULTS, ...)
+                 -> EngineHeuristicDescriptor::getEngineConfigs()
+                    -> For each ranked engine ID:
+                       EngineDescriptor::createForApplicableEngine(graph, engineId)
+                          -> Plugin: hipdnnEnginePluginGetEngineDetails()  [no applicability re-probe]
+              -> For each engine config:
+                 Backend: hipdnnBackendFinalize(engineConfig)
+                    -> EngineConfigDescriptor::finalize()
+                       -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
+           -> Select the preferred engine if it is ranked, otherwise the top-ranked engine
+        f. Backend: hipdnnBackendCreateDescriptor(EXECUTION_PLAN)  [per engine config, unfinalized]
      4. graph.check_support()         [validates descriptors exist]
-     5. graph.build_plans()
-        a. Backend: hipdnnBackendSetAttribute(execPlan, ENGINE_CONFIG, engineConfig)
-        b. Backend: hipdnnBackendFinalize(execPlan)
-           -> ExecutionPlanDescriptor::finalize()
-              -> Plugin: hipdnnEnginePluginGetEngineDetails()          [if not cached]
-              -> Plugin: hipdnnEnginePluginCreateExecutionContext()
-              -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
+     5. graph.build_plans()           [active plan, or every plan with BuildPlanPolicy::ALL]
+        -> finalizePlanDescriptor(plan)
+           a. Backend: hipdnnBackendSetAttribute(execPlan, ENGINE_CONFIG, engineConfig)
+           b. Backend: hipdnnBackendFinalize(execPlan)
+              -> ExecutionPlanDescriptor::finalize()
+                 -> Plugin: hipdnnEnginePluginCreateExecutionContext()
+                 -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
+           c. Backend: hipdnnBackendGetAttribute(execPlan, WORKSPACE_SIZE, ...)
 
 
 ``graph.get_workspace_size()``
@@ -181,7 +194,9 @@ Handle destruction (implicit via RAII)
          -> Backend: hipdnnBackendSetAttribute(engine, GRAPH, graphDesc)
          -> Backend: hipdnnBackendSetAttribute(engine, ENGINE_ID, engineId)
          -> Backend: hipdnnBackendFinalize(engine)
-            -> Plugin: hipdnnEnginePluginGetEngineDetails(handle, engineId, graph, details*)
+            -> EngineDescriptor::finalize()
+               -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
+               -> Plugin: hipdnnEnginePluginGetEngineDetails(handle, engineId, graph, details*)
       -> detail::unpackKnobsFromDescriptors(engineDesc, knobs)
          -> Backend: hipdnnBackendGetAttribute(engine, KNOB_INFO, ...)
 
@@ -196,9 +211,14 @@ Handle destruction (implicit via RAII)
          -> Backend: hipdnnBackendSetAttribute(heuristic, GRAPH, graphDesc)
          -> Backend: hipdnnBackendSetAttribute(heuristic, HEURISTIC_MODE, modes)
          -> Backend: hipdnnBackendFinalize(heuristic)
-            -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()
-            -> Plugin: hipdnnEnginePluginGetEngineDetails() [per engine]
-      -> detail::getEngineConfigs(configs, ids, heuristicDesc)
+            -> EngineHeuristicDescriptor::finalize()
+               -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
+      -> detail::getEngineConfigs(configs, ids, heuristicDesc, getAll=true)
+         -> Backend: hipdnnBackendGetAttribute(heuristic, ENGINEHEUR_RESULTS, ...)
+            -> EngineDescriptor::createForApplicableEngine()  [per ranked engine]
+               -> Plugin: hipdnnEnginePluginGetEngineDetails()
+         -> Backend: hipdnnBackendFinalize(engineConfig)  [per ranked engine]
+            -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
 
 
 ``create_execution_plan_ext()``
@@ -207,23 +227,36 @@ Handle destruction (implicit via RAII)
 .. code::
 
    Frontend: graph.create_execution_plan_ext(engineId, knobSettings)
-     1. get_knob_lookup_for_engine(engineId) [validate knob settings]
-     2. initializeEngineConfig(engineId)
-        -> detail::createEngineDescriptorForGraph(engineId)
+     -> compilePlanFromSpec(engineId, knobSettings, plan)
+        1. detail::createEngineDescriptorForGraph(engineDesc, graphDesc, engineId)
            -> Backend: hipdnnBackendCreateDescriptor(ENGINE)
            -> Backend: hipdnnBackendSetAttribute(engine, GRAPH, graphDesc)
            -> Backend: hipdnnBackendSetAttribute(engine, ENGINE_ID, engineId)
            -> Backend: hipdnnBackendFinalize(engine)
-              -> Plugin: hipdnnEnginePluginGetEngineDetails()
-     3. applyKnobSettingsToEngineConfig(settings)
-        -> Backend: hipdnnBackendSetAttribute(engineConfig, KNOB_CHOICE, ...)
-     4. Backend: hipdnnBackendFinalize(engineConfig)
-     5. Create executionPlanDesc
-        -> Backend: hipdnnBackendCreateDescriptor(EXECUTION_PLAN)
+              -> EngineDescriptor::finalize()
+                 -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
+                 -> Plugin: hipdnnEnginePluginGetEngineDetails()        [this engine only]
+        2. Backend: hipdnnBackendCreateDescriptor(ENGINECFG)
+           -> Backend: hipdnnBackendSetAttribute(engineConfig, ENGINE, engineDesc)
+        3. knobLookupFromEngineDescriptor(engineDesc, knobs)  [reads this engine's knobs]
+           -> detail::unpackKnobsFromDescriptors(engineDesc, knobs)
+              -> Backend: hipdnnBackendGetAttribute(engine, KNOB_INFO, ...)
+        4. validateAndFilterKnobSettings(knobSettings, knobs, validatedSettings)
+        5. detail::applyKnobSettingsViaDescriptors(engineConfig, validatedSettings)
+           -> Backend: hipdnnBackendSetAttribute(engineConfig, KNOB_CHOICES, ...)
+        6. Backend: hipdnnBackendFinalize(engineConfig)
+           -> EngineConfigDescriptor::finalize()
+              -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
+        7. Backend: hipdnnBackendCreateDescriptor(EXECUTION_PLAN)  [unfinalized]
+
+   Frontend: graph.build_plans()
+     -> finalizePlanDescriptor(plan)
         -> Backend: hipdnnBackendSetAttribute(execPlan, ENGINE_CONFIG, ...)
         -> Backend: hipdnnBackendFinalize(execPlan)
-           -> Plugin: hipdnnEnginePluginCreateExecutionContext()
-           -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
+           -> ExecutionPlanDescriptor::finalize()
+              -> Plugin: hipdnnEnginePluginCreateExecutionContext()
+              -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
+        -> Backend: hipdnnBackendGetAttribute(execPlan, WORKSPACE_SIZE, ...)
 
 
 Plugin lifecycle

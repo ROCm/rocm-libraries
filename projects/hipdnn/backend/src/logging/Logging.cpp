@@ -7,6 +7,7 @@
 #include "UserCallbackSink.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <hipdnn_data_sdk/logging/LogLevel.hpp>
@@ -37,6 +38,12 @@ namespace
 // initialize() and backendLoggingCallback() to short-circuit before touching the state object.
 std::atomic<bool> sLoggingShutdown{false};
 
+// Logger-initialized flag. Stored with release as the last write under loggerStateMutex once
+// all logger/sink state is built (and cleared with release by loggerShutdown()); the acquire
+// load at the top of initialize() pairs with it so the initialized fast path needs neither the
+// BackendLogState nor its mutex. Reads under loggerStateMutex use relaxed ordering.
+std::atomic<bool> sLoggerInitialized{false};
+
 constexpr const char* S_BACKEND_ASYNC_LOGGER_NAME = "hipdnn_backend_async";
 constexpr const char* S_BACKEND_SYNC_LOGGER_NAME = "hipdnn_backend_sync";
 
@@ -52,7 +59,6 @@ struct BackendLogState
     // (multiple threads logging simultaneously) while still providing exclusive access
     // for modifications (setting callbacks, shutdown).
     std::shared_mutex loggerStateMutex;
-    bool loggerInitialized = false;
 
     // Shared thread pool for async logger
     std::shared_ptr<spdlog::details::thread_pool> sharedThreadPool;
@@ -175,21 +181,16 @@ void initialize()
         return;
     }
 
-    auto& state = getBackendLogState();
-    // Fast path: check if already initialized with read lock (allows concurrent read access)
+    if(sLoggerInitialized.load(std::memory_order_acquire))
     {
-        const std::shared_lock<std::shared_mutex> lock(state.loggerStateMutex);
-        if(state.loggerInitialized)
-        {
-            return;
-        }
+        return;
     }
 
-    // Slow path: actually initialize with write lock (first call only)
+    auto& state = getBackendLogState();
     try
     {
         const std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
-        if(state.loggerInitialized) // Check again - race protection
+        if(sLoggerInitialized.load(std::memory_order_relaxed)) // Check again - race protection
         {
             return;
         }
@@ -256,7 +257,7 @@ void initialize()
         // Set global log level in data_sdk
         hipdnn_data_sdk::logging::setLogLevel(logLevel);
 
-        state.loggerInitialized = true;
+        sLoggerInitialized.store(true, std::memory_order_release);
     }
     catch(const std::exception& e)
     {
@@ -314,7 +315,7 @@ void loggerShutdown()
     hipdnn_data_sdk::logging::resetLogLevelCache();
     GraphLogger::resetCache();
 
-    state.loggerInitialized = false;
+    sLoggerInitialized.store(false, std::memory_order_release);
 }
 
 namespace
@@ -487,7 +488,7 @@ hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
     auto& state = getBackendLogState();
     const std::unique_lock<std::shared_mutex> lock(state.loggerStateMutex);
 
-    if(!state.loggerInitialized)
+    if(!sLoggerInitialized.load(std::memory_order_relaxed))
     {
         return HIPDNN_STATUS_NOT_INITIALIZED;
     }

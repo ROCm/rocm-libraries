@@ -41,8 +41,8 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// What a caller needs to size and launch one selected kernel; copied out so it does
-/// not pin the state manager's internals.
+/// What a plan needs to size and launch one selected kernel; holds its own copy of the
+/// definition so it does not pin the state manager's internals.
 template <typename THandle>
 struct KernelDispatcher
 {
@@ -107,7 +107,7 @@ struct MetadataTupleValuesHash
 
 /// The engine's view of its own kernels: which apply to a graph, in what order, and
 /// how to launch one. Answers isApplicable (unsortedDefinitions non-empty), getDetails
-/// (sortedDefinitions), getMaxWorkspaceSize (getDispatchDetails per survivor, max), and
+/// (sortedDefinitions), getMaxWorkspaceSize (dispatchHandlerFor per survivor, max), and
 /// initializeExecutionContext (sortedDefinitions().front(), getDispatchDetails).
 ///
 /// Thread safety. Two independent caches, each guarding itself:
@@ -220,13 +220,19 @@ public:
         validateAndIndexPacks();
     }
 
+    // Pinned in place: catalog pointers into `_definitions` rely on a stable address.
+    KernelIngestorStateManager(const KernelIngestorStateManager&) = delete;
+    KernelIngestorStateManager& operator=(const KernelIngestorStateManager&) = delete;
+    KernelIngestorStateManager(KernelIngestorStateManager&&) = delete;
+    KernelIngestorStateManager& operator=(KernelIngestorStateManager&&) = delete;
+
     const MetadataSchema& metadataSchema() const
     {
         return _schema;
     }
 
     /// Every kernel that applies to the graph and device @p context names, unordered.
-    std::vector<KernelDefinition> unsortedDefinitions(const MatchContext& context) const
+    std::vector<const KernelDefinition*> unsortedDefinitions(const MatchContext& context) const
     {
         return catalogFor(context).entries;
     }
@@ -238,7 +244,7 @@ public:
     }
 
     /// Every kernel that applies to the graph and device @p context names, best first.
-    std::vector<KernelDefinition> sortedDefinitions(const MatchContext& context) const
+    std::vector<const KernelDefinition*> sortedDefinitions(const MatchContext& context) const
     {
         return sortedCatalog(context).entries;
     }
@@ -249,8 +255,8 @@ public:
     /// `rank()` is never called; otherwise the heuristic orders it.
     Catalog sortedCatalog(const MatchContext& context) const
     {
-        // Mirrors catalogFor's own reject guard: cacheKey() below only reads graph and
-        // device ordinal, not arch, so without this an unresolved-arch context would
+        // Mirrors catalogFor's own reject guard: cacheKey() below reads graph content
+        // and device ordinal, not arch, so without this an unresolved-arch context would
         // cache an empty catalog under the SAME key a later, resolved call for this
         // device reuses -- permanently hiding that device's real catalog.
         if(context.deviceId == NO_DEVICE || context.deviceProperties.gcnArchName.empty())
@@ -258,7 +264,8 @@ public:
             return catalogFor(context);
         }
 
-        Catalog catalog = catalogFor(context);
+        const auto key = cacheKey(context);
+        Catalog catalog = catalogFor(context, key);
 
         // A measured order is final; a heuristic one is provisional, so this lookup runs
         // again even when the catalog is already sorted -- a sweep can postdate the
@@ -283,7 +290,7 @@ public:
         }
         catalog.isSorted = true;
 
-        if(const auto key = cacheKey(context); key.has_value())
+        if(key.has_value())
         {
             // put, not putIfAbsent: sorted is strictly better than whatever is cached.
             _catalogCache.put(*key, catalog);
@@ -388,9 +395,10 @@ public:
                       == _loadedWinnerShards.end();
     }
 
-    /// Resolves how to size and launch @p kernel.
+    /// The handler that sizes and launches @p kernel; looked up in place, without
+    /// copying the definition.
     /// @throws std::runtime_error if the kernel's dispatch descriptor is unknown.
-    KernelDispatcher<THandle> getDispatchDetails(const KernelDefinition& kernel) const
+    const IKernelDispatchHandler<THandle>* dispatchHandlerFor(const KernelDefinition& kernel) const
     {
         auto it = _dispatches.find(kernel.dispatchId);
         if(it == _dispatches.end())
@@ -399,17 +407,26 @@ public:
                                      + "' names unknown dispatch descriptor '"
                                      + toString(kernel.dispatchId) + "'");
         }
-        return {kernel, it->second.handler};
+        return it->second.handler;
+    }
+
+    /// Resolves how to size and launch @p kernel, copying the definition for a plan to
+    /// own.
+    /// @throws std::runtime_error if the kernel's dispatch descriptor is unknown.
+    KernelDispatcher<THandle> getDispatchDetails(const KernelDefinition& kernel) const
+    {
+        const auto* handler = dispatchHandlerFor(kernel);
+        return {kernel, handler};
     }
 
     /// The distinct values @p field takes across @p kernels, in ranked-first order.
-    static std::vector<MetadataValue> knobValues(const std::vector<KernelDefinition>& kernels,
-                                                 const std::string& field)
+    static std::vector<MetadataValue>
+        knobValues(const std::vector<const KernelDefinition*>& kernels, const std::string& field)
     {
         std::vector<MetadataValue> values;
-        for(const auto& kernel : kernels)
+        for(const KernelDefinition* kernel : kernels)
         {
-            const auto value = kernel.tryGetMetadata(field);
+            const auto value = kernel->tryGetMetadata(field);
             if(!value.has_value())
             {
                 continue;
@@ -425,7 +442,7 @@ public:
 private:
     /// Validates every pack's references and builds the KernelDefinition for each of
     /// its kernels. Every field of a definition is context-independent, so this is the
-    /// only place they are ever computed: buildCatalog copies them per query rather
+    /// only place they are ever computed: buildCatalog references them per query rather
     /// than completing each kernel's metadata again on every graph.
     void validateAndIndexPacks()
     {
@@ -575,16 +592,32 @@ private:
         return complete;
     }
 
-    /// Device comes from the context, not a separate argument, so one device's catalog
-    /// never caches under another's key.
+    /// nullopt when the graph supplies no usable content key (no or unverifiable
+    /// `bytes()`); such a graph is rematched on every call. Device comes from the
+    /// context, not a separate argument, so one device's catalog never caches under
+    /// another's key.
     std::optional<CatalogKey> cacheKey(const MatchContext& context) const
     {
-        const auto graphId = tryGetGraphId(context.graph);
-        if(!graphId.has_value())
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graph{context.graph};
+        if(!graph.isUsable())
         {
             return std::nullopt;
         }
-        return CatalogKey{*graphId, context.deviceId};
+
+        const auto& flatGraph = context.graph.getGraph();
+        std::vector<int64_t> tensorUids;
+        if(const auto* tensors = flatGraph.tensors(); tensors != nullptr)
+        {
+            tensorUids.reserve(tensors->size());
+            for(const auto* tensor : *tensors)
+            {
+                tensorUids.push_back(tensor->uid());
+            }
+        }
+        return CatalogKey{std::move(graph),
+                          CatalogGraphFields::of(flatGraph),
+                          std::move(tensorUids),
+                          context.deviceId};
     }
 
     Catalog catalogFor(const MatchContext& context) const
@@ -601,7 +634,13 @@ private:
             return Catalog{};
         }
 
-        const auto key = cacheKey(context);
+        return catalogFor(context, cacheKey(context));
+    }
+
+    /// The lookup-or-build half of catalogFor, for a caller that already passed its
+    /// device guard and built @p key from the same @p context.
+    Catalog catalogFor(const MatchContext& context, const std::optional<CatalogKey>& key) const
+    {
         if(key.has_value())
         {
             if(auto cached = _catalogCache.get(*key); cached.has_value())
@@ -616,7 +655,7 @@ private:
         else
         {
             HIPDNN_PLUGIN_LOG_TRACE(
-                "ingestor: graph carries no identity, so its catalog cannot be cached");
+                "ingestor: graph supplies no content key, so its catalog cannot be cached");
         }
 
         Catalog catalog = buildCatalog(context);
@@ -703,13 +742,11 @@ private:
                     continue;
                 }
 
-                // Copied, not rebuilt: every field was settled at construction, and the
-                // kernel matcher below reads the definition without mutating it.
-                KernelDefinition definition = precomputed;
-
-                if(kernelLevelMatchersPass(pack, context, catalog.bound, definition))
+                // Referenced, not rebuilt or copied: every field was settled at
+                // construction, and `_definitions` never changes after it.
+                if(kernelLevelMatchersPass(pack, context, catalog.bound, precomputed))
                 {
-                    catalog.entries.push_back(std::move(definition));
+                    catalog.entries.push_back(&precomputed);
                     ++admitted;
                 }
             }
@@ -789,8 +826,8 @@ private:
     ///
     /// Full coverage is required: a partial record cannot order the rest, and
     /// interleaving measured with unmeasured entries would not be a valid order.
-    std::optional<std::vector<KernelDefinition>>
-        orderFromWinnerRecord(const std::vector<KernelDefinition>& entries,
+    std::optional<std::vector<const KernelDefinition*>>
+        orderFromWinnerRecord(const std::vector<const KernelDefinition*>& entries,
                               const MatchContext& context) const
     {
         // Cheap rejection first: mightHaveWinnerFor() accounts for an on-disk shard this
@@ -1065,7 +1102,8 @@ private:
     std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
     std::vector<KernelDescriptorPack> _packs;
     /// One entry per pack, parallel to _packs: its kernels' context-independent
-    /// definitions, completed once at construction.
+    /// definitions, completed once at construction and never mutated after, so the
+    /// pointers every Catalog holds into it stay valid for this manager's lifetime.
     std::vector<std::vector<KernelDefinition>> _definitions;
     std::shared_ptr<IKernelHeuristic> _heuristic;
     GraphMatchFn _graphMatchFn = nullptr;

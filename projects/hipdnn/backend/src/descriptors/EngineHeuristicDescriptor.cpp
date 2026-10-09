@@ -560,17 +560,8 @@ void EngineHeuristicDescriptor::getEngineConfigs(hipdnnBackendAttributeType_t at
                 "EngineHeuristicDescriptor failed to get engine config: Config "
                 "descriptor is null.");
 
-            auto engine = std::make_shared<EngineDescriptor>();
-
-            engine->setAttribute(
-                HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &_engineIds[i]);
-
-            ScopedDescriptor graphDesc(HipdnnBackendDescriptor::packDescriptor(_graph));
-            engine->setAttribute(HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
-                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                 1,
-                                 static_cast<const void*>(graphDesc.getPtr()));
-            engine->finalize();
+            // _engineIds was produced by finalize()'s applicability pass on _graph.
+            auto engine = EngineDescriptor::createForApplicableEngine(_graph, _engineIds[i]);
 
             ScopedDescriptor engineDesc(HipdnnBackendDescriptor::packDescriptor(engine));
             config->setAttribute(HIPDNN_ATTR_ENGINECFG_ENGINE,

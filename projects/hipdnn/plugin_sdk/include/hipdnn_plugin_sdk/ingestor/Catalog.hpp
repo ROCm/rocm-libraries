@@ -17,7 +17,10 @@ namespace hipdnn_plugin_sdk::ingestor
 /// is applicable exactly when its catalog is non-empty.
 struct Catalog
 {
-    std::vector<KernelDefinition> entries;
+    /// Points into the owning KernelIngestorStateManager's kernel set, which is built
+    /// once at construction and never mutated, and the manager can be neither copied nor
+    /// moved, so every pointer stays valid for the manager's lifetime.
+    std::vector<const KernelDefinition*> entries;
     bool isSorted = false;
     /// True when `entries` came from a benchmarked record rather than the heuristic,
     /// distinct from `isSorted`: this asks whether the order can still be replaced by a

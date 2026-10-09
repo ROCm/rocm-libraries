@@ -110,6 +110,16 @@ public:
     MOCK_METHOD(std::string_view, apiVersion, (), (const));
     MOCK_METHOD(hipdnnPluginType_t, type, (), (const));
     MOCK_METHOD(hipdnnPluginStatus_t, setLoggingCallback, (hipdnnCallback_t callback), (const));
+
+    // Public so tests can exercise the production parse helper directly.
+    using EnginePlugin::parseApiVersion;
+
+    // Re-parses the mocked apiVersion() on every call, so expectations set on
+    // apiVersion() after construction drive the parsed result.
+    std::optional<hipdnn_data_sdk::utilities::Version> parsedApiVersion() const override
+    {
+        return parseApiVersion(apiVersion(), cachedName());
+    }
 };
 
 } // namespace hipdnn_backend::plugin

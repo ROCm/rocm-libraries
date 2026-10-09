@@ -88,7 +88,7 @@ public:
             {
                 return false;
             }
-            return !_stateManager.unsortedDefinitions(contextFor(handle, opGraph)).empty();
+            return !_stateManager.unsortedCatalog(contextFor(handle, opGraph)).entries.empty();
         }
         catch(const std::exception& error)
         {
@@ -136,11 +136,10 @@ public:
         }
 
         size_t maxBytes = 0;
-        for(const auto& kernel : filtered)
+        for(const KernelDefinition* kernel : filtered)
         {
-            const auto dispatcher = _stateManager.getDispatchDetails(kernel);
-            maxBytes = std::max(maxBytes,
-                                dispatcher.handler->workspaceBytes(context, catalog.bound, kernel));
+            const auto* handler = _stateManager.dispatchHandlerFor(*kernel);
+            maxBytes = std::max(maxBytes, handler->workspaceBytes(context, catalog.bound, *kernel));
         }
         return maxBytes;
     }
@@ -209,13 +208,13 @@ public:
                     try
                     {
                         auto plan = std::make_unique<GenericPlan<THandle>>(
-                            _stateManager.getDispatchDetails((*ranked)[rank]),
+                            _stateManager.getDispatchDetails(*(*ranked)[rank]),
                             context,
                             catalog.bound);
 
                         HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
                                                << _engine.name << "' served kernel "
-                                               << toString((*ranked)[rank].kernelId) << " at rank "
+                                               << toString((*ranked)[rank]->kernelId) << " at rank "
                                                << rank << " from a benchmarked record of "
                                                << record->size() << " entry(s) for "
                                                << filtered.size() << " candidate(s)");
@@ -241,7 +240,7 @@ public:
 
                     HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
                                            << _engine.name << "' could not build a plan for "
-                                           << toString((*ranked)[rank].kernelId) << " at rank "
+                                           << toString((*ranked)[rank]->kernelId) << " at rank "
                                            << rank << ": " << failure
                                            << "; trying the next ranked entry");
                 }
@@ -274,13 +273,14 @@ public:
                 try
                 {
                     auto plan = std::make_unique<GenericPlan<THandle>>(
-                        _stateManager.getDispatchDetails(filtered[rank]), context, catalog.bound);
+                        _stateManager.getDispatchDetails(*filtered[rank]), context, catalog.bound);
 
-                    HIPDNN_PLUGIN_LOG_INFO(
-                        "ingestor: engine '"
-                        << _engine.name << "' selected kernel " << toString(filtered[rank].kernelId)
-                        << " at rank " << rank << " from " << filtered.size() << " candidate(s) ("
-                        << catalog.entries.size() << " before knob filtering)");
+                    HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                           << _engine.name << "' selected kernel "
+                                           << toString(filtered[rank]->kernelId) << " at rank "
+                                           << rank << " from " << filtered.size()
+                                           << " candidate(s) (" << catalog.entries.size()
+                                           << " before knob filtering)");
 
                     executionContext.setPlan(std::move(plan));
                     return;
@@ -294,16 +294,16 @@ public:
                     {
                         throw;
                     }
-                    failures.emplace_back(toString(filtered[rank].kernelId) + ": " + error.what());
+                    failures.emplace_back(toString(filtered[rank]->kernelId) + ": " + error.what());
                 }
                 catch(const std::exception& error)
                 {
-                    failures.emplace_back(toString(filtered[rank].kernelId) + ": " + error.what());
+                    failures.emplace_back(toString(filtered[rank]->kernelId) + ": " + error.what());
                 }
 
                 HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
                                        << _engine.name << "' could not build a plan for "
-                                       << toString(filtered[rank].kernelId) << " at rank " << rank
+                                       << toString(filtered[rank]->kernelId) << " at rank " << rank
                                        << ": " << failures.back() << "; trying the next candidate");
             }
 
@@ -314,7 +314,7 @@ public:
                                                     << filtered.size() << " candidate(s) ("
                                                     << catalog.entries.size()
                                                     << " before knob filtering), ranked front "
-                                                    << toString(filtered.front().kernelId));
+                                                    << toString(filtered.front()->kernelId));
 
         // Every candidate walk applies the same policy: an unbuildable candidate is a reason
         // to carry, a malformed descriptor stops the build. Absorbing here what the others
@@ -322,16 +322,16 @@ public:
         std::vector<std::string> benchmarkFailures;
         std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates;
         candidates.reserve(filtered.size());
-        for(const auto& kernel : filtered)
+        for(const KernelDefinition* kernel : filtered)
         {
             try
             {
                 candidates.push_back(
-                    {kernel.kernelId,
+                    {kernel->kernelId,
                      std::make_unique<GenericPlan<THandle>>(
-                         _stateManager.getDispatchDetails(kernel), context, catalog.bound),
-                     kernel.packId,
-                     kernel.dispatchId});
+                         _stateManager.getDispatchDetails(*kernel), context, catalog.bound),
+                     kernel->packId,
+                     kernel->dispatchId});
                 continue;
             }
             catch(const HipdnnPluginException& error)
@@ -340,16 +340,16 @@ public:
                 {
                     throw;
                 }
-                benchmarkFailures.emplace_back(toString(kernel.kernelId) + ": " + error.what());
+                benchmarkFailures.emplace_back(toString(kernel->kernelId) + ": " + error.what());
             }
             catch(const std::exception& error)
             {
-                benchmarkFailures.emplace_back(toString(kernel.kernelId) + ": " + error.what());
+                benchmarkFailures.emplace_back(toString(kernel->kernelId) + ": " + error.what());
             }
 
             HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '" << _engine.name
                                                         << "' dropped benchmarking candidate '"
-                                                        << toString(kernel.kernelId)
+                                                        << toString(kernel->kernelId)
                                                         << "': " << benchmarkFailures.back());
         }
 
@@ -515,21 +515,22 @@ private:
         return setting.valueAs<IntValue>().value() != 0;
     }
 
-    std::vector<KernelDefinition> applyKnobFilter(const std::vector<KernelDefinition>& catalog,
-                                                  const KnobFilter& filter) const
+    std::vector<const KernelDefinition*>
+        applyKnobFilter(const std::vector<const KernelDefinition*>& catalog,
+                        const KnobFilter& filter) const
     {
         if(filter.empty())
         {
             return catalog;
         }
 
-        std::vector<KernelDefinition> filtered;
+        std::vector<const KernelDefinition*> filtered;
         filtered.reserve(catalog.size());
-        for(const auto& kernel : catalog)
+        for(const KernelDefinition* kernel : catalog)
         {
             const bool matchesEverySetKnob
-                = std::all_of(filter.begin(), filter.end(), [&kernel](const auto& setting) {
-                      const auto value = kernel.tryGetMetadata(setting.first);
+                = std::all_of(filter.begin(), filter.end(), [kernel](const auto& setting) {
+                      const auto value = kernel->tryGetMetadata(setting.first);
                       const auto* intValue
                           = value.has_value() ? std::get_if<int64_t>(&*value) : nullptr;
                       return intValue != nullptr && *intValue == setting.second;

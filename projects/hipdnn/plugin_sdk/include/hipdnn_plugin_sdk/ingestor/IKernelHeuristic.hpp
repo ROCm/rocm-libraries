@@ -49,15 +49,16 @@ public:
     /// is undefined behaviour for stable_sort. Mapping it to -infinity keeps the order
     /// total, so a pack that returns NaN loses selection quality without costing
     /// determinism or reaching UB. Infinities are already well-ordered and pass through.
-    std::vector<KernelDefinition> rank(const Catalog& catalog, const MatchContext& context) const
+    std::vector<const KernelDefinition*> rank(const Catalog& catalog,
+                                              const MatchContext& context) const
     {
         std::vector<std::pair<double, const KernelDefinition*>> scored;
         scored.reserve(catalog.entries.size());
-        for(const auto& entry : catalog.entries)
+        for(const KernelDefinition* entry : catalog.entries)
         {
-            const double raw = score(context, catalog.bound, entry);
+            const double raw = score(context, catalog.bound, *entry);
             scored.emplace_back(std::isnan(raw) ? -std::numeric_limits<double>::infinity() : raw,
-                                &entry);
+                                entry);
         }
 
         std::stable_sort(scored.begin(), scored.end(), [](const auto& lhs, const auto& rhs) {
@@ -72,11 +73,11 @@ public:
             return lhs.second->kernelId < rhs.second->kernelId;
         });
 
-        std::vector<KernelDefinition> ranked;
+        std::vector<const KernelDefinition*> ranked;
         ranked.reserve(scored.size());
         for(const auto& [_, entry] : scored)
         {
-            ranked.push_back(*entry);
+            ranked.push_back(entry);
         }
         return ranked;
     }

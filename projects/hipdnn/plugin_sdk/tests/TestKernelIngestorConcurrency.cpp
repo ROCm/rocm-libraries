@@ -31,6 +31,7 @@ namespace
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
 
 constexpr int THREAD_COUNT = 8;
 constexpr int ITERATIONS_PER_THREAD = 200;
@@ -150,7 +151,7 @@ TEST(TestIngestorStateManagerConcurrency, RanksConsistentlyFromManyThreads)
             const MatchContext context{graph, 0, properties};
             const auto ranked = manager->sortedDefinitions(context);
             ASSERT_EQ(ranked.size(), 2U);
-            EXPECT_EQ(ranked.front().getIntMetadata(std::string(BLOCK_SIZE)), 256);
+            EXPECT_EQ(ranked.front()->getIntMetadata(std::string(BLOCK_SIZE)), 256);
         }
     });
 }
@@ -177,7 +178,7 @@ TEST(TestIngestorStateManagerConcurrency, ServesUncacheableGraphsConcurrently)
 {
     const ScopedTestSymbols symbols;
     const auto manager = makeTestStateManager();
-    const TestGraph graph;
+    const BytelessTestGraph graph;
     const auto properties = testDeviceProperties();
 
     runConcurrently(THREAD_COUNT, [&](int) {
@@ -198,7 +199,10 @@ TEST(TestIngestorStateManagerConcurrency, EvictsUnderConcurrentDistinctGraphs)
     runConcurrently(THREAD_COUNT, [&](int thread) {
         for(int i = 0; i < ITERATIONS_PER_THREAD; ++i)
         {
-            const TestGraph graph(makeGraphId(static_cast<uint8_t>((thread * 7 + i) % 32)));
+            // Distinct content per seed: the catalog cache keys on content, not identity.
+            ContentCarryingTestGraph::Spec spec;
+            spec.tensors[0].dims = {4, 1 + ((thread * 7 + i) % 32)};
+            const ContentCarryingTestGraph graph{spec};
             const MatchContext context{graph, 0, properties};
 
             ASSERT_EQ(manager->unsortedDefinitions(context).size(), 2U);

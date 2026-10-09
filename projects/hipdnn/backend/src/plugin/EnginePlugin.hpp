@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <hip/hip_runtime.h>
@@ -26,6 +27,17 @@ protected:
     EnginePlugin();
 
 public:
+    /**
+     * @brief Returns the plugin's API version parsed into a structured
+     *        `Version` object, or `std::nullopt` if the version string is
+     *        malformed.
+     *
+     * The version string is read and parsed once, at plugin load. Plugin
+     * managers validate this at load time and reject malformed plugin API
+     * versions before dispatch.
+     */
+    virtual std::optional<hipdnn_data_sdk::utilities::Version> parsedApiVersion() const;
+
     // Functions that don't require a handle (called first)
     virtual std::vector<int64_t> getAllEngineIds() const;
 
@@ -139,6 +151,12 @@ public:
         return HIPDNN_PLUGIN_TYPE_ENGINE;
     }
 
+protected:
+    // Parses a raw plugin API version string. Logs a warning naming the plugin
+    // and returns std::nullopt when the string is malformed.
+    static std::optional<hipdnn_data_sdk::utilities::Version>
+        parseApiVersion(std::string_view rawVersion, const std::string& pluginName);
+
 private:
     void resolveSymbols();
 
@@ -147,6 +165,9 @@ private:
 #endif
 
     mutable std::vector<int64_t> _allEngineIds;
+
+    // Set once by the SharedLibrary constructor; empty for mock construction.
+    std::optional<hipdnn_data_sdk::utilities::Version> _parsedApiVersion;
 
     hipdnnPluginStatus_t (*_funcGetAllEngineIds)(int64_t*, uint32_t, uint32_t*);
     hipdnnPluginStatus_t (*_funcCreateHandle)(hipdnnEnginePluginHandle_t*);

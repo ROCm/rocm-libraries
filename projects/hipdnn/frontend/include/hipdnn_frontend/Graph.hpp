@@ -391,7 +391,7 @@ protected:
 
         // Validate and apply knob settings
         std::unordered_map<KnobType_t, Knob> existingKnobs;
-        HIPDNN_CHECK_ERROR(get_knob_lookup_for_engine(engineId, existingKnobs));
+        HIPDNN_CHECK_ERROR(knobLookupFromEngineDescriptor(engineDesc.get(), existingKnobs));
 
         std::vector<KnobSetting> validatedSettings;
         HIPDNN_CHECK_ERROR(
@@ -496,6 +496,40 @@ private:
     std::optional<int64_t> _preferredEngineId;
 
     bool _isOverrideShapeEnabled = false;
+
+    // Create and finalize an engine descriptor for engineId on the built
+    // operation graph. Returns ErrorCode::INVALID_VALUE if the graph has not
+    // been built.
+    Error
+        createEngineDescriptorForKnobQuery(int64_t engineId,
+                                           detail::ScopedHipdnnBackendDescriptor& engineDesc) const
+    {
+        if(!hasValidGraphDesc())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has not been built, build the operation graph first. Cannot get knobs "
+                    "for engine."};
+        }
+
+        return hipdnn_frontend::detail::createEngineDescriptorForGraph(
+            engineDesc, _graphDesc->get(), engineId);
+    }
+
+    // Insert the knobs exposed by a finalized engine descriptor into knobs,
+    // keyed by knob type. Entries already present for a knob type are kept.
+    static Error knobLookupFromEngineDescriptor(hipdnnBackendDescriptor_t engineDesc,
+                                                std::unordered_map<KnobType_t, Knob>& knobs)
+    {
+        std::vector<Knob> knobVector;
+        HIPDNN_CHECK_ERROR(detail::unpackKnobsFromDescriptors(engineDesc, knobVector));
+
+        for(auto& knob : knobVector)
+        {
+            knobs.try_emplace(knob.knobId(), std::move(knob));
+        }
+
+        return {ErrorCode::OK, ""};
+    }
 
     // Get the active plan's engine config descriptor. Throws if no active plan exists.
     // Returns a borrowed pointer; invalidated by any operation that resets _compiledPlans
@@ -998,38 +1032,6 @@ private:
 
         replaceCompiledPlans(
             std::move(plans), selectedIndex, detail::ActivePlanFinalization::UNFINALIZED);
-
-        return {ErrorCode::OK, ""};
-    }
-
-    // Initialize engine config for a specific engine ID.
-    // Clears the compiled plans vector and creates a single plan entry with
-    // the engine config set but not yet finalized.
-    // This method does NOT finalize the engine config. The caller must
-    // finalize after setting any knobs on the config.
-    Error initializeEngineConfig(int64_t engineId)
-    {
-        detail::ScopedHipdnnBackendDescriptor engineDesc;
-
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
-            engineDesc, _graphDesc->get(), engineId));
-
-        auto engineConfigDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
-            HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
-
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
-                                             engineConfigDesc->get(),
-                                             HIPDNN_ATTR_ENGINECFG_ENGINE,
-                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                             1,
-                                             static_cast<const void*>(&engineDesc.get())),
-                                         "Failed to set engine on the engine config descriptor.");
-
-        CompiledPlan plan;
-        plan.engineConfigDesc = std::move(engineConfigDesc);
-        plan.engineId = engineId;
-
-        replaceWithSingleCompiledPlan(std::move(plan), detail::ActivePlanFinalization::UNFINALIZED);
 
         return {ErrorCode::OK, ""};
     }
@@ -2386,17 +2388,8 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const
     {
-        if(!hasValidGraphDesc())
-        {
-            return {ErrorCode::INVALID_VALUE,
-                    "Graph has not been built, build the operation graph first. Cannot get knobs "
-                    "for engine."};
-        }
-
         detail::ScopedHipdnnBackendDescriptor engineDesc;
-
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
-            engineDesc, _graphDesc->get(), engineId));
+        HIPDNN_CHECK_ERROR(createEngineDescriptorForKnobQuery(engineId, engineDesc));
 
         return detail::unpackKnobsFromDescriptors(engineDesc.get(), knobs);
     }
@@ -2404,8 +2397,9 @@ public:
     /**
      * @brief Get knobs for a specific engine, indexed by knob type
      *
-     * Convenience wrapper around get_knobs_for_engine() that populates
-     * a map keyed by KnobType_t for direct lookup.
+     * Clears @p knobs, creates and finalizes an engine descriptor for
+     * @p engineId, and fills @p knobs with that engine's knobs keyed by
+     * KnobType_t for direct lookup.
      *
      * @param engineId The engine ID to query
      * @param knobs Output map populated with available knobs, keyed by type
@@ -2421,15 +2415,10 @@ public:
     {
         knobs.clear();
 
-        std::vector<Knob> knobVector;
-        HIPDNN_CHECK_ERROR(get_knobs_for_engine(engineId, knobVector));
+        detail::ScopedHipdnnBackendDescriptor engineDesc;
+        HIPDNN_CHECK_ERROR(createEngineDescriptorForKnobQuery(engineId, engineDesc));
 
-        for(auto& knob : knobVector)
-        {
-            knobs.try_emplace(knob.knobId(), std::move(knob));
-        }
-
-        return {ErrorCode::OK, ""};
+        return knobLookupFromEngineDescriptor(engineDesc.get(), knobs);
     }
 
     /**
