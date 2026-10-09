@@ -34,11 +34,13 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "family_glue.hpp"
 
 extern "C" {
+#include "rocke/arch_domain.h"
 #include "rocke/arena.h"
 #include "rocke/instance_batched_gemm.h"
 #include "rocke/instance_block_scale_gemm.h"
@@ -3900,6 +3902,25 @@ PYBIND11_MODULE(rocke_engine, m)
         },
         "The LLVM flavors this engine accepts, oldest first. Must equal "
         "rocke.core.lower_llvm.LLVM_FLAVORS.");
+
+    /* The engine's compiled-in arch-domain table, so a test can hold it to the
+     * Python reader cell for cell. It is generated from the same committed
+     * columns at build time; this is how a stale or mis-generated copy shows. */
+    m.def(
+        "arch_domain_column",
+        [](const std::string& flavor) {
+            std::vector<std::tuple<std::string, std::string, std::string, std::string>> out;
+            size_t n = 0;
+            const rocke_arch_domain_cell_t* cells = rocke_arch_domain_column(flavor.c_str(), &n);
+            out.reserve(n);
+            for(size_t i = 0; i < n; ++i)
+                out.emplace_back(cells[i].key, cells[i].arch, cells[i].status, cells[i].evidence);
+            return out;
+        },
+        py::arg("flavor"),
+        "Every negative (key, arch, status, evidence) cell compiled into this "
+        "engine for one LLVM flavor, sorted by (key, arch); empty for a flavor "
+        "with no committed column.");
 
     m.def("gemm_lower_llvm",
           &gemm_lower_llvm,

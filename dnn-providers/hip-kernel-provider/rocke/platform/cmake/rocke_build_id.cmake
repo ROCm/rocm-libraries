@@ -7,7 +7,8 @@
 # and regardless of any version-control state.
 #
 # rocke_compute_build_id(<out_var> <root_dir>)
-#   Hashes the sorted concatenation of every src/**/*.cpp and include/**/*.h*
+#   Hashes the sorted concatenation of every cpp/**/*.cpp and
+#   cpp/include/**/*.h*, plus the inputs of the generated arch-domain table,
 #   under <root_dir>. Each file contributes its repo-relative path followed by a
 #   SHA-256 of its bytes; the per-file lines are sorted (locale-independent) and
 #   the whole list is hashed once more to yield the build-id. Including the path
@@ -25,7 +26,15 @@ function(rocke_compute_build_id out_var root_dir)
   file(GLOB_RECURSE _rocke_hdr
        "${root_dir}/cpp/include/*.h"
        "${root_dir}/cpp/include/*.hpp")
-  set(_rocke_all ${_rocke_src} ${_rocke_hdr})
+  # The engine's arch-domain table is generated from these at build time
+  # (tools/gen_arch_domain_cpp.py), so they change what the engine does as
+  # surely as its sources do.
+  file(GLOB _rocke_arch_domain
+       "${root_dir}/python/rocke/core/arch/data/intrinsic_arch_domain.*.json")
+  list(APPEND _rocke_arch_domain
+       "${root_dir}/python/rocke/core/arch/domain.py"
+       "${root_dir}/tools/gen_arch_domain_cpp.py")
+  set(_rocke_all ${_rocke_src} ${_rocke_hdr} ${_rocke_arch_domain})
 
   set(_rocke_lines "")
   foreach(_f IN LISTS _rocke_all)

@@ -5,6 +5,9 @@
 ``tools/gen_arch_domain.py`` measures, per (declaration key, gfx target),
 whether that declaration links, and commits the answer as one JSON column per
 LLVM flavor under ``rocke/core/arch/data/``. This module is the only reader.
+The C++ engine reads no files when it lowers, so the build generates its copy
+of the table through this module (``tools/gen_arch_domain_cpp.py``) -- which
+is why it imports nothing outside the standard library.
 
 A cell answers two questions at once: "does this LLVM know the name"
 (``name_absent``) and "can this target lower it" (``arch_absent``).
@@ -131,6 +134,11 @@ class ArchDomain:
         """Every declaration key this column covers, in file order."""
         return tuple(self._keys)
 
+    def arches(self, key: str) -> tuple:
+        """Every target this column measured ``key`` on, in file order; empty
+        for a key the column does not cover."""
+        return tuple(self._keys.get(key, ()))
+
 
 def is_negative(status: str) -> bool:
     """Whether a status is a definite "this will not work".
@@ -143,6 +151,25 @@ def is_negative(status: str) -> bool:
     return status == STATUS_ARCH_ABSENT
 
 
+_COLUMN_PREFIX = "intrinsic_arch_domain."
+_COLUMN_SUFFIX = ".json"
+
+
+def committed_flavors() -> tuple[str, ...]:
+    """Every flavor that has a committed column, sorted.
+
+    The C++ engine's copy of the table is generated from exactly this set
+    (``tools/gen_arch_domain_cpp.py``), so a column added here reaches both
+    engines with no list to update.
+    """
+    return tuple(
+        sorted(
+            p.name[len(_COLUMN_PREFIX) : -len(_COLUMN_SUFFIX)]
+            for p in _DATA_DIR.glob(f"{_COLUMN_PREFIX}*{_COLUMN_SUFFIX}")
+        )
+    )
+
+
 @functools.cache
 def load(flavor: str) -> ArchDomain | None:
     """The committed column for ``flavor``, or ``None`` if there is not one.
@@ -152,7 +179,7 @@ def load(flavor: str) -> ArchDomain | None:
     that exists but cannot be read (permissions, I/O) raises, because returning
     ``None`` for it would switch the whole lane off without a word.
     """
-    path = _DATA_DIR / f"intrinsic_arch_domain.{flavor}.json"
+    path = _DATA_DIR / f"{_COLUMN_PREFIX}{flavor}{_COLUMN_SUFFIX}"
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
