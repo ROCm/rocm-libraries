@@ -886,12 +886,16 @@ _AOT_DIRECT_PLACEHOLDERS = {
 # The direct variants only the AOT engine packages.
 #: DirectDepthwiseTiledSpec: an output-stationary block_h x block_w tile per block.
 DIRECT_VARIANT_TILED = "tiled"
+#: DirectDepthwiseColSpec: the filter-column loop outermost; it bounds its rows by
+#: the runtime Ho, so it also serves "valid" padding.
+DIRECT_VARIANT_COL = "col"
 #: Each forward algorithm of ``direct_kernel_sweep.DIRECT_CAPABILITIES`` and the
 #: ``direct_variant`` an instance of it carries.
 AOT_DIRECT_ALGORITHMS = {
     "direct_depthwise": DIRECT_VARIANT_STD,
     "direct_depthwise_spatial": DIRECT_VARIANT_SPATIAL,
     "direct_depthwise_tiled": DIRECT_VARIANT_TILED,
+    "direct_depthwise_col": DIRECT_VARIANT_COL,
 }
 _AOT_DIRECT_VARIANTS = tuple(AOT_DIRECT_ALGORITHMS.values())
 #: The block knobs after ``block_w``/``block_waves`` and the value each holds
@@ -929,6 +933,11 @@ AOT_DIRECT_KNOBS = {
         "block_h": "block_h",
         "block_waves": "block_waves",
         "unroll_rows": "unroll_rows",
+    },
+    DIRECT_VARIANT_COL: {
+        "block_w": "block_w",
+        "block_h": "block_h",
+        "block_waves": "block_waves",
     },
 }
 #: Knobs rocKE spells as a bool, and as None: the descriptor holds an int.
@@ -1197,6 +1206,10 @@ class Gfx950ConvFwdAotSpec:
             )
         if variant == DIRECT_VARIANT_TILED:
             return _direct.DirectDepthwiseTiledSpec(problem=problem, name=name, **knobs)
+        if variant == DIRECT_VARIANT_COL:
+            return _direct.DirectDepthwiseColSpec(
+                problem=problem, name=name, dtype=problem.dtype, **knobs
+            )
         raise ValueError(f"unknown direct variant {variant!r}")
 
     def to_direct_spec(self):
@@ -1324,6 +1337,9 @@ def _aot_direct_validate(variant: str, rocke_spec, arch: str) -> tuple[bool, str
             return _direct.is_valid_depthwise_spatial_spec(rocke_spec, arch=arch)
         if variant == DIRECT_VARIANT_TILED:
             return _direct.is_valid_depthwise_tiled_spec(rocke_spec, arch=arch)
+        if variant == DIRECT_VARIANT_COL:
+            rocke_spec.validate()
+            return _direct.is_valid_depthwise_col_spec(rocke_spec, arch=arch)
     except (TypeError, ValueError, ZeroDivisionError) as exc:
         return False, str(exc)
     return False, f"unknown direct variant {variant!r}"
@@ -1665,6 +1681,7 @@ _AOT_DIRECT_BUILDERS = {
     DIRECT_VARIANT_STD: _direct.build_direct_depthwise,
     DIRECT_VARIANT_SPATIAL: _direct.build_direct_depthwise_spatial,
     DIRECT_VARIANT_TILED: _direct.build_direct_depthwise_tiled,
+    DIRECT_VARIANT_COL: _direct.build_direct_depthwise_col,
 }
 
 

@@ -232,6 +232,7 @@ TEST(TestGfx950ConvFwdGeometry, FamilyAndVariantValueSetsAreClosed)
     EXPECT_EQ(parseDirectVariant("std"), DirectVariant::STD);
     EXPECT_EQ(parseDirectVariant("spatial"), DirectVariant::SPATIAL);
     EXPECT_EQ(parseDirectVariant("tiled"), DirectVariant::TILED);
+    EXPECT_EQ(parseDirectVariant("col"), DirectVariant::COL);
     for(const auto* value :
         {"", "Std", "SPATIAL", "direct_depthwise", "std ", "direct_depthwise_tiled", "Col"})
     {
@@ -771,6 +772,38 @@ const std::vector<DirectLaunchCase>& directLaunchCases()
         {{{21, 21, 1, 1, 10, 10, 1, 1}, DirectVariant::TILED, 14, 2, 1}, {1, 4, 4, 3, 12, 21, 21, 1, 1, 10, 10, 1, 1, 2}, false, 0, 0, 0, 0},
         {{{21, 21, 1, 1, 10, 10, 1, 1}, DirectVariant::TILED, 14, 2, 1}, {2, 63, 63, 33, 28, 21, 21, 1, 1, 2, 2, 1, 1, 63}, false, 0, 0, 0, 0},
         {{{21, 21, 1, 1, 10, 10, 1, 1}, DirectVariant::TILED, 14, 2, 1}, {1, 192, 192, 1, 56, 21, 21, 1, 1, 10, 10, 1, 1, 96}, false, 0, 0, 0, 0},
+        {{{3, 3, 1, 1, 0, 0, 1, 1}, DirectVariant::COL, 1, 1, 8}, {1, 32, 32, 28, 28, 3, 3, 1, 1, 0, 0, 1, 1, 32}, true, 26, 1, 4, 64},
+        {{{3, 3, 1, 1, 0, 0, 1, 1}, DirectVariant::COL, 1, 1, 8}, {1, 16, 16, 3, 7, 3, 3, 1, 1, 0, 0, 1, 1, 16}, true, 5, 1, 1, 64},
+        {{{3, 3, 1, 1, 0, 0, 1, 1}, DirectVariant::COL, 1, 1, 8}, {1, 16, 16, 7, 8, 3, 3, 1, 1, 0, 0, 1, 1, 16}, true, 6, 1, 1, 64},
+        {{{3, 3, 1, 1, 0, 0, 1, 1}, DirectVariant::COL, 1, 1, 8}, {1, 16, 16, 56, 8, 3, 3, 1, 1, 0, 0, 1, 1, 16}, true, 6, 1, 7, 64},
+        {{{3, 3, 1, 1, 0, 0, 1, 1}, DirectVariant::COL, 1, 1, 8}, {1, 5, 5, 7, 5, 3, 3, 1, 1, 0, 0, 1, 1, 5}, true, 3, 1, 1, 64},
+        {{{3, 3, 1, 1, 0, 0, 1, 1}, DirectVariant::COL, 1, 1, 8}, {1, 300, 300, 1, 7, 3, 3, 1, 1, 1, 1, 1, 1, 300}, false, 0, 0, 0, 0},
+        {{{3, 3, 1, 1, 0, 0, 1, 1}, DirectVariant::COL, 1, 1, 8}, {2, 16, 16, 3, 12, 3, 3, 1, 2, 0, 0, 1, 1, 16}, false, 0, 0, 0, 0},
+        {{{3, 3, 1, 1, 0, 0, 1, 1}, DirectVariant::COL, 1, 1, 8}, {1, 8, 16, 3, 12, 3, 3, 1, 1, 0, 0, 1, 1, 8}, false, 0, 0, 0, 0},
+        {{{5, 5, 1, 1, 2, 2, 1, 1}, DirectVariant::COL, 4, 2, 8}, {2, 16, 16, 7, 56, 5, 5, 1, 1, 2, 2, 1, 1, 16}, true, 14, 1, 2, 128},
+        {{{5, 5, 1, 1, 2, 2, 1, 1}, DirectVariant::COL, 4, 2, 8}, {3, 64, 64, 28, 8, 5, 5, 1, 1, 2, 2, 1, 1, 64}, true, 2, 1, 12, 128},
+        {{{5, 5, 1, 1, 2, 2, 1, 1}, DirectVariant::COL, 4, 2, 8}, {2, 300, 300, 33, 33, 5, 5, 1, 1, 2, 2, 1, 1, 300}, true, 9, 3, 10, 128},
+        {{{5, 5, 1, 1, 2, 2, 1, 1}, DirectVariant::COL, 4, 2, 8}, {1, 63, 63, 5, 33, 5, 5, 1, 1, 2, 2, 1, 1, 63}, true, 9, 1, 1, 128},
+        {{{5, 5, 1, 1, 2, 2, 1, 1}, DirectVariant::COL, 4, 2, 8}, {3, 1, 1, 31, 31, 5, 5, 1, 1, 2, 2, 1, 1, 1}, true, 8, 1, 12, 128},
+        {{{5, 5, 1, 1, 2, 2, 1, 1}, DirectVariant::COL, 4, 2, 8}, {2, 8, 16, 1, 17, 5, 5, 1, 1, 2, 2, 1, 1, 8}, false, 0, 0, 0, 0},
+        {{{5, 5, 1, 1, 2, 2, 1, 1}, DirectVariant::COL, 4, 2, 8}, {1, 8, 8, 12, 2, 5, 5, 1, 2, 2, 2, 1, 1, 8}, false, 0, 0, 0, 0},
+        {{{5, 5, 1, 1, 2, 2, 1, 1}, DirectVariant::COL, 4, 2, 8}, {1, 65, 65, 12, 12, 3, 3, 1, 1, 2, 2, 1, 1, 65}, false, 0, 0, 0, 0},
+        {{{7, 7, 2, 2, 0, 0, 1, 1}, DirectVariant::COL, 2, 4, 16}, {2, 8, 8, 28, 33, 7, 7, 2, 2, 0, 0, 1, 1, 8}, true, 7, 1, 2, 256},
+        {{{7, 7, 2, 2, 0, 0, 1, 1}, DirectVariant::COL, 2, 4, 16}, {2, 16, 16, 56, 17, 7, 7, 2, 2, 0, 0, 1, 1, 16}, true, 3, 1, 4, 256},
+        {{{7, 7, 2, 2, 0, 0, 1, 1}, DirectVariant::COL, 2, 4, 16}, {1, 96, 96, 7, 33, 7, 7, 2, 2, 0, 0, 1, 1, 96}, true, 7, 1, 1, 256},
+        {{{7, 7, 2, 2, 0, 0, 1, 1}, DirectVariant::COL, 2, 4, 16}, {2, 63, 63, 33, 31, 7, 7, 2, 2, 0, 0, 1, 1, 63}, true, 7, 1, 2, 256},
+        {{{7, 7, 2, 2, 0, 0, 1, 1}, DirectVariant::COL, 2, 4, 16}, {1, 96, 96, 33, 12, 7, 7, 2, 2, 0, 0, 1, 1, 96}, true, 2, 1, 1, 256},
+        {{{7, 7, 2, 2, 0, 0, 1, 1}, DirectVariant::COL, 2, 4, 16}, {1, 300, 300, 28, 33, 1, 1, 2, 2, 0, 0, 1, 1, 300}, false, 0, 0, 0, 0},
+        {{{7, 7, 2, 2, 0, 0, 1, 1}, DirectVariant::COL, 2, 4, 16}, {1, 2, 2, 31, 12, 7, 7, 2, 3, 0, 0, 1, 1, 2}, false, 0, 0, 0, 0},
+        {{{7, 7, 2, 2, 0, 0, 1, 1}, DirectVariant::COL, 2, 4, 16}, {3, 2, 2, 17, 56, 7, 7, 2, 3, 0, 0, 1, 1, 2}, false, 0, 0, 0, 0},
+        {{{9, 9, 2, 2, 4, 4, 1, 1}, DirectVariant::COL, 2, 1, 32}, {2, 2, 2, 56, 28, 9, 9, 2, 2, 4, 4, 1, 1, 2}, true, 7, 1, 2, 64},
+        {{{9, 9, 2, 2, 4, 4, 1, 1}, DirectVariant::COL, 2, 1, 32}, {3, 96, 96, 28, 17, 9, 9, 2, 2, 4, 4, 1, 1, 96}, true, 5, 2, 3, 64},
+        {{{9, 9, 2, 2, 4, 4, 1, 1}, DirectVariant::COL, 2, 1, 32}, {1, 1, 1, 7, 31, 9, 9, 2, 2, 4, 4, 1, 1, 1}, true, 8, 1, 1, 64},
+        {{{9, 9, 2, 2, 4, 4, 1, 1}, DirectVariant::COL, 2, 1, 32}, {3, 5, 5, 12, 56, 9, 9, 2, 2, 4, 4, 1, 1, 5}, true, 14, 1, 3, 64},
+        {{{9, 9, 2, 2, 4, 4, 1, 1}, DirectVariant::COL, 2, 1, 32}, {1, 2, 2, 33, 56, 9, 9, 2, 2, 4, 4, 1, 1, 2}, true, 14, 1, 1, 64},
+        {{{9, 9, 2, 2, 4, 4, 1, 1}, DirectVariant::COL, 2, 1, 32}, {3, 2, 2, 33, 56, 9, 9, 2, 2, 5, 5, 1, 1, 1}, false, 0, 0, 0, 0},
+        {{{9, 9, 2, 2, 4, 4, 1, 1}, DirectVariant::COL, 2, 1, 32}, {3, 300, 300, 28, 5, 9, 9, 1, 1, 4, 4, 1, 1, 300}, false, 0, 0, 0, 0},
+        {{{9, 9, 2, 2, 4, 4, 1, 1}, DirectVariant::COL, 2, 1, 32}, {3, 16, 16, 1, 28, 9, 9, 1, 1, 4, 4, 1, 1, 16}, false, 0, 0, 0, 0},
     };
     return s_cases;
 }
@@ -814,6 +847,13 @@ TEST(TestGfx950ConvFwdGeometry, AotDirectVariantsRefuseWhatRockesValidatorsRefus
     auto noRows = tiled;
     noRows.blockH = 0;
     EXPECT_FALSE(launches(depthwise(32, 14, 14, 3, 1, 1), noRows));
+
+    // col: "valid" padding, rows bounded by the output; a block no wider than Wo.
+    DirectInstance col{{5, 5, 2, 2, 0, 0, 1, 1}, DirectVariant::COL, 4, 1};
+    col.blockH = 8;
+    EXPECT_TRUE(launches(Problem{2, 24, 24, 13, 17, 5, 5, 2, 2, 0, 0, 1, 1, 24}, col));
+    EXPECT_FALSE(launches(Problem{2, 24, 24, 13, 6, 5, 5, 2, 2, 0, 0, 1, 1, 24}, col));
+    EXPECT_FALSE(launches(Problem{2, 24, 24, 13, 17, 5, 5, 2, 2, 2, 2, 1, 1, 24}, col));
 }
 
 TEST(TestGfx950ConvFwdGeometry, DefaultDirectArmFollowsTheGroupCount)

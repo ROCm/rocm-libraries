@@ -1504,6 +1504,16 @@ KernelDefinition aotTiledKernel(int64_t filter = 3, int64_t stride = 1)
                              {"unroll_rows", int64_t{1}}});
 }
 
+KernelDefinition aotColKernel(int64_t filter = 5, int64_t stride = 2, int64_t pad = 0)
+{
+    return aotVariantKernel(
+        "col",
+        filter,
+        stride,
+        pad,
+        {{"block_w", int64_t{2}}, {"block_h", int64_t{8}}, {"block_waves", int64_t{1}}});
+}
+
 TEST(TestGfx950ConvFwdAotKernelMatcher, OneInstanceServesEveryShapeItsCapabilitiesAdmit)
 {
     // No geometry field exists to compare: the same descriptor claims every shape.
@@ -1906,10 +1916,14 @@ TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachDirectVariantServesItsOwnProbl
     EXPECT_TRUE(matches(depthwiseShape(96, 17, 19, 15, 1, 7), aotTiledKernel(15)));
     EXPECT_TRUE(matches(depthwiseShape(5, 33, 7, 3, 1, 1), aotTiledKernel()));
     EXPECT_FALSE(matches(depthwiseShape(96, 17, 19, 13, 1, 6), aotTiledKernel(15)));
+    // col: "valid" padding too; a block no wider than the output.
+    EXPECT_TRUE(matches(depthwiseShape(24, 13, 17, 5, 2, 0), aotColKernel()));
+    EXPECT_FALSE(matches(depthwiseShape(24, 13, 5, 5, 2, 0), aotColKernel()));
+    EXPECT_FALSE(matches(depthwiseShape(24, 13, 17, 5, 2, 2), aotColKernel()));
     // The exact-shape engine admits none of them.
     const GraphFixture depthwise(buildGraph(convSpec(depthwiseShape(32, 14, 14, 3, 1, 1))),
                                  gfx950Properties());
-    for(const auto& kernel : {aotTiledKernel()})
+    for(const auto& kernel : {aotTiledKernel(), aotColKernel(3, 1, 1)})
     {
         EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, depthwise.context(), kernel));
         EXPECT_FALSE(matchesKernel(GFX950_CONV_FWD, depthwise.context(), kernel));
@@ -1944,6 +1958,9 @@ TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachVariantStatesOnlyItsOwnKnobs)
         {depthwiseShape(32, 14, 14, 3, 1, 1),
          aotTiledKernel(),
          {"block_w", "block_h", "block_waves", "unroll_rows"}},
+        {depthwiseShape(24, 13, 17, 5, 2, 0),
+         aotColKernel(),
+         {"block_w", "block_h", "block_waves"}},
     };
     for(const auto& [shape, base, own] : cases)
     {
@@ -2001,6 +2018,7 @@ TEST(TestGfx950ConvFwdAotDispatch, EveryDirectVariantPassesTheContractAndReaches
 {
     for(const auto& [shape, kernel] : std::vector<std::pair<ConvShape, KernelDefinition>>{
             {depthwiseShape(32, 14, 14, 3, 1, 1), aotTiledKernel()},
+            {depthwiseShape(24, 13, 17, 5, 2, 0), aotColKernel()},
         })
     {
         SCOPED_TRACE(std::get<std::string>(kernel.metadata.at("direct_variant")));
