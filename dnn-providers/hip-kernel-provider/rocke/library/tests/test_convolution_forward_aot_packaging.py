@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import random
 from dataclasses import replace
 
@@ -26,6 +27,7 @@ from builders.common.convolution_forward import (
     Gfx950ConvFwdSpec,
     build_gfx950_conv_fwd_aot,
     gfx950_conv_fwd_aot_problem_for_request,
+    gfx950_conv_fwd_aot_runtime_candidates,
     gfx950_conv_fwd_aot_serves,
     supports_gfx950_conv_fwd_aot,
     supports_gfx950_conv_fwd_aot_problem,
@@ -328,6 +330,100 @@ def test_profile_dispatch_resolves_the_problem_including_grouped_pointwise():
     assert supports_gfx950_conv_fwd_aot_problem(problem) == (True, "ok")
     with pytest.raises(ValueError, match="2D"):
         gfx950_conv_fwd_aot_problem_for_request(replace(request, Di=4, Z=1))
+
+
+# ---- Runtime selection: which serving instances run ----
+
+#: (N, C, K, Hi, Wi, Y, X, sH, sW, pH, pW, dH, dW, groups). Odd and even C/groups and
+#: K/groups, C/groups of 2 mod 4, grouped (odd group counts too), depthwise, pointwise
+#: and grouped pointwise, strided, dilated and large filters, and two output extents
+#: past 65535 small M tiles, the second past every tile but the largest, so the grid
+#: bound decides which width combinations remain.
+_SELECTION_GRID = (
+    (2, 64, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1),
+    (2, 3, 32, 32, 32, 7, 7, 2, 2, 3, 3, 1, 1, 1),
+    (2, 32, 5, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1),
+    (1, 3, 5, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1, 1),
+    (2, 6, 16, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1),
+    (2, 10, 6, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1, 1),
+    (2, 4, 12, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1),
+    (2, 32, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 4),
+    (2, 12, 20, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 4),
+    (1, 9, 48, 10, 10, 5, 5, 1, 1, 2, 2, 1, 1, 3),
+    (2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32),
+    (2, 64, 128, 14, 14, 1, 1, 1, 1, 0, 0, 1, 1, 1),
+    (2, 24, 24, 14, 14, 1, 1, 1, 1, 0, 0, 1, 1, 3),
+    (2, 16, 24, 17, 19, 3, 3, 2, 2, 2, 2, 2, 2, 1),
+    (1, 4, 12, 31, 31, 11, 11, 4, 4, 5, 5, 1, 1, 1),
+    (32, 8, 8, 192, 192, 1, 1, 1, 1, 0, 0, 1, 1, 1),
+    (36, 2, 2, 500, 500, 1, 1, 1, 1, 0, 0, 1, 1, 1),
+)
+
+
+@pytest.fixture(scope="module")
+def full_sweep():
+    """Every valid gfx950 forward identity of the AOT sweep, per dtype, in rocKE's order."""
+    target = ArchTarget.from_gfx("gfx950")
+    jobs = max(1, min(os.cpu_count() or 1, 32))
+    return {
+        dtype: [
+            job.identity
+            for job in kernel_sweep.enumerate_jobs(
+                arch="gfx950",
+                dtype=dtype,
+                target=target,
+                directions=("fwd",),
+                jobs=jobs,
+            )
+        ]
+        for dtype in ("fp16", "bf16")
+    }
+
+
+def test_runtime_candidates_are_rockes_runtime_selection(full_sweep):
+    """Over the whole sweep, the instances selected for a problem are exactly the ones
+    rocKE's --run-from-cache benchmark runs by default: KernelCache.compatible, then
+    _widest_vector_sizes. Both functions are rocKE's own, called on the identities."""
+    from benchmarks.common.benchmark_implicit_gemm_conv import _widest_vector_sizes
+
+    narrowed = kept_default = 0
+    for dtype, identities in full_sweep.items():
+        cache = KernelCache.__new__(KernelCache)
+        cache._entries = lambda direction, ids=identities: [(i, None, {}) for i in ids]
+        specs = [_spec(identity) for identity in identities]
+        for values in _SELECTION_GRID:
+            n, c, k, hi, wi, y, x, sh, sw, ph, pw, dh, dw, groups = values
+            problem = Gfx950ConvFwdSpec(
+                N=n, C=c, K=k, Hi=hi, Wi=wi, Y=y, X=x, sH=sh, sW=sw, pH=ph, pW=pw,
+                dH=dh, dW=dw, groups=groups, dtype=dtype,
+            )  # fmt: skip
+            compatible = [
+                entry
+                for entry in cache.compatible(problem.to_problem(), direction="fwd")
+                if entry[0].dtype_a == dtype
+            ]
+            theirs = {
+                ident.stable_hash() for ident, *_ in _widest_vector_sizes(compatible)
+            }
+            ours = gfx950_conv_fwd_aot_runtime_candidates(problem, specs)
+            assert [s.instance_id for s in ours] == [
+                s.instance_id for s in specs if s.instance_id in theirs
+            ], (dtype, values)
+            assert len(ours) == len(theirs), (dtype, values)
+            narrowed += len(ours) < len(compatible)
+            kept_default += any(s.epilogue == "default" for s in ours)
+    # The policy narrows wherever some width is wider than 1, and keeps the scalar-store
+    # epilogue where nothing stores wider.
+    assert narrowed > len(_SELECTION_GRID) and kept_default > 0
+
+
+def test_runtime_candidates_keep_every_serving_direct_instance(direct_jobs):
+    specs = [_direct_spec(job.identity) for _, job in direct_jobs]
+    problem = Gfx950ConvFwdSpec(
+        N=2, Hi=14, Wi=14, C=32, K=32, Y=3, X=3, pH=1, pW=1, groups=32
+    )
+    serving = [s for s in specs if gfx950_conv_fwd_aot_serves(s, problem)[0]]
+    assert serving and gfx950_conv_fwd_aot_runtime_candidates(problem, specs) == serving
 
 
 # ---- Direct depthwise instances ----
