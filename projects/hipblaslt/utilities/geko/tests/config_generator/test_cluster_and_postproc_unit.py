@@ -1,16 +1,17 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-
 from __future__ import annotations
 
+import builtins
 from dataclasses import dataclass
 import os
-import sys
+
+import pytest
 
 from geko.config_generator import cluster_sizes as cs
+from geko.config_generator.fork_params import optimization_param as opt_param
 from geko.config_generator.fork_params import post_processor as base_pp
 from geko.config_generator.fork_params.hw_profiles.gfx950 import post_processor as gfx950_pp
-from geko.config_generator.fork_params import optimization_param as opt_param
 from geko.config_generator.mi_designer import MFMAParameters
 from geko.config_generator.shared_utils import ConfigEntry, ForkParameter
 from geko.schemas import GemmType
@@ -115,14 +116,20 @@ def test_gfx950_postprocessor_adjustments(monkeypatch) -> None:
 
 
 def test_load_cms_groups_import_error(monkeypatch) -> None:
-    monkeypatch.setitem(sys.modules, "Tensile", None)
+    real_import = builtins.__import__
+
+    def reject_tensilelite_import(name, *args, **kwargs):
+        if name in {
+            "tensilelite.Components.CustomSchedule",
+            "tensilelite.Common.ValidParameters",
+        }:
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", reject_tensilelite_import)
     monkeypatch.setattr(os.path, "isdir", lambda _p: False)
-    raised = False
-    try:
+    with pytest.raises(ImportError, match="tensilelite not found"):
         gfx950_pp.load_CMS_groups("H", "N", "N", lambda *a, **k: ForkParameter(name=a[0], values=a[1]))
-    except ImportError:
-        raised = True
-    assert raised is True
 
 
 def test_base_postprocessor_ignore_non_temporal_filter(monkeypatch) -> None:
