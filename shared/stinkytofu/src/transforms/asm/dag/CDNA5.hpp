@@ -599,15 +599,23 @@ class CDNA5ReadyQueue : public ReadyQueue {
     //  - dsCapOwnTlClock_: a tensor_load already issued in this region;
     //  - dsCapTdmCarryAge_: the previous region's tensor_load, aged to this region's start (set
     //    in onInitRegion from the after-barrier threshold; assumes identical regions).
-    int dsCapWindowLimit() const {
+    bool inTdmWindow() const {
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
-        if (f.dsCapTdmPerCap <= 0 || f.dsCapTdmEndCycles <= f.dsCapTdmBeginCycles) return 0;
+        if (f.dsCapTdmPerCap <= 0 || f.dsCapTdmEndCycles <= f.dsCapTdmBeginCycles) return false;
         auto in = [&](int age) {
             return age >= f.dsCapTdmBeginCycles && age < f.dsCapTdmEndCycles;
         };
         const bool carried = dsCapTdmCarryAge_ >= 0 && in(dsCapTdmCarryAge_ + clock_);
         const bool own = dsCapOwnTlClock_ >= 0 && in(clock_ - dsCapOwnTlClock_);
-        return (carried || own) ? std::min(f.dsCapTdmPerCap, dsIssueCap_.depth()) : 0;
+        return carried || own;
+    }
+    int dsCapWindowLimit() const {
+        const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
+        return inTdmWindow() ? std::min(f.dsCapTdmPerCap, dsIssueCap_.depth()) : 0;
+    }
+    // Burst experiment: inside the window the cap is lifted entirely.
+    bool dsCapLifted() const {
+        return getPassContext().getPassFeatureConfig().dagFeatures.dsCapTdmBurst && inTdmWindow();
     }
     // Pacing plan (DsPacePlan.hpp): the k-th ds_load of the region may not issue before
     // dsPacePlan_[k]. Empty = ASAP.
@@ -619,9 +627,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return dsPaceHeld() ? dsPacePlan_[static_cast<size_t>(dsIssuedThisRegion_)] - clock_ : 0;
     }
     bool dsCapFull() const {
+        if (dsCapLifted()) return dsPaceHeld();
         return dsIssueCap_.full(dsCapWindowLimit()) || dsPaceHeld();
     }
     int dsCapMinResidual() const {
+        if (dsCapLifted()) return dsPaceResidual();
         return std::max(dsIssueCap_.minResidual(dsCapWindowLimit()), dsPaceResidual());
     }
     int dsReadThrottleWait() const {
