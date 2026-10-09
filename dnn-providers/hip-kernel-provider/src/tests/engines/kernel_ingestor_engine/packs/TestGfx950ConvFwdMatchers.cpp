@@ -2110,6 +2110,31 @@ TEST(TestGfx950ConvFwdAotDirectKernelMatcher, EachVariantStatesOnlyItsOwnKnobs)
     }
 }
 
+TEST(TestGfx950ConvFwdAotScore, GroupedAndNongroupedDirectRankBelowImplicitGemm)
+{
+    // Depthwise kernels rank above implicit GEMM; the grouped and non-grouped direct
+    // kernels take a placeholder below every implicit-GEMM instance (and above a
+    // refusal), so an unbenchmarked dense or grouped graph stays on implicit GEMM.
+    const auto scoreOf = [](const ConvShape& shape, const KernelDefinition& kernel) {
+        const GraphFixture fixture(buildGraph(convSpec(shape)), gfx950Properties());
+        EXPECT_TRUE(matchesKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel));
+        return scoreKernel(GFX950_CONV_FWD_AOT, fixture.context(), kernel);
+    };
+    const auto dense = denseShape(64, 96, 10, 96);
+    const auto nongrouped = scoreOf(dense, aotNongroupedKernel());
+    EXPECT_LT(nongrouped, scoreOf(dense, aotKernel({1, 1, 1})));
+    EXPECT_LT(nongrouped, scoreOf(dense, aotKernel({1, 1, 1}, 1, "fp16", 256, 256)));
+    EXPECT_GT(nongrouped, -1.0);
+    const auto grouped = groupedShape(8, 8);
+    EXPECT_LT(scoreOf(grouped, aotGroupedKernel()), scoreOf(grouped, aotKernel({1, 1, 1})));
+    const auto depthwise = depthwiseShape(32, 14, 14, 3, 1, 1);
+    const auto implicit = scoreOf(depthwise, aotKernel({1, 1, 1}));
+    const auto tiled = scoreOf(depthwise, aotTiledKernel());
+    EXPECT_GT(tiled, implicit);
+    EXPECT_LT(tiled, scoreOf(depthwise, aotDirectKernel("spatial")));
+    EXPECT_GT(scoreOf(depthwise, aotColKernel(3, 1, 1)), implicit);
+}
+
 TEST(TestGfx950ConvFwdAotDispatch, EveryDirectVariantPassesTheContractAndReachesCodeLoading)
 {
     for(const auto& [shape, kernel] : std::vector<std::pair<ConvShape, KernelDefinition>>{
