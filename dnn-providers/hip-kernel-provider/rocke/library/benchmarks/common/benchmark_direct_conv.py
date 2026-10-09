@@ -2327,6 +2327,12 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                     )
                 except (HipError, RuntimeError) as e:
                     print(f"  [skip] {plan.label}: {e}", flush=True)
+                    # time_launches drained before raising, but it does not
+                    # raise a failed drain (the launch error is the one it
+                    # reports). Drain again so a failed drain ends the sweep
+                    # here, before the shared buffers below are freed with
+                    # launches possibly still using them.
+                    synchronize_and_release(0)
                     continue
                 if ms is None:
                     _stop.report(plan.label)

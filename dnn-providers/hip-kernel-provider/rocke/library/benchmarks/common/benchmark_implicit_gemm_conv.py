@@ -3881,8 +3881,13 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 for split_k in degrees:
                     if _prune_stop:
                         break
-                    # The previous launch config's scratch is no longer used
-                    # (timing synchronizes); free it before allocating the next.
+                    # Free the previous launch config's scratch before
+                    # allocating the next. Every path that gets here has
+                    # drained the device after its last launch: _verify_kernel
+                    # fences its launches and copies the output back,
+                    # time_launches drains whether it returns or raises (an
+                    # early-stopped kernel returns from it too), and both
+                    # exception handlers below drain before skipping a kernel.
                     _free_extras(rt, live_extras)
                     try:
                         extras, grid = _extras_and_grid(
@@ -3960,20 +3965,31 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     if ref_out is not None:
                         # The output is zeroed first: the atomic split-K
                         # epilogues accumulate into it. A kernel that fails is
-                        # reported and not timed, so it can never rank.
-                        stopped, passed = _verify_kernel(
-                            rt=rt,
-                            launch_fn=run,
-                            out_dev=D_dev,
-                            out_t=D_t,
-                            zero_init_out=True,
-                            ref_out=ref_out,
-                            kernel_name=label,
-                            dump_fail=args.dump_fail,
-                            u8=_u8,
-                            arch=arch,
-                            compute_dtype=case_dtype,
-                        )
+                        # reported and not timed, so it can never rank; so is
+                        # one whose launch fails.
+                        try:
+                            stopped, passed = _verify_kernel(
+                                rt=rt,
+                                launch_fn=run,
+                                out_dev=D_dev,
+                                out_t=D_t,
+                                zero_init_out=True,
+                                ref_out=ref_out,
+                                kernel_name=label,
+                                dump_fail=args.dump_fail,
+                                u8=_u8,
+                                arch=arch,
+                                compute_dtype=case_dtype,
+                            )
+                        except (HipError, RuntimeError) as e:
+                            print(f"  verify {label}: FAIL({e})", flush=True)
+                            # A launch that raised can leave work queued
+                            # before it (e.g. the two-stage scratch clear) in
+                            # flight on this config's scratch. A drain that
+                            # fails here ends the sweep: the device is in an
+                            # error state and the scratch cannot be freed.
+                            synchronize_and_release()
+                            stopped, passed = False, False
                         if stopped:
                             _free_extras(rt, live_extras)
                             for buf in (A_dev, B_dev, D_dev):
@@ -3992,6 +4008,12 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         )
                     except (HipError, RuntimeError) as e:
                         print(f"  [skip] {ident.label()}: {e}", flush=True)
+                        # time_launches drained before raising, but it does
+                        # not raise a failed drain (the launch error is the
+                        # one it reports). Drain again so a failed drain ends
+                        # the sweep here rather than freeing this config's
+                        # scratch with launches possibly still using it.
+                        synchronize_and_release()
                         continue
                     if ms is None:
                         _stop.report(label)
