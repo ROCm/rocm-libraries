@@ -125,21 +125,26 @@ Tests:
   indextype: *i32
   batch_count: [8]
 
-# AISPARSE-690 regression: every incomplete factorization launch put
-# A->batch_count directly on grid.y, so a batch count above the grid.y cap
-# failed with hipErrorInvalidConfiguration. The launches now clamp grid.y
-# through rocsparse::get_grid_size_y and the kernels grid-stride over the
-# batch, so batch instance 65535 is reached ONLY by that loop and its values are
-# checked against the host reference like every other instance. The matrices are
-# small enough that the whole batch costs a few hundred megabytes and runs on any
-# GPU. spic0 covers both csric0 and bsric0.
+# AISPARSE-690: every incomplete factorization launch put A->batch_count
+# directly on grid.y. The launches now clamp grid.y through
+# rocsparse::get_grid_size_y and the kernels grid-stride over the batch. The
+# matrices are small enough that the whole batch costs a few hundred megabytes
+# and runs on any GPU. spic0 covers both csric0 and bsric0.
 #
-# batch_count is 65536 rather than something larger because the shared
-# singularity-position helper (rocsparse::assign_async, reached from every
-# spic0/spilu0/spildlt0 descriptor) puts the batch count on grid.y too and still
-# fails above it; see AISPARSE-697. Raise this once that fix lands, which is
-# what also makes the clamp itself (rather than only the grid-stride loop)
-# observable from the public API.
+# On a device that reports maxGridSize[1] == 65535 (every current AMD GPU), batch
+# instance 65535 is reached only by the grid-stride loop, and its values are
+# checked against the host reference like every other instance. A device that
+# reports a larger limit runs the loop once, and these become plain large-batch
+# tests. They guard the grid-stride loop, not the clamp: the runtime accepts
+# grid.y == 65536 (it rejects 65537 on gfx1201), so an unclamped launch passes at
+# this batch_count too.
+#
+# batch_count is 65536 and not larger because the shared singularity-position
+# helper (rocsparse::assign_async, reached from every spic0/spilu0/spildlt0
+# descriptor) puts the batch count on grid.y as well and still fails above it;
+# see AISPARSE-697. Raise this to a count above the runtime limit, for example
+# 70000, once that fix lands. That also makes the clamp itself observable from
+# the public API.
 #
 # The BSR entry asserts launch success only: the clients zero every batch of the
 # value comparison when analysis reports a pivot, and the random BSR generator

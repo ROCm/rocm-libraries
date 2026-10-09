@@ -262,18 +262,19 @@ namespace rocsparse
 
         const double boost_tol = (boost_tol_size == sizeof(double)) ? boost_tol_64 : boost_tol_32;
 
-        for(int64_t i = hipBlockIdx_y; i < batch_count; i += hipGridDim_y)
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
         {
             rocsparse::csrilu0_device_binsearch<BLOCKSIZE, WFSIZE, SLEEP, T, I, J>(
                 m,
                 csr_row_ptr,
                 csr_col_ind,
-                rocsparse::load_pointer(csr_val, i, csr_val_stride),
+                rocsparse::load_pointer(csr_val, batch_index, csr_val_stride),
                 csr_diag_ind,
-                rocsparse::load_pointer(done, i, done_stride),
+                rocsparse::load_pointer(done, batch_index, done_stride),
                 map,
-                rocsparse::load_pointer(zero_pivot, i, zero_pivot_stride),
-                rocsparse::load_pointer(singular_pivot, i, singular_pivot_stride),
+                rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                rocsparse::load_pointer(singular_pivot, batch_index, singular_pivot_stride),
                 tolerance,
                 idx_base,
                 boost_enable,

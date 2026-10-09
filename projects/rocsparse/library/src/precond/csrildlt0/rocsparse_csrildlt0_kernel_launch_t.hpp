@@ -68,10 +68,10 @@ namespace rocsparse
         for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
             batch_index += hipGridDim_y)
         {
-            diag[batch_index * diag_stride + row]
-                = (diag_pos >= 0)
-                      ? rocsparse::real(csr_val[batch_index * csr_val_stride + diag_pos])
-                      : static_cast<floating_data_t<T>>(0);
+            rocsparse::load_pointer(diag, batch_index, diag_stride)[row]
+                = (diag_pos >= 0) ? rocsparse::real(rocsparse::load_pointer(
+                                        csr_val, batch_index, csr_val_stride)[diag_pos])
+                                  : static_cast<floating_data_t<T>>(0);
         }
     }
 
