@@ -59,9 +59,9 @@ jobs:
         if: github.event_name == 'pull_request'
         shell: bash
         run: |
-          python3 projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/tools/check_snapshot_diff.py \
+          python3 projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/tools/check_snapshot_diff.py \
             --repo-root . \
-            --characterization-dir projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization \
+            --characterization-dir projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization \
             --base "${{ github.event.pull_request.base.sha }}" \
             --head "${{ github.event.pull_request.head.sha }}"
 

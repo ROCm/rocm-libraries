@@ -279,9 +279,9 @@ CI enforces this mechanically (`characterization/tools/check_snapshot_diff.py`, 
 When the guard trips, CI fails at **Component CI → TensileLite coverage → "Guard against blanket .ambr snapshot regeneration"**. To reproduce locally from the `rocm-libraries` repo root (after fetching the PR's base):
 
 ```bash
-python3 projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/tools/check_snapshot_diff.py \
+python3 projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/tools/check_snapshot_diff.py \
   --repo-root . \
-  --characterization-dir projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization \
+  --characterization-dir projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization \
   --base origin/develop \
   --head HEAD
 ```
