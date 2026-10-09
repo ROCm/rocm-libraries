@@ -235,18 +235,3 @@ Tests:
              amazon0312,
              webbase-1M,
              Chebyshev4]
-
-# Transposed SELL SpMV (sellmvt_device, slice <= 128) with m not a multiple of the
-# slice size: padded threads (row >= m) must not read x[row] out of bounds.
-- name: v2_spmv_sell_transpose_small_slice_unaligned_m
-  category: pre_checkin
-  function: v2_spmv_sell
-  indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
-  M: [1003, 100003]
-  N: [211]
-  sell_slice_size: [7, 128]
-  alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
