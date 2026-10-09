@@ -58,6 +58,14 @@
     {
       "name": "prefer_max",
       "type": "int"
+    },
+    {
+      "name": "head_dim_v",
+      "type": "int"
+    },
+    {
+      "name": "qk_mask",
+      "type": "int"
     }
   ]
 }

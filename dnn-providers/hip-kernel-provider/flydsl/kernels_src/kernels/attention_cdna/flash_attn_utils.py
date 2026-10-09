@@ -1387,6 +1387,11 @@ class FlashAttnGenericTraits:
     K_VEC_HI_N_OFFSET: int
     QK_PREFETCH_DEPTH: int
     RETURN_LSE: bool = False
+    # V's and O's head dim (modification 13); HEAD_DIM's unless narrower (MLA).
+    HEAD_DIM_V: int = 0
+    STRIDE_TOKEN_V: int = 0
+    # Q and K columns at or past a runtime head dim read as zero (modification 13).
+    QK_MASK: bool = False
 
     @property
     def cache_tag(self):
@@ -1395,6 +1400,8 @@ class FlashAttnGenericTraits:
             self.NUM_HEADS_KV,
             self.GQA_GROUP_SIZE,
             self.HEAD_DIM,
+            self.HEAD_DIM_V,
+            self.QK_MASK,
             self.DTYPE_STR,
             self.CAUSAL,
             self.VARLEN,
@@ -1499,6 +1506,8 @@ def _make_flash_attn_generic_traits(
     return_lse=False,
     k_pad=None,
     vt_pad=None,
+    head_dim_v=None,
+    qk_mask=False,
 ):
     """Build compile-time traits for ``flash_attn_generic``."""
     block_n = 64
@@ -1570,7 +1579,11 @@ def _make_flash_attn_generic_traits(
     k_step_qk = 16 if use_k16 else 8
     k_steps_qk = head_dim // k_step_qk
     d_chunk = 32
-    d_chunks = head_dim // d_chunk
+    # V and O are head_dim_v wide (modification 13): the PV product and the O
+    # accumulators cover only those columns; V is still staged head_dim wide.
+    head_dim_v = head_dim if head_dim_v is None else int(head_dim_v)
+    assert 32 <= head_dim_v <= head_dim and head_dim_v % d_chunk == 0
+    d_chunks = head_dim_v // d_chunk
     pv_k_step = 16 if use_k16 else 8
     pv_k_steps = k_sub_n // pv_k_step
     mfma_lane_k = 8 if use_k16 else 4
@@ -1584,6 +1597,7 @@ def _make_flash_attn_generic_traits(
 
     stride_token_q = num_heads * head_dim
     stride_token_kv = num_kv_heads * head_dim
+    stride_token_v = num_kv_heads * head_dim_v
     _k_pad_default = 4 if (gpu_arch.startswith("gfx942") and not enable_dma) else 0
     _k_pad = int(os.getenv("FLYDSL_FLASH_ATTN_FUNC_K_PAD", str(_k_pad_default)))
     if k_pad is not None:
@@ -1626,9 +1640,16 @@ def _make_flash_attn_generic_traits(
         num_batches_kv = block_n // rows_per_batch_load
         kv_needs_guard = False
 
+    # The masked and narrow-V loads (modification 13) are on the plain load paths.
+    narrow = head_dim_v != head_dim or bool(qk_mask)
+    if narrow and (enable_dma or paged):
+        raise NotImplementedError(
+            "a narrow V or a runtime Q/K head dim needs the dense, non-DMA path"
+        )
     v_perm_tr_env = os.getenv("FLYDSL_FLASH_ATTN_FUNC_V_PERM_TR", "1") == "1"
     v_perm_tr = (
-        v_perm_tr_env
+        not narrow
+        and v_perm_tr_env
         and (not use_hw_tr)
         and (not enable_dma)
         and (not enable_prefetch_3buf)
@@ -1744,6 +1765,9 @@ def _make_flash_attn_generic_traits(
         K_VEC_HI_N_OFFSET=k_vec_hi_n_offset,
         QK_PREFETCH_DEPTH=qk_prefetch_depth,
         RETURN_LSE=bool(return_lse),
+        HEAD_DIM_V=head_dim_v,
+        STRIDE_TOKEN_V=stride_token_v,
+        QK_MASK=bool(qk_mask),
     )
 
 
@@ -2537,10 +2561,16 @@ class GenericFlashAttnContext:
         diag_offset=None,
         view_strides=None,
         window_lo=None,
+        stride_token_v=None,
+        head_dim_qk=None,
     ):
         self.traits = traits
         self.K = K
         self.V = V
+        # V's own token stride (modification 13); None keeps K's.
+        self.stride_token_v = stride_token_v
+        # The actual Q/K head dim, read by a QK_MASK build (modification 13).
+        self.head_dim_qk = head_dim_qk
         self.seq_len = seq_len
         self.seq_len_kv = seq_len_kv
         # Runtime head counts and token strides (modification 3); None keeps the
@@ -2593,6 +2623,13 @@ class GenericFlashAttnContext:
             self.gqa_group_i32 = self.num_heads_q_i32 // fx.Int32(self.num_heads_kv)
         self.stride_token_q_v = _shape(self.stride_token_q, traits.STRIDE_TOKEN_Q)
         self.stride_token_kv_v = _shape(self.stride_token_kv, traits.STRIDE_TOKEN_KV)
+        self.stride_token_v_v = (
+            self.stride_token_kv_v
+            if self.stride_token_v is None
+            else fx.Index(self.stride_token_v)
+        )
+        if const_expr(traits.QK_MASK):
+            self.head_dim_qk_v = fx.Index(self.head_dim_qk)
 
     def init_lds_view(self, shared_storage):
         lds = fx.SharedAllocator().allocate(shared_storage).peek()
@@ -2727,15 +2764,22 @@ class GenericFlashAttnContext:
         )
         if const_expr(not traits.PAGED):
             off = self.kv_tok_base * self.stride_token_kv_v
+            v_off = self.kv_tok_base * self.stride_token_v_v
             if strides is not None:
                 off = fx.Index(self.batch_idx) * fx.Index(
                     strides["kv_b"]
                 ) + self.kv_head_idx * fx.Index(strides["kv_h"])
+                # V's own batch and head strides (modification 13).
+                v_off = off
+                if "v_b" in strides:
+                    v_off = fx.Index(self.batch_idx) * fx.Index(
+                        strides["v_b"]
+                    ) + self.kv_head_idx * fx.Index(strides["v_h"])
             self.k_ptr = buffer_ops.get_element_ptr(
                 self.k_ptr, off, elem_type=self.elem_type
             )
             self.v_ptr = buffer_ops.get_element_ptr(
-                self.v_ptr, off, elem_type=self.elem_type
+                self.v_ptr, v_off, elem_type=self.elem_type
             )
 
     def init_descriptors(self, Q, O, LSE=None):  # noqa: E741
@@ -2792,11 +2836,14 @@ class GenericFlashAttnContext:
         traits = self.traits
         strides = self.view_strides
         head_dim = fx.Index(traits.HEAD_DIM)
+        # Q ends at its actual head dim, O at V's (modification 13).
+        q_width = self.head_dim_qk_v if const_expr(traits.QK_MASK) else head_dim
+        o_width = fx.Index(traits.HEAD_DIM_V)
         batch = fx.Index(self.batch_idx)
 
-        def span_bytes(rows, stride_n):
+        def span_bytes(rows, stride_n, width=head_dim):
             return as_mlir_value(
-                ((rows - fx.Index(1)) * stride_n + head_dim) * fx.Index(2)
+                ((rows - fx.Index(1)) * stride_n + width) * fx.Index(2)
             )
 
         def base_bytes(stride_b, head, stride_h):
@@ -2812,7 +2859,9 @@ class GenericFlashAttnContext:
         self.q_rsrc = buffer_ops.create_buffer_resource(
             Q,
             max_size=False,
-            num_records_bytes=span_bytes(self.seqlen_q_b, self.stride_token_q_v),
+            num_records_bytes=span_bytes(
+                self.seqlen_q_b, self.stride_token_q_v, q_width
+            ),
             base_byte_offset=base_bytes(
                 strides["q_b"], self.q_head_idx, strides["q_h"]
             ),
@@ -2820,7 +2869,9 @@ class GenericFlashAttnContext:
         self.o_rsrc = buffer_ops.create_buffer_resource(
             O,
             max_size=False,
-            num_records_bytes=span_bytes(self.seqlen_q_b, self.stride_token_o_v),
+            num_records_bytes=span_bytes(
+                self.seqlen_q_b, self.stride_token_o_v, o_width
+            ),
             base_byte_offset=base_bytes(
                 strides["o_b"], self.q_head_idx, strides["o_h"]
             ),
@@ -2923,6 +2974,17 @@ class GenericFlashAttnContext:
             + col
         )
 
+    def global_idx_v(self, token_idx, col):
+        """V's element index: its own token stride (modification 13)."""
+        traits = self.traits
+        if self.view_strides is not None:
+            return token_idx * self.stride_token_v_v + col
+        return (
+            token_idx * self.stride_token_v_v
+            + self.kv_head_idx * traits.HEAD_DIM_V
+            + col
+        )
+
     def kv_row_clamp(self, row_idx):
         last = self.seqlen_kv_b - fx.Index(1)
         return fx.Index((row_idx < self.seqlen_kv_b).select(row_idx, last))
@@ -3016,6 +3078,31 @@ class GenericKvGmemToLdsLoader:
     def global_idx(self, token_idx, col):
         return self.ctx.global_idx_kv(token_idx, col)
 
+    def load_k_cols(self, row_idx, col):
+        """One lane's VEC_WIDTH K columns of a row. A QK_MASK build reads columns at or
+        past the runtime head dim as zero, from column 0's address so nothing past the
+        row is touched (modification 13)."""
+        ctx = self.ctx
+        traits = ctx.traits
+        if const_expr(traits.QK_MASK):
+            ok = col < ctx.head_dim_qk_v
+            vec = self.load_f16xN(
+                ctx.k_ptr, self.global_idx(row_idx, ok.select(col, fx.Index(0)))
+            )
+            return ok.select(vec, Vec.filled(traits.VEC_WIDTH, 0.0, ctx.elem_dtype))
+        return self.load_f16xN(ctx.k_ptr, self.global_idx(row_idx, col))
+
+    def load_v_cols(self, row_idx, col):
+        """One lane's VEC_WIDTH V columns of a row, through V's own strides. Columns at
+        or past a narrower V's head dim are read from column 0's address instead: the PV
+        product never consumes them (modification 13)."""
+        ctx = self.ctx
+        traits = ctx.traits
+        if const_expr(traits.HEAD_DIM_V != traits.HEAD_DIM):
+            ok = col < fx.Index(traits.HEAD_DIM_V)
+            col = ok.select(col, fx.Index(0))
+        return self.load_f16xN(ctx.v_ptr, ctx.global_idx_v(row_idx, col))
+
     def row_clamp(self, row_idx):
         return self.ctx.kv_row_clamp(row_idx)
 
@@ -3102,7 +3189,6 @@ class GenericKvGmemToLdsLoader:
             if const_expr(traits.KV_NEEDS_GUARD):
 
                 def _store_row():
-                    g_idx = self.global_idx(row_idx, col)
                     lds_row = row + row_offset
                     lds_idx = (
                         k_base
@@ -3110,7 +3196,7 @@ class GenericKvGmemToLdsLoader:
                         + self.k_swizzle(lds_row, col)
                     )
                     fx.ptr_store(
-                        self.load_f16xN(ctx.k_ptr, g_idx), lds_kv + fx.Int64(lds_idx)
+                        self.load_k_cols(row_idx, col), lds_kv + fx.Int64(lds_idx)
                     )
 
                 _if_then(row < fx.Index(traits.BLOCK_N), _store_row)
@@ -3124,7 +3210,7 @@ class GenericKvGmemToLdsLoader:
                         ctx.k_ptr, pid, self.sigma_kv(lds_row), col
                     )
                 else:
-                    vec = self.load_f16xN(ctx.k_ptr, self.global_idx(row_idx, col))
+                    vec = self.load_k_cols(row_idx, col)
                 fx.ptr_store(vec, lds_kv + fx.Int64(lds_idx))
 
     def coop_load_k_global(self, tile_start):
@@ -3145,9 +3231,7 @@ class GenericKvGmemToLdsLoader:
                 row_idx = self.row_clamp(
                     tile_start + ctx.load_row_in_batch + row_offset
                 )
-            vecs.append(
-                self.load_f16xN(ctx.k_ptr, self.global_idx(row_idx, ctx.load_col_base))
-            )
+            vecs.append(self.load_k_cols(row_idx, ctx.load_col_base))
         return vecs
 
     def coop_store_k_lds(self, vecs, buf_id=0):
@@ -3211,9 +3295,8 @@ class GenericKvGmemToLdsLoader:
             if const_expr(traits.KV_NEEDS_GUARD):
 
                 def _store_row():
-                    g_idx = self.global_idx(row_idx, col)
                     self._v_store_to_lds(
-                        v_base, row + row_offset, self.load_f16xN(ctx.v_ptr, g_idx)
+                        v_base, row + row_offset, self.load_v_cols(row_idx, col)
                     )
 
                 _if_then(row < fx.Index(traits.BLOCK_N), _store_row)
@@ -3224,7 +3307,7 @@ class GenericKvGmemToLdsLoader:
                         ctx.v_ptr, pid, self.sigma_kv(lds_row), col
                     )
                 else:
-                    vec = self.load_f16xN(ctx.v_ptr, self.global_idx(row_idx, col))
+                    vec = self.load_v_cols(row_idx, col)
                 self._v_store_to_lds(v_base, lds_row, vec)
 
     def coop_load_v_global(self, tile_start):
@@ -3263,9 +3346,7 @@ class GenericKvGmemToLdsLoader:
                 row_idx = self.row_clamp(
                     tile_start + ctx.load_row_in_batch + row_offset
                 )
-            vecs.append(
-                self.load_f16xN(ctx.v_ptr, self.global_idx(row_idx, ctx.load_col_base))
-            )
+            vecs.append(self.load_v_cols(row_idx, ctx.load_col_base))
         return vecs
 
     def coop_store_v_lds(self, vecs, buf_id=0):
@@ -3311,9 +3392,7 @@ class GenericKvGmemToLdsLoader:
                 row_idx = pid * fx.Index(traits.PAGE_SIZE) + ctx.vp_row_base + r
             else:
                 row_idx = self.row_clamp(tile_start + ctx.vp_row_base + r)
-            vecs.append(
-                self.load_f16xN(ctx.v_ptr, self.global_idx(row_idx, ctx.vp_col_base))
-            )
+            vecs.append(self.load_v_cols(row_idx, ctx.vp_col_base))
         return vecs
 
     @flyc.jit
@@ -3706,6 +3785,8 @@ class GenericQLoader:
                     ctx.global_idx_q(q_row, q_col),
                     vec_width=traits.MFMA_LANE_K,
                     dtype=ctx.elem_dtype,
+                    # Past the actual head dim, read as zero (modification 13).
+                    mask=(q_col < ctx.head_dim_qk_v) if traits.QK_MASK else None,
                 )
             )
         return q_b_packs

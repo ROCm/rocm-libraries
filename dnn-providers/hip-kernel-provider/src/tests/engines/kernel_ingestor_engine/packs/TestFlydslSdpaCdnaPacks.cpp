@@ -91,12 +91,14 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsUniqueObjectsAndOneServeAllDefaultPerClass)
                                 int64_t,
                                 int64_t,
                                 int64_t,
+                                int64_t,
+                                int64_t,
                                 int64_t>;
     std::set<BuildKey> builds;
-    // Per graph class -- (dtype, head_dim, causal, has_bias) -- how many objects serve every
+    // Per graph class -- (dtype, head_dim, head_dim_v, causal, has_bias) -- how many objects serve every
     // shape of it at the default rank: exactly one, so the untuned pick never depends on
     // a key length or a diagonal, and every other object is a measured companion below it.
-    using ClassKey = std::tuple<std::string, int64_t, int64_t, int64_t>;
+    using ClassKey = std::tuple<std::string, int64_t, int64_t, int64_t, int64_t>;
     std::map<ClassKey, size_t> defaults;
     const std::set<std::string> features = {"none", "rows", "seq_q"};
     size_t kernels = 0;
@@ -123,6 +125,7 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsUniqueObjectsAndOneServeAllDefaultPerClass)
             const auto kvAlign = field("kv_align");
             const auto anyDiagonal = field("any_diagonal");
             const auto hasBias = field("has_bias");
+            const auto headDimV = field("head_dim_v");
             builds.emplace(*dtype,
                            *family,
                            headDim,
@@ -133,8 +136,10 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsUniqueObjectsAndOneServeAllDefaultPerClass)
                            field("waves_per_eu"),
                            hasBias,
                            field("setprio"),
-                           field("kv_gpfetch"));
-            auto& count = defaults[{*dtype, headDim, causal, hasBias}];
+                           field("kv_gpfetch"),
+                           headDimV,
+                           field("qk_mask"));
+            auto& count = defaults[{*dtype, headDim, headDimV, causal, hasBias}];
             if(kvAlign == 0 && anyDiagonal == 1 && kernel.priority >= 100)
             {
                 ++count;
@@ -150,9 +155,9 @@ TEST(TestFlydslSdpaCdnaPacks, ShipsUniqueObjectsAndOneServeAllDefaultPerClass)
     EXPECT_EQ(kernels, builds.size()) << "two objects share one build";
     for(const auto& [key, count] : defaults)
     {
-        EXPECT_EQ(count, 1U) << std::get<0>(key) << " head_dim " << std::get<1>(key) << " causal "
-                             << std::get<2>(key) << " bias " << std::get<3>(key) << ": " << count
-                             << " serve-all default objects";
+        EXPECT_EQ(count, 1U) << std::get<0>(key) << " head_dim " << std::get<1>(key) << "/"
+                             << std::get<2>(key) << " causal " << std::get<3>(key) << " bias "
+                             << std::get<4>(key) << ": " << count << " serve-all default objects";
     }
 }
 
@@ -163,7 +168,8 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
     // Dual-wave: 12 tensors, then 8 i32, the f32 scale, the two head counts, lse_on,
     // diag_offset, seven operand strides and two bias strides. Generic: 5 tensors, 2 i32, 3 tensors, then 1 i32, the
     // f32 scale, the two head counts, the two token strides, lse_on, diag_offset and the
-    // same seven strides. Every scalar slot is 4 bytes.
+    // same seven strides, the window, the bias, its three strides, V's three strides and
+    // the Q/K head dim. Every scalar slot is 4 bytes.
     using Slot = std::pair<std::string, uint32_t>;
     const auto expected = [](const std::string& family) {
         std::vector<Slot> slots;
@@ -192,7 +198,7 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
             tensors(3);
             scalars(16);
             tensors(1);
-            scalars(3);
+            scalars(7);
         }
         return slots;
     };

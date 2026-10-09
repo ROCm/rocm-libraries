@@ -113,6 +113,7 @@ GRAPH_DETERMINED_FIELDS = {
     "dtype",
     "head_dim",
     "head_dim_v",
+    "qk_mask",
     "causal",
     "merge_symbol",
     "kernel",

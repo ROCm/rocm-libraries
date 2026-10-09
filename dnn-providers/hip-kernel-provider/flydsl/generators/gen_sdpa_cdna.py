@@ -141,6 +141,10 @@ _PARAMS = {
         ("bias_stride0", "i32"),
         ("stride_bias_b", "i32"),
         ("stride_bias_h", "i32"),
+        ("stride_v_n", "i32"),
+        ("stride_v_b", "i32"),
+        ("stride_v_h", "i32"),
+        ("head_dim_qk", "i32"),
     ),
 }
 
@@ -266,6 +270,8 @@ def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
             return_lse=True,
             extra_llvm_options=_llvm_options(instance, arch),
             has_bias=bool(knobs["has_bias"]),
+            head_dim_v=knobs.get("head_dim_v") or head_dim,
+            qk_mask=bool(knobs.get("qk_mask", 0)),
             **_lds_pads(instance, arch),
             **(
                 {"waves_per_eu": knobs["waves_per_eu"]} if knobs["waves_per_eu"] else {}

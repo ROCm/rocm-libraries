@@ -86,6 +86,8 @@ constexpr const char* CDNA_BLOCK_M_FIELD = "block_m";
 constexpr const char* CDNA_KV_ALIGN_FIELD = "kv_align";
 constexpr const char* CDNA_ANY_DIAGONAL_FIELD = "any_diagonal";
 constexpr const char* CDNA_HAS_BIAS_FIELD = "has_bias";
+constexpr const char* CDNA_HEAD_DIM_V_FIELD = "head_dim_v";
+constexpr const char* CDNA_QK_MASK_FIELD = "qk_mask";
 constexpr const char* CDNA_PREFER_FEATURE_FIELD = "prefer_feature";
 constexpr const char* CDNA_PREFER_MIN_FIELD = "prefer_min";
 constexpr const char* CDNA_PREFER_MAX_FIELD = "prefer_max";
@@ -113,7 +115,9 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
                                 int64_t blockM = 256,
                                 int64_t kvAlign = 0,
                                 int64_t anyDiagonal = 1,
-                                int64_t hasBias = 0)
+                                int64_t hasBias = 0,
+                                std::optional<int64_t> headDimV = std::nullopt,
+                                int64_t qkMask = 0)
 {
     KernelDefinition kernel;
     kernel.name = "sdpa_cdna_" + dtype + "_" + family;
@@ -124,7 +128,9 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
                        {CDNA_BLOCK_M_FIELD, blockM},
                        {CDNA_KV_ALIGN_FIELD, kvAlign},
                        {CDNA_ANY_DIAGONAL_FIELD, anyDiagonal},
-                       {CDNA_HAS_BIAS_FIELD, hasBias}};
+                       {CDNA_HAS_BIAS_FIELD, hasBias},
+                       {CDNA_HEAD_DIM_V_FIELD, headDimV.value_or(headDim)},
+                       {CDNA_QK_MASK_FIELD, qkMask}};
     kernel.priority = 100;
     return kernel;
 }
@@ -158,6 +164,11 @@ std::vector<CdnaCase> acceptedCases()
 {
     std::vector<CdnaCase> cases;
     cases.push_back({"NonCausal", cdnaSpec()});
+    // Multi-head latent attention, un-absorbed: V narrower than Q and K.
+    auto mla = cdnaSpec();
+    mla.headDim = 192;
+    mla.valueHeadDim = 128;
+    cases.push_back({"ValueHeadDimNarrower", mla});
     auto topLeft = cdnaSpec();
     topLeft.mask = SdpaMask::TOP_LEFT_CAUSAL;
     cases.push_back({"TopLeftCausal", topLeft});
@@ -256,6 +267,9 @@ std::vector<CdnaCase> declinedCases()
     topLeftOverflow.seqLenQ = 512;
     topLeftOverflow.seqLenKv = 256;
     cases.push_back({"TopLeftCausalWithMoreQueriesThanKeys", topLeftOverflow});
+    auto wideV = cdnaSpec();
+    wideV.valueHeadDim = 256;
+    cases.push_back({"ValueHeadDimWider", wideV});
     auto bottomRightBand = cdnaSpec();
     bottomRightBand.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
     bottomRightBand.rightBound = 8;
@@ -450,6 +464,33 @@ TEST(TestFlydslSdpaCdnaKernelMatch, AdmitsTheCandidateBuiltForTheGraphsShape)
                               fixture.context(),
                               makeCdnaKernel("generic", 128, 0, "bf16", 128),
                               *bound));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, AnMlaObjectServesItsVHeadDimAndQkHeadDimsUpToItsBucket)
+{
+    // The qk_mask object: Q/K head dims up to its 256 bucket in steps of 16, V exactly 128.
+    const auto mla = makeCdnaKernel("generic", 256, 0, "bf16", 128, 0, 1, 0, int64_t{128}, 1);
+    const auto plain256 = makeCdnaKernel("generic", 256, 0, "bf16", 128);
+    const auto matches = [](int64_t headDim, int64_t headDimV, const KernelDefinition& kernel) {
+        auto spec = cdnaSpec();
+        spec.headDim = headDim;
+        spec.valueHeadDim = headDimV;
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+        return bound.has_value()
+               && matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), kernel, *bound);
+    };
+    EXPECT_TRUE(matches(192, 128, mla));
+    EXPECT_TRUE(matches(256, 128, mla));
+    EXPECT_TRUE(matches(144, 128, mla));
+    // Not a multiple of the masks' 16 columns, past the bucket, or another V width.
+    EXPECT_FALSE(matches(200, 128, mla));
+    EXPECT_FALSE(matches(192, 192, mla));
+    EXPECT_FALSE(matches(192, 64, mla));
+    // An object without masks serves its own head dims only.
+    EXPECT_FALSE(matches(192, 128, plain256));
+    EXPECT_TRUE(matches(256, 256, plain256));
+    EXPECT_FALSE(matches(256, 256, mla));
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, AdmitsAnyHeadCountBecauseTheyAreKernelArguments)
@@ -684,21 +725,26 @@ void expectCandidateMatchesReference(const MatchContext& context,
     const int64_t h = spec.heads;
     const int64_t hk = spec.kvHeads;
     const int64_t d = spec.headDim;
+    // V's and O's head dim: Q/K's, or narrower (MLA).
+    const int64_t dv = spec.valueHeadDim.value_or(d);
     // Logical (B, H, S, D) strides of each operand, as the graph states them. In a packed
     // buffer K and V start one and two heads' worth of a token's row after Q.
     const auto qStrides
         = spec.packedQkv ? sdpaPackedQkvStrides(spec) : sdpaStrides(spec.layout, h, s, d);
     const auto kvStrides
         = spec.packedQkv ? sdpaPackedQkvStrides(spec) : sdpaStrides(spec.layout, hk, skv, d);
-    const auto oStrides = sdpaStrides(spec.layout, h, s, d);
+    const auto vStrides
+        = spec.packedQkv ? sdpaPackedQkvStrides(spec) : sdpaStrides(spec.layout, hk, skv, dv);
+    const auto oStrides = sdpaStrides(spec.layout, h, s, dv);
     const int64_t kStart = spec.packedQkv ? h * d : 0;
     const int64_t vStart = spec.packedQkv ? 2 * h * d : 0;
     const auto qCount = static_cast<size_t>(spec.packedQkv ? b * s * 3 * h * d : b * s * h * d);
     const auto kvCount = static_cast<size_t>(b * skv * hk * d);
-    const auto oCount = static_cast<size_t>(b * s * h * d);
+    const auto vCount = static_cast<size_t>(b * skv * hk * dv);
+    const auto oCount = static_cast<size_t>(b * s * h * dv);
     const auto q = fillValues<T>(qCount, 1U);
     const auto k = spec.packedQkv ? q : fillValues<T>(kvCount, 2U);
-    const auto v = spec.packedQkv ? q : fillValues<T>(kvCount, 3U);
+    const auto v = spec.packedQkv ? q : fillValues<T>(vCount, 3U);
     std::vector<T> o(oCount, T(0.0F));
 
     void* qDevice = nullptr;
@@ -716,11 +762,11 @@ void expectCandidateMatchesReference(const MatchContext& context,
     else
     {
         ASSERT_EQ(hipSuccess, hipMalloc(&kDevice, kvCount * sizeof(T)));
-        ASSERT_EQ(hipSuccess, hipMalloc(&vDevice, kvCount * sizeof(T)));
+        ASSERT_EQ(hipSuccess, hipMalloc(&vDevice, vCount * sizeof(T)));
         ASSERT_EQ(hipSuccess,
                   hipMemcpy(kDevice, k.data(), kvCount * sizeof(T), hipMemcpyHostToDevice));
         ASSERT_EQ(hipSuccess,
-                  hipMemcpy(vDevice, v.data(), kvCount * sizeof(T), hipMemcpyHostToDevice));
+                  hipMemcpy(vDevice, v.data(), vCount * sizeof(T), hipMemcpyHostToDevice));
     }
     ASSERT_EQ(hipSuccess, hipMemset(oDevice, 0, oCount * sizeof(T)));
     // The LSE output, [B, H, Sq] f32, when the graph asks for it.
@@ -890,13 +936,13 @@ void expectCandidateMatchesReference(const MatchContext& context,
                                    + " s=" + std::to_string(si);
                     }
                 }
-                for(int64_t e = 0; e < d; ++e)
+                for(int64_t e = 0; e < dv; ++e)
                 {
                     double expected = 0.0;
                     for(int64_t j = firstKey; j <= lastKey; ++j)
                     {
                         expected += scores[static_cast<size_t>(j)]
-                                    * at(v, kvStrides, vStart, bi, hi / group, j, e);
+                                    * at(v, vStrides, vStart, bi, hi / group, j, e);
                     }
                     expected = lastKey < firstKey ? 0.0 : expected / sum;
                     const double error = std::abs(at(o, oStrides, 0, bi, hi, si, e) - expected);
@@ -1142,6 +1188,39 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim64InBothDtypes)
     spec.mask = SdpaMask::NONE;
     spec.seqLenQ = 300;
     spec.seqLenKv = 300;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesAValueHeadDimNarrowerThanTheQueryOne)
+{
+    // Multi-head latent attention, un-absorbed: Q and K 192 wide, V and O 128.
+    auto spec = cdnaSpec();
+    spec.headDim = 192;
+    spec.valueHeadDim = 128;
+    spec.heads = 8;
+    spec.kvHeads = 8;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+
+    // Non-causal cross-attention with GQA and a ragged last tile, in f16.
+    spec.dataType = DataType::HALF;
+    spec.mask = SdpaMask::NONE;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 150;
+    spec.seqLenKv = 333;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+
+    // Bottom-right causal over a longer cache, BHSD, and a Q/K head dim off the bucket's
+    // power of two that is not 192.
+    spec.dataType = DataType::BFLOAT16;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.layout = SdpaLayout::BHSD;
+    spec.headDim = 160;
+    spec.seqLenQ = 64;
+    spec.seqLenKv = 257;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 

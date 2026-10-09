@@ -98,6 +98,7 @@ _ABBREV = {
     "bias_q": "biasq",
     "kv_gpfetch": "gpf",
     "head_dim_v": "vd",
+    "qk_mask": "qkm",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -115,6 +116,7 @@ _NAME_OMITTED_WHEN = {
     "bias_q": lambda knobs: knobs["bias_q"] == 0,
     "kv_gpfetch": lambda knobs: knobs["kv_gpfetch"] == 1,
     "head_dim_v": lambda knobs: knobs["head_dim_v"] == knobs["head_dim"],
+    "qk_mask": lambda knobs: knobs["qk_mask"] == 0,
     # A pick rule, not a build choice: two objects never differ in it alone.
     "prefer_feature": lambda knobs: True,
     "prefer_min": lambda knobs: True,
@@ -602,12 +604,37 @@ SDPA_CDNA_BIAS_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
     },
 }
 
+# Multi-head latent attention, un-absorbed prefill (DeepSeek-V2/V3, Kimi K2, GLM-5):
+# Q and K 192 wide, V 128 (vendored-kernel modification 13). Served by the generic
+# kernel built for a 256-wide Q/K bucket whose actual width is a runtime argument
+# (`qk_mask`), with V and O 128 wide (`head_dim_v`); V is staged at the bucket's
+# width, so the LDS is the head_dim 256 objects'. Keyed (bucket, head_dim_v, causal).
+SDPA_CDNA_MLA_TIERS: dict[str, dict[tuple[int, int, int], tuple[CdnaTier, ...]]] = {
+    "gfx950": {
+        (256, 128, 0): (CdnaTier(_GEN, 128, waves_per_eu=1),),
+        (256, 128, 1): (CdnaTier(_GEN, 128, waves_per_eu=1),),
+    },
+    "gfx942": {
+        (256, 128, 0): (CdnaTier(_GEN, 128),),
+        (256, 128, 1): (CdnaTier(_GEN, 128),),
+    },
+}
+
 # Everything else is a kernel argument (vendored-kernel modifications 2-8).
 SDPA_CDNA_DTYPES = ("bf16", "f16")
 
 
 def _cdna_instance(
-    dtype, head_dim, causal, has_bias, tier, priority, kv_align, any_diagonal
+    dtype,
+    head_dim,
+    causal,
+    has_bias,
+    tier,
+    priority,
+    kv_align,
+    any_diagonal,
+    head_dim_v=None,
+    qk_mask=0,
 ):
     feature, low, high = tier.prefer
     return Instance(
@@ -628,6 +655,8 @@ def _cdna_instance(
             "prefer_feature": feature,
             "prefer_min": low,
             "prefer_max": high,
+            "head_dim_v": head_dim if head_dim_v is None else head_dim_v,
+            "qk_mask": qk_mask,
         },
     )
 
@@ -670,6 +699,27 @@ def sdpa_cdna_instances(arch: str) -> list[Instance]:
                             any_diagonal,
                         )
                     )
+        for (bucket, head_dim_v, causal), tiers in SDPA_CDNA_MLA_TIERS[arch].items():
+            for index, tier in enumerate(tiers):
+                priority = (
+                    PRIORITY_SDPA_CDNA_DEFAULT
+                    if index == 0
+                    else PRIORITY_SDPA_CDNA_COMPANION
+                )
+                instances.append(
+                    _cdna_instance(
+                        dtype,
+                        bucket,
+                        causal,
+                        0,
+                        tier,
+                        priority,
+                        0,
+                        1,
+                        head_dim_v=head_dim_v,
+                        qk_mask=1,
+                    )
+                )
     _assert_unique(instances)
     return instances
 

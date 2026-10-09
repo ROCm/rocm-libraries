@@ -24,7 +24,9 @@
     "kv_gpfetch": 1,
     "prefer_feature": "rows",
     "prefer_min": 0,
-    "prefer_max": 24576
+    "prefer_max": 24576,
+    "head_dim_v": 64,
+    "qk_mask": 0
   },
   "priority": 85,
   "provenance": {
@@ -49,7 +51,9 @@
             "kv_gpfetch",
             "prefer_feature",
             "prefer_min",
-            "prefer_max"
+            "prefer_max",
+            "head_dim_v",
+            "qk_mask"
           ],
           "bindings": {},
           "vocabulary": {}

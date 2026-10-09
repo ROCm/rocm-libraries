@@ -88,6 +88,14 @@ constexpr std::string_view DTYPE_FIELD = "dtype";
 /// list and the grid.
 constexpr std::string_view KERNEL_FIELD = "kernel";
 constexpr std::string_view HEAD_DIM_FIELD = "head_dim";
+/// V's and O's head dim: head_dim's, or narrower on the MLA objects (vendored-kernel
+/// modification 13).
+constexpr std::string_view HEAD_DIM_V_FIELD = "head_dim_v";
+/// 1 for an object whose head_dim is a bucket: it serves any Q/K head dim up to it that is
+/// a multiple of QK_MASK_ALIGN, read at runtime (modification 13).
+constexpr std::string_view QK_MASK_FIELD = "qk_mask";
+/// A masked K load zeroes whole 16-element vectors.
+constexpr int64_t QK_MASK_ALIGN = 16;
 constexpr std::string_view CAUSAL_FIELD = "causal";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
 /// 0 for an object that serves any key length; otherwise the multiple the key length must
@@ -231,11 +239,14 @@ struct SdpaProblem
     int64_t seqLenQ = 0;
     int64_t seqLenKv = 0;
     int64_t headDim = 0;
+    /// V's and O's head dim; Q/K's, or narrower (multi-head latent attention).
+    int64_t headDimV = 0;
     data_objects::DataType dataType = data_objects::DataType::UNSET;
 };
 
 SdpaProblem problemFor(const data_objects::TensorAttributes& q,
-                       const data_objects::TensorAttributes& k)
+                       const data_objects::TensorAttributes& k,
+                       const data_objects::TensorAttributes* v)
 {
     SdpaProblem problem;
     problem.batch = q.dims()->Get(BATCH_AXIS);
@@ -244,6 +255,11 @@ SdpaProblem problemFor(const data_objects::TensorAttributes& q,
     problem.seqLenKv = k.dims()->Get(SEQ_AXIS);
     problem.headDim = q.dims()->Get(HEAD_DIM_AXIS);
     problem.numKvHeads = k.dims()->Get(HEAD_AXIS);
+    problem.headDimV = problem.headDim;
+    if(v != nullptr && v->dims() != nullptr && v->dims()->size() == SDPA_RANK)
+    {
+        problem.headDimV = v->dims()->Get(HEAD_DIM_AXIS);
+    }
     problem.dataType = q.data_type();
     return problem;
 }
@@ -331,16 +347,18 @@ std::optional<OperandStrides> servableStrides(const data_objects::TensorAttribut
     return OperandStrides{*batchStride, *sequenceStride, *headStride};
 }
 
-/// The strides the kernels take: Q's, O's, and the one set K and V share.
+/// The strides the kernels take: Q's, O's, K's and V's.
 struct ViewStrides
 {
     OperandStrides q;
     OperandStrides o;
     OperandStrides kv;
+    OperandStrides v;
 };
 
-/// The operands' strides, or nullopt when any is unservable or K and V differ -- the
-/// kernels take one set for both.
+/// The operands' strides, or nullopt when any is unservable. V has its own only when its head
+/// dim is narrower than K's (the MLA objects, vendored-kernel modification 13); every other
+/// object reads V through K's strides, so they must match.
 std::optional<ViewStrides> viewStridesFor(const data_objects::TensorAttributes& q,
                                           const data_objects::TensorAttributes& k,
                                           const data_objects::TensorAttributes& v,
@@ -350,17 +368,18 @@ std::optional<ViewStrides> viewStridesFor(const data_objects::TensorAttributes& 
     const auto qStrides
         = servableStrides(q, problem.batch, problem.numHeads, problem.seqLenQ, problem.headDim);
     const auto oStrides
-        = servableStrides(o, problem.batch, problem.numHeads, problem.seqLenQ, problem.headDim);
+        = servableStrides(o, problem.batch, problem.numHeads, problem.seqLenQ, problem.headDimV);
     const auto kStrides
         = servableStrides(k, problem.batch, problem.numKvHeads, problem.seqLenKv, problem.headDim);
     const auto vStrides
-        = servableStrides(v, problem.batch, problem.numKvHeads, problem.seqLenKv, problem.headDim);
+        = servableStrides(v, problem.batch, problem.numKvHeads, problem.seqLenKv, problem.headDimV);
     if(!qStrides.has_value() || !oStrides.has_value() || !kStrides.has_value()
-       || !vStrides.has_value() || !(*kStrides == *vStrides))
+       || !vStrides.has_value()
+       || (problem.headDimV == problem.headDim && !(*kStrides == *vStrides)))
     {
         return std::nullopt;
     }
-    return ViewStrides{*qStrides, *oStrides, *kStrides};
+    return ViewStrides{*qStrides, *oStrides, *kStrides, *vStrides};
 }
 
 /// The bias's (batch, head, query) strides as the kernels take them; 0 broadcasts an axis.
@@ -570,9 +589,10 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
         return std::nullopt;
     }
 
-    const auto problem = problemFor(*q, *k);
+    const auto problem = problemFor(*q, *k, v);
     if(problem.batch <= 0 || problem.numHeads <= 0 || problem.numKvHeads <= 0
-       || problem.seqLenQ <= 0 || problem.seqLenKv <= 0 || problem.headDim <= 0)
+       || problem.seqLenQ <= 0 || problem.seqLenKv <= 0 || problem.headDim <= 0
+       || problem.headDimV <= 0 || problem.headDimV > problem.headDim)
     {
         return std::nullopt;
     }
@@ -582,7 +602,8 @@ std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext& contex
     {
         return std::nullopt;
     }
-    // Contiguous BSHD, V shaped as K, O as Q, GQA by integer division.
+    // V shaped as K but for a head dim that may be narrower, O as Q with V's head dim, GQA by
+    // integer division.
     if(problem.numHeads % problem.numKvHeads != 0)
     {
         return std::nullopt;
@@ -878,7 +899,7 @@ bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
     {
         return false;
     }
-    const auto problem = problemFor(*q, *k);
+    const auto problem = problemFor(*q, *k, findTensor(context, attributes->v_tensor_uid()));
     const auto tile = candidateTile(kernel);
     if(!tile.has_value() || !candidateGrid(problem, *tile).has_value())
     {
@@ -911,10 +932,24 @@ bool flydslSdpaCdnaKernelMatches(const MatchContext& context,
         return false;
     }
 
+    // An object built for one head dim serves it exactly; a qk_mask one serves any Q/K head
+    // dim up to its bucket that its masks cover. Either way V's must be its own.
+    const auto headDim = integerMetadata(kernel, HEAD_DIM_FIELD);
+    const auto headDimV = integerMetadata(kernel, HEAD_DIM_V_FIELD);
+    const auto qkMask = integerMetadata(kernel, QK_MASK_FIELD);
+    if(!headDim.has_value() || !headDimV.has_value() || !qkMask.has_value()
+       || *headDimV != problem.headDimV)
+    {
+        return false;
+    }
+    const bool servesHead
+        = *qkMask == 1 ? problem.headDim <= *headDim && problem.headDim % QK_MASK_ALIGN == 0
+                       : *qkMask == 0 && *headDim == problem.headDim;
+
     const auto dataTypeName = kernelDataTypeName(problem.dataType);
     const auto causal = tryGetBoundInt(bound, CAUSAL_TOKEN);
-    return dataTypeName.has_value() && stringMetadata(kernel, DTYPE_FIELD) == *dataTypeName
-           && integerMetadata(kernel, HEAD_DIM_FIELD) == problem.headDim && causal.has_value()
+    return servesHead && dataTypeName.has_value()
+           && stringMetadata(kernel, DTYPE_FIELD) == *dataTypeName && causal.has_value()
            && integerMetadata(kernel, CAUSAL_FIELD) == *causal;
 }
 
@@ -962,7 +997,7 @@ double flydslSdpaCdnaScore(const MatchContext& context,
     }
     const auto* q = findTensor(context, attributes->q_tensor_uid());
     const auto* k = findTensor(context, attributes->k_tensor_uid());
-    if(q != nullptr && k != nullptr && isPreferredFor(problemFor(*q, *k), kernel))
+    if(q != nullptr && k != nullptr && isPreferredFor(problemFor(*q, *k, nullptr), kernel))
     {
         score += PREFERRED_BONUS;
     }
@@ -1055,7 +1090,7 @@ const std::vector<KernelArgument>& dualwaveSignature()
 const std::vector<KernelArgument>& genericSignature()
 {
     static const std::vector<KernelArgument> s_signature
-        = signatureOf({{5, true}, {2, false}, {3, true}, {16, false}, {1, true}, {3, false}});
+        = signatureOf({{5, true}, {2, false}, {3, true}, {16, false}, {1, true}, {7, false}});
     return s_signature;
 }
 
@@ -1173,8 +1208,9 @@ public:
                 "flydsl_sdpa_cdna: kernel '" + toString(kernel.kernelId)
                     + "' declares no kernel family or block_m this pack can launch");
         }
-        const auto problem
-            = problemFor(requireTensor(context, binding.q), requireTensor(context, binding.k));
+        const auto problem = problemFor(requireTensor(context, binding.q),
+                                        requireTensor(context, binding.k),
+                                        &requireTensor(context, binding.v));
         const auto grid = candidateGrid(problem, *tile);
         if(!grid.has_value())
         {
@@ -1386,7 +1422,11 @@ public:
                       qLayout, // read for its pointer only
                       i32(biasStrides.query),
                       i32(biasStrides.batch),
-                      i32(biasStrides.head));
+                      i32(biasStrides.head),
+                      i32(strides.v.sequence),
+                      i32(strides.v.batch),
+                      i32(strides.v.head),
+                      static_cast<int32_t>(problem.headDim));
     }
 
 private:

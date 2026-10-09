@@ -113,5 +113,23 @@ diff against upstream plus the modifications below.
     eight 4-element runs and adds `bias / scale` to the unscaled scores, which the
     kernel scales inside the exponent. Other builds never read the slot.
 
+13. **Separate V strides, a narrower V, and a runtime Q/K head dim on the generic
+    kernel** (`flash_attn_generic.py`, `flash_attn_utils.py`). Every generic object
+    takes trailing `stride_v_n, stride_v_b, stride_v_h, head_dim_qk`. V is addressed
+    through its own strides rather than K's, so K and V need not share a layout.
+    - **`head_dim_v`** (builder argument, cache key): V and O are that wide, at most
+      `head_dim`, for multi-head latent attention. The PV product, the O
+      accumulators, the O store and O's buffer extent cover only those columns. V is
+      still staged `head_dim` wide, and the columns past it are read from column 0's
+      address rather than past the row, and are never consumed.
+    - **`qk_mask`** (builder argument, cache key): `head_dim` is then a bucket, and
+      `head_dim_qk` the actual Q/K width. Q columns past it are loaded through an
+      out-of-range offset, so they read zero. K columns past it are selected to zero,
+      read from column 0's address. Both must be zero, because 0 * NaN from a
+      neighbouring row is still NaN. Q's buffer extent ends at it.
+    - **Scope:** both are on the dense, non-DMA load paths, and a build with either
+      refuses DMA, paging and the permuted V^T store. Builds without them are
+      unchanged apart from V's own index.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).
