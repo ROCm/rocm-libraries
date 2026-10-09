@@ -481,6 +481,13 @@ defaultInternalSupportParams = {
     # and ignores bit 29 -- do not claim it; newly generated StreamK 3 / SK5
     # set it True in Solution.py.
     "SupportStreamKPerTileExtraIters": False,
+    # Pure CAPABILITY: "this StreamK Hybrid kernel fixes the split tiles of its
+    # dynamic sub-path up by last arrival (one counter per split tile), not by
+    # per-part ready flags", so the host may split few-tile problems on that
+    # path. The spin-flag protocol can wait on parts no resident workgroup will
+    # run. Derived in Solution.py from usesStreamKArrivalFixup(); default False
+    # so older/custom kernels keep every dynamic tile whole.
+    "SupportStreamKArrivalFixup": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
     "UseSFC": False,

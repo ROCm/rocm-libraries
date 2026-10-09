@@ -32,6 +32,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -508,6 +509,29 @@ namespace TensileLite
         std::array<int, 2> waveGroup;
     };
 
+    /**
+     * Work decomposition of the dynamic work-queue StreamK path (SK4 and the
+     * dynamic sub-path of SK5): the first tiles - skTiles work items are whole
+     * tiles, the remaining skTiles tiles are each cut into skSplit parts of
+     * skItersPerWI iterations, for totalItems work items in all. grid is the
+     * workgroup count the dynamic grid policy launches for it.
+     */
+    struct StreamKDynamicSplit
+    {
+        uint32_t skTiles      = 0;
+        uint32_t skSplit      = 0;
+        uint32_t skItersPerWI = 0;
+        uint32_t totalItems   = 0;
+        size_t   grid         = 0;
+
+        // Workspace partial-tile slots (and, on the flag-protocol kernels, ready
+        // flags) the kernel indexes: one per part of every split tile.
+        size_t partialSlots() const
+        {
+            return static_cast<size_t>(skTiles) * skSplit;
+        }
+    };
+
     struct PersistentLaunchSettings
     {
         TileProcessingStrategy tileProcessingStrategy = TileProcessingStrategy::None;
@@ -523,6 +547,11 @@ namespace TensileLite
         // StreamK=5 tri-state (0=OFF default/SK3, 1=ON/SK4, 2=AUTO); see
         // hipblasLtStreamKTileSchedulingMode_t. Ignored when streamK != 5.
         int                  smCountTarget = 0; // 0 = use all device CUs; >0 engages origami heuristic when mode is OFF
+        // Dynamic work-queue launches (SK4, SK5 dynamic sub-path): the
+        // decomposition the grid, workspace and kernel arguments of this launch
+        // were sized from, computed once by resolveStreamKSettings(). Empty for
+        // every other launch; consumers recompute it if absent.
+        std::optional<StreamKDynamicSplit> dynamicSplit;
     };
 
     // Source compatibility for consumers using the former launch type.
@@ -571,6 +600,55 @@ namespace TensileLite
      */
     TENSILELITEHOST_EXPORT StreamKStaticSplit streamKStaticSplit(
         size_t tiles, size_t itersPerTile, size_t skGrid, int skFullTiles, bool forceDPOnly);
+
+    struct StreamKDynamicSplitInputs
+    {
+        // Batch-inclusive tile count, getNumTiles(sizeMapping, 1).
+        size_t tiles = 0;
+        // getItersPerTile(sizeMapping), clamped to at least 1.
+        size_t itersPerTile = 1;
+        // Workgroups the dynamic grid policy may launch (CUs x occupancy,
+        // capped by persistentMaxCUs and a fixed grid).
+        size_t maxGrid = 0;
+        // CUs the split is sized for: origami's cu_count for the static grid.
+        size_t splitCUs = 0;
+        // False keeps every tile whole unless the debug overrides ask otherwise.
+        bool allowSplit = true;
+        // Flag-region entries left after the per-XCD queue counters.
+        size_t flagSlots = 0;
+        // Workspace the launch is given, and the bytes of one partial tile.
+        size_t workspaceBytes   = 0;
+        size_t partialTileBytes = 0;
+        // TENSILE_STREAMK_TILES / TENSILE_STREAMK_SPLIT, -1 when unset.
+        int overrideTiles = -1;
+        int overrideSplit = -1;
+    };
+
+    // Fewest main-loop iterations a split part may get: origami's
+    // MinItersPerCU, which bounds the static grid's split the same way
+    // (shared/origami/src/origami/streamk.cpp, grid_k_split_aware).
+    constexpr size_t StreamKDynamicMinItersPerWI = 8;
+
+    // Splits the static grid tries, largest first, when there are fewer tiles
+    // than CUs and the reduction is tree (origami grid_k_split_aware).
+    inline constexpr size_t StreamKDynamicSplitFactors[] = {16, 12, 8, 6, 4, 3, 2};
+
+    /**
+     * Choose the dynamic StreamK work decomposition. Single source of truth for
+     * the packed SKTiles/SKSplit/SKItersPerWI/TotalItems, the dynamic grid, the
+     * partials workspace and the launch summary.
+     *
+     * Problems with at least splitCUs tiles keep every tile whole (skTiles = 0,
+     * the historical packing). Fewer tiles are split the way the static grid
+     * splits them (origami grid_k_split_aware, tree reduction): skSplit is the
+     * largest of StreamKDynamicSplitFactors with tiles*skSplit <= splitCUs and
+     * at least StreamKDynamicMinItersPerWI iterations per part that also fits
+     * flagSlots and the workspace. If none does, the tiles stay whole. The
+     * debug overrides replace the policy; if the partials they ask for do not
+     * fit the workspace or the flag region the tiles stay whole.
+     */
+    TENSILELITEHOST_EXPORT StreamKDynamicSplit
+        streamKDynamicSplit(StreamKDynamicSplitInputs const& in);
 
     /**
      * Whether every output tile of a static two-tile StreamK split is folded
@@ -723,7 +801,7 @@ namespace TensileLite
         // makeArgs() must be reflected in computeStreamKDecisions() or the report
         // silently drifts from the launch.
         //
-        // recomputed: dynamic path  -> the SKTiles arg (debug override, else 0);
+        // recomputed: dynamic path  -> the SKTiles arg (streamKDynamicDecomposition());
         //             parallel path -> the split factor, which is what makeArgs packs
         //                              into the skTiles slot on that path;
         //             static SK3    -> streamKStaticSplit().skTiles, the stream-k
@@ -786,8 +864,8 @@ namespace TensileLite
         size_t idealWorkspaceBytes    = 0;
         // available: problem.workspaceSize().
         size_t givenWorkspaceBytes    = 0;
-        // recomputed: skTiles*skSplit slot count for the dynamic path (informational; does
-        // NOT feed the allocation guard, which is sized by grid).
+        // recomputed: skTiles*skSplit slot count for the dynamic path. When tiles are
+        // split this, not the grid, sizes the partials workspace.
         size_t dynamicPartialsSlots   = 0;
         // available: streamKBakedQueueCount() -- baked per-XCD work-queue count (NUM_XCD),
         // 0 if unknown.
@@ -1031,6 +1109,16 @@ namespace TensileLite
         bool                 uniformSummationOrderSupported(Problem const&  problem,
                                                             Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
+        // streamKDynamicSplit() fed from this solution, problem and hardware.
+        // Every consumer of the dynamic decomposition gets it from here (arg
+        // packers, grid, workspace query, launch settings, decisions, uniform
+        // summation order gate), so they cannot disagree. A launch computes it
+        // once in resolveStreamKSettings() and carries it in
+        // PersistentLaunchSettings::dynamicSplit. Only meaningful on the
+        // dynamic work-queue path.
+        StreamKDynamicSplit  streamKDynamicDecomposition(Problem const&  problem,
+                                                         Hardware const& hardware,
+                                                         size_t          tiles) const;
 
         // Compute the StreamK launch-parameter DECISIONS for this solution on the
         // given problem/hardware. solve() does NOT consume this on the hot path:
@@ -1306,6 +1394,11 @@ namespace TensileLite
             // newly generated StreamK 3 / SK5 set it true. Uniform-summation-order
             // grid steering consults the same bit.
             bool perTileExtraIters  = false;
+            // StreamK Hybrid kernel fixes the split tiles of its dynamic
+            // sub-path up by last arrival (one counter per split tile) instead
+            // of per-part ready flags; streamKDynamicDecomposition() splits
+            // tiles only for these. Older/custom kernels leave this false.
+            bool arrivalFixup       = false;
             bool useUniversalArgs   = true;
             bool useSFC             = false;
         };

@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from ..ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy
+from ..ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy, usesStreamKArrivalFixup
 
 import collections
 import copy
@@ -7127,6 +7127,13 @@ class Solution(collections.abc.Mapping):
               reject(state, printRejectionReason, "packedC0 Assembly requires AF0EM>=VectorWidth or not VectorStore (for stores)")
 
     state["_PrefetchAcrossPersistentEnabled"] = bool(state["PrefetchAcrossPersistent"])
+    # Capability, fully derived like SupportStreamKPerTileExtraIters: only the
+    # generator knows which fixup protocol it emits (StreamKHybrid.usesArrivalFixup).
+    state["InternalSupportParams"]["SupportStreamKArrivalFixup"] = bool(
+        isStreamK(state) and hasHybridAssignment(state) and not isCustomKernelConfig(state)
+        and usesStreamKArrivalFixup(state["DebugStreamK"],
+                                    isaInfoMap[isa].asmCaps["HasSAtomic"],
+                                    state["_PrefetchAcrossPersistentEnabled"]))
     state["AssignedDerivedParameters"] = True
 
     # Set E

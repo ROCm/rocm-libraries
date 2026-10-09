@@ -20,7 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from ..ExecutionPolicy import isPersistent, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from ..ExecutionPolicy import isPersistent, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, usesStreamKArrivalFixup
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, DSModifiers, replaceHolder, EXEC, VOP3PModifiers, ContinuousRegister
@@ -4196,9 +4196,15 @@ class StreamKHybrid(StreamK):
         # The arrival broadcast borrows LDS[0, 64*4) and restores it, which is
         # only safe when nothing in LDS is in flight across the epilogue (no
         # PAP prefetch of the next tile). DebugStreamK keeps the old protocol.
-        return (kernel["DebugStreamK"] == 0
-                and writer.states.asmCaps["HasSAtomic"]
-                and not writer.isPrefetchAcrossPersistentEnabled(kernel))
+        uses = usesStreamKArrivalFixup(kernel["DebugStreamK"],
+                                       writer.states.asmCaps["HasSAtomic"],
+                                       writer.isPrefetchAcrossPersistentEnabled(kernel))
+        # The host splits dynamic tiles only when the solution advertises this
+        # (InternalArgsSupport::arrivalFixup); the two must agree.
+        advertised = kernel.get("InternalSupportParams", {}).get("SupportStreamKArrivalFixup")
+        assert advertised is None or bool(advertised) == uses, \
+            "SupportStreamKArrivalFixup=%s disagrees with the emitted fixup protocol" % advertised
+        return uses
 
     def emitArrival(self, writer, kernel, arrivalDone, tmpSgprBlock=None):
         """Count this part in on its tile; branch to the fixup if it is last.
