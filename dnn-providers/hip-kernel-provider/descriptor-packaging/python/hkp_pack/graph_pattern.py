@@ -1,17 +1,16 @@
 """Pack-time validation of a UED's declarative `graph_match.nodes` pattern.
 
-Applies the checks the runtime runs when it loads a pattern (RFC 0020 §4.3).
-A pattern the runtime would refuse then fails the pack instead of dropping the
-engine at load. There are two stages:
+Applies the checks compileGraphPattern (CompiledGraphPattern.hpp) runs when
+the runtime loads a pattern (RFC 0020 §4.3). A pattern the runtime would refuse
+then fails the pack instead of dropping the engine at load. There are two
+stages, in the runtime's order:
 
-- Well-formedness, checked from the block alone. Mirrors parseGraphPattern in
-  GraphPattern.hpp.
+- Well-formedness, checked from the block alone.
 - Resolution against the op-schema registry, which is generated from the
-  annotated FlatBuffers schemas. Mirrors compileGraphPattern in
-  CompiledGraphPattern.hpp.
+  annotated FlatBuffers schemas.
 
-The runtime is authoritative. The limits and reserved names below copy its
-constants.
+The runtime is authoritative. The limit and reserved names below copy its
+constants, and every error carries the runtime's wording.
 """
 
 import functools
@@ -25,8 +24,6 @@ from .errors import HkpPackError
 from .json_rules import DuplicateKeyError, loads_strict, require_known_keys
 
 MAX_PATTERN_NODES = 32
-MAX_PATTERN_EDGES_PER_NODE = 64
-MAX_PATTERN_OPCODE_SET = 32
 
 # Keys a pattern node may carry, and the keys it must carry.
 NODE_KEYS = ("kind", "id", "op", "operands", "results")
@@ -36,9 +33,7 @@ NODE_REQUIRED_KEYS = ("kind", "id", "op")
 # them (RFC 0020 §6.1).
 RESERVED_ROOTS = ("graph", "kernel", "device")
 
-_IDENT_PATTERN = r"[A-Za-z_][A-Za-z0-9_]*"
-_IDENT_RE = re.compile(rf"^{_IDENT_PATTERN}$")
-_BINDING_RE = re.compile(rf"^\$({_IDENT_PATTERN})(\?)?$")
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 # Environment override for the registry path. CMake sets it for tests and the
 # configure probe. The pack step passes the path as an argument.
@@ -82,8 +77,8 @@ class _Node:
 def resolve_op_schema_registry(path=None):
     """Return the registry path from the argument, the environment, or the repo copy.
 
-    An empty argument or environment value counts as absent, so a build that
-    passes an unset CMake variable gets the default.
+    An empty argument or environment value counts as absent, so
+    `hkp_pack.py --op-schema-registry ""` gets the default.
     """
     if path:
         return Path(path)
@@ -94,40 +89,17 @@ def resolve_op_schema_registry(path=None):
 
 
 def _registry_edges(entries, path, opcode, direction):
-    if not isinstance(entries, list):
-        raise HkpPackError(
-            f"malformed op-schema registry {path}: op '{opcode}' {direction} "
-            "must be an array"
-        )
-    edges = {}
-    for entry in entries:
-        if (
-            not isinstance(entry, dict)
-            or not isinstance(entry.get("name"), str)
-            or not isinstance(entry.get("optional"), bool)
-        ):
-            raise HkpPackError(
-                f"malformed op-schema registry {path}: op '{opcode}' {direction} "
-                "entries must be objects with a string 'name' and a bool 'optional'"
-            )
-        edges[entry["name"]] = entry["optional"]
-    return edges
-
-
-def _check_registry_edge_lists(entries, path, opcode, key):
-    """Validate an op's edge lists, which are tensor-uid vectors.
-
-    A pattern never binds a list, so no names are kept. A pattern edge that
-    names a list field resolves as undeclared, like any other unknown edge.
-    """
     if not isinstance(entries, list) or not all(
-        isinstance(entry, dict) and isinstance(entry.get("name"), str)
+        isinstance(entry, dict)
+        and isinstance(entry.get("name"), str)
+        and isinstance(entry.get("optional"), bool)
         for entry in entries
     ):
         raise HkpPackError(
-            f"malformed op-schema registry {path}: op '{opcode}' {key} must be an "
-            "array of objects with a string 'name'"
+            f"malformed op-schema registry {path}: op '{opcode}' {direction} must "
+            "be an array of objects with a string 'name' and a bool 'optional'"
         )
+    return {entry["name"]: entry["optional"] for entry in entries}
 
 
 @functools.lru_cache(maxsize=None)
@@ -157,8 +129,6 @@ def _load_op_schema_registry(path):
             operands=_registry_edges(entry.get("operands"), path, opcode, "operands"),
             results=_registry_edges(entry.get("results"), path, opcode, "results"),
         )
-        for key in ("operand_lists", "result_lists"):
-            _check_registry_edge_lists(entry.get(key), path, opcode, key)
     return registry
 
 
@@ -167,119 +137,137 @@ def load_op_schema_registry(path):
     return _load_op_schema_registry(str(path))
 
 
-def _quote(value):
-    """Format a value as JSON for error messages."""
-    return json.dumps(value)
+def _dump(value):
+    """Format a value as nlohmann::json::dump() does, for error messages."""
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
-def _parse_op(node, label):
-    op = node["op"]
+def _node_locator(node_id, where):
+    return f"node '{node_id}' in {where}"
+
+
+def _parse_opcodes(op, locator):
     if isinstance(op, str):
         if not op:
-            raise HkpPackError(f"{label} field 'op' must be a nonempty string")
+            raise HkpPackError(f"key 'op' of {locator} must not be empty")
         return (op,)
     if not isinstance(op, dict):
         raise HkpPackError(
-            f"{label} field 'op' must be an opcode string or an object "
-            '{"one_of": [...]}'
+            f"key 'op' of {locator} must be an opcode string or an object "
+            '{"one_of": [opcodes]}'
         )
-    require_known_keys(op, ("one_of",), f"{label} op")
+    set_locator = f"key 'op' of {locator}"
+    require_known_keys(op, ("one_of",), set_locator)
     if "one_of" not in op:
-        raise HkpPackError(f"{label} op object missing required field 'one_of'")
+        raise HkpPackError(f"missing required key 'one_of' in {set_locator}")
     members = op["one_of"]
     if not isinstance(members, list):
-        raise HkpPackError(f"{label} op 'one_of' must be an array of opcode strings")
-    if len(members) < 2:
-        raise HkpPackError(f"{label} op 'one_of' needs at least two opcodes")
-    if len(members) > MAX_PATTERN_OPCODE_SET:
         raise HkpPackError(
-            f"{label} op 'one_of' lists {len(members)} opcodes, more than the "
-            f"limit of {MAX_PATTERN_OPCODE_SET}"
+            f"key 'one_of' in {set_locator} must be an array of opcode strings"
         )
+    if len(members) < 2:
+        raise HkpPackError(
+            f"key 'one_of' in {set_locator} lists {len(members)} opcode(s); an "
+            "opcode set needs at least 2"
+        )
+    opcodes = []
     seen = set()
     for member in members:
         if not isinstance(member, str) or not member:
-            raise HkpPackError(f"{label} op 'one_of' must list nonempty opcode strings")
+            raise HkpPackError(
+                f"key 'one_of' in {set_locator} must list non-empty opcode strings"
+            )
         if member in seen:
-            raise HkpPackError(f"{label} op 'one_of' contains duplicates")
+            raise HkpPackError(
+                f"opcode '{member}' is listed twice in key 'one_of' in {set_locator}"
+            )
         seen.add(member)
-    return tuple(members)
+        opcodes.append(member)
+    return tuple(opcodes)
 
 
-def _parse_edges(node, key, label):
-    """Parse the `operands` or `results` map. Only an operand may bind with `?`.
+def _parse_binding(name, value, operand, edge_locator):
+    """Parse `"$name"`, or `"$name?"` on an operand."""
+    if not isinstance(value, str):
+        raise HkpPackError(f"{edge_locator} must be a string binding '$<identifier>'")
+    body = value
+    optional = body.endswith("?")
+    if optional:
+        if not operand:
+            raise HkpPackError(
+                f"{edge_locator} has binding '{value}'; '?' is only allowed on an "
+                "operand binding"
+            )
+        body = body[:-1]
+    if not body.startswith("$") or not _IDENT_RE.fullmatch(body[1:]):
+        expected = (
+            "'$<identifier>' or '$<identifier>?'" if operand else "'$<identifier>'"
+        )
+        raise HkpPackError(
+            f"{edge_locator} has malformed binding '{value}'; expected {expected}"
+        )
+    return _Edge(name=name, variable=body[1:], optional=optional)
+
+
+def _parse_edges(node, key, locator):
+    """Parse the `operands` or `results` map.
 
     Edges are checked and kept in name order, the order the runtime reads them, so
     a map with several faults reports the same one on both sides.
     """
-    direction = key[:-1]
     edges_doc = node.get(key, {})
     if not isinstance(edges_doc, dict):
-        raise HkpPackError(f"{label} field '{key}' must be an object")
-    edges = []
-    for name, binding in sorted(edges_doc.items()):
-        if key == "results" and isinstance(binding, str) and binding.endswith("?"):
-            raise HkpPackError(
-                f"{label} result '{name}' binding {_quote(binding)} takes no '?': "
-                "an op's declared result is always produced"
-            )
-        match = _BINDING_RE.fullmatch(binding) if isinstance(binding, str) else None
-        if match is None:
-            form = "'$name' or '$name?'" if key == "operands" else "'$name'"
-            raise HkpPackError(
-                f"{label} {direction} '{name}' binding {_quote(binding)} must be "
-                f"of the form {form}"
-            )
-        edges.append(
-            _Edge(name=name, variable=match.group(1), optional=bool(match.group(2)))
+        raise HkpPackError(
+            f"key '{key}' of {locator} must be an object mapping edge names to bindings"
         )
-    return tuple(edges)
+    operand = key == "operands"
+    direction = "operand" if operand else "result"
+    return tuple(
+        _parse_binding(name, value, operand, f"{direction} '{name}' of {locator}")
+        for name, value in sorted(edges_doc.items())
+    )
 
 
 def _parse_node(index, node, where):
     """Parse one node on its own. Checks that span nodes wait for _check_variables."""
-    position = f"{where} graph_match node {index}"
+    position = f"graph_match.nodes[{index}] in {where}"
     if not isinstance(node, dict):
-        raise HkpPackError(f"{position} must be an object")
+        raise HkpPackError(f"{position} must be a JSON object")
     require_known_keys(node, NODE_KEYS, position)
     for key in NODE_REQUIRED_KEYS:
         if key not in node:
-            raise HkpPackError(f"{position} missing required field '{key}'")
+            raise HkpPackError(f"missing required key '{key}' in {position}")
     node_id = node["id"]
     if not isinstance(node_id, str) or not _IDENT_RE.fullmatch(node_id):
         raise HkpPackError(
-            f"{position} id {_quote(node_id)} must be an identifier matching "
-            f"^{_IDENT_PATTERN}$"
+            f"key 'id' in {position} must be an identifier "
+            f"([A-Za-z_][A-Za-z0-9_]*), got {_dump(node_id)}"
         )
-    label = f"{where} graph_match node '{node_id}'"
+    locator = _node_locator(node_id, where)
     if node_id in RESERVED_ROOTS:
-        raise HkpPackError(f"{label} id is a reserved root")
+        raise HkpPackError(f"{locator}: node id '{node_id}' is a reserved root")
     if node["kind"] != "op":
         raise HkpPackError(
-            f"{label} kind {_quote(node['kind'])} is not 'op', the only node kind"
+            f"key 'kind' of {locator} must be \"op\", got {_dump(node['kind'])}"
         )
-    opcodes = _parse_op(node, label)
-    operands = _parse_edges(node, "operands", label)
-    results = _parse_edges(node, "results", label)
-    edge_count = len(operands) + len(results)
-    if edge_count > MAX_PATTERN_EDGES_PER_NODE:
-        raise HkpPackError(
-            f"{label} binds {edge_count} edges, more than the limit of "
-            f"{MAX_PATTERN_EDGES_PER_NODE}"
-        )
-    return _Node(id=node_id, opcodes=opcodes, operands=operands, results=results)
+    return _Node(
+        id=node_id,
+        opcodes=_parse_opcodes(node["op"], locator),
+        operands=_parse_edges(node, "operands", locator),
+        results=_parse_edges(node, "results", locator),
+    )
 
 
-def _check_variable_name(node, edge, direction, node_ids, where):
+def _check_variable_name(node, edge, node_ids, where):
     if edge.variable in RESERVED_ROOTS:
         raise HkpPackError(
-            f"{where} graph_match node '{node.id}' {direction} '{edge.name}' binds "
-            f"reserved root '${edge.variable}'"
+            f"{_node_locator(node.id, where)}: variable '${edge.variable}' is a "
+            "reserved root"
         )
     if edge.variable in node_ids:
         raise HkpPackError(
-            f"{where} graph_match node '{node.id}' variable "
-            f"'${edge.variable}' collides with node id '{edge.variable}'"
+            f"{_node_locator(node.id, where)}: variable '${edge.variable}' collides "
+            f"with node id '{edge.variable}'"
         )
 
 
@@ -295,100 +283,102 @@ def _check_variables(nodes, where):
     node_ids = set()
     for node in nodes:
         if node.id in node_ids:
-            raise HkpPackError(
-                f"{where} graph_match node '{node.id}' id is not unique within 'nodes'"
-            )
+            raise HkpPackError(f"node id '{node.id}' is used by two nodes in {where}")
         node_ids.add(node.id)
     producer = {}
     for node in nodes:
         for edge in node.results:
-            _check_variable_name(node, edge, "result", node_ids, where)
+            _check_variable_name(node, edge, node_ids, where)
+            site = f"node '{node.id}' result '{edge.name}'"
             if edge.variable in producer:
-                first_node, first_edge = producer[edge.variable]
                 raise HkpPackError(
-                    f"{where} graph_match node '{node.id}' result '{edge.name}' "
-                    f"binds '${edge.variable}', already bound by node "
-                    f"'{first_node}' result '{first_edge}'"
+                    f"variable '${edge.variable}' is bound by two results in {where}: "
+                    f"{producer[edge.variable]} and {site}"
                 )
-            producer[edge.variable] = (node.id, edge.name)
+            producer[edge.variable] = site
     graph_input = {}
     for node in nodes:
         for edge in node.operands:
-            _check_variable_name(node, edge, "operand", node_ids, where)
+            _check_variable_name(node, edge, node_ids, where)
             if edge.variable in producer:
                 if edge.optional:
                     raise HkpPackError(
-                        f"{where} graph_match node '{node.id}' operand "
-                        f"'{edge.name}' marks '${edge.variable}' optional, but "
-                        f"node '{producer[edge.variable][0]}' produces it"
+                        f"{_node_locator(node.id, where)}: optional binding "
+                        f"'${edge.variable}?' on operand '{edge.name}' names a "
+                        f"variable {producer[edge.variable]} produces; only a graph "
+                        "input may be optional"
                     )
                 continue
+            site = f"node '{node.id}' operand '{edge.name}'"
             if edge.variable in graph_input:
-                first_node, first_edge = graph_input[edge.variable]
                 raise HkpPackError(
-                    f"{where} graph_match node '{node.id}' operand '{edge.name}' "
-                    f"binds '${edge.variable}', already bound by node "
-                    f"'{first_node}' operand '{first_edge}'; no node produces it, "
-                    "so exactly one operand binds it"
+                    f"graph input variable '${edge.variable}' is bound by two "
+                    f"operands in {where}: {graph_input[edge.variable]} and {site}; "
+                    "a variable no node produces is bound by exactly one operand"
                 )
-            graph_input[edge.variable] = (node.id, edge.name)
-
-
-def _resolve_edge(node, edge, direction, registry, label):
-    """Check an edge against each opcode in turn, as the runtime does.
-
-    Each opcode must declare the edge in this direction, must declare an operand
-    bound with `?` optional, and must agree with the first opcode on its
-    optionality.
-    """
-    first = None
-    for opcode in node.opcodes:
-        schema = registry[opcode]
-        if direction == "operand":
-            declared, other, misplaced = schema.operands, schema.results, "a result"
-        else:
-            declared, other, misplaced = schema.results, schema.operands, "an operand"
-        if edge.name not in declared:
-            if edge.name in other:
-                raise HkpPackError(
-                    f"{label} {direction} '{edge.name}' is declared by op "
-                    f"'{opcode}' as {misplaced}"
-                )
-            raise HkpPackError(
-                f"{label} {direction} '{edge.name}' is not declared by op '{opcode}'"
-            )
-        optional = declared[edge.name]
-        if edge.optional and not optional:
-            raise HkpPackError(
-                f"{label} operand '{edge.name}' is bound with '?', but the "
-                f"registry declares it required in op '{opcode}'"
-            )
-        if first is None:
-            first = (opcode, optional)
-        elif optional != first[1]:
-            raise HkpPackError(
-                f"{label} one_of members disagree on {direction} '{edge.name}': "
-                f"op '{first[0]}' declares it {_optionality(first[1])}, op "
-                f"'{opcode}' declares it {_optionality(optional)}"
-            )
+            graph_input[edge.variable] = site
 
 
 def _optionality(optional):
     return "optional" if optional else "required"
 
 
+def _resolve_edge(node, edge, direction, registry, locator):
+    """Check an edge against each opcode in turn, as the runtime does.
+
+    Each opcode must declare the edge in this direction, must declare an operand
+    bound with `?` optional, and must agree with the first opcode on its
+    optionality.
+    """
+    if direction == "operand":
+        other_kind, other_section = "a result", "results"
+    else:
+        other_kind, other_section = "an operand", "operands"
+    first = None
+    for opcode in node.opcodes:
+        schema = registry[opcode]
+        declared, other = (
+            (schema.operands, schema.results)
+            if direction == "operand"
+            else (schema.results, schema.operands)
+        )
+        if edge.name not in declared:
+            message = (
+                f"{locator}: opcode '{opcode}' declares no {direction} '{edge.name}'"
+            )
+            if edge.name in other:
+                message += (
+                    f"; it is {other_kind}, so it belongs under '{other_section}'"
+                )
+            raise HkpPackError(message)
+        optional = declared[edge.name]
+        if edge.optional and not optional:
+            raise HkpPackError(
+                f"{locator}: operand '{edge.name}' of opcode '{opcode}' is required, "
+                f"so binding '${edge.variable}?' cannot be optional"
+            )
+        if first is None:
+            first = (opcode, optional)
+        elif optional != first[1]:
+            raise HkpPackError(
+                f"{locator}: one_of members disagree on {direction} '{edge.name}': "
+                f"opcode '{first[0]}' declares it {_optionality(first[1])}, opcode "
+                f"'{opcode}' declares it {_optionality(optional)}"
+            )
+
+
 def _resolve(nodes, registry, where):
     for node in nodes:
-        label = f"{where} graph_match node '{node.id}'"
+        locator = _node_locator(node.id, where)
         for opcode in node.opcodes:
             if opcode not in registry:
                 raise HkpPackError(
-                    f"{label} op '{opcode}' is not in the op-schema registry"
+                    f"{locator}: opcode '{opcode}' is not in the op-schema registry"
                 )
         for edge in node.operands:
-            _resolve_edge(node, edge, "operand", registry, label)
+            _resolve_edge(node, edge, "operand", registry, locator)
         for edge in node.results:
-            _resolve_edge(node, edge, "result", registry, label)
+            _resolve_edge(node, edge, "result", registry, locator)
 
 
 def validate_graph_pattern(nodes, where, registry_path=None):
@@ -399,12 +389,14 @@ def validate_graph_pattern(nodes, where, registry_path=None):
     only after the well-formedness checks pass. An unreadable registry raises an
     error that names its path.
     """
-    if not isinstance(nodes, list) or not nodes:
-        raise HkpPackError(f"{where} graph_match 'nodes' must be a nonempty array")
+    block = f"graph_match.nodes in {where}"
+    if not isinstance(nodes, list):
+        raise HkpPackError(f"{block} must be an array of node objects")
+    if not nodes:
+        raise HkpPackError(f"{block} must not be empty")
     if len(nodes) > MAX_PATTERN_NODES:
         raise HkpPackError(
-            f"{where} graph_match 'nodes' has {len(nodes)} nodes, more than the "
-            f"limit of {MAX_PATTERN_NODES}"
+            f"{block} has {len(nodes)} nodes; the limit is {MAX_PATTERN_NODES}"
         )
     parsed = [_parse_node(index, node, where) for index, node in enumerate(nodes)]
     _check_variables(parsed, where)

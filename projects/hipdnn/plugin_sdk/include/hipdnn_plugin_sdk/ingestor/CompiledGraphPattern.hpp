@@ -14,13 +14,15 @@
 #include <utility>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include <hipdnn_flatbuffers_sdk/data_objects/op_schema_registry_generated.h>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorJsonRules.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GraphPattern.hpp>
 
 /// @file CompiledGraphPattern.hpp
 /// @brief A `graph_match.nodes` pattern resolved against the op-schema registry (RFC 0020
-///        §4.3.3), plus the symbol table it publishes.
+///        §4.3.3).
 ///
 /// Patterns compile once at load. Each pattern edge then points at the registry accessor
 /// that reads its tensor uid, so matching a graph needs no string lookups.
@@ -28,51 +30,14 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// Kind of value a published symbol carries. A TENSOR symbol is a tensor root, with the
-/// fields publishTensor() in BindingPublication.hpp publishes.
-enum class SymbolKind
-{
-    TENSOR,
-    INT,
-    FLOAT,
-    BOOL,
-    ENUM_NAME
-};
-
-/// A root the pattern publishes. It is a tensor variable (`x`), a graph field
-/// (`graph.node_count`), or a node attribute (`<node id>.<attribute>`).
-struct PublishedSymbol
-{
-    std::string name;
-    SymbolKind kind;
-    /// A match may leave this symbol unbound.
-    bool optional;
-};
-
-enum class EdgeDirection
-{
-    OPERAND,
-    RESULT
-};
-
-/// One named edge of one pattern node.
-struct PatternEdgeRef
-{
-    std::string nodeId;
-    std::string edge;
-    EdgeDirection direction;
-};
-
-/// A pattern variable, with the edge that binds it and the edges that only read it.
+/// A pattern variable.
 struct PatternVariable
 {
     std::string name;
-    /// A node's result, or the single operand reading a graph input.
-    PatternEdgeRef binding;
+    /// No pattern node produces it, so it names a graph input bound by exactly one operand.
+    bool graphInput;
     /// Bound with `?`. If the graph omits it, the match succeeds and publishes nothing for it.
     bool optional;
-    /// Operand edges reading a variable a result binds, in authored order.
-    std::vector<PatternEdgeRef> readers;
 };
 
 /// One opcode a pattern node may match, with its edges resolved.
@@ -91,12 +56,12 @@ struct CompiledPatternCandidate
     std::vector<const hipdnn_flatbuffers_sdk::data_objects::op_schema::AttributeSchema*> attributes;
 };
 
-/// An attribute a pattern node publishes.
+/// An attribute a pattern node publishes. Every candidate declares it with the same
+/// value kind.
 struct CompiledPatternAttribute
 {
     /// `<node id>.<attribute>`.
     std::string token;
-    SymbolKind kind;
     bool optional;
 };
 
@@ -115,11 +80,12 @@ struct CompiledPatternNode
 
 class CompiledGraphPattern;
 
-/// Resolves @p pattern against the op-schema registry. @p where names the UED in every
-/// error.
+/// Parses @p nodes, the value of `graph_match.nodes`, and resolves it against the op-schema
+/// registry. Grammar and well-formedness errors are reported before resolution errors.
+/// @p where names the UED in every error.
 /// @throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE) naming the UED, the
-///         node, and the unresolved name.
-inline std::shared_ptr<const CompiledGraphPattern> compileGraphPattern(const GraphPattern& pattern,
+///         node, and the offending name or value.
+inline std::shared_ptr<const CompiledGraphPattern> compileGraphPattern(const nlohmann::json& nodes,
                                                                        const std::string& where);
 
 /// A resolved pattern. It is immutable, so threads can share one instance.
@@ -136,14 +102,12 @@ public:
                          std::vector<CompiledPatternNode> nodes,
                          std::vector<size_t> matchOrder,
                          std::vector<PatternVariable> variables,
-                         std::vector<std::string> rootOpcodes,
-                         std::vector<PublishedSymbol> publishedSymbols)
+                         std::vector<std::string> rootOpcodes)
         : _where(std::move(where))
         , _nodes(std::move(nodes))
         , _matchOrder(std::move(matchOrder))
         , _variables(std::move(variables))
         , _rootOpcodes(std::move(rootOpcodes))
-        , _publishedSymbols(std::move(publishedSymbols))
     {
     }
 
@@ -177,17 +141,6 @@ public:
         return _variables;
     }
 
-    const PatternVariable* findVariable(std::string_view name) const noexcept
-    {
-        const auto it = std::lower_bound(_variables.begin(),
-                                         _variables.end(),
-                                         name,
-                                         [](const PatternVariable& variable, std::string_view key) {
-                                             return variable.name < key;
-                                         });
-        return it != _variables.end() && it->name == name ? &*it : nullptr;
-    }
-
     /// Opcodes a graph's root node may carry. This is the union of the opcode sets of the
     /// nodes that read no variable another node produces. Sorted and distinct. The matcher
     /// declines a graph with a root outside this set before it searches.
@@ -196,44 +149,19 @@ public:
         return _rootOpcodes;
     }
 
-    /// Sorted by name.
-    const std::vector<PublishedSymbol>& publishedSymbols() const noexcept
-    {
-        return _publishedSymbols;
-    }
-
 private:
     friend std::shared_ptr<const CompiledGraphPattern>
-        compileGraphPattern(const GraphPattern& pattern, const std::string& where);
+        compileGraphPattern(const nlohmann::json& nodes, const std::string& where);
 
     std::string _where;
     std::vector<CompiledPatternNode> _nodes;
     std::vector<size_t> _matchOrder;
     std::vector<PatternVariable> _variables;
     std::vector<std::string> _rootOpcodes;
-    std::vector<PublishedSymbol> _publishedSymbols;
 };
 
 namespace detail
 {
-
-inline SymbolKind symbolKindOf(hipdnn_flatbuffers_sdk::data_objects::op_schema::ValueKind kind)
-{
-    using hipdnn_flatbuffers_sdk::data_objects::op_schema::ValueKind;
-    switch(kind)
-    {
-    case ValueKind::INT:
-        return SymbolKind::INT;
-    case ValueKind::FLOAT:
-        return SymbolKind::FLOAT;
-    case ValueKind::BOOL:
-        return SymbolKind::BOOL;
-    case ValueKind::ENUM_NAME:
-        return SymbolKind::ENUM_NAME;
-    default:
-        fail("op-schema registry attribute has an unknown value kind");
-    }
-}
 
 inline const hipdnn_flatbuffers_sdk::data_objects::op_schema::EdgeSchema*
     findEdgeSchema(hipdnn_flatbuffers_sdk::data_objects::op_schema::SchemaSpan<
@@ -249,11 +177,10 @@ inline const hipdnn_flatbuffers_sdk::data_objects::op_schema::EdgeSchema*
 /// and that all `one_of` members agree.
 inline void resolvePatternEdge(const PatternNode& node,
                                const PatternEdge& edge,
-                               EdgeDirection direction,
+                               bool operand,
                                std::vector<CompiledPatternCandidate>& candidates,
                                const std::string& where)
 {
-    const bool operand = direction == EdgeDirection::OPERAND;
     const std::string_view kind = operand ? "operand" : "result";
     const std::string_view otherKind = operand ? "a result" : "an operand";
     const std::string_view otherSection = operand ? "results" : "operands";
@@ -343,8 +270,8 @@ inline void resolvePatternAttributes(const PatternNode& node, CompiledPatternNod
         {
             continue;
         }
-        compiled.attributes.push_back(CompiledPatternAttribute{
-            node.id + "." + std::string(attribute.name), symbolKindOf(attribute.kind), optional});
+        compiled.attributes.push_back(
+            CompiledPatternAttribute{node.id + "." + std::string(attribute.name), optional});
         for(size_t i = 0; i < perCandidate.size(); ++i)
         {
             compiled.candidates[i].attributes.push_back(perCandidate[i]);
@@ -376,39 +303,25 @@ inline void collectUnnamedOptionalEdges(const PatternNode& node,
     }
 }
 
-inline std::vector<PatternVariable> collectPatternVariables(const GraphPattern& pattern)
+inline std::vector<PatternVariable> collectPatternVariables(const std::vector<PatternNode>& nodes)
 {
     std::map<std::string, PatternVariable> variables;
-    for(const auto& node : pattern.nodes())
+    for(const auto& node : nodes)
     {
         for(const auto& edge : node.results)
         {
-            variables.emplace(
-                edge.binding.variable,
-                PatternVariable{edge.binding.variable,
-                                PatternEdgeRef{node.id, edge.name, EdgeDirection::RESULT},
-                                false,
-                                {}});
+            variables.emplace(edge.binding.variable,
+                              PatternVariable{edge.binding.variable, false, false});
         }
     }
-    for(const auto& node : pattern.nodes())
+    // A variable a result binds is already present, and parsePatternNodes() gives a graph
+    // input exactly one operand, so each operand adds at most one variable.
+    for(const auto& node : nodes)
     {
         for(const auto& edge : node.operands)
         {
-            PatternEdgeRef reference{node.id, edge.name, EdgeDirection::OPERAND};
-            const auto it = variables.find(edge.binding.variable);
-            if(it == variables.end())
-            {
-                // parseGraphPattern() guarantees a graph input has exactly one operand.
-                variables.emplace(
-                    edge.binding.variable,
-                    PatternVariable{
-                        edge.binding.variable, std::move(reference), edge.binding.optional, {}});
-            }
-            else
-            {
-                it->second.readers.push_back(std::move(reference));
-            }
+            variables.emplace(edge.binding.variable,
+                              PatternVariable{edge.binding.variable, true, edge.binding.optional});
         }
     }
     std::vector<PatternVariable> sorted;
@@ -481,11 +394,12 @@ inline std::vector<size_t> patternMatchOrder(const std::vector<std::vector<size_
 
 } // namespace detail
 
-inline std::shared_ptr<const CompiledGraphPattern> compileGraphPattern(const GraphPattern& pattern,
+inline std::shared_ptr<const CompiledGraphPattern> compileGraphPattern(const nlohmann::json& nodes,
                                                                        const std::string& where)
 {
     namespace op_schema = hipdnn_flatbuffers_sdk::data_objects::op_schema;
 
+    const auto pattern = detail::parsePatternNodes(nodes, where);
     auto variables = detail::collectPatternVariables(pattern);
     const auto variableIndex = [&variables](const std::string& name) {
         return static_cast<size_t>(
@@ -498,12 +412,12 @@ inline std::shared_ptr<const CompiledGraphPattern> compileGraphPattern(const Gra
             - variables.begin());
     };
 
-    std::vector<CompiledPatternNode> nodes;
-    nodes.reserve(pattern.nodes().size());
-    for(const auto& node : pattern.nodes())
+    std::vector<CompiledPatternNode> compiled;
+    compiled.reserve(pattern.size());
+    for(const auto& node : pattern)
     {
-        CompiledPatternNode compiled;
-        compiled.id = node.id;
+        CompiledPatternNode resolved;
+        resolved.id = node.id;
         for(const auto& opcode : node.opcodes)
         {
             const auto* schema = op_schema::findOpSchema(opcode);
@@ -512,68 +426,47 @@ inline std::shared_ptr<const CompiledGraphPattern> compileGraphPattern(const Gra
                 detail::fail(detail::patternNodeLocator(node.id, where) + ": opcode '" + opcode
                              + "' is not in the op-schema registry");
             }
-            compiled.candidates.push_back(CompiledPatternCandidate{schema, {}, {}, {}, {}});
+            resolved.candidates.push_back(CompiledPatternCandidate{schema, {}, {}, {}, {}});
         }
         for(const auto& edge : node.operands)
         {
-            detail::resolvePatternEdge(
-                node, edge, EdgeDirection::OPERAND, compiled.candidates, where);
-            compiled.operandVariables.push_back(variableIndex(edge.binding.variable));
+            detail::resolvePatternEdge(node, edge, true, resolved.candidates, where);
+            resolved.operandVariables.push_back(variableIndex(edge.binding.variable));
         }
         for(const auto& edge : node.results)
         {
-            detail::resolvePatternEdge(
-                node, edge, EdgeDirection::RESULT, compiled.candidates, where);
-            compiled.resultVariables.push_back(variableIndex(edge.binding.variable));
+            detail::resolvePatternEdge(node, edge, false, resolved.candidates, where);
+            resolved.resultVariables.push_back(variableIndex(edge.binding.variable));
         }
-        for(auto& candidate : compiled.candidates)
+        for(auto& candidate : resolved.candidates)
         {
             detail::collectUnnamedOptionalEdges(node, candidate);
         }
-        detail::resolvePatternAttributes(node, compiled);
-        nodes.push_back(std::move(compiled));
+        detail::resolvePatternAttributes(node, resolved);
+        compiled.push_back(std::move(resolved));
     }
 
-    const auto producers = detail::patternProducers(nodes, variables);
+    const auto producers = detail::patternProducers(compiled, variables);
     auto matchOrder = detail::patternMatchOrder(producers);
 
     std::vector<std::string> rootOpcodes;
-    for(size_t node = 0; node < nodes.size(); ++node)
+    for(size_t node = 0; node < compiled.size(); ++node)
     {
         if(producers[node].empty())
         {
-            const auto& opcodes = pattern.nodes()[node].opcodes;
+            const auto& opcodes = pattern[node].opcodes;
             rootOpcodes.insert(rootOpcodes.end(), opcodes.begin(), opcodes.end());
         }
     }
     std::sort(rootOpcodes.begin(), rootOpcodes.end());
     rootOpcodes.erase(std::unique(rootOpcodes.begin(), rootOpcodes.end()), rootOpcodes.end());
 
-    std::vector<PublishedSymbol> symbols;
-    symbols.push_back(PublishedSymbol{"graph.node_count", SymbolKind::INT, false});
-    symbols.push_back(PublishedSymbol{"graph.is_override_shape_enabled", SymbolKind::BOOL, false});
-    for(const auto& variable : variables)
-    {
-        symbols.push_back(PublishedSymbol{variable.name, SymbolKind::TENSOR, variable.optional});
-    }
-    for(const auto& node : nodes)
-    {
-        for(const auto& attribute : node.attributes)
-        {
-            symbols.push_back(PublishedSymbol{attribute.token, attribute.kind, attribute.optional});
-        }
-    }
-    std::sort(symbols.begin(), symbols.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.name < rhs.name;
-    });
-
     return std::make_shared<CompiledGraphPattern>(CompiledGraphPattern::ConstructionKey{},
                                                   where,
-                                                  std::move(nodes),
+                                                  std::move(compiled),
                                                   std::move(matchOrder),
                                                   std::move(variables),
-                                                  std::move(rootOpcodes),
-                                                  std::move(symbols));
+                                                  std::move(rootOpcodes));
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

@@ -224,7 +224,8 @@ which writes two files from one schema walk:
 
 - `flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/op_schema_registry_generated.h`,
   which the kernel ingestor compiles.
-- `flatbuffers_sdk/op_schema_registry.json`, which `hkp_pack` validates descriptors against.
+- `flatbuffers_sdk/op_schema_registry.json`, each op's operand and result edges, which
+  `hkp_pack` validates descriptors against.
 
 ### Annotating a table
 
@@ -265,44 +266,25 @@ list**: a variable-length set of tensor references. Give it exactly one directio
     output_tensor_uids: [long] (cache_uid, matcher_output_tensor);
 ```
 
-The registry lists it under `operandLists`/`resultLists` (`operand_lists`/`result_lists` in
-the JSON), named by the field. The ingestor counts a result list's uids as tensors the node
-produces, exactly like a scalar result, so a pattern can never treat a tensor an edge list
-produces as a graph input. A pattern cannot bind an edge list by name: an edge naming one
-fails to resolve like any undeclared edge.
+The registry lists it under `operandLists`/`resultLists`, named by the field. The ingestor
+counts a result list's uids as tensors the node produces, exactly like a scalar result, so a
+pattern can never treat a tensor an edge list produces as a graph input. A pattern cannot
+bind an edge list by name: an edge naming one fails to resolve like any undeclared edge.
 
 Every unflagged scalar field becomes a scalar attribute named by the field: integers as
-`int`, `float`/`double` as `float`, `bool` as `bool`, and enum-typed fields as `enum_name`,
-the name of the enum value. The `Node` table's `compute_data_type` is added to every op.
-Other vectors, strings, and sub-tables are skipped. A `long` field that is not a tensor
-reference, such as `PointwiseAttributes.axis_tensor_uid`, stays unflagged and is an `int`
-attribute.
+`ValueKind::INT`, `float`/`double` as `FLOAT`, `bool` as `BOOL`, and enum-typed fields as
+`ENUM_NAME`, the name of the enum value. The `Node` table's `compute_data_type` is added to
+every op. Other vectors, strings, and sub-tables are skipped. A `long` field that is not a
+tensor reference, such as `PointwiseAttributes.axis_tensor_uid`, stays unflagged and is an
+`INT` attribute.
 
 A new `.fbs` file must redeclare the `matcher_*` annotations it uses, as it does `cache_uid`.
 
 ### Build errors
 
-The generator refuses to write either file, naming the table and field, when:
-
-- A `NodeAttributes` table has no `matcher_opcode`.
-- A field carries both `matcher_input_tensor` and `matcher_output_tensor`.
-- A field carries `matcher_name` without a direction flag, or a flagged scalar lacks a non-empty
-  `matcher_name`.
-- A direction flag is on anything other than a scalar `long` or a `[long]` vector.
-- A scalar integer field carries `(cache_uid)` but no direction flag. Every tensor
-  reference must be an edge.
-- A vector field carries `(cache_uid)` but no direction flag, or a direction-flagged vector
-  carries `matcher_name`. Every tensor-uid vector must be an edge list, and an edge list has no
-  name.
-- Two edges of one op share a `matcher_name`, or two attributes share a name (including the
-  `Node` table's attributes).
-- An edge is named `graph`, `kernel`, or `device`, the reserved symbol roots.
-- A `matcher_opcode` or `matcher_name` is not an identifier (`[A-Za-z_][A-Za-z0-9_]*`).
-- Two tables declare the same opcode, or `matcher_opcode` is on a table outside the
-  `NodeAttributes` union.
-- A `Node` table field carries any `matcher_` annotation. `Node` fields bind as attributes only.
-- An annotation starts with `matcher_` but is not one of the four above.
-- An attribute is an unsigned 64-bit integer, which cannot be published as a signed `int`.
+When the registry cannot describe a table faithfully, the generator writes neither file and
+stops with an `ERROR:` that names the table, the field, and the broken rule (RFC 0020
+Appendix B.3).
 
 ### Regenerating
 

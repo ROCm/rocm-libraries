@@ -323,7 +323,7 @@ TEST(TestBindingPublication, PublishesWholeGraphCountAndActualOverrideFlag)
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());
         BoundTokens bound;
-        ASSERT_TRUE(publishGraph(bound, graph));
+        publishGraph(bound, graph);
         EXPECT_EQ(tryGetBoundInt(bound, "graph.node_count"), 2);
         EXPECT_EQ(std::get<bool>(bound.at("graph.is_override_shape_enabled")), overrideShape);
     }

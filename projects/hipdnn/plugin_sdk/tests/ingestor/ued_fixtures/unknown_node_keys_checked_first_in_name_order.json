@@ -9,23 +9,7 @@
     "metadata": "e0f2fdf4-215e-5449-96d7-845b56344d8f",
     "graph_match": {
       "nodes": [
-        {
-          "id": "pw",
-          "op": "pointwise",
-          "operands": {
-            "in_0": "$input_a",
-            "in_1": "$input_b"
-          },
-          "results": {
-            "out_0": "$output"
-          },
-          "outputs": {
-            "out_0": "$output"
-          },
-          "inputs": {
-            "in_0": "$input_a"
-          }
-        }
+        {"id": "pw", "op": "pointwise", "operands": {"in_0": "$input_a", "in_1": "$input_b"}, "results": {"out_0": "$output"}, "outputs": {"out_0": "$output"}, "inputs": {"in_0": "$input_a"}}
       ]
     }
   }

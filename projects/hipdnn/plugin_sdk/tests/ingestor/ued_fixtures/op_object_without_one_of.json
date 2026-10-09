@@ -1,8 +1,7 @@
 {
   "description": "A node whose 'op' object has no 'one_of'.",
   "valid": false,
-  "runtime_error": "missing required key 'one_of'",
-  "packager_error": "op object missing required field 'one_of'",
+  "error": "missing required key 'one_of'",
   "ued": {
     "version": "1.0",
     "id": "401123cc-6d42-5588-9a89-3568ff644b37",
@@ -10,18 +9,7 @@
     "metadata": "eb951468-3837-532f-8c28-f49f95377e25",
     "graph_match": {
       "nodes": [
-        {
-          "kind": "op",
-          "id": "pw",
-          "op": {},
-          "operands": {
-            "in_0": "$input_a",
-            "in_1": "$input_b"
-          },
-          "results": {
-            "out_0": "$output"
-          }
-        }
+        {"kind": "op", "id": "pw", "op": {}, "operands": {"in_0": "$input_a", "in_1": "$input_b"}, "results": {"out_0": "$output"}}
       ]
     }
   }

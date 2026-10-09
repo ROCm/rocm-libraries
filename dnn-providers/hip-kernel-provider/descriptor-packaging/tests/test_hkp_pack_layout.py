@@ -1077,8 +1077,6 @@ def test_generic_descriptors_are_validated_against_the_loader_schema(
         ({"heuristic": 7}, None, "field 'heuristic' must be a nonempty string"),
         ({"name": "test:engine\n"}, None, "must be scoped 'namespace:local'"),
         ({"tensor_roots": ["input_a"]}, None, "has unknown key 'tensor_roots'"),
-        ({"graph_match": None}, None, "graph_match must be an object"),
-        ({"graph_match": {}}, None, "exactly one of 'nodes' or 'native'"),
         (
             {"graph_match": {"native": ""}},
             None,
@@ -1088,16 +1086,6 @@ def test_generic_descriptors_are_validated_against_the_loader_schema(
             {"graph_match": {"native": 7}},
             None,
             "field 'native' must be a nonempty string",
-        ),
-        (
-            {"graph_match": {"native": "hipkernel.pointwise.graph_match", "nodes": []}},
-            None,
-            "exactly one of 'nodes' or 'native'",
-        ),
-        (
-            {"graph_match": {"nodes": "pointwise"}},
-            None,
-            "graph_match 'nodes' must be a nonempty array",
         ),
         ({"knobs": "block_size"}, None, "field 'knobs' must be an array of strings"),
         (
@@ -1180,8 +1168,8 @@ def _empty_arch_pattern_root(tmp_path, empty_arch_fixture):
     return root
 
 
-# HkpPackaging.cmake passes an empty `--op-schema-registry` when its variable is
-# unset. That must mean "not given", not the current directory.
+# `hkp_pack.py --op-schema-registry ""` must mean "not given", not the current
+# directory.
 @pytest.mark.quick
 def test_an_empty_registry_argument_falls_back_to_the_repo_registry(
     tmp_path, empty_arch_fixture, monkeypatch

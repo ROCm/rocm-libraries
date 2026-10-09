@@ -1,8 +1,7 @@
 {
   "description": "Two nodes share an id.",
   "valid": false,
-  "runtime_error": "node id 'pw' is used by two nodes",
-  "packager_error": "node 'pw' id is not unique",
+  "error": "node id 'pw' is used by two nodes",
   "ued": {
     "version": "1.0",
     "id": "04f4a686-855e-5aec-81d3-667bd5f9b48b",
@@ -10,28 +9,8 @@
     "metadata": "1ee2961a-3ab7-5e66-b553-60088d37088f",
     "graph_match": {
       "nodes": [
-        {
-          "kind": "op",
-          "id": "pw",
-          "op": "pointwise",
-          "operands": {
-            "in_0": "$a"
-          },
-          "results": {
-            "out_0": "$b"
-          }
-        },
-        {
-          "kind": "op",
-          "id": "pw",
-          "op": "pointwise",
-          "operands": {
-            "in_0": "$b"
-          },
-          "results": {
-            "out_0": "$c"
-          }
-        }
+        {"kind": "op", "id": "pw", "op": "pointwise", "operands": {"in_0": "$a"}, "results": {"out_0": "$b"}},
+        {"kind": "op", "id": "pw", "op": "pointwise", "operands": {"in_0": "$b"}, "results": {"out_0": "$c"}}
       ]
     }
   }

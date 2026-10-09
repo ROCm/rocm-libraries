@@ -9,19 +9,7 @@
     "metadata": "4fe339ac-ecfb-5b1f-91dc-e1bfeeb5826f",
     "graph_match": {
       "nodes": [
-        {
-          "kind": "op",
-          "id": "bn",
-          "op": {
-            "one_of": [
-              "batchnorm_inference",
-              "batchnorm_bwd"
-            ]
-          },
-          "operands": {
-            "mean": "$mean"
-          }
-        }
+        {"kind": "op", "id": "bn", "op": {"one_of": ["batchnorm_inference", "batchnorm_bwd"]}, "operands": {"mean": "$mean"}}
       ]
     }
   }

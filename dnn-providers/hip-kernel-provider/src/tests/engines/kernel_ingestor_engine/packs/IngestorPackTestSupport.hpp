@@ -16,10 +16,16 @@
 #include <string_view>
 #include <utility>
 
+#include <gtest/gtest.h>
+
+#include <nlohmann/json.hpp>
+
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
+#include <hipdnn_plugin_sdk/ingestor/GraphPatternMatcher.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -248,6 +254,70 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(int64_t blockSiz
     kernel.metadata
         = {{std::string(BLOCK_SIZE_FIELD), blockSize}, {std::string(DTYPE_FIELD), dtype}};
     return kernel;
+}
+
+/// A `graph_match.nodes` pattern for one binary pointwise node. The node id matches the
+/// native attribute root, so both arms publish the same `pointwise.*` keys. @p swapInputs
+/// binds `$input_a` to the node's `in_1` edge and `$input_b` to its `in_0` edge. The
+/// registry cannot catch this authoring mistake because both are operands of the same op.
+inline nlohmann::json pointwisePattern(bool swapInputs = false)
+{
+    const auto* inputAEdge = swapInputs ? "in_1" : "in_0";
+    const auto* inputBEdge = swapInputs ? "in_0" : "in_1";
+    return nlohmann::json::array(
+        {{{"kind", "op"},
+          {"id", "pointwise"},
+          {"op", "pointwise"},
+          {"operands", {{inputAEdge, "$input_a"}, {inputBEdge, "$input_b"}}},
+          {"results", {{"out_0", "$output"}}}}});
+}
+
+/// A `graph_match.nodes` pattern for one forward convolution. The node id matches the
+/// native attribute root, so both arms publish the same `conv.*` keys. @p swapXAndW binds
+/// `$x` to the node's `w` edge and `$w` to its `x` edge. The registry cannot catch this
+/// authoring mistake because both are required operands of the same op.
+inline nlohmann::json convPattern(bool swapXAndW = false)
+{
+    const auto* xEdge = swapXAndW ? "w" : "x";
+    const auto* wEdge = swapXAndW ? "x" : "w";
+    return nlohmann::json::array({{{"kind", "op"},
+                                   {"id", "conv"},
+                                   {"op", "convolution_fwd"},
+                                   {"operands", {{xEdge, "$x"}, {wEdge, "$w"}}},
+                                   {"results", {{"y", "$y"}}}}});
+}
+
+/// Compiles @p nodes and binds @p context through it, as a UED's declarative arm does.
+inline std::optional<hipdnn_plugin_sdk::ingestor::BoundTokens>
+    matchPattern(const nlohmann::json& nodes,
+                 const hipdnn_plugin_sdk::ingestor::MatchContext& context)
+{
+    return hipdnn_plugin_sdk::ingestor::matchGraphPattern(
+        *hipdnn_plugin_sdk::ingestor::compileGraphPattern(nodes, "test pattern"), context);
+}
+
+/// Asserts @p declarative publishes exactly the tokens @p native does, with the same
+/// values, so criteria and dispatch written against the native binding work under either
+/// arm.
+inline void expectSameBinding(const hipdnn_plugin_sdk::ingestor::BoundTokens& native,
+                              const hipdnn_plugin_sdk::ingestor::BoundTokens& declarative)
+{
+    std::set<std::string> nativeNames;
+    for(const auto& token : native)
+    {
+        nativeNames.insert(token.first);
+    }
+    std::set<std::string> declarativeNames;
+    for(const auto& token : declarative)
+    {
+        declarativeNames.insert(token.first);
+    }
+
+    ASSERT_EQ(declarativeNames, nativeNames);
+    for(const auto& [name, value] : native)
+    {
+        EXPECT_TRUE(declarative.at(name) == value) << name;
+    }
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

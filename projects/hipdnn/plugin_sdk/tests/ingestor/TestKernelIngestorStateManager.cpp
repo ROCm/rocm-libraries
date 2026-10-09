@@ -649,8 +649,8 @@ TEST(TestKernelIngestorStateManager, ResidentCanonicalPublicationOutlivesItsSour
     const auto publish = [](const MatchContext& context) -> std::optional<BoundTokens> {
         ++counters().graphMatchCalls;
         BoundTokens bound;
-        if(!publishGraph(bound, context.graph)
-           || !publishTensor(bound, "input", context.graph.getTensorMap().at(1)))
+        publishGraph(bound, context.graph);
+        if(!publishTensor(bound, "input", context.graph.getTensorMap().at(1)))
         {
             return std::nullopt;
         }

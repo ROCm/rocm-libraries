@@ -8,9 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <limits>
-#include <memory>
 #include <optional>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -20,15 +18,10 @@
 
 #include <gtest/gtest.h>
 
-#include <nlohmann/json.hpp>
-
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
-#include <hipdnn_plugin_sdk/ingestor/GraphPattern.hpp>
-#include <hipdnn_plugin_sdk/ingestor/GraphPatternMatcher.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
@@ -415,58 +408,19 @@ TEST(TestConvFwdKernelMatcher, AcceptsAHalfKernelForAHalfGraph)
 // native criterion and dispatch. The pattern checks only topology. The kernel matcher is
 // the pack's only criterion, so it must refuse every graph the kernel cannot serve.
 
-/// The pattern such a UED carries. The node id matches the native attribute root, so both
-/// arms publish the same `conv.*` keys. @p swapXAndW binds `$x` to the node's `w` edge and
-/// `$w` to its `x` edge. The registry cannot catch this authoring mistake because both are
-/// required operands of the same op.
-std::shared_ptr<const hipdnn_plugin_sdk::ingestor::CompiledGraphPattern> convPattern(bool swapXAndW
-                                                                                     = false)
-{
-    const auto* xEdge = swapXAndW ? "w" : "x";
-    const auto* wEdge = swapXAndW ? "x" : "w";
-    const auto nodes = nlohmann::json::array({{{"kind", "op"},
-                                               {"id", "conv"},
-                                               {"op", "convolution_fwd"},
-                                               {"operands", {{xEdge, "$x"}, {wEdge, "$w"}}},
-                                               {"results", {{"y", "$y"}}}}});
-    return hipdnn_plugin_sdk::ingestor::compileGraphPattern(
-        hipdnn_plugin_sdk::ingestor::parseGraphPattern(nodes, "conv test pattern"),
-        "conv test pattern");
-}
-
-std::optional<BoundTokens> matchesPattern(const MatchContext& context, bool swapXAndW = false)
-{
-    return hipdnn_plugin_sdk::ingestor::matchGraphPattern(*convPattern(swapXAndW), context);
-}
-
-std::set<std::string> tokenNames(const BoundTokens& bound)
-{
-    std::set<std::string> names;
-    for(const auto& token : bound)
-    {
-        names.insert(token.first);
-    }
-    return names;
-}
-
-/// Both arms publish the same tokens and values, so the criterion and dispatch written
-/// against the native binding work under either arm. The node compute type differs from
-/// the tensor dtype to catch a publication that reads the wrong one.
+/// The node compute type differs from the tensor dtype to catch a publication that reads
+/// the wrong one.
 TEST(TestConvFwdDeclarativeMatch, PublishesTheNativeBindingTokenForToken)
 {
     const GraphFixture fixture(transformGraph(buildConvFwdGraph(), [](auto& graph) {
         graph.nodes[0]->compute_data_type = data_objects::DataType::DOUBLE;
     }));
     const auto native = matchesGraph(CONV_FWD, fixture.context());
-    const auto declarative = matchesPattern(fixture.context());
+    const auto declarative = matchPattern(convPattern(), fixture.context());
     ASSERT_TRUE(native.has_value());
     ASSERT_TRUE(declarative.has_value());
 
-    ASSERT_EQ(tokenNames(*declarative), tokenNames(*native));
-    for(const auto& [name, value] : *native)
-    {
-        EXPECT_TRUE(declarative->at(name) == value) << name;
-    }
+    expectSameBinding(*native, *declarative);
 }
 
 /// A graph the pattern binds differently from the native match, which either refuses it or
@@ -487,7 +441,7 @@ class TestConvFwdDeclarativeRefusal : public ::testing::TestWithParam<Declarativ
 TEST(TestConvFwdDeclarativeMatch, KernelMatcherAdmitsAServableDeclarativeBinding)
 {
     const GraphFixture fixture(buildConvFwdGraph());
-    const auto bound = matchesPattern(fixture.context());
+    const auto bound = matchPattern(convPattern(), fixture.context());
     ASSERT_TRUE(bound.has_value());
 
     EXPECT_TRUE(
@@ -497,7 +451,7 @@ TEST(TestConvFwdDeclarativeMatch, KernelMatcherAdmitsAServableDeclarativeBinding
 TEST_P(TestConvFwdDeclarativeRefusal, KernelMatcherDeclinesWhatOnlyThePatternAdmits)
 {
     const GraphFixture fixture(GetParam().buildGraph());
-    const auto bound = matchesPattern(fixture.context(), GetParam().swapXAndW);
+    const auto bound = matchPattern(convPattern(GetParam().swapXAndW), fixture.context());
     ASSERT_TRUE(bound.has_value());
     const auto native = matchesGraph(CONV_FWD, fixture.context());
     ASSERT_TRUE(!native.has_value() || *native != *bound);
@@ -718,7 +672,7 @@ TEST(TestConvFwdDispatch, RefusesToPrepareABindingMissingAnExtent)
                                                  /*xDims=*/std::vector<int64_t>{1, 1, 3},
                                                  /*wDims=*/std::vector<int64_t>{1, 1, 2, 2},
                                                  /*yDims=*/std::vector<int64_t>{1, 1, 2, 2}));
-    const auto bound = matchesPattern(fixture.context());
+    const auto bound = matchPattern(convPattern(), fixture.context());
     ASSERT_TRUE(bound.has_value());
     const auto& handler = dispatchHandler(CONV_FWD);
 

@@ -1,8 +1,7 @@
 {
   "description": "A node without the required key 'id'.",
   "valid": false,
-  "runtime_error": "missing required key 'id' in graph_match.nodes[0]",
-  "packager_error": "graph_match node 0 missing required field 'id'",
+  "error": "missing required key 'id' in graph_match.nodes[0]",
   "ued": {
     "version": "1.0",
     "id": "8c26ce52-2b24-5aa8-b119-7e1b2421d37f",
@@ -10,17 +9,7 @@
     "metadata": "6b947c68-6fbb-5dd7-b88e-d67bbe191895",
     "graph_match": {
       "nodes": [
-        {
-          "kind": "op",
-          "op": "pointwise",
-          "operands": {
-            "in_0": "$input_a",
-            "in_1": "$input_b"
-          },
-          "results": {
-            "out_0": "$output"
-          }
-        }
+        {"kind": "op", "op": "pointwise", "operands": {"in_0": "$input_a", "in_1": "$input_b"}, "results": {"out_0": "$output"}}
       ]
     }
   }

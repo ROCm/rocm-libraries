@@ -13,8 +13,10 @@ annotations, so they are read from the binary schema.
 Writes two files from one schema walk, so they always agree:
 
 - ``op_schema_registry_generated.h``: the header-only registry the kernel ingestor
-  compiles, with a typed accessor per edge and attribute.
-- ``op_schema_registry.json``: the same registry for build-time tools (hkp_pack).
+  compiles. Each edge and attribute reads its field through a reader template
+  instantiated on the FlatBuffers accessor.
+- ``op_schema_registry.json``: each op's operand and result edges, for build-time
+  tools (hkp_pack).
 
 If the registry cannot describe a schema faithfully, the run fails with an ``ERROR:``
 that names the table and field. No registry is written.
@@ -29,15 +31,20 @@ import json
 import os
 import re
 import tempfile
+from dataclasses import dataclass, field as dataclass_field
+from string import Template
+from typing import Optional
 
 from gen_cache_key import (
+    HIPDNN_DIR,
+    IGNORE_ATTRIBUTE,
     NAMESPACE,
     SCALAR_BASE_TYPES,
     SDK_DIR,
-    _HIPDNN_DIR,
-    _resolve_flatc,
+    UID_ATTRIBUTE,
     accessor,
     load_schema,
+    resolve_flatc,
     short_name,
 )
 
@@ -56,12 +63,6 @@ NAME_ATTRIBUTE = "matcher_name"
 FIELD_ATTRIBUTES = frozenset([INPUT_ATTRIBUTE, OUTPUT_ATTRIBUTE, NAME_ATTRIBUTE])
 ANNOTATION_PREFIX = "matcher_"
 
-# Defined by gen_cache_key.py. An integer or integer vector carrying cache_uid is a
-# tensor reference. The registry must classify it as an edge or edge list, never
-# publish it as an attribute or skip it.
-UID_ATTRIBUTE = "cache_uid"
-IGNORE_ATTRIBUTE = "cache_ignore"
-
 # Symbol roots a pattern variable may not take (RFC 0020 section 6.1).
 RESERVED_ROOTS = frozenset(["device", "graph", "kernel"])
 
@@ -77,54 +78,52 @@ HEADER_NAME = "op_schema_registry_generated.h"
 JSON_NAME = "op_schema_registry.json"
 GENERATOR = "scripts/gen_op_schema_registry.py"
 
-# Value kinds, as (JSON name, C++ ValueKind enumerator, ScalarValue alternative).
-INT = ("int", "INT", "int64_t")
-FLOAT = ("float", "FLOAT", "double")
-BOOL = ("bool", "BOOL", "bool")
-ENUM_NAME = ("enum_name", "ENUM_NAME", "std::string_view")
+# Value kinds, named by their C++ ValueKind enumerator.
+INT = "INT"
+FLOAT = "FLOAT"
+BOOL = "BOOL"
+ENUM_NAME = "ENUM_NAME"
+
+# The ScalarValue alternative each non-enum kind is held as.
+SCALAR_ALTERNATIVES = {INT: "int64_t", FLOAT: "double", BOOL: "bool"}
 
 
 def _fail(message):
     raise SystemExit(f"ERROR: {message}")
 
 
-def _camel(name):
-    return "".join(part[:1].upper() + part[1:] for part in name.split("_"))
-
-
+@dataclass
 class Edge:
-    def __init__(self, name, field, optional):
-        self.name = name
-        self.field = field
-        self.optional = optional
+    name: str
+    field: str
+    optional: bool
 
 
+@dataclass
 class EdgeList:
-    def __init__(self, field):
-        self.field = field
+    field: str
 
 
+@dataclass
 class Attribute:
-    def __init__(self, name, kind, optional, enum, on_node):
-        self.name = name
-        self.kind = kind
-        self.optional = optional
-        # Short enum type name for ENUM_NAME, else None.
-        self.enum = enum
-        # Read from the Node table rather than the attribute table.
-        self.on_node = on_node
+    name: str
+    kind: str
+    optional: bool
+    # Short enum type name for ENUM_NAME, else None.
+    enum: Optional[str]
+    # Read from the Node table rather than the attribute table.
+    on_node: bool
 
 
+@dataclass
 class OpSchema:
-    def __init__(self, opcode, table, attributes_type):
-        self.opcode = opcode
-        self.table = table
-        self.attributes_type = attributes_type
-        self.operands = []
-        self.results = []
-        self.operand_lists = []
-        self.result_lists = []
-        self.attributes = []
+    opcode: str
+    table: str
+    operands: list = dataclass_field(default_factory=list)
+    results: list = dataclass_field(default_factory=list)
+    operand_lists: list = dataclass_field(default_factory=list)
+    result_lists: list = dataclass_field(default_factory=list)
+    attributes: list = dataclass_field(default_factory=list)
 
 
 class Registry:
@@ -153,7 +152,7 @@ class Registry:
         )
 
     def _union_members(self):
-        """(union value, table object) per NodeAttributes member, NONE excluded."""
+        """The table object of each NodeAttributes member, NONE excluded."""
         unions = [
             f
             for f in self.node["fields"]
@@ -170,7 +169,7 @@ class Registry:
             member = value.get("union_type") or {}
             if member.get("base_type") != "Obj" or member.get("index", -1) < 0:
                 continue
-            members.append((value["value"], self.schema["objects"][member["index"]]))
+            members.append(self.schema["objects"][member["index"]])
         return members
 
     def _opcode(self, table):
@@ -306,7 +305,7 @@ class Registry:
 
     def _build(self):
         members = self._union_members()
-        member_names = {table["name"] for _, table in members}
+        member_names = {table["name"] for table in members}
         for obj in self.schema["objects"]:
             if (
                 OPCODE_ATTRIBUTE in self._annotations(obj)
@@ -319,7 +318,7 @@ class Registry:
 
         node_attributes = self.node_attributes
         ops = {}
-        for value, table in members:
+        for table in members:
             table_name = short_name(table["name"])
             opcode = self._opcode(table)
             if opcode in ops:
@@ -327,7 +326,7 @@ class Registry:
                     f"opcode '{opcode}' is declared by both "
                     f"'{ops[opcode].table}' and '{table_name}'"
                 )
-            op = OpSchema(opcode, table_name, value)
+            op = OpSchema(opcode, table_name)
             for field in self._fields(table):
                 self._classify_field(op, field, table_name)
             op.attributes.extend(node_attributes)
@@ -353,411 +352,388 @@ class Registry:
         return [ops[opcode] for opcode in sorted(ops)]
 
 
-class HeaderEmitter:
-    """Emits op_schema_registry_generated.h for a classified Registry."""
+# Everything before the per-op tables: the schema types and the reader templates every
+# table row instantiates.
+HEADER_PROLOGUE = Template(
+    """\
+// Automatically generated by ${generator}, do not modify.
+//
+// The op-schema registry: per NodeAttributes table, the opcode a UED pattern
+// names it by, its operand and result tensor edges and edge lists, and its
+// scalar attributes, taken from the '${opcode}', '${input}',
+// '${output}', and '${name}' schema annotations. Static tables
+// read the caller's buffer in place: no allocation, no reflection.
 
-    def __init__(self, registry):
-        self.registry = registry
-        self.node_table = short_name(registry.node["name"])
-        self.lines = []
+#pragma once
 
-    def w(self, line=""):
-        self.lines.append(line)
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+#include <variant>
 
-    def edge_reader(self, op, edge):
-        return f"read{op.table}{_camel(edge.field)}"
+#include <${namespace}/data_objects/graph_generated.h>
 
-    def attribute_reader(self, op, attribute):
-        if attribute.on_node:
-            return f"read{self.node_table}{_camel(attribute.name)}"
-        return f"read{op.table}{_camel(attribute.name)}"
+namespace ${namespace}::data_objects::op_schema
+{
 
-    @staticmethod
-    def array_name(op, suffix):
-        return f"{op.opcode.upper()}_{suffix}"
+/// How a scalar attribute's value is represented in a ScalarValue.
+enum class ValueKind : uint8_t
+{
+    INT, ///< int64_t, widened from any integer field.
+    FLOAT, ///< double, widened exactly from a float or double field.
+    BOOL, ///< bool.
+    ENUM_NAME, ///< std::string_view naming the enum value; empty when out of range.
+};
 
-    def emit(self):
-        self.emit_prologue()
-        self.w("namespace detail")
-        self.w("{")
-        self.w()
-        for attribute in self.registry.node_attributes:
-            self.emit_attribute_reader(None, attribute)
-        for op in self.registry.ops:
-            for edge in op.operands + op.results:
-                self.emit_edge_reader(op, edge)
-            for edge_list in op.operand_lists + op.result_lists:
-                self.emit_edge_list_reader(op, edge_list)
-            for attribute in op.attributes:
-                if not attribute.on_node:
-                    self.emit_attribute_reader(op, attribute)
-            self.emit_arrays(op)
-        self.emit_op_table()
-        self.w("} // namespace detail")
-        self.w()
-        self.emit_lookups()
-        self.w(f"}} // namespace {NAMESPACE}::data_objects::op_schema")
-        return "\n".join(self.lines) + "\n"
+using ScalarValue = std::variant<bool, int64_t, double, std::string_view>;
 
-    def emit_prologue(self):
-        self.w(f"// Automatically generated by {GENERATOR}, do not modify.")
-        self.w("//")
-        self.w(
-            "// The op-schema registry: per NodeAttributes table, the opcode a UED pattern"
-        )
-        self.w(
-            "// names it by, its operand and result tensor edges and edge lists, and its"
-        )
-        self.w(
-            f"// scalar attributes, taken from the '{OPCODE_ATTRIBUTE}', '{INPUT_ATTRIBUTE}',"
-        )
-        self.w(
-            f"// '{OUTPUT_ATTRIBUTE}', and '{NAME_ATTRIBUTE}' schema annotations. Static tables"
-        )
-        self.w("// read the caller's buffer in place: no allocation, no reflection.")
-        self.w()
-        self.w("#pragma once")
-        self.w()
-        self.w("#include <array>")
-        self.w("#include <cstddef>")
-        self.w("#include <cstdint>")
-        self.w("#include <optional>")
-        self.w("#include <string_view>")
-        self.w("#include <utility>")
-        self.w("#include <variant>")
-        self.w()
-        self.w(f"#include <{NAMESPACE}/data_objects/graph_generated.h>")
-        self.w()
-        self.w(f"namespace {NAMESPACE}::data_objects::op_schema")
-        self.w("{")
-        self.w()
-        self.w("/// How a scalar attribute's value is represented in a ScalarValue.")
-        self.w("enum class ValueKind : uint8_t")
-        self.w("{")
-        self.w("    INT, ///< int64_t, widened from any integer field.")
-        self.w("    FLOAT, ///< double, widened exactly from a float or double field.")
-        self.w("    BOOL, ///< bool.")
-        self.w(
-            "    ENUM_NAME, ///< std::string_view naming the enum value; empty when out of range."
-        )
-        self.w("};")
-        self.w()
-        self.w(
-            "using ScalarValue = std::variant<bool, int64_t, double, std::string_view>;"
-        )
-        self.w()
-        self.w("/// An operand or result tensor edge of an op.")
-        self.w("struct EdgeSchema")
-        self.w("{")
-        self.w(
-            "    std::string_view name; ///< The edge name a pattern binds (matcher_name)."
-        )
-        self.w("    bool optional; ///< The uid field is `= null`.")
-        self.w(
-            "    /// The edge's tensor uid; nullopt when an optional uid is absent or the node"
-        )
-        self.w("    /// does not carry this op's attribute table. Never throws.")
-        self.w("    std::optional<int64_t> (*read)(const Node& node);")
-        self.w("};")
-        self.w()
-        self.w("/// A scalar attribute of an op, published as `<node id>.<name>`.")
-        self.w("struct AttributeSchema")
-        self.w("{")
-        self.w("    std::string_view name; ///< The field name.")
-        self.w("    ValueKind kind;")
-        self.w("    bool optional; ///< The field is `= null`.")
-        self.w(
-            "    /// The attribute's value; nullopt when an optional field is absent or the node"
-        )
-        self.w(
-            "    /// does not carry this op's attribute table. Node-table attributes read the"
-        )
-        self.w("    /// Node itself. Never throws.")
-        self.w("    std::optional<ScalarValue> (*read)(const Node& node);")
-        self.w("};")
-        self.w()
-        self.w(
-            "/// A tensor-uid vector field: its uids are the node's operands or results, but a"
-        )
-        self.w("/// pattern never binds it by name.")
-        self.w("struct EdgeListSchema")
-        self.w("{")
-        self.w("    std::string_view name; ///< The field name.")
-        self.w(
-            "    /// The uid vector; nullptr when absent or the node does not carry this op's"
-        )
-        self.w("    /// attribute table. Never throws.")
-        self.w("    const ::flatbuffers::Vector<int64_t>* (*read)(const Node& node);")
-        self.w("};")
-        self.w()
-        self.w(
-            "/// A read-only view over a static array (C++17 stand-in for std::span)."
-        )
-        self.w("template <typename T>")
-        self.w("struct SchemaSpan")
-        self.w("{")
-        self.w("    const T* data;")
-        self.w("    size_t size;")
-        self.w()
-        self.w("    constexpr const T* begin() const")
-        self.w("    {")
-        self.w("        return data;")
-        self.w("    }")
-        self.w()
-        self.w("    constexpr const T* end() const")
-        self.w("    {")
-        self.w("        return data + size;")
-        self.w("    }")
-        self.w()
-        self.w("    constexpr bool empty() const")
-        self.w("    {")
-        self.w("        return size == 0;")
-        self.w("    }")
-        self.w("};")
-        self.w()
-        self.w("/// One op: a NodeAttributes table and what a pattern can bind on it.")
-        self.w("struct OpSchema")
-        self.w("{")
-        self.w(
-            "    std::string_view opcode; ///< The table's matcher_opcode annotation."
-        )
-        self.w('    std::string_view attributesTable; ///< e.g. "PointwiseAttributes".')
-        self.w("    NodeAttributes attributesType; ///< The union discriminant.")
-        self.w("    SchemaSpan<EdgeSchema> operands; ///< Declaration order.")
-        self.w("    SchemaSpan<EdgeSchema> results; ///< Declaration order.")
-        self.w(
-            "    /// Attribute-table scalars in declaration order, then the Node table's scalars."
-        )
-        self.w("    SchemaSpan<AttributeSchema> attributes;")
-        self.w("    SchemaSpan<EdgeListSchema> operandLists; ///< Declaration order.")
-        self.w("    SchemaSpan<EdgeListSchema> resultLists; ///< Declaration order.")
-        self.w("};")
-        self.w()
+/// An operand or result tensor edge of an op.
+struct EdgeSchema
+{
+    std::string_view name; ///< The edge name a pattern binds (matcher_name).
+    bool optional; ///< The uid field is `= null`.
+    /// The edge's tensor uid; nullopt when an optional uid is absent or the node
+    /// does not carry this op's attribute table. Never throws.
+    std::optional<int64_t> (*read)(const Node& node);
+};
 
-    def emit_edge_reader(self, op, edge):
-        self.w(
-            f"inline std::optional<int64_t> {self.edge_reader(op, edge)}(const Node& node) noexcept"
-        )
-        self.w("{")
-        self.w(f"    const auto* table = node.attributes_as<{op.table}>();")
-        self.w("    if(table == nullptr)")
-        self.w("    {")
-        self.w("        return std::nullopt;")
-        self.w("    }")
-        field = accessor(edge.field)
-        if edge.optional:
-            self.w(f"    const auto value = table->{field}();")
-            self.w("    if(!value.has_value())")
-            self.w("    {")
-            self.w("        return std::nullopt;")
-            self.w("    }")
-            self.w("    return value.value();")
-        else:
-            self.w(f"    return table->{field}();")
-        self.w("}")
-        self.w()
+/// A scalar attribute of an op, published as `<node id>.<name>`.
+struct AttributeSchema
+{
+    std::string_view name; ///< The field name.
+    ValueKind kind;
+    bool optional; ///< The field is `= null`.
+    /// The attribute's value; nullopt when an optional field is absent or the node
+    /// does not carry this op's attribute table. Node-table attributes read the
+    /// Node itself. Never throws.
+    std::optional<ScalarValue> (*read)(const Node& node);
+};
 
-    def emit_edge_list_reader(self, op, edge_list):
-        self.w(
-            "inline const ::flatbuffers::Vector<int64_t>* "
-            f"{self.edge_reader(op, edge_list)}(const Node& node) noexcept"
-        )
-        self.w("{")
-        self.w(f"    const auto* table = node.attributes_as<{op.table}>();")
-        self.w("    if(table == nullptr)")
-        self.w("    {")
-        self.w("        return nullptr;")
-        self.w("    }")
-        self.w(f"    return table->{accessor(edge_list.field)}();")
-        self.w("}")
-        self.w()
+/// A tensor-uid vector field: its uids are the node's operands or results, but a
+/// pattern never binds it by name.
+struct EdgeListSchema
+{
+    std::string_view name; ///< The field name.
+    /// The uid vector; nullptr when absent or the node does not carry this op's
+    /// attribute table. Never throws.
+    const ::flatbuffers::Vector<int64_t>* (*read)(const Node& node);
+};
 
-    def emit_attribute_reader(self, op, attribute):
-        name = self.attribute_reader(op, attribute)
-        self.w(f"inline std::optional<ScalarValue> {name}(const Node& node) noexcept")
-        self.w("{")
-        if attribute.on_node:
-            source = "node."
-        else:
-            self.w(f"    const auto* table = node.attributes_as<{op.table}>();")
-            self.w("    if(table == nullptr)")
-            self.w("    {")
-            self.w("        return std::nullopt;")
-            self.w("    }")
-            source = "table->"
-        read = f"{source}{accessor(attribute.name)}()"
-        if attribute.optional:
-            self.w(f"    const auto value = {read};")
-            self.w("    if(!value.has_value())")
-            self.w("    {")
-            self.w("        return std::nullopt;")
-            self.w("    }")
-            read = "value.value()"
-        if attribute.kind is ENUM_NAME:
-            read = f"EnumName{attribute.enum}({read})"
-        self.w(
-            f"    return ScalarValue{{std::in_place_type<{attribute.kind[2]}>, {read}}};"
-        )
-        self.w("}")
-        self.w()
+/// A read-only view over a static array (C++17 stand-in for std::span).
+template <typename T>
+struct SchemaSpan
+{
+    const T* data;
+    size_t size;
 
-    def emit_arrays(self, op):
-        for suffix, edges in (("OPERANDS", op.operands), ("RESULTS", op.results)):
-            if not edges:
-                continue
-            self.w(
-                f"inline constexpr std::array<EdgeSchema, {len(edges)}> "
-                f"{self.array_name(op, suffix)} = {{{{"
+    constexpr const T* begin() const
+    {
+        return data;
+    }
+
+    constexpr const T* end() const
+    {
+        return data + size;
+    }
+
+    constexpr bool empty() const
+    {
+        return size == 0;
+    }
+};
+
+/// One op: a NodeAttributes table and what a pattern can bind on it.
+struct OpSchema
+{
+    std::string_view opcode; ///< The table's matcher_opcode annotation.
+    NodeAttributes attributesType; ///< The union discriminant.
+    SchemaSpan<EdgeSchema> operands; ///< Declaration order.
+    SchemaSpan<EdgeSchema> results; ///< Declaration order.
+    /// Attribute-table scalars in declaration order, then the Node table's scalars.
+    SchemaSpan<AttributeSchema> attributes;
+    SchemaSpan<EdgeListSchema> operandLists; ///< Declaration order.
+    SchemaSpan<EdgeListSchema> resultLists; ///< Declaration order.
+};
+
+namespace detail
+{
+
+template <typename Accessor>
+struct AccessorTable;
+
+template <typename Table, typename Value>
+struct AccessorTable<Value (Table::*)() const>
+{
+    using type = Table;
+};
+
+/// The table @p Field reads: the Node itself for a Node field, else the node's
+/// attribute table when it is @p Field's table, else nullptr.
+template <auto Field>
+const auto* fieldTable(const Node& node) noexcept
+{
+    using Table = typename AccessorTable<decltype(Field)>::type;
+    if constexpr(std::is_same_v<Table, Node>)
+    {
+        return &node;
+    }
+    else
+    {
+        return node.attributes_as<Table>();
+    }
+}
+
+template <typename T>
+std::optional<T> present(T value) noexcept
+{
+    return value;
+}
+
+template <typename T>
+std::optional<T> present(const ::flatbuffers::Optional<T>& value) noexcept
+{
+    if(!value.has_value())
+    {
+        return std::nullopt;
+    }
+    return *value;
+}
+
+/// @p Field's value; nullopt when the node does not carry its table or an optional
+/// field is absent.
+template <auto Field>
+auto readField(const Node& node) noexcept
+{
+    const auto* table = fieldTable<Field>(node);
+    using Value = decltype(present((table->*Field)()));
+    if(table == nullptr)
+    {
+        return Value{};
+    }
+    return present((table->*Field)());
+}
+
+template <auto Field>
+std::optional<int64_t> readEdge(const Node& node) noexcept
+{
+    return readField<Field>(node);
+}
+
+template <auto Field>
+const ::flatbuffers::Vector<int64_t>* readEdgeList(const Node& node) noexcept
+{
+    const auto* table = fieldTable<Field>(node);
+    return table == nullptr ? nullptr : (table->*Field)();
+}
+
+/// A scalar attribute held as @p Alternative.
+template <typename Alternative, auto Field>
+std::optional<ScalarValue> readScalar(const Node& node) noexcept
+{
+    const auto value = readField<Field>(node);
+    if(!value.has_value())
+    {
+        return std::nullopt;
+    }
+    return ScalarValue{std::in_place_type<Alternative>, *value};
+}
+
+/// An enum attribute held as the name @p EnumName gives its value.
+template <auto Field, auto EnumName>
+std::optional<ScalarValue> readEnumName(const Node& node) noexcept
+{
+    const auto value = readField<Field>(node);
+    if(!value.has_value())
+    {
+        return std::nullopt;
+    }
+    return ScalarValue{std::in_place_type<std::string_view>, EnumName(*value)};
+}
+
+template <typename T, size_t N>
+constexpr SchemaSpan<T> spanOf(const std::array<T, N>& entries) noexcept
+{
+    return SchemaSpan<T>{entries.data(), N};
+}
+
+"""
+)
+
+# Everything after the op table: the lookups.
+HEADER_EPILOGUE = Template(
+    """\
+} // namespace detail
+
+/// Every op, sorted by opcode.
+constexpr SchemaSpan<OpSchema> allOpSchemas() noexcept
+{
+    return detail::spanOf(detail::OP_SCHEMAS);
+}
+
+/// The op named @p opcode, or nullptr when no op declares it.
+constexpr const OpSchema* findOpSchema(std::string_view opcode) noexcept
+{
+    size_t low  = 0;
+    size_t high = detail::OP_SCHEMAS.size();
+    while(low < high)
+    {
+        const size_t middle = low + ((high - low) / 2);
+        if(detail::OP_SCHEMAS[middle].opcode < opcode)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    if(low < detail::OP_SCHEMAS.size() && detail::OP_SCHEMAS[low].opcode == opcode)
+    {
+        return &detail::OP_SCHEMAS[low];
+    }
+    return nullptr;
+}
+
+/// The op whose attribute table is @p attributesType, or nullptr for NONE or a
+/// value no op declares.
+constexpr const OpSchema* findOpSchema(NodeAttributes attributesType) noexcept
+{
+    for(const auto& op : detail::OP_SCHEMAS)
+    {
+        if(op.attributesType == attributesType)
+        {
+            return &op;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace ${namespace}::data_objects::op_schema
+"""
+)
+
+
+def _bool(value):
+    return "true" if value else "false"
+
+
+def _member(table, name):
+    return f"&{table}::{accessor(name)}"
+
+
+def _attribute_reader(op, attribute, node_table):
+    member = _member(node_table if attribute.on_node else op.table, attribute.name)
+    if attribute.kind == ENUM_NAME:
+        return f"&readEnumName<{member}, &EnumName{attribute.enum}>"
+    return f"&readScalar<{SCALAR_ALTERNATIVES[attribute.kind]}, {member}>"
+
+
+def emit_header(registry):
+    node_table = short_name(registry.node["name"])
+    out = [
+        HEADER_PROLOGUE.substitute(
+            generator=GENERATOR,
+            opcode=OPCODE_ATTRIBUTE,
+            input=INPUT_ATTRIBUTE,
+            output=OUTPUT_ATTRIBUTE,
+            name=NAME_ATTRIBUTE,
+            namespace=NAMESPACE,
+        )
+    ]
+
+    def array(op, suffix, element, rows):
+        """Emits one op's array; returns the OP_SCHEMAS span expression for it."""
+        if not rows:
+            return "{}"
+        name = f"{op.opcode.upper()}_{suffix}"
+        out.append(
+            f"inline constexpr std::array<{element}, {len(rows)}> {name} = {{{{\n"
+        )
+        out.extend(f"    {{{row}}},\n" for row in rows)
+        out.append("}};\n\n")
+        return f"spanOf({name})"
+
+    op_rows = []
+    for op in registry.ops:
+        spans = [
+            array(
+                op,
+                suffix,
+                "EdgeSchema",
+                [
+                    f'"{e.name}", {_bool(e.optional)}, &readEdge<{_member(op.table, e.field)}>'
+                    for e in edges
+                ],
             )
-            for edge in edges:
-                self.w(
-                    f'    {{"{edge.name}", {self.bool(edge.optional)}, '
-                    f"&{self.edge_reader(op, edge)}}},"
-                )
-            self.w("}};")
-            self.w()
-        for suffix, edge_lists in (
-            ("OPERAND_LISTS", op.operand_lists),
-            ("RESULT_LISTS", op.result_lists),
-        ):
-            if not edge_lists:
-                continue
-            self.w(
-                f"inline constexpr std::array<EdgeListSchema, {len(edge_lists)}> "
-                f"{self.array_name(op, suffix)} = {{{{"
+            for suffix, edges in (("OPERANDS", op.operands), ("RESULTS", op.results))
+        ]
+        spans.append(
+            array(
+                op,
+                "ATTRIBUTES",
+                "AttributeSchema",
+                [
+                    f'"{a.name}", ValueKind::{a.kind}, {_bool(a.optional)}, '
+                    f"{_attribute_reader(op, a, node_table)}"
+                    for a in op.attributes
+                ],
             )
-            for edge_list in edge_lists:
-                self.w(
-                    f'    {{"{edge_list.field}", &{self.edge_reader(op, edge_list)}}},'
-                )
-            self.w("}};")
-            self.w()
-        if op.attributes:
-            self.w(
-                f"inline constexpr std::array<AttributeSchema, {len(op.attributes)}> "
-                f"{self.array_name(op, 'ATTRIBUTES')} = {{{{"
+        )
+        spans.extend(
+            array(
+                op,
+                suffix,
+                "EdgeListSchema",
+                [
+                    f'"{e.field}", &readEdgeList<{_member(op.table, e.field)}>'
+                    for e in edge_lists
+                ],
             )
-            for attribute in op.attributes:
-                self.w(
-                    f'    {{"{attribute.name}", ValueKind::{attribute.kind[1]}, '
-                    f"{self.bool(attribute.optional)}, "
-                    f"&{self.attribute_reader(op, attribute)}}},"
-                )
-            self.w("}};")
-            self.w()
+            for suffix, edge_lists in (
+                ("OPERAND_LISTS", op.operand_lists),
+                ("RESULT_LISTS", op.result_lists),
+            )
+        )
+        op_rows.append(
+            f'    {{"{op.opcode}", NodeAttributes::{op.table}, {", ".join(spans)}}},\n'
+        )
 
-    @staticmethod
-    def bool(value):
-        return "true" if value else "false"
-
-    def span(self, op, suffix, element, entries):
-        if not entries:
-            return f"SchemaSpan<{element}>{{nullptr, 0}}"
-        name = self.array_name(op, suffix)
-        return f"SchemaSpan<{element}>{{{name}.data(), {name}.size()}}"
-
-    def emit_op_table(self):
-        ops = self.registry.ops
-        self.w("/// Sorted by opcode.")
-        self.w(f"inline constexpr std::array<OpSchema, {len(ops)}> OP_SCHEMAS = {{{{")
-        for op in ops:
-            self.w(f'    {{"{op.opcode}",')
-            self.w(f'     "{op.table}",')
-            self.w(f"     NodeAttributes::{op.table},")
-            self.w(f"     {self.span(op, 'OPERANDS', 'EdgeSchema', op.operands)},")
-            self.w(f"     {self.span(op, 'RESULTS', 'EdgeSchema', op.results)},")
-            self.w(
-                f"     {self.span(op, 'ATTRIBUTES', 'AttributeSchema', op.attributes)},"
-            )
-            self.w(
-                f"     {self.span(op, 'OPERAND_LISTS', 'EdgeListSchema', op.operand_lists)},"
-            )
-            self.w(
-                f"     {self.span(op, 'RESULT_LISTS', 'EdgeListSchema', op.result_lists)}}},"
-            )
-        self.w("}};")
-        self.w()
-
-    def emit_lookups(self):
-        self.w("/// Every op, sorted by opcode.")
-        self.w("constexpr SchemaSpan<OpSchema> allOpSchemas() noexcept")
-        self.w("{")
-        self.w(
-            "    return SchemaSpan<OpSchema>{detail::OP_SCHEMAS.data(), detail::OP_SCHEMAS.size()};"
-        )
-        self.w("}")
-        self.w()
-        self.w("/// The op named @p opcode, or nullptr when no op declares it.")
-        self.w(
-            "constexpr const OpSchema* findOpSchema(std::string_view opcode) noexcept"
-        )
-        self.w("{")
-        self.w("    size_t low  = 0;")
-        self.w("    size_t high = detail::OP_SCHEMAS.size();")
-        self.w("    while(low < high)")
-        self.w("    {")
-        self.w("        const size_t middle = low + ((high - low) / 2);")
-        self.w("        if(detail::OP_SCHEMAS[middle].opcode < opcode)")
-        self.w("        {")
-        self.w("            low = middle + 1;")
-        self.w("        }")
-        self.w("        else")
-        self.w("        {")
-        self.w("            high = middle;")
-        self.w("        }")
-        self.w("    }")
-        self.w(
-            "    if(low < detail::OP_SCHEMAS.size() && detail::OP_SCHEMAS[low].opcode == opcode)"
-        )
-        self.w("    {")
-        self.w("        return &detail::OP_SCHEMAS[low];")
-        self.w("    }")
-        self.w("    return nullptr;")
-        self.w("}")
-        self.w()
-        self.w(
-            "/// The op whose attribute table is @p attributesType, or nullptr for NONE or a"
-        )
-        self.w("/// value no op declares.")
-        self.w(
-            "constexpr const OpSchema* findOpSchema(NodeAttributes attributesType) noexcept"
-        )
-        self.w("{")
-        self.w("    for(const auto& op : detail::OP_SCHEMAS)")
-        self.w("    {")
-        self.w("        if(op.attributesType == attributesType)")
-        self.w("        {")
-        self.w("            return &op;")
-        self.w("        }")
-        self.w("    }")
-        self.w("    return nullptr;")
-        self.w("}")
-        self.w()
+    out.append("/// Sorted by opcode.\n")
+    out.append(
+        f"inline constexpr std::array<OpSchema, {len(op_rows)}> OP_SCHEMAS = {{{{\n"
+    )
+    out.extend(op_rows)
+    out.append("}};\n\n")
+    out.append(HEADER_EPILOGUE.substitute(namespace=NAMESPACE))
+    return "".join(out)
 
 
 def emit_json(registry):
-    def edges(entries):
-        return [{"name": e.name, "optional": e.optional} for e in entries]
+    """One edge object per line, so a schema change diffs as the edges it touches."""
 
-    def edge_lists(entries):
-        return [{"name": e.field} for e in entries]
+    def edges(key, entries, last):
+        rows = [json.dumps({"name": e.name, "optional": e.optional}) for e in entries]
+        end = "" if last else ","
+        if not rows:
+            return [f'      "{key}": []{end}']
+        return (
+            [f'      "{key}": [']
+            + [f"        {row}," for row in rows[:-1]]
+            + [f"        {rows[-1]}", f"      ]{end}"]
+        )
 
-    ops = {}
-    for op in registry.ops:
-        ops[op.opcode] = {
-            "attributes_table": op.table,
-            "attributes_type": op.attributes_type,
-            "operands": edges(op.operands),
-            "results": edges(op.results),
-            "operand_lists": edge_lists(op.operand_lists),
-            "result_lists": edge_lists(op.result_lists),
-            "attributes": [
-                {"name": a.name, "kind": a.kind[0], "optional": a.optional}
-                for a in op.attributes
-            ],
-        }
-    document = {"generator": GENERATOR, "ops": ops}
-    return json.dumps(document, indent=2, sort_keys=True) + "\n"
+    lines = ["{", f'  "generator": {json.dumps(GENERATOR)},', '  "ops": {']
+    for position, op in enumerate(registry.ops):
+        lines.append(f"    {json.dumps(op.opcode)}: {{")
+        lines += edges("operands", op.operands, last=False)
+        lines += edges("results", op.results, last=True)
+        lines.append("    }" if position == len(registry.ops) - 1 else "    },")
+    lines += ["  }", "}"]
+    return "\n".join(lines) + "\n"
 
 
 def main():
@@ -768,8 +744,8 @@ def main():
         help="flatc binary to use; defaults to the one on PATH. The build passes the "
         "binary CMake already resolved, which need not be on PATH.",
     )
-    flatc_path = _resolve_flatc(parser.parse_args().flatc)
-    sdk_dir = os.path.join(_HIPDNN_DIR, SDK_DIR)
+    flatc_path = resolve_flatc(parser.parse_args().flatc)
+    sdk_dir = os.path.join(HIPDNN_DIR, SDK_DIR)
     schemas_dir = os.path.join(sdk_dir, "schemas")
     header_dir = os.path.join(sdk_dir, "include", NAMESPACE, "data_objects")
 
@@ -779,7 +755,7 @@ def main():
     # Both outputs are rendered before either is written, so a failure leaves the
     # checked-in pair consistent.
     outputs = [
-        (os.path.join(header_dir, HEADER_NAME), HeaderEmitter(registry).emit()),
+        (os.path.join(header_dir, HEADER_NAME), emit_header(registry)),
         (os.path.join(sdk_dir, JSON_NAME), emit_json(registry)),
     ]
     os.makedirs(header_dir, exist_ok=True)

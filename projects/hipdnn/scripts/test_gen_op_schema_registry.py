@@ -13,7 +13,7 @@ describe faithfully fails the run.
 import json
 import unittest
 
-from gen_op_schema_registry import Registry, emit_json
+from gen_op_schema_registry import BOOL, ENUM_NAME, FLOAT, INT, Registry, emit_json
 
 NS = "test_ns"
 NODE = f"{NS}.Node"
@@ -128,36 +128,28 @@ def pointwise_like():
 class TestRegistryEntry(unittest.TestCase):
     """What a well-annotated table publishes."""
 
-    def setUp(self):
-        self.registry = build([pointwise_like()])
-        self.ops = json.loads(emit_json(self.registry))["ops"]
-
     def test_a_pointwise_like_table_publishes_its_edges_and_attributes(self):
+        registry = build([pointwise_like()])
         self.assertEqual(
-            self.ops["pointwise"],
+            json.loads(emit_json(registry))["ops"]["pointwise"],
             {
-                "attributes_table": "PointwiseAttributes",
-                "attributes_type": 1,
                 "operands": [
                     {"name": "in_0", "optional": False},
                     {"name": "in_1", "optional": True},
                 ],
                 "results": [{"name": "out_0", "optional": False}],
-                "operand_lists": [],
-                "result_lists": [],
-                # Declaration order. The vector is skipped and the Node scalar comes last.
-                "attributes": [
-                    {"name": "operation", "kind": "enum_name", "optional": False},
-                    {"name": "relu_lower_clip", "kind": "float", "optional": True},
-                    {"name": "axis_tensor_uid", "kind": "int", "optional": True},
-                    {"name": "in_place", "kind": "bool", "optional": False},
-                    {
-                        "name": "compute_data_type",
-                        "kind": "enum_name",
-                        "optional": False,
-                    },
-                ],
             },
+        )
+        # Declaration order. The vector is skipped and the Node scalar comes last.
+        self.assertEqual(
+            [(a.name, a.kind, a.optional) for a in registry.ops[0].attributes],
+            [
+                ("operation", ENUM_NAME, False),
+                ("relu_lower_clip", FLOAT, True),
+                ("axis_tensor_uid", INT, True),
+                ("in_place", BOOL, False),
+                ("compute_data_type", ENUM_NAME, False),
+            ],
         )
 
     def test_directed_uid_vectors_publish_as_edge_lists_not_edges(self):
@@ -175,15 +167,17 @@ class TestRegistryEntry(unittest.TestCase):
                 )
             ]
         )
-        op = json.loads(emit_json(registry))["ops"]["custom_op"]
+        op = registry.ops[0]
         # Lists keep declaration order and never appear among the bindable edges.
         self.assertEqual(
-            op["operand_lists"],
-            [{"name": "input_tensor_uids"}, {"name": "aux_tensor_uids"}],
+            [e.field for e in op.operand_lists],
+            ["input_tensor_uids", "aux_tensor_uids"],
         )
-        self.assertEqual(op["result_lists"], [{"name": "output_tensor_uids"}])
-        self.assertEqual(op["operands"], [{"name": "x", "optional": False}])
-        self.assertEqual(op["results"], [])
+        self.assertEqual([e.field for e in op.result_lists], ["output_tensor_uids"])
+        self.assertEqual(
+            json.loads(emit_json(registry))["ops"]["custom_op"],
+            {"operands": [{"name": "x", "optional": False}], "results": []},
+        )
 
     def test_ops_are_sorted_by_opcode(self):
         registry = build(
@@ -194,7 +188,12 @@ class TestRegistryEntry(unittest.TestCase):
             ]
         )
         self.assertEqual([op.opcode for op in registry.ops], ["a_op", "b_op", "c_op"])
-        self.assertEqual([op.attributes_type for op in registry.ops], [3, 1, 2])
+        self.assertEqual(
+            [op.table for op in registry.ops], ["MTable", "ZTable", "ATable"]
+        )
+        self.assertEqual(
+            list(json.loads(emit_json(registry))["ops"]), ["a_op", "b_op", "c_op"]
+        )
 
 
 class TestBuildErrors(unittest.TestCase):

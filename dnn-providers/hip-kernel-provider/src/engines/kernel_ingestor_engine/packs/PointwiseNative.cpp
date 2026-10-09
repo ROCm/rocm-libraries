@@ -245,8 +245,8 @@ std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
     }
 
     BoundTokens bound;
-    if(!publishGraph(bound, context.graph) || !publishTensor(bound, INPUT_A_TOKEN, inputA)
-       || !publishTensor(bound, INPUT_B_TOKEN, inputB)
+    publishGraph(bound, context.graph);
+    if(!publishTensor(bound, INPUT_A_TOKEN, inputA) || !publishTensor(bound, INPUT_B_TOKEN, inputB)
        || !publishTensor(bound, OUTPUT_TOKEN, output)
        || !publishPointwiseNode(
            bound, attributes, context.graph.getNodeWrapper(0).computeDataType())

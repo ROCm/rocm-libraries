@@ -1,8 +1,7 @@
 {
   "description": "graph_match is a symbol string instead of an object naming an arm.",
   "valid": false,
-  "runtime_error": "graph_match must be a JSON object",
-  "packager_error": "graph_match must be an object",
+  "error": "graph_match must be a JSON object",
   "ued": {
     "version": "1.0",
     "id": "01e8fb18-319e-5888-bdc2-6798f67f0312",

@@ -5,6 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -22,6 +23,25 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
+namespace detail
+{
+
+/// True for `[A-Za-z_][A-Za-z0-9_]*`, the form of a token root.
+inline bool isIdentifier(std::string_view text)
+{
+    const auto isLeading
+        = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; };
+    if(text.empty() || !isLeading(text.front()))
+    {
+        return false;
+    }
+    return std::all_of(text.begin() + 1, text.end(), [&isLeading](char c) {
+        return isLeading(c) || (c >= '0' && c <= '9');
+    });
+}
+
+} // namespace detail
+
 /// Builds a tensor field token such as `input_a.dtype`.
 inline std::string tensorField(std::string_view root, std::string_view field)
 {
@@ -36,23 +56,34 @@ inline std::string tensorElement(std::string_view root, std::string_view field, 
 
 /// Validates @p tensor and publishes its fields under @p root. Publish each root
 /// once. If this returns false, discard the whole binding.
+///
+/// Publishes:
+///  - `<root>` and `<root>.uid`: the tensor uid.
+///  - `<root>.rank`, and `<root>.dims[i]` and `<root>.strides[i]` for each axis.
+///  - `<root>.dtype`: the DataType enum name.
+///  - `<root>.stride_order`: axis ranks from extractStrideOrder() in ShapeUtilities.hpp.
+///    Ties follow that function, so four unit strides give [3, 2, 1, 0].
+///  - `<root>.packed`: the tensor fills a dense, non-overlapping block with positive
+///    strides, ignoring strides on size-one axes (isTensorPacked()). A ragged tensor is
+///    never packed.
+///  - `<root>.virtual` and `<root>.is_runtime_pass_by_value`.
+///  - `<root>.value_f32`: only for a stored scalar that is not passed by value at run
+///    time. The value is rounded to a finite binary32 float and stored as a double. A
+///    runtime default is validated the same way but not published.
+///
+/// Returns false when @p root is not an identifier; the dims or strides are missing,
+/// empty, or of different lengths; a dim is not positive or the element count overflows
+/// int64_t; the dtype has no enum name; the stored value disagrees with the value type;
+/// a stored or runtime-passed scalar is virtual or has more than one element; or a stored
+/// value is not finite in binary32.
 inline bool publishTensor(BoundTokens& bound,
                           std::string_view root,
                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensor)
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-    const auto isLetter
-        = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; };
-    if(root.empty() || !isLetter(root.front()))
+    if(!detail::isIdentifier(root))
     {
         return false;
-    }
-    for(const auto c : root)
-    {
-        if(!isLetter(c) && (c < '0' || c > '9'))
-        {
-            return false;
-        }
     }
     if(tensor == nullptr || tensor->dims() == nullptr || tensor->strides() == nullptr
        || tensor->dims()->empty() || tensor->dims()->size() != tensor->strides()->size())
@@ -124,13 +155,13 @@ inline bool publishTensor(BoundTokens& bound,
     return true;
 }
 
-/// Publish facts for the whole graph, not just the matched nodes.
-inline bool publishGraph(BoundTokens& bound,
+/// Publishes facts for the whole graph, not just the matched nodes: `graph.node_count`
+/// and `graph.is_override_shape_enabled`.
+inline void publishGraph(BoundTokens& bound,
                          const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
 {
     bound.emplace("graph.node_count", static_cast<int64_t>(graph.nodeCount()));
     bound.emplace("graph.is_override_shape_enabled", graph.getGraph().is_override_shape_enabled());
-    return true;
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

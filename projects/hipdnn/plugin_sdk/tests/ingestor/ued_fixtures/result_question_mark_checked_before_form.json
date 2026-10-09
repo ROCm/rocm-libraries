@@ -1,8 +1,7 @@
 {
   "description": "A result binding 'output?' that both lacks its '$' and carries '?'. The '?' is checked first, so both sides report it.",
   "valid": false,
-  "runtime_error": "has binding 'output?'; '?' is only allowed on an operand binding",
-  "packager_error": "result 'out_0' binding \"output?\" takes no '?'",
+  "error": "has binding 'output?'; '?' is only allowed on an operand binding",
   "ued": {
     "version": "1.0",
     "id": "da83e183-e1f6-5021-8e6d-db93761cf88d",
@@ -10,18 +9,7 @@
     "metadata": "e14c182b-a571-504d-9036-dd37deb25d7c",
     "graph_match": {
       "nodes": [
-        {
-          "kind": "op",
-          "id": "pw",
-          "op": "pointwise",
-          "operands": {
-            "in_0": "$input_a",
-            "in_1": "$input_b"
-          },
-          "results": {
-            "out_0": "output?"
-          }
-        }
+        {"kind": "op", "id": "pw", "op": "pointwise", "operands": {"in_0": "$input_a", "in_1": "$input_b"}, "results": {"out_0": "output?"}}
       ]
     }
   }

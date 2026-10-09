@@ -1,8 +1,7 @@
 {
   "description": "'nodes' is a single node object instead of an array of them.",
   "valid": false,
-  "runtime_error": "must be an array of node objects",
-  "packager_error": "graph_match 'nodes' must be a nonempty array",
+  "error": "must be an array of node objects",
   "ued": {
     "version": "1.0",
     "id": "f1153d53-09d7-50e7-a228-aff92b9940fe",

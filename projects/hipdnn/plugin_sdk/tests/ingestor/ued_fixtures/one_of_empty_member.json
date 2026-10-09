@@ -1,8 +1,7 @@
 {
   "description": "An opcode set with an empty-string member.",
   "valid": false,
-  "runtime_error": "must list non-empty opcode strings",
-  "packager_error": "op 'one_of' must list nonempty opcode strings",
+  "error": "must list non-empty opcode strings",
   "ued": {
     "version": "1.0",
     "id": "7fdeb4de-b24b-5171-9104-b1bd3f4cd450",
@@ -10,23 +9,7 @@
     "metadata": "a8f2e980-6584-5601-abd2-8a1619e97266",
     "graph_match": {
       "nodes": [
-        {
-          "kind": "op",
-          "id": "pw",
-          "op": {
-            "one_of": [
-              "pointwise",
-              ""
-            ]
-          },
-          "operands": {
-            "in_0": "$input_a",
-            "in_1": "$input_b"
-          },
-          "results": {
-            "out_0": "$output"
-          }
-        }
+        {"kind": "op", "id": "pw", "op": {"one_of": ["pointwise", ""]}, "operands": {"in_0": "$input_a", "in_1": "$input_b"}, "results": {"out_0": "$output"}}
       ]
     }
   }

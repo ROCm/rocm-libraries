@@ -4,20 +4,14 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <limits>
-#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
 
-#include <nlohmann/json.hpp>
-
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
-#include <hipdnn_plugin_sdk/ingestor/GraphPattern.hpp>
-#include <hipdnn_plugin_sdk/ingestor/GraphPatternMatcher.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
@@ -32,7 +26,6 @@ namespace
 
 using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
-using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
@@ -100,38 +93,6 @@ TEST(TestPointwiseAddGraphMatcher, RejectsScalarAndVirtualStateOnEveryOperand)
             EXPECT_FALSE(matches(fixture.context())) << operand << ":" << state;
         }
     }
-}
-
-TEST(TestPointwiseAddBinding, PublishesActualNodeScalarsWithoutTensorEdgesOrGraphDefaults)
-{
-    const GraphFixture fixture(transformGraph(buildPointwiseGraph(), [](auto& graph) {
-        graph.compute_data_type = data_objects::DataType::HALF;
-        graph.is_override_shape_enabled = true;
-        graph.nodes[0]->compute_data_type = data_objects::DataType::DOUBLE;
-        auto* attributes = graph.nodes[0]->attributes.AsPointwiseAttributes();
-        attributes->relu_lower_clip = 0.0f;
-        attributes->relu_upper_clip = 6.0f;
-        attributes->relu_lower_clip_slope = 0.25f;
-        attributes->axis_tensor_uid = 0;
-        attributes->swish_beta = 1.0f;
-        attributes->elu_alpha = 2.0f;
-        attributes->softplus_beta = 3.0f;
-    }));
-    const auto bound = matchesGraph(POINTWISE_ADD, fixture.context());
-    ASSERT_TRUE(bound.has_value());
-    EXPECT_EQ(std::get<std::string>(bound->at("pointwise.operation")), "ADD");
-    EXPECT_EQ(std::get<std::string>(bound->at("pointwise.compute_data_type")), "DOUBLE");
-    EXPECT_EQ(std::get<double>(bound->at("pointwise.relu_lower_clip")), 0.0);
-    EXPECT_EQ(std::get<double>(bound->at("pointwise.relu_upper_clip")), 6.0);
-    EXPECT_EQ(std::get<double>(bound->at("pointwise.relu_lower_clip_slope")), 0.25);
-    EXPECT_EQ(std::get<double>(bound->at("pointwise.swish_beta")), 1.0);
-    EXPECT_EQ(std::get<double>(bound->at("pointwise.elu_alpha")), 2.0);
-    EXPECT_EQ(std::get<double>(bound->at("pointwise.softplus_beta")), 3.0);
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "pointwise.axis_tensor_uid"), 0);
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "graph.node_count"), 1);
-    EXPECT_TRUE(std::get<bool>(bound->at("graph.is_override_shape_enabled")));
-    EXPECT_EQ(bound->count("pointwise.in_0_tensor_uid"), 0U);
-    EXPECT_EQ(bound->count("pointwise.out_0_tensor_uid"), 0U);
 }
 
 TEST(TestPointwiseAddBinding, RejectsInvalidOptionalNodeScalarRatherThanOmittingIt)
@@ -353,33 +314,13 @@ TEST(TestPointwiseOperationMatchers, EachPackAdmitsOnlyItsOwnOperation)
     EXPECT_FALSE(matchesOperation(POINTWISE_MUL, add.context(), *addBound));
 }
 
-/// Binds @p context through a `graph_match.nodes` pattern whose node id matches the native
-/// attribute root, so both arms publish the same `pointwise.*` keys. @p swapInputs binds
-/// `$input_a` to the node's `in_1` edge and `$input_b` to its `in_0` edge. The registry
-/// cannot catch this authoring mistake because both are operands of the same op.
-std::optional<BoundTokens> matchesPattern(const MatchContext& context, bool swapInputs)
-{
-    const auto* inputAEdge = swapInputs ? "in_1" : "in_0";
-    const auto* inputBEdge = swapInputs ? "in_0" : "in_1";
-    const auto nodes = nlohmann::json::array(
-        {{{"kind", "op"},
-          {"id", "pointwise"},
-          {"op", "pointwise"},
-          {"operands", {{inputAEdge, "$input_a"}, {inputBEdge, "$input_b"}}},
-          {"results", {{"out_0", "$output"}}}}});
-    const auto pattern = hipdnn_plugin_sdk::ingestor::compileGraphPattern(
-        hipdnn_plugin_sdk::ingestor::parseGraphPattern(nodes, "pointwise test pattern"),
-        "pointwise test pattern");
-    return hipdnn_plugin_sdk::ingestor::matchGraphPattern(*pattern, context);
-}
-
 /// Swapped roles pass every operand check, since both inputs share shape and dtype. Sub
 /// is asymmetric, so admitting the swapped binding would compute b - a.
 TEST(TestPointwiseOperationMatchers, SubDeclinesABindingWithSwappedInputRoles)
 {
     const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::SUB));
-    const auto ordered = matchesPattern(fixture.context(), /*swapInputs=*/false);
-    const auto swapped = matchesPattern(fixture.context(), /*swapInputs=*/true);
+    const auto ordered = matchPattern(pointwisePattern(), fixture.context());
+    const auto swapped = matchPattern(pointwisePattern(/*swapInputs=*/true), fixture.context());
     ASSERT_TRUE(ordered.has_value());
     ASSERT_TRUE(swapped.has_value());
     ASSERT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*swapped, "input_a"), INPUT_B_UID);

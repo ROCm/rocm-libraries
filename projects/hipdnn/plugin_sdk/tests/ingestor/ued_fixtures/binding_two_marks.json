@@ -1,0 +1,16 @@
+{
+  "description": "An operand binding ending in two '?' marks; only one may follow the identifier.",
+  "valid": false,
+  "error": "has malformed binding '$input_a??'",
+  "ued": {
+    "version": "1.0",
+    "id": "7dcd667b-5203-5a23-a3fa-a74056b595a5",
+    "name": "ued_fixture:binding_two_marks",
+    "metadata": "ab6e1d41-eee8-5040-9fbc-d64df7e396df",
+    "graph_match": {
+      "nodes": [
+        {"kind": "op", "id": "pointwise", "op": "pointwise", "operands": {"in_0": "$input_a??"}, "results": {"out_0": "$output"}}
+      ]
+    }
+  }
+}

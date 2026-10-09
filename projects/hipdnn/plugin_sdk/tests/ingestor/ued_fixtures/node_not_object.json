@@ -1,8 +1,7 @@
 {
   "description": "A 'nodes' entry that is a string, not a node object.",
   "valid": false,
-  "runtime_error": "must be a JSON object",
-  "packager_error": "graph_match node 0 must be an object",
+  "error": "must be a JSON object",
   "ued": {
     "version": "1.0",
     "id": "1743bf2b-74bc-5e15-85fc-6a95d4e88f71",

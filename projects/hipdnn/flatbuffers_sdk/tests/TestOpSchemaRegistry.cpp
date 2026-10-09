@@ -95,7 +95,6 @@ TEST(TestOpSchemaRegistry, EveryNodeAttributesMemberHasAnOp)
         const auto* op = findOpSchema(type);
         ASSERT_NE(op, nullptr) << EnumNameNodeAttributes(type);
         EXPECT_EQ(op->attributesType, type);
-        EXPECT_EQ(op->attributesTable, std::string_view(EnumNameNodeAttributes(type)));
     }
     EXPECT_EQ(findOpSchema(NodeAttributes::NONE), nullptr);
 }

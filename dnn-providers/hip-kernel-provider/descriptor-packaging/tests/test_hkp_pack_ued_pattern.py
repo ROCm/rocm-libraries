@@ -4,14 +4,10 @@ The fixture corpus and the JSON Schema live in the hipDNN plugin SDK. The
 runtime's gtests read the same files, so the packer and the loader agree on
 every fixture and on the schema's member lists.
 
-Each invalid fixture names the error it must raise, so it cannot pass because
-of an unrelated defect. The text is a plain substring, matched literally:
-
-- `error` when the packer and the runtime share the wording.
-- `runtime_error` and `packager_error` when they word it differently. This
-  test reads `packager_error`.
-
-A valid fixture carries none of these keys.
+Each invalid fixture names, under `error`, the error it must raise, so it
+cannot pass because of an unrelated defect. The packer and the runtime share
+the wording, so both sides match the same plain substring, literally. A valid
+fixture carries no `error`.
 """
 
 import json
@@ -29,7 +25,6 @@ from hkp_pack.descriptors import (
 from hkp_pack.errors import HkpPackError
 from hkp_pack.graph_pattern import (
     MAX_PATTERN_NODES,
-    MAX_PATTERN_OPCODE_SET,
     NODE_KEYS,
     NODE_REQUIRED_KEYS,
     OP_SCHEMA_REGISTRY_ENV,
@@ -43,8 +38,6 @@ SCHEMA_PATH = _PLUGIN_SDK / "schemas" / "universal_engine_descriptor.schema.json
 _FIXTURES = sorted(FIXTURE_DIR.glob("*.json"))
 assert _FIXTURES, f"no UED fixtures under {FIXTURE_DIR}"
 
-_ERROR_KEYS = {"error", "runtime_error", "packager_error"}
-
 
 def _read_case(fixture):
     return json.loads(fixture.read_text(encoding="utf-8"))
@@ -52,15 +45,6 @@ def _read_case(fixture):
 
 def _ued_text(case):
     return case["ued_text"] if "ued_text" in case else json.dumps(case["ued"])
-
-
-def _packager_error(case):
-    """The text the packer's error for an invalid fixture must contain."""
-    if "error" in case:
-        assert not {"runtime_error", "packager_error"} & case.keys()
-        return case["error"]
-    assert {"runtime_error", "packager_error"} <= case.keys()
-    return case["packager_error"]
 
 
 _VALID_FIXTURES = [path for path in _FIXTURES if _read_case(path)["valid"]]
@@ -102,12 +86,11 @@ def test_ued_fixture_validity_matches_the_runtime(tmp_path, fixture):
     root = _ued_root(tmp_path, text, json.loads(text)["metadata"])
 
     if case["valid"]:
-        assert not _ERROR_KEYS & case.keys()
+        assert "error" not in case
         load_flat_input(root)
     else:
-        error = _packager_error(case)
-        assert error
-        with pytest.raises(HkpPackError, match=re.escape(error)):
+        assert case["error"]
+        with pytest.raises(HkpPackError, match=re.escape(case["error"])):
             load_flat_input(root)
 
 
@@ -139,10 +122,6 @@ def test_schema_member_lists_equal_the_packer_constants():
     assert set(node["properties"]) == set(NODE_KEYS)
     assert set(node["required"]) == set(NODE_REQUIRED_KEYS)
     assert graph_match["properties"]["nodes"]["maxItems"] == MAX_PATTERN_NODES
-    opcode_set = next(
-        arm for arm in node["properties"]["op"]["oneOf"] if arm.get("type") == "object"
-    )
-    assert opcode_set["properties"]["one_of"]["maxItems"] == MAX_PATTERN_OPCODE_SET
 
 
 @pytest.mark.quick
@@ -203,16 +182,15 @@ def test_native_ued_loads_without_a_registry(tmp_path):
 
 
 @pytest.mark.quick
-def test_a_registry_with_a_malformed_edge_list_names_the_op(tmp_path):
+def test_a_registry_with_a_malformed_edge_names_the_registry_and_the_op(tmp_path):
     registry = tmp_path / "op_schema_registry.json"
     entry = {
-        "operands": [{"name": "in_0", "optional": False}],
+        "operands": [{"name": "in_0", "optional": False}, {"name": "in_1"}],
         "results": [{"name": "out_0", "optional": False}],
-        "operand_lists": [{"field": "in_0_tensor_uids"}],
-        "result_lists": [],
     }
     registry.write_text(json.dumps({"ops": {"pointwise": entry}}), encoding="utf-8")
     root = _ued_root(tmp_path, json.dumps(_NODES_UED), _NODES_UED["metadata"])
 
-    with pytest.raises(HkpPackError, match="op 'pointwise' operand_lists must be"):
+    with pytest.raises(HkpPackError, match="op 'pointwise' operands must be") as exc:
         load_flat_input(root, op_schema_registry=registry)
+    assert str(registry) in str(exc.value)

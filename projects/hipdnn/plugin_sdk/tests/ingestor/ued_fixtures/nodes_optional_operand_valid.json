@@ -8,18 +8,7 @@
     "metadata": "b7c91f04-44c9-5370-a403-36a46526094a",
     "graph_match": {
       "nodes": [
-        {
-          "kind": "op",
-          "id": "pointwise",
-          "op": "pointwise",
-          "operands": {
-            "in_0": "$input_a",
-            "in_1": "$input_b?"
-          },
-          "results": {
-            "out_0": "$output"
-          }
-        }
+        {"kind": "op", "id": "pointwise", "op": "pointwise", "operands": {"in_0": "$input_a", "in_1": "$input_b?"}, "results": {"out_0": "$output"}}
       ]
     }
   }

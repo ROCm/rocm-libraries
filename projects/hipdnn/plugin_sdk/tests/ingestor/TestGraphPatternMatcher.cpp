@@ -141,7 +141,7 @@ TEST(TestGraphPatternMatcher, SinglePointwisePublishesTheCanonicalTokenMap)
 
     BoundTokens expected;
     const auto& tensors = *context.graph.getGraph().tensors();
-    ASSERT_TRUE(publishGraph(expected, context.graph));
+    publishGraph(expected, context.graph);
     ASSERT_TRUE(publishTensor(expected, "input_a", tensors.Get(0)));
     ASSERT_TRUE(publishTensor(expected, "input_b", tensors.Get(1)));
     ASSERT_TRUE(publishTensor(expected, "output", tensors.Get(2)));
@@ -323,6 +323,11 @@ TEST(TestGraphPatternMatcher, ChainBindsIntermediateConsistently)
     EXPECT_EQ(tryGetBoundInt(*bound, "bias"), 4);
     EXPECT_EQ(tryGetBoundInt(*bound, "y"), 5);
     EXPECT_EQ(std::get<std::string>(bound->at("conv.conv_mode")), "CROSS_CORRELATION");
+    EXPECT_EQ(std::get<std::string>(bound->at("conv.compute_data_type")), "FLOAT");
+    // Vector attributes are not published.
+    EXPECT_EQ(bound->count("conv.stride"), 0U);
+    EXPECT_EQ(bound->count("conv.dilation"), 0U);
+    EXPECT_EQ(bound->count("conv.pre_padding"), 0U);
     EXPECT_EQ(std::get<std::string>(bound->at("add.operation")), "ADD");
     EXPECT_EQ(tryGetBoundInt(*bound, "graph.node_count"), 2);
 }
@@ -425,6 +430,24 @@ TEST(TestGraphPatternMatcher, OpcodeSetMatchesEitherMember)
     EXPECT_EQ(std::get<std::string>(backwardBound->at("conv.conv_mode")), "CONVOLUTION");
 }
 
+TEST(TestGraphPatternMatcher, OpcodeSetPublishesOnlyAttributesEveryMemberDeclares)
+{
+    const std::string anyNorm = R"([{"kind": "op", "id": "norm",
+        "op": {"one_of": ["rms_norm", "layernorm"]},
+        "operands": {"x": "$x", "scale": "$scale", "epsilon": "$epsilon"},
+        "results": {"y": "$y"}}])";
+    PatternGraphBuilder graph;
+    graph.tensor(1).tensor(2).tensor(3).tensor(4).tensor(5);
+    graph.node(layernormNode(1, 2, 3, 4, 5, std::nullopt));
+
+    const auto bound = match(anyNorm, graph);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(std::get<std::string>(bound->at("norm.forward_phase")), "NOT_SET");
+    EXPECT_EQ(std::get<std::string>(bound->at("norm.compute_data_type")), "FLOAT");
+    // Only layernorm declares normalized_dim_count, although the graph node sets it.
+    EXPECT_EQ(bound->count("norm.normalized_dim_count"), 0U);
+}
+
 TEST(TestGraphPatternMatcher, MatchesChainWhoseGraphListsTheConsumerFirst)
 {
     const std::string unaryChain = R"([
@@ -493,8 +516,7 @@ TEST(TestGraphPatternMatcher, DeclinesAndWarnsWhenTheSearchExceedsItsBudget)
         node["results"]["out_0"] = "$out" + index;
         nodes.push_back(std::move(node));
     }
-    const auto compiled
-        = compileGraphPattern(parseGraphPattern(nodes, PATTERN_TEST_UED), PATTERN_TEST_UED);
+    const auto compiled = compileGraphPattern(nodes, PATTERN_TEST_UED);
     const auto graphEndingIn = [](bool binary) {
         PatternGraphBuilder graph;
         for(int64_t uid = 1; uid <= (2 * NODE_COUNT) + 1; ++uid)

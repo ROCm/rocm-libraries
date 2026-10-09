@@ -2,1254 +2,288 @@
   "generator": "scripts/gen_op_schema_registry.py",
   "ops": {
     "batchnorm": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "BatchnormAttributes",
-      "attributes_type": 4,
-      "operand_lists": [
-        {
-          "name": "peer_stats_tensor_uid"
-        }
-      ],
       "operands": [
-        {
-          "name": "x",
-          "optional": false
-        },
-        {
-          "name": "scale",
-          "optional": false
-        },
-        {
-          "name": "bias",
-          "optional": false
-        },
-        {
-          "name": "epsilon",
-          "optional": false
-        },
-        {
-          "name": "prev_running_mean",
-          "optional": true
-        },
-        {
-          "name": "prev_running_variance",
-          "optional": true
-        },
-        {
-          "name": "momentum",
-          "optional": true
-        }
+        {"name": "x", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "bias", "optional": false},
+        {"name": "epsilon", "optional": false},
+        {"name": "prev_running_mean", "optional": true},
+        {"name": "prev_running_variance", "optional": true},
+        {"name": "momentum", "optional": true}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "y",
-          "optional": false
-        },
-        {
-          "name": "mean",
-          "optional": true
-        },
-        {
-          "name": "inv_variance",
-          "optional": true
-        },
-        {
-          "name": "next_running_mean",
-          "optional": true
-        },
-        {
-          "name": "next_running_variance",
-          "optional": true
-        }
+        {"name": "y", "optional": false},
+        {"name": "mean", "optional": true},
+        {"name": "inv_variance", "optional": true},
+        {"name": "next_running_mean", "optional": true},
+        {"name": "next_running_variance", "optional": true}
       ]
     },
     "batchnorm_bwd": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "BatchnormBackwardAttributes",
-      "attributes_type": 3,
-      "operand_lists": [
-        {
-          "name": "peer_stats_tensor_uid"
-        }
-      ],
       "operands": [
-        {
-          "name": "dy",
-          "optional": false
-        },
-        {
-          "name": "x",
-          "optional": false
-        },
-        {
-          "name": "mean",
-          "optional": true
-        },
-        {
-          "name": "inv_variance",
-          "optional": true
-        },
-        {
-          "name": "scale",
-          "optional": false
-        }
+        {"name": "dy", "optional": false},
+        {"name": "x", "optional": false},
+        {"name": "mean", "optional": true},
+        {"name": "inv_variance", "optional": true},
+        {"name": "scale", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "dx",
-          "optional": false
-        },
-        {
-          "name": "dscale",
-          "optional": false
-        },
-        {
-          "name": "dbias",
-          "optional": false
-        }
+        {"name": "dx", "optional": false},
+        {"name": "dscale", "optional": false},
+        {"name": "dbias", "optional": false}
       ]
     },
     "batchnorm_inference": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "BatchnormInferenceAttributes",
-      "attributes_type": 1,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "x",
-          "optional": false
-        },
-        {
-          "name": "mean",
-          "optional": false
-        },
-        {
-          "name": "inv_variance",
-          "optional": false
-        },
-        {
-          "name": "scale",
-          "optional": false
-        },
-        {
-          "name": "bias",
-          "optional": false
-        }
+        {"name": "x", "optional": false},
+        {"name": "mean", "optional": false},
+        {"name": "inv_variance", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "bias", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "y",
-          "optional": false
-        }
+        {"name": "y", "optional": false}
       ]
     },
     "batchnorm_inference_variance_ext": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "BatchnormInferenceAttributesVarianceExt",
-      "attributes_type": 8,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "x",
-          "optional": false
-        },
-        {
-          "name": "mean",
-          "optional": false
-        },
-        {
-          "name": "variance",
-          "optional": false
-        },
-        {
-          "name": "scale",
-          "optional": false
-        },
-        {
-          "name": "bias",
-          "optional": false
-        },
-        {
-          "name": "epsilon",
-          "optional": false
-        }
+        {"name": "x", "optional": false},
+        {"name": "mean", "optional": false},
+        {"name": "variance", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "bias", "optional": false},
+        {"name": "epsilon", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "y",
-          "optional": false
-        }
+        {"name": "y", "optional": false}
       ]
     },
     "block_scale_dequantize": {
-      "attributes": [
-        {
-          "kind": "bool",
-          "name": "is_negative_scale",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "BlockScaleDequantizeAttributes",
-      "attributes_type": 13,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "x",
-          "optional": false
-        },
-        {
-          "name": "scale",
-          "optional": false
-        }
+        {"name": "x", "optional": false},
+        {"name": "scale", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "y",
-          "optional": false
-        }
+        {"name": "y", "optional": false}
       ]
     },
     "block_scale_quantize": {
-      "attributes": [
-        {
-          "kind": "int",
-          "name": "block_size",
-          "optional": false
-        },
-        {
-          "kind": "int",
-          "name": "axis",
-          "optional": true
-        },
-        {
-          "kind": "bool",
-          "name": "transpose",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "BlockScaleQuantizeAttributes",
-      "attributes_type": 14,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "x",
-          "optional": false
-        }
+        {"name": "x", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "y",
-          "optional": false
-        },
-        {
-          "name": "scale",
-          "optional": false
-        }
+        {"name": "y", "optional": false},
+        {"name": "scale", "optional": false}
       ]
     },
     "convolution_bwd_data": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "conv_mode",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "ConvolutionBwdAttributes",
-      "attributes_type": 6,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "dy",
-          "optional": false
-        },
-        {
-          "name": "w",
-          "optional": false
-        }
+        {"name": "dy", "optional": false},
+        {"name": "w", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "dx",
-          "optional": false
-        }
+        {"name": "dx", "optional": false}
       ]
     },
     "convolution_bwd_filter": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "conv_mode",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "ConvolutionWrwAttributes",
-      "attributes_type": 7,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "x",
-          "optional": false
-        },
-        {
-          "name": "dy",
-          "optional": false
-        }
+        {"name": "x", "optional": false},
+        {"name": "dy", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "dw",
-          "optional": false
-        }
+        {"name": "dw", "optional": false}
       ]
     },
     "convolution_fwd": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "conv_mode",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "ConvolutionFwdAttributes",
-      "attributes_type": 5,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "x",
-          "optional": false
-        },
-        {
-          "name": "w",
-          "optional": false
-        }
+        {"name": "x", "optional": false},
+        {"name": "w", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "y",
-          "optional": false
-        }
+        {"name": "y", "optional": false}
       ]
     },
     "custom_op": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "CustomOpAttributes",
-      "attributes_type": 16,
-      "operand_lists": [
-        {
-          "name": "input_tensor_uids"
-        }
-      ],
       "operands": [],
-      "result_lists": [
-        {
-          "name": "output_tensor_uids"
-        }
-      ],
       "results": []
     },
     "layernorm": {
-      "attributes": [
-        {
-          "kind": "int",
-          "name": "normalized_dim_count",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "forward_phase",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "LayernormAttributes",
-      "attributes_type": 11,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "x",
-          "optional": false
-        },
-        {
-          "name": "scale",
-          "optional": false
-        },
-        {
-          "name": "bias",
-          "optional": false
-        },
-        {
-          "name": "epsilon",
-          "optional": false
-        }
+        {"name": "x", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "bias", "optional": false},
+        {"name": "epsilon", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "y",
-          "optional": false
-        },
-        {
-          "name": "mean",
-          "optional": true
-        },
-        {
-          "name": "inv_variance",
-          "optional": true
-        }
+        {"name": "y", "optional": false},
+        {"name": "mean", "optional": true},
+        {"name": "inv_variance", "optional": true}
       ]
     },
     "layernorm_bwd": {
-      "attributes": [
-        {
-          "kind": "int",
-          "name": "normalized_dim_count",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "LayernormBackwardAttributes",
-      "attributes_type": 20,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "dy",
-          "optional": false
-        },
-        {
-          "name": "x",
-          "optional": false
-        },
-        {
-          "name": "scale",
-          "optional": false
-        },
-        {
-          "name": "mean",
-          "optional": true
-        },
-        {
-          "name": "inv_variance",
-          "optional": true
-        },
-        {
-          "name": "epsilon",
-          "optional": true
-        }
+        {"name": "dy", "optional": false},
+        {"name": "x", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "mean", "optional": true},
+        {"name": "inv_variance", "optional": true},
+        {"name": "epsilon", "optional": true}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "dx",
-          "optional": false
-        },
-        {
-          "name": "dscale",
-          "optional": false
-        },
-        {
-          "name": "dbias",
-          "optional": false
-        }
+        {"name": "dx", "optional": false},
+        {"name": "dscale", "optional": false},
+        {"name": "dbias", "optional": false}
       ]
     },
     "matmul": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "MatmulAttributes",
-      "attributes_type": 9,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "a",
-          "optional": false
-        },
-        {
-          "name": "b",
-          "optional": false
-        }
+        {"name": "a", "optional": false},
+        {"name": "b", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "c",
-          "optional": false
-        }
+        {"name": "c", "optional": false}
       ]
     },
     "moe_grouped_matmul": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "mode",
-          "optional": false
-        },
-        {
-          "kind": "int",
-          "name": "top_k",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "MoeGroupedMatmulAttributes",
-      "attributes_type": 22,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "token",
-          "optional": false
-        },
-        {
-          "name": "weight",
-          "optional": false
-        },
-        {
-          "name": "first_token_offset",
-          "optional": false
-        },
-        {
-          "name": "token_index",
-          "optional": true
-        },
-        {
-          "name": "token_ks",
-          "optional": true
-        }
+        {"name": "token", "optional": false},
+        {"name": "weight", "optional": false},
+        {"name": "first_token_offset", "optional": false},
+        {"name": "token_index", "optional": true},
+        {"name": "token_ks", "optional": true}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "output",
-          "optional": false
-        }
+        {"name": "output", "optional": false}
       ]
     },
     "moe_grouped_matmul_bwd": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "MoeGroupedMatmulBwdAttributes",
-      "attributes_type": 23,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "doutput",
-          "optional": false
-        },
-        {
-          "name": "token",
-          "optional": false
-        },
-        {
-          "name": "first_token_offset",
-          "optional": false
-        }
+        {"name": "doutput", "optional": false},
+        {"name": "token", "optional": false},
+        {"name": "first_token_offset", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "dweight",
-          "optional": false
-        }
+        {"name": "dweight", "optional": false}
       ]
     },
     "pointwise": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "operation",
-          "optional": false
-        },
-        {
-          "kind": "float",
-          "name": "relu_lower_clip",
-          "optional": true
-        },
-        {
-          "kind": "float",
-          "name": "relu_upper_clip",
-          "optional": true
-        },
-        {
-          "kind": "float",
-          "name": "relu_lower_clip_slope",
-          "optional": true
-        },
-        {
-          "kind": "int",
-          "name": "axis_tensor_uid",
-          "optional": true
-        },
-        {
-          "kind": "float",
-          "name": "swish_beta",
-          "optional": true
-        },
-        {
-          "kind": "float",
-          "name": "elu_alpha",
-          "optional": true
-        },
-        {
-          "kind": "float",
-          "name": "softplus_beta",
-          "optional": true
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "PointwiseAttributes",
-      "attributes_type": 2,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "in_0",
-          "optional": false
-        },
-        {
-          "name": "in_1",
-          "optional": true
-        },
-        {
-          "name": "in_2",
-          "optional": true
-        }
+        {"name": "in_0", "optional": false},
+        {"name": "in_1", "optional": true},
+        {"name": "in_2", "optional": true}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "out_0",
-          "optional": false
-        }
+        {"name": "out_0", "optional": false}
       ]
     },
     "reduction": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "mode",
-          "optional": false
-        },
-        {
-          "kind": "bool",
-          "name": "is_deterministic",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "ReductionAttributes",
-      "attributes_type": 18,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "in",
-          "optional": false
-        }
+        {"name": "in", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "out",
-          "optional": false
-        }
+        {"name": "out", "optional": false}
       ]
     },
     "resample_bwd": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "resample_mode",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "padding_mode",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "ResampleBwdAttributes",
-      "attributes_type": 21,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "dy",
-          "optional": false
-        },
-        {
-          "name": "index",
-          "optional": true
-        }
+        {"name": "dy", "optional": false},
+        {"name": "index", "optional": true}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "dx",
-          "optional": false
-        }
+        {"name": "dx", "optional": false}
       ]
     },
     "resample_fwd": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "resample_mode",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "padding_mode",
-          "optional": false
-        },
-        {
-          "kind": "bool",
-          "name": "generate_index",
-          "optional": true
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "ResampleFwdAttributes",
-      "attributes_type": 19,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "x",
-          "optional": false
-        }
+        {"name": "x", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "y",
-          "optional": false
-        },
-        {
-          "name": "index",
-          "optional": true
-        }
+        {"name": "y", "optional": false},
+        {"name": "index", "optional": true}
       ]
     },
     "rms_norm": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "forward_phase",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "RMSNormAttributes",
-      "attributes_type": 10,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "x",
-          "optional": false
-        },
-        {
-          "name": "scale",
-          "optional": false
-        },
-        {
-          "name": "epsilon",
-          "optional": false
-        },
-        {
-          "name": "bias",
-          "optional": true
-        }
+        {"name": "x", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "epsilon", "optional": false},
+        {"name": "bias", "optional": true}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "y",
-          "optional": false
-        },
-        {
-          "name": "inv_rms",
-          "optional": true
-        }
+        {"name": "y", "optional": false},
+        {"name": "inv_rms", "optional": true}
       ]
     },
     "rms_norm_bwd": {
-      "attributes": [
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "RMSNormBackwardAttributes",
-      "attributes_type": 17,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "dy",
-          "optional": false
-        },
-        {
-          "name": "x",
-          "optional": false
-        },
-        {
-          "name": "scale",
-          "optional": false
-        },
-        {
-          "name": "inv_rms",
-          "optional": false
-        }
+        {"name": "dy", "optional": false},
+        {"name": "x", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "inv_rms", "optional": false}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "dx",
-          "optional": false
-        },
-        {
-          "name": "dscale",
-          "optional": false
-        },
-        {
-          "name": "dbias",
-          "optional": true
-        }
+        {"name": "dx", "optional": false},
+        {"name": "dscale", "optional": false},
+        {"name": "dbias", "optional": true}
       ]
     },
     "sdpa_bwd": {
-      "attributes": [
-        {
-          "kind": "bool",
-          "name": "alibi_mask",
-          "optional": false
-        },
-        {
-          "kind": "bool",
-          "name": "padding_mask",
-          "optional": false
-        },
-        {
-          "kind": "bool",
-          "name": "causal_mask",
-          "optional": false
-        },
-        {
-          "kind": "bool",
-          "name": "causal_mask_bottom_right",
-          "optional": false
-        },
-        {
-          "kind": "float",
-          "name": "dropout_probability",
-          "optional": true
-        },
-        {
-          "kind": "float",
-          "name": "attn_scale_value",
-          "optional": true
-        },
-        {
-          "kind": "int",
-          "name": "left_bound",
-          "optional": true
-        },
-        {
-          "kind": "int",
-          "name": "right_bound",
-          "optional": true
-        },
-        {
-          "kind": "enum_name",
-          "name": "diagonal_alignment",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "SdpaBackwardAttributes",
-      "attributes_type": 15,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "q",
-          "optional": false
-        },
-        {
-          "name": "k",
-          "optional": false
-        },
-        {
-          "name": "v",
-          "optional": false
-        },
-        {
-          "name": "o",
-          "optional": false
-        },
-        {
-          "name": "do",
-          "optional": false
-        },
-        {
-          "name": "stats",
-          "optional": false
-        },
-        {
-          "name": "scale",
-          "optional": true
-        },
-        {
-          "name": "attn_mask",
-          "optional": true
-        },
-        {
-          "name": "seq_len_q",
-          "optional": true
-        },
-        {
-          "name": "seq_len_kv",
-          "optional": true
-        },
-        {
-          "name": "seed",
-          "optional": true
-        },
-        {
-          "name": "offset",
-          "optional": true
-        },
-        {
-          "name": "dropout_mask",
-          "optional": true
-        },
-        {
-          "name": "dropout_scale",
-          "optional": true
-        },
-        {
-          "name": "dropout_scale_inv",
-          "optional": true
-        }
+        {"name": "q", "optional": false},
+        {"name": "k", "optional": false},
+        {"name": "v", "optional": false},
+        {"name": "o", "optional": false},
+        {"name": "do", "optional": false},
+        {"name": "stats", "optional": false},
+        {"name": "scale", "optional": true},
+        {"name": "attn_mask", "optional": true},
+        {"name": "seq_len_q", "optional": true},
+        {"name": "seq_len_kv", "optional": true},
+        {"name": "seed", "optional": true},
+        {"name": "offset", "optional": true},
+        {"name": "dropout_mask", "optional": true},
+        {"name": "dropout_scale", "optional": true},
+        {"name": "dropout_scale_inv", "optional": true}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "dq",
-          "optional": false
-        },
-        {
-          "name": "dk",
-          "optional": false
-        },
-        {
-          "name": "dv",
-          "optional": false
-        },
-        {
-          "name": "dbias",
-          "optional": true
-        }
+        {"name": "dq", "optional": false},
+        {"name": "dk", "optional": false},
+        {"name": "dv", "optional": false},
+        {"name": "dbias", "optional": true}
       ]
     },
     "sdpa_fwd": {
-      "attributes": [
-        {
-          "kind": "bool",
-          "name": "generate_stats",
-          "optional": true
-        },
-        {
-          "kind": "bool",
-          "name": "alibi_mask",
-          "optional": false
-        },
-        {
-          "kind": "bool",
-          "name": "padding_mask",
-          "optional": false
-        },
-        {
-          "kind": "bool",
-          "name": "causal_mask",
-          "optional": false
-        },
-        {
-          "kind": "bool",
-          "name": "causal_mask_bottom_right",
-          "optional": false
-        },
-        {
-          "kind": "float",
-          "name": "dropout_probability",
-          "optional": true
-        },
-        {
-          "kind": "float",
-          "name": "attn_scale_value",
-          "optional": true
-        },
-        {
-          "kind": "int",
-          "name": "left_bound",
-          "optional": true
-        },
-        {
-          "kind": "int",
-          "name": "right_bound",
-          "optional": true
-        },
-        {
-          "kind": "int",
-          "name": "max_seq_len_kv",
-          "optional": true
-        },
-        {
-          "kind": "enum_name",
-          "name": "diagonal_alignment",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "mma_core_mode",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "implementation",
-          "optional": false
-        },
-        {
-          "kind": "enum_name",
-          "name": "compute_data_type",
-          "optional": false
-        }
-      ],
-      "attributes_table": "SdpaAttributes",
-      "attributes_type": 12,
-      "operand_lists": [],
       "operands": [
-        {
-          "name": "q",
-          "optional": false
-        },
-        {
-          "name": "k",
-          "optional": false
-        },
-        {
-          "name": "v",
-          "optional": false
-        },
-        {
-          "name": "attn_mask",
-          "optional": true
-        },
-        {
-          "name": "scale",
-          "optional": true
-        },
-        {
-          "name": "seq_len_q",
-          "optional": true
-        },
-        {
-          "name": "seq_len_kv",
-          "optional": true
-        },
-        {
-          "name": "seed",
-          "optional": true
-        },
-        {
-          "name": "offset",
-          "optional": true
-        },
-        {
-          "name": "dropout_mask",
-          "optional": true
-        },
-        {
-          "name": "dropout_scale",
-          "optional": true
-        },
-        {
-          "name": "page_table_k",
-          "optional": true
-        },
-        {
-          "name": "page_table_v",
-          "optional": true
-        },
-        {
-          "name": "block_mask",
-          "optional": true
-        },
-        {
-          "name": "sink_token",
-          "optional": true
-        },
-        {
-          "name": "descale_q",
-          "optional": true
-        },
-        {
-          "name": "descale_k",
-          "optional": true
-        },
-        {
-          "name": "descale_v",
-          "optional": true
-        },
-        {
-          "name": "descale_s",
-          "optional": true
-        },
-        {
-          "name": "scale_s",
-          "optional": true
-        },
-        {
-          "name": "scale_o",
-          "optional": true
-        }
+        {"name": "q", "optional": false},
+        {"name": "k", "optional": false},
+        {"name": "v", "optional": false},
+        {"name": "attn_mask", "optional": true},
+        {"name": "scale", "optional": true},
+        {"name": "seq_len_q", "optional": true},
+        {"name": "seq_len_kv", "optional": true},
+        {"name": "seed", "optional": true},
+        {"name": "offset", "optional": true},
+        {"name": "dropout_mask", "optional": true},
+        {"name": "dropout_scale", "optional": true},
+        {"name": "page_table_k", "optional": true},
+        {"name": "page_table_v", "optional": true},
+        {"name": "block_mask", "optional": true},
+        {"name": "sink_token", "optional": true},
+        {"name": "descale_q", "optional": true},
+        {"name": "descale_k", "optional": true},
+        {"name": "descale_v", "optional": true},
+        {"name": "descale_s", "optional": true},
+        {"name": "scale_s", "optional": true},
+        {"name": "scale_o", "optional": true}
       ],
-      "result_lists": [],
       "results": [
-        {
-          "name": "o",
-          "optional": false
-        },
-        {
-          "name": "stats",
-          "optional": true
-        },
-        {
-          "name": "max",
-          "optional": true
-        },
-        {
-          "name": "sum_exp",
-          "optional": true
-        },
-        {
-          "name": "rng_dump",
-          "optional": true
-        },
-        {
-          "name": "amax_s",
-          "optional": true
-        },
-        {
-          "name": "amax_o",
-          "optional": true
-        }
+        {"name": "o", "optional": false},
+        {"name": "stats", "optional": true},
+        {"name": "max", "optional": true},
+        {"name": "sum_exp", "optional": true},
+        {"name": "rng_dump", "optional": true},
+        {"name": "amax_s", "optional": true},
+        {"name": "amax_o", "optional": true}
       ]
     }
   }

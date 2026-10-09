@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "ued.json",
   "title": "hipDNN UED",
-  "description": "Universal Engine Descriptor. Implements a subset of RFC 0020 section 4.2, and differs from the RFC's inline schema in four ways: 'heuristic' is a single UHD id in place of the role maps ('sort_kernel_catalog', 'predict_engine', 'predict_applicable_kernels'); 'sdk_version' is MAJOR.MINOR.PATCH; keys starting with 'x-' or '_', and the key 'provenance', are extensions the loader ignores; and 'nodes' and 'one_of' hold at most 32 items (section 4.3.2). Structural shape only; registry and cross-reference rules are semantic (section 13.2).",
+  "description": "Universal Engine Descriptor. Implements a subset of RFC 0020 section 4.2, and differs from the RFC's inline schema in four ways: 'heuristic' is a single UHD id in place of the role maps ('sort_kernel_catalog', 'predict_engine', 'predict_applicable_kernels'); 'sdk_version' is MAJOR.MINOR.PATCH; keys starting with 'x-' or '_', and the key 'provenance', are extensions the loader ignores; and 'nodes' holds at most 32 items (section 4.3.2). Structural shape only; registry and cross-reference rules are semantic (section 13.2).",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "id", "name", "metadata"],
@@ -64,7 +64,7 @@
           "addedInVersion": "1.0"
         },
         "nodes": {
-          "description": "Structural pattern over the op DAG. Opcodes, operand and result names MUST resolve against the op-schema registry (semantic; see RFC 0020 section 13.2). A node binds at most 64 edges across 'operands' and 'results'; the loader checks this limit, which this schema cannot express.",
+          "description": "Structural pattern over the op DAG. Opcodes, operand and result names MUST resolve against the op-schema registry (semantic; see RFC 0020 section 13.2).",
           "type": "array",
           "minItems": 1,
           "maxItems": 32,
@@ -103,7 +103,6 @@
                       "one_of": {
                         "type": "array",
                         "minItems": 2,
-                        "maxItems": 32,
                         "uniqueItems": true,
                         "items": { "type": "string", "minLength": 1 },
                         "addedInVersion": "1.0"

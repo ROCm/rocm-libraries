@@ -366,7 +366,7 @@ private:
         const auto& declared = _pattern.variables()[variable];
         if(!uid.has_value())
         {
-            // Only a `?` graph input may be absent. parseGraphPattern() gives it exactly one
+            // Only a `?` graph input may be absent. parsePatternNodes() gives it exactly one
             // binding edge, so it is still unset here.
             if(!declared.optional)
             {
@@ -386,8 +386,7 @@ private:
         // A graph input must not be produced inside the graph. A produced variable needs no
         // check: its producer's result field supplies the uid, and every other edge must
         // agree with it.
-        if(declared.binding.direction == EdgeDirection::OPERAND
-           && _graph.producers.count(*uid) != 0)
+        if(declared.graphInput && _graph.producers.count(*uid) != 0)
         {
             return false;
         }
@@ -429,21 +428,22 @@ inline bool publishPatternAttribute(
     const hipdnn_flatbuffers_sdk::data_objects::op_schema::AttributeSchema& schema,
     const hipdnn_flatbuffers_sdk::data_objects::Node& node)
 {
+    using hipdnn_flatbuffers_sdk::data_objects::op_schema::ValueKind;
     const auto value = schema.read(node);
     if(!value.has_value())
     {
         return attribute.optional;
     }
-    switch(attribute.kind)
+    switch(schema.kind)
     {
-    case SymbolKind::INT:
+    case ValueKind::INT:
         if(const auto* number = std::get_if<int64_t>(&*value))
         {
             bound.emplace(attribute.token, *number);
             return true;
         }
         return false;
-    case SymbolKind::FLOAT:
+    case ValueKind::FLOAT:
         if(const auto* number = std::get_if<double>(&*value);
            number != nullptr && std::isfinite(*number))
         {
@@ -451,14 +451,14 @@ inline bool publishPatternAttribute(
             return true;
         }
         return false;
-    case SymbolKind::BOOL:
+    case ValueKind::BOOL:
         if(const auto* flag = std::get_if<bool>(&*value))
         {
             bound.emplace(attribute.token, *flag);
             return true;
         }
         return false;
-    case SymbolKind::ENUM_NAME:
+    case ValueKind::ENUM_NAME:
         if(const auto* name = std::get_if<std::string_view>(&*value);
            name != nullptr && !name->empty())
         {
@@ -466,7 +466,6 @@ inline bool publishPatternAttribute(
             return true;
         }
         return false;
-    case SymbolKind::TENSOR:
     default:
         return false;
     }
@@ -475,13 +474,14 @@ inline bool publishPatternAttribute(
 inline std::optional<BoundTokens> matchGraphPatternOrThrow(const CompiledGraphPattern& pattern,
                                                            const MatchContext& context)
 {
-    if(context.graph.nodeCount() == 0 || context.graph.nodeCount() != pattern.nodeCount())
+    if(context.graph.nodeCount() != pattern.nodeCount())
     {
         return std::nullopt;
     }
+    // IGraph::nodeCount() counts getGraph().nodes(), and indexPatternGraph() indexes every
+    // one of them or fails, so a successful index holds pattern.nodeCount() nodes.
     const auto index = indexPatternGraph(context.graph.getGraph());
-    if(!index.has_value() || index->nodes.size() != pattern.nodeCount()
-       || !rootOpcodesAdmit(pattern, *index))
+    if(!index.has_value() || !rootOpcodesAdmit(pattern, *index))
     {
         return std::nullopt;
     }
@@ -501,10 +501,7 @@ inline std::optional<BoundTokens> matchGraphPatternOrThrow(const CompiledGraphPa
     }
 
     BoundTokens bound;
-    if(!publishGraph(bound, context.graph))
-    {
-        return std::nullopt;
-    }
+    publishGraph(bound, context.graph);
     const auto& variables = pattern.variables();
     for(size_t variable = 0; variable < variables.size(); ++variable)
     {

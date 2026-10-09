@@ -12,30 +12,26 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include <hipdnn_plugin_sdk/ingestor/BindingPublication.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorJsonRules.hpp>
 
 /// @file GraphPattern.hpp
 /// @brief Parsed form of the declarative `graph_match.nodes` pattern (RFC 0020 §4.3).
 ///
-/// parseGraphPattern() checks the grammar and well-formedness rules, which need only the
-/// block itself. compileGraphPattern() in CompiledGraphPattern.hpp resolves opcodes and
-/// edge names against the op-schema registry.
+/// detail::parsePatternNodes() checks the grammar and well-formedness rules, which need
+/// only the block itself. compileGraphPattern() in CompiledGraphPattern.hpp runs it, then
+/// resolves opcodes and edge names against the op-schema registry.
 
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// Maximum nodes in one pattern. These limits keep a broken or hostile UED from making
-/// compile or match unbounded.
+/// Maximum nodes in one pattern. This and MAX_PATTERN_MATCH_STEPS keep a broken or
+/// hostile UED from making compile or match unbounded.
 inline constexpr size_t MAX_PATTERN_NODES = 32;
-/// Maximum operand plus result bindings on one node.
-inline constexpr size_t MAX_PATTERN_EDGES_PER_NODE = 64;
-/// Maximum members of one `one_of` opcode set.
-inline constexpr size_t MAX_PATTERN_OPCODE_SET = 32;
 /// Maximum candidate assignments the matcher tries for one graph before it declines.
 /// One step tries one pattern node on one free graph node and costs a few hundred
 /// operations at most, so the budget caps a search near twenty million operations. The
@@ -85,49 +81,8 @@ struct PatternNode
     std::vector<PatternEdge> results;
 };
 
-class GraphPattern;
-
-/// Parses @p nodes, the value of `graph_match.nodes`, and checks its grammar and
-/// well-formedness. @p where names the UED in every error.
-/// @throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE) naming the UED, the
-///         node, and the offending name or value.
-inline GraphPattern parseGraphPattern(const nlohmann::json& nodes, const std::string& where);
-
-/// A well-formed pattern, immutable once parsed.
-class GraphPattern
-{
-public:
-    const std::vector<PatternNode>& nodes() const noexcept
-    {
-        return _nodes;
-    }
-
-private:
-    explicit GraphPattern(std::vector<PatternNode> nodes)
-        : _nodes(std::move(nodes))
-    {
-    }
-
-    friend GraphPattern parseGraphPattern(const nlohmann::json& nodes, const std::string& where);
-
-    std::vector<PatternNode> _nodes;
-};
-
 namespace detail
 {
-
-inline bool isPatternIdentifier(std::string_view text)
-{
-    const auto isLeading
-        = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; };
-    if(text.empty() || !isLeading(text.front()))
-    {
-        return false;
-    }
-    return std::all_of(text.begin() + 1, text.end(), [&isLeading](char c) {
-        return isLeading(c) || (c >= '0' && c <= '9');
-    });
-}
 
 inline bool isReservedPatternRoot(std::string_view name)
 {
@@ -162,7 +117,7 @@ inline PatternBinding parsePatternBinding(const nlohmann::json& value,
         binding.optional = true;
         body.remove_suffix(1);
     }
-    if(body.empty() || body.front() != '$' || !isPatternIdentifier(body.substr(1)))
+    if(body.empty() || body.front() != '$' || !isIdentifier(body.substr(1)))
     {
         fail(edgeLocator + " has malformed binding '" + text + "'; expected '$<identifier>'"
              + (allowOptional ? " or '$<identifier>?'" : ""));
@@ -233,11 +188,7 @@ inline void
         fail("key 'one_of' in " + setLocator + " lists " + std::to_string(members->size())
              + " opcode(s); an opcode set needs at least 2");
     }
-    if(members->size() > MAX_PATTERN_OPCODE_SET)
-    {
-        fail("key 'one_of' in " + setLocator + " lists " + std::to_string(members->size())
-             + " opcodes; the limit is " + std::to_string(MAX_PATTERN_OPCODE_SET));
-    }
+    std::set<std::string_view> seen;
     for(const auto& member : *members)
     {
         if(!member.is_string() || member.get_ref<const std::string&>().empty())
@@ -245,7 +196,7 @@ inline void
             fail("key 'one_of' in " + setLocator + " must list non-empty opcode strings");
         }
         const auto& opcode = member.get_ref<const std::string&>();
-        if(std::find(node.opcodes.begin(), node.opcodes.end(), opcode) != node.opcodes.end())
+        if(!seen.insert(opcode).second)
         {
             std::string message = "opcode '";
             message += opcode;
@@ -275,7 +226,7 @@ inline PatternNode
     }
 
     const auto& id = object.at("id");
-    if(!id.is_string() || !isPatternIdentifier(id.get_ref<const std::string&>()))
+    if(!id.is_string() || !isIdentifier(id.get_ref<const std::string&>()))
     {
         fail("key 'id' in " + position + " must be an identifier ([A-Za-z_][A-Za-z0-9_]*), got "
              + id.dump());
@@ -297,12 +248,6 @@ inline PatternNode
     parsePatternOpcodes(object.at("op"), node, locator);
     node.operands = parsePatternEdges(object, "operands", true, locator);
     node.results = parsePatternEdges(object, "results", false, locator);
-    const auto edgeCount = node.operands.size() + node.results.size();
-    if(edgeCount > MAX_PATTERN_EDGES_PER_NODE)
-    {
-        fail(locator + " binds " + std::to_string(edgeCount) + " edges; the limit is "
-             + std::to_string(MAX_PATTERN_EDGES_PER_NODE));
-    }
     return node;
 }
 
@@ -398,33 +343,36 @@ inline void checkPatternVariables(const std::vector<PatternNode>& nodes, const s
     }
 }
 
-} // namespace detail
-
-inline GraphPattern parseGraphPattern(const nlohmann::json& nodes, const std::string& where)
+/// Parses @p nodes, the value of `graph_match.nodes`, and checks its grammar and
+/// well-formedness. @p where names the UED in every error.
+inline std::vector<PatternNode> parsePatternNodes(const nlohmann::json& nodes,
+                                                  const std::string& where)
 {
     const std::string block = "graph_match.nodes in " + where;
     if(!nodes.is_array())
     {
-        detail::fail(block + " must be an array of node objects");
+        fail(block + " must be an array of node objects");
     }
     if(nodes.empty())
     {
-        detail::fail(block + " must not be empty");
+        fail(block + " must not be empty");
     }
     if(nodes.size() > MAX_PATTERN_NODES)
     {
-        detail::fail(block + " has " + std::to_string(nodes.size()) + " nodes; the limit is "
-                     + std::to_string(MAX_PATTERN_NODES));
+        fail(block + " has " + std::to_string(nodes.size()) + " nodes; the limit is "
+             + std::to_string(MAX_PATTERN_NODES));
     }
     std::vector<PatternNode> parsed;
     parsed.reserve(nodes.size());
     for(size_t i = 0; i < nodes.size(); ++i)
     {
-        parsed.push_back(detail::parsePatternNode(nodes[i], i, where));
+        parsed.push_back(parsePatternNode(nodes[i], i, where));
     }
-    detail::checkPatternVariables(parsed, where);
-    return GraphPattern(std::move(parsed));
+    checkPatternVariables(parsed, where);
+    return parsed;
 }
+
+} // namespace detail
 
 } // namespace hipdnn_plugin_sdk::ingestor
 

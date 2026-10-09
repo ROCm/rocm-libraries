@@ -1,8 +1,7 @@
 {
   "description": "Node 'a' reads '$b', which collides with node id 'b', and nodes 'a' and 'b' both produce '$y'. Every result is checked before any operand, so the second producer of '$y' is reported.",
   "valid": false,
-  "runtime_error": "variable '$y' is bound by two results",
-  "packager_error": "binds '$y', already bound by node 'a' result 'out_0'",
+  "error": "variable '$y' is bound by two results",
   "ued": {
     "version": "1.0",
     "id": "85f26838-df8f-5997-8a53-2f49cebbfa3b",
@@ -10,28 +9,8 @@
     "metadata": "c9726cba-a643-5668-8974-d06953b46e69",
     "graph_match": {
       "nodes": [
-        {
-          "kind": "op",
-          "id": "a",
-          "op": "pointwise",
-          "operands": {
-            "in_0": "$b"
-          },
-          "results": {
-            "out_0": "$y"
-          }
-        },
-        {
-          "kind": "op",
-          "id": "b",
-          "op": "pointwise",
-          "operands": {
-            "in_0": "$x"
-          },
-          "results": {
-            "out_0": "$y"
-          }
-        }
+        {"kind": "op", "id": "a", "op": "pointwise", "operands": {"in_0": "$b"}, "results": {"out_0": "$y"}},
+        {"kind": "op", "id": "b", "op": "pointwise", "operands": {"in_0": "$x"}, "results": {"out_0": "$y"}}
       ]
     }
   }

@@ -1,8 +1,7 @@
 {
   "description": "A result name bound under operands.",
   "valid": false,
-  "runtime_error": "declares no operand 'out_0'; it is a result, so it belongs under 'results'",
-  "packager_error": "operand 'out_0' is declared by op 'pointwise' as a result",
+  "error": "declares no operand 'out_0'; it is a result, so it belongs under 'results'",
   "ued": {
     "version": "1.0",
     "id": "36133160-68f3-5114-917a-0c321e92c73a",
@@ -10,15 +9,7 @@
     "metadata": "0ea1b927-d869-5492-8054-a3008c9c804d",
     "graph_match": {
       "nodes": [
-        {
-          "kind": "op",
-          "id": "pointwise",
-          "op": "pointwise",
-          "operands": {
-            "out_0": "$input_a"
-          },
-          "results": {}
-        }
+        {"kind": "op", "id": "pointwise", "op": "pointwise", "operands": {"out_0": "$input_a"}, "results": {}}
       ]
     }
   }

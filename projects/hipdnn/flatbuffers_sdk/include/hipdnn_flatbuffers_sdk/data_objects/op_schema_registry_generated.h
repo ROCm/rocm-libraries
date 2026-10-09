@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <optional>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -91,7 +92,6 @@ struct SchemaSpan
 struct OpSchema
 {
     std::string_view opcode; ///< The table's matcher_opcode annotation.
-    std::string_view attributesTable; ///< e.g. "PointwiseAttributes".
     NodeAttributes attributesType; ///< The union discriminant.
     SchemaSpan<EdgeSchema> operands; ///< Declaration order.
     SchemaSpan<EdgeSchema> results; ///< Declaration order.
@@ -104,3046 +104,568 @@ struct OpSchema
 namespace detail
 {
 
-inline std::optional<ScalarValue> readNodeComputeDataType(const Node& node) noexcept
+template <typename Accessor>
+struct AccessorTable;
+
+template <typename Table, typename Value>
+struct AccessorTable<Value (Table::*)() const>
 {
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameDataType(node.compute_data_type())};
+    using type = Table;
+};
+
+/// The table @p Field reads: the Node itself for a Node field, else the node's
+/// attribute table when it is @p Field's table, else nullptr.
+template <auto Field>
+const auto* fieldTable(const Node& node) noexcept
+{
+    using Table = typename AccessorTable<decltype(Field)>::type;
+    if constexpr(std::is_same_v<Table, Node>)
+    {
+        return &node;
+    }
+    else
+    {
+        return node.attributes_as<Table>();
+    }
 }
 
-inline std::optional<int64_t> readBatchnormAttributesXTensorUid(const Node& node) noexcept
+template <typename T>
+std::optional<T> present(T value) noexcept
 {
-    const auto* table = node.attributes_as<BatchnormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->x_tensor_uid();
+    return value;
 }
 
-inline std::optional<int64_t> readBatchnormAttributesScaleTensorUid(const Node& node) noexcept
+template <typename T>
+std::optional<T> present(const ::flatbuffers::Optional<T>& value) noexcept
 {
-    const auto* table = node.attributes_as<BatchnormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->scale_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormAttributesBiasTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->bias_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormAttributesEpsilonTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->epsilon_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormAttributesPrevRunningMeanTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->prev_running_mean_tensor_uid();
     if(!value.has_value())
     {
         return std::nullopt;
     }
-    return value.value();
+    return *value;
 }
 
-inline std::optional<int64_t> readBatchnormAttributesPrevRunningVarianceTensorUid(const Node& node) noexcept
+/// @p Field's value; nullopt when the node does not carry its table or an optional
+/// field is absent.
+template <auto Field>
+auto readField(const Node& node) noexcept
 {
-    const auto* table = node.attributes_as<BatchnormAttributes>();
+    const auto* table = fieldTable<Field>(node);
+    using Value = decltype(present((table->*Field)()));
     if(table == nullptr)
     {
-        return std::nullopt;
+        return Value{};
     }
-    const auto value = table->prev_running_variance_tensor_uid();
+    return present((table->*Field)());
+}
+
+template <auto Field>
+std::optional<int64_t> readEdge(const Node& node) noexcept
+{
+    return readField<Field>(node);
+}
+
+template <auto Field>
+const ::flatbuffers::Vector<int64_t>* readEdgeList(const Node& node) noexcept
+{
+    const auto* table = fieldTable<Field>(node);
+    return table == nullptr ? nullptr : (table->*Field)();
+}
+
+/// A scalar attribute held as @p Alternative.
+template <typename Alternative, auto Field>
+std::optional<ScalarValue> readScalar(const Node& node) noexcept
+{
+    const auto value = readField<Field>(node);
     if(!value.has_value())
     {
         return std::nullopt;
     }
-    return value.value();
+    return ScalarValue{std::in_place_type<Alternative>, *value};
 }
 
-inline std::optional<int64_t> readBatchnormAttributesMomentumTensorUid(const Node& node) noexcept
+/// An enum attribute held as the name @p EnumName gives its value.
+template <auto Field, auto EnumName>
+std::optional<ScalarValue> readEnumName(const Node& node) noexcept
 {
-    const auto* table = node.attributes_as<BatchnormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->momentum_tensor_uid();
+    const auto value = readField<Field>(node);
     if(!value.has_value())
     {
         return std::nullopt;
     }
-    return value.value();
+    return ScalarValue{std::in_place_type<std::string_view>, EnumName(*value)};
 }
 
-inline std::optional<int64_t> readBatchnormAttributesYTensorUid(const Node& node) noexcept
+template <typename T, size_t N>
+constexpr SchemaSpan<T> spanOf(const std::array<T, N>& entries) noexcept
 {
-    const auto* table = node.attributes_as<BatchnormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->y_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormAttributesMeanTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->mean_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readBatchnormAttributesInvVarianceTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->inv_variance_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readBatchnormAttributesNextRunningMeanTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->next_running_mean_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readBatchnormAttributesNextRunningVarianceTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->next_running_variance_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline const ::flatbuffers::Vector<int64_t>* readBatchnormAttributesPeerStatsTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormAttributes>();
-    if(table == nullptr)
-    {
-        return nullptr;
-    }
-    return table->peer_stats_tensor_uid();
+    return SchemaSpan<T>{entries.data(), N};
 }
 
 inline constexpr std::array<EdgeSchema, 7> BATCHNORM_OPERANDS = {{
-    {"x", false, &readBatchnormAttributesXTensorUid},
-    {"scale", false, &readBatchnormAttributesScaleTensorUid},
-    {"bias", false, &readBatchnormAttributesBiasTensorUid},
-    {"epsilon", false, &readBatchnormAttributesEpsilonTensorUid},
-    {"prev_running_mean", true, &readBatchnormAttributesPrevRunningMeanTensorUid},
-    {"prev_running_variance", true, &readBatchnormAttributesPrevRunningVarianceTensorUid},
-    {"momentum", true, &readBatchnormAttributesMomentumTensorUid},
+    {"x", false, &readEdge<&BatchnormAttributes::x_tensor_uid>},
+    {"scale", false, &readEdge<&BatchnormAttributes::scale_tensor_uid>},
+    {"bias", false, &readEdge<&BatchnormAttributes::bias_tensor_uid>},
+    {"epsilon", false, &readEdge<&BatchnormAttributes::epsilon_tensor_uid>},
+    {"prev_running_mean", true, &readEdge<&BatchnormAttributes::prev_running_mean_tensor_uid>},
+    {"prev_running_variance", true, &readEdge<&BatchnormAttributes::prev_running_variance_tensor_uid>},
+    {"momentum", true, &readEdge<&BatchnormAttributes::momentum_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 5> BATCHNORM_RESULTS = {{
-    {"y", false, &readBatchnormAttributesYTensorUid},
-    {"mean", true, &readBatchnormAttributesMeanTensorUid},
-    {"inv_variance", true, &readBatchnormAttributesInvVarianceTensorUid},
-    {"next_running_mean", true, &readBatchnormAttributesNextRunningMeanTensorUid},
-    {"next_running_variance", true, &readBatchnormAttributesNextRunningVarianceTensorUid},
-}};
-
-inline constexpr std::array<EdgeListSchema, 1> BATCHNORM_OPERAND_LISTS = {{
-    {"peer_stats_tensor_uid", &readBatchnormAttributesPeerStatsTensorUid},
+    {"y", false, &readEdge<&BatchnormAttributes::y_tensor_uid>},
+    {"mean", true, &readEdge<&BatchnormAttributes::mean_tensor_uid>},
+    {"inv_variance", true, &readEdge<&BatchnormAttributes::inv_variance_tensor_uid>},
+    {"next_running_mean", true, &readEdge<&BatchnormAttributes::next_running_mean_tensor_uid>},
+    {"next_running_variance", true, &readEdge<&BatchnormAttributes::next_running_variance_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 1> BATCHNORM_ATTRIBUTES = {{
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readBatchnormBackwardAttributesDyTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dy_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormBackwardAttributesXTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->x_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormBackwardAttributesMeanTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->mean_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readBatchnormBackwardAttributesInvVarianceTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->inv_variance_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readBatchnormBackwardAttributesScaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->scale_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormBackwardAttributesDxTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dx_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormBackwardAttributesDscaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dscale_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormBackwardAttributesDbiasTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dbias_tensor_uid();
-}
-
-inline const ::flatbuffers::Vector<int64_t>* readBatchnormBackwardAttributesPeerStatsTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return nullptr;
-    }
-    return table->peer_stats_tensor_uid();
-}
+inline constexpr std::array<EdgeListSchema, 1> BATCHNORM_OPERAND_LISTS = {{
+    {"peer_stats_tensor_uid", &readEdgeList<&BatchnormAttributes::peer_stats_tensor_uid>},
+}};
 
 inline constexpr std::array<EdgeSchema, 5> BATCHNORM_BWD_OPERANDS = {{
-    {"dy", false, &readBatchnormBackwardAttributesDyTensorUid},
-    {"x", false, &readBatchnormBackwardAttributesXTensorUid},
-    {"mean", true, &readBatchnormBackwardAttributesMeanTensorUid},
-    {"inv_variance", true, &readBatchnormBackwardAttributesInvVarianceTensorUid},
-    {"scale", false, &readBatchnormBackwardAttributesScaleTensorUid},
+    {"dy", false, &readEdge<&BatchnormBackwardAttributes::dy_tensor_uid>},
+    {"x", false, &readEdge<&BatchnormBackwardAttributes::x_tensor_uid>},
+    {"mean", true, &readEdge<&BatchnormBackwardAttributes::mean_tensor_uid>},
+    {"inv_variance", true, &readEdge<&BatchnormBackwardAttributes::inv_variance_tensor_uid>},
+    {"scale", false, &readEdge<&BatchnormBackwardAttributes::scale_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 3> BATCHNORM_BWD_RESULTS = {{
-    {"dx", false, &readBatchnormBackwardAttributesDxTensorUid},
-    {"dscale", false, &readBatchnormBackwardAttributesDscaleTensorUid},
-    {"dbias", false, &readBatchnormBackwardAttributesDbiasTensorUid},
-}};
-
-inline constexpr std::array<EdgeListSchema, 1> BATCHNORM_BWD_OPERAND_LISTS = {{
-    {"peer_stats_tensor_uid", &readBatchnormBackwardAttributesPeerStatsTensorUid},
+    {"dx", false, &readEdge<&BatchnormBackwardAttributes::dx_tensor_uid>},
+    {"dscale", false, &readEdge<&BatchnormBackwardAttributes::dscale_tensor_uid>},
+    {"dbias", false, &readEdge<&BatchnormBackwardAttributes::dbias_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 1> BATCHNORM_BWD_ATTRIBUTES = {{
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readBatchnormInferenceAttributesXTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormInferenceAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->x_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormInferenceAttributesMeanTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormInferenceAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->mean_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormInferenceAttributesInvVarianceTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormInferenceAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->inv_variance_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormInferenceAttributesScaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormInferenceAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->scale_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormInferenceAttributesBiasTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormInferenceAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->bias_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormInferenceAttributesYTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormInferenceAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->y_tensor_uid();
-}
+inline constexpr std::array<EdgeListSchema, 1> BATCHNORM_BWD_OPERAND_LISTS = {{
+    {"peer_stats_tensor_uid", &readEdgeList<&BatchnormBackwardAttributes::peer_stats_tensor_uid>},
+}};
 
 inline constexpr std::array<EdgeSchema, 5> BATCHNORM_INFERENCE_OPERANDS = {{
-    {"x", false, &readBatchnormInferenceAttributesXTensorUid},
-    {"mean", false, &readBatchnormInferenceAttributesMeanTensorUid},
-    {"inv_variance", false, &readBatchnormInferenceAttributesInvVarianceTensorUid},
-    {"scale", false, &readBatchnormInferenceAttributesScaleTensorUid},
-    {"bias", false, &readBatchnormInferenceAttributesBiasTensorUid},
+    {"x", false, &readEdge<&BatchnormInferenceAttributes::x_tensor_uid>},
+    {"mean", false, &readEdge<&BatchnormInferenceAttributes::mean_tensor_uid>},
+    {"inv_variance", false, &readEdge<&BatchnormInferenceAttributes::inv_variance_tensor_uid>},
+    {"scale", false, &readEdge<&BatchnormInferenceAttributes::scale_tensor_uid>},
+    {"bias", false, &readEdge<&BatchnormInferenceAttributes::bias_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 1> BATCHNORM_INFERENCE_RESULTS = {{
-    {"y", false, &readBatchnormInferenceAttributesYTensorUid},
+    {"y", false, &readEdge<&BatchnormInferenceAttributes::y_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 1> BATCHNORM_INFERENCE_ATTRIBUTES = {{
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readBatchnormInferenceAttributesVarianceExtXTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormInferenceAttributesVarianceExt>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->x_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormInferenceAttributesVarianceExtMeanTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormInferenceAttributesVarianceExt>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->mean_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormInferenceAttributesVarianceExtVarianceTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormInferenceAttributesVarianceExt>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->variance_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormInferenceAttributesVarianceExtScaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormInferenceAttributesVarianceExt>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->scale_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormInferenceAttributesVarianceExtBiasTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormInferenceAttributesVarianceExt>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->bias_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormInferenceAttributesVarianceExtEpsilonTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormInferenceAttributesVarianceExt>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->epsilon_tensor_uid();
-}
-
-inline std::optional<int64_t> readBatchnormInferenceAttributesVarianceExtYTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BatchnormInferenceAttributesVarianceExt>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->y_tensor_uid();
-}
-
 inline constexpr std::array<EdgeSchema, 6> BATCHNORM_INFERENCE_VARIANCE_EXT_OPERANDS = {{
-    {"x", false, &readBatchnormInferenceAttributesVarianceExtXTensorUid},
-    {"mean", false, &readBatchnormInferenceAttributesVarianceExtMeanTensorUid},
-    {"variance", false, &readBatchnormInferenceAttributesVarianceExtVarianceTensorUid},
-    {"scale", false, &readBatchnormInferenceAttributesVarianceExtScaleTensorUid},
-    {"bias", false, &readBatchnormInferenceAttributesVarianceExtBiasTensorUid},
-    {"epsilon", false, &readBatchnormInferenceAttributesVarianceExtEpsilonTensorUid},
+    {"x", false, &readEdge<&BatchnormInferenceAttributesVarianceExt::x_tensor_uid>},
+    {"mean", false, &readEdge<&BatchnormInferenceAttributesVarianceExt::mean_tensor_uid>},
+    {"variance", false, &readEdge<&BatchnormInferenceAttributesVarianceExt::variance_tensor_uid>},
+    {"scale", false, &readEdge<&BatchnormInferenceAttributesVarianceExt::scale_tensor_uid>},
+    {"bias", false, &readEdge<&BatchnormInferenceAttributesVarianceExt::bias_tensor_uid>},
+    {"epsilon", false, &readEdge<&BatchnormInferenceAttributesVarianceExt::epsilon_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 1> BATCHNORM_INFERENCE_VARIANCE_EXT_RESULTS = {{
-    {"y", false, &readBatchnormInferenceAttributesVarianceExtYTensorUid},
+    {"y", false, &readEdge<&BatchnormInferenceAttributesVarianceExt::y_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 1> BATCHNORM_INFERENCE_VARIANCE_EXT_ATTRIBUTES = {{
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readBlockScaleDequantizeAttributesXTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BlockScaleDequantizeAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->x_tensor_uid();
-}
-
-inline std::optional<int64_t> readBlockScaleDequantizeAttributesScaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BlockScaleDequantizeAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->scale_tensor_uid();
-}
-
-inline std::optional<int64_t> readBlockScaleDequantizeAttributesYTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BlockScaleDequantizeAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->y_tensor_uid();
-}
-
-inline std::optional<ScalarValue> readBlockScaleDequantizeAttributesIsNegativeScale(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BlockScaleDequantizeAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<bool>, table->is_negative_scale()};
-}
-
 inline constexpr std::array<EdgeSchema, 2> BLOCK_SCALE_DEQUANTIZE_OPERANDS = {{
-    {"x", false, &readBlockScaleDequantizeAttributesXTensorUid},
-    {"scale", false, &readBlockScaleDequantizeAttributesScaleTensorUid},
+    {"x", false, &readEdge<&BlockScaleDequantizeAttributes::x_tensor_uid>},
+    {"scale", false, &readEdge<&BlockScaleDequantizeAttributes::scale_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 1> BLOCK_SCALE_DEQUANTIZE_RESULTS = {{
-    {"y", false, &readBlockScaleDequantizeAttributesYTensorUid},
+    {"y", false, &readEdge<&BlockScaleDequantizeAttributes::y_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 2> BLOCK_SCALE_DEQUANTIZE_ATTRIBUTES = {{
-    {"is_negative_scale", ValueKind::BOOL, false, &readBlockScaleDequantizeAttributesIsNegativeScale},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"is_negative_scale", ValueKind::BOOL, false, &readScalar<bool, &BlockScaleDequantizeAttributes::is_negative_scale>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readBlockScaleQuantizeAttributesXTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BlockScaleQuantizeAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->x_tensor_uid();
-}
-
-inline std::optional<int64_t> readBlockScaleQuantizeAttributesYTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BlockScaleQuantizeAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->y_tensor_uid();
-}
-
-inline std::optional<int64_t> readBlockScaleQuantizeAttributesScaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BlockScaleQuantizeAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->scale_tensor_uid();
-}
-
-inline std::optional<ScalarValue> readBlockScaleQuantizeAttributesBlockSize(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BlockScaleQuantizeAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<int64_t>, table->block_size()};
-}
-
-inline std::optional<ScalarValue> readBlockScaleQuantizeAttributesAxis(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BlockScaleQuantizeAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->axis();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<int64_t>, value.value()};
-}
-
-inline std::optional<ScalarValue> readBlockScaleQuantizeAttributesTranspose(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<BlockScaleQuantizeAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<bool>, table->transpose()};
-}
-
 inline constexpr std::array<EdgeSchema, 1> BLOCK_SCALE_QUANTIZE_OPERANDS = {{
-    {"x", false, &readBlockScaleQuantizeAttributesXTensorUid},
+    {"x", false, &readEdge<&BlockScaleQuantizeAttributes::x_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 2> BLOCK_SCALE_QUANTIZE_RESULTS = {{
-    {"y", false, &readBlockScaleQuantizeAttributesYTensorUid},
-    {"scale", false, &readBlockScaleQuantizeAttributesScaleTensorUid},
+    {"y", false, &readEdge<&BlockScaleQuantizeAttributes::y_tensor_uid>},
+    {"scale", false, &readEdge<&BlockScaleQuantizeAttributes::scale_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 4> BLOCK_SCALE_QUANTIZE_ATTRIBUTES = {{
-    {"block_size", ValueKind::INT, false, &readBlockScaleQuantizeAttributesBlockSize},
-    {"axis", ValueKind::INT, true, &readBlockScaleQuantizeAttributesAxis},
-    {"transpose", ValueKind::BOOL, false, &readBlockScaleQuantizeAttributesTranspose},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"block_size", ValueKind::INT, false, &readScalar<int64_t, &BlockScaleQuantizeAttributes::block_size>},
+    {"axis", ValueKind::INT, true, &readScalar<int64_t, &BlockScaleQuantizeAttributes::axis>},
+    {"transpose", ValueKind::BOOL, false, &readScalar<bool, &BlockScaleQuantizeAttributes::transpose>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readConvolutionBwdAttributesDyTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ConvolutionBwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dy_tensor_uid();
-}
-
-inline std::optional<int64_t> readConvolutionBwdAttributesWTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ConvolutionBwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->w_tensor_uid();
-}
-
-inline std::optional<int64_t> readConvolutionBwdAttributesDxTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ConvolutionBwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dx_tensor_uid();
-}
-
-inline std::optional<ScalarValue> readConvolutionBwdAttributesConvMode(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ConvolutionBwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameConvMode(table->conv_mode())};
-}
-
 inline constexpr std::array<EdgeSchema, 2> CONVOLUTION_BWD_DATA_OPERANDS = {{
-    {"dy", false, &readConvolutionBwdAttributesDyTensorUid},
-    {"w", false, &readConvolutionBwdAttributesWTensorUid},
+    {"dy", false, &readEdge<&ConvolutionBwdAttributes::dy_tensor_uid>},
+    {"w", false, &readEdge<&ConvolutionBwdAttributes::w_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 1> CONVOLUTION_BWD_DATA_RESULTS = {{
-    {"dx", false, &readConvolutionBwdAttributesDxTensorUid},
+    {"dx", false, &readEdge<&ConvolutionBwdAttributes::dx_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 2> CONVOLUTION_BWD_DATA_ATTRIBUTES = {{
-    {"conv_mode", ValueKind::ENUM_NAME, false, &readConvolutionBwdAttributesConvMode},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"conv_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ConvolutionBwdAttributes::conv_mode, &EnumNameConvMode>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readConvolutionWrwAttributesXTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ConvolutionWrwAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->x_tensor_uid();
-}
-
-inline std::optional<int64_t> readConvolutionWrwAttributesDyTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ConvolutionWrwAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dy_tensor_uid();
-}
-
-inline std::optional<int64_t> readConvolutionWrwAttributesDwTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ConvolutionWrwAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dw_tensor_uid();
-}
-
-inline std::optional<ScalarValue> readConvolutionWrwAttributesConvMode(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ConvolutionWrwAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameConvMode(table->conv_mode())};
-}
-
 inline constexpr std::array<EdgeSchema, 2> CONVOLUTION_BWD_FILTER_OPERANDS = {{
-    {"x", false, &readConvolutionWrwAttributesXTensorUid},
-    {"dy", false, &readConvolutionWrwAttributesDyTensorUid},
+    {"x", false, &readEdge<&ConvolutionWrwAttributes::x_tensor_uid>},
+    {"dy", false, &readEdge<&ConvolutionWrwAttributes::dy_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 1> CONVOLUTION_BWD_FILTER_RESULTS = {{
-    {"dw", false, &readConvolutionWrwAttributesDwTensorUid},
+    {"dw", false, &readEdge<&ConvolutionWrwAttributes::dw_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 2> CONVOLUTION_BWD_FILTER_ATTRIBUTES = {{
-    {"conv_mode", ValueKind::ENUM_NAME, false, &readConvolutionWrwAttributesConvMode},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"conv_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ConvolutionWrwAttributes::conv_mode, &EnumNameConvMode>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readConvolutionFwdAttributesXTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ConvolutionFwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->x_tensor_uid();
-}
-
-inline std::optional<int64_t> readConvolutionFwdAttributesWTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ConvolutionFwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->w_tensor_uid();
-}
-
-inline std::optional<int64_t> readConvolutionFwdAttributesYTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ConvolutionFwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->y_tensor_uid();
-}
-
-inline std::optional<ScalarValue> readConvolutionFwdAttributesConvMode(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ConvolutionFwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameConvMode(table->conv_mode())};
-}
-
 inline constexpr std::array<EdgeSchema, 2> CONVOLUTION_FWD_OPERANDS = {{
-    {"x", false, &readConvolutionFwdAttributesXTensorUid},
-    {"w", false, &readConvolutionFwdAttributesWTensorUid},
+    {"x", false, &readEdge<&ConvolutionFwdAttributes::x_tensor_uid>},
+    {"w", false, &readEdge<&ConvolutionFwdAttributes::w_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 1> CONVOLUTION_FWD_RESULTS = {{
-    {"y", false, &readConvolutionFwdAttributesYTensorUid},
+    {"y", false, &readEdge<&ConvolutionFwdAttributes::y_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 2> CONVOLUTION_FWD_ATTRIBUTES = {{
-    {"conv_mode", ValueKind::ENUM_NAME, false, &readConvolutionFwdAttributesConvMode},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
-}};
-
-inline const ::flatbuffers::Vector<int64_t>* readCustomOpAttributesInputTensorUids(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<CustomOpAttributes>();
-    if(table == nullptr)
-    {
-        return nullptr;
-    }
-    return table->input_tensor_uids();
-}
-
-inline const ::flatbuffers::Vector<int64_t>* readCustomOpAttributesOutputTensorUids(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<CustomOpAttributes>();
-    if(table == nullptr)
-    {
-        return nullptr;
-    }
-    return table->output_tensor_uids();
-}
-
-inline constexpr std::array<EdgeListSchema, 1> CUSTOM_OP_OPERAND_LISTS = {{
-    {"input_tensor_uids", &readCustomOpAttributesInputTensorUids},
-}};
-
-inline constexpr std::array<EdgeListSchema, 1> CUSTOM_OP_RESULT_LISTS = {{
-    {"output_tensor_uids", &readCustomOpAttributesOutputTensorUids},
+    {"conv_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ConvolutionFwdAttributes::conv_mode, &EnumNameConvMode>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
 inline constexpr std::array<AttributeSchema, 1> CUSTOM_OP_ATTRIBUTES = {{
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readLayernormAttributesXTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->x_tensor_uid();
-}
+inline constexpr std::array<EdgeListSchema, 1> CUSTOM_OP_OPERAND_LISTS = {{
+    {"input_tensor_uids", &readEdgeList<&CustomOpAttributes::input_tensor_uids>},
+}};
 
-inline std::optional<int64_t> readLayernormAttributesScaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->scale_tensor_uid();
-}
-
-inline std::optional<int64_t> readLayernormAttributesBiasTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->bias_tensor_uid();
-}
-
-inline std::optional<int64_t> readLayernormAttributesEpsilonTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->epsilon_tensor_uid();
-}
-
-inline std::optional<int64_t> readLayernormAttributesYTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->y_tensor_uid();
-}
-
-inline std::optional<int64_t> readLayernormAttributesMeanTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->mean_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readLayernormAttributesInvVarianceTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->inv_variance_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<ScalarValue> readLayernormAttributesNormalizedDimCount(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<int64_t>, table->normalized_dim_count()};
-}
-
-inline std::optional<ScalarValue> readLayernormAttributesForwardPhase(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameNormFwdPhase(table->forward_phase())};
-}
+inline constexpr std::array<EdgeListSchema, 1> CUSTOM_OP_RESULT_LISTS = {{
+    {"output_tensor_uids", &readEdgeList<&CustomOpAttributes::output_tensor_uids>},
+}};
 
 inline constexpr std::array<EdgeSchema, 4> LAYERNORM_OPERANDS = {{
-    {"x", false, &readLayernormAttributesXTensorUid},
-    {"scale", false, &readLayernormAttributesScaleTensorUid},
-    {"bias", false, &readLayernormAttributesBiasTensorUid},
-    {"epsilon", false, &readLayernormAttributesEpsilonTensorUid},
+    {"x", false, &readEdge<&LayernormAttributes::x_tensor_uid>},
+    {"scale", false, &readEdge<&LayernormAttributes::scale_tensor_uid>},
+    {"bias", false, &readEdge<&LayernormAttributes::bias_tensor_uid>},
+    {"epsilon", false, &readEdge<&LayernormAttributes::epsilon_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 3> LAYERNORM_RESULTS = {{
-    {"y", false, &readLayernormAttributesYTensorUid},
-    {"mean", true, &readLayernormAttributesMeanTensorUid},
-    {"inv_variance", true, &readLayernormAttributesInvVarianceTensorUid},
+    {"y", false, &readEdge<&LayernormAttributes::y_tensor_uid>},
+    {"mean", true, &readEdge<&LayernormAttributes::mean_tensor_uid>},
+    {"inv_variance", true, &readEdge<&LayernormAttributes::inv_variance_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 3> LAYERNORM_ATTRIBUTES = {{
-    {"normalized_dim_count", ValueKind::INT, false, &readLayernormAttributesNormalizedDimCount},
-    {"forward_phase", ValueKind::ENUM_NAME, false, &readLayernormAttributesForwardPhase},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"normalized_dim_count", ValueKind::INT, false, &readScalar<int64_t, &LayernormAttributes::normalized_dim_count>},
+    {"forward_phase", ValueKind::ENUM_NAME, false, &readEnumName<&LayernormAttributes::forward_phase, &EnumNameNormFwdPhase>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readLayernormBackwardAttributesDyTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dy_tensor_uid();
-}
-
-inline std::optional<int64_t> readLayernormBackwardAttributesXTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->x_tensor_uid();
-}
-
-inline std::optional<int64_t> readLayernormBackwardAttributesScaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->scale_tensor_uid();
-}
-
-inline std::optional<int64_t> readLayernormBackwardAttributesMeanTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->mean_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readLayernormBackwardAttributesInvVarianceTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->inv_variance_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readLayernormBackwardAttributesEpsilonTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->epsilon_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readLayernormBackwardAttributesDxTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dx_tensor_uid();
-}
-
-inline std::optional<int64_t> readLayernormBackwardAttributesDscaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dscale_tensor_uid();
-}
-
-inline std::optional<int64_t> readLayernormBackwardAttributesDbiasTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dbias_tensor_uid();
-}
-
-inline std::optional<ScalarValue> readLayernormBackwardAttributesNormalizedDimCount(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<LayernormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<int64_t>, table->normalized_dim_count()};
-}
-
 inline constexpr std::array<EdgeSchema, 6> LAYERNORM_BWD_OPERANDS = {{
-    {"dy", false, &readLayernormBackwardAttributesDyTensorUid},
-    {"x", false, &readLayernormBackwardAttributesXTensorUid},
-    {"scale", false, &readLayernormBackwardAttributesScaleTensorUid},
-    {"mean", true, &readLayernormBackwardAttributesMeanTensorUid},
-    {"inv_variance", true, &readLayernormBackwardAttributesInvVarianceTensorUid},
-    {"epsilon", true, &readLayernormBackwardAttributesEpsilonTensorUid},
+    {"dy", false, &readEdge<&LayernormBackwardAttributes::dy_tensor_uid>},
+    {"x", false, &readEdge<&LayernormBackwardAttributes::x_tensor_uid>},
+    {"scale", false, &readEdge<&LayernormBackwardAttributes::scale_tensor_uid>},
+    {"mean", true, &readEdge<&LayernormBackwardAttributes::mean_tensor_uid>},
+    {"inv_variance", true, &readEdge<&LayernormBackwardAttributes::inv_variance_tensor_uid>},
+    {"epsilon", true, &readEdge<&LayernormBackwardAttributes::epsilon_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 3> LAYERNORM_BWD_RESULTS = {{
-    {"dx", false, &readLayernormBackwardAttributesDxTensorUid},
-    {"dscale", false, &readLayernormBackwardAttributesDscaleTensorUid},
-    {"dbias", false, &readLayernormBackwardAttributesDbiasTensorUid},
+    {"dx", false, &readEdge<&LayernormBackwardAttributes::dx_tensor_uid>},
+    {"dscale", false, &readEdge<&LayernormBackwardAttributes::dscale_tensor_uid>},
+    {"dbias", false, &readEdge<&LayernormBackwardAttributes::dbias_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 2> LAYERNORM_BWD_ATTRIBUTES = {{
-    {"normalized_dim_count", ValueKind::INT, false, &readLayernormBackwardAttributesNormalizedDimCount},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"normalized_dim_count", ValueKind::INT, false, &readScalar<int64_t, &LayernormBackwardAttributes::normalized_dim_count>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readMatmulAttributesATensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MatmulAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->a_tensor_uid();
-}
-
-inline std::optional<int64_t> readMatmulAttributesBTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MatmulAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->b_tensor_uid();
-}
-
-inline std::optional<int64_t> readMatmulAttributesCTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MatmulAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->c_tensor_uid();
-}
-
 inline constexpr std::array<EdgeSchema, 2> MATMUL_OPERANDS = {{
-    {"a", false, &readMatmulAttributesATensorUid},
-    {"b", false, &readMatmulAttributesBTensorUid},
+    {"a", false, &readEdge<&MatmulAttributes::a_tensor_uid>},
+    {"b", false, &readEdge<&MatmulAttributes::b_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 1> MATMUL_RESULTS = {{
-    {"c", false, &readMatmulAttributesCTensorUid},
+    {"c", false, &readEdge<&MatmulAttributes::c_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 1> MATMUL_ATTRIBUTES = {{
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readMoeGroupedMatmulAttributesTokenTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MoeGroupedMatmulAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->token_tensor_uid();
-}
-
-inline std::optional<int64_t> readMoeGroupedMatmulAttributesWeightTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MoeGroupedMatmulAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->weight_tensor_uid();
-}
-
-inline std::optional<int64_t> readMoeGroupedMatmulAttributesFirstTokenOffsetTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MoeGroupedMatmulAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->first_token_offset_tensor_uid();
-}
-
-inline std::optional<int64_t> readMoeGroupedMatmulAttributesTokenIndexTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MoeGroupedMatmulAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->token_index_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readMoeGroupedMatmulAttributesTokenKsTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MoeGroupedMatmulAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->token_ks_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readMoeGroupedMatmulAttributesOutputTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MoeGroupedMatmulAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->output_tensor_uid();
-}
-
-inline std::optional<ScalarValue> readMoeGroupedMatmulAttributesMode(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MoeGroupedMatmulAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameMoeGroupedMatmulMode(table->mode())};
-}
-
-inline std::optional<ScalarValue> readMoeGroupedMatmulAttributesTopK(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MoeGroupedMatmulAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<int64_t>, table->top_k()};
-}
-
 inline constexpr std::array<EdgeSchema, 5> MOE_GROUPED_MATMUL_OPERANDS = {{
-    {"token", false, &readMoeGroupedMatmulAttributesTokenTensorUid},
-    {"weight", false, &readMoeGroupedMatmulAttributesWeightTensorUid},
-    {"first_token_offset", false, &readMoeGroupedMatmulAttributesFirstTokenOffsetTensorUid},
-    {"token_index", true, &readMoeGroupedMatmulAttributesTokenIndexTensorUid},
-    {"token_ks", true, &readMoeGroupedMatmulAttributesTokenKsTensorUid},
+    {"token", false, &readEdge<&MoeGroupedMatmulAttributes::token_tensor_uid>},
+    {"weight", false, &readEdge<&MoeGroupedMatmulAttributes::weight_tensor_uid>},
+    {"first_token_offset", false, &readEdge<&MoeGroupedMatmulAttributes::first_token_offset_tensor_uid>},
+    {"token_index", true, &readEdge<&MoeGroupedMatmulAttributes::token_index_tensor_uid>},
+    {"token_ks", true, &readEdge<&MoeGroupedMatmulAttributes::token_ks_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 1> MOE_GROUPED_MATMUL_RESULTS = {{
-    {"output", false, &readMoeGroupedMatmulAttributesOutputTensorUid},
+    {"output", false, &readEdge<&MoeGroupedMatmulAttributes::output_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 3> MOE_GROUPED_MATMUL_ATTRIBUTES = {{
-    {"mode", ValueKind::ENUM_NAME, false, &readMoeGroupedMatmulAttributesMode},
-    {"top_k", ValueKind::INT, false, &readMoeGroupedMatmulAttributesTopK},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"mode", ValueKind::ENUM_NAME, false, &readEnumName<&MoeGroupedMatmulAttributes::mode, &EnumNameMoeGroupedMatmulMode>},
+    {"top_k", ValueKind::INT, false, &readScalar<int64_t, &MoeGroupedMatmulAttributes::top_k>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readMoeGroupedMatmulBwdAttributesDoutputTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MoeGroupedMatmulBwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->doutput_tensor_uid();
-}
-
-inline std::optional<int64_t> readMoeGroupedMatmulBwdAttributesTokenTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MoeGroupedMatmulBwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->token_tensor_uid();
-}
-
-inline std::optional<int64_t> readMoeGroupedMatmulBwdAttributesFirstTokenOffsetTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MoeGroupedMatmulBwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->first_token_offset_tensor_uid();
-}
-
-inline std::optional<int64_t> readMoeGroupedMatmulBwdAttributesDweightTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<MoeGroupedMatmulBwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dweight_tensor_uid();
-}
-
 inline constexpr std::array<EdgeSchema, 3> MOE_GROUPED_MATMUL_BWD_OPERANDS = {{
-    {"doutput", false, &readMoeGroupedMatmulBwdAttributesDoutputTensorUid},
-    {"token", false, &readMoeGroupedMatmulBwdAttributesTokenTensorUid},
-    {"first_token_offset", false, &readMoeGroupedMatmulBwdAttributesFirstTokenOffsetTensorUid},
+    {"doutput", false, &readEdge<&MoeGroupedMatmulBwdAttributes::doutput_tensor_uid>},
+    {"token", false, &readEdge<&MoeGroupedMatmulBwdAttributes::token_tensor_uid>},
+    {"first_token_offset", false, &readEdge<&MoeGroupedMatmulBwdAttributes::first_token_offset_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 1> MOE_GROUPED_MATMUL_BWD_RESULTS = {{
-    {"dweight", false, &readMoeGroupedMatmulBwdAttributesDweightTensorUid},
+    {"dweight", false, &readEdge<&MoeGroupedMatmulBwdAttributes::dweight_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 1> MOE_GROUPED_MATMUL_BWD_ATTRIBUTES = {{
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readPointwiseAttributesIn0TensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<PointwiseAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->in_0_tensor_uid();
-}
-
-inline std::optional<int64_t> readPointwiseAttributesIn1TensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<PointwiseAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->in_1_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readPointwiseAttributesIn2TensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<PointwiseAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->in_2_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readPointwiseAttributesOut0TensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<PointwiseAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->out_0_tensor_uid();
-}
-
-inline std::optional<ScalarValue> readPointwiseAttributesOperation(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<PointwiseAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNamePointwiseMode(table->operation())};
-}
-
-inline std::optional<ScalarValue> readPointwiseAttributesReluLowerClip(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<PointwiseAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->relu_lower_clip();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<double>, value.value()};
-}
-
-inline std::optional<ScalarValue> readPointwiseAttributesReluUpperClip(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<PointwiseAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->relu_upper_clip();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<double>, value.value()};
-}
-
-inline std::optional<ScalarValue> readPointwiseAttributesReluLowerClipSlope(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<PointwiseAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->relu_lower_clip_slope();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<double>, value.value()};
-}
-
-inline std::optional<ScalarValue> readPointwiseAttributesAxisTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<PointwiseAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->axis_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<int64_t>, value.value()};
-}
-
-inline std::optional<ScalarValue> readPointwiseAttributesSwishBeta(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<PointwiseAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->swish_beta();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<double>, value.value()};
-}
-
-inline std::optional<ScalarValue> readPointwiseAttributesEluAlpha(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<PointwiseAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->elu_alpha();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<double>, value.value()};
-}
-
-inline std::optional<ScalarValue> readPointwiseAttributesSoftplusBeta(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<PointwiseAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->softplus_beta();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<double>, value.value()};
-}
-
 inline constexpr std::array<EdgeSchema, 3> POINTWISE_OPERANDS = {{
-    {"in_0", false, &readPointwiseAttributesIn0TensorUid},
-    {"in_1", true, &readPointwiseAttributesIn1TensorUid},
-    {"in_2", true, &readPointwiseAttributesIn2TensorUid},
+    {"in_0", false, &readEdge<&PointwiseAttributes::in_0_tensor_uid>},
+    {"in_1", true, &readEdge<&PointwiseAttributes::in_1_tensor_uid>},
+    {"in_2", true, &readEdge<&PointwiseAttributes::in_2_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 1> POINTWISE_RESULTS = {{
-    {"out_0", false, &readPointwiseAttributesOut0TensorUid},
+    {"out_0", false, &readEdge<&PointwiseAttributes::out_0_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 9> POINTWISE_ATTRIBUTES = {{
-    {"operation", ValueKind::ENUM_NAME, false, &readPointwiseAttributesOperation},
-    {"relu_lower_clip", ValueKind::FLOAT, true, &readPointwiseAttributesReluLowerClip},
-    {"relu_upper_clip", ValueKind::FLOAT, true, &readPointwiseAttributesReluUpperClip},
-    {"relu_lower_clip_slope", ValueKind::FLOAT, true, &readPointwiseAttributesReluLowerClipSlope},
-    {"axis_tensor_uid", ValueKind::INT, true, &readPointwiseAttributesAxisTensorUid},
-    {"swish_beta", ValueKind::FLOAT, true, &readPointwiseAttributesSwishBeta},
-    {"elu_alpha", ValueKind::FLOAT, true, &readPointwiseAttributesEluAlpha},
-    {"softplus_beta", ValueKind::FLOAT, true, &readPointwiseAttributesSoftplusBeta},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"operation", ValueKind::ENUM_NAME, false, &readEnumName<&PointwiseAttributes::operation, &EnumNamePointwiseMode>},
+    {"relu_lower_clip", ValueKind::FLOAT, true, &readScalar<double, &PointwiseAttributes::relu_lower_clip>},
+    {"relu_upper_clip", ValueKind::FLOAT, true, &readScalar<double, &PointwiseAttributes::relu_upper_clip>},
+    {"relu_lower_clip_slope", ValueKind::FLOAT, true, &readScalar<double, &PointwiseAttributes::relu_lower_clip_slope>},
+    {"axis_tensor_uid", ValueKind::INT, true, &readScalar<int64_t, &PointwiseAttributes::axis_tensor_uid>},
+    {"swish_beta", ValueKind::FLOAT, true, &readScalar<double, &PointwiseAttributes::swish_beta>},
+    {"elu_alpha", ValueKind::FLOAT, true, &readScalar<double, &PointwiseAttributes::elu_alpha>},
+    {"softplus_beta", ValueKind::FLOAT, true, &readScalar<double, &PointwiseAttributes::softplus_beta>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readReductionAttributesInTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ReductionAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->in_tensor_uid();
-}
-
-inline std::optional<int64_t> readReductionAttributesOutTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ReductionAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->out_tensor_uid();
-}
-
-inline std::optional<ScalarValue> readReductionAttributesMode(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ReductionAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameReductionMode(table->mode())};
-}
-
-inline std::optional<ScalarValue> readReductionAttributesIsDeterministic(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ReductionAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<bool>, table->is_deterministic()};
-}
-
 inline constexpr std::array<EdgeSchema, 1> REDUCTION_OPERANDS = {{
-    {"in", false, &readReductionAttributesInTensorUid},
+    {"in", false, &readEdge<&ReductionAttributes::in_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 1> REDUCTION_RESULTS = {{
-    {"out", false, &readReductionAttributesOutTensorUid},
+    {"out", false, &readEdge<&ReductionAttributes::out_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 3> REDUCTION_ATTRIBUTES = {{
-    {"mode", ValueKind::ENUM_NAME, false, &readReductionAttributesMode},
-    {"is_deterministic", ValueKind::BOOL, false, &readReductionAttributesIsDeterministic},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"mode", ValueKind::ENUM_NAME, false, &readEnumName<&ReductionAttributes::mode, &EnumNameReductionMode>},
+    {"is_deterministic", ValueKind::BOOL, false, &readScalar<bool, &ReductionAttributes::is_deterministic>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readResampleBwdAttributesDyTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ResampleBwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dy_tensor_uid();
-}
-
-inline std::optional<int64_t> readResampleBwdAttributesIndexTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ResampleBwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->index_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readResampleBwdAttributesDxTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ResampleBwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dx_tensor_uid();
-}
-
-inline std::optional<ScalarValue> readResampleBwdAttributesResampleMode(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ResampleBwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameResampleMode(table->resample_mode())};
-}
-
-inline std::optional<ScalarValue> readResampleBwdAttributesPaddingMode(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ResampleBwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNamePaddingMode(table->padding_mode())};
-}
-
 inline constexpr std::array<EdgeSchema, 2> RESAMPLE_BWD_OPERANDS = {{
-    {"dy", false, &readResampleBwdAttributesDyTensorUid},
-    {"index", true, &readResampleBwdAttributesIndexTensorUid},
+    {"dy", false, &readEdge<&ResampleBwdAttributes::dy_tensor_uid>},
+    {"index", true, &readEdge<&ResampleBwdAttributes::index_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 1> RESAMPLE_BWD_RESULTS = {{
-    {"dx", false, &readResampleBwdAttributesDxTensorUid},
+    {"dx", false, &readEdge<&ResampleBwdAttributes::dx_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 3> RESAMPLE_BWD_ATTRIBUTES = {{
-    {"resample_mode", ValueKind::ENUM_NAME, false, &readResampleBwdAttributesResampleMode},
-    {"padding_mode", ValueKind::ENUM_NAME, false, &readResampleBwdAttributesPaddingMode},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"resample_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ResampleBwdAttributes::resample_mode, &EnumNameResampleMode>},
+    {"padding_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ResampleBwdAttributes::padding_mode, &EnumNamePaddingMode>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readResampleFwdAttributesXTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ResampleFwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->x_tensor_uid();
-}
-
-inline std::optional<int64_t> readResampleFwdAttributesYTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ResampleFwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->y_tensor_uid();
-}
-
-inline std::optional<int64_t> readResampleFwdAttributesIndexTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ResampleFwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->index_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<ScalarValue> readResampleFwdAttributesResampleMode(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ResampleFwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameResampleMode(table->resample_mode())};
-}
-
-inline std::optional<ScalarValue> readResampleFwdAttributesPaddingMode(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ResampleFwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNamePaddingMode(table->padding_mode())};
-}
-
-inline std::optional<ScalarValue> readResampleFwdAttributesGenerateIndex(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<ResampleFwdAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->generate_index();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<bool>, value.value()};
-}
-
 inline constexpr std::array<EdgeSchema, 1> RESAMPLE_FWD_OPERANDS = {{
-    {"x", false, &readResampleFwdAttributesXTensorUid},
+    {"x", false, &readEdge<&ResampleFwdAttributes::x_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 2> RESAMPLE_FWD_RESULTS = {{
-    {"y", false, &readResampleFwdAttributesYTensorUid},
-    {"index", true, &readResampleFwdAttributesIndexTensorUid},
+    {"y", false, &readEdge<&ResampleFwdAttributes::y_tensor_uid>},
+    {"index", true, &readEdge<&ResampleFwdAttributes::index_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 4> RESAMPLE_FWD_ATTRIBUTES = {{
-    {"resample_mode", ValueKind::ENUM_NAME, false, &readResampleFwdAttributesResampleMode},
-    {"padding_mode", ValueKind::ENUM_NAME, false, &readResampleFwdAttributesPaddingMode},
-    {"generate_index", ValueKind::BOOL, true, &readResampleFwdAttributesGenerateIndex},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"resample_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ResampleFwdAttributes::resample_mode, &EnumNameResampleMode>},
+    {"padding_mode", ValueKind::ENUM_NAME, false, &readEnumName<&ResampleFwdAttributes::padding_mode, &EnumNamePaddingMode>},
+    {"generate_index", ValueKind::BOOL, true, &readScalar<bool, &ResampleFwdAttributes::generate_index>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readRMSNormAttributesXTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->x_tensor_uid();
-}
-
-inline std::optional<int64_t> readRMSNormAttributesScaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->scale_tensor_uid();
-}
-
-inline std::optional<int64_t> readRMSNormAttributesEpsilonTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->epsilon_tensor_uid();
-}
-
-inline std::optional<int64_t> readRMSNormAttributesBiasTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->bias_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readRMSNormAttributesYTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->y_tensor_uid();
-}
-
-inline std::optional<int64_t> readRMSNormAttributesInvRmsTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->inv_rms_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<ScalarValue> readRMSNormAttributesForwardPhase(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameNormFwdPhase(table->forward_phase())};
-}
-
 inline constexpr std::array<EdgeSchema, 4> RMS_NORM_OPERANDS = {{
-    {"x", false, &readRMSNormAttributesXTensorUid},
-    {"scale", false, &readRMSNormAttributesScaleTensorUid},
-    {"epsilon", false, &readRMSNormAttributesEpsilonTensorUid},
-    {"bias", true, &readRMSNormAttributesBiasTensorUid},
+    {"x", false, &readEdge<&RMSNormAttributes::x_tensor_uid>},
+    {"scale", false, &readEdge<&RMSNormAttributes::scale_tensor_uid>},
+    {"epsilon", false, &readEdge<&RMSNormAttributes::epsilon_tensor_uid>},
+    {"bias", true, &readEdge<&RMSNormAttributes::bias_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 2> RMS_NORM_RESULTS = {{
-    {"y", false, &readRMSNormAttributesYTensorUid},
-    {"inv_rms", true, &readRMSNormAttributesInvRmsTensorUid},
+    {"y", false, &readEdge<&RMSNormAttributes::y_tensor_uid>},
+    {"inv_rms", true, &readEdge<&RMSNormAttributes::inv_rms_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 2> RMS_NORM_ATTRIBUTES = {{
-    {"forward_phase", ValueKind::ENUM_NAME, false, &readRMSNormAttributesForwardPhase},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"forward_phase", ValueKind::ENUM_NAME, false, &readEnumName<&RMSNormAttributes::forward_phase, &EnumNameNormFwdPhase>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readRMSNormBackwardAttributesDyTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dy_tensor_uid();
-}
-
-inline std::optional<int64_t> readRMSNormBackwardAttributesXTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->x_tensor_uid();
-}
-
-inline std::optional<int64_t> readRMSNormBackwardAttributesScaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->scale_tensor_uid();
-}
-
-inline std::optional<int64_t> readRMSNormBackwardAttributesInvRmsTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->inv_rms_tensor_uid();
-}
-
-inline std::optional<int64_t> readRMSNormBackwardAttributesDxTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dx_tensor_uid();
-}
-
-inline std::optional<int64_t> readRMSNormBackwardAttributesDscaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dscale_tensor_uid();
-}
-
-inline std::optional<int64_t> readRMSNormBackwardAttributesDbiasTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<RMSNormBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->dbias_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
 inline constexpr std::array<EdgeSchema, 4> RMS_NORM_BWD_OPERANDS = {{
-    {"dy", false, &readRMSNormBackwardAttributesDyTensorUid},
-    {"x", false, &readRMSNormBackwardAttributesXTensorUid},
-    {"scale", false, &readRMSNormBackwardAttributesScaleTensorUid},
-    {"inv_rms", false, &readRMSNormBackwardAttributesInvRmsTensorUid},
+    {"dy", false, &readEdge<&RMSNormBackwardAttributes::dy_tensor_uid>},
+    {"x", false, &readEdge<&RMSNormBackwardAttributes::x_tensor_uid>},
+    {"scale", false, &readEdge<&RMSNormBackwardAttributes::scale_tensor_uid>},
+    {"inv_rms", false, &readEdge<&RMSNormBackwardAttributes::inv_rms_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 3> RMS_NORM_BWD_RESULTS = {{
-    {"dx", false, &readRMSNormBackwardAttributesDxTensorUid},
-    {"dscale", false, &readRMSNormBackwardAttributesDscaleTensorUid},
-    {"dbias", true, &readRMSNormBackwardAttributesDbiasTensorUid},
+    {"dx", false, &readEdge<&RMSNormBackwardAttributes::dx_tensor_uid>},
+    {"dscale", false, &readEdge<&RMSNormBackwardAttributes::dscale_tensor_uid>},
+    {"dbias", true, &readEdge<&RMSNormBackwardAttributes::dbias_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 1> RMS_NORM_BWD_ATTRIBUTES = {{
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readSdpaBackwardAttributesQTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->q_tensor_uid();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesKTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->k_tensor_uid();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesVTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->v_tensor_uid();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesOTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->o_tensor_uid();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesDoTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->do_tensor_uid();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesStatsTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->stats_tensor_uid();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesScaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->scale_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesAttnMaskTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->attn_mask_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesSeqLenQTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->seq_len_q_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesSeqLenKvTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->seq_len_kv_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesSeedTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->seed_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesOffsetTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->offset_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesDropoutMaskTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->dropout_mask_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesDropoutScaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->dropout_scale_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesDropoutScaleInvTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->dropout_scale_inv_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesDqTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dq_tensor_uid();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesDkTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dk_tensor_uid();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesDvTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->dv_tensor_uid();
-}
-
-inline std::optional<int64_t> readSdpaBackwardAttributesDbiasTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->dbias_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<ScalarValue> readSdpaBackwardAttributesAlibiMask(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<bool>, table->alibi_mask()};
-}
-
-inline std::optional<ScalarValue> readSdpaBackwardAttributesPaddingMask(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<bool>, table->padding_mask()};
-}
-
-inline std::optional<ScalarValue> readSdpaBackwardAttributesCausalMask(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<bool>, table->causal_mask()};
-}
-
-inline std::optional<ScalarValue> readSdpaBackwardAttributesCausalMaskBottomRight(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<bool>, table->causal_mask_bottom_right()};
-}
-
-inline std::optional<ScalarValue> readSdpaBackwardAttributesDropoutProbability(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->dropout_probability();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<double>, value.value()};
-}
-
-inline std::optional<ScalarValue> readSdpaBackwardAttributesAttnScaleValue(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->attn_scale_value();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<double>, value.value()};
-}
-
-inline std::optional<ScalarValue> readSdpaBackwardAttributesLeftBound(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->left_bound();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<int64_t>, value.value()};
-}
-
-inline std::optional<ScalarValue> readSdpaBackwardAttributesRightBound(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->right_bound();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<int64_t>, value.value()};
-}
-
-inline std::optional<ScalarValue> readSdpaBackwardAttributesDiagonalAlignment(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaBackwardAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameDiagonalAlignment(table->diagonal_alignment())};
-}
-
 inline constexpr std::array<EdgeSchema, 15> SDPA_BWD_OPERANDS = {{
-    {"q", false, &readSdpaBackwardAttributesQTensorUid},
-    {"k", false, &readSdpaBackwardAttributesKTensorUid},
-    {"v", false, &readSdpaBackwardAttributesVTensorUid},
-    {"o", false, &readSdpaBackwardAttributesOTensorUid},
-    {"do", false, &readSdpaBackwardAttributesDoTensorUid},
-    {"stats", false, &readSdpaBackwardAttributesStatsTensorUid},
-    {"scale", true, &readSdpaBackwardAttributesScaleTensorUid},
-    {"attn_mask", true, &readSdpaBackwardAttributesAttnMaskTensorUid},
-    {"seq_len_q", true, &readSdpaBackwardAttributesSeqLenQTensorUid},
-    {"seq_len_kv", true, &readSdpaBackwardAttributesSeqLenKvTensorUid},
-    {"seed", true, &readSdpaBackwardAttributesSeedTensorUid},
-    {"offset", true, &readSdpaBackwardAttributesOffsetTensorUid},
-    {"dropout_mask", true, &readSdpaBackwardAttributesDropoutMaskTensorUid},
-    {"dropout_scale", true, &readSdpaBackwardAttributesDropoutScaleTensorUid},
-    {"dropout_scale_inv", true, &readSdpaBackwardAttributesDropoutScaleInvTensorUid},
+    {"q", false, &readEdge<&SdpaBackwardAttributes::q_tensor_uid>},
+    {"k", false, &readEdge<&SdpaBackwardAttributes::k_tensor_uid>},
+    {"v", false, &readEdge<&SdpaBackwardAttributes::v_tensor_uid>},
+    {"o", false, &readEdge<&SdpaBackwardAttributes::o_tensor_uid>},
+    {"do", false, &readEdge<&SdpaBackwardAttributes::do_tensor_uid>},
+    {"stats", false, &readEdge<&SdpaBackwardAttributes::stats_tensor_uid>},
+    {"scale", true, &readEdge<&SdpaBackwardAttributes::scale_tensor_uid>},
+    {"attn_mask", true, &readEdge<&SdpaBackwardAttributes::attn_mask_tensor_uid>},
+    {"seq_len_q", true, &readEdge<&SdpaBackwardAttributes::seq_len_q_tensor_uid>},
+    {"seq_len_kv", true, &readEdge<&SdpaBackwardAttributes::seq_len_kv_tensor_uid>},
+    {"seed", true, &readEdge<&SdpaBackwardAttributes::seed_tensor_uid>},
+    {"offset", true, &readEdge<&SdpaBackwardAttributes::offset_tensor_uid>},
+    {"dropout_mask", true, &readEdge<&SdpaBackwardAttributes::dropout_mask_tensor_uid>},
+    {"dropout_scale", true, &readEdge<&SdpaBackwardAttributes::dropout_scale_tensor_uid>},
+    {"dropout_scale_inv", true, &readEdge<&SdpaBackwardAttributes::dropout_scale_inv_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 4> SDPA_BWD_RESULTS = {{
-    {"dq", false, &readSdpaBackwardAttributesDqTensorUid},
-    {"dk", false, &readSdpaBackwardAttributesDkTensorUid},
-    {"dv", false, &readSdpaBackwardAttributesDvTensorUid},
-    {"dbias", true, &readSdpaBackwardAttributesDbiasTensorUid},
+    {"dq", false, &readEdge<&SdpaBackwardAttributes::dq_tensor_uid>},
+    {"dk", false, &readEdge<&SdpaBackwardAttributes::dk_tensor_uid>},
+    {"dv", false, &readEdge<&SdpaBackwardAttributes::dv_tensor_uid>},
+    {"dbias", true, &readEdge<&SdpaBackwardAttributes::dbias_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 10> SDPA_BWD_ATTRIBUTES = {{
-    {"alibi_mask", ValueKind::BOOL, false, &readSdpaBackwardAttributesAlibiMask},
-    {"padding_mask", ValueKind::BOOL, false, &readSdpaBackwardAttributesPaddingMask},
-    {"causal_mask", ValueKind::BOOL, false, &readSdpaBackwardAttributesCausalMask},
-    {"causal_mask_bottom_right", ValueKind::BOOL, false, &readSdpaBackwardAttributesCausalMaskBottomRight},
-    {"dropout_probability", ValueKind::FLOAT, true, &readSdpaBackwardAttributesDropoutProbability},
-    {"attn_scale_value", ValueKind::FLOAT, true, &readSdpaBackwardAttributesAttnScaleValue},
-    {"left_bound", ValueKind::INT, true, &readSdpaBackwardAttributesLeftBound},
-    {"right_bound", ValueKind::INT, true, &readSdpaBackwardAttributesRightBound},
-    {"diagonal_alignment", ValueKind::ENUM_NAME, false, &readSdpaBackwardAttributesDiagonalAlignment},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"alibi_mask", ValueKind::BOOL, false, &readScalar<bool, &SdpaBackwardAttributes::alibi_mask>},
+    {"padding_mask", ValueKind::BOOL, false, &readScalar<bool, &SdpaBackwardAttributes::padding_mask>},
+    {"causal_mask", ValueKind::BOOL, false, &readScalar<bool, &SdpaBackwardAttributes::causal_mask>},
+    {"causal_mask_bottom_right", ValueKind::BOOL, false, &readScalar<bool, &SdpaBackwardAttributes::causal_mask_bottom_right>},
+    {"dropout_probability", ValueKind::FLOAT, true, &readScalar<double, &SdpaBackwardAttributes::dropout_probability>},
+    {"attn_scale_value", ValueKind::FLOAT, true, &readScalar<double, &SdpaBackwardAttributes::attn_scale_value>},
+    {"left_bound", ValueKind::INT, true, &readScalar<int64_t, &SdpaBackwardAttributes::left_bound>},
+    {"right_bound", ValueKind::INT, true, &readScalar<int64_t, &SdpaBackwardAttributes::right_bound>},
+    {"diagonal_alignment", ValueKind::ENUM_NAME, false, &readEnumName<&SdpaBackwardAttributes::diagonal_alignment, &EnumNameDiagonalAlignment>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
-inline std::optional<int64_t> readSdpaAttributesQTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->q_tensor_uid();
-}
-
-inline std::optional<int64_t> readSdpaAttributesKTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->k_tensor_uid();
-}
-
-inline std::optional<int64_t> readSdpaAttributesVTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->v_tensor_uid();
-}
-
-inline std::optional<int64_t> readSdpaAttributesAttnMaskTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->attn_mask_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesScaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->scale_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesSeqLenQTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->seq_len_q_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesSeqLenKvTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->seq_len_kv_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesSeedTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->seed_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesOffsetTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->offset_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesDropoutMaskTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->dropout_mask_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesDropoutScaleTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->dropout_scale_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesPageTableKTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->page_table_k_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesPageTableVTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->page_table_v_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesBlockMaskTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->block_mask_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesSinkTokenTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->sink_token_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesDescaleQTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->descale_q_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesDescaleKTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->descale_k_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesDescaleVTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->descale_v_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesDescaleSTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->descale_s_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesScaleSTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->scale_s_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesScaleOTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->scale_o_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesOTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return table->o_tensor_uid();
-}
-
-inline std::optional<int64_t> readSdpaAttributesStatsTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->stats_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesMaxTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->max_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesSumExpTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->sum_exp_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesRngDumpTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->rng_dump_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesAmaxSTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->amax_s_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<int64_t> readSdpaAttributesAmaxOTensorUid(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->amax_o_tensor_uid();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return value.value();
-}
-
-inline std::optional<ScalarValue> readSdpaAttributesGenerateStats(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->generate_stats();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<bool>, value.value()};
-}
-
-inline std::optional<ScalarValue> readSdpaAttributesAlibiMask(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<bool>, table->alibi_mask()};
-}
-
-inline std::optional<ScalarValue> readSdpaAttributesPaddingMask(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<bool>, table->padding_mask()};
-}
-
-inline std::optional<ScalarValue> readSdpaAttributesCausalMask(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<bool>, table->causal_mask()};
-}
-
-inline std::optional<ScalarValue> readSdpaAttributesCausalMaskBottomRight(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<bool>, table->causal_mask_bottom_right()};
-}
-
-inline std::optional<ScalarValue> readSdpaAttributesDropoutProbability(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->dropout_probability();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<double>, value.value()};
-}
-
-inline std::optional<ScalarValue> readSdpaAttributesAttnScaleValue(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->attn_scale_value();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<double>, value.value()};
-}
-
-inline std::optional<ScalarValue> readSdpaAttributesLeftBound(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->left_bound();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<int64_t>, value.value()};
-}
-
-inline std::optional<ScalarValue> readSdpaAttributesRightBound(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->right_bound();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<int64_t>, value.value()};
-}
-
-inline std::optional<ScalarValue> readSdpaAttributesMaxSeqLenKv(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    const auto value = table->max_seq_len_kv();
-    if(!value.has_value())
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<int64_t>, value.value()};
-}
-
-inline std::optional<ScalarValue> readSdpaAttributesDiagonalAlignment(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameDiagonalAlignment(table->diagonal_alignment())};
-}
-
-inline std::optional<ScalarValue> readSdpaAttributesMmaCoreMode(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameDataType(table->mma_core_mode())};
-}
-
-inline std::optional<ScalarValue> readSdpaAttributesImplementation(const Node& node) noexcept
-{
-    const auto* table = node.attributes_as<SdpaAttributes>();
-    if(table == nullptr)
-    {
-        return std::nullopt;
-    }
-    return ScalarValue{std::in_place_type<std::string_view>, EnumNameAttentionImplementation(table->implementation())};
-}
-
 inline constexpr std::array<EdgeSchema, 21> SDPA_FWD_OPERANDS = {{
-    {"q", false, &readSdpaAttributesQTensorUid},
-    {"k", false, &readSdpaAttributesKTensorUid},
-    {"v", false, &readSdpaAttributesVTensorUid},
-    {"attn_mask", true, &readSdpaAttributesAttnMaskTensorUid},
-    {"scale", true, &readSdpaAttributesScaleTensorUid},
-    {"seq_len_q", true, &readSdpaAttributesSeqLenQTensorUid},
-    {"seq_len_kv", true, &readSdpaAttributesSeqLenKvTensorUid},
-    {"seed", true, &readSdpaAttributesSeedTensorUid},
-    {"offset", true, &readSdpaAttributesOffsetTensorUid},
-    {"dropout_mask", true, &readSdpaAttributesDropoutMaskTensorUid},
-    {"dropout_scale", true, &readSdpaAttributesDropoutScaleTensorUid},
-    {"page_table_k", true, &readSdpaAttributesPageTableKTensorUid},
-    {"page_table_v", true, &readSdpaAttributesPageTableVTensorUid},
-    {"block_mask", true, &readSdpaAttributesBlockMaskTensorUid},
-    {"sink_token", true, &readSdpaAttributesSinkTokenTensorUid},
-    {"descale_q", true, &readSdpaAttributesDescaleQTensorUid},
-    {"descale_k", true, &readSdpaAttributesDescaleKTensorUid},
-    {"descale_v", true, &readSdpaAttributesDescaleVTensorUid},
-    {"descale_s", true, &readSdpaAttributesDescaleSTensorUid},
-    {"scale_s", true, &readSdpaAttributesScaleSTensorUid},
-    {"scale_o", true, &readSdpaAttributesScaleOTensorUid},
+    {"q", false, &readEdge<&SdpaAttributes::q_tensor_uid>},
+    {"k", false, &readEdge<&SdpaAttributes::k_tensor_uid>},
+    {"v", false, &readEdge<&SdpaAttributes::v_tensor_uid>},
+    {"attn_mask", true, &readEdge<&SdpaAttributes::attn_mask_tensor_uid>},
+    {"scale", true, &readEdge<&SdpaAttributes::scale_tensor_uid>},
+    {"seq_len_q", true, &readEdge<&SdpaAttributes::seq_len_q_tensor_uid>},
+    {"seq_len_kv", true, &readEdge<&SdpaAttributes::seq_len_kv_tensor_uid>},
+    {"seed", true, &readEdge<&SdpaAttributes::seed_tensor_uid>},
+    {"offset", true, &readEdge<&SdpaAttributes::offset_tensor_uid>},
+    {"dropout_mask", true, &readEdge<&SdpaAttributes::dropout_mask_tensor_uid>},
+    {"dropout_scale", true, &readEdge<&SdpaAttributes::dropout_scale_tensor_uid>},
+    {"page_table_k", true, &readEdge<&SdpaAttributes::page_table_k_tensor_uid>},
+    {"page_table_v", true, &readEdge<&SdpaAttributes::page_table_v_tensor_uid>},
+    {"block_mask", true, &readEdge<&SdpaAttributes::block_mask_tensor_uid>},
+    {"sink_token", true, &readEdge<&SdpaAttributes::sink_token_tensor_uid>},
+    {"descale_q", true, &readEdge<&SdpaAttributes::descale_q_tensor_uid>},
+    {"descale_k", true, &readEdge<&SdpaAttributes::descale_k_tensor_uid>},
+    {"descale_v", true, &readEdge<&SdpaAttributes::descale_v_tensor_uid>},
+    {"descale_s", true, &readEdge<&SdpaAttributes::descale_s_tensor_uid>},
+    {"scale_s", true, &readEdge<&SdpaAttributes::scale_s_tensor_uid>},
+    {"scale_o", true, &readEdge<&SdpaAttributes::scale_o_tensor_uid>},
 }};
 
 inline constexpr std::array<EdgeSchema, 7> SDPA_FWD_RESULTS = {{
-    {"o", false, &readSdpaAttributesOTensorUid},
-    {"stats", true, &readSdpaAttributesStatsTensorUid},
-    {"max", true, &readSdpaAttributesMaxTensorUid},
-    {"sum_exp", true, &readSdpaAttributesSumExpTensorUid},
-    {"rng_dump", true, &readSdpaAttributesRngDumpTensorUid},
-    {"amax_s", true, &readSdpaAttributesAmaxSTensorUid},
-    {"amax_o", true, &readSdpaAttributesAmaxOTensorUid},
+    {"o", false, &readEdge<&SdpaAttributes::o_tensor_uid>},
+    {"stats", true, &readEdge<&SdpaAttributes::stats_tensor_uid>},
+    {"max", true, &readEdge<&SdpaAttributes::max_tensor_uid>},
+    {"sum_exp", true, &readEdge<&SdpaAttributes::sum_exp_tensor_uid>},
+    {"rng_dump", true, &readEdge<&SdpaAttributes::rng_dump_tensor_uid>},
+    {"amax_s", true, &readEdge<&SdpaAttributes::amax_s_tensor_uid>},
+    {"amax_o", true, &readEdge<&SdpaAttributes::amax_o_tensor_uid>},
 }};
 
 inline constexpr std::array<AttributeSchema, 14> SDPA_FWD_ATTRIBUTES = {{
-    {"generate_stats", ValueKind::BOOL, true, &readSdpaAttributesGenerateStats},
-    {"alibi_mask", ValueKind::BOOL, false, &readSdpaAttributesAlibiMask},
-    {"padding_mask", ValueKind::BOOL, false, &readSdpaAttributesPaddingMask},
-    {"causal_mask", ValueKind::BOOL, false, &readSdpaAttributesCausalMask},
-    {"causal_mask_bottom_right", ValueKind::BOOL, false, &readSdpaAttributesCausalMaskBottomRight},
-    {"dropout_probability", ValueKind::FLOAT, true, &readSdpaAttributesDropoutProbability},
-    {"attn_scale_value", ValueKind::FLOAT, true, &readSdpaAttributesAttnScaleValue},
-    {"left_bound", ValueKind::INT, true, &readSdpaAttributesLeftBound},
-    {"right_bound", ValueKind::INT, true, &readSdpaAttributesRightBound},
-    {"max_seq_len_kv", ValueKind::INT, true, &readSdpaAttributesMaxSeqLenKv},
-    {"diagonal_alignment", ValueKind::ENUM_NAME, false, &readSdpaAttributesDiagonalAlignment},
-    {"mma_core_mode", ValueKind::ENUM_NAME, false, &readSdpaAttributesMmaCoreMode},
-    {"implementation", ValueKind::ENUM_NAME, false, &readSdpaAttributesImplementation},
-    {"compute_data_type", ValueKind::ENUM_NAME, false, &readNodeComputeDataType},
+    {"generate_stats", ValueKind::BOOL, true, &readScalar<bool, &SdpaAttributes::generate_stats>},
+    {"alibi_mask", ValueKind::BOOL, false, &readScalar<bool, &SdpaAttributes::alibi_mask>},
+    {"padding_mask", ValueKind::BOOL, false, &readScalar<bool, &SdpaAttributes::padding_mask>},
+    {"causal_mask", ValueKind::BOOL, false, &readScalar<bool, &SdpaAttributes::causal_mask>},
+    {"causal_mask_bottom_right", ValueKind::BOOL, false, &readScalar<bool, &SdpaAttributes::causal_mask_bottom_right>},
+    {"dropout_probability", ValueKind::FLOAT, true, &readScalar<double, &SdpaAttributes::dropout_probability>},
+    {"attn_scale_value", ValueKind::FLOAT, true, &readScalar<double, &SdpaAttributes::attn_scale_value>},
+    {"left_bound", ValueKind::INT, true, &readScalar<int64_t, &SdpaAttributes::left_bound>},
+    {"right_bound", ValueKind::INT, true, &readScalar<int64_t, &SdpaAttributes::right_bound>},
+    {"max_seq_len_kv", ValueKind::INT, true, &readScalar<int64_t, &SdpaAttributes::max_seq_len_kv>},
+    {"diagonal_alignment", ValueKind::ENUM_NAME, false, &readEnumName<&SdpaAttributes::diagonal_alignment, &EnumNameDiagonalAlignment>},
+    {"mma_core_mode", ValueKind::ENUM_NAME, false, &readEnumName<&SdpaAttributes::mma_core_mode, &EnumNameDataType>},
+    {"implementation", ValueKind::ENUM_NAME, false, &readEnumName<&SdpaAttributes::implementation, &EnumNameAttentionImplementation>},
+    {"compute_data_type", ValueKind::ENUM_NAME, false, &readEnumName<&Node::compute_data_type, &EnumNameDataType>},
 }};
 
 /// Sorted by opcode.
 inline constexpr std::array<OpSchema, 23> OP_SCHEMAS = {{
-    {"batchnorm",
-     "BatchnormAttributes",
-     NodeAttributes::BatchnormAttributes,
-     SchemaSpan<EdgeSchema>{BATCHNORM_OPERANDS.data(), BATCHNORM_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{BATCHNORM_RESULTS.data(), BATCHNORM_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{BATCHNORM_ATTRIBUTES.data(), BATCHNORM_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{BATCHNORM_OPERAND_LISTS.data(), BATCHNORM_OPERAND_LISTS.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"batchnorm_bwd",
-     "BatchnormBackwardAttributes",
-     NodeAttributes::BatchnormBackwardAttributes,
-     SchemaSpan<EdgeSchema>{BATCHNORM_BWD_OPERANDS.data(), BATCHNORM_BWD_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{BATCHNORM_BWD_RESULTS.data(), BATCHNORM_BWD_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{BATCHNORM_BWD_ATTRIBUTES.data(), BATCHNORM_BWD_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{BATCHNORM_BWD_OPERAND_LISTS.data(), BATCHNORM_BWD_OPERAND_LISTS.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"batchnorm_inference",
-     "BatchnormInferenceAttributes",
-     NodeAttributes::BatchnormInferenceAttributes,
-     SchemaSpan<EdgeSchema>{BATCHNORM_INFERENCE_OPERANDS.data(), BATCHNORM_INFERENCE_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{BATCHNORM_INFERENCE_RESULTS.data(), BATCHNORM_INFERENCE_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{BATCHNORM_INFERENCE_ATTRIBUTES.data(), BATCHNORM_INFERENCE_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"batchnorm_inference_variance_ext",
-     "BatchnormInferenceAttributesVarianceExt",
-     NodeAttributes::BatchnormInferenceAttributesVarianceExt,
-     SchemaSpan<EdgeSchema>{BATCHNORM_INFERENCE_VARIANCE_EXT_OPERANDS.data(), BATCHNORM_INFERENCE_VARIANCE_EXT_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{BATCHNORM_INFERENCE_VARIANCE_EXT_RESULTS.data(), BATCHNORM_INFERENCE_VARIANCE_EXT_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{BATCHNORM_INFERENCE_VARIANCE_EXT_ATTRIBUTES.data(), BATCHNORM_INFERENCE_VARIANCE_EXT_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"block_scale_dequantize",
-     "BlockScaleDequantizeAttributes",
-     NodeAttributes::BlockScaleDequantizeAttributes,
-     SchemaSpan<EdgeSchema>{BLOCK_SCALE_DEQUANTIZE_OPERANDS.data(), BLOCK_SCALE_DEQUANTIZE_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{BLOCK_SCALE_DEQUANTIZE_RESULTS.data(), BLOCK_SCALE_DEQUANTIZE_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{BLOCK_SCALE_DEQUANTIZE_ATTRIBUTES.data(), BLOCK_SCALE_DEQUANTIZE_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"block_scale_quantize",
-     "BlockScaleQuantizeAttributes",
-     NodeAttributes::BlockScaleQuantizeAttributes,
-     SchemaSpan<EdgeSchema>{BLOCK_SCALE_QUANTIZE_OPERANDS.data(), BLOCK_SCALE_QUANTIZE_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{BLOCK_SCALE_QUANTIZE_RESULTS.data(), BLOCK_SCALE_QUANTIZE_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{BLOCK_SCALE_QUANTIZE_ATTRIBUTES.data(), BLOCK_SCALE_QUANTIZE_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"convolution_bwd_data",
-     "ConvolutionBwdAttributes",
-     NodeAttributes::ConvolutionBwdAttributes,
-     SchemaSpan<EdgeSchema>{CONVOLUTION_BWD_DATA_OPERANDS.data(), CONVOLUTION_BWD_DATA_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{CONVOLUTION_BWD_DATA_RESULTS.data(), CONVOLUTION_BWD_DATA_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{CONVOLUTION_BWD_DATA_ATTRIBUTES.data(), CONVOLUTION_BWD_DATA_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"convolution_bwd_filter",
-     "ConvolutionWrwAttributes",
-     NodeAttributes::ConvolutionWrwAttributes,
-     SchemaSpan<EdgeSchema>{CONVOLUTION_BWD_FILTER_OPERANDS.data(), CONVOLUTION_BWD_FILTER_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{CONVOLUTION_BWD_FILTER_RESULTS.data(), CONVOLUTION_BWD_FILTER_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{CONVOLUTION_BWD_FILTER_ATTRIBUTES.data(), CONVOLUTION_BWD_FILTER_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"convolution_fwd",
-     "ConvolutionFwdAttributes",
-     NodeAttributes::ConvolutionFwdAttributes,
-     SchemaSpan<EdgeSchema>{CONVOLUTION_FWD_OPERANDS.data(), CONVOLUTION_FWD_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{CONVOLUTION_FWD_RESULTS.data(), CONVOLUTION_FWD_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{CONVOLUTION_FWD_ATTRIBUTES.data(), CONVOLUTION_FWD_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"custom_op",
-     "CustomOpAttributes",
-     NodeAttributes::CustomOpAttributes,
-     SchemaSpan<EdgeSchema>{nullptr, 0},
-     SchemaSpan<EdgeSchema>{nullptr, 0},
-     SchemaSpan<AttributeSchema>{CUSTOM_OP_ATTRIBUTES.data(), CUSTOM_OP_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{CUSTOM_OP_OPERAND_LISTS.data(), CUSTOM_OP_OPERAND_LISTS.size()},
-     SchemaSpan<EdgeListSchema>{CUSTOM_OP_RESULT_LISTS.data(), CUSTOM_OP_RESULT_LISTS.size()}},
-    {"layernorm",
-     "LayernormAttributes",
-     NodeAttributes::LayernormAttributes,
-     SchemaSpan<EdgeSchema>{LAYERNORM_OPERANDS.data(), LAYERNORM_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{LAYERNORM_RESULTS.data(), LAYERNORM_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{LAYERNORM_ATTRIBUTES.data(), LAYERNORM_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"layernorm_bwd",
-     "LayernormBackwardAttributes",
-     NodeAttributes::LayernormBackwardAttributes,
-     SchemaSpan<EdgeSchema>{LAYERNORM_BWD_OPERANDS.data(), LAYERNORM_BWD_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{LAYERNORM_BWD_RESULTS.data(), LAYERNORM_BWD_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{LAYERNORM_BWD_ATTRIBUTES.data(), LAYERNORM_BWD_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"matmul",
-     "MatmulAttributes",
-     NodeAttributes::MatmulAttributes,
-     SchemaSpan<EdgeSchema>{MATMUL_OPERANDS.data(), MATMUL_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{MATMUL_RESULTS.data(), MATMUL_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{MATMUL_ATTRIBUTES.data(), MATMUL_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"moe_grouped_matmul",
-     "MoeGroupedMatmulAttributes",
-     NodeAttributes::MoeGroupedMatmulAttributes,
-     SchemaSpan<EdgeSchema>{MOE_GROUPED_MATMUL_OPERANDS.data(), MOE_GROUPED_MATMUL_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{MOE_GROUPED_MATMUL_RESULTS.data(), MOE_GROUPED_MATMUL_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{MOE_GROUPED_MATMUL_ATTRIBUTES.data(), MOE_GROUPED_MATMUL_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"moe_grouped_matmul_bwd",
-     "MoeGroupedMatmulBwdAttributes",
-     NodeAttributes::MoeGroupedMatmulBwdAttributes,
-     SchemaSpan<EdgeSchema>{MOE_GROUPED_MATMUL_BWD_OPERANDS.data(), MOE_GROUPED_MATMUL_BWD_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{MOE_GROUPED_MATMUL_BWD_RESULTS.data(), MOE_GROUPED_MATMUL_BWD_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{MOE_GROUPED_MATMUL_BWD_ATTRIBUTES.data(), MOE_GROUPED_MATMUL_BWD_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"pointwise",
-     "PointwiseAttributes",
-     NodeAttributes::PointwiseAttributes,
-     SchemaSpan<EdgeSchema>{POINTWISE_OPERANDS.data(), POINTWISE_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{POINTWISE_RESULTS.data(), POINTWISE_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{POINTWISE_ATTRIBUTES.data(), POINTWISE_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"reduction",
-     "ReductionAttributes",
-     NodeAttributes::ReductionAttributes,
-     SchemaSpan<EdgeSchema>{REDUCTION_OPERANDS.data(), REDUCTION_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{REDUCTION_RESULTS.data(), REDUCTION_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{REDUCTION_ATTRIBUTES.data(), REDUCTION_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"resample_bwd",
-     "ResampleBwdAttributes",
-     NodeAttributes::ResampleBwdAttributes,
-     SchemaSpan<EdgeSchema>{RESAMPLE_BWD_OPERANDS.data(), RESAMPLE_BWD_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{RESAMPLE_BWD_RESULTS.data(), RESAMPLE_BWD_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{RESAMPLE_BWD_ATTRIBUTES.data(), RESAMPLE_BWD_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"resample_fwd",
-     "ResampleFwdAttributes",
-     NodeAttributes::ResampleFwdAttributes,
-     SchemaSpan<EdgeSchema>{RESAMPLE_FWD_OPERANDS.data(), RESAMPLE_FWD_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{RESAMPLE_FWD_RESULTS.data(), RESAMPLE_FWD_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{RESAMPLE_FWD_ATTRIBUTES.data(), RESAMPLE_FWD_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"rms_norm",
-     "RMSNormAttributes",
-     NodeAttributes::RMSNormAttributes,
-     SchemaSpan<EdgeSchema>{RMS_NORM_OPERANDS.data(), RMS_NORM_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{RMS_NORM_RESULTS.data(), RMS_NORM_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{RMS_NORM_ATTRIBUTES.data(), RMS_NORM_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"rms_norm_bwd",
-     "RMSNormBackwardAttributes",
-     NodeAttributes::RMSNormBackwardAttributes,
-     SchemaSpan<EdgeSchema>{RMS_NORM_BWD_OPERANDS.data(), RMS_NORM_BWD_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{RMS_NORM_BWD_RESULTS.data(), RMS_NORM_BWD_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{RMS_NORM_BWD_ATTRIBUTES.data(), RMS_NORM_BWD_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"sdpa_bwd",
-     "SdpaBackwardAttributes",
-     NodeAttributes::SdpaBackwardAttributes,
-     SchemaSpan<EdgeSchema>{SDPA_BWD_OPERANDS.data(), SDPA_BWD_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{SDPA_BWD_RESULTS.data(), SDPA_BWD_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{SDPA_BWD_ATTRIBUTES.data(), SDPA_BWD_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
-    {"sdpa_fwd",
-     "SdpaAttributes",
-     NodeAttributes::SdpaAttributes,
-     SchemaSpan<EdgeSchema>{SDPA_FWD_OPERANDS.data(), SDPA_FWD_OPERANDS.size()},
-     SchemaSpan<EdgeSchema>{SDPA_FWD_RESULTS.data(), SDPA_FWD_RESULTS.size()},
-     SchemaSpan<AttributeSchema>{SDPA_FWD_ATTRIBUTES.data(), SDPA_FWD_ATTRIBUTES.size()},
-     SchemaSpan<EdgeListSchema>{nullptr, 0},
-     SchemaSpan<EdgeListSchema>{nullptr, 0}},
+    {"batchnorm", NodeAttributes::BatchnormAttributes, spanOf(BATCHNORM_OPERANDS), spanOf(BATCHNORM_RESULTS), spanOf(BATCHNORM_ATTRIBUTES), spanOf(BATCHNORM_OPERAND_LISTS), {}},
+    {"batchnorm_bwd", NodeAttributes::BatchnormBackwardAttributes, spanOf(BATCHNORM_BWD_OPERANDS), spanOf(BATCHNORM_BWD_RESULTS), spanOf(BATCHNORM_BWD_ATTRIBUTES), spanOf(BATCHNORM_BWD_OPERAND_LISTS), {}},
+    {"batchnorm_inference", NodeAttributes::BatchnormInferenceAttributes, spanOf(BATCHNORM_INFERENCE_OPERANDS), spanOf(BATCHNORM_INFERENCE_RESULTS), spanOf(BATCHNORM_INFERENCE_ATTRIBUTES), {}, {}},
+    {"batchnorm_inference_variance_ext", NodeAttributes::BatchnormInferenceAttributesVarianceExt, spanOf(BATCHNORM_INFERENCE_VARIANCE_EXT_OPERANDS), spanOf(BATCHNORM_INFERENCE_VARIANCE_EXT_RESULTS), spanOf(BATCHNORM_INFERENCE_VARIANCE_EXT_ATTRIBUTES), {}, {}},
+    {"block_scale_dequantize", NodeAttributes::BlockScaleDequantizeAttributes, spanOf(BLOCK_SCALE_DEQUANTIZE_OPERANDS), spanOf(BLOCK_SCALE_DEQUANTIZE_RESULTS), spanOf(BLOCK_SCALE_DEQUANTIZE_ATTRIBUTES), {}, {}},
+    {"block_scale_quantize", NodeAttributes::BlockScaleQuantizeAttributes, spanOf(BLOCK_SCALE_QUANTIZE_OPERANDS), spanOf(BLOCK_SCALE_QUANTIZE_RESULTS), spanOf(BLOCK_SCALE_QUANTIZE_ATTRIBUTES), {}, {}},
+    {"convolution_bwd_data", NodeAttributes::ConvolutionBwdAttributes, spanOf(CONVOLUTION_BWD_DATA_OPERANDS), spanOf(CONVOLUTION_BWD_DATA_RESULTS), spanOf(CONVOLUTION_BWD_DATA_ATTRIBUTES), {}, {}},
+    {"convolution_bwd_filter", NodeAttributes::ConvolutionWrwAttributes, spanOf(CONVOLUTION_BWD_FILTER_OPERANDS), spanOf(CONVOLUTION_BWD_FILTER_RESULTS), spanOf(CONVOLUTION_BWD_FILTER_ATTRIBUTES), {}, {}},
+    {"convolution_fwd", NodeAttributes::ConvolutionFwdAttributes, spanOf(CONVOLUTION_FWD_OPERANDS), spanOf(CONVOLUTION_FWD_RESULTS), spanOf(CONVOLUTION_FWD_ATTRIBUTES), {}, {}},
+    {"custom_op", NodeAttributes::CustomOpAttributes, {}, {}, spanOf(CUSTOM_OP_ATTRIBUTES), spanOf(CUSTOM_OP_OPERAND_LISTS), spanOf(CUSTOM_OP_RESULT_LISTS)},
+    {"layernorm", NodeAttributes::LayernormAttributes, spanOf(LAYERNORM_OPERANDS), spanOf(LAYERNORM_RESULTS), spanOf(LAYERNORM_ATTRIBUTES), {}, {}},
+    {"layernorm_bwd", NodeAttributes::LayernormBackwardAttributes, spanOf(LAYERNORM_BWD_OPERANDS), spanOf(LAYERNORM_BWD_RESULTS), spanOf(LAYERNORM_BWD_ATTRIBUTES), {}, {}},
+    {"matmul", NodeAttributes::MatmulAttributes, spanOf(MATMUL_OPERANDS), spanOf(MATMUL_RESULTS), spanOf(MATMUL_ATTRIBUTES), {}, {}},
+    {"moe_grouped_matmul", NodeAttributes::MoeGroupedMatmulAttributes, spanOf(MOE_GROUPED_MATMUL_OPERANDS), spanOf(MOE_GROUPED_MATMUL_RESULTS), spanOf(MOE_GROUPED_MATMUL_ATTRIBUTES), {}, {}},
+    {"moe_grouped_matmul_bwd", NodeAttributes::MoeGroupedMatmulBwdAttributes, spanOf(MOE_GROUPED_MATMUL_BWD_OPERANDS), spanOf(MOE_GROUPED_MATMUL_BWD_RESULTS), spanOf(MOE_GROUPED_MATMUL_BWD_ATTRIBUTES), {}, {}},
+    {"pointwise", NodeAttributes::PointwiseAttributes, spanOf(POINTWISE_OPERANDS), spanOf(POINTWISE_RESULTS), spanOf(POINTWISE_ATTRIBUTES), {}, {}},
+    {"reduction", NodeAttributes::ReductionAttributes, spanOf(REDUCTION_OPERANDS), spanOf(REDUCTION_RESULTS), spanOf(REDUCTION_ATTRIBUTES), {}, {}},
+    {"resample_bwd", NodeAttributes::ResampleBwdAttributes, spanOf(RESAMPLE_BWD_OPERANDS), spanOf(RESAMPLE_BWD_RESULTS), spanOf(RESAMPLE_BWD_ATTRIBUTES), {}, {}},
+    {"resample_fwd", NodeAttributes::ResampleFwdAttributes, spanOf(RESAMPLE_FWD_OPERANDS), spanOf(RESAMPLE_FWD_RESULTS), spanOf(RESAMPLE_FWD_ATTRIBUTES), {}, {}},
+    {"rms_norm", NodeAttributes::RMSNormAttributes, spanOf(RMS_NORM_OPERANDS), spanOf(RMS_NORM_RESULTS), spanOf(RMS_NORM_ATTRIBUTES), {}, {}},
+    {"rms_norm_bwd", NodeAttributes::RMSNormBackwardAttributes, spanOf(RMS_NORM_BWD_OPERANDS), spanOf(RMS_NORM_BWD_RESULTS), spanOf(RMS_NORM_BWD_ATTRIBUTES), {}, {}},
+    {"sdpa_bwd", NodeAttributes::SdpaBackwardAttributes, spanOf(SDPA_BWD_OPERANDS), spanOf(SDPA_BWD_RESULTS), spanOf(SDPA_BWD_ATTRIBUTES), {}, {}},
+    {"sdpa_fwd", NodeAttributes::SdpaAttributes, spanOf(SDPA_FWD_OPERANDS), spanOf(SDPA_FWD_RESULTS), spanOf(SDPA_FWD_ATTRIBUTES), {}, {}},
 }};
 
 } // namespace detail
@@ -3151,7 +673,7 @@ inline constexpr std::array<OpSchema, 23> OP_SCHEMAS = {{
 /// Every op, sorted by opcode.
 constexpr SchemaSpan<OpSchema> allOpSchemas() noexcept
 {
-    return SchemaSpan<OpSchema>{detail::OP_SCHEMAS.data(), detail::OP_SCHEMAS.size()};
+    return detail::spanOf(detail::OP_SCHEMAS);
 }
 
 /// The op named @p opcode, or nullptr when no op declares it.

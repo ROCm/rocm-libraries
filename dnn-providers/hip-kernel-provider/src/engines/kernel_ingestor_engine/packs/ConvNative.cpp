@@ -267,8 +267,9 @@ std::optional<BoundTokens> convFwdGraphMatches(const MatchContext& context)
     }
 
     BoundTokens bound;
-    if(!publishGraph(bound, context.graph) || !publishTensor(bound, X_TOKEN, x)
-       || !publishTensor(bound, W_TOKEN, w) || !publishTensor(bound, Y_TOKEN, y))
+    publishGraph(bound, context.graph);
+    if(!publishTensor(bound, X_TOKEN, x) || !publishTensor(bound, W_TOKEN, w)
+       || !publishTensor(bound, Y_TOKEN, y))
     {
         return std::nullopt;
     }

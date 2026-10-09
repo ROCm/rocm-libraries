@@ -34,31 +34,16 @@ HipKernelEngine
 ### Native kernel-ingestor bindings
 
 With `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, the pointwise and convolution reference
-engines publish bindings through the plugin SDK's `BindingPublication.hpp`.
-Pointwise tensor roots are `input_a`, `input_b`, and `output`; convolution roots are
-`x`, `w`, and `y`. Each root holds its tensor's unique identifier (UID), also
-available at `.uid`. UID zero is valid.
-
-Each tensor publishes `.rank`, `.dtype` (an enum name), `.stride_order`, `.packed`,
-`.virtual`, `.is_runtime_pass_by_value`, and indexed `.dims[i]` and `.strides[i]`.
-Packed tensors have dense, non-overlapping storage with positive strides except
-on singleton dimensions, whose strides are ignored. Ragged tensors are not packed.
-Stride-order ties follow the shared SDK rule: four unit strides give `[3, 2, 1, 0]`.
-Malformed shapes and element-count overflow are rejected.
-
-The shared publisher exposes `.value_f32` only for stored, non-runtime scalars,
-rounded to finite binary32 and stored as a Float. Runtime defaults are validated
-but not published as constants. Virtual scalars, unsupported dtype/value pairs,
-and nonfinite or out-of-range values are rejected. Both reference engines reject
-pass-by-value (stored or runtime) and virtual operands, so their bindings never
-contain `.value_f32`.
-
-`graph.node_count` and `graph.is_override_shape_enabled` describe the whole graph.
-Node roots are separate from tensor roots: `pointwise` exposes `operation`,
-`compute_data_type`, and scalar pointwise attributes present on the node
-(including `axis_tensor_uid`, an axis index); `conv` exposes `conv_mode` and
-`compute_data_type`. Compute types come from the node, not graph defaults.
-Vector attributes and tensor-edge UIDs are omitted.
+engines publish bindings through the plugin SDK's
+[`BindingPublication.hpp`](../../projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/BindingPublication.hpp),
+which documents every published field. Pointwise tensor roots are `input_a`,
+`input_b`, and `output`; convolution roots are `x`, `w`, and `y`. Node roots are
+separate from tensor roots: `pointwise` exposes `operation`, `compute_data_type`,
+and scalar pointwise attributes present on the node (including `axis_tensor_uid`,
+an axis index); `conv` exposes `conv_mode` and `compute_data_type`. Compute types
+come from the node, not graph defaults. Vector attributes and tensor-edge UIDs are
+omitted. Both reference engines reject pass-by-value (stored or runtime) and
+virtual operands, so their bindings never contain `.value_f32`.
 
 Reference-engine limits:
 
@@ -75,14 +60,10 @@ A UED may replace either engine's native `graph_match` with a declarative
 `graph_match.nodes` pattern (RFC 0020) and keep the native criteria and dispatch.
 The pattern checks topology only, so these limits are enforced again by the
 criteria both arms run: the pointwise operation criteria re-check the bound
-operands, and the convolution kernel criterion re-checks the bound operands and
-reads stride, dilation, and padding from the node. Use the node ids `pointwise`
-and `conv` and the tensor roots above, or the criteria decline the graph. The
-pattern's choice of variable for each edge is part of the contract: the
-convolution criterion compares the bound `x`, `w`, and `y` UIDs with the node's
-edges, but the pointwise criteria cannot tell a pattern that binds `input_a` to
-`in_1` from a correct one, so a SUB pattern must bind `in_0` to `input_a` and
-`in_1` to `input_b`.
+operands and their roles, and the convolution kernel criterion re-checks the bound
+operands and reads stride, dilation, and padding from the node. Use the node ids
+`pointwise` and `conv` and the tensor roots above, or the criteria decline the
+graph.
 
 Bindings own their data and are created once per engine reached during a catalog
 build. Cached catalogs reuse them for criteria, ranking, workspace queries, and

@@ -246,9 +246,7 @@ that file converges on. The delivered file implements a subset of it and differs
 - **Extension keys.** The top-level object, `graph_match`, each pattern node, and each `op`
   object also accept `x-`- or `_`-prefixed keys and the key `provenance`. The loader warns about
   and ignores these keys (§ 4.3.2).
-- **Size caps.** `nodes` and `one_of` each carry `"maxItems": 32`, the pattern limits of § 4.3.2.
-  The per-node edge limit spans two objects, so no schema keyword expresses it; the loader checks
-  it.
+- **Size cap.** `nodes` carries `"maxItems": 32`, the pattern limit of § 4.3.2.
 
 The runtime loader documents the first two as divergences from this RFC. The last two are not
 divergences: they encode rules this RFC states in prose (§ 4.3.2) that the inline schema does not
@@ -609,11 +607,10 @@ These are checkable from the block alone and are part of the structural check (�
 load rejection, never a warning:
 
 - **The block is non-empty.** `"nodes": []` is refused.
-- **The block has at most 32 nodes.** A 33-node block is refused. This limit and the next two keep
-  a broken or hostile UED from making pattern compile or match unbounded. The loader enforces all
-  three, and `hkp_pack` enforces the same values when it packages a UED.
-- **A node binds at most 64 edges**, counting its `operands` and `results` entries together.
-- **An opcode set lists at most 32 opcodes.** A `one_of` with 33 members is refused.
+- **The block has at most 32 nodes.** A 33-node block is refused. This limit, with the bounded
+  search of § 4.3.1, keeps a broken or hostile UED from making pattern compile or match
+  unbounded. The loader enforces it, and `hkp_pack` enforces the same value when it packages a
+  UED.
 - **`kind` is `"op"`.** Any other value is refused rather than ignored.
 - **Node `id` is unique within the block**, and is an `ident`. A duplicate `id` would make an
   Attributes reference ambiguous.
@@ -1762,8 +1759,8 @@ visible to patterns under a name no one chose) and classifies each field by thes
     (`diagonal_alignment` → `"TOP_LEFT"`), so a criterion compares an enum attribute against a
     literal enum name, as it does a tensor `dtype`.
 
-  These spellings are the `kind` values in `op_schema_registry.json`. The generated C++ header
-  names the same kinds `ValueKind::INT`, `FLOAT`, `BOOL`, and `ENUM_NAME`.
+  The generated C++ header names these kinds `ValueKind::INT`, `FLOAT`, `BOOL`, and
+  `ENUM_NAME`.
 - **No name-suffix inference.** `PointwiseAttributes::axis_tensor_uid` is a plain axis index, not a
   tensor UID; because it carries no `matcher_input_tensor`/`matcher_output_tensor` it is classified a scalar attribute,
   exactly as intended — nothing keys off the `_tensor_uid` suffix.
@@ -1808,13 +1805,13 @@ visible to patterns under a name no one chose) and classifies each field by thes
    the top-level schema does.
 3. The generator emits the op-schema registry as generated C++ the provider compiles (a header-only
    registry emitted into the schema-owning SDK, so it needs no dependency on the provider): a table
-   keyed by the `matcher_opcode` shorthand, each entry also carrying its attribute-table name and the
-   integer `NodeAttributes` value, and listing its input and output tensors (name, optionality, and
-   the typed accessor for the UID field), its input and output edge lists (field name and the typed
-   accessor for the UID vector), and its scalar attributes (name, optionality, value kind, and
-   typed accessor). The same run emits the registry as JSON (`op_schema_registry.json`, installed with
-   the SDK) without the accessors, so build-time tools such as the packager resolve patterns against
-   the identical table.
+   keyed by the `matcher_opcode` shorthand, each entry also carrying its `NodeAttributes` union
+   value, and listing its input and output tensors (name, optionality, and the typed accessor for
+   the UID field), its input and output edge lists (field name and the typed accessor for the UID
+   vector), and its scalar attributes (name, optionality, value kind, and typed accessor). The
+   same run emits each op's input and output tensors (name and optionality) as JSON
+   (`op_schema_registry.json`, installed with the SDK), so build-time tools such as the packager
+   resolve pattern opcodes and edge names against the identical table.
 
 Reflection is used **only at build time**; the generated registry holds typed accessors, so the runtime
 match path reads UID and attribute fields via `attributesAs<T>()`

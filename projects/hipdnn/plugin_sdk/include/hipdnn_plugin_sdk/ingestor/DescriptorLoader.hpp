@@ -38,7 +38,6 @@
 #include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorJsonRules.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
-#include <hipdnn_plugin_sdk/ingestor/GraphPattern.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
@@ -202,7 +201,7 @@ inline constexpr std::array<std::string_view, 4> UED_REQUIRED_KEYS{
     "version", "id", "name", "metadata"};
 
 /// The two arms of a UED's `graph_match`. An object carries exactly one: the declarative
-/// pattern (see GraphPattern.hpp) or a GraphMatchRegistry symbol.
+/// pattern (see CompiledGraphPattern.hpp) or a GraphMatchRegistry symbol.
 inline constexpr std::array<std::string_view, 2> GRAPH_MATCH_KEYS{"nodes", "native"};
 
 namespace detail
@@ -754,7 +753,7 @@ inline GraphMatch parseGraphMatch(const nlohmann::json& object,
     {
         return NativeGraphMatch{requireString(object, "native", where)};
     }
-    return compileGraphPattern(parseGraphPattern(*nodes, engine), engine);
+    return compileGraphPattern(*nodes, engine);
 }
 
 inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const std::string& where)

@@ -19,24 +19,18 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
-#include <hipdnn_plugin_sdk/ingestor/GraphPattern.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
-/// Builders shared by the graph-pattern parser, compiler, and matcher tests.
+/// Builders shared by the graph-pattern compiler and matcher tests.
 namespace hipdnn_plugin_sdk::ingestor::testing
 {
 
 /// The UED name every pattern test passes as `where`.
 inline constexpr const char* PATTERN_TEST_UED = "test.ued.json";
 
-inline GraphPattern parsePatternText(const std::string& nodes)
-{
-    return parseGraphPattern(nlohmann::json::parse(nodes), PATTERN_TEST_UED);
-}
-
 inline std::shared_ptr<const CompiledGraphPattern> compilePatternText(const std::string& nodes)
 {
-    return compileGraphPattern(parsePatternText(nodes), PATTERN_TEST_UED);
+    return compileGraphPattern(nlohmann::json::parse(nodes), PATTERN_TEST_UED);
 }
 
 /// One binary pointwise node, published under the names its slots bind.

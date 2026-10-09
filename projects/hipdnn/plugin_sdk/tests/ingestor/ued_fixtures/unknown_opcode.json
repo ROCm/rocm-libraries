@@ -9,17 +9,7 @@
     "metadata": "a2623304-ef3e-5621-8601-ff1614aefb6e",
     "graph_match": {
       "nodes": [
-        {
-          "kind": "op",
-          "id": "add",
-          "op": "pointwise_add",
-          "operands": {
-            "in_0": "$a"
-          },
-          "results": {
-            "out_0": "$y"
-          }
-        }
+        {"kind": "op", "id": "add", "op": "pointwise_add", "operands": {"in_0": "$a"}, "results": {"out_0": "$y"}}
       ]
     }
   }

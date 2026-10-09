@@ -1,8 +1,7 @@
 {
   "description": "'?' on a result binding.",
   "valid": false,
-  "runtime_error": "has binding '$output?'; '?' is only allowed on an operand binding",
-  "packager_error": "result 'out_0' binding \"$output?\" takes no '?'",
+  "error": "has binding '$output?'; '?' is only allowed on an operand binding",
   "ued": {
     "version": "1.0",
     "id": "7d337f4c-91de-54d1-bbe9-d6dc7a302752",
@@ -10,18 +9,7 @@
     "metadata": "b2974da1-e03c-5b98-8667-1f55d9b00e7d",
     "graph_match": {
       "nodes": [
-        {
-          "kind": "op",
-          "id": "pointwise",
-          "op": "pointwise",
-          "operands": {
-            "in_0": "$input_a",
-            "in_1": "$input_b"
-          },
-          "results": {
-            "out_0": "$output?"
-          }
-        }
+        {"kind": "op", "id": "pointwise", "op": "pointwise", "operands": {"in_0": "$input_a", "in_1": "$input_b"}, "results": {"out_0": "$output?"}}
       ]
     }
   }

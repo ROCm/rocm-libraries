@@ -514,11 +514,15 @@ def _validate_ued(desc, op_schema_registry=None):
         graph_match = doc["graph_match"]
         graph_where = f"{where} graph_match"
         if not isinstance(graph_match, dict):
-            raise HkpPackError(f"{graph_where} must be an object")
+            raise HkpPackError(f"{graph_where} must be a JSON object")
         require_known_keys(graph_match, GRAPH_MATCH_ARMS, graph_where)
-        if sum(arm in graph_match for arm in GRAPH_MATCH_ARMS) != 1:
+        if "nodes" in graph_match and "native" in graph_match:
             raise HkpPackError(
-                f"{graph_where} must contain exactly one of 'nodes' or 'native'"
+                f"{graph_where} carries both 'nodes' and 'native'; name exactly one"
+            )
+        if "nodes" not in graph_match and "native" not in graph_match:
+            raise HkpPackError(
+                f"{graph_where} carries neither 'nodes' nor 'native'; name exactly one"
             )
         if "native" in graph_match:
             _require_string(graph_match, "native", graph_where)
