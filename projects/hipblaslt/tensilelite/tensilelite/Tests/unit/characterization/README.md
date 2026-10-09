@@ -221,7 +221,7 @@ A floor-raising PR is a small, behavior-neutral maintenance change. It should to
    ```bash
    python tensilelite/Tests/unit/characterization/tools/coverage_ratchet.py update \
        --current coverage.json \
-       --allow-lower=Tensile/Components/Subtile/SubtileGREmit.py
+       --allow-lower=tensilelite/Components/Subtile/SubtileGREmit.py
    ```
 
    One `--allow-lower` per file, and it lowers only the files named. That is what keeps a run made
