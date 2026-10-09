@@ -155,13 +155,18 @@ The harness checks the output of an engine only if an oracle exists
 ([Verification modes](running-tests.md#verification-modes)).
 `src/harness/reference-validation/ReferenceOpCoverage.hpp` lists the ops that
 each reference executor must handle. If your op is not in that list, the bundle
-appears in `UNVERIFIABLE BUNDLES` and nothing checks it. Do one of these:
+**fails** with an `Unverifiable: … tried: …` message, and it appears in
+`UNVERIFIABLE BUNDLES`: an engine whose output nothing checks is untested. Do
+one of these:
 
 - **add golden data** produced by an independent implementation (see
   [Golden data with DVC](#golden-data-with-dvc)), or
+- **add the op to a reference executor**, or
 - **set `enforcement_level`** in the metadata to `applicability` (the engine
   accepts the graph) or `buildable` (its plans compile), so that the bundle
-  claims only what the harness can check today.
+  claims only what the harness can check today, or
+- **quarantine the bundle** until one of the above lands: exclude it in the
+  provider's `test_categories_integration.yaml` with a comment that says why.
 
 ### Finding existing cases
 
@@ -408,6 +413,44 @@ The writer reports graphs that a filter removed or that were skipped in
 
 Each machine can only claim its own cell. Claims for other archs or platforms
 come from runs on those machines.
+
+### Harvest claims from CI logs
+
+Instead of running `--write-support-claims` on each machine, you can take the
+support that a CI run proved and add it to the sidecars. A run of
+`hipdnn_integration_tests` prints a `SUPPORT CLAIM SUMMARY` whose
+`unclaimed_support` names graphs that reached the depth their bundle requires but
+that no sidecar claims. `scripts/harvest_support_claims.py` reads these blocks
+from CI job logs. Run it from `dnn-providers/integration-tests/`. It reads first,
+and only `--write` changes files:
+
+```bash
+python3 scripts/harvest_support_claims.py                                                # report every arch/platform of the latest develop nightly
+python3 scripts/harvest_support_claims.py --run <id> --arch gfx942 --platform linux      # report one; name the sidecars that would change
+python3 scripts/harvest_support_claims.py --run <id> --arch gfx942 --platform linux --write
+```
+
+- **Sources.** `--run <id>` fetches the logs of one workflow run with the `gh`
+  CLI. A positional argument is a log file, or a directory of `*.log` files, on
+  disk. With neither, the latest completed scheduled develop nightly is used.
+  `--jobs <regex>` picks the jobs (default: every provider's test job).
+  `--min-runs N` claims a cell only when it was kept in at least N runs.
+- **A cell is kept only if its gtest printed an `OK` line.** `reached: verified`
+  means that the comparison ran, not that it passed. A cell that FAILED, was
+  SKIPPED, or reached less than its required depth is dropped. A drop in any run
+  vetoes the cell. A block with bad JSON, an inconsistent counter or a harness
+  defect rejects its whole log, and then nothing is written (exit 1).
+- **`--write` needs both `--arch` and `--platform`**, so that one change covers
+  one arch/platform. `--arch` takes one gfx target, not a family name such as
+  `gfx94X`.
+- **Add-only, and the sidecars must be current.** The script fetches the tip of
+  develop. It refuses a sidecar that lacks a claim its develop version has:
+  rebase onto develop first. It also refuses a sidecar that does not render back
+  to its own bytes. If any sidecar or log is refused, it writes nothing.
+- `claim_failures` and `failed_in_use` are listed for you to read. They are never
+  written as claims.
+
+Then continue with [Confirm, review, commit](#confirm-review-commit).
 
 ### When no engine accepts the graph yet
 

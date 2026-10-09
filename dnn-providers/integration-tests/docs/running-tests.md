@@ -173,6 +173,13 @@ If the machine has no HIP device, the binary prints
 `No HIP devices available; skipping …` and exits 0 immediately. It does this
 before it reads any other flag.
 
+Bundle inputs of at least 2^14 elements (float, half, bfloat16 and double) are
+generated on the device with rocRAND. Smaller tensors, sub-byte types and fixed
+fills use the host RNG. Device-filled values differ from the host fill's, so a
+failure that you saw with them reproduces bit for bit only on the same path.
+Set `HIPDNN_TEST_HOST_INPUT_FILL=1` to force the host fill for every input.
+A build without rocRAND always uses the host fill.
+
 ## `hipdnn_golden_data_tests`
 
 This binary recomputes every bundle that has golden data with a reference
@@ -276,14 +283,18 @@ it passes all of them.
 | 1 | Build options (`-DBUILD_CPP_GRAPH_TESTS`, op enables) | configure | A test not compiled cannot be selected. C++ graph tests are **off by default**. |
 | 2 | `exclude_gpu` in the tier YAML | configure (suites) and `ctest` (selection) | Adds per-arch variant suites (`…_<category>_<arch>_suite`, label `ex_gpu_<arch>`) carrying that arch's negative patterns, or `DISABLED` for `"*"`. To pick the variant, use `-L ex_gpu_<arch>`. A plain `-L quick` also runs the unfiltered suite. See `shared/ctest/README.md`. |
 | 3 | `ctest -L` / `-LE` / `-R` | ctest invocation | Selects suites by label or name. |
-| 4 | `--gtest_filter` (from the YAML, or yours) | binary start | Selects cases by GTest name. |
+| 4 | `--gtest_filter` (from the YAML, or yours) | binary start | Selects cases by GTest name. Bundles that the filter excludes are dropped **before** they are parsed or read, which keeps startup fast. |
 | 5 | Metadata guards and TOML `test_skips` | each test's `SetUp()` | Skip on VRAM, arch-locked golden data, or a recorded engine limitation. |
 | 6 | The engine's ranked list | each test body | The engine declines the graph → the case is skipped (or fails if a claim promised support). |
 
 A bundle that fails to load (bad JSON, a sweep case with a missing placeholder
 or metadata block, a bad `golden.path`) never reaches these layers. The harness
 drops it from registration with an `ERROR` log line, and the test count is
-lower. See [File Formats](file-formats.md#where-each-format-is-enforced).
+lower. Two kinds of failure are different. They fail as a registered test, with
+the reason in the message: a malformed `.meta.json` or sweep-case `metadata`
+block (a `BundleMetadataError`), and a tensor blob that is unreadable or has the
+wrong size. The harness reads blobs when the test that needs them runs, not at
+registration. See [File Formats](file-formats.md#where-each-format-is-enforced).
 
 ## Verification modes
 
@@ -292,10 +303,10 @@ After an engine runs a bundle, the harness compares its output with an oracle.
 
 | Mode | Oracle |
 |---|---|
-| `auto` (default) | golden data → GPU reference → CPU reference → skip, first available wins |
+| `auto` (default) | golden data → GPU reference → CPU reference, first available wins; **fails** if none can verify |
 | `golden` | golden data only; **fails** a bundle with no golden data |
-| `gpu` | the GPU reference executor (no DVC pull needed) |
-| `cpu` | the CPU reference executor (no DVC pull needed) |
+| `gpu` | the GPU reference executor (no DVC pull needed); **fails** if it cannot run the op |
+| `cpu` | the CPU reference executor (no DVC pull needed); **fails** if it cannot run the op |
 
 The comparison runs where the expected values are: on the device for a GPU
 reference, and on the host for a CPU reference or golden data.
@@ -325,12 +336,20 @@ The first two go to **stdout**. The last two go to **stderr**. Capture both.
 ```
 
 - **Unverifiable bundles** ran on the engine with no oracle available (no golden
-  data, and no reference executor supports the op). They skip. Nothing checked
-  their output.
+  data, and no reference executor supports the op). **They fail** with an
+  `Unverifiable: …; tried: …` message. It names each oracle that the harness
+  tried and why it could not help. The engine's output was not checked, so the
+  bundle is untested, not skipped. To quarantine such a bundle until it has golden
+  data or a reference, exclude it in the provider's
+  `test_categories_integration.yaml` with a comment that says why. Other
+  `Unverifiable:` outcomes (inputs that cannot be filled, a bundle with no
+  outputs) are not about the oracle and stay skips.
 - **Reference executor errors** are bugs in a reference executor that should
   have handled the op. In `auto` mode, a GPU-reference error falls back to the
   CPU reference. An error in the last oracle tried fails the test. An error in
-  an explicit `--verification-mode gpu|cpu` also fails the test.
+  an explicit `--verification-mode gpu|cpu` also fails the test. That failure
+  shows the reference error, and the bundle is not listed under
+  `UNVERIFIABLE BUNDLES`.
 
 ### Support-claim summary
 
@@ -405,7 +424,7 @@ is green. To tell an expected skip from a regression, read the skip reasons:
 
 | Message | Meaning |
 |---|---|
-| `Error: zero tests ran.` followed by `registered: N … selected: 0 …` | Nothing ran. `registered: 0` is a discovery problem (wrong plugin, wrong bundle root). `N` registered with 0 selected is a filter problem. The one expected cause is GTest sharding (`GTEST_TOTAL_SHARDS` / `GTEST_SHARD_INDEX`). If GTest printed `Note: This is test shard K of M.`, the shard can be empty because there are more shards than tests that the filter matched. In that case, the `selected:` line also reads `nothing matched --gtest_filter`, although the filter did match. In all other cases, this is a configuration bug. Exit 1. |
+| `Error: zero tests ran.` followed by `registered: N … discovered: N … selected: 0 …` | Nothing ran. `discovered: 0` is a discovery problem (wrong plugin, wrong bundle root). If bundles were discovered and the filter excluded them all, it is a filter problem: the line also says how many bundles `--gtest_filter` excluded before loading. The one expected cause is GTest sharding (`GTEST_TOTAL_SHARDS` / `GTEST_SHARD_INDEX`). If GTest printed `Note: This is test shard K of M.`, the shard can be empty because there are more shards than tests that the filter matched. In that case, the `selected:` line also reads `nothing matched --gtest_filter`, although the filter did match. In all other cases, this is a configuration bug. Exit 1. |
 | `FATAL: --enforce-support-claims is active and N graph(s) carrying support` (continues over several lines) | Graphs with sidecars ran but the harness never queried any of them: enforcement verified nothing. Usually every one of them failed to open. Exit 1. |
 | `support claims exist for X but were never queried` | A code path skipped the claim query: a harness bug, not a data problem. |
 | `Error: --enforce-support-claims requires --test-engine …` | No engine named to check claims against. |
