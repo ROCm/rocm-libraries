@@ -344,3 +344,86 @@ def test_halfplr_rejects_tdmfuse1_at_a_divergent_pair(
     )
     assert sol.get("Valid") is False
     assert "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair" in out
+
+
+# ---------------------------------------------------------------------------
+# HalfPLR + LRVW > MIInputPerThread
+# ---------------------------------------------------------------------------
+_FP32_TN = {
+    "mi": [16, 16, 4, 1, 1, 2, 2, 2, 2],
+    "DepthU": 64,
+    "ProblemType": {
+        "DataType": "S",
+        "DestDataType": "S",
+        "ComputeDataType": "s",
+        "HighPrecisionAccumulate": False,
+    },
+}
+
+
+@pytest.mark.parametrize("half_plr", [1, 2, 3])
+def test_halfplr_caps_auto_local_read_vector_width(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr
+):
+    sol, out = _derive(
+        gfx1250_iim, assembler, capsys, HalfPLR=half_plr, **copy.deepcopy(_FP32_TN)
+    )
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    for tc, bit in (("A", 1), ("B", 2)):
+        if half_plr & bit:
+            assert sol[f"LocalReadVectorWidth{tc}"] == sol[f"MIInputPerThread{tc}"]
+
+
+@pytest.mark.parametrize("half_plr, tc", [(1, "A"), (2, "B")])
+def test_halfplr_rejects_explicit_wide_local_read(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr, tc
+):
+    # An explicit width bypasses the auto-width cap, so it has to be rejected.
+    sol, out = _derive(
+        gfx1250_iim,
+        assembler,
+        capsys,
+        HalfPLR=half_plr,
+        LocalReadVectorWidth=4,
+        **copy.deepcopy(_FP32_TN),
+    )
+    assert sol.get("Valid") is False
+    assert (
+        f"HalfPLR{tc} does not support coalesced local reads "
+        f"(LocalReadVectorWidth{tc}=4 > MIInputPerThread{tc}=2)"
+    ) in out
+
+
+# ---------------------------------------------------------------------------
+# Generic HalfPLR restrictions, each reached by flipping one knob on the
+# StreamK base above.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "half_plr, mi",
+    [
+        (1, [16, 16, 128, 1, 1, 1, 2, 2, 2]),  # odd MIWaveTileA
+        (2, [16, 16, 128, 1, 1, 2, 1, 2, 2]),  # odd MIWaveTileB
+    ],
+)
+def test_halfplr_rejects_odd_wave_tile(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, half_plr, mi
+):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, HalfPLR=half_plr, mi=mi)
+    assert sol.get("Valid") is False
+    assert "HalfPLR does not support odd WaveTile" in out
+
+
+def test_halfplr_rejects_unsupported_schedule_iter_alg(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    # Only SIA 0 and 4 (which maps to _ScheduleIterAlg=0) are supported.
+    sol, out = _derive(gfx1250_iim, assembler, capsys, ScheduleIterAlg=3)
+    assert sol.get("Valid") is False
+    assert "Currently HalfPLR only supports SIA = 0 or 4" in out
+
+
+def test_halfplr_rejects_inner_unroll(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    # Double DepthU so LoopIters stays > 1 and the earlier HalfPLR check passes.
+    sol, out = _derive(gfx1250_iim, assembler, capsys, InnerUnroll=2, DepthU=512)
+    assert sol.get("Valid") is False
+    assert "Currently HalfPLR only supports InnerUnroll = 1" in out
