@@ -335,7 +335,7 @@ struct unrolled
 
 template<typename EngineState, typename T, typename Generator>
 __global__ __launch_bounds__(get_max_block_size<EngineState>())
-void generate_kernel(EngineState* states,
+void generate_kernel(EngineState* __restrict__ states,
                      T* __restrict__ data,
                      const size_t size,
                      Generator    generator)
@@ -397,7 +397,7 @@ struct runner
 
 template<typename T, typename Generator>
 __global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
-void generate_kernel(rand_state_mtgp32_t* states,
+void generate_kernel(rand_state_mtgp32_t* __restrict__ states,
                      T* __restrict__ data,
                      const size_t size,
                      Generator    generator)
@@ -587,7 +587,7 @@ void init_scrambled_sobol_kernel(EngineState* states,
 // generate_kernel for the normal and scrambled sobol generators
 template<typename EngineState, typename T, typename Generator>
 __global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
-void generate_sobol_kernel(EngineState* states,
+void generate_sobol_kernel(EngineState* __restrict__ states,
                            T* __restrict__ data,
                            const size_t size,
                            Generator    generator)

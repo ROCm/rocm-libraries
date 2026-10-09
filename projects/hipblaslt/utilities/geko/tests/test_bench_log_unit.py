@@ -204,8 +204,8 @@ def _probe_row(**overrides):
 
 def test_realign_rows_reorders_to_match_original_order() -> None:
     rows = [
-        _row(M=16, N=32, K=64, compute_type="c_f32_r"),
-        _row(M=8, N=8, K=8, compute_type="c_f32_r"),
+        _row(M=16, N=32, K=64, compute_type="c_f32_r", scaleA=0, scaleB=0),
+        _row(M=8, N=8, K=8, compute_type="c_f32_r", scaleA=0, scaleB=0),
     ]
     # probe results arrive in the opposite order to rows (simulating a
     # multi-device run where chunks complete out of dispatch order)
@@ -220,8 +220,8 @@ def test_realign_rows_reorders_to_match_original_order() -> None:
 
 def test_realign_rows_disambiguates_using_extra_field() -> None:
     rows = [
-        _row(M=8, N=8, K=8, compute_type="c_f32_r", beta=0.0),
-        _row(M=8, N=8, K=8, compute_type="c_f32_r", beta=1.0),
+        _row(M=8, N=8, K=8, compute_type="c_f32_r", beta=0.0, scaleA=0, scaleB=0),
+        _row(M=8, N=8, K=8, compute_type="c_f32_r", beta=1.0, scaleA=0, scaleB=0),
     ]
     # same GEMM_LOG_FIELDS for both rows; only beta differs, and probe results
     # are also scrambled relative to rows

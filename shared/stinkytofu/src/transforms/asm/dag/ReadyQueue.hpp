@@ -43,6 +43,29 @@ namespace dag {
 // scheduler drains, rather than rebuilding their own view of it.
 struct RegionDAG;
 
+// WMMAs per TDM stage of a basic block: WMMAs / tensor_load groups (a group ends at a WMMA).
+// A stage under minStageWmmas (PrefetchLeadMinStageWmmas) has no room for a prefetch lead, so
+// the block runs as if PrefetchLeadWmmas = 0. Blocks without WMMAs or tensor_loads keep it.
+struct StageWmmaCounter {
+    int wmmas = 0;
+    int groups = 0;
+    bool wmmaSinceTensorLoad = true;
+    void add(const StinkyInstruction& inst) {
+        if (inst.getHwInstDesc() == nullptr) return;
+        if (isMatrixInstruction(inst)) {
+            ++wmmas;
+            wmmaSinceTensorLoad = true;
+        } else if (isTensorLoad(inst)) {
+            if (wmmaSinceTensorLoad) ++groups;
+            wmmaSinceTensorLoad = false;
+        }
+    }
+    int effectiveLead(int lead, int minStageWmmas) const {
+        const bool shortStage = groups > 0 && wmmas > 0 && wmmas < minStageWmmas * groups;
+        return lead > 0 && shortStage ? 0 : lead;
+    }
+};
+
 // REMOVED: Local buildUseDefChain() has been replaced by stinkytofu::buildUseDefChain()
 // from BuildDefUseChain.hpp. All callers now use the shared implementation.
 
@@ -227,6 +250,12 @@ class ReadyQueue {
         (void)regionEnd;
         (void)blockBegin;
         (void)deps;
+    }
+
+    // Hook called for every instruction appended to the BB's final order, in order: picks,
+    // filler instructions, and the side-effect instructions between regions.
+    virtual void onScheduled(const StinkyInstruction& inst) {
+        (void)inst;
     }
 
     // Hook called after a basic block has been fully scheduled. When the queue is

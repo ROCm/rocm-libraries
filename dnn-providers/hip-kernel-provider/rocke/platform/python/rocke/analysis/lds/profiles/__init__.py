@@ -4,9 +4,18 @@
 """Built-in architecture profiles for LDS conflict prediction."""
 
 from .gfx90a import GFX90A_PROFILE, Gfx90aProfile
+from .gfx942 import GFX942_PROFILE, Gfx942Profile
+from .gfx950 import GFX950_PROFILE, Gfx950Profile
+
+__all__ = [
+    "BUILTIN_PROFILES",
+    "GFX90A_PROFILE",
+    "GFX942_PROFILE",
+    "GFX950_PROFILE",
+    "Gfx90aProfile",
+    "Gfx942Profile",
+    "Gfx950Profile",
+]
 
 
-__all__ = ["BUILTIN_PROFILES", "GFX90A_PROFILE", "Gfx90aProfile"]
-
-
-BUILTIN_PROFILES = (GFX90A_PROFILE,)
+BUILTIN_PROFILES = (GFX90A_PROFILE, GFX942_PROFILE, GFX950_PROFILE)

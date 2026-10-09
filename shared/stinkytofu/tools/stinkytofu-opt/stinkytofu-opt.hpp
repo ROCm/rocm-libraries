@@ -53,6 +53,7 @@
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
+#include "stinkytofu/transforms/asm/PrefetchBridgeSubstitutionPass.hpp"
 #include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RegionClonePass.hpp"
@@ -230,6 +231,7 @@ const std::vector<PassInfo> availablePasses = {
      [](const std::vector<std::string>& args) {
          WaitCntInsertionOptions options;
          options.enableLoopCarriedTokenDeps = hasPassArg(args, "enableLoopCarriedTokenDeps");
+         options.mergeWaitsInWmmaRuns = hasPassArg(args, "mergeWaitsInWmmaRuns");
          return createStinkyWaitCntInsertionPass(options);
      }},
     // Gfx1250HazardPass accepts:
@@ -395,13 +397,18 @@ const std::vector<PassInfo> availablePasses = {
     {"InsertVgprMsbPass", [](const auto&) { return createInsertVgprMsbPass(); }},
     {"InsertInitialUnclausedVmemPass",
      [](const auto&) { return createInsertInitialUnclausedVmemPass(); }},
+    {"PrefetchBridgeSubstitutionPass",
+     [](const auto&) { return createPrefetchBridgeSubstitutionPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
     {"InsertClusterBarrierPass", [](const auto&) { return createInsertClusterBarrierPass(); }},
     {"TDMLoadWaveSyncPass", [](const auto&) { return createTDMLoadWaveSyncPass(); }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass",
      [](const std::vector<std::string>& args) {
-         return createInsertWaitAluPass(hasPassArg(args, "enableESM2TrackValuVsrc"));
+         return createInsertWaitAluPass(
+             {hasPassArg(args, "enableESM2TrackValuVsrc"),
+              hasPassArg(args, "sharedOrderCountFollowers"),
+              hasPassArg(args, "xdlCountFromNextWmma")});
      }},
     {"InsertCoexecHazardPass", [](const auto&) { return createInsertCoexecHazardPass(); }},
     {"RegionClonePass",

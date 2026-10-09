@@ -71,6 +71,7 @@ include(GNUInstallDirs)
 include(ClangTidy)
 include(ClangCheck)
 include(Sanitizers)
+include(WindowsDllStaging)
 include(Tests)
 include(HipdnnIntegrationTestHelpers)
 
@@ -121,6 +122,14 @@ if(USE_ROCRAND AND NOT TARGET roc::rocrand)
     set(USE_ROCRAND OFF)
 endif()
 
+# FillInputs.cpp generates large inputs with rocRAND (DeviceInputFiller). Only that
+# file is built with USE_ROCRAND: rocrand.h declares a global `half`, which is
+# ambiguous in any file that also pulls in hipdnn_data_sdk::types::half unqualified.
+if(USE_ROCRAND)
+    set_source_files_properties(src/harness/input-init/FillInputs.cpp
+        PROPERTIES COMPILE_DEFINITIONS USE_ROCRAND)
+endif()
+
 include(Dependencies)
 fetch_gtest_dependency()
 
@@ -149,6 +158,28 @@ if(Python3_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_verify_support_claims.py
     )
     set(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST hipdnn_support_claim_verifier_python_tests)
+
+    add_test(
+        NAME hipdnn_support_claim_harvest_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_harvest_support_claims.py
+    )
+    set(HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST hipdnn_support_claim_harvest_python_tests)
+
+    add_test(
+        NAME hipdnn_support_sidecar_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_support_sidecar.py
+    )
+    set(HIPDNN_IT_SUPPORT_SIDECAR_TEST hipdnn_support_sidecar_python_tests)
+
+    # Skips itself when PyTorch, which the generator needs, is not installed.
+    add_test(
+        NAME hipdnn_golden_generator_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_fwd_golden.py
+    )
+    set(HIPDNN_IT_GOLDEN_GENERATOR_TEST hipdnn_golden_generator_python_tests)
 endif()
 
 # Install integration test bundles so installed tests can find them at
@@ -162,18 +193,17 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
     src/harness/ReferenceExecutorPool.cpp
-    src/harness/bundle/BundleReferenceValidationHarness.cpp
     src/harness/bundle/FrontendGraphEngineRunner.cpp
     src/harness/bundle/GraphSession.cpp
     src/harness/bundle/HarnessDependencies.cpp
     src/harness/bundle/IntegrationBundleVerificationHarness.cpp
     src/harness/bundle/OutputComparison.cpp
     src/harness/bundle/ProductionPolicy.cpp
-    src/harness/bundle/ReferenceOpCoverage.cpp
     src/harness/bundle/SupportClaimReport.cpp
     src/harness/bundle/SupportClaimWriter.cpp
     src/harness/bundle/SupportClaims.cpp
     src/harness/bundle/SupportVerdict.cpp
+    src/harness/bundle/SweepManifestCache.cpp
     src/harness/bundle/VariantPackBuilder.cpp
     src/harness/input-init/FillInputs.cpp
 )
@@ -194,15 +224,19 @@ set(GOLDEN_DATA_TESTS_EXE hipdnn_golden_data_tests)
 add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/golden_data_main.cpp
     src/harness/ReferenceExecutorPool.cpp
-    src/harness/bundle/BundleReferenceValidationHarness.cpp
     src/harness/bundle/GraphSession.cpp
     src/harness/bundle/OutputComparison.cpp
-    src/harness/bundle/ReferenceOpCoverage.cpp
     src/harness/bundle/SupportClaimReport.cpp
     src/harness/bundle/SupportClaims.cpp
     src/harness/bundle/SupportVerdict.cpp
+    src/harness/bundle/SweepManifestCache.cpp
     src/harness/bundle/VariantPackBuilder.cpp
     src/harness/input-init/FillInputs.cpp
+    src/harness/reference-validation/BundleReferenceValidationHarness.cpp
+    src/harness/reference-validation/GoldenDataPlan.cpp
+    src/harness/reference-validation/GoldenDataRegistration.cpp
+    src/harness/reference-validation/GoldenOutputProbe.cpp
+    src/harness/reference-validation/ReferenceOpCoverage.cpp
 )
 
 target_include_directories(${GOLDEN_DATA_TESTS_EXE} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -219,6 +253,7 @@ target_link_libraries(${GOLDEN_DATA_TESTS_EXE}
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<BOOL:${USE_ROCRAND}>:roc::rocrand>
         $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
@@ -227,7 +262,16 @@ target_compile_options(${GOLDEN_DATA_TESTS_EXE}
 
 clang_tidy_check(${GOLDEN_DATA_TESTS_EXE})
 
-add_integration_test_target(${GOLDEN_DATA_TESTS_EXE} ${CMAKE_CURRENT_BINARY_DIR})
+# SKIP_NAME_VALIDATION: every test this binary registers is named after a bundle's
+# directory path (deriveTestName() in BundleDiscovery.hpp), so the names are
+# lower_snake_case by construction -- `quick_SdpaFwd_bhsd_bf16_hd128_causal_batch_
+# Small_CpuRef.Small`. The PascalCase convention the validator enforces is for
+# hand-written C++ test names; satisfying it here would mean renaming the checked-in
+# bundle tree, which is the data, not the test code. hipdnn_integration_tests
+# registers the same bundle-derived names and is likewise absent from the validated
+# set, because it is not a tiered ctest target (see the note below).
+add_integration_test_target(${GOLDEN_DATA_TESTS_EXE} ${CMAKE_CURRENT_BINARY_DIR}
+    SKIP_NAME_VALIDATION)
 
 add_subdirectory(src/integration-tests)
 
@@ -245,6 +289,7 @@ target_link_libraries(${INTEGRATION_TESTS_EXE}
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<BOOL:${USE_ROCRAND}>:roc::rocrand>
         $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
@@ -275,6 +320,15 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     endif()
     if(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_SIDECAR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_SIDECAR_TEST})
+    endif()
+    if(HIPDNN_IT_GOLDEN_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_GENERATOR_TEST})
     endif()
 else()
     message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")

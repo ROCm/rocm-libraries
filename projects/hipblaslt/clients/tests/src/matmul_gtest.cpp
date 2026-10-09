@@ -37,6 +37,36 @@
 namespace
 {
 
+    TEST(FastCheckMx_pre_checkin, unsupported_transpose_layouts_are_refused)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.initialization = hipblaslt_initialization::integer_exact;
+        arg.fast_check     = 1;
+        arg.batch_count    = 1;
+        arg.M[0] = arg.N[0] = 64;
+        arg.K[0]            = 256;
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0;
+        for(char a : {'N', 'T', 'C'})
+            for(char b : {'N', 'T', 'C'})
+            {
+                arg.transA = a;
+                arg.transB = b;
+                auto why   = fast_check_unsupported_reason(arg,
+                                                         HIPBLASLT_BATCH_MODE_STRIDED,
+                                                         false,
+                                                         HIP_R_8F_E4M3,
+                                                         HIP_R_8F_E5M2,
+                                                         HIP_R_32F,
+                                                         HIP_R_32F);
+                if(a == 'T' && b == 'N')
+                    EXPECT_TRUE(why.empty()) << why;
+                else
+                    EXPECT_NE(why.find("transA=T and transB=N"), std::string::npos)
+                        << a << b << ": " << why;
+            }
+    }
+
     // ----------------------------------------------------------------------------
     // matmul
     // ----------------------------------------------------------------------------
@@ -171,6 +201,10 @@ namespace
 
                 if(arg.c_equal_d)
                     name << "_C_EQUAL_D";
+                if(arg.placement[0])
+                    name << "_PLACE_" << arg.placement;
+                if(arg.integer_exact_pattern[0])
+                    name << "_IE_" << arg.integer_exact_pattern;
                 // grouped gemm only supports ext
                 if(arg.use_ext || arg.grouped_gemm > 0)
                     name << "_APIExt";
@@ -195,6 +229,7 @@ namespace
     TEST_P(matmul_test, matmul)
     {
         SKIP_IF_KNOWN_BUG_FOR_PLATFORM();
+        SKIP_UNLESS_SELECTED_BY_FILTER();
         RUN_TEST_ON_THREADS_STREAMS(matmul_testing{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(matmul_test);

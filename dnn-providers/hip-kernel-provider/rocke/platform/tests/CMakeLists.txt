@@ -14,6 +14,24 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/smoke.cpp")
 endif()
 
 if(BUILD_TESTING)
+  add_executable(rocke_tf32 core/test_tf32.cpp)
+  target_link_libraries(rocke_tf32 PRIVATE rocke_core)
+  add_test(NAME rocke_tf32 COMMAND rocke_tf32)
+  set_tests_properties(rocke_tf32 PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_tf32)
+  set_target_properties(rocke_tf32 PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_tf32 RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_tf32)
+
+  add_executable(rocke_storage core/test_storage.cpp)
+  target_link_libraries(rocke_storage PRIVATE rocke_core)
+  add_test(NAME rocke_storage COMMAND rocke_storage)
+  set_tests_properties(rocke_storage PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_storage)
+  set_target_properties(rocke_storage PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_storage RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_storage)
+
   add_executable(rocke_dtypes core/test_dtypes.cpp)
   target_link_libraries(rocke_dtypes PRIVATE rocke_core)
   add_test(NAME rocke_dtypes COMMAND rocke_dtypes)
@@ -90,6 +108,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_future_intrinsic_lowering)
+  endif()
+
+  # temporal_hint (rocke_mem_opts_t) on global_load_vN/global_store_vN and the
+  # io helpers, through the C++ builders and HIP/LLVM lowerers.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_nontemporal_hip.cpp")
+    add_executable(rocke_nontemporal_hip core/test_nontemporal_hip.cpp)
+    target_link_libraries(rocke_nontemporal_hip PRIVATE rocke_core)
+    add_test(NAME rocke_nontemporal_hip COMMAND rocke_nontemporal_hip)
+    set_tests_properties(rocke_nontemporal_hip PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_nontemporal_hip)
+    set_target_properties(rocke_nontemporal_hip
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_nontemporal_hip
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_nontemporal_hip)
   endif()
 
   # Direct f32 tanh lowering and narrow-type rejection in the C++ engine.
@@ -181,6 +215,9 @@ if(BUILD_TESTING)
     if(UNIX)
       target_link_libraries(rocke_portable_ir_replay_cli PRIVATE m)
     endif()
+    # Python recipe tests need the native VM in relocated test artifacts.
+    install(TARGETS rocke_portable_ir_replay_cli
+            RUNTIME DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/portable_ir")
   endif()
 
   # --- instances layer --------------------------------------------------------
