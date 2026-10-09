@@ -2662,6 +2662,8 @@ TEST(TestIngestorCandidateEnumeration, SparsePagesEnrollExactlyTheirReportedCand
     EXPECT_EQ(first.candidates.front()->id, toString(testId(0x64)));
     EXPECT_EQ(second.candidates.front()->id, toString(testId(0x65)));
     EXPECT_EQ(first.graph_id, second.graph_id);
+    // The graph's own id, which corpora and their evaluation slices name the problem by.
+    EXPECT_EQ(first.graph_id, hipdnn_flatbuffers_sdk::utilities::formatUuid(makeGraphId(0xDA)));
     EXPECT_EQ(first.device_id, second.device_id);
     EXPECT_EQ(nlohmann::json::parse(first.problem_features).at("test.bound_token"),
               BOUND_TOKEN_VALUE);
