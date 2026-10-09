@@ -11,11 +11,23 @@ slug: gfx950_attention_dense
 provider_root: dnn-providers/hip-kernel-provider
 
 # Read by reconcile_applicability.py.
+# `family` must match the post-ae4db22a5b8 algorithm name. The old `attention_dense`
+# matched only gfx942 after the refactor split dense into attention_dense_grid and
+# attention_dense_persist. Without an explicit algorithm pin the reference request
+# returns 0 candidates (opt-in required for the new pinned dispatch API).
 reference_candidates:
   module: dispatch.attention
   function: attention_candidates
   match: algorithm
-  family: attention_dense
+  family: attention_dense_grid
+
+reference_request:
+  module: dispatch.attention.common
+  class: AttentionRequest
+  defaults:
+    arch: gfx950
+    algorithm: attention_dense_grid
+    spec_id: gfx950_dense_grid
 
 source: kernels/gfx950/attention_dense.py
 builder: build_attention_dense

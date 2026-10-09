@@ -270,6 +270,88 @@ class TestKmdFieldComparison:
         assert "--regenerated-kmd" in capsys.readouterr().err
 
 
+class TestShippedFieldKeying:
+    """The comparison key uses the shipped entry's OWN spec fields, not the
+    metadata_fields filter. This catches cases the narrower filter would miss."""
+
+    def test_non_metadata_spec_field_change_is_caught(self, run, capsys):
+        """A pin flip that changes a spec field outside metadata_fields
+        (e.g. `persistent`) must be detected, not masked by the filter."""
+        shipped_entry = {
+            "version": "1.0",
+            "id": "id-k0",
+            "name": "k0",
+            "kernel_source": {
+                "kind": "rocke",
+                "source": "kernels/gfx950/attention_dense.py",
+                "builder": "build_attention_dense",
+                "spec": {
+                    "dtype": "bf16",
+                    "block_m": 256,
+                    "block_n": 64,
+                    "persistent": False,
+                },
+            },
+            "metadata": {"dtype": "BF16", "block_m": 256, "block_n": 64},
+            "priority": 0,
+        }
+        regen_entry = json.loads(json.dumps(shipped_entry))
+        regen_entry["kernel_source"]["spec"]["persistent"] = True
+        shipped = _kdp([shipped_entry])
+        regenerated = _kdp([regen_entry])
+        assert run(shipped, regenerated, "--ignore-ids") == 1
+        out = capsys.readouterr().out
+        assert "only in shipped" in out or "only in regenerated" in out, out
+
+    def test_regenerated_only_spec_fields_are_not_a_difference(self, run):
+        """Regenerated catalogs may carry newly defaulted spec fields (e.g.
+        `lds_k_row_pad`) that the shipped catalog never had. These must NOT
+        produce false differences -- only shipped fields are compared."""
+        shipped_entry = {
+            "version": "1.0",
+            "id": "id-k0",
+            "name": "k0",
+            "kernel_source": {
+                "kind": "rocke",
+                "source": "kernels/gfx950/attention_dense.py",
+                "builder": "build_attention_dense",
+                "spec": {"dtype": "bf16", "block_m": 256, "block_n": 64},
+            },
+            "metadata": {"dtype": "BF16", "block_m": 256, "block_n": 64},
+            "priority": 0,
+        }
+        regen_entry = json.loads(json.dumps(shipped_entry))
+        # Regenerated side carries an extra field the shipped spec never had.
+        regen_entry["kernel_source"]["spec"]["lds_k_row_pad"] = 8
+        regen_entry["id"] = "fresh-id"
+        shipped = _kdp([shipped_entry])
+        regenerated = _kdp([regen_entry])
+        assert run(shipped, regenerated, "--ignore-ids") == 0
+
+    def test_changed_kernel_source_kind_is_caught(self, run, capsys):
+        """kernel_source.kind is now part of the key. Changing the source kind
+        while leaving the spec identical is a different binary."""
+        shipped_entry = {
+            "version": "1.0",
+            "id": "id-k0",
+            "name": "k0",
+            "kernel_source": {
+                "kind": "rocke",
+                "source": "kernels/gfx950/attention_dense.py",
+                "builder": "build_attention_dense",
+                "spec": {"dtype": "bf16"},
+            },
+            "metadata": {"dtype": "BF16"},
+            "priority": 0,
+        }
+        regen_entry = json.loads(json.dumps(shipped_entry))
+        regen_entry["kernel_source"]["kind"] = "hiprtc"
+        regen_entry["id"] = "fresh-id"
+        shipped = _kdp([shipped_entry])
+        regenerated = _kdp([regen_entry])
+        assert run(shipped, regenerated, "--ignore-ids") == 1
+
+
 class TestUsageErrorsAreNotDifferences:
     def test_a_missing_file_exits_2(self, tmp_path, capsys):
         """Exit 1 means 'the catalogs differ'. An unreadable input has compared

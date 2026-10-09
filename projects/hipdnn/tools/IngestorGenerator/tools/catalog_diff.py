@@ -84,53 +84,65 @@ def _canonical(value) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-def entry_key(entry: dict, spec_fields: frozenset | None = None) -> tuple:
+def entry_key(entry: dict, shipped_spec_keys: frozenset | None = None) -> tuple:
     """What makes two catalog entries the same kernel. Deliberately excludes
     ``id`` (minted per run) and includes ``priority`` (it orders selection).
 
-    ``spec_fields``: when given, only these spec fields are compared (the
-    metadata_fields from the KDP's specialization_contract). The shipped catalog
-    is hand-authored and may omit policy-resolved knobs that the parity tool
-    carries; both represent the same compiled binary, so the comparison key is
-    the metadata-discriminating subset that the matcher actually uses.
+    ``shipped_spec_keys``: when given (from the shipped entry's own spec), only
+    spec fields present in the SHIPPED entry are compared. Regenerated-only
+    fields (e.g. newly defaulted knobs like ``lds_k_row_pad``) are ignored --
+    they are not part of what the shipped catalog committed to. But ALL shipped
+    fields are compared, not only the metadata_fields subset: a pin flip to
+    ``attention_dense_persist`` changes ``persistent`` (a shipped field), and
+    a knobs-list rollback would likewise alter shipped fields that the
+    metadata_fields filter would miss.
     """
     spec = entry.get("kernel_source", {}).get("spec") or {}
-    if spec_fields is not None:
-        spec = {k: v for k, v in spec.items() if k in spec_fields}
+    if shipped_spec_keys is not None:
+        spec = {k: v for k, v in spec.items() if k in shipped_spec_keys}
+    ks = entry.get("kernel_source", {})
     return (
         entry.get("name"),
         _canonical(spec),
         _canonical(entry.get("metadata")),
         entry.get("priority"),
+        ks.get("kind"),
+        ks.get("source"),
+        ks.get("builder"),
+        entry.get("version"),
     )
 
 
 def compare_catalog(shipped: dict, regenerated: dict) -> list[str]:
     """Multiset difference over the kernel entries.
 
-    The comparison key uses only the metadata-discriminating spec fields from
-    the specialization_contract -- the same subset the C++ matcher reads. The
-    shipped catalog may omit policy-resolved knobs the parity tool resolved;
-    both represent the same compiled binary, so the full spec is not the key.
+    For each shipped entry, the spec key is restricted to the fields that entry
+    ITSELF carries: regenerated-only fields (newly added defaults) are ignored so
+    they do not produce false differences. But ALL shipped fields are compared,
+    not just the metadata_fields subset -- a pin flip or knob-list rollback
+    changes shipped fields that a narrower filter would miss.
     """
-    # Derive the spec fields that actually discriminate between kernels.
-    # Fall back to None (full spec) when the contract is absent.
-    contract = (shipped.get("provenance") or {}).get("specialization_contract")
-    spec_fields: frozenset | None = None
-    if contract:
-        consumers = contract.get("consumers") or []
-        all_fields: set[str] = set()
-        for c in consumers:
-            all_fields.update(c.get("metadata_fields") or [])
-            all_fields.update(c.get("matcher_only_fields") or [])
-        if all_fields:
-            spec_fields = frozenset(all_fields)
+    # Build a per-entry key using the shipped entry's own spec field names.
+    # Regenerated entries use those same keys so the comparison is symmetric.
+    left_keys: list = []
+    shipped_spec_keys_per_entry: list[frozenset | None] = []
+    for e in shipped["kernelDescriptors"]:
+        spec_keys = frozenset((e.get("kernel_source", {}).get("spec") or {}).keys())
+        shipped_spec_keys_per_entry.append(spec_keys if spec_keys else None)
+        left_keys.append(entry_key(e, spec_keys if spec_keys else None))
 
-    left = collections.Counter(
-        entry_key(e, spec_fields) for e in shipped["kernelDescriptors"]
+    # Derive the union of all shipped spec keys so the regenerated side is
+    # filtered to the same vocabulary; entries with no shipped counterpart get
+    # None (full spec) so they never silently collapse.
+    all_shipped_keys: frozenset | None = (
+        frozenset().union(*shipped_spec_keys_per_entry)  # type: ignore[arg-type]
+        if shipped_spec_keys_per_entry
+        else None
     )
+
+    left = collections.Counter(left_keys)
     right = collections.Counter(
-        entry_key(e, spec_fields) for e in regenerated["kernelDescriptors"]
+        entry_key(e, all_shipped_keys) for e in regenerated["kernelDescriptors"]
     )
     problems: list[str] = []
 
@@ -160,24 +172,12 @@ def find_duplicate_specs(kdp: dict) -> list[str]:
     The packer dedups compilation on (source, builder, spec), so two catalog
     entries with the same spec are one kernel under two names -- and if their
     completed metadata also collides, the loader keeps one and the catalog
-    silently ships less than it claims.
+    silently ships less than it claims. Uses the full spec (not a filtered
+    subset) since the packer dedup itself uses the full spec.
     """
-    contract = (kdp.get("provenance") or {}).get("specialization_contract")
-    spec_fields: frozenset | None = None
-    if contract:
-        consumers = contract.get("consumers") or []
-        all_fields: set[str] = set()
-        for c in consumers:
-            all_fields.update(c.get("metadata_fields") or [])
-            all_fields.update(c.get("matcher_only_fields") or [])
-        if all_fields:
-            spec_fields = frozenset(all_fields)
-
     by_spec: dict[str, list[str]] = collections.defaultdict(list)
     for entry in kdp["kernelDescriptors"]:
         spec = entry.get("kernel_source", {}).get("spec") or {}
-        if spec_fields is not None:
-            spec = {k: v for k, v in spec.items() if k in spec_fields}
         by_spec[_canonical(spec)].append(entry.get("name", "<unnamed>"))
     return [
         f"  {len(names)} entries share one spec: {', '.join(sorted(names)[:4])}"

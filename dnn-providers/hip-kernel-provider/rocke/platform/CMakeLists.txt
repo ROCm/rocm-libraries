@@ -492,14 +492,21 @@ if(ROCKE_INSTALL_TESTS)
     # library root so that tests/dispatch/attention/ does not shadow the real
     # dispatch.attention package -- running from tests/ would make the local
     # subdirectory win on sys.path, silently importing the wrong module.
+    #
+    # CTest resolves WORKING_DIRECTORY against the CTestTestfile's directory; the
+    # pytest path argument and PYTHONPATH must then be relative to that working
+    # directory (not to the CTestTestfile). Use "." for PYTHONPATH (the library
+    # root is already the working directory) and "tests/dispatch/attention" for
+    # the pytest path. An absolute path would also work but cannot be written
+    # here since the install prefix is only known at install time.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_library_attention_pytest python -m pytest"
-           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention\""
+           " \"tests/dispatch/attention\""
            " -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_attention_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;attention\\;dispatch\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=.\"\n"
            "  WORKING_DIRECTORY \"${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
 
