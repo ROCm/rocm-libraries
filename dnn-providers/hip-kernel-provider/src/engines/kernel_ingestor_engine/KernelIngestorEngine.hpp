@@ -43,22 +43,23 @@ std::vector<std::filesystem::path> descriptorSearchDirectories();
 /// descriptor costs its pack, never the provider. Memoized, so two scans can't disagree.
 const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescriptorSets();
 
-/// The state manager discovery built while validating the discoverDescriptorSets() entry
-/// whose engine id is @p engineId, or null once taken or when no set has that id.
-/// One-shot: the first engine constructed for that set takes it, and any later one -- a
-/// Container created after an earlier one was destroyed -- builds its own from the set, so
-/// no state manager is shared between two engines. One no engine takes stays alive beside
-/// its set until the provider unloads, so a process that never constructs a Container
-/// holds one extra state manager per set.
-std::unique_ptr<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>>
-    takeDiscoveredStateManager(const hipdnn_plugin_sdk::ingestor::DescriptorId& engineId);
+/// The immutable kernel-ingestor state discovery built while validating the
+/// discoverDescriptorSets() entry whose engine id is @p engineId, or null when no set has
+/// that id. Built once per process from the descriptor tree and shared, never copied: every
+/// engine constructed for that set -- one per Container, so one per hipDNN handle -- wraps
+/// it in a state manager of its own (own catalog and winner caches), so constructing a
+/// Container costs no per-kernel work. Callers holding the pointer keep the state alive
+/// across a rediscoverSharedStatesForTesting(). Thread-safe.
+std::shared_ptr<const hipdnn_plugin_sdk::ingestor::KernelIngestorSharedState<Handle>>
+    discoveredSharedState(const hipdnn_plugin_sdk::ingestor::DescriptorId& engineId);
 
 /// Test-only. Rescans the descriptor tree through the same path discovery takes and
-/// refills every takeDiscoveredStateManager() slot with the state manager that scan built.
-/// Thread-safe against concurrent takes.
+/// replaces every discoveredSharedState() with the state that scan built; the next
+/// Container serves the new states, while engines already constructed keep the ones they
+/// hold. Thread-safe against concurrent lookups.
 /// @throws std::logic_error the rescan does not reproduce discoverDescriptorSets() in
-///         order (e.g. the search directories changed); the slots are left unchanged.
-void rediscoverStateManagersForTesting();
+///         order (e.g. the search directories changed); the states are left unchanged.
+void rediscoverSharedStatesForTesting();
 
 /// The device resolver every descriptor-backed engine in this provider shares.
 /// Process-lifetime: a device-property cache with no engine-specific state.

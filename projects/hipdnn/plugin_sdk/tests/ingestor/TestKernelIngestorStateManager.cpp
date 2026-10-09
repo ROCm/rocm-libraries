@@ -1149,6 +1149,84 @@ TEST(TestKernelIngestorStateManager, MakeEngineRejectsANullStateManager)
                  std::invalid_argument);
 }
 
+TEST(TestKernelIngestorStateManager, ManagersBuiltOverOneSharedStateShareItAndNotTheirCaches)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto first = makeStateManager();
+    const StateManager second(first->sharedState());
+
+    EXPECT_EQ(second.sharedState().get(), first->sharedState().get());
+    EXPECT_EQ(&second.metadataSchema(), &first->metadataSchema())
+        << "the second manager copied the schema rather than sharing it";
+
+    const TestGraph graph(makeGraphId(0x71));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto fromFirst = first->sortedDefinitions(context);
+    const auto fromSecond = second.sortedDefinitions(context);
+    ASSERT_EQ(fromFirst.size(), fromSecond.size());
+    for(size_t index = 0; index < fromFirst.size(); ++index)
+    {
+        EXPECT_EQ(fromFirst[index].kernelId, fromSecond[index].kernelId);
+    }
+
+    // Each manager matched the graph itself: the catalog cache is per manager, so a
+    // manager over a shared state starts as cold as one built from scratch.
+    EXPECT_EQ(counters().graphMatchCalls, 2);
+}
+
+TEST(TestKernelIngestorStateManager, AManagerOverASharedStateResolvesNothingAgain)
+{
+    std::shared_ptr<const KernelIngestorSharedState<TestHandle>> state;
+    {
+        const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+        state = makeStateManager()->sharedState();
+    }
+
+    // The graph_match and matcher symbols are unregistered now, so building the state
+    // again would throw; wrapping the existing one must not, and the state outlives the
+    // manager that built it.
+    ASSERT_NE(state.get(), nullptr);
+    EXPECT_NO_THROW({
+        const StateManager manager(state);
+        static_cast<void>(manager.metadataSchema());
+    });
+    EXPECT_EQ(state.use_count(), 1);
+}
+
+TEST(TestKernelIngestorStateManager, ANullSharedStateIsRejected)
+{
+    EXPECT_THROW(StateManager{std::shared_ptr<const KernelIngestorSharedState<TestHandle>>{}},
+                 std::invalid_argument);
+}
+
+TEST(TestKernelIngestorStateManager, MakeEngineOverASharedStateSharesItAcrossEngines)
+{
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const auto state = makeStubStateManager()->sharedState();
+    ASSERT_EQ(state.use_count(), 1);
+
+    auto first = makeEngine<StubHandle, StubSettings, StubContext>(
+        makeEngineWithKnobs({}), state, resolver);
+    auto second = makeEngine<StubHandle, StubSettings, StubContext>(
+        makeEngineWithKnobs({}), state, resolver);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(state.use_count(), 3);
+
+    first.reset();
+    second.reset();
+    EXPECT_EQ(state.use_count(), 1);
+
+    EXPECT_THROW((makeEngine<StubHandle, StubSettings, StubContext>(
+                     makeEngineWithKnobs({}),
+                     std::shared_ptr<const KernelIngestorSharedState<StubHandle>>{},
+                     resolver)),
+                 std::invalid_argument);
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
