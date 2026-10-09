@@ -489,6 +489,100 @@ def test_the_post_pass_is_silent_on_an_unmeasured_declare() -> None:
     assert not [w for w in caught if isinstance(w.message, ArchDomainWarning)]
 
 
+def _aliased_negative_declare() -> tuple[str, str, tuple[str, ...], str]:
+    """A (declare line, arch, keys, flavor) where several keys share one declare
+    and every one of them is a measured negative on that arch.
+
+    Found from the committed tables rather than named, so the test keeps
+    meaning something when the data moves. At llvm23 the pair is
+    ``mfma.scale.f32.16x16x128.f8f6f4`` / ``mfma.f32.16x16x128.fp8.hero``.
+    """
+    from rocke.core.lower_llvm import _decls_for_flavor
+
+    for flavor in _committed_flavors():
+        table = arch_domain.load(flavor)
+        if table is None:
+            continue
+        by_decl: dict[str, list[str]] = {}
+        for key, decl in _decls_for_flavor(flavor).items():
+            by_decl.setdefault(decl, []).append(key)
+        for decl, keys in sorted(by_decl.items()):
+            if len(keys) < 2:
+                continue
+            for arch in sorted(set(table.arches(keys[0]))):
+                cells = [table.lookup(k, arch) for k in keys]
+                if all(
+                    c is not None and arch_domain.is_negative(c.status) for c in cells
+                ):
+                    return decl, arch, tuple(sorted(keys)), flavor
+    pytest.skip("no committed column has an all-negative aliased declare")
+
+
+def test_the_post_pass_reports_every_key_an_aliased_declare_could_be(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Identical declare text is the same LLVM intrinsic under two table keys.
+
+    The post-pass reads keys back out of emitted IR, so for such a pair it
+    cannot know which one the kernel demanded -- and naming just one (whichever
+    the reverse map happened to keep) would point at the wrong table row half
+    the time, disagreeing with the key the Python lowerer warns under. Report
+    every alias that is itself a measured negative.
+    """
+    from rocke.core.lower_llvm import check_arch_domain_in_ir
+
+    decl, arch, keys, flavor = _aliased_negative_declare()
+    monkeypatch.setenv(arch_domain.MODE_ENV, "warn")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        check_arch_domain_in_ir(f"{decl}\n", arch, flavor)
+    got = [w.message for w in caught if isinstance(w.message, ArchDomainWarning)]
+    assert tuple(sorted(w.key for w in got)) == keys
+    assert {w.arch for w in got} == {arch}
+
+
+def test_a_waived_alias_does_not_turn_its_sibling_into_a_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The engine lowered the kernel, so whichever alias it demanded was
+    acceptable to it.
+
+    With one alias waived, the unwaived sibling may be a key the kernel never
+    asked for, and refusing over it would overrule a waiver on a guess. Both are
+    still reported, each against its own cell.
+    """
+    from rocke.core.lower_llvm import check_arch_domain_in_ir
+
+    decl, arch, keys, flavor = _aliased_negative_declare()
+    _waive(monkeypatch, (keys[0], arch, flavor))
+    monkeypatch.setenv(arch_domain.MODE_ENV, "error")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        check_arch_domain_in_ir(f"{decl}\n", arch, flavor)
+    got = {
+        w.message.key: w.message.waived
+        for w in caught
+        if isinstance(w.message, ArchDomainWarning)
+    }
+    assert got == {keys[0]: True, **{k: False for k in keys[1:]}}
+
+
+def test_an_aliased_declare_no_alias_accounts_for_is_a_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When every alias sharing the declare is an unwaived negative, nothing
+    could explain the engine having lowered it: the extension was built from a
+    different table than this checkout's, and the post-pass says so."""
+    from rocke.core.lower_llvm import check_arch_domain_in_ir
+
+    decl, arch, keys, flavor = _aliased_negative_declare()
+    _waive(monkeypatch)  # nothing waived, whatever is on file
+    monkeypatch.setenv(arch_domain.MODE_ENV, "error")
+    with pytest.raises(ArchDomainError) as excinfo:
+        check_arch_domain_in_ir(f"{decl}\n", arch, flavor)
+    assert excinfo.value.key in keys
+
+
 def test_the_post_pass_honours_the_off_switch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Unlike ``test_lane_can_be_switched_off``, this input provably warns when
     the lane is on, so the assertion is about the switch and not about a kernel

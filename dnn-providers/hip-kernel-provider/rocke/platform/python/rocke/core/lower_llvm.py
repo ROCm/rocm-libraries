@@ -1209,6 +1209,24 @@ def check_arch_domain_in_ir(ir_text: str, arch: str, flavor: Optional[str]) -> N
     byte-identity with it. A line that is not a table value belongs to
     something never measured (the dynamic ``llvm.smax.v<N>i<W>`` declares),
     which is silence by the same rule as the rest of the lane.
+
+    It is not one-to-one, though: several keys can share one declare line, and
+    at llvm23 ``mfma.scale.f32.16x16x128.f8f6f4`` and
+    ``mfma.f32.16x16x128.fp8.hero`` do. Identical declare text means the same
+    LLVM intrinsic, so those keys are aliases for one declaration and the IR
+    cannot say which of them the kernel demanded. Picking one would name the
+    wrong table row half the time, so every negative alias is reported, each
+    against its own cell -- which is also what keeps a waiver on one alias from
+    silencing the other.
+
+    Refusing is judged more carefully than reporting, because refusing wrongly
+    blocks a kernel. The engine lowered this one, so whichever alias it demanded
+    was acceptable to it: if any alias sharing the declare is not an unwaived
+    negative, that one may be the demanded key and the engine was right, and
+    refusing over its sibling would overrule a waiver on a key the kernel never
+    asked for. Only when every alias is an unwaived negative could none of them
+    account for the engine having lowered it, and only then is this pass's
+    refusal evidence that the extension was built from a different table.
     """
     from .arch import domain as arch_domain
 
@@ -1218,34 +1236,42 @@ def check_arch_domain_in_ir(ir_text: str, arch: str, flavor: Optional[str]) -> N
     table = arch_domain.load(flavor if flavor is not None else _resolve_llvm_flavor())
     if table is None:
         return
-    by_decl = {decl: key for key, decl in _decls_for_flavor(table.flavor).items()}
+    by_decl: Dict[str, List[str]] = {}
+    for key, decl in _decls_for_flavor(table.flavor).items():
+        by_decl.setdefault(decl, []).append(key)
     for line in ir_text.splitlines():
         if not line.startswith("declare "):
             continue
-        key = by_decl.get(line.strip())
-        if key is None:
-            continue
-        cell = table.lookup(key, arch)
-        if cell is None or not arch_domain.is_negative(cell.status):
-            continue
-        waived = arch_domain.is_waived(key, arch, table.flavor)
-        if mode == arch_domain.MODE_ERROR and not waived:
-            refusal = ArchDomainError(
-                key, arch, table.flavor, cell.status, cell.evidence
-            )
-            if hasattr(refusal, "add_note"):
-                refusal.add_note(
-                    "The C++ engine emitted this declare instead of refusing it, "
-                    "so the rocke_engine extension was built from a different "
-                    "table than this checkout's: rebuild it."
+        aliases = sorted(by_decl.get(line.strip(), ()))
+        negative = []
+        for key in aliases:
+            cell = table.lookup(key, arch)
+            if cell is not None and arch_domain.is_negative(cell.status):
+                negative.append((key, cell))
+        waived_keys = {
+            key for key, _ in negative if arch_domain.is_waived(key, arch, table.flavor)
+        }
+        # Some alias could account for the engine having lowered this declare.
+        accounted_for = len(negative) < len(aliases) or bool(waived_keys)
+        for key, cell in negative:
+            waived = key in waived_keys
+            if mode == arch_domain.MODE_ERROR and not waived and not accounted_for:
+                refusal = ArchDomainError(
+                    key, arch, table.flavor, cell.status, cell.evidence
                 )
-            raise refusal
-        warnings.warn(
-            ArchDomainWarning(
-                key, arch, table.flavor, cell.status, cell.evidence, waived=waived
-            ),
-            stacklevel=4,
-        )
+                if hasattr(refusal, "add_note"):
+                    refusal.add_note(
+                        "The C++ engine emitted this declare instead of refusing "
+                        "it, so the rocke_engine extension was built from a "
+                        "different table than this checkout's: rebuild it."
+                    )
+                raise refusal
+            warnings.warn(
+                ArchDomainWarning(
+                    key, arch, table.flavor, cell.status, cell.evidence, waived=waived
+                ),
+                stacklevel=4,
+            )
 
 
 def _llvm_type(t: Type) -> str:
