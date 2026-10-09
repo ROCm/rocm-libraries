@@ -439,6 +439,7 @@ _DIRECT_COUNTS = {
     "direct_depthwise": 54,
     "direct_depthwise_spatial": 30,
     "direct_depthwise_tiled": 1536,
+    "direct_depthwise_col": 540,
 }
 #: Identities per (dtype, algorithm) the IR and serving tests sample, spread evenly
 #: over the sweep's order (capabilities outermost, then knobs). std and spatial are
@@ -757,6 +758,30 @@ def _first(direct_jobs, algorithm: str, **caps) -> Gfx950ConvFwdAotSpec:
     )
 
 
+def test_col_serves_valid_padding_and_bounds_its_rows_by_the_output(direct_jobs):
+    valid = _first(direct_jobs, "direct_depthwise_col", filter_h=5, pad_h=0)
+    same = _first(direct_jobs, "direct_depthwise_col", filter_h=5, pad_h=2)
+    problem = Gfx950ConvFwdSpec(
+        N=2, Hi=13, Wi=17, C=24, K=24, Y=5, X=5, pH=0, pW=0, groups=24
+    )
+    assert gfx950_conv_fwd_aot_serves(valid, problem) == (True, "ok")
+    ok, why = gfx950_conv_fwd_aot_serves(same, problem)
+    assert not ok and "padding" in why
+    ok, _ = gfx950_conv_fwd_aot_serves(same, replace(problem, pH=2, pW=2))
+    assert ok
+    # A block wider than the output is declined by rocKE's validator.
+    wide = next(
+        _direct_spec(job.identity)
+        for _, job in direct_jobs
+        if job.identity.algorithm == "direct_depthwise_col"
+        and (job.identity.filter_h, job.identity.pad_h, job.identity.stride_h)
+        == (5, 0, 1)
+        and json.loads(job.identity.knobs)["block_w"] == 4
+    )
+    ok, why = gfx950_conv_fwd_aot_serves(wide, replace(problem, Wi=6))
+    assert not ok and "block_w 4 > Wo 2" in why, why
+
+
 def test_tiled_serves_large_filters_the_row_stream_cannot(direct_jobs):
     tiled = _first(direct_jobs, "direct_depthwise_tiled", filter_h=31, stride_h=2)
     problem = Gfx950ConvFwdSpec(
@@ -806,6 +831,9 @@ def test_out_of_contract_direct_instances_are_declined(direct_jobs, change, reas
         ("direct_depthwise_tiled", {"unroll_rows": 2}, "unroll_rows must be 0 or 1"),
         ("direct_depthwise_tiled", {"block_q": 16}, "does not use block_q"),
         ("direct_depthwise_tiled", {"dilation_h": 2}, "no dilation"),
+        ("direct_depthwise_col", {"block_w": 0}, "block_w must be a positive"),
+        ("direct_depthwise_col", {"unroll_rows": 1}, "does not use unroll_rows"),
+        ("direct_depthwise_col", {"block_waves": 17}, "block_waves"),
     ],
 )
 def test_out_of_contract_variant_knobs_are_declined(
