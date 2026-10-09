@@ -74,6 +74,9 @@ supposed to catch this?), release-readiness review, onboarding, and planning CI 
 thing it can do is make the sentence "we assumed CI was covering it" less common. Every gap recorded
 below is a place where that sentence would otherwise get said later, with worse consequences.
 
+**Where this is headed.** This document describes the current state at the start of a redesign of
+hipBLASLt and TensileLite testing (AIHPBLAS-5028); see [Improvement Roadmap](#improvement-roadmap).
+
 ## Contents
 
 Six sections carry the load, marked **P1** below, matching the priority the ROCm template assigns
@@ -638,8 +641,8 @@ tracked as a gap.
 
 **Informational.** Worth reading, cannot block a merge.
 
-- The hipBLASLt ASAN lane (full ASAN on gfx90a) and Multi-Arch CI ASAN (host-only ASAN on gfx94X and
-  gfx950). Both run on every pull request, and neither is a required check
+- The hipBLASLt ASAN lane (host-only ASAN on gfx90a) and Multi-Arch CI ASAN (host-only ASAN on gfx94X
+  and gfx950). Both run on every pull request, and neither is a required check
 - The characterization-versus-unit coverage summary card
 - The `tensilelite-unit-codecov` check and the codecov reports
 
@@ -758,8 +761,8 @@ Beyond PR validation, the following run on a nightly or postsubmit cadence rathe
   the commit TheRock pins, adds more families (gfx90a, gfx103X, gfx110X, gfx115X, gfx120X).
 - **Wider test tiers.** Nightly runs use the `comprehensive` tier; prerelease runs use `full`.
 - **Full ASAN on more architectures.** The nightly Multi-Arch ASAN lane builds full ASAN, with
-  device-side instrumentation, for gfx94X and gfx950. Per pull request, full ASAN runs only on gfx90a,
-  in the hipBLASLt ASAN lane.
+  device-side instrumentation, for gfx94X and gfx950. No pull-request lane runs device-side ASAN;
+  both per-PR ASAN lanes are host-only.
 - **TensileLite GPU tests.** The `Component CI: TensileLite coverage` lane is CPU-only, so its
   GPU-guarded tests skip there by design. They do run per PR, on Math CI's `preliminary` job and
   in TheRock's installed-artifact lane, subject to the conditions on each. See
@@ -780,7 +783,7 @@ the set of architectures the library supports or builds for.
 | Linux, gfx90a / gfx942 / gfx950 / gfx12 | TensileLite's whole unit and characterization tree, then the `common` GEMM-selection suite | PR, via Math CI `preliminary` | Skipped unless `tensilelite/` changed, and the second stage needs the first to pass. See [tensilelite/TESTING.md#pre-submit--ci-gates](tensilelite/TESTING.md#pre-submit--ci-gates) |
 | Linux, gfx94X-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | Primary GitHub Actions test target. 6 shards |
 | Linux, gfx950-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | On the pull-request path since the TheRock pin of 2026-10-02. Also covered per PR by Math CI |
-| Linux, gfx90a | Partial | PR (full ASAN, quick tier, not a required check), TheRock nightly | The hipBLASLt ASAN lane's only architecture |
+| Linux, gfx90a | Partial | PR (host-only ASAN, quick tier, not a required check), TheRock nightly | The hipBLASLt ASAN lane's only architecture |
 | Windows, gfx110X | Partial | PR, via TheRock Multi-Arch CI | 1 shard |
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
 | Linux, gfx950 (MI350) | Benchmarks only | Nightly, in the rocPTS lane outside this repository | Non-gating, and not surfaced on a pull request. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
@@ -804,10 +807,11 @@ red sanitizer run does not block a merge.
 **What runs.** The `hipBLASLt ASAN CI` workflow
 ([`.github/workflows/hipblaslt-asan-ci.yml`](../../.github/workflows/hipblaslt-asan-ci.yml)) triggers
 on any pull request touching `projects/hipblaslt/**` or the hipBLASLt test driver. It builds
-hipBLASLt through TheRock with full ASAN (`-DTHEROCK_SANITIZER=ASAN`, mirroring TheRock's
-`linux-release-asan` preset) for gfx90a, and then runs the quick tier of `hipblaslt-test` under the
-sanitizer runtime on real hardware. Separately, `TheRock Multi-Arch CI ASAN` runs on every pull
-request to this repository with host-only ASAN.
+hipBLASLt through TheRock with host-only ASAN (`-DTHEROCK_SANITIZER=HOST_ASAN`, mirroring TheRock's
+`linux-release-host-asan` preset) for gfx90a, and then runs the quick tier of `hipblaslt-test` under
+the sanitizer runtime on real hardware. Separately, `TheRock Multi-Arch CI ASAN` runs on every pull
+request to this repository with host-only ASAN, and builds full ASAN for its nightly and
+manually dispatched runs.
 
 | Sanitizer | What it catches | Where it runs | Gating |
 | --- | --- | --- | --- |
@@ -829,8 +833,8 @@ library. Within a TheRock superbuild, `-DhipBLASLt_SANITIZER=HOST_ASAN` instead;
 sanitizer options intentionally stand down when the superbuild is driving.
 
 **GPU-specific limitations.** Host ASAN does not instrument device code. Device-side ASAN requires
-XNACK-capable configurations and is substantially slower, which is why it runs per PR on one
-architecture and the wider sweep is nightly.
+XNACK-capable configurations and is substantially slower, which is why it runs only nightly and on
+manual dispatch.
 
 There is currently no gfx90a device-ASAN runtime test lane. Before enabling one, runner capacity
 and stability with full ASAN and `HSA_XNACK=1` must be reviewed with DevOps. A dedicated pool,
@@ -1027,8 +1031,8 @@ real unit tests, which is the migration described in
 [tensilelite/TESTING.md#unit-testing-strategy](tensilelite/TESTING.md#unit-testing-strategy).
 
 **4. Memory safety.** Wrong-sized workspaces, out-of-bounds host buffers, and leaks in long-running
-inference processes. Checked by the per-PR ASAN lanes (full ASAN on gfx90a, host-only ASAN on gfx94X
-and gfx950) and by nightly full ASAN, none of which blocks a merge today.
+inference processes. Checked by the per-PR ASAN lanes (host-only ASAN on gfx90a, gfx94X and gfx950)
+and by nightly full ASAN, none of which blocks a merge today.
 Device-side memory errors are covered only nightly.
 
 **5. API and ABI compatibility.** hipBLASLt is consumed by frameworks; a breaking change is felt
@@ -1088,15 +1092,19 @@ for this document.
 
 ## Improvement Roadmap
 
-Ordered by value per unit of effort, not by ambition. This covers hipBLASLt's C++ client and library.
-TensileLite, rocisa, and library-logic build-time validation have their own roadmap, including the
-larger structural items (the characterization-to-unit migration and mutation testing), in
+**This section is not yet a plan.** Testing across hipBLASLt and TensileLite is being redesigned as
+one effort under AIHPBLAS-5028: a shared testing philosophy, an inventory of every suite and where it
+runs, and a model of the usage space the tests are meant to cover. That work will arrive in follow-up
+changes, and it will replace this section. What is listed here is narrower: tactical fixes found while
+documenting the current state. Each names the ticket that tracks it, for the same reason the
+[Known Risks and Gaps](#known-risks-and-gaps) table does, but the list is neither a commitment nor a
+priority order.
+
+This covers hipBLASLt's C++ client and library. The TensileLite, rocisa, and library-logic items,
+including the characterization-to-unit migration and mutation testing, are in
 [tensilelite/TESTING.md#improvement-roadmap](tensilelite/TESTING.md#improvement-roadmap).
 
-Each item names the ticket that tracks it, for the same reason the
-[Known Risks and Gaps](#known-risks-and-gaps) table does.
-
-### Near term, cheap and unblocking
+### Process and policy fixes
 
 1. **Publish the required-check list**
    ([#12996](https://github.com/ROCm/rocm-libraries/issues/12996)). Document which checks actually
@@ -1120,7 +1128,7 @@ Each item names the ticket that tracks it, for the same reason the
    accepting a stated exception. Start by splitting flaky from known-failing in the client quarantine
    list, which is the largest and blindest surface.
 
-### Medium term, the structural unlock
+### Structural changes
 
 1. **Create a host-only link target for library internals** (AIHPBLAS-5033), resolving the
    include-path collision, so C++ unit tests can reach validation, enum and string mapping,
@@ -1132,7 +1140,7 @@ Each item names the ticket that tracks it, for the same reason the
 3. **Extract validation ahead of dispatch** (AIHPBLAS-5034) so argument-error paths are reachable
    without a GPU.
 
-### Longer term, the real gap
+### Larger investments
 
 1. **Get a performance number onto the change** (AIHPBLAS-5029, with architecture and shape breadth
    in AIHPBLAS-5030). Pull requests are not benchmarked today, so this builds something new rather
@@ -1175,7 +1183,9 @@ this document does, and a stale name in a repository file is worse than no name 
 authoritative. Instead each row points at a work item, which is where ownership, status and priority
 can actually be kept current. An empty cell would mean the gap is real, acknowledged, and not yet
 tracked anywhere. As of October 2026 every row has a ticket, and a new row should arrive with one.
-Gaps that had no better home are collected under the umbrella epic AIHPBLAS-5028.
+Each ticket tracks one shortcoming rather than a strategy; the testing redesign described under
+[Improvement Roadmap](#improvement-roadmap) will regroup them. Gaps that had no better home are
+collected under the umbrella epic AIHPBLAS-5028.
 
 ### Performance
 

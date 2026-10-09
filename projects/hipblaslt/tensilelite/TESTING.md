@@ -83,7 +83,7 @@ and it still owes a real test.
 > <details>
 > <summary>The full account: the churn, the deadlock, and the plan that makes the net unnecessary</summary>
 >
-> [`KernelWriterAssembly.py`](Tensile/KernelWriterAssembly.py) is where a GEMM kernel actually becomes
+> [`KernelWriterAssembly.py`](tensilelite/KernelWriterAssembly.py) is where a GEMM kernel actually becomes
 > assembly, which makes it one of the highest-consequence files in the repository. It is 20,259 lines.
 > Since the monorepo reorganization in April 2025 it has taken 303 commits from 78 authors, adding
 > 13,810 lines and removing 7,277. That window undercounts the file, which is years older than this
@@ -438,7 +438,7 @@ of reaching a customer's model three months earlier in the story. There is no wa
 times that has already happened, because a build that fails on line one of a bad YAML file does not
 generate a ticket, a meeting, or a revert. That absence is the whole return on the investment.
 
-Its known-bug list, [`Tensile/TensileLogic/known_bugs.yaml`](Tensile/TensileLogic/known_bugs.yaml), is
+Its known-bug list, [`tensilelite/TensileLogic/known_bugs.yaml`](tensilelite/TensileLogic/known_bugs.yaml), is
 the best-structured quarantine in the component (see
 [Known Bugs and Expected Failures](../TESTING.md#known-bugs-and-expected-failures) in the hipBLASLt
 doc). Entries are keyed on the logic file path plus the solution's `SolutionNameMin`, a
@@ -731,14 +731,19 @@ number nobody could act on.
 
 ## Improvement Roadmap
 
-Ordered by value per unit of effort, not by ambition. This list only covers TensileLite, rocisa, and
-the library-logic build-time validation; hipBLASLt's C++ client and library roadmap items live in
+**This section is not yet a plan.** TensileLite and hipBLASLt are tightly coupled, and their testing
+is being redesigned together under AIHPBLAS-5028 (see
+[../TESTING.md#improvement-roadmap](../TESTING.md#improvement-roadmap)). Follow-up changes will
+replace this section with that shared plan. What is listed here is narrower: tactical fixes found
+while documenting the current state. Each names the ticket that tracks it, for the same reason the
+[Known Risks and Gaps](#known-risks-and-gaps) table does, but the list is neither a commitment nor a
+priority order.
+
+This list only covers TensileLite, rocisa, and the library-logic build-time validation; hipBLASLt's
+C++ client and library items live in
 [../TESTING.md#improvement-roadmap](../TESTING.md#improvement-roadmap).
 
-Each item names the ticket that tracks it, for the same reason the
-[Known Risks and Gaps](#known-risks-and-gaps) table does.
-
-### Near term, cheap and unblocking
+### Small, self-contained fixes
 
 1. **Make the test suite resolve its own toolchain** (AIHPBLAS-5039). Some characterization tests
    locate `amdclang++` through a bare `shutil.which` with a `/usr/bin` fallback, while others already
@@ -754,9 +759,10 @@ Each item names the ticket that tracks it, for the same reason the
    invoked by nothing.
 4. **Shard TheRock's `tensilelite-common` job** (AIHPBLAS-5040). gfx950 is on the pull-request path
    as of the TheRock pin of 2026-10-02, and the job still runs unsharded with a 180-minute timeout.
-   gfx950 takes about two hours, so split the suite across shards before it becomes a two-hour gate.
+   gfx950 takes about two hours, so the job is already a two-hour gate on pull requests. Split the
+   suite across shards.
 
-### Medium term, the structural unlock
+### Structural changes
 
 1. **Put a number on the characterization-to-unit migration** (AIHPBLAS-5041). The split summary
    card already computes the characterization-only statement count. Track it over time and set a
@@ -764,7 +770,7 @@ Each item names the ticket that tracks it, for the same reason the
    Without this, the union floors are fully satisfiable by a codebase that is pinned everywhere and
    verified nowhere, and the scaffolding has no expiry date.
 
-### Longer term, the real gap
+### Larger investments
 
 1. **Graduate mutation testing** (AIHPBLAS-3868) from a report-only pilot to a maintained signal on
    the modules where it has demonstrated value. This is the companion to the migration item above:
@@ -780,7 +786,8 @@ Each item names the ticket that tracks it, for the same reason the
 Stated plainly, so none of these are a surprise at release time. This section covers TensileLite,
 rocisa, and library-logic validation; hipBLASLt's own C++/client gaps are in
 [../TESTING.md#known-risks-and-gaps](../TESTING.md#known-risks-and-gaps). On the Tracking column, see
-the note there. As of October 2026 every row has a ticket. Math CI is being retired in favor of
+the note there. As of October 2026 every row has a ticket. Each ticket tracks one shortcoming rather
+than a strategy; the shared redesign will regroup them. Math CI is being retired in favor of
 TheRock CI, so the rows about Math CI's `preliminary` job point at the work to move TensileLite's
 testing there (AIHPBLAS-3354) rather than at changes to Math CI itself.
 
