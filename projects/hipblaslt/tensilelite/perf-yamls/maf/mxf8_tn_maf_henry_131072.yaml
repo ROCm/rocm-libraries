@@ -119,9 +119,9 @@ BenchmarkProblems:
 
         - PrefetchGL2: [2]
         - ClusterDim: [[4,4]]
-        - DsReadDrainLatency: [64]
-        - DsReadPerWmma: [2]
-        - DsReadThrottleLatency: [112]
+        #- DsReadDrainLatency: [64]
+        #- DsReadPerWmma: [2]
+        #- DsReadThrottleLatency: [112]
 
       BenchmarkForkParameters:
       JoinParameters:
