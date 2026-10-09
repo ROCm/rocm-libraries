@@ -10,6 +10,7 @@ step 10). Ticket AICK-2208.
 - [The one DRIFT is pre-existing](#the-one-drift-is-pre-existing)
 - [Why no existing golden needed re-blessing](#why-no-existing-golden-needed-re-blessing)
   - [The parity family is blessed into the L5 anchor](#the-parity-family-is-blessed-into-the-l5-anchor)
+    - [The `ll` entries are llvm20; the `ir_canonical` entries are flavor-free](#the-ll-entries-are-llvm20-the-ir_canonical-entries-are-flavor-free)
 - [The gate does not tolerate concurrent runs](#the-gate-does-not-tolerate-concurrent-runs)
 - [Verification](#verification)
 
@@ -106,7 +107,7 @@ The parity family added after review *is* also blessed, in both
 `differential/golden/llvm_gfx_all.json` keys:
 
 ```json
-"ll":           { "xf32_bf16x3_mma": { "0": "c5ca733a...", "1": "7e8a5f48..." } }
+"ll":           { "xf32_bf16x3_mma": { "0": "1b73e8bd...", "1": "223ae6ef..." } }
 "ir_canonical": { "xf32_bf16x3_mma": { "0": "4826b0c2...", "1": "2098f5c3..." } }
 ```
 
@@ -118,23 +119,49 @@ edit the invariant asks for — stays GREEN while the emitted bytes change.
 entry that drift is silent. The anchor is the absolute half of the pair:
 the engines agree *and* they agree with what was reviewed.
 
-The shas are the Python reference emission at the default flavor, which is
-what every other family in the file records (the `ll` sha for these two
-configs differs under `llvm23`; the anchor carries no flavor axis). They were
-taken from a full `--check-golden` run, not a `--only` one — `--record-golden`
-replaces an entire key, so running it scoped would silently unbless every
-other family.
+The shas are the Python reference emission, re-checked against a full
+`--check-golden` run rather than only the `--only` run they were read from —
+`--record-golden` replaces an entire key, so blessing them with it would have
+silently unblessed every other family.
+
+#### The `ll` entries are llvm20; the `ir_canonical` entries are flavor-free
+
+The anchor file carries no flavor axis, so each key holds exactly one sha per
+config and the flavor it was taken at has to be stated rather than inferred.
+These two are **llvm20**, the flavor `CLAUDE.md` runs the byte-identity gate
+at first. All three differ:
+
+| config | llvm20 (recorded) | llvm22 | llvm23 |
+|---|---|---|---|
+| `xf32_bf16x3_f32_16x16x32` | `1b73e8bd` | `c5ca733a` | `1d857887` |
+| `xf32_bf16x3_f32_32x32x16` | `223ae6ef` | `7e8a5f48` | `2c49a350` |
+
+So `--check-golden` reports this family as changed in a ROCm 7.2 image, where
+the flavor auto-detects to llvm22 — `ROCKE_LLVM_FLAVOR=llvm20` is what makes
+it match. (Auto-detection reads the comgr vintage: ROCm 7.1.1 gives llvm20,
+7.2 gives llvm22. An explicit `ROCKE_LLVM_FLAVOR` produces the same bytes in
+either image, so the flavor, not the container, is what the recorded sha is a
+function of.)
+
+`ir_canonical` has no such caveat: that mode serialises the kernel IR rather
+than the lowered LLVM, so both configs hash the same under llvm20, llvm22 and
+llvm23 — measured, not assumed.
+
+An earlier revision of this document said llvm20 and llvm22 agreed here and
+only llvm23 differed. That was wrong, and wrong in the direction that matters:
+the recorded shas were in fact llvm22's, taken from an unflavored run in a
+7.2 image and labelled llvm20.
 
 **The rest of that file is stale, and was before this branch.** A full
-`--check-golden` on this tree reports 644 of 673 `ll` configs and 579 of 643
-`ir_canonical` configs changed, including families this branch does not
-touch. It is not a flavor mismatch: `add_rmsnorm2d_bf16[0]` emits
+`--check-golden` on this tree at llvm20 reports 653 of 673 `ll` configs and
+579 of 643 `ir_canonical` configs changed, including families this branch does
+not touch. It is not the flavor caveat above writ large: `add_rmsnorm2d_bf16[0]` emits
 `b64c6fef...` at llvm20, `edad2c15...` at llvm22 and `8335125c...` at llvm23,
-and the anchor holds `102bd96c...`. The same three shas come out of the merge
-base (`320f7a89`), so the drift predates this work — the file was last
-re-blessed in September. Re-blessing it is a
-tree-wide decision for its owners, not something to fold into this branch;
-the two entries above were merged in textually for that reason.
+and the anchor holds `102bd96c...` — no flavor reproduces it. The same three
+shas come out of the merge base (`320f7a89`), so the drift predates this work;
+the file was last re-blessed in September. Re-blessing it is a tree-wide
+decision for its owners, not something to fold into this branch; the two
+entries above were merged in textually for that reason.
 
 ## The gate does not tolerate concurrent runs
 
@@ -168,6 +195,11 @@ which is the signal that should prompt a re-run rather than a bisect.
   skipping, so the expansion is compared across the engines by both routes —
   the parity family through the archive and the pybind module in-process.
 - No existing golden re-blessed; none needed it. `xf32_bf16x3_mma` added to
-  both anchor keys, its shas taken from and re-checked against a full
-  `--check-golden` run at the default flavor (that run's remaining
+  both anchor keys and confirmed by a full `ROCKE_LLVM_FLAVOR=llvm20
+  --check-golden` run in each mode: the family's two configs match the
+  recorded shas and are absent from the mismatch list (that run's remaining
   mismatches are the pre-existing staleness described above).
+- The `ll` flavor spread measured by emitting the family directly under each
+  flavor in the ROCm 7.1.1 and 7.2 images: the same three shas in both, and
+  the auto-detected flavor following the image (llvm20 / llvm22). The
+  `ir_canonical` sha is identical under all three.
