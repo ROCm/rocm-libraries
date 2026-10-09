@@ -73,6 +73,16 @@ struct GemmPipelineAgBgCrCompTDMProducerConsumer
     static constexpr index_t NumConsumerWaves = BlockGemmShape::NumWarps;
     /// One producer per operand: wave NumConsumerWaves loads A, the wave after it loads B.
     static constexpr index_t NumProducerWaves = 2;
+    // The role dispatch in operator() maps producer wave P to operand P, so this pipeline
+    // supports exactly one loader per operand. Raising this alone duplicates an operand's
+    // producer and leaves a role unplayed: the duplicated role's FREE barrier over-signals
+    // (corrupting the next generation) while the orphaned one never completes -- silent wrong
+    // results plus a hang, with no fault. It needs the operand split (kOperand = P % 2) and the
+    // per-operand tile partition that goes with it. The policy's barrier-budget note assumes
+    // this value too.
+    static_assert(NumProducerWaves == 2,
+                  "the role dispatch in operator() maps producer wave P to operand P: this "
+                  "pipeline supports exactly one loader per operand");
 
     /// The named barriers the kernel must arm for this pipeline.
     using BarrierPipeline =
@@ -82,6 +92,21 @@ struct GemmPipelineAgBgCrCompTDMProducerConsumer
     static constexpr index_t BlockSize = Problem::kBlockSize;
     static constexpr index_t LaunchBlockSize =
         (NumConsumerWaves + NumProducerWaves) * get_warp_size();
+    // The producer waves launch on top of BlockGemm's, so a BlockWarps shape that fits an
+    // ordinary pipeline can overflow here, and nothing downstream rejects it: BlockSize() only
+    // converts units (it halves on wave32), it never validates, so the sole symptom is an opaque
+    // launch failure naming neither this pipeline nor the BlockWarps that caused it.
+    //
+    // Asserted in the DEVICE pass only. get_warp_size() reports the wave size of the CURRENT
+    // COMPILER PASS: 32 here, but 64 in the host pass, where amdgcn_target_wave_size_id::HOST is
+    // defined as 64. So the host pass sees twice the real workgroup and would reject valid
+    // shapes -- [4, 4, 1] is 18 waves = 576 threads, which the host pass scores as 1152. Only
+    // the device pass carries the real width. Spelled as an implication rather than an #if to
+    // match the pattern arch.hpp uses for its own target sanity checks.
+    static_assert(!ck_tile::core::amdgcn_compiler_target_state::CK_TILE_DEVICE_COMPILE ||
+                      LaunchBlockSize <= 1024,
+                  "workgroup exceeds the hardware thread limit: reduce BlockWarps, since the "
+                  "producer waves are launched in addition to BlockGemm's consumer waves");
     static constexpr bool IsWavelet = true;
 
     static constexpr bool kPadM = Problem::kPadM;
@@ -137,13 +162,20 @@ struct GemmPipelineAgBgCrCompTDMProducerConsumer
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
+        // The ring triple ends in NumProducerWaves because only BlockWarps[0] and [1] are
+        // emitted below, so consumers-plus-producers cannot be recovered from the rest of the
+        // name. Forward protection, not a live collision: tile_engine has no NumSlots/PublishLag
+        // config axis today, so every generated comp_tdm_pc instance ships one ring shape. If
+        // that changes, the ring triple belongs in _format_trait_combo_string -- the one string
+        // that reaches both the CMake target name and the generated header path -- and not in
+        // _format_kernel_name, which neither of those two derives from.
         // clang-format off
         return concat('_', "pipeline_AgBgCrCompTDMProducerConsumer",
                       concat('x', MPerBlock, NPerBlock, KPerBlock), LaunchBlockSize,
                       concat('x', BlockGemmShape::BlockWarps::at(number<0>{}),
                                   BlockGemmShape::BlockWarps::at(number<1>{})),
                       concat('x', kPadM, kPadN, kPadK),
-                      concat('x', NumSlots, PublishLag));
+                      concat('x', NumSlots, PublishLag, NumProducerWaves));
         // clang-format on
     }
 
@@ -205,20 +237,47 @@ struct GemmPipelineAgBgCrCompTDMProducerConsumer
                 return RunConsumers(
                     lds_views.at(number<0>{}), lds_views.at(number<1>{}), num_loop, barriers);
             }
-            if(warp_id == NumConsumerWaves)
-            {
-                RunProducer<0>(a_dram_block_window_tmp[number<0>{}],
-                               lds_views.at(number<0>{}),
-                               num_loop,
-                               barriers);
-            }
-            else if(warp_id == NumConsumerWaves + 1)
-            {
-                RunProducer<1>(b_dram_block_window_tmp[number<0>{}],
-                               lds_views.at(number<1>{}),
-                               num_loop,
-                               barriers);
-            }
+            // Exactly one wave plays each producer<P>. The tests below are on disjoint warp_id
+            // values and cover [NumConsumerWaves, NumConsumerWaves + NumProducerWaves)
+            // exhaustively, with no fallthrough: a wave launched past that range does nothing
+            // rather than becoming a second producer<NumProducerWaves - 1>.
+            //
+            // Why that matters, in signal counts: a DUPLICATED role over-signals its FREE[p][s]
+            // -- NumConsumerWaves releases plus a join+signal from each of the two waves, i.e.
+            // kFreeMemberCount + 1 per step -- so it completes a generation early and the two
+            // waves drift out of phase until one waits on a generation nobody completes. The
+            // ORPHANED role's FREE[p][s] is merely inert, since nobody blocks on it. DATA[s]
+            // stays at exactly kDataMemberCount throughout, so the first observable is not the
+            // hang but silent wrong results: the orphaned operand is never transferred and the
+            // consumers multiply stale LDS. Debug accordingly.
+            // See the "Producer<P> is a role, not an identity" note in named_barrier.hpp.
+            static_for<0, NumProducerWaves, 1>{}([&](auto p) {
+                if(warp_id == NumConsumerWaves + p.value)
+                {
+                    // kProducer is the ring role; kOperand is which matrix it streams. They
+                    // coincide while NumProducerWaves == 2 and separate when the operand split
+                    // lands, so they are named apart to keep that change local to here. The two
+                    // arms are exhaustive because the NumProducerWaves == 2 assert above bounds
+                    // kOperand to {0, 1}; that assert fires first, and names the cause more
+                    // precisely, if the count is ever raised without the operand split.
+                    constexpr index_t kProducer = p.value;
+                    constexpr index_t kOperand  = p.value;
+                    if constexpr(kOperand == 0)
+                    {
+                        RunProducer<kProducer, 0>(a_dram_block_window_tmp[number<0>{}],
+                                                  lds_views.at(number<0>{}),
+                                                  num_loop,
+                                                  barriers);
+                    }
+                    else
+                    {
+                        RunProducer<kProducer, 1>(b_dram_block_window_tmp[number<0>{}],
+                                                  lds_views.at(number<1>{}),
+                                                  num_loop,
+                                                  barriers);
+                    }
+                }
+            });
             return CBlockTile{};
         }
         else
@@ -247,7 +306,11 @@ struct GemmPipelineAgBgCrCompTDMProducerConsumer
     }
 
     // One producer wave: streams operand Operand (0 = A, 1 = B) into the ring, one TDM per step.
-    template <index_t Operand, typename DramBlockWindowTmp, typename LdsViews>
+    // Producer is the ring ROLE this wave plays; Operand is which matrix it streams. The two
+    // coincide while NumProducerWaves == 2, but they are distinct concepts -- see "Producer<P>
+    // is a role, not an identity" in named_barrier.hpp -- and keeping them apart confines the
+    // operand split (several producers cooperating on one matrix) to the dispatch in operator().
+    template <index_t Producer, index_t Operand, typename DramBlockWindowTmp, typename LdsViews>
     CK_TILE_DEVICE static void RunProducer(const DramBlockWindowTmp& dram_block_window_tmp,
                                            const LdsViews& lds_views,
                                            index_t num_loop,
@@ -285,13 +348,24 @@ struct GemmPipelineAgBgCrCompTDMProducerConsumer
         const TDMConfig tdm_config = MakeTdmConfig<IsA>();
 
         using Ring = typename BarrierPipeline::template ring<0>;
-        Ring::template producer<Operand>::template run<PublishLag>(
+        Ring::template producer<Producer>::template run<PublishLag>(
             barriers,
             num_loop,
             [&](auto slot, index_t) {
                 impl.GlobalPrefetchTDM(tdm_config, lds_windows[slot], dram_window, k_step);
             },
-            // Each fill is one TENSOR_LOAD_TO_LDS, retiring in issue order.
+            // retire(N) must leave at most N of THIS WAVE's fills in flight, and this is the
+            // only thing that covers them. s_wait_tensorcnt counts tensor ops, not fills, so the
+            // identity rests on three facts, none of them local:
+            //   1. one fill == one TENSOR_LOAD_TO_LDS. GlobalPrefetchTDM issues NumCoord of them
+            //      on the non-gather path, and tile_window.hpp pins NumCoord == 1. Passing a
+            //      gather index view here takes the NumIterations path and breaks this.
+            //   2. a producer wave fills one operand only, so every tensor op it has in flight
+            //      is one of its own fills.
+            //   3. TENSORcnt retires in issue order, so "at most N outstanding" means
+            //      "fills 0..k-N have landed".
+            // Break any of the three and the producer publishes a slot whose transfer has not
+            // landed: silent wrong results, no fault, no hang.
             [](auto in_flight) { s_wait_tensorcnt<decltype(in_flight)::value>(); });
     }
 
