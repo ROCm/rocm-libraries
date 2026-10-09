@@ -139,7 +139,8 @@ void printHelp(const char* program)
         << "  --stability <f>        Coefficient-of-variation threshold (default 0.05)\n"
         << "  --problem-id <s>       Value for the problem column; defaults to the path\n"
         << "  --query <k=v,...>      Declared problem parameters, emitted as q.* columns\n"
-        << "  --no-header            Omit the CSV header, for concatenating runs\n";
+        << "  --no-header            Omit the CSV header, for concatenating runs that report\n"
+        << "                         the same knobs (each knob is a kernel.* column)\n";
 }
 
 /// What the command line asks for: a run, the help text, or nothing it can use.
