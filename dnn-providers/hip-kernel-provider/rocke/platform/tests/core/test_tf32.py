@@ -122,9 +122,13 @@ def test_mma_requires_logical_tf32(dtype, n):
 @pytest.mark.parametrize("gfx", ["gfx950", "gfx1151", "gfx1250"])
 def test_rejects_unsupported_target(gfx):
     kernel = build_tf32_mma_probe(Tf32MmaProbeSpec())
-    with pytest.raises(ValueError, match="gfx942"):
+    message = (
+        f"^no MMA instruction found for 'mfma_f32_16x16x8_xf32' on '{gfx}' -- the "
+        "target's MMA catalog does not list it; it is listed for gfx942$"
+    )
+    with pytest.raises(ValueError, match=message):
         _lower_kernel_to_llvm_python(kernel, arch=gfx)
-    with pytest.raises(ValueError, match="gfx942"):
+    with pytest.raises(ValueError, match=message):
         lower_kernel_to_hip(kernel, arch=gfx)
     native = pytest.importorskip("rocke_engine")
     with pytest.raises(Exception):

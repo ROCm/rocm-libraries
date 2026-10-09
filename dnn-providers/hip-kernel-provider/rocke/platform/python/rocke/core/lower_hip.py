@@ -30,6 +30,7 @@ from .ir import (
     VectorType,
     require_streaming_arch,
 )
+from .tf32 import TF32_MMA, tf32_mma_target_error, tf32_op_error
 
 
 _HIP_TYPE = {
@@ -323,8 +324,6 @@ class _Lowerer:
         self._indent -= 1
 
     def lower_op(self, op: Op) -> None:
-        from .tf32 import tf32_op_error
-
         error = tf32_op_error(op)
         if error:
             raise ValueError(error)
@@ -580,12 +579,11 @@ class _Lowerer:
         This keeps the HIP emission identical to the legacy ISA-named path while
         the IRBuilder helpers route through :meth:`IRBuilder.mma`.
         """
-        from .tf32 import TF32_MMA
-
         op_id = op.attrs["op_id"]
         if op_id in TF32_MMA:
-            if self.arch.gfx != "gfx942":
-                raise ValueError("XF32 MMA requires gfx942")
+            error = tf32_mma_target_error(op_id, self.arch)
+            if error:
+                raise ValueError(error)
             a, b, c = op.operands
             self._emit(
                 f"f32x{TF32_MMA[op_id]} {_name(op.result)} = __builtin_amdgcn_{op_id}("

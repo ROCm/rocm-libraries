@@ -525,7 +525,10 @@ gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 **Consequence for rocKE.** The gfx942 catalog declares
 `mfma_f32_16x16x8_xf32` and `mfma_f32_32x32x4_xf32`, with logical TF32 A/B and
 FP32 C/D. Both Python and C++ lowerers support them and reject these atoms on
-other targets. gfx950/gfx1250 have no native XF32 instruction. This atom support
+other targets. The Python lowerers decide from the target's MMA catalog: a target
+whose catalog does not list the atom raises "no MMA instruction found for
+'<op_id>' on '<target>'", so a target that gains the atom in its catalog needs no
+code change. gfx950/gfx1250 have no native XF32 instruction. This atom support
 does not add production GEMM/convolution dispatch or cross-target emulation.
 See [§1](#1-the-canonical-dtype-set) for the distinction between logical TF32,
 raw payload wrapping, explicit RNE preparation, and a BF16 compute mode.
@@ -586,8 +589,8 @@ scheduled to gain.
 rocKE's two engines must emit the same LLVM IR (byte identity). The items below
 exist in the Python engine only, or behave differently in the C++ engine. Where
 the C++ engine rejects a kernel that uses one, the default dispatch falls back to
-the Python engine; the bitcast check and the register-packing arithmetic are
-exceptions, described in their rows. Each line names the C++ files a mirror must
+the Python engine; the bitcast check, the register-packing arithmetic and the
+three MMA rows are exceptions, described in their rows. Each line names the C++ files a mirror must
 change.
 
 | Item | Python engine | C++ files to mirror |
@@ -602,3 +605,4 @@ change.
 | `register_packing` / `packed_word_range`: how sub-byte elements pack into 32-bit registers (host-side arithmetic; no kernel calls it yet) | `core/storage.py` | `cpp/include/rocke/storage.h`, `cpp/core/storage.cpp` |
 | MMA operands passed as the instruction's register type (`_mma_operand` over `_operand_as` in `core/lower_llvm.py`): an operand of another shape is reinterpreted with one `bitcast` when it holds the register's element type (`<1 x float>`) or the operand's catalog format (`<16 x i8>`, `<32 x i8>` fp8/bf8), and any other number format raises. The C++ engine, which the default backend uses, still prints such an operand as is (LLVM rejects it), and the HIP lowering still passes it unchanged | `core/lower_llvm.py`, `core/isa/backend.py` | `cpp/core/lower_llvm/mma.cpp`, `cpp/core/isa/backend.cpp`, and `core/lower_hip.py` in the Python engine |
 | MMA result element typed by the catalog's accumulator dtype (`_mma_c_dtype`); the C++ builder still chooses `i32` or `f32`, which gives the same result for every catalog instruction today | `core/ir.py` | `cpp/core/ir/ir_tile.cpp` (`rocke_b_mma`), `cpp/core/arch/query.cpp` |
+| TF32 MMA availability decided from the target's MMA catalog (`tf32_mma_target_error` in `core/tf32.py`); the C++ lowerers still compare against gfx942 and keep the old message | `core/tf32.py`, `core/lower_llvm.py`, `core/lower_hip.py` | `cpp/core/lower_llvm/mma.cpp`, `cpp/core/lower_hip/lower_hip_mma.cpp`, `cpp/include/rocke/tf32_internal.h` |
