@@ -393,6 +393,18 @@ def test_split_never_returns_an_empty_slice():
     assert single.eval_problems == (("only",),)
 
 
+def test_split_keeps_every_device_of_a_shape_on_one_side():
+    """A shape trained on one GPU and scored on another is not an unseen shape."""
+    keys = [("g%02d" % i, device) for i in range(40) for device in ("mi300x", "mi325x")]
+    split = split_problems(keys, 0.25, seed=3)
+
+    held = {shape for shape, _ in split.eval_problems}
+    trained = {shape for shape, _ in split.train_problems}
+    assert held & trained == set()
+    assert len(held) == 10
+    assert len(split.eval_problems) == 20, "both devices of each held shape"
+
+
 def test_split_moves_whole_problems_not_rows():
     """Every candidate of an evaluated problem must be on the evaluation side."""
     rows = []

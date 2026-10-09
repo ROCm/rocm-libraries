@@ -382,8 +382,8 @@ def one_measurement_per_shape(measured: list) -> tuple[list, int]:
     """Keep exactly one measurement of each configuration on each graph: the newest.
 
     `measured` is `(session, row)` in measurement order; returns (rows, dropped). A repeat
-    kept twice is weighted twice and can straddle the holdout split, which keys on device;
-    that holds for a repeat within one session too. A repeat under another binding is
+    kept twice is weighted twice, a repeat within one session as much as one across
+    sessions. A repeat under another binding is
     refused, not superseded, so a mix cannot hide. The binding's `provider_build` is
     diagnostic: a rebuilt provider's measurement supersedes.
     """
