@@ -97,6 +97,76 @@ def sweep_jobs():
     return sample
 
 
+def _knob_class(identity: KernelIdentity) -> tuple:
+    """The compile-time knob class of an implicit-GEMM identity: everything but the
+    tile and warp geometry."""
+    k_loop = (
+        "async_dma"
+        if identity.async_dma
+        else "unroll" if identity.unroll_k else "plain"
+    )
+    return (
+        identity.pipeline,
+        identity.epilogue,
+        k_loop,
+        identity.vector_size_a,
+        identity.vector_size_b,
+        identity.vector_size_c,
+        identity.async_chunk_a,
+        identity.async_chunk_b,
+    )
+
+
+@pytest.fixture(scope="module")
+def knob_class_jobs():
+    """One valid job of every knob class of the AOT sweep's gfx950 forward grid, per
+    dtype, drawn by a seeded shuffle: every pipeline, epilogue, K loop (with each
+    async chunk pair) and load/store width combination the shipped catalog holds."""
+    target = ArchTarget.from_gfx("gfx950")
+    rng = random.Random(_SEED + 2)
+    sample = []
+    for dtype in ("fp16", "bf16"):
+        by_class: dict = {}
+        for job in kernel_sweep._direction_jobs(
+            "fwd", "gfx950", dtype, target, (2,), 64
+        ):
+            if kernel_sweep._spec_is_valid(job, "gfx950", dtype):
+                by_class.setdefault(_knob_class(job.identity), []).append(job)
+        for key in sorted(by_class, key=repr):
+            sample.append((dtype, rng.choice(by_class[key])))
+    return sample
+
+
+def test_the_knob_class_sample_covers_every_knob_value(knob_class_jobs):
+    classes = {_knob_class(job.identity) for _, job in knob_class_jobs}
+    assert {c[0] for c in classes} == {"mem", "compv3", "compv4"}
+    assert {c[1] for c in classes} == {"default", "cshuffle"}
+    assert {c[2] for c in classes} == {"plain", "unroll", "async_dma"}
+    for position in (3, 4, 5):
+        assert {c[position] for c in classes} == {1, 2, 4, 8}
+    assert {(c[1], c[5]) for c in classes} >= {("default", 1), ("cshuffle", 8)}
+    assert len({c[6:] for c in classes if c[2] == "async_dma"}) > 1
+
+
+def test_every_knob_class_is_packageable_with_the_sweeps_ir(knob_class_jobs):
+    """The packaged kernel is the sweep's, byte for byte up to its symbol, for one
+    instance of every knob class in each dtype."""
+    for dtype, job in knob_class_jobs:
+        spec = _spec(job.identity)
+        assert supports_gfx950_conv_fwd_aot(spec) == (True, "ok"), job.identity.label()
+        ours = build_gfx950_conv_fwd_aot(spec)
+        theirs, _ = kernel_sweep.build_kernel(job, "gfx950", dtype)
+        ours_ir = _lower_kernel_to_llvm_python(
+            ours, arch="gfx950", llvm_flavor="llvm22"
+        )
+        theirs_ir = _lower_kernel_to_llvm_python(
+            theirs, arch="gfx950", llvm_flavor="llvm22"
+        )
+        assert ours_ir.replace(ours.name, "@K") == theirs_ir.replace(
+            theirs.name, "@K"
+        ), job.identity.label()
+
+
 def test_every_sampled_sweep_identity_is_packageable(sweep_jobs):
     for _, job in sweep_jobs:
         assert supports_gfx950_conv_fwd_aot(_spec(job.identity)) == (True, "ok")
