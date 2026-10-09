@@ -865,10 +865,108 @@ private:
                                                      << " kernel(s) after kernel-scoped matching");
         }
 
+        applyCandidateFilters(context, catalog);
+
         HIPDNN_PLUGIN_LOG_INFO("ingestor: catalog for device "
                                << context.deviceId << " holds " << catalog.entries.size()
                                << " kernel(s) from " << _packs.size() << " pack(s)");
         return catalog;
+    }
+
+    /// Each kernel-scoped matcher whose symbol also names a CandidateFilterFn narrows, as
+    /// one set, every kernel admitted from the packs listing it. Runs once every pack has
+    /// been matched, so a set sharded across packs is refined whole; what stays keeps its
+    /// order. Resolved per call rather than at construction: absence is the common case
+    /// and means no refinement, and the registry is immutable once the provider loaded.
+    void applyCandidateFilters(const MatchContext& context, Catalog& catalog) const
+    {
+        if(catalog.entries.empty())
+        {
+            return;
+        }
+        std::vector<bool> keep(catalog.entries.size(), true);
+        std::unordered_set<DescriptorId, DescriptorIdHash> visited;
+        for(const auto& pack : _packs)
+        {
+            for(const auto& matcherId : pack.matcherIds)
+            {
+                const auto& matcher = _matchers.at(matcherId);
+                if(matcher.descriptor.scope != MatchScope::KERNEL
+                   || !visited.insert(matcherId).second)
+                {
+                    continue;
+                }
+                const auto filter
+                    = CandidateFilterRegistry::tryResolve(matcher.descriptor.matchSymbol);
+                if(filter == nullptr)
+                {
+                    continue;
+                }
+
+                std::unordered_set<DescriptorId, DescriptorIdHash> listing;
+                for(const auto& other : _packs)
+                {
+                    if(std::find(other.matcherIds.begin(), other.matcherIds.end(), matcherId)
+                       != other.matcherIds.end())
+                    {
+                        listing.insert(other.id);
+                    }
+                }
+                std::vector<size_t> indices;
+                std::vector<const KernelDefinition*> candidates;
+                for(size_t i = 0; i < catalog.entries.size(); ++i)
+                {
+                    if(keep[i] && listing.count(catalog.entries[i].packId) != 0)
+                    {
+                        indices.push_back(i);
+                        candidates.push_back(&catalog.entries[i]);
+                    }
+                }
+                if(candidates.empty())
+                {
+                    continue;
+                }
+
+                const auto description
+                    = describeDescriptor("matcher", matcher.descriptor.name, matcher.descriptor.id);
+                const auto kept = filter(context, catalog.bound, candidates);
+                if(kept.size() != candidates.size())
+                {
+                    throw std::runtime_error("the candidate filter of " + description + " returned "
+                                             + std::to_string(kept.size()) + " flag(s) for "
+                                             + std::to_string(candidates.size()) + " kernel(s)");
+                }
+                size_t survivors = 0;
+                for(size_t i = 0; i < kept.size(); ++i)
+                {
+                    if(kept[i])
+                    {
+                        ++survivors;
+                    }
+                    else
+                    {
+                        keep[indices[i]] = false;
+                    }
+                }
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: the candidate filter of "
+                                       << description << " kept " << survivors << " of "
+                                       << candidates.size() << " kernel(s)");
+            }
+        }
+
+        size_t next = 0;
+        for(size_t i = 0; i < catalog.entries.size(); ++i)
+        {
+            if(keep[i])
+            {
+                if(next != i)
+                {
+                    catalog.entries[next] = std::move(catalog.entries[i]);
+                }
+                ++next;
+            }
+        }
+        catalog.entries.resize(next);
     }
 
     bool graphLevelMatchersPass(const KernelDescriptorPack& pack,

@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
@@ -38,6 +39,18 @@ using GraphMatchFn = std::optional<BoundTokens> (*)(const MatchContext&);
 using GraphCriterionFn = bool (*)(const MatchContext&, const BoundTokens&);
 using KernelMatcherFn = bool (*)(const MatchContext&, const BoundTokens&, const KernelDefinition&);
 using ScoreFn = double (*)(const MatchContext&, const BoundTokens&, const KernelDefinition&);
+
+/// A kernel-scoped matcher's set-level refinement, for an applicability rule that is a
+/// property of the candidate set rather than of one kernel ("only the widest variant
+/// the graph admits", say). A pack registers one under the symbol of a kernel-scoped
+/// UMD it already declares; no descriptor names it. Once every pack has been matched,
+/// it sees every kernel that UMD admitted for the graph, across all packs listing it,
+/// in catalog order, and returns one keep flag per kernel. It can only narrow the
+/// catalog: what it keeps stays in order, and ranking orders it as before. Must be
+/// thread-safe, like the stages above.
+using CandidateFilterFn = std::vector<bool> (*)(const MatchContext&,
+                                                const BoundTokens&,
+                                                const std::vector<const KernelDefinition*>&);
 
 /// The provider's registry of native implementations, keyed by symbol name. One
 /// instance per registered type per loaded image: requires `CXX_VISIBILITY_PRESET
@@ -135,6 +148,7 @@ using GraphMatchRegistry = NativeRegistry<GraphMatchFn>;
 using GraphCriterionRegistry = NativeRegistry<GraphCriterionFn>;
 using KernelMatcherRegistry = NativeRegistry<KernelMatcherFn>;
 using ScoreRegistry = NativeRegistry<ScoreFn>;
+using CandidateFilterRegistry = NativeRegistry<CandidateFilterFn>;
 
 /// Non-owning: the provider must keep each handler alive for as long as any plan
 /// built from it can execute.
