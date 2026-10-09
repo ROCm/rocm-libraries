@@ -210,6 +210,11 @@ namespace TensileLite
                 size_t start = path.rfind('/');
                 start        = (start == std::string::npos) ? 0 : start + 1;
                 m_loadedCOFiles.insert(removeXnack(std::string(path.begin() + start, path.end())));
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+                // FindCodeObject looks absolute names up whole.
+                if(!path.empty() && path.front() == '/')
+                    m_loadedCOFiles.insert(path);
+#endif
             }
             Debug::Instance().markerStop();
             return hipSuccess;
@@ -298,6 +303,20 @@ namespace TensileLite
 
         bool SolutionAdapter::FindCodeObject(std::string const& codeObjectFile)
         {
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+            // A runtime-registered kernel names its code object by absolute
+            // path, which may be outside the library directory and may share a
+            // basename with a shipped one.
+            if(!codeObjectFile.empty() && codeObjectFile.front() == '/')
+            {
+                m_access.lock();
+                bool loaded = m_loadedCOFiles.count(codeObjectFile) != 0;
+                m_access.unlock();
+                if(!loaded)
+                    static_cast<void>(loadCodeObjectFile(codeObjectFile));
+                return loaded;
+            }
+#endif
             //If required code object file hasn't yet been loaded, load it now
             m_access.lock();
             bool loaded = m_loadedCOFiles.find(removeXnack(codeObjectFile))

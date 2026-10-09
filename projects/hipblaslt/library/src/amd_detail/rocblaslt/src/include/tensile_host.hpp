@@ -144,6 +144,24 @@ std::string getSolutionNameFromAlgoIndex(rocblaslt_handle             handle,
  ***********************************************************************************/
 std::atomic_bool& rocblaslt_internal_tensile_is_initialized();
 
+#ifdef HIPBLASLT_ENABLE_USER_KERNELS
+/***********************************************************************************
+ * User kernel library. See hipblaslt-user-kernel.h for the public contract.
+ ***********************************************************************************/
+rocblaslt_status rocblaslt_user_kernel_register(rocblaslt_handle  handle,
+                                                const char*       libraryPath,
+                                                const char*       codeObjectPath,
+                                                std::vector<int>& kernelIndices);
+
+rocblaslt_status rocblaslt_user_kernel_set_exact_match(
+    rocblaslt_handle handle, int kernelIndex, size_t m, size_t n, size_t batch, size_t k);
+
+rocblaslt_status
+    rocblaslt_user_kernel_counts(rocblaslt_handle handle, size_t* registered, size_t* selectable);
+
+bool rocblaslt_is_user_kernel_index(int index);
+#endif
+
 /**********************************************
  * Whether to suppress Tensile error messages *
  **********************************************/

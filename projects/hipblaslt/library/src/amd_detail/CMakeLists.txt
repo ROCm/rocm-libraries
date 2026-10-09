@@ -10,3 +10,11 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-ext.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-ext-op.cpp"
 )
+
+if(HIPBLASLT_ENABLE_USER_KERNELS)
+    target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_USER_KERNELS)
+    target_sources(hipblaslt
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-user-kernel.cpp"
+    )
+endif()
