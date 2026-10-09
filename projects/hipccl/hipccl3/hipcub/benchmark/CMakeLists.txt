@@ -50,16 +50,16 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
   # both derive their CMake target name from that filename - so nesting both in
   # one configure failed with "add_executable cannot create target ... because
   # another target with the same name already exists". Prefix the *target* name
-  # here; OUTPUT_NAME below names the binary benchmark_hipcub_<name>, unique
-  # across components in a shared bin/. The benchmark runner
+  # here, as benchmark_hipcub_<name>. The target name is also the binary name,
+  # so it is unique across components in a shared bin/. The benchmark runner
   # (.gitlab/run_benchmarks.py) selects binaries with a filename regex whose
   # default, ^benchmark, still matches.
   #
-  # rocPRIM's copy is deliberately left untouched: there BENCHMARK_TARGET also
+  # rocPRIM's copy is deliberately left alone: there BENCHMARK_TARGET also
   # doubles as a source path ("${BENCHMARK_TARGET}.parallel.cpp.in") and as a
   # lookup key into benchmark/ConfigAutotuneSettings.cmake, so renaming it
   # would break config tuning. Renaming one side is enough to break the clash.
-  set(BENCHMARK_TARGET "hipcub_${BENCHMARK_NAME}")
+  string(REGEX REPLACE "^benchmark_" "benchmark_hipcub_" BENCHMARK_TARGET "${BENCHMARK_NAME}")
 
   if(USE_HIPCXX)
     set_source_files_properties(${BENCHMARK_SOURCE} PROPERTIES LANGUAGE HIP)
@@ -99,10 +99,8 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
   # DLL copy destination below, which already used PROJECT_BINARY_DIR - when
   # nested those two previously diverged, leaving Windows benchmarks unable to
   # find their DLLs.
-  string(REGEX REPLACE "^benchmark_" "benchmark_hipcub_" BENCHMARK_OUTPUT_NAME "${BENCHMARK_NAME}")
   set_target_properties(${BENCHMARK_TARGET}
     PROPERTIES
-    OUTPUT_NAME "${BENCHMARK_OUTPUT_NAME}"
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/benchmark"
   )
   rocm_install(TARGETS ${BENCHMARK_TARGET} COMPONENT benchmarks)
