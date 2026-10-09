@@ -119,10 +119,20 @@ endif()
 
 # PredictionLibrary_test ranks with a shipped tilewright model and skips when the
 # directory is not present (e.g. an installed test binary on another machine).
+# It writes the MLREC_v3 models it needs with tilewright's own test writer.
 if(TARGET roc::tilewright)
     get_target_property(_tensilelite_tests_tilewright_dir roc::tilewright SOURCE_DIR)
     target_compile_definitions(tensilelite-tests PRIVATE
         TILEWRIGHT_TEST_WEIGHTS_DIR="${_tensilelite_tests_tilewright_dir}/weights/hipblaslt")
+    get_property(_tensilelite_tests_has_tilewright GLOBAL PROPERTY TENSILELITE_HAS_TILEWRIGHT)
+    set(_tensilelite_tests_writer "${_tensilelite_tests_tilewright_dir}/tests/model_writer.cpp")
+    if(_tensilelite_tests_has_tilewright AND EXISTS "${_tensilelite_tests_writer}")
+        target_sources(tensilelite-tests PRIVATE "${_tensilelite_tests_writer}")
+        target_include_directories(tensilelite-tests PRIVATE
+            "${_tensilelite_tests_tilewright_dir}/tests"
+            "${_tensilelite_tests_tilewright_dir}/src/tilewright")
+        target_compile_definitions(tensilelite-tests PRIVATE TILEWRIGHT_TEST_MODEL_WRITER)
+    endif()
 endif()
 
 if(HIPBLASLT_ENABLE_OPENMP)

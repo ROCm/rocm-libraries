@@ -18,7 +18,8 @@ The models are produced by the training pipeline in
 
 TensileLite can also offer tilewright the problem type's tuned Equality kernels
 (the bank) for every problem size: with `TENSILE_TILEWRIGHT_BANK=1`, or, when
-the variable is unset, when the model reads kernel attributes
+the variable is unset, when the model was trained on the bank (`bank` in
+`describe`, MLREC_v3 serving flag bit 6) or reads kernel attributes
 (`attribute_names`), which the variants of one tile in a bank need to be told
 apart (`TENSILE_TILEWRIGHT_BANK=0` turns it off). The pool is then the
 Prediction table in table order, followed, in ascending solution index, by the
@@ -30,7 +31,8 @@ that pool, so a training pipeline that ranks the same files for the same device
 builds the same positions. Equality rows still answer their exact sizes first,
 and tilewright does not offer a kernel such a row already returned;
 `TENSILE_PREDICTION_LIB=1` skips those rows, so that tilewright alone ranks the
-bank pool.
+bank pool. A library builds its bank pool, and the pool's `CandidateSet`, on
+its first call on each device.
 
 ## Layout
 
