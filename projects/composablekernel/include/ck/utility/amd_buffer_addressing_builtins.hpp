@@ -7,6 +7,7 @@
 #if defined(__gfx125__)
 #include "ck/utility/amd_address_space.hpp"
 #endif
+#include "amd_tdm.hpp"
 
 namespace ck {
 
@@ -1359,6 +1360,22 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
                           bytes_per_thread == 16,
                       "bytes_per_thread must be 1, 4, 8, or 16");
     }
+}
+
+template <AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
+          typename TdmDesc>
+__device__ void amd_tensor_load_to_lds(const TdmDesc& tdm_desc)
+{
+#if defined(__gfx125__)
+    __builtin_amdgcn_tensor_load_to_lds(bit_cast<uint32x4_t>(tdm_desc.g0),
+                                        tdm_desc.g1,
+                                        tdm_desc.g2,
+                                        tdm_desc.g3,
+                                        tdm_desc.g4,
+                                        static_cast<index_t>(coherence));
+#else
+    ignore = tdm_desc;
+#endif
 }
 
 template <typename T,
