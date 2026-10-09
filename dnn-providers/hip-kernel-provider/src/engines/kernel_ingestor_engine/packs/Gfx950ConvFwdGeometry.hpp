@@ -567,6 +567,7 @@ enum class DirectVariant
     SPATIAL,
     TILED, ///< "tiled": DirectDepthwiseTiledSpec.
     COL, ///< "col": DirectDepthwiseColSpec.
+    GROUPED, ///< "grouped": DirectConvSpec.
 };
 
 /// A closed value set: any other integer, including a future family this build does not
@@ -605,6 +606,10 @@ inline std::optional<DirectVariant> parseDirectVariant(std::string_view value)
     if(value == "col")
     {
         return DirectVariant::COL;
+    }
+    if(value == "grouped")
+    {
+        return DirectVariant::GROUPED;
     }
     return std::nullopt;
 }
@@ -771,8 +776,13 @@ struct DirectInstance
     int64_t blockW;
     /// Waves per block, one channel per lane, for the depthwise variants.
     int64_t blockWaves;
-    /// Output rows per block (tiled, col).
+    /// Output rows per block (tiled, col); the grouped kernel's row tile over the input.
     int64_t blockH = 0;
+    /// grouped: output columns and groups per block, and the compiled channel counts.
+    int64_t blockQ = 0;
+    int64_t blockGroups = 0;
+    int64_t cpg = 0;
+    int64_t kpg = 0;
 };
 
 /// rocKE's DirectConvProblem takes one stride and one padding, and the instance's compiled
@@ -852,6 +862,36 @@ inline std::optional<LaunchGeometry> depthwiseTileLaunch(const Problem& problem,
                              threads);
 }
 
+/// The grouped direct kernel: DirectConvSpec.validate and is_valid_spec in
+/// conv_direct_grouped.py on the runtime problem (its compiled channel counts, "same"
+/// padding with an odd filter and no dilation, stride 1, block_groups dividing the group
+/// count), then direct_launch_geometry's (ceil(Wo / block_q), groups / block_groups,
+/// N * ceil(Hi / block_h)) grid of 64 * block_groups threads: one wave per group, the row
+/// tile over the input height, as the kernel decodes it.
+inline std::optional<LaunchGeometry> groupedDirectLaunch(const Problem& problem,
+                                                         const Geometry& geometry,
+                                                         const DirectInstance& instance)
+{
+    const auto& compiled = instance.compiled;
+    if(problem.groups <= 0 || problem.c % problem.groups != 0 || problem.k % problem.groups != 0
+       || problem.c / problem.groups != instance.cpg || problem.k / problem.groups != instance.kpg
+       || !directCompiledMatches(compiled, problem) || compiled.dilationH != 1
+       || compiled.dilationW != 1 || compiled.y % 2 != 1 || compiled.x % 2 != 1
+       || compiled.padH != (compiled.y - 1) / 2 || compiled.strideH != 1 || instance.cpg < 4
+       || instance.cpg % 4 != 0 || instance.kpg < 1 || instance.blockGroups < 1
+       || instance.blockGroups > DIRECT_MAX_BLOCK_WAVES || instance.blockQ < 16
+       || instance.blockQ % 16 != 0 || instance.blockH < 1
+       || problem.groups % instance.blockGroups != 0 || geometry.wo < 1
+       || problem.n > DIRECT_MAX_GRID_DIM)
+    {
+        return std::nullopt;
+    }
+    return boundedDirectGrid(ceilDiv(geometry.wo, instance.blockQ),
+                             problem.groups / instance.blockGroups,
+                             problem.n * ceilDiv(problem.hi, instance.blockH),
+                             instance.blockGroups * DIRECT_WAVE_SIZE);
+}
+
 /// The launch of @p instance on @p problem, or std::nullopt when the binary cannot compute
 /// it. std and spatial mirror _direct_serves in convolution_forward.py: the direct guard
 /// (directProblemSupported), the compiled filter, stride and padding (directServes), and
@@ -879,6 +919,8 @@ inline std::optional<LaunchGeometry> directInstanceLaunch(const Problem& problem
     case DirectVariant::TILED:
     case DirectVariant::COL:
         return depthwiseTileLaunch(problem, geometry, instance);
+    case DirectVariant::GROUPED:
+        return groupedDirectLaunch(problem, geometry, instance);
     case DirectVariant::NONE:
     default:
         return std::nullopt;
