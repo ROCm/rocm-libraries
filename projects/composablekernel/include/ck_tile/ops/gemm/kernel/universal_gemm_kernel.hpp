@@ -214,6 +214,26 @@ struct UniversalGemmKernel
     using AElementWise = remove_cvref_t<typename GemmPipeline::AElementWise>;
     using BElementWise = remove_cvref_t<typename GemmPipeline::BElementWise>;
 
+    /**
+     * @brief Whether this epilogue can accumulate C across k_batch splits.
+     *
+     * With k_batch > 1 every split atomically adds into the same C tile, which requires a vector
+     * width the atomic store path can express. A half-precision epilogue with an odd
+     * GetVectorSizeC() has no such path and emits no store at all, leaving C untouched rather than
+     * partial. Both the host rejection in IsSupportedArgument and the device-side epilogue dispatch
+     * read this constant, so the two cannot drift apart.
+     *
+     * CK_TILE_FORCE_SINGLE_TAIL_HANDLER elides the atomic_add arm of that dispatch entirely, so in
+     * that build no epilogue has a split-K store path. It belongs in this constant rather than in a
+     * second #if at the use site, or the host answers "supported" for a device that cannot store.
+     */
+    static constexpr bool EpilogueSupportsSplitK =
+#if defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
+        false;
+#else
+        EpiloguePipeline::GetVectorSizeC() % 2 == 0 || !is_any_of<EDataType, fp16_t, bf16_t>::value;
+#endif
+
     // Wavelet pipelines launch load waves beyond the math waves BlockGemm maps onto the C tile.
     static constexpr index_t kBlockSize = GemmPipelineLaunchBlockSize<GemmPipeline>;
 
@@ -255,23 +275,6 @@ struct UniversalGemmKernel
              TilePartitioner::BlockGemmShape::kclusterK >
          1);
 
-    // Check if TilePartitioner has GetOutputOffset method with kargs and k_id
-    struct has_tile_partitioner_output_offset_impl
-    {
-        template <typename T, typename KernelArgs>
-        using has_get_output_offset_t =
-            decltype(T::GetOutputOffset(std::declval<KernelArgs>(), std::declval<index_t>()));
-
-        static constexpr bool value = []() {
-            if constexpr(is_detected<has_get_output_offset_t, TilePartitioner>{})
-                return true;
-            else
-                return false;
-        }();
-    };
-    static constexpr bool has_tile_partitioner_output_offset =
-        has_tile_partitioner_output_offset_impl::value;
-
     static constexpr auto I0 = number<0>();
     static constexpr auto I1 = number<1>();
     static constexpr auto I2 = number<2>();
@@ -300,6 +303,26 @@ struct UniversalGemmKernel
 
     using KernelArgs =
         UniversalGemmKernelArgs<AsLayout::size(), BsLayout::size(), DsLayout::size()>;
+
+    // Whether TilePartitioner opts into per-k-split output slicing via
+    // GetOutputOffset(kargs, k_id), which a two-stage split-K reduction needs so that each split
+    // writes its own workspace slice.
+    //
+    // Must stay below KernelArgs: the probe names that exact type, so it is ill-formed -- and
+    // silently false for every partitioner -- if declared before the alias.
+    struct has_tile_partitioner_output_offset_impl
+    {
+        // Lvalue, not rvalue: both call sites pass `kargs`, a by-value parameter, as an lvalue.
+        // Probing with an rvalue would miss a `KernelArgs&` overload -- silently re-deadening this
+        // path -- and would accept a `KernelArgs&&` one that then fails to compile at the call.
+        template <typename T>
+        using has_get_output_offset_t =
+            decltype(T::GetOutputOffset(std::declval<KernelArgs&>(), std::declval<index_t>()));
+
+        static constexpr bool value = is_detected<has_get_output_offset_t, TilePartitioner>::value;
+    };
+    static constexpr bool has_tile_partitioner_output_offset =
+        has_tile_partitioner_output_offset_impl::value;
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
@@ -543,12 +566,80 @@ struct UniversalGemmKernel
                 return false;
             }
         }
-        if constexpr(has_skip_check_valid_launch_params::value)
+        // A tensor whose single-dimension byte extent reaches the 2GB buffer-addressing limit
+        // overflows the 32-bit offset arithmetic. Only the 64-bit global load/store path can
+        // address it, so without that path the argument must be rejected rather than silently
+        // producing wrong results.
+        //
+        // This precedes the skipCheckValidLaunchParams short-circuit below. That opt-out exists
+        // for pipelines that bound-clip on real descriptor extents (TDM), so the divisibility
+        // and vector-alignment checks do not apply to them; it is not an opt-out from memory
+        // safety. Skipping this one lets a TDM pipeline form a wrapped global address and fault.
+        if constexpr(!UseLargeTensorGlobalLoad())
         {
-            return true;
+            auto is_large_tensor = [](auto layout,
+                                      index_t rows,
+                                      index_t cols,
+                                      index_t stride,
+                                      auto data_type) {
+                constexpr size_t SizeLimit = (size_t{1} << 31);
+                constexpr size_t PackedSize =
+                    ck_tile::numeric_traits<remove_cvref_t<decltype(data_type)>>::PackedSize;
+
+                const size_t n =
+                    std::is_same_v<tensor_layout::gemm::RowMajor, remove_cvref_t<decltype(layout)>>
+                        ? static_cast<size_t>(rows)
+                        : static_cast<size_t>(cols);
+                return n * static_cast<size_t>(stride) * sizeof(data_type) / PackedSize >=
+                       SizeLimit;
+            };
+
+            // A and E are addressed through descriptors a derived kernel may restrict to a
+            // single M tile; D is not, so it is checked against the full kargs.M below.
+            const index_t m_extent = SelfType::ClampMToOffsettedTile(kargs.M, 0);
+
+            const bool any_large_tensor = [&]() {
+                bool r = false;
+
+                static_for<0, NumATensor, 1>{}([&](auto i) {
+                    using AiLayout   = remove_cvref_t<std::tuple_element_t<i.value, AsLayout>>;
+                    using AiDataType = remove_cvref_t<std::tuple_element_t<i.value, AsDataType>>;
+                    r                = r || is_large_tensor(
+                                 AiLayout{}, m_extent, kargs.K, kargs.stride_As[i], AiDataType{});
+                });
+                static_for<0, NumBTensor, 1>{}([&](auto i) {
+                    using BiLayout   = remove_cvref_t<std::tuple_element_t<i.value, BsLayout>>;
+                    using BiDataType = remove_cvref_t<std::tuple_element_t<i.value, BsDataType>>;
+                    r                = r || is_large_tensor(
+                                 BiLayout{}, kargs.K, kargs.N, kargs.stride_Bs[i], BiDataType{});
+                });
+                static_for<0, NumDTensor, 1>{}([&](auto i) {
+                    using DiLayout   = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
+                    using DiDataType = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
+                    r                = r || is_large_tensor(
+                                 DiLayout{}, kargs.M, kargs.N, kargs.stride_Ds[i], DiDataType{});
+                });
+                r = r || is_large_tensor(CLayout{}, m_extent, kargs.N, kargs.stride_E, EDataType{});
+
+                return r;
+            }();
+
+            if(any_large_tensor)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("Can't support large tensors without the LargeTensors trait!");
+                }
+                return false;
+            }
         }
-        if constexpr(EpiloguePipeline::GetVectorSizeC() % 2 != 0 &&
-                     is_any_of<EDataType, fp16_t, bf16_t>::value)
+
+        // These k_batch guards precede the skipCheckValidLaunchParams short-circuit below, for the
+        // same reason the large-tensor check above does. Behind it they would report "supported"
+        // for a k_batch beyond the K-step count, where SplitKBatchOffset yields a negative
+        // splitted_k and the A/B descriptor extents underflow, and for an epilogue with no split-K
+        // store path at all -- a wrong C with no fault and no hang.
+        if constexpr(!EpilogueSupportsSplitK)
         {
             if(kargs.k_batch != 1)
             {
@@ -565,9 +656,15 @@ struct UniversalGemmKernel
         {
             if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
             {
-                CK_TILE_ERROR("KBatch is too large, part of GPU wouldn't be utilized!");
+                CK_TILE_ERROR("KBatch exceeds the number of K steps: the split offsets would be "
+                              "degenerate!");
             }
             return false;
+        }
+
+        if constexpr(has_skip_check_valid_launch_params::value)
+        {
+            return true;
         }
 
         const auto vectorSizeA = is_wave32() ? GemmPipeline::template GetVectorSizeA<true>()
@@ -774,69 +871,6 @@ struct UniversalGemmKernel
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
                     CK_TILE_ERROR("num_chunks must be positive when chunk_signals is set!");
-                }
-                return false;
-            }
-        }
-
-        // A tensor whose single-dimension byte extent reaches the 2GB buffer-addressing limit
-        // overflows the 32-bit offset arithmetic. Only the 64-bit global load/store path can
-        // address it, so without that path the argument must be rejected rather than silently
-        // producing wrong results.
-        if constexpr(!UseLargeTensorGlobalLoad())
-        {
-            auto is_large_tensor = [](auto layout,
-                                      index_t rows,
-                                      index_t cols,
-                                      index_t stride,
-                                      auto data_type) {
-                constexpr size_t SizeLimit = (size_t{1} << 31);
-                constexpr size_t PackedSize =
-                    ck_tile::numeric_traits<remove_cvref_t<decltype(data_type)>>::PackedSize;
-
-                const size_t n =
-                    std::is_same_v<tensor_layout::gemm::RowMajor, remove_cvref_t<decltype(layout)>>
-                        ? static_cast<size_t>(rows)
-                        : static_cast<size_t>(cols);
-                return n * static_cast<size_t>(stride) * sizeof(data_type) / PackedSize >=
-                       SizeLimit;
-            };
-
-            // A and E are addressed through descriptors a derived kernel may restrict to a
-            // single M tile; D is not, so it is checked against the full kargs.M below.
-            const index_t m_extent = SelfType::ClampMToOffsettedTile(kargs.M, 0);
-
-            const bool any_large_tensor = [&]() {
-                bool r = false;
-
-                static_for<0, NumATensor, 1>{}([&](auto i) {
-                    using AiLayout   = remove_cvref_t<std::tuple_element_t<i.value, AsLayout>>;
-                    using AiDataType = remove_cvref_t<std::tuple_element_t<i.value, AsDataType>>;
-                    r                = r || is_large_tensor(
-                                 AiLayout{}, m_extent, kargs.K, kargs.stride_As[i], AiDataType{});
-                });
-                static_for<0, NumBTensor, 1>{}([&](auto i) {
-                    using BiLayout   = remove_cvref_t<std::tuple_element_t<i.value, BsLayout>>;
-                    using BiDataType = remove_cvref_t<std::tuple_element_t<i.value, BsDataType>>;
-                    r                = r || is_large_tensor(
-                                 BiLayout{}, kargs.K, kargs.N, kargs.stride_Bs[i], BiDataType{});
-                });
-                static_for<0, NumDTensor, 1>{}([&](auto i) {
-                    using DiLayout   = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
-                    using DiDataType = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
-                    r                = r || is_large_tensor(
-                                 DiLayout{}, kargs.M, kargs.N, kargs.stride_Ds[i], DiDataType{});
-                });
-                r = r || is_large_tensor(CLayout{}, m_extent, kargs.N, kargs.stride_E, EDataType{});
-
-                return r;
-            }();
-
-            if(any_large_tensor)
-            {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR("Can't support large tensors without the LargeTensors trait!");
                 }
                 return false;
             }
@@ -1406,11 +1440,14 @@ struct UniversalGemmKernel
                 EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
             });
         }
-#if !defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
         else
         {
-            if constexpr(EpiloguePipeline::GetVectorSizeC() % 2 == 0 ||
-                         !is_any_of<EDataType, fp16_t, bf16_t>::value)
+            // IsSupportedArgument rejects k_batch != 1 whenever EpilogueSupportsSplitK is false,
+            // ahead of the skipCheckValidLaunchParams short-circuit, so no pipeline can opt out of
+            // that rejection. This cannot be a static_assert -- it is a runtime `if` on k_batch, so
+            // both arms are compiled for every epilogue, including a TDM epilogue whose
+            // GetVectorSizeC() is 1 and which is correct and fully supported at k_batch == 1.
+            if constexpr(EpilogueSupportsSplitK)
             {
                 RunWaveletAwareEpilogue<GemmPipeline, EpiloguePipeline>([&]() {
                     auto c_block_window = MakeCBlockWindows<memory_operation_enum::atomic_add>(
@@ -1418,8 +1455,18 @@ struct UniversalGemmKernel
                     EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
                 });
             }
+            else
+            {
+                // This epilogue has no split-K store path, so reaching here means the caller
+                // bypassed IsSupportedArgument -- the kernel is directly instantiable and that
+                // check is advisory. Abort rather than return having written no C: a silent empty
+                // output is indistinguishable downstream from a correct run. Costs nothing, the
+                // k_batch == 1 wave never reaches this block and the ISA for that path is
+                // byte-identical with and without the trap. s_trap raises a queue abort the
+                // runtime reports as an exception; it is not a hang and needs no device reset.
+                __builtin_trap();
+            }
         }
-#endif
     }
 
     CK_TILE_DEVICE static auto
@@ -1540,8 +1587,12 @@ struct UniversalGemmKernel
         EDataType* e_ptr = static_cast<EDataType*>(kargs.e_ptr);
         if constexpr(has_tile_partitioner_output_offset)
         {
-            const index_t output_offset = TilePartitioner::GetOutputOffset(kargs, blockIdx.z);
-            e_ptr += output_offset;
+            // Wave-uniform, like every other blockIdx read in this file: e_ptr feeds
+            // make_wave_buffer_resource, whose 128-bit descriptor must live in SGPRs. Leaving it
+            // in VGPRs forces a readfirstlane -- or a waterfall -- at the descriptor build, in the
+            // most register-pressure-sensitive part of the kernel.
+            const auto k_id = amd_wave_read_first_lane(static_cast<index_t>(blockIdx.z));
+            e_ptr += TilePartitioner::GetOutputOffset(kargs, k_id);
         }
 
         // allocate LDS
@@ -1630,9 +1681,10 @@ struct UniversalGemmKernel
                 }
             }
 
-            // Get the SplitK offset for this block
-            const auto k_batch = amd_wave_read_first_lane(block_id / num_tiles);
-            const SplitKBatchOffset splitk_batch_offset(kargs, k_batch);
+            // Get the SplitK offset for this block. Named k_id, not k_batch: this is the split
+            // INDEX, while kargs.k_batch is the split COUNT, and GetOutputOffset below reads both.
+            const auto k_id = amd_wave_read_first_lane(block_id / num_tiles);
+            const SplitKBatchOffset splitk_batch_offset(kargs, k_id);
 
             std::array<const ADataType*, NumATensor> as_ptr;
             static_for<0, NumATensor, 1>{}([&](auto i) {
@@ -1650,8 +1702,7 @@ struct UniversalGemmKernel
             EDataType* e_ptr = static_cast<EDataType*>(kargs.e_ptr);
             if constexpr(has_tile_partitioner_output_offset)
             {
-                const index_t output_offset = TilePartitioner::GetOutputOffset(kargs, k_batch);
-                e_ptr += output_offset;
+                e_ptr += TilePartitioner::GetOutputOffset(kargs, k_id);
             }
 
             // allocate LDS
