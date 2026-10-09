@@ -135,6 +135,7 @@ its incident write-ups, lives in [tensilelite/TESTING.md](tensilelite/TESTING.md
   - [Who tests what](#who-tests-what)
   - [Kernel corpus testing](#kernel-corpus-testing)
   - [Cadence contract](#cadence-contract)
+  - [Coverage model](#coverage-model)
   - [Workstreams](#workstreams)
 - [Known Risks and Gaps](#known-risks-and-gaps)
 - [Owners and Review Cadence](#owners-and-review-cadence)
@@ -1542,6 +1543,32 @@ costs per profile and architecture once each profile has been timed.
 | Nightly | Recently changed kernels, a rotating seventh of the corpus, and the nightly stress checks | 2 hours of wall time per architecture |
 | Weekly | The smoke profile over the whole corpus, whichever boundary slice is due, deep repeats on gfx1250, and large-buffer cases on large-memory runners. A cluster sweep covers the devices CI lacks | 8 hours of wall time |
 
+### Coverage model
+
+A math library has to be right across far more combinations than any suite can enumerate: types,
+shapes, layouts, batching, epilogues, scalar and value classes, entry points, kernel sources,
+architectures, and process conditions. [test_coverage_model.yaml](test_coverage_model.yaml) names
+those axes, splits each into a small number of classes plus the boundaries between them, and rates
+each class for the likelihood of a defect and the impact of one escaping. The product of the two is a
+priority from 1 to 9. The ratings are ordinal on purpose. They are a starting proposal, to be
+recalibrated against escaped defects: every escape gets tagged with the class it lived in, and a
+high-impact escape from a class rated low means the rating was wrong.
+
+The model also records combinations that are not valid (so they do not count as gaps) and the pairs
+of axes that should be covered pairwise, since most interaction defects involve two factors. Each
+suite in the inventory says which classes it is meant to reach through `covers`. That is a claim
+about intent until it is measured, and three measurements are planned under the Inventory workstream:
+
+- **Static expansion.** Expand the client test data the way the build does, place every generated
+  case in its classes, and report per-class and pairwise coverage by tier and architecture, with the
+  uncovered classes ranked by priority. No GPU is needed.
+- **Kernel coverage.** For each architecture, the fraction of shipped solutions that any test
+  executes. hipBLASLt is in effect a very large table of generated kernels, and nothing measures
+  how much of that table the tests touch today.
+- **Usage overlay.** Place real calls in the same classes, from the sizes in the library logic YAML,
+  the nightly performance problem lists, and bench-mode traces of framework workloads, so coverage
+  can be weighted by how the library is actually used.
+
 ### Workstreams
 
 Five workstreams carry the plan. Every ticket in either Known Risks and Gaps table, in this document
@@ -1560,6 +1587,9 @@ rather than by asking around.
 - **Keep [test_inventory.yaml](test_inventory.yaml) current.** It lists every suite in both products
   with where it runs today, with evidence for each placement, and where this plan would put it. A new
   lane, or a change to what an existing one gates, updates the inventory in the same pull request.
+- **Measure coverage against [test_coverage_model.yaml](test_coverage_model.yaml).** Static
+  expansion first, then kernel coverage, then the usage overlay, as described under
+  [Coverage model](#coverage-model). Tickets for each will be filed under AIHPBLAS-5028.
 - **Publish the required-check list**
   ([#12996](https://github.com/ROCm/rocm-libraries/issues/12996)). Document which checks actually
   block a merge, so contributors and reviewers stop guessing. The lane tables in this document and in
@@ -1748,9 +1778,9 @@ recorded in the inventory as `review` items rather than settled here. It also su
 disagreement between the two documents on whether Math CI measures C++ coverage. It does, as
 [Coverage](#coverage) now describes.
 
-The second file, a coverage model of the space of ways the library gets called with a risk rating on
-each part of it, follows in a later change, so that "are we testing the odd ways this library gets
-used?" has an answer that is more than a feeling.
+[test_coverage_model.yaml](test_coverage_model.yaml) describes the space of ways the library gets
+called, with a risk rating on each part of it (see [Coverage model](#coverage-model)), so that "are we
+testing the odd ways this library gets used?" can get an answer that is more than a feeling.
 
 ## Known Risks and Gaps
 
