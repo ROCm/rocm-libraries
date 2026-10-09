@@ -270,7 +270,7 @@ from this plan.
 | 6 | Same expansion, byte-identical, in the C++ engine | `cpp/core/lower_llvm/mma.cpp` | same change as 5 | ✅ [steps 5+6](xf32_bf16x3_steps/step-05-bf16x3-lowering.md) |
 | 7 | FP32-selection-unchanged regression test | `tests/` | after 3 | ✅ [step 7](xf32_bf16x3_steps/step-07-selection-regression.md) |
 | 8 | COMGR compile gate for gfx950 | `tests/` | after 6 | ✅ [step 8](xf32_bf16x3_steps/step-08-comgr-compile-gate.md) |
-| 9 | Numeric regression: vs FP32 reference **and** vs CK packed-path reference | `tests/core/` + `examples/gfx950/xf32/` | after 8 | ✅ [step 9](xf32_bf16x3_steps/step-09-numeric-regression.md) — host half green; device harness wired into pytest (`test_xf32_bf16x3_device.py`); **gfx950 device run not performed** (no gfx950 visible here) |
+| 9 | Numeric regression: vs FP32 reference **and** vs CK packed-path reference | `tests/core/` + `examples/gfx950/xf32/` | after 8 | ✅ [step 9](xf32_bf16x3_steps/step-09-numeric-regression.md) — host half green; device harness wired into pytest (`test_xf32_bf16x3_device.py`); **gfx950 device run green** — bitwise against the hand-written BF16x3 at both atoms, rel err 1.19e-07 vs K*alpha*beta, and both injected faults rejected |
 | 10 | Re-bless byte-identity goldens; run both LLVM flavors | `tools/check_byte_identity.py` | last | ✅ [step 10](xf32_bf16x3_steps/step-10-byte-identity.md) — with the `xf32_bf16x3_mma` parity family: 70 GREEN / 1 pre-existing DRIFT at llvm20, llvm22 and llvm23; no golden needed re-blessing |
 
 ---

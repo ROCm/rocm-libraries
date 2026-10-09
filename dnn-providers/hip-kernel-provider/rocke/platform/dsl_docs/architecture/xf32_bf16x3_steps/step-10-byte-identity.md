@@ -129,4 +129,10 @@ which is the signal that should prompt a re-run rather than a bisect.
 - After review, with `xf32_bf16x3_mma` added: 70 GREEN / 1 DRIFT at llvm20,
   llvm22 and llvm23, run sequentially in an archive-only environment (no
   `rocke_engine`).
+- Re-measured on the gfx950 node: the same 70 / 1 at all three flavors, the
+  same single DRIFT, `xf32_bf16x3_mma` GREEN on both configs. With
+  `rocke_engine` built there,
+  `test_xf32_bf16x3_lowering.py::TestEngineParity` also runs rather than
+  skipping, so the expansion is compared across the engines by both routes —
+  the parity family through the archive and the pybind module in-process.
 - No golden re-blessed; none needed it.

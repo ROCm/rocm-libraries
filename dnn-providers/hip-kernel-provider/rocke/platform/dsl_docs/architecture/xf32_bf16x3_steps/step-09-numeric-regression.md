@@ -9,7 +9,7 @@ step 9). Ticket AICK-2208.
 - [Two halves, split by what each can prove](#two-halves-split-by-what-each-can-prove)
 - [The host half: the arithmetic](#the-host-half-the-arithmetic)
 - [The device half: layout-free by construction](#the-device-half-layout-free-by-construction)
-- [Status of the on-device run](#status-of-the-on-device-run)
+- [The on-device run](#the-on-device-run)
 - [Verification](#verification)
 
 ## The gap steps 5–8 leave
@@ -104,25 +104,40 @@ believing the agreement. Both checks here avoid needing the layout at all:
 The second kernel is reused for both the reference and the control, differing
 only in how many terms it issues, so the two cannot drift apart.
 
-## Status of the on-device run
+## The on-device run
 
-**The gfx950 run has not been performed.** The only device visible from this
-development host is gfx942 (`rocminfo` reports
-`amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-`), and the emulated rows are
-gfx950-only, so there is nothing here to run them on. The harness detects this
-and prints `SKIPPED`, exiting 0; `--require-device` turns the same condition
-into a failure, which is the spelling a gfx950 validation node should use so a
-missing device cannot pass as a green run.
+**Measured on a gfx950 device, 2026-10-08.** An earlier revision of this
+doc recorded the run as not performed: the development host at the time saw
+only gfx942, and the emulated rows are gfx950-only. Both checks now run on
+silicon, with `--require-device` so a missing device cannot pass as green:
 
-What *was* verified on this host, without a device:
+| atom | expansion vs hand-written BF16x3 | emulated rel err | bf16-only rel err |
+|---|---|---|---|
+| `xf32_bf16x3_f32_16x16x32` | 0 of 256 slots differ | 1.188e-07 | 2.424e-04 |
+| `xf32_bf16x3_f32_32x32x16` | 0 of 1024 slots differ | 1.188e-07 | 2.424e-04 |
 
-- both kernels build and lower for gfx950 through the Python engine;
-- the emulated kernel emits three MFMA calls and the single-term control emits
-  one, as the recipe requires;
-- the skip path and the `--require-device` path both behave as documented.
+Both land three orders inside the `2^-16` tolerance, and the single-term
+control misses by more than its `2^-13` floor — so the tolerance check is
+being met by the residual terms rather than by bf16 happening to be good
+enough. The two atoms agree to the digit because the operands are constant and
+the accumulate is exact at both K.
 
-The numeric assertions inside the harness are therefore **unexercised**. They
-are not reported as passing anywhere, and this note is the record of that.
+### That the device checks bite
+
+Green on a check that cannot fail is worth nothing, so the lowering was broken
+twice — in the Python engine only, in a throwaway copy of the tree — and the
+harness re-run on the same device:
+
+| injected fault | result |
+|---|---|
+| term order rotated to `big*big, small*big, big*small` | 170 / 531 slots differ; exit 2 |
+| residual terms dropped, leaving `big*big` | 256 / 1024 slots differ, emulated err rises to the bf16 floor 2.424e-04; exit 2 |
+
+The first is caught by the differential alone and the second by both checks,
+which is the split the two were written for: the differential sees *order*, the
+absolute check sees *missing terms*. Note the first fault leaves the accuracy
+figure untouched — a reordered sum of the same three terms is still accurate —
+which is precisely why the bitwise differential exists.
 
 ### How the suite reaches it
 
@@ -136,23 +151,33 @@ other test:
 - device 0 is probed in a subprocess, keeping HIP out of the pytest process;
 - on gfx950 the harness runs with `--require-device`, and anything but exit 0
   with `PASSED` fails the test;
-- off gfx950 it skips, and so does a host without torch, which the harness
-  allocates through (torch stays optional);
-- `ROCKE_REQUIRE_GFX950=1` turns either skip into a failure. That is the
+- off gfx950 it skips — the only reason it skips, now that the harness needs
+  nothing beyond numpy;
+- `ROCKE_REQUIRE_GFX950=1` turns that skip into a failure. That is the
   spelling for a gfx950 validation node, mirroring `ROCKE_REQUIRE_GFX1250`.
+
+The harness originally allocated through torch, which would have skipped the
+gate on the gfx950 node it was written for: neither that node nor the ROCm
+images on it carry torch. It now uses `DeviceMem` + `Runtime.memcpy_*` over
+numpy host arrays — rocke's only hard dependency — with the fp32→bf16 RNE
+narrowing hand-rolled in `uint32`, the same way
+[`test_xf32_bf16x3_numerics.py`](../../../tests/core/test_xf32_bf16x3_numerics.py)
+does it. That the host split matches the ISA's own convert is not assumed: it
+is exactly what the bitwise differential above measures.
 
 ## Verification
 
 - `tests/core/test_xf32_bf16x3_numerics.py` — 13 tests, green.
-- `tests/core` — 425 passed, 19 skipped, 757 subtests.
-- `examples/gfx950/xf32/bf16x3_parity.py` — `SKIPPED` (exit 0) and, with
-  `--require-device`, `FAILED` (exit 2) on this gfx942 host. Numeric result:
-  **not measured**.
-- `tests/core/test_xf32_bf16x3_device.py` on the same gfx942 host — skips
-  ("needs HIP device 0 to be gfx950; found gfx942"), and errors under
-  `ROCKE_REQUIRE_GFX950=1`. With the probe faked to report gfx950, a host
-  without torch skips (errors under the env var), and the harness's own
-  `FAILED` exit fails the test with its message. The gfx950 pass itself is
-  still **not measured**.
+- `tests/core` on the gfx950 node — 440 passed, 7 skipped, 799 subtests with
+  the `rocke_engine` extension built; 428 / 19 without it (the extra skips are
+  all engine- or `ml_dtypes`-gated).
+- `examples/gfx950/xf32/bf16x3_parity.py --require-device` on gfx950 —
+  `PASSED`, with the figures tabulated above, in 0.7 s.
+- `tests/core/test_xf32_bf16x3_device.py` under `ROCKE_REQUIRE_GFX950=1` on
+  the same node — 1 passed.
+- Both injected faults rejected by the harness on-device (table above).
+- Earlier, on a gfx942 host — the harness prints `SKIPPED` (exit 0), `FAILED`
+  (exit 2) under `--require-device`, and the test skips with "needs HIP device
+  0 to be gfx950; found gfx942" and errors under `ROCKE_REQUIRE_GFX950=1`.
 - No emission changed in this step, so the byte-identity result from
   [steps 5+6](step-05-bf16x3-lowering.md) still stands.
