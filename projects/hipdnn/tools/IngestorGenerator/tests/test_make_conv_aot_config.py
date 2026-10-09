@@ -461,6 +461,7 @@ def test_a_direct_instance_carries_the_identitys_capabilities_and_knobs(
             "block_waves",
         ),
         ("direct_depthwise_tiled", {"filter_h": 33, "filter_w": 33}, "cannot build"),
+        ("direct_depthwise_col", {"pad_h": 2, "pad_w": 2}, "cannot build"),
     ],
 )
 def test_unsupported_direct_identities_are_named_with_their_reason(
@@ -501,6 +502,7 @@ def test_direct_instances_are_variants_stating_their_own_fields(
         assert variants == {
             ("spatial", "std"): "gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}",
             ("tiled",): "gfx950_conv_fwd_aot_dwtiled_{dtype}_{instance_id}",
+            ("col",): "gfx950_conv_fwd_aot_dwcol_{dtype}_{instance_id}",
         }
     # Every direct field is builder_default, so implicit-GEMM descriptors (and std and
     # spatial ones, for the block knobs) leave them to the KMD.
@@ -905,4 +907,4 @@ def test_native_direct_launch_cases_are_the_adapters():
             assert spec.grid(runtime) == (gx, gy, gz), (variant, problem)
             assert spec.block()[0] == block, (variant, problem)
         variants.add((variant, ok))
-    assert variants == {(v, ok) for v in ("TILED",) for ok in (True, False)}
+    assert variants == {(v, ok) for v in ("TILED", "COL") for ok in (True, False)}

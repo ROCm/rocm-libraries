@@ -605,6 +605,8 @@ bool aotDirectVariantUses(conv::DirectVariant variant, std::string_view field)
         return among({"block_waves"});
     case conv::DirectVariant::TILED:
         return among({"block_w", "block_h", "block_waves", "unroll_rows"});
+    case conv::DirectVariant::COL:
+        return among({"block_w", "block_h", "block_waves"});
     case conv::DirectVariant::NONE:
     default:
         return false;

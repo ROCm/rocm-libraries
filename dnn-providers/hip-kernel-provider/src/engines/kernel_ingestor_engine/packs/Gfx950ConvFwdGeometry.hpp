@@ -566,6 +566,7 @@ enum class DirectVariant
     STD,
     SPATIAL,
     TILED, ///< "tiled": DirectDepthwiseTiledSpec.
+    COL, ///< "col": DirectDepthwiseColSpec.
 };
 
 /// A closed value set: any other integer, including a future family this build does not
@@ -600,6 +601,10 @@ inline std::optional<DirectVariant> parseDirectVariant(std::string_view value)
     if(value == "tiled")
     {
         return DirectVariant::TILED;
+    }
+    if(value == "col")
+    {
+        return DirectVariant::COL;
     }
     return std::nullopt;
 }
@@ -762,11 +767,11 @@ struct DirectInstance
 {
     DirectCapabilities compiled;
     DirectVariant variant;
-    /// Output columns per block for std and tiled; 0 for spatial, which derives it.
+    /// Output columns per block for std, tiled and col; 0 for spatial, which derives it.
     int64_t blockW;
     /// Waves per block, one channel per lane, for the depthwise variants.
     int64_t blockWaves;
-    /// Output rows per block (tiled).
+    /// Output rows per block (tiled, col).
     int64_t blockH = 0;
 };
 
@@ -804,11 +809,12 @@ inline std::optional<LaunchGeometry>
 /// rocKE's depthwise filter bound (_DW_MAX_KH, _DW_MAX_KW).
 constexpr int64_t DIRECT_DEPTHWISE_MAX_FILTER = 32;
 
-/// The tiled depthwise kernel: is_valid_depthwise_tiled_spec in conv_direct_grouped.py on
-/// the runtime problem, then direct_launch_geometry's (ceil(Wo / block_w),
-/// ceil(groups / (64 * block_waves)), N * ceil(Ho / block_h)) grid of 64 * block_waves
-/// threads. It indexes outputs directly and bounds its rows by the runtime Ho, so it is not
-/// tied to "same" padding.
+/// The tiled and col depthwise kernels: is_valid_depthwise_tiled_spec and
+/// is_valid_depthwise_col_spec in conv_direct_grouped.py on the runtime problem, then
+/// direct_launch_geometry's (ceil(Wo / block_w), ceil(groups / (64 * block_waves)),
+/// N * ceil(Ho / block_h)) grid of 64 * block_waves threads. Both index outputs directly
+/// and bound their rows by the runtime Ho, so neither is tied to "same" padding. col
+/// also requires Ho <= Hi, a padding below the filter and a block no wider than Wo.
 inline std::optional<LaunchGeometry> depthwiseTileLaunch(const Problem& problem,
                                                          const Geometry& geometry,
                                                          const DirectInstance& instance)
@@ -823,7 +829,15 @@ inline std::optional<LaunchGeometry> depthwiseTileLaunch(const Problem& problem,
     {
         return std::nullopt;
     }
-    if(compiled.strideH > compiled.y)
+    if(instance.variant == DirectVariant::TILED)
+    {
+        if(compiled.strideH > compiled.y)
+        {
+            return std::nullopt;
+        }
+    }
+    else if(geometry.ho > problem.hi || compiled.padH >= compiled.y || compiled.padH >= compiled.x
+            || instance.blockW > geometry.wo)
     {
         return std::nullopt;
     }
@@ -863,6 +877,7 @@ inline std::optional<LaunchGeometry> directInstanceLaunch(const Problem& problem
                                     instance.blockWaves,
                                     DIRECT_WAVE_SIZE);
     case DirectVariant::TILED:
+    case DirectVariant::COL:
         return depthwiseTileLaunch(problem, geometry, instance);
     case DirectVariant::NONE:
     default:

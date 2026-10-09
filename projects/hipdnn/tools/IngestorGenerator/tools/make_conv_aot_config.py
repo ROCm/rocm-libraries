@@ -169,6 +169,7 @@ DIRECT_VARIANT_FIELDS = {
     "std": (),
     "spatial": (),
     "tiled": ("block_h", "unroll_rows"),
+    "col": ("block_h",),
 }
 _STRING_FIELDS = (
     "dtype",
@@ -191,6 +192,7 @@ DIRECT_ALGORITHMS = {"direct_depthwise": "std", "direct_depthwise_spatial": "spa
 PACKAGED_DIRECT_ALGORITHMS = {
     **DIRECT_ALGORITHMS,
     "direct_depthwise_tiled": "tiled",
+    "direct_depthwise_col": "col",
 }
 #: The generator variant (kernel name) of each direct variant. std and spatial keep
 #: the name they had when they were the only direct instances.
@@ -198,6 +200,7 @@ _DIRECT_VARIANT_NAMES = {
     "std": "gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}",
     "spatial": "gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}",
     "tiled": "gfx950_conv_fwd_aot_dwtiled_{dtype}_{instance_id}",
+    "col": "gfx950_conv_fwd_aot_dwcol_{dtype}_{instance_id}",
 }
 
 
@@ -435,6 +438,7 @@ def build_config(
         for group in (
             ("std", "spatial"),
             ("tiled",),
+            ("col",),
         ):
             members = [
                 s for s in shards[shard] if s.is_direct and s.direct_variant in group
