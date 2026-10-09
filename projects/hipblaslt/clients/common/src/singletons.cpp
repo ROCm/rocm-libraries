@@ -24,11 +24,22 @@
  *
  *******************************************************************************/
 #include "singletons.hpp"
+#include <mutex>
 
 // global for device memory padding see d_vector.hpp
-size_t g_DVEC_PAD = 4096;
+// RUN_TEST_ON_THREADS_STREAMS writes this from every worker; the mutex keeps
+// that update from racing the reads in the d_vector constructors.
+static std::mutex g_pad_mutex;
+size_t            g_DVEC_PAD = 4096;
 
 void d_vector_set_pad_length(size_t pad)
 {
+    std::lock_guard<std::mutex> lock(g_pad_mutex);
     g_DVEC_PAD = pad;
+}
+
+size_t d_vector_get_pad_length()
+{
+    std::lock_guard<std::mutex> lock(g_pad_mutex);
+    return g_DVEC_PAD;
 }

@@ -124,6 +124,7 @@ stream_pool g_stream_pool;
  * callback function
  *********************************************/
 thread_local std::unique_ptr<std::function<void(hipblasLtHandle_t)>> t_set_stream_callback;
+thread_local hipStream_t                                             t_hipblaslt_test_stream = nullptr;
 
 /*********************************************
  * Signal-handling for detecting test faults *
@@ -266,7 +267,10 @@ void catch_signals_and_exceptions_as_failures(std::function<void()> test, bool s
     t_handler = old_handler;
 }
 
-void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_t numDevices)
+void launch_test_on_streams(std::function<void()> test,
+                            size_t                numStreams,
+                            size_t                numDevices,
+                            size_t                threadIndex)
 {
     size_t devices = numDevices > 1 ? numDevices : 1;
     size_t streams = numStreams > 1 ? numStreams : 1;
@@ -275,12 +279,20 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
         CHECK_HIP_ERROR(hipSetDevice(i));
         for(size_t j = 0; j < streams; ++j)
         {
+            // Drop any stream left by a previous iteration before this one runs.
+            t_hipblaslt_test_stream = nullptr;
             if(numStreams)
-                t_set_stream_callback.reset(
-                    new std::function<void(hipblasLtHandle_t)>([=](hipblasLtHandle_t handle) {
-                        //TODO tell test to run on a specific stream.
-                    }));
+            {
+                // One stream per (worker, iteration). Concurrent threads used to
+                // fall through to the legacy null stream because this callback
+                // was empty, which races in the HIP runtime and corrupts the heap.
+                const size_t slot   = threadIndex * streams + j;
+                hipStream_t  pooled = g_stream_pool[i].at(slot);
+                t_set_stream_callback.reset(new std::function<void(hipblasLtHandle_t)>(
+                    [=](hipblasLtHandle_t) { t_hipblaslt_test_stream = pooled; }));
+            }
             catch_signals_and_exceptions_as_failures(test, true);
+            t_hipblaslt_test_stream = nullptr;
         }
     }
 }
@@ -297,8 +309,9 @@ void launch_test_on_threads(std::function<void()> test,
         future[i] = promise[i].get_future();
 
     for(size_t i = 0; i < numThreads; ++i)
-        g_thread_pool.submit([=] { launch_test_on_streams(test, numStreams, numDevices); },
-                             std::move(promise[i]));
+        g_thread_pool.submit(
+            [=] { launch_test_on_streams(test, numStreams, numDevices, i); },
+            std::move(promise[i]));
 
     for(size_t i = 0; i < numThreads; ++i)
         future[i].get(); //Wait for tasks to complete

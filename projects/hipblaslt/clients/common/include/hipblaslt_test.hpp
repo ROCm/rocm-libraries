@@ -278,8 +278,12 @@ void launch_test_on_threads(std::function<void()> test,
 #define LAUNCH_TEST_ON_THREADS(test, threads, streams, devices) \
     launch_test_on_threads([&] { test; }, threads, streams, devices)
 
-// Function to catch signals and exceptions as failures
-void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_t numDevices);
+// threadIndex selects this worker's private slice of g_stream_pool so concurrent
+// threads do not share a hipStream_t. The default is the calling thread.
+void launch_test_on_streams(std::function<void()> test,
+                            size_t                numStreams,
+                            size_t                numDevices,
+                            size_t                threadIndex = 0);
 
 // Macro to call catch_signals_and_exceptions_as_failures() with a lambda expression
 #define LAUNCH_TEST_ON_STREAMS(test, streams, devices) \
@@ -315,7 +319,10 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
                 }                                                                            \
             }                                                                                \
         }                                                                                    \
-        g_stream_pool.reset(devices, streams);                                               \
+        size_t pool_streams = streams > 1 ? streams : (streams ? 1 : 0);                     \
+        if(threads > 1 && pool_streams)                                                       \
+            pool_streams *= threads;                                                          \
+        g_stream_pool.reset(devices, pool_streams);                                           \
         if(threads)                                                                          \
             LAUNCH_TEST_ON_THREADS(test, threads, streams, devices);                         \
         else                                                                                 \
@@ -363,6 +370,11 @@ extern stream_pool g_stream_pool;
 extern thread_pool g_thread_pool;
 
 extern thread_local std::unique_ptr<std::function<void(hipblasLtHandle_t)>> t_set_stream_callback;
+
+// Stream the multithread harness selected for this worker. Null means the test
+// creates and owns its own stream. hipBLASLt has no handle-level set-stream
+// call; matmul reads this after hipblaslt_local_handle runs the callback.
+extern thread_local hipStream_t t_hipblaslt_test_stream;
 
 /* ============================================================================================ */
 /*! \brief  Normalized test name to conform to Google Tests */

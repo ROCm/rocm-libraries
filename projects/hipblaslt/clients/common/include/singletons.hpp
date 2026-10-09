@@ -28,3 +28,4 @@
 #include <cstddef>
 extern size_t g_DVEC_PAD;
 void          d_vector_set_pad_length(size_t pad);
+size_t        d_vector_get_pad_length();

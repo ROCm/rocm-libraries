@@ -33,6 +33,7 @@
 #include "singletons.hpp"
 #include <cinttypes>
 #include <hipblaslt/hipblaslt.h>
+#include <mutex>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -334,8 +335,6 @@ private:
     size_t   m_bytes;
     d_memory m_mem;
 
-    static bool m_init_guard;
-
 protected:
     inline size_t nmemb() const noexcept
     {
@@ -351,17 +350,15 @@ public:
 #ifdef GOOGLE_TEST
     d_vector(size_t s, bool HMM = false)
         : m_size(s)
-        , m_pad(std::min(g_DVEC_PAD, size_t(MEM_MAX_GUARD_PAD)))
+        , m_pad(std::min(d_vector_get_pad_length(), size_t(MEM_MAX_GUARD_PAD)))
         , m_guard_len(m_pad * sizeof(T))
         , m_bytes((s + m_pad * 2) * sizeof(T))
         , use_HMM(HMM)
     {
-        // Initialize m_guard with random data
-        if(!m_init_guard)
-        {
-            hipblaslt_init_nan(m_guard, MEM_MAX_GUARD_PAD);
-            m_init_guard = true;
-        }
+        // One init per T. The old unlocked flag raced when several workers
+        // constructed the first vector of that type together.
+        static std::once_flag once;
+        std::call_once(once, [] { hipblaslt_init_nan(m_guard, MEM_MAX_GUARD_PAD); });
     }
 #else
     d_vector(size_t s, bool HMM = false)
@@ -443,8 +440,6 @@ private:
     size_t      m_bytes;
     d_memory    m_mem;
 
-    inline static bool m_init_guard_type;
-
 protected:
     inline size_t nmemb() const noexcept
     {
@@ -461,17 +456,13 @@ public:
     d_vector_type(hipDataType dtype, size_t s, bool HMM = false)
         : m_size(s)
         , m_dtype(dtype)
-        , m_pad(std::min(g_DVEC_PAD, size_t(MEM_MAX_GUARD_PAD)))
+        , m_pad(std::min(d_vector_get_pad_length(), size_t(MEM_MAX_GUARD_PAD)))
         , m_guard_len(m_pad * realDataTypeSize(dtype))
         , m_bytes((s + m_pad * 2) * realDataTypeSize(dtype))
         , use_HMM(HMM)
     {
-        // Initialize m_guard with random data
-        if(!m_init_guard_type)
-        {
-            hipblaslt_init_nan(m_guard_type, MEM_MAX_GUARD_PAD);
-            m_init_guard_type = true;
-        }
+        static std::once_flag once;
+        std::call_once(once, [] { hipblaslt_init_nan(m_guard_type, MEM_MAX_GUARD_PAD); });
     }
 #else
     d_vector_type(hipDataType dtype, size_t s, bool HMM = false)
@@ -552,9 +543,6 @@ public:
 
 template <typename T>
 T d_vector<T>::m_guard[MEM_MAX_GUARD_PAD] = {};
-
-template <typename T>
-bool d_vector<T>::m_init_guard = false;
 
 #undef MEM_MAX_GUARD_PAD
 #undef MAX_DTYPE_SIZE

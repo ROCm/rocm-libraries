@@ -2124,8 +2124,30 @@ void testing_matmul_with_bias(const Arguments& arg,
     gpu_time_used = cpu_time_used = gpu_mem_gbytes = 0.0;
     bool                   HMM                     = arg.HMM;
     hipblaslt_local_handle handle{arg};
-    hipStream_t            stream;
-    CHECK_HIP_ERROR(hipStreamCreate(&stream));
+    hipStream_t            stream     = nullptr;
+    bool                   own_stream = false;
+#ifdef GOOGLE_TEST
+    // The multithread harness publishes one pooled stream per worker. That
+    // stream belongs to g_stream_pool; destroying it here frees it twice.
+    if(t_hipblaslt_test_stream)
+        stream = t_hipblaslt_test_stream;
+    else
+#endif
+    {
+        CHECK_HIP_ERROR(hipStreamCreate(&stream));
+        own_stream = true;
+    }
+    struct StreamOwner
+    {
+        hipStream_t& stream;
+        bool&        own;
+        ~StreamOwner()
+        {
+            if(own && stream)
+                static_cast<void>(hipStreamDestroy(stream));
+        }
+    } stream_owner{stream, own_stream};
+    static_cast<void>(stream_owner);
 
     hipEvent_t event_gpu_time_start, event_gpu_time_end;
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_start));
@@ -7245,7 +7267,6 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(h)
                 (void)hipblasLtMatmulDescDestroy(h);
 
-    CHECK_HIP_ERROR(hipStreamDestroy(stream));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_end));
 }
