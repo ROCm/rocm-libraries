@@ -14,6 +14,7 @@
  */
 
 #include <hipdnn_bench/CandidatePageJson.hpp>
+#include <hipdnn_bench/CliNumbers.hpp>
 #include <hipdnn_bench/CsvOutput.hpp>
 #include <hipdnn_bench/NumericalValidation.hpp>
 #include <hipdnn_bench/VariantPackBuilder.hpp>
@@ -42,6 +43,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -140,17 +142,48 @@ void printHelp(const char* program)
         << "  --no-header            Omit the CSV header, for concatenating runs\n";
 }
 
-bool parseArguments(const std::vector<std::string>& args, Options& options)
+/// What the command line asks for: a run, the help text, or nothing it can use.
+enum class ParseOutcome
+{
+    RUN,
+    HELP,
+    INVALID
+};
+
+ParseOutcome parseArguments(const std::vector<std::string>& args, Options& options)
 {
     for(size_t i = 1; i < args.size(); ++i)
     {
         const std::string& arg = args[i];
-        const auto next = [&]() { return (i + 1 < args.size()) ? args[++i] : std::string(); };
+        // A following flag is not a value: `--problem-id --no-header` must not swallow the flag.
+        bool missingValue = false;
+        const auto next = [&]() {
+            if(i + 1 >= args.size() || args[i + 1].rfind("--", 0) == 0)
+            {
+                missingValue = true;
+                return std::string();
+            }
+            return args[++i];
+        };
+        // The whole value is the number, or the argument is refused.
+        std::string badNumber;
+        const auto integer = [&](auto& target) {
+            const auto text = next();
+            const auto value = hipdnn_bench::parseInteger(text);
+            if(!missingValue && !value)
+            {
+                badNumber = text;
+            }
+            else if(value)
+            {
+                target = static_cast<std::remove_reference_t<decltype(target)>>(*value);
+            }
+        };
 
         if(arg == "--help" || arg == "-h")
         {
             printHelp(args[0].c_str());
-            return false;
+            return ParseOutcome::HELP;
         }
         if(i == 1 && arg == "enumerate")
         {
@@ -170,8 +203,16 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
         }
         else if(arg == "--engine-id")
         {
-            options.engineId = static_cast<int64_t>(std::strtoull(next().c_str(), nullptr, 0));
-            options.haveEngineId = true;
+            const auto text = next();
+            if(const auto id = hipdnn_bench::parseEngineId(text))
+            {
+                options.engineId = *id;
+                options.haveEngineId = true;
+            }
+            else if(!missingValue)
+            {
+                badNumber = text;
+            }
         }
         else if(arg == "--plugin-dir")
         {
@@ -215,15 +256,12 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
         }
         else if(arg == "--offset" || arg == "--limit")
         {
-            const auto value = next();
             options.havePageOptions = true;
-            size_t consumed = 0;
-            const auto parsed = std::stoll(value, &consumed);
-            if(consumed != value.size() || parsed < 0)
+            integer(arg == "--offset" ? options.offset : options.limit);
+            if((arg == "--offset" ? options.offset : options.limit) < 0)
             {
                 throw std::invalid_argument("Invalid candidate page offset/limit");
             }
-            (arg == "--offset" ? options.offset : options.limit) = parsed;
         }
         else if(arg == "--sweep")
         {
@@ -237,13 +275,12 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
             if(split == std::string::npos)
             {
                 std::cerr << "--knob expects name=value, got '" << setting << "'\n";
-                return false;
+                return ParseOutcome::INVALID;
             }
             const auto name = setting.substr(0, split);
-            const auto text = setting.substr(split + 1);
-            size_t consumed = 0;
-            const auto value = std::stoll(text, &consumed);
-            if(name.empty() || consumed != text.size()
+            const auto parsed = hipdnn_bench::parseInteger(setting.substr(split + 1));
+            const auto value = parsed.value_or(0);
+            if(name.empty() || !parsed
                || std::any_of(options.knobs.begin(),
                               options.knobs.end(),
                               [&name](const auto& item) { return item.first == name; }))
@@ -258,15 +295,23 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
         }
         else if(arg == "--max-iterations")
         {
-            options.maxIterations = static_cast<int>(std::strtol(next().c_str(), nullptr, 10));
+            integer(options.maxIterations);
         }
         else if(arg == "--warmup")
         {
-            options.warmup = static_cast<int>(std::strtol(next().c_str(), nullptr, 10));
+            integer(options.warmup);
         }
         else if(arg == "--stability")
         {
-            options.stability = std::strtof(next().c_str(), nullptr);
+            const auto text = next();
+            if(const auto value = hipdnn_bench::parseReal(text))
+            {
+                options.stability = static_cast<float>(*value);
+            }
+            else if(!missingValue)
+            {
+                badNumber = text;
+            }
         }
         else if(arg == "--query")
         {
@@ -278,7 +323,7 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
                 if(split == std::string::npos)
                 {
                     std::cerr << "--query expects name=value pairs, got '" << field << "'\n";
-                    return false;
+                    return ParseOutcome::INVALID;
                 }
                 options.query.emplace_back(field.substr(0, split), field.substr(split + 1));
             }
@@ -295,7 +340,17 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
         {
             std::cerr << "Unknown argument: " << arg << "\n";
             printHelp(args[0].c_str());
-            return false;
+            return ParseOutcome::INVALID;
+        }
+        if(missingValue)
+        {
+            std::cerr << arg << " needs a value\n";
+            return ParseOutcome::INVALID;
+        }
+        if(!badNumber.empty())
+        {
+            std::cerr << arg << " needs a number, not '" << badNumber << "'\n";
+            return ParseOutcome::INVALID;
         }
     }
     if(options.limit < 1 || options.limit > 10000)
@@ -339,7 +394,7 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
                 "0 < stability < 1, and max-iterations >= the stability window");
         }
     }
-    return true;
+    return ParseOutcome::RUN;
 }
 
 /// Variant-pack memory for the duration of the run. Not a general allocator -- it exists so
@@ -886,12 +941,10 @@ int runBench(const std::vector<std::string>& args)
 {
 
     Options options;
-    if(!parseArguments(args, options))
+    const auto parsed = parseArguments(args, options);
+    if(parsed != ParseOutcome::RUN)
     {
-        return std::find(args.begin(), args.end(), "--help") != args.end()
-                       || std::find(args.begin(), args.end(), "-h") != args.end()
-                   ? 0
-                   : 1;
+        return parsed == ParseOutcome::HELP ? 0 : 1;
     }
     if(options.graphPath.empty() || !options.haveEngineId)
     {
