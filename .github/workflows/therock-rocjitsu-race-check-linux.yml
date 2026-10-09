@@ -1,8 +1,9 @@
 # This reusable workflow is a narrow post-build instrumentation job for
 # hipBLASLt. It fetches BLAS artifacts from the just-finished TheRock build and
-# runs two small workloads under rocjitsu's race detector. The workloads run
-# entirely under CPU-side emulation, so the workflow uses the CPU build runner
-# instead of consuming GPU test capacity.
+# runs independent TensileLite/hipBLASLt-bench packaged-GEMM sweeps
+# (four workers, 100 sampled solutions each) under
+# rocjitsu's race detector. The workloads run entirely under CPU-side emulation,
+# so the workflow uses the CPU build runner instead of consuming GPU test capacity.
 
 name: TheRock rocjitsu race check Linux
 
@@ -48,19 +49,9 @@ jobs:
       run:
         shell: bash
     env:
-      VENV_DIR: ${{ github.workspace }}/.venv
       ARTIFACT_RUN_ID: ${{ github.run_id }}
       OUTPUT_ARTIFACTS_DIR: ./build
-      ROCM_PATH: ${{ github.workspace }}/build
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
-      ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
-      ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
-      RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
-      # The driver uses these values for its two timeout commands. Both are
-      # shorter than the job timeout, so reports can still upload after a
-      # workload timeout.
-      RACE_TIMEOUT_SECONDS: "180"
-      TENSILELITE_TIMEOUT_SECONDS: "420"
     steps:
       # The job needs three inputs in one workspace:
       #   1. TheRock actions/scripts to fetch the exact artifacts from this run.
@@ -78,8 +69,20 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           path: rocm-libraries
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/scripts
+            .github/workflows
           sparse-checkout-cone-mode: true
+
+      # Resolve paths inside the container; github.workspace may name the host mount.
+      - name: Resolve race-check paths
+        run: |
+          printf '%s\n' \
+            "VENV_DIR=${PWD}/.venv" \
+            "ROCM_PATH=$(realpath -m "${OUTPUT_ARTIFACTS_DIR}")" \
+            "ROCJITSU_SOURCE_DIR=${PWD}/rocm-systems/emulation/rocjitsu" \
+            "ROCJITSU_BUILD_DIR=${PWD}/rocjitsu-build" \
+            "RACE_REPORT_DIR=${PWD}/race-reports" >> "${GITHUB_ENV}"
 
       - name: Checkout rocm-systems for rocjitsu
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -87,8 +90,8 @@ jobs:
           repository: ROCm/rocm-systems
           # Keep the validated tool revision stable instead of following
           # rocm-systems develop, where rocjitsu interfaces can change independently.
-          # Pinned 2026-09-10.
-          ref: 50d855a7dcf382f57267443250c3776067b29223
+          # Pinned 2026-10-07; recheck known_failures.yaml when updating.
+          ref: c5cc42b6c18f359bf1ee9c262212c2616a016a8c
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
@@ -121,23 +124,36 @@ jobs:
           VENV_DIR: ${{ env.VENV_DIR }}
           FETCH_ARTIFACT_ARGS: --blas --tests
 
-      # setup_test_environment installs only TheRock's common test
-      # requirements. Install TensileLite's requirements explicitly from its
-      # test artifact instead of relying on them to remain in that shared
-      # environment.
-      - name: Install TensileLite test requirements
+      # The packaged sweep needs only metadata and YAML readers.
+      - name: Install GEMM sweep requirements
         run: |
           python ./build_tools/install_additional_requirements.py \
-            --requirements-files "${ROCM_PATH}/share/hipblaslt/tensilelite/requirements-test.txt"
+            --requirements-files "${ROCM_PATH}/share/hipblaslt/tensilelite/rocjitsu/requirements.txt"
+
+      - name: Check race sweep tooling
+        run: |
+          export PYTHONPATH="${ROCM_PATH}/share/hipblaslt/tensilelite${PYTHONPATH:+:${PYTHONPATH}}"
+          python3 -B "${ROCM_PATH}/share/hipblaslt/tensilelite/rocjitsu/test_rocjitsu_race_sweep.py"
+          python3 -B rocm-libraries/.github/scripts/test_rocjitsu_race_check.py
 
       - name: Run rocjitsu race check
         timeout-minutes: 75
         run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_check.sh
 
-      # Upload even on failure. The report directory contains the per-workload
-      # stdout logs, rocjitsu sink files, race.log files, generated reduced
-      # TensileLite input/output, and timing.tsv; without this artifact a failed
-      # detector run is usually not actionable from the console log alone.
+      - name: Publish sampled solution results
+        if: ${{ always() }}
+        run: |
+          for backend in tensile bench; do
+            report="${RACE_REPORT_DIR}/sweep-${backend}/summary.md"
+            if [[ -f "${report}" ]]; then
+              cat "${report}" >> "${GITHUB_STEP_SUMMARY}"
+            else
+              printf '\n### %s sampled race sweep\n\nNo report; the sweep was not reached or preparation was interrupted.\n' "${backend}" >> "${GITHUB_STEP_SUMMARY}"
+            fi
+          done
+
+      # Upload each sweep's manifests, inputs, logs, results and stage timings
+      # even after failure so the selected solution can be reproduced.
       - name: Upload race reports
         if: ${{ always() }}
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
