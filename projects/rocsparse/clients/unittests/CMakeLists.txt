@@ -229,16 +229,16 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # point with handle->properties.maxGridSize[0] shrunk, so no internal
   # translation unit has to be compiled in.
   unit_test_internal_level3_csrmm_grids.cpp
-  # --- Conversion-directory grid clamps [AISPARSE-684/685/686] --------------
-  # Distinct anchor at the end of the list so this leaf does not conflict with
-  # the sibling unit-test branches above. Drives public entry points plus
-  # rocsparse::convert_array, whose TU is already compiled in below.
-  unit_test_internal_conversion_grid_clamp.cpp
   # --- Blocked-ELL SpMM grid.y clamp + column-panel stride [AISPARSE-667] ---
   # Appended at the end (distinct anchor) so this leaf does not conflict with the
   # sibling large-grid branches. Drives rocsparse_spmm through the public API;
   # no compile-in library TUs needed.
   unit_test_internal_level3_bellmm.cpp
+  # --- Conversion-directory grid clamps [AISPARSE-684/685/686] --------------
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # the sibling unit-test branches above. Drives public entry points plus
+  # rocsparse::convert_array, whose TU is already compiled in below.
+  unit_test_internal_conversion_grid_clamp.cpp
 )
 
 # Host building-block library translation units under test by the
