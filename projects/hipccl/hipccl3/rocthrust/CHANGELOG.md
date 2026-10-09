@@ -6,12 +6,7 @@ Documentation for rocThrust available at
 ## rocThrust 5.0.0 for ROCm 10.2.0
  
 ### Added
- 
-* rocThrust is now largely in feature parity with CCCL/thrust v3.0.3. 
-  * Note that since CCCL 3.x requires libhipcxx, the following fallbacks exist:
-    * If a libhipcxx corresponding to CCCL/libcudacxx >= v3.0.3 is not available, `thrust::tuple`, `thrust::pair` and `thrust::zip_iterator` will fall back to rocThrust 4.4.0 implementations. This means that:
-      * For `thrust::tuple` and `thrust::pair`: some features may differ from CCCL/thrust v3.0.3.
-      * For `thrust::zip_iterator`: some iterator concepts present in CCCL/thrust v3.0.3 are missing.
+* rocThrust is now largely in feature parity with CCCL/thrust v3.0.3. If there isn't a libhipcxx corresponding to CCCL/libcudacxx version 3.0.3 or later, `thrust::tuple`, `thrust::pair` and `thrust::zip_iterator` will fall back to rocThrust 4.4.0 implementations.
  
 ### Removed
 
