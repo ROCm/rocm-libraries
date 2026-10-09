@@ -55,6 +55,9 @@ inline constexpr int kTdmWindowPostCycles = 160;
 inline constexpr int kPolicyDsCapTdmBeginCycles = 576;
 inline constexpr int kPolicyDsCapTdmEndCycles = 840;
 inline constexpr int kPolicyDsCapTdmPerCap = 1;
+/// Kernels that also TDM MX scale tensors (a second TDM group per stage) lose ~1.4% with the
+/// tight cap (fp4 / MX) and gain nothing: keep the stall-free ds rate, 2 per 8-cycle span.
+inline constexpr int kPolicyDsCapTdmPerCapScaled = 2;
 /// The policy is only proposed when the main loop has at least this many WMMAs.
 inline constexpr int kPolicyDsCapTdmMinWmmas = 128;
 
@@ -99,6 +102,8 @@ struct SchedulingFeatures {
     int unrollLoopCopies = 0;
     /// LDS bytes the TDM writes per stage (A + B tiles); <= 0 = unknown.
     int tdmStageBytes = 0;
+    /// The kernel TDMs MX scale tensors besides the data tiles.
+    bool tdmScaleTensors = false;
 };
 
 struct ResolvedSchedulingKnobs {

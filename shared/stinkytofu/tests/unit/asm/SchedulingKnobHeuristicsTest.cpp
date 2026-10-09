@@ -470,3 +470,22 @@ TEST(SchedulingKnobHeuristics, TdmStageBytesModuleOptionDefaultsToUnknown) {
     StinkyAsmModule::ModuleOptions opts{};
     EXPECT_EQ(opts.TdmStageBytes, -1);
 }
+
+// Kernels that also TDM MX scale tensors get the looser window cap (2 per span), others 1.
+TEST(SchedulingKnobHeuristics, DsCapTdmPerCapLooserWithScaleTensors) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingFeatures f = makeFeatures(384, 200, 8, 3072, 3, 4);
+    f.stats.tensorLoadCount = 10;
+    f.tdmStageBytes = 128 * 1024;
+    EXPECT_EQ(resolveSchedulingKnobs(f, {}, policy).dsCapTdmPerCap, kPolicyDsCapTdmPerCap);
+    f.tdmScaleTensors = true;
+    const ResolvedSchedulingKnobs r = resolveSchedulingKnobs(f, {}, policy);
+    EXPECT_EQ(r.dsCapTdmPerCap, kPolicyDsCapTdmPerCapScaled);
+    EXPECT_EQ(r.dsCapTdmBeginCycles, 602);  // the window itself is unchanged
+
+    SchedulingKnobOverrides o;
+    o.dsCapTdmPerCap = 1;  // a user value still wins
+    EXPECT_EQ(resolveSchedulingKnobs(f, o, policy).dsCapTdmPerCap, 1);
+    StinkyAsmModule::ModuleOptions opts{};
+    EXPECT_EQ(opts.TdmScaleTensors, 0);
+}
