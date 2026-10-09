@@ -6,6 +6,10 @@
 from __future__ import annotations
 
 import json
+import os
+import pathlib
+import subprocess
+import sys
 
 import pytest
 
@@ -249,3 +253,109 @@ def test_export_keeps_one_metric_where_a_contribution_measured_several(tmp_path)
     store.add(tmp_path / "ds", *store.from_collection(_collection(tmp_path, "one")))
     rows = store.export_rows(tmp_path / "ds", purposes=["training"], source="time")
     assert sorted(r["kernel"] for r in rows) == ["k0", "k1", "k2", "m"]
+
+
+#: projects/hipdnn/tools, so `python -m uhd_gen.dataset` runs from the checkout.
+TOOLS = pathlib.Path(__file__).resolve().parents[3]
+
+
+def _dataset_command(*arguments):
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [str(TOOLS), env.get("PYTHONPATH")])
+    )
+    return subprocess.run(
+        [sys.executable, "-m", "uhd_gen.dataset", *map(str, arguments)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+def test_add_and_export_round_trip_on_the_command_line(tmp_path):
+    dataset = tmp_path / "ds"
+    added = _dataset_command(
+        "add",
+        "--into",
+        dataset,
+        "--collection",
+        _collection(tmp_path, "train"),
+        _collection(tmp_path, "other"),
+    )
+    assert added.returncode == 0, added.stderr
+    assert [c["added"] for c in json.loads(added.stdout)["contributions"]] == [
+        True,
+        True,
+    ]
+    held = _dataset_command(
+        "add",
+        "--into",
+        dataset,
+        "--collection",
+        _collection(tmp_path, "held"),
+        "--purpose",
+        "eval",
+    )
+    assert held.returncode == 0, held.stderr
+
+    out = tmp_path / "held.json"
+    exported = _dataset_command(
+        "export", "--from", dataset, "--out", out, "--purpose", "eval"
+    )
+    assert exported.returncode == 0, exported.stderr
+    assert json.loads(exported.stdout)["rows"] == 3
+    original = json.loads((tmp_path / "held" / "corpus.json").read_text())
+    assert json.loads(out.read_text()) == original, "rows as the source wrote them"
+
+    missing = _dataset_command(
+        "export", "--from", dataset, "--out", out, "--contribution", "absent"
+    )
+    assert missing.returncode == 1 and "no contribution" in missing.stderr
+
+
+def test_one_contribution_id_cannot_name_several_collections(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        store.main(
+            [
+                "--into",
+                str(tmp_path / "ds"),
+                "--contribution-id",
+                "x",
+                "--collection",
+                str(_collection(tmp_path, "a")),
+                str(_collection(tmp_path, "b")),
+            ]
+        )
+    assert "give one --collection" in capsys.readouterr().err
+
+
+def test_rows_that_disagree_on_a_column_type_are_refused_whole(tmp_path):
+    dataset = tmp_path / "ds"
+    store.add(dataset, *store.from_collection(_collection(tmp_path, "a")))
+    before = (dataset / store.DATA_FILE).read_bytes()
+    clash = _collection(
+        tmp_path,
+        "b",
+        rows=[
+            {
+                "benchmark": "b-g0",
+                "device": "d0",
+                "arch": "gfx942",
+                "kernel": "k0",
+                "knob_settings": "{}",
+                "avgTimeMs": {"not": "a number"},
+            }
+        ],
+    )
+    with pytest.raises(store.DatasetError, match="one Parquet table"):
+        store.add(dataset, *store.from_collection(clash))
+    assert (dataset / store.DATA_FILE).read_bytes() == before
+    assert len(store.read_manifest(dataset)["contributions"]) == 1
+
+
+def test_a_held_lock_times_out_naming_itself(tmp_path):
+    (tmp_path / ".lock").mkdir()
+    with pytest.raises(store.DatasetError, match="held for over"):
+        with store._locked(tmp_path, timeout_s=0.0):
+            pass
+    assert (tmp_path / ".lock").is_dir(), "another writer's lock is left alone"

@@ -65,8 +65,12 @@ def _predict(engine, metric, values):
 
 def test_a_wrong_pick_costs_the_shortfall_of_the_engine_it_chose(monkeypatch, tmp_path):
     measured = [
-        _measured(tmp_path / "a.csv", "A", "tflops", [("g1", 100, 1.0), ("g2", 50, 2.0)]),
-        _measured(tmp_path / "b.csv", "B", "tflops", [("g1", 80, 1.2), ("g2", 200, 0.5)]),
+        _measured(
+            tmp_path / "a.csv", "A", "tflops", [("g1", 100, 1.0), ("g2", 50, 2.0)]
+        ),
+        _measured(
+            tmp_path / "b.csv", "B", "tflops", [("g1", 80, 1.2), ("g2", 200, 0.5)]
+        ),
     ]
     predictions = _predict("A", "tflops", {"g1": 90, "g2": 90}) + _predict(
         "B", "tflops", {"g1": 70, "g2": 60}
@@ -77,7 +81,9 @@ def test_a_wrong_pick_costs_the_shortfall_of_the_engine_it_chose(monkeypatch, tm
     assert by_graph["g1"]["agree"] and by_graph["g1"]["regret"] == 0
     assert by_graph["g2"]["predicted_winner"] == "A"
     assert by_graph["g2"]["measured_winner"] == "B"
-    assert by_graph["g2"]["regret"] == pytest.approx(0.75), "50 TFLOPS where 200 was there"
+    assert by_graph["g2"]["regret"] == pytest.approx(
+        0.75
+    ), "50 TFLOPS where 200 was there"
     assert by_graph["g2"]["regime"] == "long"
 
 
@@ -90,7 +96,9 @@ def test_lower_wins_for_time_and_rows_count_only_under_their_own_metric(
         _measured(tmp_path / "a2.csv", "A", "time", [("g1", 300, 2.0)]),
         _measured(tmp_path / "b2.csv", "B", "time", [("g1", 400, 1.0)]),
     ]
-    predictions = _predict("A", "time", {"g1": 0.5}) + _predict("B", "time", {"g1": 1.5})
+    predictions = _predict("A", "time", {"g1": 0.5}) + _predict(
+        "B", "time", {"g1": 1.5}
+    )
     code, rows = _run(monkeypatch, tmp_path, predictions, measured)
     assert code == 0 and len(rows) == 1
     assert rows[0]["measured_winner"] == "B" and rows[0]["predicted_winner"] == "A"
@@ -99,7 +107,9 @@ def test_lower_wins_for_time_and_rows_count_only_under_their_own_metric(
 
 def test_nothing_contested_is_a_failure_not_an_empty_pass(monkeypatch, tmp_path):
     measured = [_measured(tmp_path / "a.csv", "A", "tflops", [("g1", 100, 1.0)])]
-    predictions = _predict("A", "tflops", {"g1": 90}) + _predict("B", "tflops", {"g1": 95})
+    predictions = _predict("A", "tflops", {"g1": 90}) + _predict(
+        "B", "tflops", {"g1": 95}
+    )
     code, rows = _run(monkeypatch, tmp_path, predictions, measured)
     assert code == 1 and rows is None
 

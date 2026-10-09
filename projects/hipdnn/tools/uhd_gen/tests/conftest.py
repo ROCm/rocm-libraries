@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Fixtures shared by the uhd_gen suite."""
 import os
+import shutil
 import sys
 
 import pytest
@@ -20,6 +21,22 @@ def evaluator() -> str:
         return resolve_feature_evaluator()
     except ValueError as error:
         pytest.skip(str(error))
+
+
+def install_fake_bench(monkeypatch, respond) -> None:
+    """Installs `respond(command, environment, log_dir, ordinal, commands)` as hipdnn_bench.
+
+    `generate` gets every answer from `respond`, and `hipdnn_bench` resolves as if it were
+    installed. Every other executable resolves as it really does, so the feature evaluator is
+    found -- or a test needing it skips -- exactly as without the fake.
+    """
+    real_which = shutil.which
+
+    def which(name, *args, **kwargs):
+        return name if name == "hipdnn_bench" else real_which(name, *args, **kwargs)
+
+    monkeypatch.setattr("uhd_gen.generate._run_json", respond)
+    monkeypatch.setattr("uhd_gen.generate.shutil.which", which)
 
 
 _REPORTING_EVALUATOR = """\

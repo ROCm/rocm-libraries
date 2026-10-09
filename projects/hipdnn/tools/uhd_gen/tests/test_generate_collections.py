@@ -12,6 +12,7 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 from uhd_gen.provenance import snapshot_provenance
+from uhd_gen.tests.conftest import install_fake_bench
 
 UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
 KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
@@ -97,8 +98,7 @@ def world(tmp_path, monkeypatch):
             "timing_statistic": "robustMeanMs",
         }
 
-    monkeypatch.setattr("uhd_gen.generate._run_json", bench)
-    monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
+    install_fake_bench(monkeypatch, bench)
     return {"tree": tree, "graphs": graphs, "engine": engine, "root": tmp_path}
 
 
@@ -148,14 +148,15 @@ def _dataset(world, name, collections):
     return directory
 
 
-def _train(world, name, evaluator, *, graphs=None, collections=(), extra=()):
+def _train(
+    world, name, evaluator, *, graphs=None, collections=(), dataset=None, extra=()
+):
     from uhd_gen.__main__ import main
 
-    source = (
-        ["--graphs", str(graphs)]
-        if graphs
-        else ["--dataset", str(_dataset(world, name, collections))]
-    )
+    if graphs:
+        source = ["--graphs", str(graphs)]
+    else:
+        source = ["--dataset", str(dataset or _dataset(world, name, collections))]
     output = world["root"] / name
     code = main(
         [
@@ -243,6 +244,49 @@ def test_a_recorded_collection_trains_what_the_one_shot_run_would(world, evaluat
     )
     assert [c["path"] for c in manifest["collections"]] == [str(collection)]
     assert manifest["superseded_rows"] == 0
+
+
+def test_a_one_shot_runs_measurements_convert_into_a_dataset_that_trains_the_same(
+    world, evaluator
+):
+    """`dataset add --generation`: an old run's folder, not re-measured, is training data."""
+    from uhd_gen.dataset import store
+
+    code, one_shot = _train(world, "one_shot", evaluator, graphs=world["graphs"])
+    assert code == 0
+    entry, rows = store.from_generation(one_shot)
+    assert (entry["role"], entry["selector_revision"], entry["graph_count"]) == (
+        "predict_engine",
+        "provider-1",
+        GRAPHS,
+    )
+    assert entry["origin"] == {"kind": "generation", "path": str(one_shot.resolve())}
+    assert entry["collected_at"], "the first bench call's time"
+    dataset = world["root"] / "converted.dataset"
+    assert store.add(dataset, entry, rows)["rows"] == GRAPHS
+    calls = world["engine"]["calls"]
+    code, retrained = _train(world, "retrained", evaluator, dataset=dataset)
+    assert code == 0 and world["engine"]["calls"] == calls, "nothing was measured again"
+    for name in ("train.json", "corpus.json"):
+        a = json.loads((one_shot / name).read_text(encoding="utf-8"))
+        b = json.loads((retrained / name).read_text(encoding="utf-8"))
+        assert sorted(r["benchmark"] for r in a) == sorted(
+            r["benchmark"] for r in b
+        ), name
+
+
+def test_a_generation_of_another_role_is_not_converted(world, evaluator, tmp_path):
+    from uhd_gen.dataset import store
+
+    code, one_shot = _train(world, "one_shot", evaluator, graphs=world["graphs"])
+    manifest = one_shot / "generation_manifest.json"
+    recorded = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest.write_text(
+        json.dumps({**recorded, "promotion_role": "sort_kernel_catalog"}),
+        encoding="utf-8",
+    )
+    with pytest.raises(store.DatasetError, match="only engine-immediate"):
+        store.from_generation(one_shot)
 
 
 def test_the_newest_measurement_of_a_graph_on_a_device_is_the_label(world, evaluator):

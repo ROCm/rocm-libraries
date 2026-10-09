@@ -19,6 +19,7 @@ from uhd_gen.sizing import (
     size_for,
     stratified_test_set,
 )
+from uhd_gen.tests.conftest import install_fake_bench
 
 UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
 KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
@@ -212,8 +213,7 @@ def store(tmp_path, monkeypatch):
             "timing_statistic": "robustMeanMs",
         }
 
-    monkeypatch.setattr("uhd_gen.generate._run_json", bench)
-    monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
+    install_fake_bench(monkeypatch, bench)
 
     def collect(name, device, collected_at):
         from uhd_gen.__main__ import main
