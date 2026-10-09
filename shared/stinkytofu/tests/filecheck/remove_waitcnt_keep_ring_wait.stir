@@ -1,0 +1,17 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyRemoveWaitCntPass --print-output
+#
+# A wait carrying LDS ring rows is pinned by its writer: no ring frame names the
+# slots read after it, so wait-count insertion could not rebuild it. It stays;
+# the untagged wait after it is stripped as usual.
+#
+# CHECK-LABEL: @remove_waitcnt_keeps_ring_wait
+# CHECK: s_wait_tensorcnt
+# CHECK-SAME: mod.lds_ring
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @remove_waitcnt_keeps_ring_wait() {
+^entry:
+  "st.s_wait_tensorcnt"(0) { mod.lds_ring = { accesses = [0,0,2,0,0,0,0,2,1,0], advances = [] } }
+  "st.s_wait_tensorcnt"(0)
+  v0 = "st.v_add_f32"(v1, v2)
+}

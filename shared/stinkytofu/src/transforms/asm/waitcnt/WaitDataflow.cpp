@@ -143,6 +143,9 @@ static_assert(CK_Count == WaitCountSpec::kCounterCount,
               "WaitCountSpec::sources must match CounterKind");
 
 WaitReconstruction waitReconstruction(const StinkyInstruction& inst) {
+    // The writer pins a wait with LDS ring rows where no frame names the slots
+    // read after it (a loop entry that skips trips); the ring cannot rebuild it.
+    if (inst.getModifier<LdsRingData>() != nullptr) return WaitReconstruction::None;
     switch (inst.getUnifiedOpcode()) {
         // One counter each, all emitted by emitOneSpec().
         case GFX::s_wait_dscnt:
@@ -1088,9 +1091,10 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
 
     // Conservative MemTokenData fallbacks. An untagged anchor or
     // untagged producer means we cannot prove disjointness, so we
-    // force the matching counter to 0.
-    if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
-        anyOpInFlight(CK_Tensor)) {
+    // force the matching counter to 0. A ring anchor's rows already say
+    // what it waits for (scanRingDeps drains producers without rows).
+    if (isTensorAnchor(*inst) && !frameAwareTensorAnchor &&
+        inst->getModifier<MemTokenData>() == nullptr && anyOpInFlight(CK_Tensor)) {
         required[CK_Tensor] = 0;
     }
     if ((isLdsWriterAnchor(*inst) || isBarrier(*inst)) &&
