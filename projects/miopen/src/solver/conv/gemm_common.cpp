@@ -25,10 +25,9 @@
  *******************************************************************************/
 
 #include <miopen/algorithm.hpp>
+#include <miopen/conv/asm_implicit_gemm.hpp>
 #include <miopen/env.hpp>
 #include <miopen/solver/gemm_common.hpp>
-
-#include <limits>
 
 // Set to 0 to disable the small-batch NHWC backward GEMM exclusion.
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_GEMM_NHWC_BACKWARD_SMALL_BATCH)
@@ -88,12 +87,11 @@ bool IsSmallBatchNhwcBackwardExcluded(const std::string& device_name,
     if(!miopen::all_of(conv.GetConvStrides(), [](auto v) { return v == 1; }) ||
        !miopen::all_of(conv.GetConvPads(), [](auto v) { return v == 0; }))
         return false;
-    // Bound the exclusion to the size range where a fast implicit-GEMM alternative exists. Below
-    // the 32-bit byte-offset addressing limit the ASM solver is applicable and competitive; above
-    // it the ASM solver drops out and the remaining fallback is much slower, so keep GEMM there.
-    constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
-    return problem.GetInSize() <= max_int32 && problem.GetOutSize() <= max_int32 &&
-           problem.GetWeightsSize() <= max_int32;
+    // Only exclude GEMM where the ASM Xdlops fallback can address the tensors, so selection
+    // reverts to a fast implicit-GEMM solver. Reuses ASM's own size gate, which is direction-aware:
+    // wrw drops out above the 32-bit byte-offset limit (keep GEMM), while bwd-data stays
+    // addressable via batch split.
+    return !igemm_tensor_size_exceeds_asm_gtc_addressing(problem);
 }
 
 } // namespace gemm
