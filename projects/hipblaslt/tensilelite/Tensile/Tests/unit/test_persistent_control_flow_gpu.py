@@ -73,22 +73,37 @@ def test_ordinary_srd_routes_general_batch_and_gsu(
         pytest.fail("Ordinary writer emission must not request a persistent strategy")
 
     monkeypatch.setattr(TileProcessingStrategy, "find", reject_strategy_lookup)
+
+    # Mock DataType for ComputeDataType and DestDataType
+    mock_data_type = SimpleNamespace(numRegisters=lambda: 1)
+
     kernel = {
         "TileProcessingStrategy": "None", "GlobalSplitU": gsu,
         "GlobalSplitUAlgorithm": "MultipleBuffer", "_GlobalAccumulation": "MultipleBuffer",
-        "ProblemType": {"SupportUserArgs": True},
+        "ProblemType": {
+            "SupportUserArgs": True,
+            "ComputeDataType": mock_data_type,
+            "DestDataType": mock_data_type,
+        },
     }
 
     @contextmanager
     def alloc_tmp(*args, **kwargs):
         yield ContinuousRegister(32, 1)
 
+    # Create a mock sgprPool for allocPostLoopSrd to use
+    sgpr_pool = RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False)
+    sgpr_pool.add(0, 64, "test registers")
+    sgpr_pool.checkOut(16, "reserved for named sgprs")
+
     writer = SimpleNamespace(
-        states=SimpleNamespace(kernel=kernel), allocTmpSgpr=alloc_tmp,
+        states=SimpleNamespace(kernel=kernel, bpr=4), allocTmpSgpr=alloc_tmp,
         shiftSrd=lambda ch: Module("gfx950 requires no SRD shift"),
         cmpNamedArgTypeEq=lambda module, value, comment: module.add(
             SCmpEQU32(src0=sgpr("ArgType"), src1=value, comment=comment)),
-        sgprs={"GSU": 6, "ArgType": 7, "AddressD": 8, "SrdD": 12},
+        sgprs={"GSU": 6, "ArgType": 7, "AddressD": 8, "SrdD": 12, "StrideD1J": 13, "SizeJ": 14},
+        sgprPool=sgpr_pool,
+        gsuMaskHex=lambda kernel: "0x3fff",
     )
     module = ".set BufferOOB, 0xffffffff\n.set Srd127_96, 0\n"
     module += str(KernelWriterAssembly.allocPostLoopSrd(writer, "D", kernel))

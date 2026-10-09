@@ -2016,7 +2016,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(ValueSet("BufferOOB", 0xfffff000, format=1))
       # Set BufferOOB to 0xfffff000 instead of 0xffffffff (reserving 4KB) to prevent
       # overflows from instruction offsets (max 4095) during memory access.
-
+      
       srdUpperValue = SrdUpperValue(self.states.version)
       module.addComment2("Bits 127:96 of SRD.\n" + srdUpperValue.desc())
       module.add(ValueSet("Srd127_96", srdUpperValue.getValue(), format=1))
@@ -14422,6 +14422,44 @@ class KernelWriterAssembly(KernelWriter):
   # globalWriteWorkGroupInit:
   ##############################################################################
 
+  def _calculateBufferSize(self, kernel, dataType, strideName, tmpsgprSize, srdName, fallbackValue):
+    """
+    Calculate buffer size as stride * N * bpe and conditionally set SRD size.
+
+    Computes: size_bytes = stride * SizeJ * bpe
+    Sets SRD size to actual size if it fits in 32-bit, otherwise uses fallback.
+
+    Args:
+        kernel: Kernel configuration dictionary
+        dataType: DataType object (e.g., kernel["ProblemType"]["DestDataType"])
+        strideName: Name of stride sgpr (e.g., "StrideD1J", "StrideC1J")
+        tmpsgprSize: Temporary sgpr pair for size calculation
+        srdName: Name of SRD register to set size field (e.g., "SrdTD+2", "SrdD+2")
+        fallbackValue: Value to use if size doesn't fit in 32-bit (e.g., "BufferLimit", "BufferOOB")
+
+    Returns:
+        Module containing the buffer size calculation instructions
+    """
+    module = Module("_calculateBufferSize")
+
+    # Calculate bpe using numBytes() - bytes per element
+    bpe = dataType.numBytes()
+
+    # Extract channel name (C, D, TD) from strideName for comment
+    ch = strideName.replace("Stride", "").replace("1J", "")
+
+    module.addComment1("Calculate %s buffer size = %s * N * bpe (accounts for padding)" % (ch, strideName))
+    module.add(SMulI32(dst=sgpr(tmpsgprSize+0), src0=sgpr(strideName), src1=sgpr("SizeJ"),
+                       comment="size = %s * N" % strideName))
+    module.add(SMulHIU32(dst=sgpr(tmpsgprSize+1), src0=sgpr(strideName), src1=sgpr("SizeJ")))
+    module.add(SLShiftLeftB64(dst=sgpr(tmpsgprSize, 2), src=sgpr(tmpsgprSize, 2),
+                              shiftHex=log2(bpe), comment="size_bytes = %s * N * bpe" % strideName))
+    module.add(SCmpEQU32(src0=sgpr(tmpsgprSize+1), src1=0, comment="Does size fit in 32-bit?"))
+    module.add(SCSelectB32(dst=sgpr(srdName), src0=sgpr(tmpsgprSize+0), src1=fallbackValue,
+                          comment="%s size = (fits_32bit) ? actual_size : %s" % (srdName, fallbackValue)))
+
+    return module
+
   def SrdTDInit(self, kernel):
     module = Module("SrdTDInit")
     tmpsgpr0 = self.sgprPool.checkOut(1, tag="SrdTDInit_tmpsgpr0", preventOverflow=False)
@@ -14430,14 +14468,51 @@ class KernelWriterAssembly(KernelWriter):
     tmpsgpr3 = self.sgprPool.checkOutAligned(2, 4, tag="SrdTDInit_tmpsgpr3", preventOverflow=False)
     module.addComment0("calculate SrdTD address")
 
-    module.add(SMovB32(dst=sgpr("SrdTD+2"), src="BufferOOB"))
+    # StreamK and GSU>1 use workspace buffers (tile-sized), not full matrix
+    # StreamK: compile-time check (kernel["StreamK"] != 0)
+    # GSU: runtime check (GSU split factor > 1 from gemmcount kernel parameter)
+    # Use BufferOOB for workspace, BufferLimit (stride-based) for regular GEMM
+    if kernel.get("StreamK", 0) != 0:
+      # StreamK always uses workspace buffers
+      module.addComment1("StreamK: use BufferOOB for workspace buffers")
+      module.add(SMovB32(dst=sgpr("SrdTD+2"), src="BufferOOB"))
+    elif kernel["GlobalSplitU"] != 0:
+      # GSU enabled: check runtime GSU split factor
+      UseBufferOOBLabel = Label(label="SrdTDInit_UseBufferOOB", comment="")
+      SrdTDInitEndLabel = Label(label="SrdTDInit_End", comment="")
+      tmpSgprGSU = self.sgprPool.checkOut(1, tag="SrdTDInit_tmpSgprGSU", preventOverflow=False)
+
+      module.addComment1("Check runtime GSU split factor")
+      module.add(SAndB32(dst=sgpr(tmpSgprGSU), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
+      module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU), src1=1, comment="GSU == 1 ?"))
+      module.add(SCBranchSCC0(labelName=UseBufferOOBLabel.getLabelName(), comment="If GSU > 1, use BufferOOB"))
+
+      # GSU == 1: Regular GEMM, use stride-based sizing
+      module.addComment1("GSU=1:")
+      module.add(self._calculateBufferSize(kernel, kernel["ProblemType"]["DestDataType"],
+                                           "StrideD1J", tmpsgpr2, "SrdTD+2", "BufferLimit"))
+      module.add(SBranch(labelName=SrdTDInitEndLabel.getLabelName()))
+
+      # GSU > 1: Use BufferOOB for workspace
+      module.add(UseBufferOOBLabel)
+      module.addComment1("GSU>1: use BufferOOB for workspace buffers")
+      module.add(SMovB32(dst=sgpr("SrdTD+2"), src="BufferOOB"))
+
+      module.add(SrdTDInitEndLabel)
+      self.sgprPool.checkIn(tmpSgprGSU)
+    else:
+      # No StreamK, No GSU: Regular GEMM, use stride-based sizing
+      module.addComment1("Regular GEMM:")
+      module.add(self._calculateBufferSize(kernel, kernel["ProblemType"]["DestDataType"],
+                                           "StrideD1J", tmpsgpr2, "SrdTD+2", "BufferLimit"))
+
     module.add(SMovB32(dst=sgpr("SrdTD+3"), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
 
     module.add(SMulI32(dst=sgpr(tmpsgpr0), src0="MT1", src1=sgpr("WorkGroup1"), comment=""))
     module.add(SMulHIU32(dst=sgpr(tmpsgpr1+1), src0=sgpr(tmpsgpr0), src1=sgpr("StrideD1J"), comment=""))
     module.add(SMulI32(dst=sgpr(tmpsgpr1+0), src0=sgpr(tmpsgpr0), src1=sgpr("StrideD1J"), comment=""))
 
-    bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()) # self.states.bpeCinternal
+    bpe = kernel["ProblemType"]["DestDataType"].numBytes()
     module.add(SLShiftLeftB64(dst=sgpr(tmpsgpr1,2), src=sgpr(tmpsgpr1,2), shiftHex=log2(bpe), comment="scale by bpe"))
 
     SrdTDGeneralBatched = Label(label="SrdTDInit_GeneralBatched", comment="")
@@ -14744,7 +14819,66 @@ class KernelWriterAssembly(KernelWriter):
     module.add(GeneralBatchedGemmSrdInitiation)
     module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=0, comment="init SRD to 0" ))
     module.add(GeneralBatchedGemmSrdInitiation_End)
-    module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src="BufferOOB"))
+
+    # StreamK and GSU>1 use workspace buffers (tile-sized), not full matrix
+    # StreamK: compile-time check (kernel["StreamK"] != 0)
+    # GSU: runtime check (GSU split factor > 1 from gemmcount kernel parameter)
+    # Use BufferOOB for workspace, BufferLimit (stride-based) for regular GEMM
+    if ch in ["C", "D"]:
+      if kernel.get("StreamK", 0) != 0:
+        # StreamK always uses workspace buffers
+        module.addComment1("StreamK: use BufferOOB for %s workspace buffer" % ch)
+        module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src="BufferOOB"))
+      elif kernel["GlobalSplitU"] != 0:
+        # GSU enabled: check runtime GSU split factor
+        UseBufferOOBLabel = Label(label="allocPostLoopSrd%s_UseBufferOOB"%ch, comment="")
+        PostLoopSrdEndLabel = Label(label="allocPostLoopSrd%s_End"%ch, comment="")
+        tmpSgprGSU = self.sgprPool.checkOut(1, tag="allocPostLoopSrd%s_tmpSgprGSU"%ch, preventOverflow=False)
+        tmpsgprSize = self.sgprPool.checkOutAligned(2, 2, tag="Srd%s_size"%ch, preventOverflow=False)
+
+        module.addComment1("Check runtime GSU split factor for %s" % ch)
+        module.add(SAndB32(dst=sgpr(tmpSgprGSU), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
+        module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU), src1=1, comment="GSU == 1 ?"))
+        module.add(SCBranchSCC0(labelName=UseBufferOOBLabel.getLabelName(), comment="If GSU > 1, use BufferOOB"))
+
+        # GSU == 1: Regular GEMM, use stride-based sizing
+        if ch == "C":
+          dataType = kernel["ProblemType"]["ComputeDataType"]
+          stride = "StrideC1J"
+        else:
+          dataType = kernel["ProblemType"]["DestDataType"]
+          stride = "StrideD1J"
+
+        module.addComment1("GSU=1:")
+        module.add(self._calculateBufferSize(kernel, dataType, stride, tmpsgprSize,
+                                             "Srd%s+2"%ch, "BufferOOB"))
+        module.add(SBranch(labelName=PostLoopSrdEndLabel.getLabelName()))
+
+        # GSU > 1: Use BufferOOB for workspace
+        module.add(UseBufferOOBLabel)
+        module.addComment1("GSU>1: use BufferOOB for %s workspace buffer" % ch)
+        module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src="BufferOOB"))
+
+        module.add(PostLoopSrdEndLabel)
+        self.sgprPool.checkIn(tmpSgprGSU)
+        self.sgprPool.checkIn(tmpsgprSize)
+      else:
+        # No StreamK, No GSU: Regular GEMM, use stride-based sizing
+        tmpsgprSize = self.sgprPool.checkOutAligned(2, 2, tag="Srd%s_size"%ch, preventOverflow=False)
+        if ch == "C":
+          dataType = kernel["ProblemType"]["ComputeDataType"]
+          stride = "StrideC1J"
+        else:
+          dataType = kernel["ProblemType"]["DestDataType"]
+          stride = "StrideD1J"
+
+        module.addComment1("Regular GEMM:")
+        module.add(self._calculateBufferSize(kernel, dataType, stride, tmpsgprSize,
+                                             "Srd%s+2"%ch, "BufferOOB"))
+        self.sgprPool.checkIn(tmpsgprSize)
+    else:
+      # For other buffers (not C/D), use BufferOOB
+      module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src="BufferOOB"))
     module.add(SMovB32(dst=sgpr("Srd%s+3"%ch), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
     module.add(self.shiftSrd(ch))
     module.addSpaceLine()
