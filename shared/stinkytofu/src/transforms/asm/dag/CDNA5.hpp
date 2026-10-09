@@ -3587,10 +3587,20 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 if (t0 == INT_MAX) t0 = totalWmma * latency;
                 const int freeCount = std::max(0, dsCount - gated);
                 const double span = std::max(1, dsIssueCapSpan());
-                dsPacePlan_ = planDsRelease(freeCount, 0, t0, dsReadPerCap() / span,
-                                            std::min(pace.dsCapTdmPerCap, dsReadPerCap()) / span,
-                                            {{pace.dsCapTdmBeginCycles - dsCapTdmCarryAge_,
-                                              pace.dsCapTdmEndCycles - dsCapTdmCarryAge_}});
+                // The first `lead` ungated loads stay ASAP (the WMMAs need them early); the rest
+                // are paced from the time those would have issued at the cap rate.
+                const int lead = std::clamp(pace.dsPaceLeadLoads, 0, freeCount);
+                const double maxRate = dsReadPerCap() / span;
+                const int tLead = maxRate > 0 ? static_cast<int>(std::ceil(lead / maxRate)) : 0;
+                std::vector<int> rest =
+                    planDsRelease(freeCount - lead, std::min(tLead, t0), t0, maxRate,
+                                  std::min(pace.dsCapTdmPerCap, dsReadPerCap()) / span,
+                                  {{pace.dsCapTdmBeginCycles - dsCapTdmCarryAge_,
+                                    pace.dsCapTdmEndCycles - dsCapTdmCarryAge_}});
+                if (!rest.empty() || freeCount == lead) {
+                    dsPacePlan_.assign(lead, 0);
+                    dsPacePlan_.insert(dsPacePlan_.end(), rest.begin(), rest.end());
+                }
             }
         }
 
