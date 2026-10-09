@@ -191,7 +191,7 @@ std::vector<std::pair<const char*, SdpaBwdTestCase>> maskRegimes()
 // The LSE normalizes the band's softmax and O is that softmax applied to V. The
 // masked positions contribute nothing, so a row that drops half its band still
 // sums to 1 rather than to the fraction it kept.
-TEST(SdpaBackwardInputs, ForwardOutputsNormalizeTheRecomputedSoftmax)
+TEST(TestSdpaBackwardInputs, ForwardOutputsNormalizeTheRecomputedSoftmax)
 {
     for(const auto& [name, tc] : maskRegimes())
     {
@@ -255,7 +255,7 @@ TEST(SdpaBackwardInputs, ForwardOutputsNormalizeTheRecomputedSoftmax)
 // The same invariant through the bf16 instantiation the shared fixture uses for
 // IntegrationGpuSdpaBwdBfp16. Q and K are bf16, so the recomputed scores carry
 // their rounding; the LSE stays float and still normalizes them.
-TEST(SdpaBackwardInputs, Bfloat16InputsStillNormalize)
+TEST(TestSdpaBackwardInputs, Bfloat16InputsStillNormalize)
 {
     const SdpaBwdTestCase tc({1, 2, 16, 8}, {1, 2, 16, 8}, std::nullopt, -1, 0, true);
     const ForwardOutputs<bfloat16> outputs(tc);
@@ -283,7 +283,7 @@ TEST(SdpaBackwardInputs, Bfloat16InputsStillNormalize)
 // Liveness control for the test above. The LSE belongs to one scale; evaluating
 // the same rows at a different scale must leave the sum far from 1, otherwise
 // ForwardOutputsNormalizeTheRecomputedSoftmax would pass on any LSE at all.
-TEST(SdpaBackwardInputs, AMismatchedScaleLeavesTheSumFarFromOne)
+TEST(TestSdpaBackwardInputs, AMismatchedScaleLeavesTheSumFarFromOne)
 {
     const SdpaBwdTestCase tc({1, 2, 16, 8}, {1, 2, 16, 8});
     const ForwardOutputs<float> outputs(tc);
@@ -308,7 +308,7 @@ TEST(SdpaBackwardInputs, AMismatchedScaleLeavesTheSumFarFromOne)
 
 // The helper forwards the test case's scale and band bounds to the reference
 // rather than defaulting them, so changing either changes the LSE it writes.
-TEST(SdpaBackwardInputs, ScaleAndBandBoundsReachTheReference)
+TEST(TestSdpaBackwardInputs, ScaleAndBandBoundsReachTheReference)
 {
     const SdpaBwdTestCase nomask({1, 2, 16, 8}, {1, 2, 16, 8});
     const SdpaBwdTestCase scaled({1, 2, 16, 8}, {1, 2, 16, 8}, 0.3535F);
