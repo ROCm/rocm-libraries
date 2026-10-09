@@ -6482,6 +6482,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               # reset local write offset in asm code as well
               module.add(self.localWriteResetOffsets(kernel, False, tensorParametersB["MX"]))
 
+        if ((kernel["DirectToLdsA"] or kernel["DirectToLdsB"])
+            and not (kernel["enableTDMA"] and kernel["enableTDMB"])
+            and self.isPrefetchAcrossPersistentEnabled(kernel)):
+          module.add(self.papDtlShiftTailLdsWriteBank(kernel, tensorParametersA, tensorParametersB))
+
       # tail: global read
       # Check out VGPR for DTVA
       vDtvResources = self.tailLoopAllocDTVVgpr(kernel, tensorParametersA, tensorParametersB)
@@ -6800,6 +6805,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if (kernel["enableTDMA"] and kernel["enableTDMB"]
             and self.isPrefetchAcrossPersistentEnabled(kernel)):
           module.add(self.papTdmShiftTailLdsBank(kernel, tensorParametersA, tensorParametersB))
+        elif ((kernel["DirectToLdsA"] or kernel["DirectToLdsB"])
+              and self.isPrefetchAcrossPersistentEnabled(kernel)):
+          module.add(self.papDtlShiftTailLdsReadBank(kernel, tensorParametersA, tensorParametersB))
 
       # tail: macs
       module.addComment1("tail loop: macs")
@@ -11965,6 +11973,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     assert False, "Should be overrided"
 
   def papDtlRestoreLdsBank(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def papDtlShiftTailLdsWriteBank(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def papDtlShiftTailLdsReadBank(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
   def papTdmShiftTailLdsBank(self, kernel, tPA, tPB) -> Module:
