@@ -333,6 +333,24 @@ def test_the_pass_does_not_run_below_optlevel_3():
     assert len(_barriers(root)) == 1
 
 
+def test_the_pass_preserves_barriers_for_the_single_loop_pgr_bypass():
+    """The linear token walk cannot model a branch that skips the main loop."""
+    toPGR1 = Label("toPGR1", "")
+    authored = SBarrier(comment="writer barrier for the single-loop path")
+    root = Module("kernelBody")
+    root.add(_branchTo(toPGR1, "single-loop bypass"))
+    root.add(_fill())
+    root.add(authored)
+    root.add(_read())
+    root.add(toPGR1)
+    root.add(_read())
+
+    _runPass(_waveParityKernel(), root)
+
+    assert [barrier for barrier in _barriers(root) if barrier is authored], \
+        "the pass rebuilt barriers despite the unmodelled toPGR1 control-flow join"
+
+
 def test_the_pass_runs_at_optlevel_0_for_a_decoupled_token_gate():
     """A TOKENS thick gate rebuilds barriers at any opt level."""
     kernel = _waveParityKernel(_StinkyTofuOptLevel=0, **_TOKEN_GATE_KEYS)
