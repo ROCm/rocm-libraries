@@ -6,11 +6,13 @@
 #include "hipblaslt-jit-gemm-internal.hpp"
 #include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-fs.hpp"
-#include "hipblaslt-jit-loader.hpp"
 #include "hipblaslt-jit-source-bundle.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include "rocblaslt-auxiliary.h"
 #include "rocblaslt_secure_env.hpp"
+#include <Tensile/AMDGPUPredicates.hpp>
+#include <Tensile/ContractionProblemPredicates.hpp>
+#include <Tensile/ContractionTaskPredicates.hpp>
 #include <Tensile/Tensile.hpp>
 
 #include <algorithm>
@@ -22,12 +24,206 @@
 
 namespace hipblaslt_ext::experimental::jit::hipkittens
 {
+    namespace detail
+    {
+        const std::vector<Kernel>& kernels()
+        {
+            static const std::vector<Kernel> value = [] {
+                const auto kernel = [](const std::string&       name,
+                                       const std::string&       kernelName,
+                                       rocisa::DataType         type,
+                                       std::vector<std::string> hipFlags,
+                                       uint32_t                 vgprs) {
+                    Kernel made;
+                    made.name       = name + ".hip";
+                    made.kind       = hipblaslt_jit::Artifact::Kind::Hip;
+                    made.bytes      = resources().source;
+                    made.processor  = hipblaslt_jit::Processor::gfx950;
+                    made.kernelName = kernelName;
+                    made.type       = type;
+                    made.hipFlags   = std::move(hipFlags);
+                    made.resources  = {84, 160000, vgprs, 0};
+                    return made;
+                };
+                // Both compile gemm_tn_256x256x64_gfx950.hip; HK_FP16 selects the FP16
+                // kernel name in that template. The resource counts are what the built
+                // kernel uses.
+                return std::vector<Kernel>{
+                    kernel("gemm_bf16_tn_256x256x64_gfx950",
+                           "HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi5",
+                           rocisa::DataType::BFloat16,
+                           {"-std=c++20", "-DKITTENS_CDNA4", "-w"},
+                           237),
+                    kernel("gemm_f16_tn_256x256x64_gfx950",
+                           "HK_gemm_f16_TN_MT256x256x64_W2x4_gfx950_abi5",
+                           rocisa::DataType::Half,
+                           {"-std=c++20", "-DKITTENS_CDNA4", "-DHK_FP16", "-w"},
+                           238)};
+            }();
+            return value;
+        }
+
+        namespace
+        {
+            template <typename P>
+            std::shared_ptr<P> predicate(decltype(P::value) value)
+            {
+                auto made   = std::make_shared<P>();
+                made->value = std::move(value);
+                return made;
+            }
+
+            template <typename P>
+            std::shared_ptr<P> sizePredicate(int64_t index, size_t value)
+            {
+                auto made   = std::make_shared<P>();
+                made->index = index;
+                made->value = value;
+                return made;
+            }
+        }
+
+        // Solves K > 0 and a multiple of 128, with M and N multiples of the 256
+        // tile. The custom kernel launches with the HIP kernel's arguments,
+        // threads and macro tile; sizeMapping is the rest of what TensileLite
+        // reads from a solution.
+        std::shared_ptr<TensileLite::ContractionSolution> Kernel::solution() const
+        {
+            using namespace TensileLite;
+            using namespace TensileLite::Predicates::Contraction;
+            using rocisa::DataType;
+            using Problem = ContractionProblemGemm;
+            // Every column, so a buffer-limit check accepts an offset anywhere in the
+            // matrix: the HIP kernel addresses each one with a single buffer descriptor.
+            constexpr size_t allColumns = 4294967295;
+
+            auto solution          = std::make_shared<ContractionSolution>();
+            solution->kernelName   = kernelName;
+            solution->solutionName = kernelName;
+
+            auto& problemType                      = solution->problemType;
+            problemType.operationIdentifier        = "Contraction_l_Alik_Bljk_Cijk_Dijk";
+            problemType.transA                     = true;
+            problemType.transB                     = false;
+            problemType.aType                      = type;
+            problemType.bType                      = type;
+            problemType.cType                      = type;
+            problemType.dType                      = type;
+            problemType.eType                      = type;
+            problemType.computeInputTypeA          = type;
+            problemType.computeInputTypeB          = type;
+            problemType.computeType                = DataType::Float;
+            problemType.highPrecisionAccumulate    = true;
+            problemType.biasSrcWhiteList           = {3};
+            problemType.biasDataTypeWhiteList      = {DataType::Float, type};
+            problemType.supportDeviceUserArguments = true;
+
+            const auto arg = [](CustomArgType type, CustomArgSemantic semantic) {
+                return CustomArgDefinition{type, semantic};
+            };
+            auto& custom = solution->customKernel;
+            custom.name  = kernelName;
+            custom.args  = {arg(CustomArgType::address, CustomArgSemantic::AddressA),
+                            arg(CustomArgType::address, CustomArgSemantic::AddressB),
+                            arg(CustomArgType::address, CustomArgSemantic::AddressC),
+                            arg(CustomArgType::address, CustomArgSemantic::AddressD),
+                            arg(CustomArgType::uint32, CustomArgSemantic::SizeFree0),
+                            arg(CustomArgType::uint32, CustomArgSemantic::SizeFree1),
+                            arg(CustomArgType::uint32, CustomArgSemantic::SizeSum),
+                            arg(CustomArgType::float32, CustomArgSemantic::Alpha),
+                            arg(CustomArgType::float32, CustomArgSemantic::Beta),
+                            arg(CustomArgType::uint32, CustomArgSemantic::StrideA0),
+                            arg(CustomArgType::uint32, CustomArgSemantic::StrideB0),
+                            arg(CustomArgType::uint32, CustomArgSemantic::StrideC0),
+                            arg(CustomArgType::uint32, CustomArgSemantic::StrideD0),
+                            arg(CustomArgType::uint32, CustomArgSemantic::StrideA1),
+                            arg(CustomArgType::uint32, CustomArgSemantic::StrideB1),
+                            arg(CustomArgType::uint32, CustomArgSemantic::StrideC1),
+                            arg(CustomArgType::uint32, CustomArgSemantic::StrideD1)};
+            custom.macrotile = {256, 256, 64};
+            custom.threads   = {512, 1, 1};
+            custom.grid
+                = {CustomGridSize::TilesXY, CustomGridSize::One, CustomGridSize::Batch};
+
+            auto& sizes                    = solution->sizeMapping;
+            sizes.waveNum                  = 8;
+            sizes.workGroupSize            = {16, 16, 1};
+            sizes.threadTile               = {4, 4, 1};
+            sizes.macroTile                = {256, 256, 1};
+            sizes.matrixInstruction        = {16, 16, 32, 1};
+            sizes.waveGroup                = {2, 4};
+            sizes.depthU                   = 64;
+            sizes.globalSplitUPGR          = 16;
+            sizes.globalSplitU             = 1;
+            sizes.workGroupMapping         = 8;
+            sizes.magicDivAlg              = 2;
+            sizes.globalAccumulation       = 2;
+            sizes.workGroupMappingXCC      = 1;
+            sizes.workGroupMappingXCCGroup = -1;
+            sizes.CUOccupancy              = -1;
+            sizes.PrefetchGlobalRead       = 1;
+            sizes.synchronizerSizePerWG    = 32768;
+            sizes.customMainLoopScheduling = -1;
+            sizes.NumLoadsCoalescedA       = 1;
+            sizes.NumLoadsCoalescedB       = 1;
+            sizes.VectorWidthA             = -1;
+            sizes.VectorWidthB             = -1;
+
+            solution->problemPredicate = std::make_shared<Predicates::And<Problem>>(
+                std::vector<std::shared_ptr<Predicates::Predicate<Problem>>>{
+                    sizePredicate<BoundSizeMultiple>(-1, 128),
+                    sizePredicate<Free0SizeMultiple>(0, 256),
+                    sizePredicate<Free1SizeMultiple>(0, 256),
+                    predicate<OperationIdentifierEqual>(problemType.operationIdentifier),
+                    predicate<BiasDataTypeWhiteList>(problemType.biasDataTypeWhiteList),
+                    predicate<GateResidualDataTypeWhiteList>({}),
+                    predicate<BiasSrcWhiteList>(problemType.biasSrcWhiteList),
+                    predicate<AmaxDCheck>(false),
+                    predicate<TypesEqual>({type, type, type, type, type, type}),
+                    predicate<HighPrecisionAccumulateEqual>(true),
+                    predicate<ActivationCheck>(ActivationType::None),
+                    predicate<ActivationComputeTypeEqual>(DataType::Float),
+                    predicate<ActivationNoGuardEqual>(false),
+                    predicate<UseGradientEqual>(false),
+                    predicate<UseBiasCheck>(0),
+                    predicate<UseEEqual>(false),
+                    predicate<UseGateResidualEqual>(false),
+                    predicate<DataTypeEEqual>(type),
+                    predicate<StridedBatchedEqual>(true),
+                    predicate<GroupedGemmEqual>(false),
+                    predicate<UseScaleABCheck>(""),
+                    predicate<UseScaleCDCheck>(false),
+                    predicate<UseScaleAlphaVecCheck>(0),
+                    predicate<Sparse>(0),
+                    predicate<F32XdlMathOpEqual>(DataType::Float),
+                    predicate<SupportDeviceUserArguments>(true),
+                    predicate<SwizzleTensorA>(false),
+                    predicate<SwizzleTensorB>(false),
+                    predicate<FusedGemmA2A>(false),
+                    predicate<MXBlockA>(0),
+                    predicate<MXBlockB>(0),
+                    predicate<LeadingFree0SizesGreaterOrEqual>(1),
+                    predicate<LeadingFree1SizesGreaterOrEqual>(1),
+                    predicate<KernelLanguageCompatible>(KernelLanguage::Assembly),
+                    predicate<BufferLoadOffsetLimitCheck>({0, 0, allColumns, allColumns}),
+                    predicate<BufferLoadOffsetLimitCheck_Beta>(allColumns),
+                    predicate<BufferStoreOffsetLimitCheck>(allColumns),
+                    predicate<GlobalSplitUCheckMinK>({32, 1}),
+                    predicate<WorkgroupMappingXCCCheck>({1, -1}),
+                    sizePredicate<SizeGreaterThan>(3, 0)});
+            solution->hardwarePredicate
+                = std::make_shared<Predicates::IsSubclass<Hardware, AMDGPU>>(
+                    std::make_shared<Predicates::GPU::ProcessorEqual>(processor));
+            solution->taskPredicate = std::make_shared<LaunchLimits>();
+            return solution;
+        }
+    }
+
     namespace
     {
         namespace fs = std::filesystem;
         using hipblaslt_jit::Stage;
         using hipblaslt_jit::Status;
-        using Master = TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>;
 
         constexpr size_t fileLimit = size_t(1) << 20;
         // The kernels address each tensor with 32-bit byte offsets.
@@ -179,15 +375,19 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             return {};
         }
 
-        // The target's variants whose entry solves the request, or why none can.
-        Status candidates(const hipblaslt_jit::GemmRequest&    request,
-                          const hipblaslt_jit::DeviceTarget&    target,
-                          std::vector<const detail::Variant*>&  found)
+        using Candidate
+            = std::pair<const detail::Kernel*, std::shared_ptr<TensileLite::ContractionSolution>>;
+
+        // The target's kernels whose solution solves the request, each with that
+        // solution, or why none can.
+        Status candidates(const hipblaslt_jit::GemmRequest& request,
+                          const hipblaslt_jit::DeviceTarget& target,
+                          std::vector<Candidate>&            found)
         {
             found.clear();
-            const auto& variants = detail::resources().variants;
-            if(std::none_of(variants.begin(), variants.end(), [&](const detail::Variant& variant) {
-                   return variant.processor == target.processor;
+            const auto& kernels = detail::kernels();
+            if(std::none_of(kernels.begin(), kernels.end(), [&](const detail::Kernel& kernel) {
+                   return kernel.processor == target.processor;
                }))
                 return {Status::Code::TargetMismatch,
                         Stage::Configure,
@@ -211,32 +411,13 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                     return {Status::Code::NotSupported,
                             Stage::Generate,
                             "HipKittens kernels need tensors smaller than 4 GiB"};
-            for(const auto& variant : variants)
+            for(const auto& kernel : kernels)
             {
-                if(variant.processor != target.processor)
+                if(kernel.processor != target.processor)
                     continue;
-                std::shared_ptr<Master> library;
-                try
-                {
-                    library = hipblaslt_jit::loadGemmLibrary(variant.entry);
-                }
-                catch(const std::exception&)
-                {
-                    library.reset();
-                }
-                if(!library || library->solutions.empty())
-                    return {Status::Code::Failed,
-                            Stage::Generate,
-                            "The HipKittens entry of " + variant.name + " does not load"};
-                const bool matches = std::any_of(
-                    library->solutions.begin(),
-                    library->solutions.end(),
-                    [&](const auto& entry) {
-                        return entry.second && entry.second->problemPredicate
-                               && (*entry.second->problemPredicate)(problem);
-                    });
-                if(matches)
-                    found.push_back(&variant);
+                auto solution = kernel.solution();
+                if((*solution->problemPredicate)(problem))
+                    found.emplace_back(&kernel, std::move(solution));
             }
             if(found.empty())
                 return {Status::Code::NotSupported,
@@ -260,49 +441,30 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             }
 
             Status generate(const hipblaslt_jit::GenerationRequest&       request,
-                            std::vector<hipblaslt_jit::SourceCodeBundle>& solutions) const override
+                            std::vector<hipblaslt_jit::SourceCodeBundle>& bundles) const override
             {
-                solutions.clear();
-                std::vector<const detail::Variant*> found;
+                bundles.clear();
+                std::vector<Candidate> found;
                 if(auto status = candidates(request.request, request.target, found); !status.ok())
                     return status;
-                for(const auto* variant : found)
+                for(auto& [kernel, solution] : found)
                 {
-                    const auto& skip = request.excludeKernels;
-                    if(solutions.size() >= request.count
-                       || std::find(skip.begin(), skip.end(), variant->kernelName) != skip.end())
+                    if(bundles.size() >= request.count
+                       || hipblaslt_jit::excludedKernel(request.excludeKernels, kernel->kernelName))
                         continue;
                     hipblaslt_jit::SourceCodeBundle bundle;
-                    bundle.mainKernel        = variant->source;
-                    bundle.mainKernel.kind   = hipblaslt_jit::Artifact::Kind::Hip;
+                    bundle.mainKernel        = *kernel;
                     bundle.includes          = m_headers;
-                    bundle.hipFlags          = variant->hipFlags;
+                    bundle.hipFlags          = kernel->hipFlags;
                     bundle.target            = request.target;
                     bundle.codeObjectVersion = request.codeObjectVersion;
-                    bundle.kernelNames       = {variant->kernelName};
-                    solutions.push_back(std::move(bundle));
+                    bundle.solutions         = {std::move(solution)};
+                    bundles.push_back(std::move(bundle));
                 }
                 return {};
             }
 
-            std::vector<uint8_t>
-                solutionRecord(const hipblaslt_jit::SourceCodeBundle& source) const override
-            {
-                const auto* variant = match(source);
-                return variant ? variant->entry : std::vector<uint8_t>{};
-            }
-
         private:
-            const detail::Variant* match(const hipblaslt_jit::SourceCodeBundle& source) const
-            {
-                for(const auto& variant : detail::resources().variants)
-                    if(source.mainKernel.name == variant.source.name
-                       && source.mainKernel.bytes == variant.source.bytes
-                       && source.hipFlags == variant.hipFlags)
-                        return &variant;
-                return nullptr;
-            }
-
             std::vector<hipblaslt_jit::Artifact> m_headers;
             hipblaslt_jit::BackendInfo              m_info;
         };

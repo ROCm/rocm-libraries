@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MIT
 #
 # Human-written description of one HipKittens GEMM variant. The build does not
-# read this file and does not pass it to TensileLite. write_entries.cpp describes
-# this variant and writes its one-solution library entry; the backend compiles
-# Template with HipFlags.
+# read this file and does not pass it to TensileLite. hipblaslt-jit-hipkittens.cpp
+# builds this variant's solution in C++; the backend compiles Template with
+# HipFlags.
 Template: gemm_tn_256x256x64_gfx950.hip
 Architecture: gfx950
 HipFlags: [-std=c++20, -DKITTENS_CDNA4, -w]

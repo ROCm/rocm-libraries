@@ -12,6 +12,11 @@ option(HIPBLASLT_JIT_ENABLE_HIPKITTENS "Build the JIT HipKittens backend (develo
 if(NOT HIPBLASLT_JIT_ENABLE_HIPKITTENS)
     return()
 endif()
+if(HIPBLASLT_ENABLE_YAML)
+    message(WARNING "HIPBLASLT_JIT_ENABLE_HIPKITTENS: a build that reads YAML libraries has no "
+                    "JIT library; building without the HipKittens backend")
+    return()
+endif()
 
 set(_hk_gfx950 OFF)
 foreach(_hk_target IN LISTS GPU_TARGETS)
@@ -81,24 +86,25 @@ rocm_install(FILES "${hipkittens_SOURCE_DIR}/LICENSE"
     DESTINATION "${CMAKE_INSTALL_DOCDIR}/third-party/hipkittens"
     COMPONENT runtime)
 
-# The compiled-in resources: the header record, the HIP template and the
-# one-solution entries write_entries.cpp describes. TensileLite is not invoked.
+# The compiled-in resources: the header record and the HIP template. The
+# kernels and their solutions are C++ in hipblaslt-jit-hipkittens.cpp.
 set(_hk_source "${PROJECT_SOURCE_DIR}/library/src/amd_detail")
 set(_hk_variant_dir "${_hk_source}/hipkittens")
 set(_hk_resources "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-jit-hipkittens-resources.cpp")
-add_executable(hipblaslt-hipkittens-write-entries "${_hk_variant_dir}/write_entries.cpp")
-target_compile_features(hipblaslt-hipkittens-write-entries PRIVATE cxx_std_17)
+add_executable(hipblaslt-hipkittens-write-resources "${_hk_variant_dir}/write_resources.cpp")
+target_compile_features(hipblaslt-hipkittens-write-resources PRIVATE cxx_std_17)
+target_link_libraries(hipblaslt-hipkittens-write-resources PRIVATE ${hipblaslt_msgpack_target})
 add_custom_command(
     OUTPUT "${_hk_resources}" "${_hk_manifest}"
-    COMMAND $<TARGET_FILE:hipblaslt-hipkittens-write-entries>
+    COMMAND $<TARGET_FILE:hipblaslt-hipkittens-write-resources>
             --headers "${_hk_list}"
             --manifest "${_hk_manifest}"
             --source "${_hk_variant_dir}/gemm_tn_256x256x64_gfx950.hip"
             --output "${_hk_resources}"
-    DEPENDS hipblaslt-hipkittens-write-entries
+    DEPENDS hipblaslt-hipkittens-write-resources
             "${_hk_variant_dir}/gemm_tn_256x256x64_gfx950.hip"
             "${_hk_list}"
-    COMMENT "Writing the JIT HipKittens entries"
+    COMMENT "Writing the JIT HipKittens resources"
     VERBATIM)
 # hipblaslt is defined in another directory, which gets no rule for the output.
 add_custom_target(hipblaslt-hipkittens-resources DEPENDS "${_hk_resources}")

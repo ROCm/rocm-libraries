@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-// The HipKittens process backend on gfx950: compiled-in variants, a capturing
+// The HipKittens process backend on gfx950: compiled-in kernels, a capturing
 // stream that must not compile, one BF16 TN GEMM checked against a host sum of
 // ones, and a size the kernel does not solve.
 namespace jit = hipblaslt_ext::experimental::jit;
@@ -41,39 +41,52 @@ namespace
     constexpr uint16_t bf16K   = 0x4300;
     constexpr int      M = 256, N = 256, K = 128;
 
-    void checkResources()
+    void checkKernels()
     {
-        const auto& resources = hk::detail::resources();
+        const auto& kernels = hk::detail::kernels();
         {
-            INFO(("expected the BF16 and FP16 variants"));
-            REQUIRE((resources.variants.size() == 2));
+            INFO(("expected the BF16 and FP16 kernels"));
+            REQUIRE((kernels.size() == 2));
         }
         bool bf16 = false, fp16 = false;
-        for(const auto& variant : resources.variants)
+        for(const auto& kernel : kernels)
         {
             {
-                INFO(("variant is not gfx950"));
-                REQUIRE((variant.processor == hipblaslt_jit::Processor::gfx950));
+                INFO(("kernel is not gfx950"));
+                REQUIRE((kernel.processor == hipblaslt_jit::Processor::gfx950));
             }
             {
-                INFO((std::string(variant.kernelName) + " resources changed"));
-                REQUIRE((variant.resources.kernargBytes == 84 && variant.resources.ldsBytes == 160000
-                    && variant.resources.vgprSpills == 0));
+                INFO((kernel.kernelName + " resources changed"));
+                REQUIRE((kernel.resources.kernargBytes == 84 && kernel.resources.ldsBytes == 160000
+                    && kernel.resources.vgprSpills == 0));
             }
-            if(variant.kernelName == "HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi5")
+            {
+                INFO((kernel.name + " is not the compiled-in HIP template"));
+                REQUIRE((kernel.kind == hipblaslt_jit::Artifact::Kind::Hip
+                         && kernel.bytes == hk::detail::resources().source));
+            }
+            const auto solution = kernel.solution();
+            {
+                INFO((kernel.kernelName + " solution does not launch it"));
+                REQUIRE((solution->kernelName == kernel.kernelName
+                         && solution->customKernel.name == kernel.kernelName
+                         && solution->problemType.aType == kernel.type
+                         && solution->problemType.dType == kernel.type));
+            }
+            if(kernel.kernelName == "HK_gemm_bf16_TN_MT256x256x64_W2x4_gfx950_abi5")
             {
                 bf16 = true;
                 {
                     INFO(("BF16 VGPR count"));
-                    REQUIRE((variant.resources.vgprs == 237));
+                    REQUIRE((kernel.resources.vgprs == 237));
                 }
             }
-            else if(variant.kernelName == "HK_gemm_f16_TN_MT256x256x64_W2x4_gfx950_abi5")
+            else if(kernel.kernelName == "HK_gemm_f16_TN_MT256x256x64_W2x4_gfx950_abi5")
             {
                 fp16 = true;
                 {
                     INFO(("FP16 VGPR count"));
-                    REQUIRE((variant.resources.vgprs == 238));
+                    REQUIRE((kernel.resources.vgprs == 238));
                 }
             }
         }
@@ -81,7 +94,7 @@ namespace
             INFO(("missing a gfx950 kernel name"));
             REQUIRE((bf16 && fp16));
         }
-        std::cout << "PASS compiled-in gfx950 variants\n";
+        std::cout << "PASS compiled-in gfx950 kernels\n";
     }
 
     // A TN BF16 problem. A is stored transposed.
@@ -143,7 +156,7 @@ namespace
         Device marker(4);
         HIP(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
         HIP(hipMemsetAsync(marker.pointer, 0, 4, stream));
-        std::shared_ptr<const jit::detail::CompiledSolution> skipped;
+        hipblasLtMatmulHeuristicResult_t skipped{};
         const auto     started = std::chrono::steady_clock::now();
         const auto     status
             = jit::getJitAlgo(device, capturing, backend, 64 << 20, skipped, diagnostics);
@@ -195,10 +208,10 @@ namespace
         Device marker(4);
         HIP(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
         HIP(hipMemsetAsync(marker.pointer, 0, 4, stream));
-        std::shared_ptr<const jit::detail::CompiledSolution> found;
+        hipblasLtMatmulHeuristicResult_t result{};
         const auto     started = std::chrono::steady_clock::now();
         const auto     status
-            = jit::getJitAlgo(device, capturing, backend, 64 << 20, found, diagnostics);
+            = jit::getJitAlgo(device, capturing, backend, 64 << 20, result, diagnostics);
         const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                                  std::chrono::steady_clock::now() - started)
                                  .count();
@@ -210,8 +223,6 @@ namespace
             INFO(("capture hit status " + std::to_string(status)));
             REQUIRE((status == HIPBLAS_STATUS_SUCCESS));
         }
-        hipblasLtMatmulHeuristicResult_t result{};
-        BLAS(jit::getGemmAlgo(found, result, diagnostics));
         const int index = hipblaslt_ext::getIndexFromAlgo(result.algo);
         {
             INFO(("capture returned " + std::to_string(index) + ", not "
@@ -246,9 +257,8 @@ namespace
         BLAS(hipblasLtMatrixLayoutCreate(&lc, HIP_R_16BF, M, N, M));
         BLAS(hipblasLtMatrixLayoutCreate(&ld, HIP_R_16BF, M, N, M));
 
-        std::shared_ptr<const jit::detail::GemmRequest>      request;
-        std::shared_ptr<const jit::detail::CompiledSolution> solution;
-        std::shared_ptr<const hipblaslt_jit::Jit>            backend;
+        std::shared_ptr<const jit::detail::GemmRequest> request;
+        std::shared_ptr<const hipblaslt_jit::Jit>       backend;
         BLAS(hk::createBackend({}, backend, diagnostics));
         BLAS(jit::makeGemmRequest(handle,
                                   desc,
@@ -264,9 +274,8 @@ namespace
                                   ld,
                                   request,
                                   diagnostics));
-        BLAS(jit::getJitAlgo(device, request, backend, 64 << 20, solution, diagnostics));
         hipblasLtMatmulHeuristicResult_t result{};
-        BLAS(jit::getGemmAlgo(solution, result, diagnostics));
+        BLAS(jit::getJitAlgo(device, request, backend, 64 << 20, result, diagnostics));
         const int published = hipblaslt_ext::getIndexFromAlgo(result.algo);
         const auto kernel = hipblaslt_ext::getKernelNameFromAlgo(handle, result.algo);
         {
@@ -301,8 +310,8 @@ namespace
         }
         std::cout << "PASS BF16 TN 256x256x128\n";
 
-        std::shared_ptr<const jit::detail::GemmRequest>      small;
-        std::shared_ptr<const jit::detail::CompiledSolution> unsupported;
+        std::shared_ptr<const jit::detail::GemmRequest> small;
+        hipblasLtMatmulHeuristicResult_t                unsupported{};
         makeProblem(handle, desc, 128, N, K, small, diagnostics);
         {
             INFO(("M=128 was accepted"));
@@ -331,7 +340,7 @@ TEST_CASE("the HipKittens gfx950 backend", "[jit-gpu]")
     }
     hipblaslt_jit_test::LibraryScratch library("hipkittens");
 
-    checkResources();
+    checkKernels();
     hipblasLtHandle_t     handle{};
     hipblasLtMatmulDesc_t desc{};
     hipStream_t           stream{};

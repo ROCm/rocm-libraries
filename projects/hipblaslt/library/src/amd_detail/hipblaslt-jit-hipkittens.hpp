@@ -3,6 +3,7 @@
 #pragma once
 
 #include "hipblaslt-jit-code-object.hpp"
+#include <Tensile/ContractionSolution.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -52,24 +53,31 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
             uint32_t kernargBytes, ldsBytes, vgprs, vgprSpills;
         };
 
-        struct Variant
+        // One HipKittens kernel: the HIP main kernel, the flags it compiles
+        // with, and the TN GEMM it implements for one processor, with A, B, C,
+        // D and E of one data type.
+        struct Kernel : hipblaslt_jit::Artifact
         {
-            std::string              name;
             hipblaslt_jit::Processor processor;
             std::string              kernelName;
-            hipblaslt_jit::Artifact  source; // HIP main kernel
-            std::vector<uint8_t>     entry; // the one-solution library skeleton
+            rocisa::DataType         type;
             std::vector<std::string> hipFlags;
             KernelResources          resources;
-        };
 
-        // Written at build time by hipkittens/write_entries.cpp. manifest is the
-        // MessagePack record installed next to the headers.
+            // The solution an executable built from this kernel runs. Its
+            // WorkgroupMappingXCCCheck predicate reads the current HIP device.
+            HIPBLASLT_EXPORT std::shared_ptr<TensileLite::ContractionSolution> solution() const;
+        };
+        HIPBLASLT_EXPORT const std::vector<Kernel>& kernels();
+
+        // Written at build time by hipkittens/write_resources.cpp. manifest is
+        // the MessagePack record installed next to the headers, and source the
+        // HIP template every kernel compiles.
         struct Resources
         {
             std::vector<uint8_t>    manifest;
             std::vector<HeaderFile> headers;
-            std::vector<Variant>    variants;
+            std::vector<uint8_t>    source;
         };
         HIPBLASLT_EXPORT const Resources& resources();
     }

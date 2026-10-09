@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipblaslt-jit-gemm-internal.hpp"
-#include "hipblaslt-jit-loader.hpp"
+#include "hipblaslt-jit-library.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include "hipblaslt-jit-replay.hpp"
 #include "hipblaslt-jit-source-bundle.hpp"
-#include <algorithm>
+#include <Tensile/ContractionProblemPredicates.hpp>
 #include <stdexcept>
 
 namespace hipblaslt_ext::experimental::jit::replay
@@ -14,67 +14,81 @@ namespace hipblaslt_ext::experimental::jit::replay
     namespace
     {
         namespace fs = std::filesystem;
+        using hipblaslt_jit::Processor;
         using hipblaslt_jit::Stage;
         using hipblaslt_jit::Status;
+        using Solution = std::shared_ptr<TensileLite::ContractionSolution>;
 
-        bool sameFile(const hipblaslt_jit::Artifact& left, const hipblaslt_jit::Artifact& right)
+        // The processor of the assembly's `.amdgcn_target` directive, or gfx000.
+        Processor declaredProcessor(const hipblaslt_jit::Artifact& assembly)
         {
-            return left.name == right.name && left.kind == right.kind && left.bytes == right.bytes;
+            const std::string text(assembly.bytes.begin(), assembly.bytes.end());
+            const std::string directive = ".amdgcn_target \"amdgcn-amd-amdhsa--";
+            const auto        at        = text.find(directive);
+            if(at == std::string::npos)
+                return Processor::gfx000;
+            const auto begin  = at + directive.size();
+            const auto target = hipblaslt_jit::Target::fromTargetId(
+                text.substr(begin, text.find('"', begin) - begin));
+            return target ? target->processor : Processor::gfx000;
         }
 
-        bool sameSource(const hipblaslt_jit::SourceCodeBundle& left,
-                        const hipblaslt_jit::SourceCodeBundle& right)
+        // A copy of solution named <kernel><suffix> with workGroupMapping and,
+        // unless kMultiple is 0, a problem predicate that K is a multiple of it.
+        Solution variant(const Solution&    solution,
+                         const std::string& suffix,
+                         int                workGroupMapping,
+                         size_t             kMultiple)
         {
-            if(!sameFile(left.mainKernel, right.mainKernel) || left.hipFlags != right.hipFlags
-               || left.helpers.size() != right.helpers.size()
-               || left.includes.size() != right.includes.size())
-                return false;
-            for(size_t i = 0; i < left.helpers.size(); ++i)
-                if(!sameFile(left.helpers[i], right.helpers[i]))
-                    return false;
-            for(size_t i = 0; i < left.includes.size(); ++i)
-                if(!sameFile(left.includes[i], right.includes[i]))
-                    return false;
-            return true;
+            using Gemm      = TensileLite::ContractionProblemGemm;
+            using Predicate = TensileLite::Predicates::Predicate<Gemm>;
+            using And       = TensileLite::Predicates::And<Gemm>;
+            auto copy                          = hipblaslt_jit::copySolution(solution);
+            copy->solutionName                 = solution->kernelName + suffix;
+            copy->sizeMapping.workGroupMapping = workGroupMapping;
+            if(kMultiple)
+            {
+                std::vector<std::shared_ptr<Predicate>> terms;
+                if(const auto all = std::dynamic_pointer_cast<And>(solution->problemPredicate))
+                    terms = all->value;
+                else if(solution->problemPredicate)
+                    terms.push_back(solution->problemPredicate);
+                terms.push_back(
+                    std::make_shared<TensileLite::Predicates::Contraction::BoundSizeMultiple>(
+                        0, kMultiple));
+                copy->problemPredicate = std::make_shared<And>(terms);
+            }
+            return copy;
         }
 
         struct Replayed
         {
-            hipblaslt_jit::SourceCodeBundle source;
-            std::vector<uint8_t>            record;
+            fs::path  directory;
+            Processor processor = Processor::gfx000;
         };
 
         // Increment when a replayed solution can change.
-        constexpr uint32_t replayVersion = 1;
+        constexpr uint32_t replayVersion = 2;
 
         class ReplayBackend final : public hipblaslt_jit::Backend
         {
         public:
             explicit ReplayBackend(const Options& options)
                 : m_info{"replay", "replay", replayVersion}
+                , m_builder(hipblaslt_jit::makeComgrBuilder())
             {
                 if(options.replay.empty())
                     throw std::invalid_argument("The replay backend has no bundle to replay");
                 for(const auto& path : options.replay)
                 {
-                    Replayed replayed;
-                    const auto directory = fs::u8path(path);
-                    auto       read      = hipblaslt_jit::readTensileSourceBundle(directory);
-                    replayed.source      = std::move(read.source);
-                    namespace artifacts  = hipblaslt_jit::source_bundle;
-                    replayed.record = artifacts::readArtifact(
-                        artifacts::artifact(directory, "library/TensileLibrary.dat"));
-                    // A local load confirms the record is a TensileLite library.
-                    // Predicate checks load it again inside generate.
-                    const auto library = hipblaslt_jit::loadGemmLibrary(replayed.record);
-                    if(!library || library->solutions.empty())
+                    Replayed   replayed{fs::u8path(path)};
+                    const auto source = hipblaslt_jit::source_bundle::readSourceBundle(
+                        replayed.directory);
+                    if(source.mainKernel.kind == hipblaslt_jit::Artifact::Kind::Assembly)
+                        replayed.processor = declaredProcessor(source.mainKernel);
+                    if(replayed.processor == Processor::gfx000)
                         throw std::invalid_argument("The bundle " + path
-                                                    + " holds no GEMM solution");
-                    auto& names = replayed.source.kernelNames;
-                    for(const auto& [index, solution] : library->solutions)
-                        if(std::find(names.begin(), names.end(), solution->kernelName)
-                           == names.end())
-                            names.push_back(solution->kernelName);
+                                                    + " has no assembly for a known target");
                     m_replayed.push_back(std::move(replayed));
                 }
             }
@@ -85,42 +99,57 @@ namespace hipblaslt_ext::experimental::jit::replay
             }
 
             Status generate(const hipblaslt_jit::GenerationRequest&       request,
-                            std::vector<hipblaslt_jit::SourceCodeBundle>& solutions) const override
+                            std::vector<hipblaslt_jit::SourceCodeBundle>& bundles) const override
             {
-                solutions.clear();
+                bundles.clear();
                 const auto problem
                     = hipblaslt_jit::RocblasltToTensileContractionProblemGemm(request.request);
-                const auto excluded = [&](const std::string& kernel) {
-                    return hipblaslt_jit::excludedKernel(request.excludeKernels, kernel);
-                };
                 bool   targeted = false, solves = false;
                 size_t solving  = 0;
                 for(const auto& replayed : m_replayed)
                 {
                     if(solving >= request.count)
                         break;
-                    size_t entrySolving = 0;
-                    bool   fresh        = false;
-                    const auto library  = hipblaslt_jit::loadGemmLibrary(replayed.record);
-                    for(const auto& [index, solution] : library->solutions)
+                    if(replayed.processor != request.target.processor
+                       || !request.target.hardware)
+                        continue;
+                    hipblaslt_jit::SourceCodeBundle source;
+                    auto status = hipblaslt_jit::readTensileSourceBundle(*m_builder,
+                                                                         replayed.directory,
+                                                                         request.target,
+                                                                         request.codeObjectVersion,
+                                                                         source);
+                    hipblaslt_jit::keepBuildLog(status, request.scratch);
+                    if(!status.ok())
+                        return status;
+                    if(source.solutions.size() != 1)
+                        return {Status::Code::Failed,
+                                Stage::Generate,
+                                "The kernel of " + replayed.directory.u8string()
+                                    + " does not record one solution"};
+                    const auto solution = source.solutions.front();
+                    source.solutions    = {variant(solution, "_K512_WGM8", 8, 512),
+                                           variant(solution, "_WGM1", 1, 0)};
+
+                    size_t bundleSolving = 0;
+                    bool   fresh         = false;
+                    for(const auto& replayedSolution : source.solutions)
                     {
-                        if(!request.target.hardware
-                           || !(*solution->hardwarePredicate)(*request.target.hardware))
+                        if(!(*replayedSolution->hardwarePredicate)(*request.target.hardware))
                             continue;
                         targeted = true;
-                        if(!(*solution->problemPredicate)(problem))
+                        if(!(*replayedSolution->problemPredicate)(problem))
                             continue;
                         solves = true;
-                        ++entrySolving;
-                        fresh = fresh || !excluded(solution->kernelName);
+                        ++bundleSolving;
+                        fresh = fresh
+                                || !hipblaslt_jit::excludedKernel(request.excludeKernels,
+                                                                  replayedSolution->kernelName);
                     }
                     if(!fresh)
                         continue;
-                    solving += entrySolving;
-                    auto source              = replayed.source;
-                    source.target            = request.target;
-                    source.codeObjectVersion = request.codeObjectVersion;
-                    solutions.push_back(std::move(source));
+                    solving += bundleSolving;
+                    bundles.push_back(std::move(source));
                 }
                 if(!targeted)
                     return {Status::Code::TargetMismatch,
@@ -132,28 +161,14 @@ namespace hipblaslt_ext::experimental::jit::replay
                             "No replayed solution solves this problem"};
                 return {Status::Code::Success,
                         Stage::Generate,
-                        "Replayed " + std::to_string(solutions.size())
-                            + (solutions.size() == 1 ? " bundle" : " bundles")};
-            }
-
-            std::vector<uint8_t>
-                solutionRecord(const hipblaslt_jit::SourceCodeBundle& source) const override
-            {
-                const auto* replayed = find(source);
-                return replayed ? replayed->record : std::vector<uint8_t>{};
+                        "Replayed " + std::to_string(bundles.size())
+                            + (bundles.size() == 1 ? " bundle" : " bundles")};
             }
 
         private:
-            const Replayed* find(const hipblaslt_jit::SourceCodeBundle& source) const
-            {
-                for(const auto& replayed : m_replayed)
-                    if(sameSource(replayed.source, source))
-                        return &replayed;
-                return nullptr;
-            }
-
-            hipblaslt_jit::BackendInfo m_info;
-            std::vector<Replayed>      m_replayed;
+            hipblaslt_jit::BackendInfo                              m_info;
+            std::shared_ptr<const hipblaslt_jit::CodeObjectBuilder> m_builder;
+            std::vector<Replayed>                                   m_replayed;
         };
     }
 

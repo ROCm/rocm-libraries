@@ -59,13 +59,15 @@ namespace hipblaslt_jit::source_bundle
     // The sources of a TensileLite bundle, found by directory convention.
     // sources/*.s is the assembly main kernel (at most one). sources/*.hip and
     // sources/*.cpp are HIP: the main kernel when there is no assembly, and
-    // helpers otherwise. Every other file in sources/ is a header. The
-    // TensileLite library entry, when present, is not part of this bundle.
+    // helpers otherwise. Every other file in sources/ is a header. A library/
+    // entry is rejected: a kernel's solutions come from the kernel itself.
     inline hipblaslt_jit::SourceCodeBundle readSourceBundle(const fs::path& bundle)
     {
         constexpr size_t fileLimit = 1024, byteLimit = 256 * 1024 * 1024;
         const auto       sources = artifact(bundle, "sources", false);
         require(fs::is_directory(sources), "Missing source directory: " + sources.u8string());
+        require(!fs::exists(fs::symlink_status(bundle / "library")),
+                "A source bundle holds no library entry: " + bundle.u8string());
         std::vector<std::string> names;
         for(const auto& entry : fs::directory_iterator(sources))
         {

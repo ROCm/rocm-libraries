@@ -45,7 +45,6 @@
 #include "../../hipblaslt-jit-gemm-internal.hpp"
 #include "../../hipblaslt-jit-heuristic.hpp"
 #include "../../hipblaslt-jit-library.hpp"
-#include "../../hipblaslt-jit-loader.hpp"
 #include "../../hipblaslt-jit-problem-type.hpp"
 #include "../../hipblaslt_internal.hpp"
 namespace jit = hipblaslt_ext::experimental::jit::detail;
@@ -5240,43 +5239,6 @@ rocblaslt_status
     return rocblaslt_status_success;
 }
 
-// The GEMM predicate sequence shared by isSolutionSupported and a JIT bundle:
-// fallback flag, workspace size, hardware predicate, then softwarePredicate
-// under uniform summation order or problemPredicate && taskPredicate. Writes
-// the required workspace when the predicates match. hardwareFailed is set when
-// the hardware predicate is what rejects the solution. Does not compare the
-// workspace with the limit.
-static bool gemmSolutionPredicates(const TensileLite::ContractionSolution& solution,
-                                   TensileLite::ContractionProblemGemm&    problem,
-                                   const TensileLite::Hardware&             hardware,
-                                   size_t                                   workspaceLimit,
-                                   size_t&                                  requiredWorkspace,
-                                   bool&                                    hardwareFailed)
-{
-    hardwareFailed    = false;
-    requiredWorkspace = 0;
-    problem.setParams().setFallbackStatus(solution.isFallbackForHW(hardware));
-    problem.setWorkspaceSize(workspaceLimit);
-    TensileLite::Task task(hardware, problem, solution);
-    if(!(*solution.hardwarePredicate)(hardware))
-    {
-        hardwareFailed = true;
-        return false;
-    }
-    const bool softwareMatch
-        = problem.getParams().uniformSummationOrder()
-              ? TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
-                                               task,
-                                               hardware,
-                                               solution,
-                                               problem)
-              : (*solution.problemPredicate)(problem) && (*solution.taskPredicate)(task);
-    if(!softwareMatch)
-        return false;
-    requiredWorkspace = solution.requiredWorkspaceSize(problem, hardware);
-    return true;
-}
-
 template <typename MyProblem, typename Inputs, typename Tuning>
 rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                                      MyProblem&             tensile_prob,
@@ -5335,7 +5297,8 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         }
 
         // cu-fallback detection
-        if(solution->isFallbackForHW(*hardware))
+        bool isCUFallback = solution->isFallbackForHW(*hardware);
+        if(isCUFallback)
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
             {
@@ -5345,32 +5308,45 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                 log_info(__func__, msg.str());
             }
         }
+        // set this flag for SW predicate
+        tensile_prob.setParams().setFallbackStatus(isCUFallback);
+
+        tensile_prob.setWorkspaceSize(algo->max_workspace_bytes);
+        TensileLite::Task task(*hardware, tensile_prob, *solution);
+        if(!(*solution->hardwarePredicate)(*hardware))
+        {
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+            {
+                std::ostringstream msg;
+                msg << "Hardware match: " << solution->description();
+                solution->hardwarePredicate->debugEval(*hardware, msg);
+                msg << std::endl;
+                log_info(__func__, msg.str());
+            }
+            log_error(__func__, "Solution is not supported");
+            return rocblaslt_status_invalid_value;
+        }
         // Under USO, the same predicate findTopSolutions uses: problem, task,
         // StreamK dynamic-queue, uniform summation order (Synchronizer pointer
         // is checked only at launch, which throws if it is missing). With USO
         // off, selection must not widen: problemPredicate && taskPredicate only.
-        bool   hardwareFailed = false;
-        size_t required       = 0;
-        if(!gemmSolutionPredicates(*solution,
-                                   tensile_prob,
-                                   *hardware,
-                                   algo->max_workspace_bytes,
-                                   required,
-                                   hardwareFailed))
+        bool swMatch;
+        if(tensile_prob.getParams().uniformSummationOrder())
         {
-            TensileLite::Task task(*hardware, tensile_prob, *solution);
-            if(hardwareFailed)
-            {
-                if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
-                {
-                    std::ostringstream msg;
-                    msg << "Hardware match: " << solution->description();
-                    solution->hardwarePredicate->debugEval(*hardware, msg);
-                    msg << std::endl;
-                    log_info(__func__, msg.str());
-                }
-            }
-            else if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+            swMatch = TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
+                                                     task,
+                                                     *hardware,
+                                                     *solution,
+                                                     tensile_prob);
+        }
+        else
+        {
+            swMatch = (*solution->problemPredicate)(tensile_prob)
+                      && (*solution->taskPredicate)(task);
+        }
+        if(!swMatch)
+        {
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
             {
                 std::ostringstream msg;
                 msg << "Software match: " << solution->description();
@@ -5379,10 +5355,11 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                 msg << std::endl;
                 log_info(__func__, msg.str());
             }
+
             log_error(__func__, "Solution is not supported");
             return rocblaslt_status_invalid_value;
         }
-        *workspaceSizeInBytes = required;
+        *workspaceSizeInBytes = solution->requiredWorkspaceSize(tensile_prob, *hardware);
     }
     else if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGroupedGemm>::value)
     {
@@ -5955,166 +5932,6 @@ namespace hipblaslt_jit
     TensileLite::ContractionProblemGemm RocblasltToTensileContractionProblemGemm(const jit::GemmRequest& request)
     {
         return ConstructTensileProblem(request.problem);
-    }
-
-    namespace
-    {
-        // Physical layout is a property of the supplied tensor. Architecture/type
-        // legality remains in TensileLite's solution validators and runtime predicates.
-        bool scaleLayoutMatches(const TensileLite::ContractionSolution& solution,
-                                const RocblasltContractionProblem&      problem)
-        {
-            using Format        = RocblasltContractionProblem::ScalingFormat;
-            const auto expected = solution.problemType.mxScaleFormat;
-            for(auto format : {problem.scaleAType, problem.scaleBType})
-            {
-                if(format == Format::None || format == Format::Scalar || format == Format::Vector)
-                    continue;
-                const auto physical = format == Format::Block_32_UE8M0_32_8_EXT ? 1 : 2;
-                if(expected != physical)
-                    return false;
-            }
-            return true;
-        }
-
-        hipblasStatus_t solutionSupports(const TensileLite::ContractionSolution& solution,
-                                         const GemmRequest&                      request,
-                                         const TensileLite::Hardware&            hardware,
-                                         size_t                                  limit,
-                                         size_t&                                 workspace,
-                                         TensileGemmBundle::Diagnostics&         diagnostics)
-        {
-            workspace = 0;
-            if(!scaleLayoutMatches(solution, request.problem))
-            {
-                diagnostics.message
-                    = "TensileLite solution has a different physical MX scale layout";
-                return HIPBLAS_STATUS_NOT_SUPPORTED;
-            }
-            auto problem        = ConstructTensileProblem(request.problem);
-            bool hardwareFailed = false;
-            if(!gemmSolutionPredicates(solution, problem, hardware, limit, workspace, hardwareFailed))
-            {
-                std::ostringstream reason;
-                reason << "TensileLite solution does not support the request: ";
-                TensileLite::Task task(hardware, problem, solution);
-                solution.hardwarePredicate->debugEval(hardware, reason);
-                solution.problemPredicate->debugEval(problem, reason);
-                solution.taskPredicate->debugEval(task, reason);
-                diagnostics.message = reason.str();
-                workspace           = 0;
-                return HIPBLAS_STATUS_NOT_SUPPORTED;
-            }
-            if(workspace > limit)
-            {
-                workspace           = 0;
-                diagnostics.message = "TensileLite solution exceeds the workspace limit";
-                return HIPBLAS_STATUS_NOT_SUPPORTED;
-            }
-            return HIPBLAS_STATUS_SUCCESS;
-        }
-    }
-
-    hipblasStatus_t TensileGemmBundle::support(const GemmRequest& request,
-                                               size_t             limit,
-                                               size_t&            workspace,
-                                               Diagnostics&       diagnostics) const
-    {
-        workspace = 0;
-        if(!solution)
-        {
-            diagnostics.message = "TensileLite solution is required";
-            return HIPBLAS_STATUS_INVALID_VALUE;
-        }
-        int             device = 0;
-        hipDeviceProp_t properties{};
-        if(hipGetDevice(&device) != hipSuccess
-           || hipGetDeviceProperties(&properties, device) != hipSuccess)
-        {
-            diagnostics.message = "TensileLite hardware is required";
-            return HIPBLAS_STATUS_INVALID_VALUE;
-        }
-        auto hardware = TensileLite::hip::GetDevice(properties, device);
-        if(!hardware)
-        {
-            diagnostics.message = "TensileLite hardware is required";
-            return HIPBLAS_STATUS_INVALID_VALUE;
-        }
-        return solutionSupports(*solution, request, *hardware, limit, workspace, diagnostics);
-    }
-
-    namespace
-    {
-        class TensileLoader final : public SolutionLoader
-        {
-        public:
-            Status support(const std::vector<uint8_t>& record,
-                           const GemmRequest&          request,
-                           const DeviceTarget&         target,
-                           size_t                      workspaceLimit,
-                           std::vector<int>&           indices) const override
-            {
-                indices.clear();
-                if(record.empty())
-                    return {Status::Code::Failed,
-                            Stage::Support,
-                            "A built solution has no TensileLite record"};
-                if(!target.hardware)
-                    return {Status::Code::Failed, Stage::Support, "TensileLite hardware is required"};
-                // Local load. The bundle does not keep this library.
-                const auto  library = loadGemmLibrary(record);
-                std::string reason;
-                for(const auto& [index, solution] : library->solutions)
-                {
-                    if(!solution)
-                        continue;
-                    size_t                         workspace = 0;
-                    TensileGemmBundle::Diagnostics diagnostics;
-                    const auto                     status = solutionSupports(*solution,
-                                                          request,
-                                                          *target.hardware,
-                                                          workspaceLimit,
-                                                          workspace,
-                                                          diagnostics);
-                    if(status == HIPBLAS_STATUS_SUCCESS)
-                        indices.push_back(index);
-                    else if(status != HIPBLAS_STATUS_NOT_SUPPORTED)
-                        return {Status::Code::Failed, Stage::Support, diagnostics.message};
-                    else if(reason.empty())
-                        reason = std::move(diagnostics.message);
-                }
-                if(indices.empty())
-                    return {Status::Code::NotSupported, Stage::Support, reason};
-                return {};
-            }
-
-            Status load(const Artifact&             executable,
-                        const std::vector<uint8_t>& record,
-                        const GemmRequest&,
-                        const DeviceTarget&,
-                        size_t,
-                        const std::vector<int>&                           indices,
-                        std::vector<std::shared_ptr<const KernelBundle>>& out) const override
-            {
-                out.clear();
-                if(executable.bytes.empty() || executable.kind != Artifact::Kind::Executable)
-                    throw std::runtime_error("A built solution has no executable");
-                const auto library = loadGemmLibrary(record);
-                for(const auto index : indices)
-                {
-                    auto bundle      = std::make_shared<TensileGemmBundle>();
-                    bundle->solution = library->solutions.at(index);
-                    bundle->index    = index;
-                    out.push_back(std::move(bundle));
-                }
-                return {};
-            }
-        };
-    }
-
-    std::shared_ptr<const SolutionLoader> makeTensileLoader()
-    {
-        return std::make_shared<const TensileLoader>();
     }
 }
 #endif

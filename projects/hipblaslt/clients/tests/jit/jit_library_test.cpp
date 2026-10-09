@@ -1,19 +1,26 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Exercises the JIT solution library: cache keys, directory
+// Exercises the JIT solution library with the solution and executable built
+// from the committed plain assembly of the current device: cache keys, directory
 // checks, the stock TensileLite loader reading what the library writes,
 // exact-size lookup, index allocation, a library whose publish stopped early,
 // concurrent publishers in separate processes, and the rejection of fused GEMM
 // and all-to-all.
 
+#include "library_fixture.hpp"
 #include "solution_entry.hpp"
 #include "hipblaslt-jit-fs.hpp"
 #include "hipblaslt-jit-library.hpp"
 #include "hipblaslt-jit-msgpack.hpp"
+#include "hipblaslt-jit-source-bundle.hpp"
 #include <Tensile/AMDGPU.hpp>
+#include <Tensile/CachingLibrary.hpp>
+#include <Tensile/ExactLogicLibrary.hpp>
+#include <Tensile/PlaceholderLibrary.hpp>
+#include <Tensile/SingleSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
-#include <msgpack.hpp>
+#include <Tensile/msgpack/Writing.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -24,6 +31,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <set>
 #include <sstream>
 #include <thread>
@@ -35,11 +43,15 @@
 namespace hj = hipblaslt_jit;
 namespace fs = std::filesystem;
 using TensileLite::ContractionProblemGemm;
+using TensileLite::ContractionSolution;
 
 namespace
 {
     constexpr int32_t base = hj::jitIndexBase;
 
+    using Rows
+        = TensileLite::ProblemSelectionLibrary<ContractionProblemGemm, ContractionSolution>;
+    using Single = TensileLite::SingleSolutionLibrary<ContractionProblemGemm, ContractionSolution>;
 
     void ok(const hj::Status& status, const std::string& what)
     {
@@ -69,52 +81,50 @@ namespace
         return std::string(bytes.begin(), bytes.end());
     }
 
-    // A one-solution entry and its main kernel.
+    // The solution a kernel's assembly records, and the executable built from it.
     struct Entry
     {
-        std::vector<uint8_t> bytes;
-        std::string          kernel;
+        hipblaslt_jit_test::Solution solution;
+        hj::Artifact                 executable;
+        std::string                  kernel;
     };
 
-    // The entry with its kernel renamed, so one size can have several solutions.
-    Entry renamed(const Entry& entry, const std::string& suffix)
+    // Assembles source's main kernel, reads its solution and links its executable.
+    Entry build(const hj::SourceCodeBundle& source, const fs::path& scratch)
     {
-        const auto handle
-            = msgpack::unpack(reinterpret_cast<const char*>(entry.bytes.data()), entry.bytes.size());
-        const auto field = [](const msgpack::object& map, const std::string& key) {
-            {
-                INFO(("Expected a map"));
-                REQUIRE((map.type == msgpack::type::MAP));
-            }
-            for(uint32_t i = 0; i < map.via.map.size; ++i)
-            {
-                auto& member = map.via.map.ptr[i];
-                if(member.key.type == msgpack::type::STR && member.key.as<std::string>() == key)
-                    return &member.val;
-            }
-            throw std::runtime_error("Missing " + key);
-        };
-        const auto* solutions = field(handle.get(), "solutions");
+        const auto              builder = hj::makeComgrBuilder();
+        hj::TensileliteAssembly assembly;
+        hj::Artifact            relocatable;
+        auto status = hj::TensileliteAssembly::make(*builder, source, assembly, relocatable);
+        hj::keepBuildLog(status, scratch);
+        ok(status, "assemble " + source.mainKernel.name);
         {
-            INFO(("Expected one solution"));
-            REQUIRE((solutions->type == msgpack::type::ARRAY && solutions->via.array.size == 1));
+            INFO(("The assembly does not record one solution"));
+            REQUIRE((assembly.solutions.size() == 1));
         }
-        auto*      name   = field(solutions->via.array.ptr[0], "kernelName");
-        const auto kernel = entry.kernel + suffix;
-        name->via.str.ptr  = kernel.data();
-        name->via.str.size = static_cast<uint32_t>(kernel.size());
-        msgpack::sbuffer buffer;
-        msgpack::pack(buffer, handle.get());
-        return {std::vector<uint8_t>(buffer.data(), buffer.data() + buffer.size()), kernel};
+        auto linked       = source;
+        linked.mainKernel = std::move(relocatable);
+        linked.solutions  = assembly.solutions;
+        Entry entry;
+        status = builder->build(linked, hj::BuildKind::Executable, entry.executable);
+        hj::keepBuildLog(status, scratch);
+        ok(status, "link " + source.mainKernel.name);
+        entry.solution = assembly.solutions.front();
+        entry.kernel   = entry.solution->kernelName;
+        return entry;
     }
 
-    // A stand-in for the executable built for entry. Its solution 0 supports the request.
-    hj::Artifact executable(const Entry& entry)
+    // An entry file holding a copy of solution as index, written by TensileLite.
+    std::vector<uint8_t> entryAs(const hipblaslt_jit_test::Solution& solution, int32_t index)
     {
-        const std::string object = "code object of " + entry.kernel;
-        return {entry.kernel,
-                hj::Artifact::Kind::Executable,
-                std::vector<uint8_t>(object.begin(), object.end())};
+        auto copy   = hj::copySolution(solution);
+        copy->index = index;
+        auto rows   = std::make_shared<Rows>();
+        rows->rows.emplace_back(copy->problemPredicate, std::make_shared<Single>(copy));
+        hj::GemmMaster entry;
+        entry.solutions.emplace(index, copy);
+        entry.library = rows;
+        return TensileLite::MessagePackWriteLibraryData(entry);
     }
 
     // The lazy master and mapping the library writes for an ISA.
@@ -174,25 +184,48 @@ namespace
         return master;
     }
 
-    // Every master row is mapped, and every mapped index loads with its code object.
+    // The entry file prefix each master row selects, in order.
+    std::vector<std::string> rowPrefixes(const hj::GemmMaster& master)
+    {
+        using Caching = TensileLite::CachingLibrary<ContractionProblemGemm, ContractionSolution>;
+        using Placeholder
+            = TensileLite::PlaceholderLibrary<ContractionProblemGemm, ContractionSolution>;
+        auto library = master.library;
+        if(const auto cache = std::dynamic_pointer_cast<Caching>(library))
+            library = cache->library();
+        const auto* rows = dynamic_cast<const Rows*>(library.get());
+        {
+            INFO(("The master does not select its rows by problem"));
+            REQUIRE((rows != nullptr));
+        }
+        std::vector<std::string> prefixes;
+        for(const auto& row : rows->rows)
+        {
+            const auto* placeholder = dynamic_cast<const Placeholder*>(row.second.get());
+            {
+                INFO(("A master row is not an entry file"));
+                REQUIRE((placeholder != nullptr));
+            }
+            prefixes.push_back(placeholder->filePrefix);
+        }
+        return prefixes;
+    }
+
+    // Every mapped index loads with its code object, and every master row is
+    // of a mapped solution.
     void consistentSlice(const fs::path&              directory,
                          const TensileLite::Hardware& hardware,
                          const std::string&           arch)
     {
-        std::vector<std::string> rows;
-        ok(hj::msgpack_io::readMasterPrefixes(read(directory / lazyMaster(arch)), rows),
-           "master rows");
-        const auto               master = stock(directory, arch);
-        std::set<std::string>    mapped;
+        const auto                    master = stock(directory, arch);
+        std::map<std::string, size_t> rows, mapped;
+        for(const auto& prefix : rowPrefixes(*master))
+            ++rows[prefix];
         for(const auto& [index, prefix] : master->libraryMapping)
         {
             {
                 INFO(("Mapped index outside the JIT range"));
                 REQUIRE((hj::isJitIndex(index)));
-            }
-            {
-                INFO(("Two indices map " + prefix));
-                REQUIRE((mapped.insert(prefix).second));
             }
             {
                 INFO(("Missing " + prefix + ".co"));
@@ -204,15 +237,12 @@ namespace
                 REQUIRE((solution && solution->index == index
                     && solution->codeObjectFilename.load() == prefix + ".co"));
             }
+            ++mapped[prefix];
         }
+        for(const auto& [prefix, count] : rows)
         {
-            INFO(("Duplicate master rows"));
-            REQUIRE((std::set<std::string>(rows.begin(), rows.end()).size() == rows.size()));
-        }
-        for(const auto& row : rows)
-        {
-            INFO(("Master row " + row + " is not mapped"));
-            REQUIRE((mapped.count(row)));
+            INFO(("Master rows of " + prefix + " outnumber its mapped solutions"));
+            REQUIRE((mapped[prefix] >= count));
         }
     }
 
@@ -272,16 +302,31 @@ namespace
 
     struct Context
     {
-        fs::path            scratch;
-        Entry               entry;
-        std::string         arch; // processor name of device 0, such as "gfx942"
-        TensileLite::AMDGPU hardware{};
+        fs::path             scratch;
+        hj::SourceCodeBundle source; // the plain assembly, for device 0
+        Entry                entry; // built from source
+        std::string          arch; // processor name of device 0, such as "gfx942"
+        TensileLite::AMDGPU  hardware{};
 
         fs::path fresh(const std::string& name) const
         {
             auto path = scratch / name;
             fs::remove_all(path);
             return path;
+        }
+
+        // The plain kernel renamed <kernel><suffix>, so one size can have
+        // solutions of several kernels.
+        Entry renamed(const std::string& suffix) const
+        {
+            const auto& kernel = entry.kernel;
+            std::string text(source.mainKernel.bytes.begin(), source.mainKernel.bytes.end());
+            for(auto at = text.find(kernel); at != std::string::npos;
+                at      = text.find(kernel, at + kernel.size() + suffix.size()))
+                text.insert(at + kernel.size(), suffix);
+            auto copy = source;
+            copy.mainKernel.bytes.assign(text.begin(), text.end());
+            return build(copy, scratch);
         }
         std::vector<int32_t> find(hj::JitLibrary&                 library,
                                   const hj::CacheKey&             key,
@@ -304,7 +349,7 @@ namespace
         for(const auto& entry : entries)
         {
             std::vector<int32_t> published;
-            ok(library.publish(key, 0, problem, executable(entry), entry.bytes, {0}, published),
+            ok(library.publish(key, 0, problem, entry.executable, {entry.solution}, published),
                "publish");
             indices.insert(indices.end(), published.begin(), published.end());
         }
@@ -439,7 +484,7 @@ namespace
         }
 
         const std::vector<size_t> sizes{256, 128, 1, 512};
-        const auto                prefix = hj::entryPrefix(type, "kernel", sizes);
+        const auto                prefix = hj::entryPrefix(type, {"kernel"}, sizes);
         {
             INFO(("Unexpected entry prefix " + prefix));
             REQUIRE((prefix.find("k/") == 0 && prefix.find("/kernel/") != std::string::npos
@@ -447,10 +492,11 @@ namespace
         }
         {
             INFO(("Entry prefixes are not a function of their content"));
-            REQUIRE((prefix == hj::entryPrefix(type, "kernel", sizes)
-                && prefix != hj::entryPrefix(type + " ", "kernel", sizes)
-                && prefix != hj::entryPrefix(type, "kernel2", sizes)
-                && prefix != hj::entryPrefix(type, "kernel", {256, 128, 1, 1024})));
+            REQUIRE((prefix == hj::entryPrefix(type, {"kernel", "kernel"}, sizes)
+                && prefix != hj::entryPrefix(type + " ", {"kernel"}, sizes)
+                && prefix != hj::entryPrefix(type, {"kernel2"}, sizes)
+                && prefix != hj::entryPrefix(type, {"kernel", "kernel2"}, sizes)
+                && prefix != hj::entryPrefix(type, {"kernel"}, {256, 128, 1, 1024})));
         }
         std::cout << "PASS cache keys, compiler environment, ProblemType keys and entry names\n";
     }
@@ -556,7 +602,7 @@ namespace
 
         const auto directory = library.directory(key);
         const auto prefix    = hj::entryPrefix(
-            hj::problemTypeKey(problem), ctx.entry.kernel, hj::problemSizes(problem));
+            hj::problemTypeKey(problem), {ctx.entry.kernel}, hj::problemSizes(problem));
         const auto slice = directory / "slices" / hj::sliceKey(problem);
         {
             INFO(("Unexpected key directory contents"));
@@ -596,7 +642,7 @@ namespace
         }
         {
             INFO(("The code object was not stored unchanged"));
-            REQUIRE((read(slice / (prefix + ".co")) == executable(ctx.entry).bytes));
+            REQUIRE((read(slice / (prefix + ".co")) == ctx.entry.executable.bytes));
         }
         int64_t next = 0;
         ok(hj::msgpack_io::readAllocator(read(builtUnder(root) / "allocator.dat"), next),
@@ -682,8 +728,7 @@ namespace
         hj::JitLibrary library(root);
         const auto     key     = testKey(ctx);
         const auto     problem = gemm(256);
-        const auto     a = renamed(ctx.entry, "_A"), b = renamed(ctx.entry, "_B"),
-                   c    = renamed(ctx.entry, "_C");
+        const auto a = ctx.renamed("_A"), b = ctx.renamed("_B"), c = ctx.renamed("_C");
         const auto first = publish(library, key, problem, {a, b, a});
         {
             INFO(("Batch indices " + text(first)));
@@ -752,25 +797,12 @@ namespace
         }
         consistent(library.directory(key), ctx.hardware, ctx.arch);
 
-        // The same kernel, problem type and sizes name one entry. Rewriting that
-        // file does not allocate another index.
-        const auto directory = library.directory(key);
-        const auto prefix
-            = hj::entryPrefix(hj::problemTypeKey(gemm(2048)), a.kernel, hj::problemSizes(gemm(2048)));
-        const auto collided = publish(library, key, gemm(2048), {a})[0];
-        std::vector<uint8_t> other;
-        ok(hj::msgpack_io::rewriteEntryIndex(b.bytes, 0, collided, other), "rewrite");
-        const auto slice = directory / "slices" / hj::sliceKey(gemm(2048));
-        ok(hj::files::writeAtomically(directory / "staging", slice / (prefix + ".dat"), other),
-           "replace entry");
         hj::JitLibrary reopened(root);
-        const auto     renamedIndex = publish(reopened, key, gemm(2048), {a})[0];
         {
-            INFO(("The same identity allocated another index"));
-            REQUIRE((renamedIndex == collided && !fs::exists(slice / (prefix + "_1.dat"))));
+            INFO(("A reopened library allocated another index for a published entry"));
+            REQUIRE((publish(reopened, key, problem, {a}) == std::vector<int32_t>{base}));
         }
-        consistent(directory, ctx.hardware, ctx.arch);
-        std::cout << "PASS deduplication, collisions, publication order, top-N and exclusions\n";
+        std::cout << "PASS deduplication, publication order, top-N and exclusions\n";
     }
 
     void mismatch(const Context& ctx)
@@ -837,9 +869,8 @@ namespace
             status = library.publish(testKey(ctx, 1),
                                      0,
                                      gemm(256),
-                                     executable(ctx.entry),
-                                     ctx.entry.bytes,
-                                     {0},
+                                     ctx.entry.executable,
+                                     {ctx.entry.solution},
                                      indices);
             {
                 INFO(("Publishing into a tampered directory was accepted"));
@@ -878,7 +909,7 @@ namespace
         }
         std::vector<int32_t> indices;
         const auto status = library.publish(
-            key, 0, gemm(272), executable(ctx.entry), ctx.entry.bytes, {0}, indices);
+            key, 0, gemm(272), ctx.entry.executable, {ctx.entry.solution}, indices);
         {
             INFO(("An exhausted range allocated an index: " + status.message));
             REQUIRE((!status.ok() && status.message.find("exhausted") != std::string::npos));
@@ -896,15 +927,15 @@ namespace
         {
             INFO(("An allocator below the reserved range was used"));
             const auto below = library.publish(
-                key, 0, gemm(272), executable(ctx.entry), ctx.entry.bytes, {0}, indices);
+                key, 0, gemm(272), ctx.entry.executable, {ctx.entry.solution}, indices);
             REQUIRE((!below.ok()));
         }
 
         const auto prefix = hj::entryPrefix(
-            hj::problemTypeKey(gemm(256)), ctx.entry.kernel, hj::problemSizes(gemm(256)));
-        ok(hj::msgpack_io::rewriteEntryIndex(ctx.entry.bytes, 0, 7, bytes), "rewrite");
+            hj::problemTypeKey(gemm(256)), {ctx.entry.kernel}, hj::problemSizes(gemm(256)));
         const auto slice = directory / "slices" / hj::sliceKey(gemm(256));
-        ok(hj::files::writeAtomically(directory / "staging", slice / (prefix + ".dat"), bytes),
+        ok(hj::files::writeAtomically(
+               directory / "staging", slice / (prefix + ".dat"), entryAs(ctx.entry.solution, 7)),
            "tamper");
         hj::JitLibrary reopened(root);
         {
@@ -1109,7 +1140,7 @@ namespace
                 REQUIRE((rejected(status, hj::Stage::Lookup) && indices.empty()));
             }
             status = library.publish(
-                key, 0, fused, executable(ctx.entry), ctx.entry.bytes, {0}, indices);
+                key, 0, fused, ctx.entry.executable, {ctx.entry.solution}, indices);
             {
                 INFO(("A fused all-to-all publication was not rejected: " + status.message));
                 REQUIRE((rejected(status, hj::Stage::Publish) && indices.empty()));
@@ -1362,34 +1393,23 @@ void runLibrary(const fs::path& scratch, int writers, int perWriter)
         REQUIRE((TensileLite::AMDGPU::toString(processor) == ctx.arch));
     }
     ctx.hardware = TensileLite::AMDGPU(processor, 256, ctx.arch);
-    const auto prepared = hipblaslt_jit_test::prepareSolutions(fs::u8path(HIPBLASLT_JIT_DATA));
-    const auto plain    = std::find_if(prepared.begin(), prepared.end(), [&](const auto& item) {
-        return item.arch == ctx.arch && item.name == "plain";
-    });
-    {
-        INFO(("No plain entry for " + ctx.arch));
-        REQUIRE((plain != prepared.end()));
-    }
-    ctx.entry.bytes = plain->record;
-    const auto library = std::dynamic_pointer_cast<hj::GemmMaster>(
-        TensileLite::LoadLibraryData<ContractionProblemGemm>(ctx.entry.bytes));
-    {
-        INFO(("The replay has no solution 0"));
-        REQUIRE((library && library->solutions.count(0)));
-    }
-    const auto& replayed = *library->solutions.at(0);
-    ctx.entry.kernel     = replayed.kernelName;
+    ctx.source   = hj::source_bundle::readSourceBundle(fs::u8path(HIPBLASLT_JIT_DATA) / ctx.arch
+                                                     / "plain");
+    ctx.source.target            = hipblaslt_jit_test::deviceTarget(properties);
+    ctx.source.codeObjectVersion = hj::jitCodeObjectVersion;
+    ctx.entry                    = build(ctx.source, ctx.scratch);
+    const auto& replayed         = *ctx.entry.solution;
     if(!(*replayed.problemPredicate)(gemm(256)))
     {
         replayed.problemPredicate->debugEval(gemm(256), std::cerr);
-        throw std::runtime_error("The test problem does not match the replayed solution");
+        throw std::runtime_error("The test problem does not match the plain solution");
     }
     if(!(*replayed.hardwarePredicate)(ctx.hardware))
     {
         replayed.hardwarePredicate->debugEval(ctx.hardware, std::cerr);
         throw std::runtime_error("The " + ctx.arch + " plain solution rejects this device");
     }
-    std::cout << "PASS " << ctx.arch << " plain entry matches the test problem\n";
+    std::cout << "PASS " << ctx.arch << " plain solution matches the test problem\n";
     if(writers)
         concurrency(ctx, writers, perWriter);
     else

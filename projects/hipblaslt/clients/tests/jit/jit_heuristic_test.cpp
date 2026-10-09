@@ -1,6 +1,6 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include "solution_entry.hpp"
+#include "test_helpers.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>

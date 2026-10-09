@@ -106,8 +106,8 @@ namespace hipblaslt_jit::code_object
                  const Target&                          target,
                  const Options&                         options) noexcept;
 
-    // The Relocatable for bundle.mainKernel. The helper library stores these
-    // bytes; the solution library stores the Executable link produces.
+    // The Relocatable for bundle.mainKernel. JitLibrary stores a helper as these
+    // bytes, and a solution's code object as the Executable link produces.
     Result compileRelocatable(const hipblaslt_jit::SourceCodeBundle& bundle,
                               const Target&                          target,
                               const Options&                         options) noexcept;
@@ -119,6 +119,23 @@ namespace hipblaslt_jit::code_object
 
     ObjectCheck inspect(const void* elf, std::size_t size) noexcept;
     ObjectCheck inspect(const std::vector<uint8_t>& elf) noexcept;
+
+    // The NT_AMDGPU_METADATA note of a relocatable or executable code object:
+    // the MessagePack document the assembler encodes from .amdgpu_metadata. It
+    // holds amdhsa.kernels and whatever else the source put there, such as the
+    // solution state a TensileLite kernel keeps in custom.config.
+    struct MetadataNote
+    {
+        Status               status = Status::InternalError;
+        std::string          log;
+        std::vector<uint8_t> bytes;
+        bool                 ok() const noexcept
+        {
+            return status == Status::Success;
+        }
+    };
+
+    MetadataNote metadataNote(const std::vector<uint8_t>& elf) noexcept;
 
     // "major.minor" of the loaded comgr library, for diagnostics.
     std::string comgrVersion() noexcept;

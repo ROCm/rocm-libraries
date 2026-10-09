@@ -21,19 +21,20 @@ hipBLASLt runs a GEMM with a kernel from its pre-tuned library, so a problem
 that the library serves poorly, or not at all, has no better kernel available.
 JIT generation produces kernels for a problem when they are needed. The `Jit`
 component defines the stages of that generation and the order in which they
-run. Its interfaces, a comgr code-object builder and a TensileLite solution
-loader are implemented. Internal entry points let the JIT test binaries
-generate a GEMM solution through a backend and run it with `hipblasLtMatmul`
-or `hipblaslt_ext::Gemm`, or publish generated solutions into a persistent
-JIT solution library on disk, whose solution indices any later process runs
-without generating again. The only backend is a test backend that replays
-pre-generated source directories. No generator backend is implemented yet.
-`hipblasLtMatmulAlgoGetHeuristic` and `Gemm::algoGetHeuristic` consult JIT
-when the library is built with JIT support and `HIPBLASLT_JIT` is `1` or `2`.
-Those queries, and `jit::getJitAlgo`, publish into the JIT solution library
-and reuse a hit, so a later process asking the same problem gets the same
-index and does not generate. The algorithms are library indices from 2^30.
-`getIndexFromAlgo` returns that index.
+run. Its interfaces, a comgr code-object builder, a TensileLite source bundle
+reader and the JIT solution library are implemented. Internal entry points let
+the JIT test binaries generate a GEMM solution through a backend and run it
+with `hipblasLtMatmul` or `hipblaslt_ext::Gemm`, or publish generated solutions
+into a persistent JIT solution library on disk, whose solution indices any
+later process runs without generating again. The only backend is a test
+backend that replays pre-generated TensileLite kernels. No generator backend
+is implemented yet. `hipblasLtMatmulAlgoGetHeuristic` and
+`Gemm::algoGetHeuristic` consult JIT when the library is built with JIT
+support and `HIPBLASLT_JIT` is `1` or `2`. Those queries, and
+`jit::getJitAlgo`, publish into the JIT solution library and reuse a hit, so a
+later process asking the same problem gets the same index and does not
+generate. The algorithms are library indices from 2^30. `getIndexFromAlgo`
+returns that index.
 
 ## Current behavior
 
@@ -47,10 +48,10 @@ algorithm for the existing C and C++ GEMM execution APIs:
   configured with that backend.
 - `jit::makeGemmRequest` captures existing GEMM descriptors and host scalars.
 - `jit::getJitAlgo` looks the solution up in the JIT solution library, publishes
-  it when it is absent, and returns the `CompiledSolution` for the first index.
-  A hit does not generate.
-- `jit::getGemmAlgo` adapts the solution to the library index that
-  `hipblasLtMatmul` and `Gemm` accept.
+  it when it is absent, and sets a `hipblasLtMatmulHeuristicResult_t` for the
+  first index: its `algo` carries that index, which `hipblasLtMatmul` and
+  `Gemm` accept, and its `workspaceSize` is the published solution's
+  workspace. A hit does not generate.
 - `jit::getLibraryAlgos` returns solution indices from the same lookup and
   publish, described under
   [persistent solution library](#persistent-solution-library).
@@ -58,11 +59,11 @@ algorithm for the existing C and C++ GEMM execution APIs:
 
 The header is internal, as are `hipblaslt-jit-replay.hpp` and
 `hipblaslt-jit-gemm-internal.hpp`: they are not installed and
-`hipblaslt-ext.hpp` does not include them. `libhipblaslt.so` exports five
+`hipblaslt-ext.hpp` does not include them. `libhipblaslt.so` exports four
 functions and one type from them with `HIPBLASLT_EXPORT` for the JIT test
 binaries, which link against the shared library: `jit::makeGemmRequest`,
-`jit::getJitAlgo`, `jit::getGemmAlgo`, `jit::getLibraryAlgos` and the
-`jit::detail::GemmRequest` request type, and `jit::replay::createBackend`. No
+`jit::getJitAlgo`, `jit::getLibraryAlgos` and the `jit::detail::GemmRequest`
+request type, and `jit::replay::createBackend`. No
 installed header declares them, and they are not a supported API.
 
 The backend's configuration belongs to the options of its factory. The
@@ -115,19 +116,36 @@ interface, so that each implementation can be replaced and tested on its own.
 
 | Stage | Interface | Contract |
 | --- | --- | --- |
-| Generate | `Backend::generate(GenerationRequest, std::vector<SourceCodeBundle>&)` | Returns up to `GenerationRequest::count` source bundles, best first, and builds and loads nothing. A `SourceCodeBundle` is the main kernel, helpers and headers that become one solution, with the device's `Target`, the code-object version and the kernel names the executable must define. It is not a TensileLite library entry. `NotSupported` means the request is outside the backend's domain. |
+| Generate | `Backend::generate(GenerationRequest, std::vector<SourceCodeBundle>&)` | Returns up to `GenerationRequest::count` source bundles, best first, each carrying the `ContractionSolution`s its executable runs, and links and publishes nothing. `NotSupported` means the request is outside the backend's domain. |
+| Support | `supportingSolutions` | Keeps the bundle's solutions whose predicates and workspace accept the request, best first, and loads no code. |
 | Build | `CodeObjectBuilder::build(SourceCodeBundle, BuildKind, Artifact&)` | Builds the bundle into one `Artifact`. Helper relocatables come from the helper library when the caller has one. |
-| Support | `SolutionLoader::support` | Evaluates the predicates and workspace of the record's solutions for the request, returns the local indices of those that support it, best first, and loads no code. |
-| Publish | `SolutionStore::publish` | Stores one executable with the supported solutions of its record and returns one library index per solution, in order. `JitLibrary` writes the TensileLite solution record. `SolutionStore::lookup` returns the indices of stored solutions for exactly a request. |
-| Load | `SolutionLoader::load` | Loads the executable once and returns a process-local executable `KernelBundle` for each supported solution. |
+| Publish | `SolutionStore::publish` | Stores one executable with its supported `ContractionSolution`s and returns one library index per solution, in order. `JitLibrary` writes them with TensileLite's writer. `SolutionStore::lookup` returns the indices of stored solutions for exactly a request. |
 
 An `Artifact` is one file of one kind: `Assembly` or `Hip` source, a
 `Relocatable` (compiled and not linked) or an `Executable` (a linked code
-object). `CodeObjectBuilder::build(bundle, kind, out)` builds a bundle with
-comgr into exactly one `Artifact`: an `Executable` for `BuildKind::Executable`,
-or the main kernel alone as a `Relocatable` for `BuildKind::Relocatable`, which
-is how a helper is built. `JitLibrary` writes the TensileLite solution record
-when it publishes the executable.
+object). A `SourceCodeBundle` is the main kernel, helpers and headers that
+become one executable, with the build inputs: the device's `Target`, the
+code-object version, the `ContractionSolution`s the executable runs, best
+first, and any other kernel names, such as helpers', the executable must
+define. It is not a TensileLite library entry.
+`CodeObjectBuilder::build(bundle, kind, out)` builds that bundle with comgr
+into exactly one `Artifact`: an `Executable` for `BuildKind::Executable`, or
+the main kernel alone as a `Relocatable` for `BuildKind::Relocatable`, which
+is how a helper is built.
+
+A `TensileliteAssembly` is a TensileLite kernel's `Assembly` with its `Target`
+and the `ContractionSolution`s it implements. `TensileliteAssembly::make`
+assembles the kernel alone into a `Relocatable`, reads the solution state
+TensileLite keeps in `custom.config` of the kernel's `.amdgpu_metadata` from
+that object's metadata note (`code_object::metadataNote`), and builds the
+solution with `TensileLite::solutionFromState`. The kernel name and the
+kernel-argument versions are the solution's; the target is a field because a
+solution states its target only as a hardware predicate. An `Executable` build
+accepts that `Relocatable` as its main kernel and links it without assembling
+again. `readTensileSourceBundle` reads a source bundle directory and does this
+for its assembly, so the bundle's main kernel is the `Relocatable` and its
+`solutions` are the kernel's. A HIP main kernel stays a plain `Artifact`, and
+its backend builds the bundle's `ContractionSolution`s itself.
 
 A `Target` holds the TensileLite `AMDGPU::Processor`, an `Any`, `On` or `Off`
 setting for each of `sramecc` and `xnack`, and the device's ASIC revision.
@@ -144,22 +162,24 @@ is unknown is not supported.
 `Jit::generate` is the only code that sequences these stages. It asks the
 backend for at most the requested count of solutions in a private scratch
 directory, forwarding the workspace limit and the kernels the caller already
-has. It then builds each source bundle and checks the support of its solutions
-until the count of supported solutions is reached. A HIP helper the helper
-library does not hold is built as a `Relocatable` and stored there; the bundle
-is then built as one `Executable` linked with the stored relocatables. A failed
-build appends the comgr log to `comgr.log` in the scratch directory. With a
-store it publishes each executable with its supported solutions, and loads an
-executable only when publishing it fails; without a store it loads them. A
-failure in one bundle's build, support or load skips that bundle and keeps the
-rest.
+has. Then, for each source bundle until the count of published solutions is
+reached, it keeps the solutions `supportingSolutions` accepts, builds the
+bundle and publishes the executable with those solutions through its
+`SolutionStore`. A HIP helper whose kernel the bundle names in `kernelNames`
+comes from the helper library under that name, built as a `Relocatable` and
+stored there when the library does not hold it; the bundle is then built as
+one `Executable` linked with the stored relocatables. A failed build appends
+the comgr log to `comgr.log` in the scratch directory. The JIT solution
+library is the only place a JIT solution lives: nothing is loaded in process,
+and a bundle whose support check, build or publish fails contributes no
+solution and the next bundle is tried.
 
-Each failure is recorded with its stage (configure, generate, build, support,
-load or publish) in `Jit::Outcome::failures`, in the order it happened.
+Each failure is recorded with its stage (configure, generate, support, build
+or publish) in `Jit::Outcome::failures`, in the order it happened.
 The scratch directory is created under the temporary directory, removed when
 the call succeeds, and kept after a failure that left files in it. `Jit`
-requires a backend, a builder and a loader; the store is optional. One `Jit`
-can generate from several threads at once.
+requires a backend, a builder and a store. One `Jit` can generate from
+several threads at once.
 
 `Jit` takes a GEMM request. The interfaces are for compiled-in implementations
 and do not establish a stable external plugin application binary interface (ABI).
@@ -168,39 +188,43 @@ The implementations are:
 
 - Code-object builder: `makeComgrBuilder()`; see
   [building generated sources](#building-generated-sources).
-- Loader: `makeTensileLoader()` checks support with a local TensileLite load of
-  the record (see
-  [loading a published solution](#loading-a-published-solution)) and returns a
-  `TensileGemmBundle` that refers to the `ContractionSolution`. The bundle does
-  not own a library, hardware description, or adapter. Published solutions are
-  launched through `JitLibrary`. The loader is in `rocblaslt/src/tensile_host.cpp`,
-  next to the GEMM problem translation that the support check reuses.
+- Support check: `supportingSolutions`; see
+  [loading a published solution](#loading-a-published-solution). The GEMM
+  problem it checks is the request's, translated by
+  `RocblasltToTensileContractionProblemGemm` in `rocblaslt/src/tensile_host.cpp`.
 - Solution store: the JIT solution library, in `hipblaslt-jit-library.cpp`,
-  with `hipblaslt-jit-msgpack.cpp` writing the library files and
+  with `hipblaslt-jit-msgpack.cpp` writing its own documents and
   `hipblaslt-jit-fs.cpp` providing the directory checks, file lock and atomic
   replacement. `getJitAlgo`, `getLibraryAlgos` and heuristic queries share one
   lookup-then-publish helper that sets this store; see
   [persistent solution library](#persistent-solution-library). A backend
   implements `generate` only.
-- Replay backend: `hipblaslt-jit-replay-backend.cpp` replays a list of source
-  bundles without a generator. A generation returns, in list order, the
-  bundles with a solution whose predicates accept the device and problem, until
-  they hold the requested count of such solutions. The predicate check is a
-  local TensileLite load inside that function. It skips a bundle when every
-  such solution's kernel is excluded; the comgr builder still builds them.
-  It implements `Backend`, so `Jit` builds and loads its sources with the same
-  builder and loader as any other backend. Tests reach it through
-  `jit::replay::createBackend` in `hipblaslt-jit-replay.hpp`, and every JIT
-  build compiles it. Each bundle it returns names the request's target and
-  code-object version and the kernels of its record's solutions.
+- Replay backend: `hipblaslt-jit-replay-backend.cpp` replays a list of
+  TensileLite source bundles without a generator. It reads each bundle whose
+  assembly targets the device with `readTensileSourceBundle` and replays the
+  kernel's solution as plain-pair: two copies with typed edits, the first only
+  for K a multiple of 512 with WorkGroupMapping 8, the second for any K with
+  WorkGroupMapping 1. A generation returns, in list order, the bundles with a
+  solution whose predicates accept the device and problem, until they hold the
+  requested count of such solutions. It skips a bundle when every such
+  solution's kernel is excluded. It implements `Backend`, so `Jit` checks,
+  builds and publishes its bundles as it does any other backend's. Tests reach
+  it through `jit::replay::createBackend` in `hipblaslt-jit-replay.hpp`, and
+  every JIT build compiles it. Each bundle it returns names the request's
+  target and code-object version.
 - HipKittens backend: `hipblaslt-jit-hipkittens.cpp`, built when
-  `HIPBLASLT_JIT_ENABLE_HIPKITTENS` is on and `GPU_TARGETS` includes gfx950.
-  It compiles the gfx950 TN templates in `library/src/amd_detail/hipkittens`
-  with comgr's generic HIP path. The HipKittens headers are staged next to
-  the library; `HIPBLASLT_JIT_HIPKITTENS_PATH` overrides that directory.
-  Each bundle it returns names the request's target and code-object version
-  and its variant's kernel. Heuristic queries use this backend when it is
-  compiled in. A build without the option replays the committed kernels.
+  `HIPBLASLT_JIT_ENABLE_HIPKITTENS` is on, `GPU_TARGETS` includes gfx950 and
+  the build reads MessagePack libraries. Each gfx950 TN kernel is a
+  `hipkittens::detail::Kernel`: an `Artifact` holding a HIP template from
+  `library/src/amd_detail/hipkittens`, with its compiler flags, that builds
+  its `ContractionSolution` in C++ with typed fields. The solution's
+  predicates decide which problems the kernel solves. Each bundle it returns
+  has that template as its main kernel and that solution, and names the
+  request's target and code-object version; comgr compiles it with its
+  generic HIP path. The HipKittens headers are staged next to the library;
+  `HIPBLASLT_JIT_HIPKITTENS_PATH` overrides that directory. Heuristic queries
+  use this backend when it is compiled in. A build without the option
+  replays the committed kernels.
 
 ### Build
 
@@ -236,7 +260,7 @@ result is a JIT solution library index, from 2^30, and it runs through the
 same launch path as a prebuilt index. Another process that queries the same
 problem receives that index.
 
-`getJitAlgo` and `getGemmAlgo` return a JIT solution library index from 2^30.
+`getJitAlgo` returns a JIT solution library index from 2^30.
 `hipblaslt_ext::getIndexFromAlgo` returns that index, and another process that
 can read the library runs it without generating. Save the bundle manifests
 for reproduction.
@@ -244,9 +268,9 @@ for reproduction.
 An empty GEMM output (M=0 or N=0) returns `HIPBLAS_STATUS_NOT_SUPPORTED` from
 the request factory without compilation. K=0 can use a solution that
 implements beta*C. The backend owns its datatype, instruction and scale-layout
-restrictions. The library propagates support failures, including a mismatch
-between the supplied physical MX scale layout and the compiled solution. Jit
-never benchmarks generated solutions. A failed build names the retained
+restrictions, which its solutions' predicates state. A request no generated
+solution supports returns `HIPBLAS_STATUS_NOT_SUPPORTED`. Jit never benchmarks
+generated solutions. A failed build names the retained
 `comgr.log` in its message.
 
 ### Persistent solution library
@@ -291,11 +315,15 @@ operation identifier, the datatypes, the scale suffix (`_SAB` or `_SABV`, and
 MX block and type) and the epilogue flags that change the kernel family. The
 slice is a standard lazy TensileLite library that the stock loader reads: a
 master file, the index mapping, and one entry (`.dat`) and code object (`.co`)
-per solution. Other slices stay unread. Code objects load for the chosen index.
-The directory also holds a helper-only library, in the same TensileLite lazy
-format, keyed by helper name. A solution's code object is the fully linked
-executable, produced by linking the main kernel with the helper relocatables
-from that library. The files the library reads and writes are MessagePack. For
+per published executable. Other slices stay unread. Code objects load for the
+chosen index. The directory also holds `helpers/`, one relocatable per helper
+kernel, named for the helper kernel's symbol. A solution's code object is the
+fully linked executable, produced by linking the main kernel with those helper
+relocatables. The files the library reads and writes are MessagePack.
+TensileLite's writer (`MessagePackWriteLibraryData` and
+`MessagePackWriteLibraryMapping`) writes the master, the mapping and the
+entries from library objects built in C++. The JIT library's own documents are
+`cache-key.msgpack`, the index allocator and the index-to-slice map. For
 example:
 
 ```text
@@ -307,27 +335,24 @@ $HIPBLASLT_JIT_LIBRARY_PATH/
         └── gfx950_..._replay_1/           one directory per device and backend
             ├── cache-key.msgpack
             ├── indices.msgpack            solution index to slice key
-            ├── helpers/                   helper-only TensileLite library
-            │   ├── TensileLibrary_lazy_gfx950.dat
-            │   ├── TensileLiteLibrary_lazy_gfx950_Mapping.dat
-            │   ├── <helper>.dat
-            │   └── <helper>.co            relocatable linked into a solution
+            ├── helpers/
+            │   └── <helper kernel>.o      relocatable linked into a solution
             ├── slices/<slice key>/
             │   ├── TensileLibrary_lazy_gfx950.dat
             │   ├── TensileLiteLibrary_lazy_gfx950_Mapping.dat
-            │   ├── k/<kernel>/t/<problem>/s/<sizes>.dat
-            │   └── k/<kernel>/t/<problem>/s/<sizes>.co
+            │   ├── k/<kernels>/t/<problem>/s/<sizes>.dat
+            │   └── k/<kernels>/t/<problem>/s/<sizes>.co
             └── staging/                   temporary files before rename
 ```
 
-An entry name is a filesystem-safe literal of the kernel, the problem type and
-the sizes. Publishers of that same identity choose the same files and reuse the
-existing index. Each entry holds one supported solution of a generated entry,
-with its solution index rewritten to the allocated one and the generated
-entry's code object beside it. Each master row is
-`And(SizeEqual(M), SizeEqual(N), SizeEqual(batch), SizeEqual(K), <the entry's
-problem predicate>)` pointing to a placeholder for the entry, so a lookup
-matches only the exact sizes within the full ProblemType. The solution's own
+An entry name is a filesystem-safe literal of the kernels, the problem type and
+the sizes. An entry holds the supported solutions published with one
+executable, each under its own allocated index, and that executable beside it
+as the code object. Publishers of that same identity choose the same files,
+and a solution already in the entry keeps its index. Each solution has its own
+master row, `And(SizeEqual(M), SizeEqual(N), SizeEqual(batch), SizeEqual(K),
+<the solution's problem predicate>)`, pointing to a placeholder for the entry,
+so a lookup matches only the exact sizes within the full ProblemType. The solution's own
 hardware, problem and task predicates, including its workspace requirement,
 still run on every match. An entry this build cannot read fails the lookup
 instead of being skipped, because only this build wrote it. A different comgr
@@ -387,16 +412,20 @@ code objects in process through AMD comgr (`hipblaslt-jit-builder.cpp` and
 - Assembly: `AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE`. The main kernel's
   `.amdgcn_target` directive must name the device's processor and only
   features the device has; it is then rewritten to the device's full target
-  ID. The declared wavefront size is the one the assembler uses.
+  ID. The declared wavefront size is the one the assembler uses. An
+  `Executable` build also accepts a main kernel already assembled into a
+  `Relocatable`.
 - HIP source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
   `--rocm-path` and a `-cuid` taken from the source name. A HIP helper
-  compiles to its own `Relocatable`. The helper library stores that
-  relocatable. A hit reuses it. A miss compiles it once and publishes it into
-  the helper library. A bundle's helpers are HIP sources, which an
-  `Executable` build compiles, or relocatables from the helper library, which
-  it links as they are; the build keeps no second cache. comgr's
-  `AMD_COMGR_CACHE` stays comgr's; it cannot be stored in the library. The
-  ROCm path is `HIP_PATH` when set, otherwise the prefix of the loaded HIP
+  compiles to its own `Relocatable`. `JitLibrary::acquireHelper` stores that
+  relocatable as a file in the cache-key directory, named for the helper
+  kernel's symbol, because a source file name such as a TensileLite
+  `Kernels.cpp` can differ per solution. A hit returns it and does not compile.
+  A miss compiles it once and stores it under the publish lock. A bundle's
+  helpers are HIP sources, which an `Executable` build compiles, or
+  relocatables, which it links as they are; the build keeps no second cache.
+  comgr's `AMD_COMGR_CACHE` stays comgr's; it cannot be stored in the library.
+  The ROCm path is `HIP_PATH` when set, otherwise the prefix of the loaded HIP
   runtime.
 - Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` links the main kernel
   and its helpers into one `Executable`, with `-Xlinker --build-id=sha1`. The
@@ -411,8 +440,9 @@ objects. A generator needs no offload bundler.
 
 After linking, the builder reads the executable's metadata and checks that its
 instruction set architecture (ISA) is the device's, that its code-object
-version is the bundle's, and that it defines every name in
-`SourceCodeBundle::kernelNames`. The builder writes no file. A failure's
+version is the bundle's, and that it defines the kernel of every solution in
+`SourceCodeBundle::solutions` and every name in `SourceCodeBundle::kernelNames`.
+The builder writes no file. A failure's
 message carries the first error line of the comgr log, and `Status::log`
 carries the full log. A caller that owns a scratch directory passes the status
 to `keepBuildLog`, which appends the log to `comgr.log` there and names that
@@ -424,36 +454,34 @@ file in the message.
 launches that solution the same way it launches Equality and Origami solutions.
 The stored record is a `ContractionSolution` with the code object, kernel name,
 `ContractionSolution::ProblemType`, and the predicates those libraries already
-expect. `TensileGemmBundle` does not own a `MasterSolutionLibrary`, `Hardware`,
-or `SolutionAdapter`. An in-process handle for one index refers to the solution
-inside `JitLibrary`.
+expect. Nothing else holds a published solution in process.
 
-`loadGemmLibrary` reads a solution record with TensileLite and requires local
-solutions 0 to N-1. It does not require the record to hold exactly one
-solution. A predicate check calls it as a local load inside the replay or
-HipKittens backend function. That load is not a field of a bundle type and not
-a second library type. `readTensileSourceBundle` reads a source directory into
-a `SourceCodeBundle` and the kernel name. A backend contributes one
-`SourceCodeBundle`. `publish` takes the executable built from it, its
-TensileLite record and the local indices of the record's solutions to add, and
-adds them to the library, which holds many.
+`supportingSolutions`, in `hipblaslt-jit-library.hpp`, decides which of a
+bundle's solutions serve a problem before they are published. TensileLite's
+`selectionPredicate` evaluates each solution's problem, task and hardware
+predicates, with the workspace limit as the problem's workspace, and the
+solution's `requiredWorkspaceSize` must fit that limit. It keeps the bundle's
+order, best first. A backend contributes one `SourceCodeBundle`. `publish`
+takes the executable built from it and the solutions `supportingSolutions`
+kept, and adds them as one entry.
 
-The record's solutions are listed best first, each with its own `Problem` row.
-Their hardware and problem predicates decide which problems each one serves,
-so `findBestSolution` on the loaded library selects the first solution that
-serves a problem, and nothing for a problem none of them was generated for.
+Each solution of an entry has its own `Problem` row. Their hardware and
+problem predicates decide which problems each one serves, so a lookup lists,
+in index order, every solution of a matching entry that serves the problem,
+and nothing for a problem none of them was generated for.
 
 ### Source bundle format
 
 A source bundle is one kernel's sources stored as a directory.
 `source_bundle::readSourceBundle`, in `hipblaslt-jit-source-bundle.hpp`, reads
 the sources into a `SourceCodeBundle` and requires one main kernel. The caller
-sets the target and kernel names, which the directory does not hold.
-`readTensileSourceBundle` also reads the library entry for the kernel name.
+sets the target and solutions, which the directory does not hold.
+`readTensileSourceBundle` reads the solutions from the assembly's
+`custom.config`, as above. A bundle with a `library/` entry is rejected,
+because a kernel's solutions come from the kernel itself.
 
 | Path | Contents |
 | --- | --- |
-| `library/TensileLibrary.dat` | The TensileLite solution record, uncompressed MsgPack. Not part of `SourceCodeBundle` |
 | `sources/*.s` | The assembly main kernel, at most one |
 | `sources/*.hip`, `sources/*.cpp` | The HIP main kernel when there is no assembly, otherwise HIP helpers |
 | Other files in `sources/` | Headers |
@@ -465,12 +493,11 @@ the file count (1024), each file (64 MiB) and the sources in total (256 MiB).
 
 The JIT tests use one kernel, generated for gfx90a, gfx942 and gfx950, in
 `clients/tests/jit/data`, of which only the assembly is committed. The assembly
-records the kernel-argument and persistent-loop argument layout versions of the
-generator that wrote it. `jit-publish` builds that assembly for the current
-device and publishes it into the JIT solution library: `plain` as one solution
-and `plain-pair` as two. `jit-loader` reads that library and resolves the
-pre-generated kernel. Replay tests stage a temporary source directory from the
-same descriptions, which is the input `readTensileSourceBundle` already
-accepts, and do not publish a second format.
+keeps the kernel's TensileLite solution state in `custom.config`, which
+`TensileliteAssembly::make` reads. `jit-publish` builds that assembly for the
+current device and publishes it into a JIT solution library: `plain` as one
+solution and `plain-pair` as two solutions in one entry. `jit-loader` reads
+that library and finds each solution at its K. The replay backend reads the
+same bundles in place.
 [The data README](clients/tests/jit/data/README.md) gives the command that
 generated the assembly.
