@@ -820,6 +820,7 @@ void testing_getrs(Arguments& argus)
                                    &size_W,
                                    bc);
     }
+    SIZE size_W_elems = (size_W + sizeof(T) - 1) / sizeof(T);
 
     if(argus.mem_query)
     {
@@ -841,7 +842,8 @@ void testing_getrs(Arguments& argus)
         device_batch_vector<T>           dB(size_B, 1, bc);
         device_strided_batch_vector<I>   dIpiv(size_P, 1, stP, bc);
         device_strided_batch_vector<int> dInfo(1, 1, 1, bc);
-        device_strided_batch_vector<T>   dWork(size_W, 1, size_W, 1); // size_W accounts for bc
+        device_strided_batch_vector<T>   dWork(
+            size_W_elems, 1, size_W_elems, 1); // size_W accounts for bc
         if(size_A)
             CHECK_HIP_ERROR(dA.memcheck());
         if(size_B)
@@ -924,7 +926,8 @@ void testing_getrs(Arguments& argus)
         device_strided_batch_vector<T>   dB(size_B, 1, stB, bc);
         device_strided_batch_vector<I>   dIpiv(size_P, 1, stP, bc);
         device_strided_batch_vector<int> dInfo(1, 1, 1, bc);
-        device_strided_batch_vector<T>   dWork(size_W, 1, size_W, 1); // size_W accounts for bc
+        device_strided_batch_vector<T>   dWork(
+            size_W_elems, 1, size_W_elems, 1); // size_W accounts for bc
         if(size_A)
             CHECK_HIP_ERROR(dA.memcheck());
         if(size_B)

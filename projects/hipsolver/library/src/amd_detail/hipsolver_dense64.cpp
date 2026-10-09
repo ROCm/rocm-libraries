@@ -809,30 +809,34 @@ try
     *lworkOnHost   = 0;
 
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status;
+    hipsolverStatus_t status, npvt_status;
     if(dataTypeA == HIP_R_32F && computeType == HIP_R_32F)
     {
         status = hipsolver::rocblas2hip_status(
             rocsolver_sgetrf_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
-        rocsolver_sgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr);
+        npvt_status = hipsolver::rocblas2hip_status(
+            rocsolver_sgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
     }
     else if(dataTypeA == HIP_R_64F && computeType == HIP_R_64F)
     {
         status = hipsolver::rocblas2hip_status(
             rocsolver_dgetrf_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
-        rocsolver_dgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr);
+        npvt_status = hipsolver::rocblas2hip_status(
+            rocsolver_dgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
     }
     else if(dataTypeA == HIP_C_32F && computeType == HIP_C_32F)
     {
         status = hipsolver::rocblas2hip_status(
             rocsolver_cgetrf_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
-        rocsolver_cgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr);
+        npvt_status = hipsolver::rocblas2hip_status(
+            rocsolver_cgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
     }
     else if(dataTypeA == HIP_C_64F && computeType == HIP_C_64F)
     {
         status = hipsolver::rocblas2hip_status(
             rocsolver_zgetrf_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
-        rocsolver_zgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr);
+        npvt_status = hipsolver::rocblas2hip_status(
+            rocsolver_zgetrf_npvt_info32((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
     }
     else
     {
@@ -841,7 +845,10 @@ try
     }
 
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
-    return status;
+
+    if(status != HIPSOLVER_STATUS_SUCCESS)
+        return status;
+    return npvt_status;
 }
 catch(...)
 {

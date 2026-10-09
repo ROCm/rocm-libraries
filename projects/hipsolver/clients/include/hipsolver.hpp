@@ -6341,7 +6341,7 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
                                                     float*               B,
                                                     int64_t              ldb,
                                                     size_t*              lwork,
-                                                    int                  bc)
+                                                    int64_t              bc)
 {
     switch(API)
     {
@@ -6364,7 +6364,7 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
                                                     double*              B,
                                                     int64_t              ldb,
                                                     size_t*              lwork,
-                                                    int                  bc)
+                                                    int64_t              bc)
 {
     switch(API)
     {
@@ -6387,7 +6387,7 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t            API,
                                                     hipsolverComplex*    B,
                                                     int64_t              ldb,
                                                     size_t*              lwork,
-                                                    int                  bc)
+                                                    int64_t              bc)
 {
     switch(API)
     {
@@ -6410,7 +6410,7 @@ inline hipsolverStatus_t hipsolver_getrs_bufferSize(testAPI_t               API,
                                                     hipsolverDoubleComplex* B,
                                                     int64_t                 ldb,
                                                     size_t*                 lwork,
-                                                    int                     bc)
+                                                    int64_t                 bc)
 {
     switch(API)
     {
@@ -6656,7 +6656,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                          float*               work,
                                          size_t               lwork,
                                          int*                 info,
-                                         int                  bc)
+                                         int64_t              bc)
 {
     switch(api2marshal(API, NPVT))
     {
@@ -6689,7 +6689,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                          double*              work,
                                          size_t               lwork,
                                          int*                 info,
-                                         int                  bc)
+                                         int64_t              bc)
 {
     switch(api2marshal(API, NPVT))
     {
@@ -6722,7 +6722,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t            API,
                                          hipsolverComplex*    work,
                                          size_t               lwork,
                                          int*                 info,
-                                         int                  bc)
+                                         int64_t              bc)
 {
     switch(api2marshal(API, NPVT))
     {
@@ -6755,7 +6755,7 @@ inline hipsolverStatus_t hipsolver_getrs(testAPI_t               API,
                                          hipsolverDoubleComplex* work,
                                          size_t                  lwork,
                                          int*                    info,
-                                         int                     bc)
+                                         int64_t                 bc)
 {
     switch(api2marshal(API, NPVT))
     {

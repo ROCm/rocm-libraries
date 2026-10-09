@@ -7989,11 +7989,11 @@ try
         *hInfo = -2;
     else if(nrhs < 0)
         *hInfo = -3;
-    else if(!A && n)
+    else if(!A && n && batch_count > 0)
         *hInfo = -4;
     else if(lda < std::max(1, n))
         *hInfo = -5;
-    else if(!B && n * nrhs)
+    else if(!B && n * nrhs && batch_count > 0)
         *hInfo = -8;
     else if(ldb < std::max(1, n))
         *hInfo = -9;
@@ -8078,11 +8078,11 @@ try
         *hInfo = -2;
     else if(nrhs < 0)
         *hInfo = -3;
-    else if(!A && n)
+    else if(!A && n && batch_count > 0)
         *hInfo = -4;
     else if(lda < std::max(1, n))
         *hInfo = -5;
-    else if(!B && n * nrhs)
+    else if(!B && n * nrhs && batch_count > 0)
         *hInfo = -8;
     else if(ldb < std::max(1, n))
         *hInfo = -9;
@@ -8167,11 +8167,11 @@ try
         *hInfo = -2;
     else if(nrhs < 0)
         *hInfo = -3;
-    else if(!A && n)
+    else if(!A && n && batch_count > 0)
         *hInfo = -4;
     else if(lda < std::max(1, n))
         *hInfo = -5;
-    else if(!B && n * nrhs)
+    else if(!B && n * nrhs && batch_count > 0)
         *hInfo = -8;
     else if(ldb < std::max(1, n))
         *hInfo = -9;
@@ -8256,11 +8256,11 @@ try
         *hInfo = -2;
     else if(nrhs < 0)
         *hInfo = -3;
-    else if(!A && n)
+    else if(!A && n && batch_count > 0)
         *hInfo = -4;
     else if(lda < std::max(1, n))
         *hInfo = -5;
-    else if(!B && n * nrhs)
+    else if(!B && n * nrhs && batch_count > 0)
         *hInfo = -8;
     else if(ldb < std::max(1, n))
         *hInfo = -9;
