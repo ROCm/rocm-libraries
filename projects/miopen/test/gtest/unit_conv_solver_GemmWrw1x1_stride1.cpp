@@ -116,7 +116,8 @@ TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NHWCUsesStride1Solver)
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
 
-    // Batch 4 stays above the gfx942 small-batch exclusion (see Gfx942SmallBatchNhwcExcluded).
+    // Batch 4 stays above the gfx942 small-batch exclusion gate (see
+    // unit_conv_solver_small_batch_gemm_exclusion.cpp).
     const auto test_case =
         TestCase{{4, 8, 8, 8}, {8, 8, 1, 1}, {0, 0}, {1, 1}, {1, 1}, miopenFloat, miopenTensorNHWC};
     const auto problem = test_case.GetProblemDescription(miopen::conv::Direction::BackwardWeights);
