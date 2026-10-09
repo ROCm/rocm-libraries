@@ -5192,6 +5192,16 @@ class Solution(collections.abc.Mapping):
       return
     assert(state["DepthU"]> 0)
 
+    # Single-wave TDM gives MXSA/MXSB their own descriptor sets, which its setup
+    # never programs; four separate sets also exceed MaxSgpr on gfx1250.
+    if state["enableTDMA"] and state["enableTDMB"] and state["NumWaves"] == 1 \
+        and not state["UseSubtileImpl"] \
+        and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
+      reject(state, printRejectionReason,
+             "TDM with MX scales requires NumWaves > 1: the single-wave TDM path does not "
+             "program the MXSA/MXSB descriptors (use an MIWaveGroup with more than one wave)")
+      return
+
     if state["_ScheduleIterAlg"] == 2:
       state["InnerUnroll"] = state["DepthU"] // state["MatrixInstK"]
       state["PrefetchLocalRead"] = 1
