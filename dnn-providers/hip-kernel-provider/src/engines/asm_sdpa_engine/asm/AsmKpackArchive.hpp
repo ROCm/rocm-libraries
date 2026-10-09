@@ -118,8 +118,7 @@ private:
             return it->second;
         }
 
-        auto kpackPath = currentPluginDirectory() / "arch_content" / "asm_sdpa" / arch
-                         / ("hip_kernel_provider_sdpa_" + arch + ".kpack");
+        const auto kpackPath = asmSdpaKpackArchivePath(arch);
 
         kpack_archive_t archive = nullptr;
         const kpack_error_t err = kpack_open(kpackPath.string().c_str(), &archive);
