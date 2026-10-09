@@ -28,11 +28,9 @@
 # whole SDPA surface at the comprehensive/full tier is safe.
 _common_excludes: &common_excludes
   - "*DISABLED*"
-  # SdpaBackward bundles fail on two independent issues:
-  #   1. ASM kernel .co files missing from TheRock artifact (hipError 301)
-  #   2. CPU reference rejects LSE tensor shape ("lse must be rank-4")
-  # Tracked upstream — re-enable once hip-kernel-provider ships the kernels
-  # and the CPU ref handles the new LSE layout.
+  # SdpaBackward bundles fail verification: the ASM kernels load and execute,
+  # but the CPU reference rejects the LSE tensor shape ("lse must be rank-4").
+  # Re-enable once the CPU ref handles the new LSE layout.
   - "*SdpaBackward*"
 
 test_categories:
