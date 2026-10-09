@@ -27,9 +27,13 @@
 #include "../../library/src/include/utility.hpp"
 #include "rocblas.h"
 #include "rocblas_vector.hpp"
+#include <cassert>
 #include <cstdio>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -108,18 +112,125 @@ void rocblas_parallel_initialize(int parallel_devices);
 
 extern thread_local std::unique_ptr<std::function<void(rocblas_handle)>> t_set_stream_callback;
 
+#ifdef WIN32
+#define setenv(A, B, C) _putenv_s(A, B)
+#define unsetenv(A) _putenv_s(A, "")
+#endif
+
+// One mutex per distinct env var name scoped_env_var ever guards, so concurrent
+// rocblas_local_handle construction (RUN_TEST_ON_THREADS_STREAMS) cannot interleave one
+// thread's override with another's read/restore of the same variable -- the library reads
+// both variables during handle construction, so the lock must span activate() through the
+// guard's destruction, not just the individual getenv/setenv calls.
+//
+// Must stay a plain `inline` function (not `static`/anonymous-namespace): this header is
+// included by multiple translation units, and only a non-internal-linkage inline function
+// is guaranteed by the standard to share one instance of its function-local statics across
+// all of them. A static/anonymous-namespace version would silently give every TU its own
+// private mutexes, defeating the whole point.
+//
+// Must be *recursive*: several testing_*.hpp files construct a nested rocblas_local_handle
+// on the same thread while an outer one is still alive (the repeatability_check pattern --
+// see e.g. testing_gemm.hpp), and both can activate the same env var name from the same
+// Arguments. A plain std::mutex would deadlock the same thread against itself in that case;
+// std::recursive_mutex still blocks a genuinely different thread the same as a plain mutex
+// would, so the cross-thread protection this exists for is unaffected.
+//
+// rocblas_local_handle always activates ROCBLAS_USE_HIPBLASLT before
+// ROCBLAS_STREAM_ORDER_ALLOC (see its constructor) -- keep that order everywhere a
+// scoped_env_var pair is activated together, so acquisition order never diverges and a
+// deadlock cycle can't form.
+inline std::recursive_mutex& env_var_mutex(const char* name)
+{
+    static std::recursive_mutex hipblaslt_mutex;
+    static std::recursive_mutex stream_order_mutex;
+    static std::recursive_mutex other_mutex;
+    if(!strcmp(name, "ROCBLAS_USE_HIPBLASLT"))
+        return hipblaslt_mutex;
+    if(!strcmp(name, "ROCBLAS_STREAM_ORDER_ALLOC"))
+        return stream_order_mutex;
+    return other_mutex;
+}
+
+/* ============================================================================================ */
+/*! \brief  Sets an environment variable for the lifetime of this object, restoring the previous
+ *          value -- or unsetting it, if it had none -- on destruction.
+ *
+ *  This is a *member* of rocblas_local_handle rather than plain code in its constructor body
+ *  for a specific reason: if a constructor throws from its body, the enclosing object's
+ *  destructor is NOT run, but the destructors of its already-constructed members ARE.
+ *  Performing the restore in ~rocblas_local_handle() therefore leaks the variable
+ *  process-wide whenever rocblas_create_handle() fails, poisoning every subsequent test in
+ *  the same process.
+ */
+class scoped_env_var
+{
+    std::string                            m_name;
+    std::string                            m_old_value;
+    bool                                   m_had_old_value{false};
+    bool                                   m_active{false};
+    std::unique_lock<std::recursive_mutex> m_lock; // held from activate() until destruction
+
+public:
+    scoped_env_var() = default;
+
+    // Not set in the constructor: rocblas_local_handle needs these as plain (not optional<>)
+    // members so it stays buildable by clients/samples, which pins CXX_STANDARD below 17.
+    void activate(const char* name, const char* value)
+    {
+        assert(!m_active && "scoped_env_var::activate called twice");
+        m_lock          = std::unique_lock<std::recursive_mutex>(env_var_mutex(name));
+        m_name          = name;
+        const char* old = getenv(name);
+        m_had_old_value = (old != nullptr);
+        m_old_value     = m_had_old_value ? old : std::string();
+        setenv(name, value, true);
+        m_active = true;
+    }
+
+    ~scoped_env_var()
+    {
+        if(!m_active)
+            return;
+        if(m_had_old_value)
+            setenv(m_name.c_str(), m_old_value.c_str(), true);
+        else
+            unsetenv(m_name.c_str()); // was not set before: unset, do not leave it empty
+    }
+
+    scoped_env_var(const scoped_env_var&) = delete;
+    scoped_env_var(scoped_env_var&&)      = delete;
+    scoped_env_var& operator=(const scoped_env_var&) = delete;
+    scoped_env_var& operator=(scoped_env_var&&) = delete;
+};
+
+// rocblas_destroy_handle tolerates a null handle (returns rocblas_status_invalid_handle), so
+// it's a valid deleter for the null state unique_ptr passes through on move/reset.
+struct rocblas_handle_deleter
+{
+    using pointer = rocblas_handle;
+    void operator()(rocblas_handle handle) const
+    {
+        rocblas_destroy_handle(handle);
+    }
+};
+
 /* ============================================================================================ */
 /*! \brief  local handle which is automatically created and destroyed  */
 class rocblas_local_handle
 {
-    rocblas_handle m_handle{nullptr};
-    void*          m_memory{nullptr};
-    hipStream_t    m_graph_stream{nullptr};
-    hipStream_t    m_old_stream{nullptr};
-    std::string    m_hipblaslt_saved_status    = "";
-    std::string    m_stream_order_saved_status = "";
-    bool           m_hipblaslt_env_set{false};
-    bool           m_stream_order_env_set{false};
+    // Declared first => destroyed last, i.e. after m_handle has been released.
+    scoped_env_var m_hipblaslt_env;
+    scoped_env_var m_stream_order_env;
+
+    // rocblas_handle_deleter's operator() calls rocblas_destroy_handle unconditionally on
+    // destruction/reset/move-assignment, so m_handle can never leak once it holds a valid
+    // pointer -- this is what let the constructors' catch blocks drop their manual
+    // rocblas_destroy_handle(m_handle) calls.
+    std::unique_ptr<std::remove_pointer<rocblas_handle>::type, rocblas_handle_deleter> m_handle;
+    void*       m_memory{nullptr};
+    hipStream_t m_graph_stream{nullptr};
+    hipStream_t m_old_stream{nullptr};
 
     void rocblas_stream_begin_capture();
     void rocblas_stream_end_capture();
@@ -136,14 +247,16 @@ public:
     rocblas_local_handle& operator=(const rocblas_local_handle&) = delete;
     rocblas_local_handle& operator=(rocblas_local_handle&&) = delete;
 
-    // Allow rocblas_local_handle to be used anywhere rocblas_handle is expected
-    operator rocblas_handle&()
+    // Allow rocblas_local_handle to be used anywhere rocblas_handle is expected. No caller
+    // relies on binding to an lvalue reference (verified against every use site in clients/),
+    // so these return by value from the underlying unique_ptr.
+    operator rocblas_handle()
     {
-        return m_handle;
+        return m_handle.get();
     }
-    operator const rocblas_handle&() const
+    operator rocblas_handle() const
     {
-        return m_handle;
+        return m_handle.get();
     }
 
     void pre_test(const Arguments& arg)
@@ -151,8 +264,8 @@ public:
         if(arg.alpha_beta_stride && arg.pointer_mode_device)
         {
             // for now no GEMM applicability so c/d stride used
-            rocblas_set_batch_alpha_stride(m_handle, arg.stride_c);
-            rocblas_set_batch_beta_stride(m_handle, arg.stride_d);
+            rocblas_set_batch_alpha_stride(m_handle.get(), arg.stride_c);
+            rocblas_set_batch_beta_stride(m_handle.get(), arg.stride_d);
         }
 #if HIP_VERSION >= 50500000
         arg.graph_test ? rocblas_stream_begin_capture() : NOOP;
@@ -166,8 +279,8 @@ public:
 #endif
         if(arg.alpha_beta_stride && arg.pointer_mode_device)
         {
-            rocblas_set_batch_alpha_stride(m_handle, 0);
-            rocblas_set_batch_beta_stride(m_handle, 0);
+            rocblas_set_batch_alpha_stride(m_handle.get(), 0);
+            rocblas_set_batch_beta_stride(m_handle.get(), 0);
         }
     }
 };
