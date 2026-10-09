@@ -102,5 +102,16 @@ diff against upstream plus the modifications below.
     they contribute nothing. Non-causal builds ignore it. The launchers pass
     `_NO_WINDOW` (-2^30), no window.
 
+12. **Additive bias on the generic kernel** (`flash_attn_generic.py`,
+    `flash_attn_utils.py`). A `has_bias` builder argument (part of the JIT cache key)
+    and trailing `Bias, bias_stride0, stride_bias_b, stride_bias_h` on every generic
+    object. A bias build reads one (batch, query head) slice of the bias through a
+    buffer view rebased at `batch * stride_bias_b + head * stride_bias_h` and ending at
+    `(seq_len - 1) * bias_stride0 + seq_len_kv`, so any of batch, head and query may be
+    broadcast (stride 0) and rows and columns past the scores read as zero, as the
+    dual-wave kernel's does (modification 8). Each lane loads its 32 scores' bias as
+    eight 4-element runs and adds `bias / scale` to the unscaled scores, which the
+    kernel scales inside the exponent. Other builds never read the slot.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

@@ -137,6 +137,10 @@ _PARAMS = {
         ("stride_kv_b", "i32"),
         ("stride_kv_h", "i32"),
         ("window_lo", "i32"),
+        ("Bias", "tensor"),
+        ("bias_stride0", "i32"),
+        ("stride_bias_b", "i32"),
+        ("stride_bias_h", "i32"),
     ),
 }
 
@@ -261,12 +265,13 @@ def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
             skip_kv_pad_mask=bool(knobs["kv_align"]),
             return_lse=True,
             extra_llvm_options=_llvm_options(instance, arch),
+            has_bias=bool(knobs["has_bias"]),
             **_lds_pads(instance, arch),
             **(
                 {"waves_per_eu": knobs["waves_per_eu"]} if knobs["waves_per_eu"] else {}
             ),
         )
-    if knobs["kernel"] == "dualwave" and knobs["has_bias"]:
+    if knobs["has_bias"]:
         # A rank-4 stand-in, like every other tensor argument; the kernel reads
         # only its pointer and takes its strides as arguments.
         bias = torch.empty(

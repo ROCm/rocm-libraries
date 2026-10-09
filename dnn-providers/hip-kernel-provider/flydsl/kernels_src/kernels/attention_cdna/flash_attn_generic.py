@@ -78,6 +78,7 @@ def build_flash_attn_func_module_primary(
     extra_llvm_options=None,
     k_pad=None,
     vt_pad=None,
+    has_bias=False,
 ):
     """Build a generic f16/bf16 flash-attention launcher.
 
@@ -124,6 +125,7 @@ def build_flash_attn_func_module_primary(
             extra_llvm_options=extra_llvm_options,
             k_pad=k_pad,
             vt_pad=vt_pad,
+            has_bias=has_bias,
         )
         _launcher_m256 = build_flash_attn_func_module_primary(
             num_heads,
@@ -150,6 +152,7 @@ def build_flash_attn_func_module_primary(
             extra_llvm_options=extra_llvm_options,
             k_pad=k_pad,
             vt_pad=vt_pad,
+            has_bias=has_bias,
         )
         _bs_threshold = (
             2048 * num_heads if gpu_arch.startswith("gfx942") else 4096 * num_heads
@@ -245,7 +248,8 @@ def build_flash_attn_func_module_primary(
         k_pad=k_pad,
         vt_pad=vt_pad,
     )
-    _flash_attn_generic_cache_tag = traits.cache_tag
+    # A bias build differs from the plain one in its body only (modification 12).
+    _flash_attn_generic_cache_tag = (traits.cache_tag, bool(has_bias))
 
     def _extract_seq_len(args, kwargs):
         """Return the launch-time seq_len as int, or None if not statically known."""
@@ -308,6 +312,10 @@ def build_flash_attn_func_module_primary(
         stride_kv_b: fx.Int32,
         stride_kv_h: fx.Int32,
         window_lo: fx.Int32,
+        Bias: fx.Tensor,
+        bias_stride0: fx.Int32,
+        stride_bias_b: fx.Int32,
+        stride_bias_h: fx.Int32,
     ):
         # Make shape/mode traits visible to the JIT cache key.
         _ = _flash_attn_generic_cache_tag
@@ -361,6 +369,8 @@ def build_flash_attn_func_module_primary(
         # Per-batch Q/O (and LSE when RETURN_LSE) descriptors, then K/V DMA
         # resources when DMA is enabled.
         ctx.init_descriptors(Q, O, LSE)
+        if const_expr(has_bias):
+            ctx.init_bias(Bias, bias_stride0, stride_bias_b, stride_bias_h)
         if const_expr(traits.ENABLE_DMA):
             kv_gmem_to_lds.init_dma()
 
@@ -369,6 +379,8 @@ def build_flash_attn_func_module_primary(
         q_b_packs = q_loader.load_all(ctx.q_rsrc, ctx.q_row)
 
         ctx.init_constants(sm_scale)
+        if const_expr(has_bias):
+            ctx.c_bias_inv_scale = fx.Float32(1.0) / ctx.c_sm_scale
         ctx.init_kv_bounds()
         kv_upper = ctx.kv_upper
 
@@ -680,6 +692,10 @@ def build_flash_attn_func_module_primary(
         stride_kv_b: fx.Int32,
         stride_kv_h: fx.Int32,
         window_lo: fx.Int32,
+        Bias: fx.Tensor,
+        bias_stride0: fx.Int32,
+        stride_bias_b: fx.Int32,
+        stride_bias_h: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         bs_idx = fx.Index(batch_size)
@@ -722,6 +738,10 @@ def build_flash_attn_func_module_primary(
             stride_kv_b,
             stride_kv_h,
             window_lo,
+            Bias,
+            bias_stride0,
+            stride_bias_b,
+            stride_bias_h,
             value_attrs={
                 "rocdl.waves_per_eu": waves_per_eu,
                 "rocdl.flat_work_group_size": (
@@ -769,6 +789,8 @@ def build_flash_attn_func_module_primary(
         seq_len_kv=None,
         lse=None,
         sm_scale=None,
+        bias=None,
+        bias_stride0=0,
         stream=None,
     ):
         # Dense/non-paged pass the output tensor as a placeholder for the unused
@@ -786,6 +808,9 @@ def build_flash_attn_func_module_primary(
         ls = lse if lse is not None else Out
         skv = seq_len if seq_len_kv is None else seq_len_kv
         scale = _default_sm_scale if sm_scale is None else sm_scale
+        # The bias (modification 12): read for its pointer; strides are arguments. A
+        # build without one never reads the slot, so O stands in.
+        bs = bias
         with CompilationContext.compile_hints(_fmha_compile_hints):
             return launch_flash_attn_generic(
                 Q,
@@ -815,6 +840,10 @@ def build_flash_attn_func_module_primary(
                 skv * traits.STRIDE_TOKEN_KV,
                 traits.HEAD_DIM,
                 _NO_WINDOW,
+                bs if bias is not None else Out,
+                bias_stride0,
+                0,
+                0,
                 fx.Stream(stream),
             )
 
@@ -828,6 +857,8 @@ def build_flash_attn_func_module_primary(
         seq_len_kv=None,
         lse=None,
         sm_scale=None,
+        bias=None,
+        bias_stride0=0,
         stream=None,
     ):
         if return_lse and lse is None:
@@ -838,6 +869,9 @@ def build_flash_attn_func_module_primary(
         ls = lse if lse is not None else Out
         skv = seq_len if seq_len_kv is None else seq_len_kv
         scale = _default_sm_scale if sm_scale is None else sm_scale
+        # The bias (modification 12): read for its pointer; strides are arguments. A
+        # build without one never reads the slot, so O stands in.
+        bs = bias
         with CompilationContext.compile_hints(_fmha_compile_hints):
             return flyc.compile(
                 launch_flash_attn_generic,
@@ -868,6 +902,10 @@ def build_flash_attn_func_module_primary(
                 skv * traits.STRIDE_TOKEN_KV,
                 traits.HEAD_DIM,
                 _NO_WINDOW,
+                bs if bias is not None else Out,
+                bias_stride0,
+                0,
+                0,
                 fx.Stream(stream),
             )
 
@@ -902,6 +940,7 @@ def build_flash_attn_func_module_primary(
             extra_llvm_options=extra_llvm_options,
             k_pad=k_pad,
             vt_pad=vt_pad,
+            has_bias=has_bias,
         )
         _launch_mask = build_flash_attn_func_module_primary(
             num_heads,
@@ -928,6 +967,7 @@ def build_flash_attn_func_module_primary(
             extra_llvm_options=extra_llvm_options,
             k_pad=k_pad,
             vt_pad=vt_pad,
+            has_bias=has_bias,
         )
 
         def _pad_dispatch(*args, **kwargs):

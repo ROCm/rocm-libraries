@@ -530,14 +530,28 @@ SDPA_CDNA_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
         ),
     },
 }
-# The dual-wave kernel adds an additive bias in the query's dtype as a compile-time
-# axis; the generic kernel has none. Bias graphs are rare in the corpus, so a bias
-# class ships its default tier only, with upstream's scheduling.
-SDPA_CDNA_BIAS_TIERS = {
-    (64, 0): (CdnaTier(_DW, 256),),
-    (64, 1): (CdnaTier(_DW, 256),),
-    (128, 0): (CdnaTier(_DW, 256),),
-    (128, 1): (CdnaTier(_DW, 256, offset_zero=True),),
+# An additive bias in the query's dtype is a compile-time axis of both kernels (the
+# dual-wave kernel upstream's, the generic one modification 12). Bias graphs are rare in
+# the corpus, so a bias class ships its default tier only, with upstream's scheduling on
+# the dual-wave kernel.
+SDPA_CDNA_BIAS_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
+    "gfx950": {
+        (64, 0): (CdnaTier(_DW, 256),),
+        (64, 1): (CdnaTier(_DW, 256),),
+        (128, 0): (CdnaTier(_DW, 256),),
+        (128, 1): (CdnaTier(_DW, 256, offset_zero=True),),
+        (256, 0): (CdnaTier(_GEN, 128, waves_per_eu=1),),
+        (256, 1): (CdnaTier(_GEN, 128, waves_per_eu=1),),
+    },
+    "gfx942": {
+        # Three waves per EU spill with a bias; the kernel's default does not.
+        (64, 0): (CdnaTier(_GEN, 128),),
+        (64, 1): (CdnaTier(_GEN, 128),),
+        (128, 0): (CdnaTier(_GEN, 128),),
+        (128, 1): (CdnaTier(_GEN, 128, kv_gpfetch=0),),
+        (256, 0): (CdnaTier(_GEN, 128),),
+        (256, 1): (CdnaTier(_GEN, 128),),
+    },
 }
 
 # Everything else is a kernel argument (vendored-kernel modifications 2-8).
@@ -577,8 +591,7 @@ def sdpa_cdna_instances(arch: str) -> list[Instance]:
             f"no CDNA SDPA kernel for {arch!r}; known: {', '.join(sorted(SDPA_CDNA_TIERS))}"
         )
     classes = [(key, 0, tiers) for key, tiers in SDPA_CDNA_TIERS[arch].items()]
-    if arch == "gfx950":
-        classes += [(key, 1, tiers) for key, tiers in SDPA_CDNA_BIAS_TIERS.items()]
+    classes += [(key, 1, tiers) for key, tiers in SDPA_CDNA_BIAS_TIERS[arch].items()]
     instances: list[Instance] = []
     for dtype in SDPA_CDNA_DTYPES:
         for (head_dim, causal), has_bias, tiers in classes:

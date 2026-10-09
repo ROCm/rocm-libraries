@@ -2764,6 +2764,23 @@ class GenericFlashAttnContext:
                 base_byte_offset=_lse_batch_byte_off,
             )
 
+    def init_bias(self, Bias, bias_stride0, stride_bias_b, stride_bias_h):
+        """The additive bias's descriptor (modification 12): one (batch, query head) slice,
+        rebased at batch * stride_bias_b + head * stride_bias_h and ending at its last
+        element, (seq_len - 1) * bias_stride0 + seq_len_kv, so rows and columns past the
+        scores read as zero; a stride of 0 broadcasts that axis."""
+        self.bias_stride0_v = fx.Index(bias_stride0)
+        span = (self.seqlen_q_b - fx.Index(1)) * self.bias_stride0_v + self.seqlen_kv_b
+        base = fx.Index(self.batch_idx) * fx.Index(
+            stride_bias_b
+        ) + self.q_head_idx * fx.Index(stride_bias_h)
+        self.bias_rsrc = buffer_ops.create_buffer_resource(
+            Bias,
+            max_size=False,
+            num_records_bytes=as_mlir_value(span * fx.Index(2)),
+            base_byte_offset=as_mlir_value(base * fx.Index(2)),
+        )
+
     def _init_strided_descriptors(self, Q, O):  # noqa: E741
         """Per-(batch, head) descriptors under runtime strides (modification 6).
 
@@ -3793,10 +3810,38 @@ class GenericSoftmaxHelper:
             moff = (0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 24, 25, 26, 27)
         return kv_start_i32 + lane_off, moff
 
+    def add_bias(self, s_raw_lo, s_raw_hi, kv_start):
+        """Add the bias (modification 12) to the unscaled scores, as bias / scale: the
+        kernel scales scores inside the exponent, so this adds `bias` to the scaled ones.
+        Each lane's 32 scores are 8 runs of 4 consecutive keys, one 8-byte load each."""
+        ctx = self.ctx
+        traits = ctx.traits
+        col_base_i32, moff = self._kv_mask_lane_off(fx.Int32(kv_start))
+        row_off = ctx.q_row * ctx.bias_stride0_v
+        out_lo = list(s_raw_lo)
+        out_hi = list(s_raw_hi)
+        for scores, extra in ((out_lo, 0), (out_hi, traits.K_SUB_N)):
+            for g in range_constexpr(4):
+                idx = row_off + fx.Index(col_base_i32 + fx.Int32(moff[4 * g] + extra))
+                raw = buffer_ops.buffer_load(
+                    ctx.bias_rsrc, idx, vec_width=4, dtype=ctx.elem_dtype
+                )
+                vals = Vec(Vec(raw, (4,), ctx.elem_dtype).to(fx.Float32))
+                for e in range_constexpr(4):
+                    scores[4 * g + e] = fx.fma(
+                        vals[e],
+                        ctx.c_bias_inv_scale,
+                        scores[4 * g + e],
+                        fastmath=ctx.fm_fast,
+                    )
+        return out_lo, out_hi
+
     @flyc.jit
     def apply_kv_mask(self, s_raw_lo, s_raw_hi, kv_start):
         ctx = self.ctx
         traits = ctx.traits
+        if const_expr(getattr(ctx, "bias_rsrc", None) is not None):
+            s_raw_lo, s_raw_hi = self.add_bias(s_raw_lo, s_raw_hi, kv_start)
         kv_start_i32 = fx.Int32(kv_start)
         if const_expr(traits.CAUSAL):
             # below-diagonal tiles skip masking; guard carries the two score lists

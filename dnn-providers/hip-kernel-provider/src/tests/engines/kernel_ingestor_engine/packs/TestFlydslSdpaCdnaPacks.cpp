@@ -191,6 +191,8 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
             scalars(2);
             tensors(3);
             scalars(16);
+            tensors(1);
+            scalars(3);
         }
         return slots;
     };

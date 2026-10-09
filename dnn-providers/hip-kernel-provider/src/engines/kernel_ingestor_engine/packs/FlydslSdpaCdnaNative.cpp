@@ -1055,7 +1055,7 @@ const std::vector<KernelArgument>& dualwaveSignature()
 const std::vector<KernelArgument>& genericSignature()
 {
     static const std::vector<KernelArgument> s_signature
-        = signatureOf({{5, true}, {2, false}, {3, true}, {16, false}});
+        = signatureOf({{5, true}, {2, false}, {3, true}, {16, false}, {1, true}, {3, false}});
     return s_signature;
 }
 
@@ -1381,7 +1381,12 @@ public:
                       i32(strides.o.head),
                       i32(strides.kv.batch),
                       i32(strides.kv.head),
-                      static_cast<int32_t>(binding.windowLo));
+                      static_cast<int32_t>(binding.windowLo),
+                      bias,
+                      qLayout, // read for its pointer only
+                      i32(biasStrides.query),
+                      i32(biasStrides.batch),
+                      i32(biasStrides.head));
     }
 
 private:

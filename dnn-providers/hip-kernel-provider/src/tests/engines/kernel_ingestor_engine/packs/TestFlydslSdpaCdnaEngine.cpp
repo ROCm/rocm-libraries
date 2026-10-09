@@ -390,10 +390,18 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsABiasGraphOnlyOnAnObjectBuiltToAddIt)
         const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
         const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
         ASSERT_TRUE(bound.has_value());
-        const auto plain = makeCdnaKernel("dualwave", 128, 0, "bf16", 256, 0, 1, 0);
-        const auto biased = makeCdnaKernel("dualwave", 128, 0, "bf16", 256, 0, 1, 1);
-        EXPECT_EQ(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), plain, *bound), !graphHasBias);
-        EXPECT_EQ(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), biased, *bound), graphHasBias);
+        for(const auto& [family, blockM] :
+            {std::pair<std::string, int64_t>{"dualwave", 256}, {"generic", 128}})
+        {
+            const auto plain = makeCdnaKernel(family, 128, 0, "bf16", blockM, 0, 1, 0);
+            const auto biased = makeCdnaKernel(family, 128, 0, "bf16", blockM, 0, 1, 1);
+            EXPECT_EQ(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), plain, *bound),
+                      !graphHasBias)
+                << family;
+            EXPECT_EQ(matchesKernel(FLYDSL_SDPA_CDNA, fixture.context(), biased, *bound),
+                      graphHasBias)
+                << family;
+        }
     }
 }
 
@@ -1187,7 +1195,6 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesPackedQkvViews)
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasPerHead)
 {
-    // gfx950 only: the generic gfx942 kernel adds no bias, so there it skips.
     auto spec = cdnaSpec();
     spec.withBias = true;
     spec.biasDataType = DataType::BFLOAT16;
@@ -1195,6 +1202,28 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasPerHead)
     spec.biasDims = {2, 32, 256, 256};
     spec.stats = SdpaStats::LSE;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasAtEveryHeadDim)
+{
+    // The generic kernel's bias (gfx942, and gfx950 at 256), and the dual-wave one's.
+    for(const int64_t headDim : {int64_t{64}, int64_t{128}, int64_t{256}})
+    {
+        SCOPED_TRACE("head_dim " + std::to_string(headDim));
+        auto spec = cdnaSpec();
+        spec.headDim = headDim;
+        spec.withBias = true;
+        spec.biasDataType = DataType::BFLOAT16;
+        spec.seqLenQ = 200;
+        spec.seqLenKv = 264;
+        spec.biasDims = {1, 32, 200, 264};
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+        spec.dataType = DataType::HALF;
+        spec.biasDataType = DataType::HALF;
+        spec.biasDims = {1, 1, 1, 264};
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAPaddingMaskWithBottomRightCausalCrossAttention)

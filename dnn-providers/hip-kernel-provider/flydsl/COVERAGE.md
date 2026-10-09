@@ -494,6 +494,8 @@ and f16, the default tier first:
 | gfx942 | 128 | `generic` 128; `generic` 64 for small problems, 256 for large ones (each + `kv_align` 64) | the same, the 128 tile without KV global prefetch |
 | gfx942 | 256 | `generic` 128; `generic` 64 for small problems (each + `kv_align` 64), LDS tiles unpadded | the same, without `kv_align` |
 | gfx950 bias | 64, 128 | `dualwave` | `dualwave` (+ offset-0 build at 128) |
+| gfx950 bias | 256 | `generic` 128, one wave per SIMD | the same |
+| gfx942 bias | 64, 128, 256 | `generic` 128 | the same (at 128 without KV global prefetch) |
 
 The dual-wave kernel takes `head_dim` 64 and 128 only, so gfx950's 256 comes from the
 generic kernel, which at that width holds its tile without spilling only with the
@@ -519,9 +521,9 @@ baked field at a time (§7.3).
 | the schedule: kernel, `block_m`, waves per EU, setprio, KV global prefetch -- a class's tiers (§7.6) | which tier serves a graph, by its size (the score) or by autotune |
 | generic non-causal: whether the KV tail is masked (`kv_align`) | |
 | gfx950 d128 causal: whether any diagonal is served (`any_diagonal`) | |
-| gfx950: whether an additive bias is added (`has_bias`) | the bias's (batch, head, query) strides |
+| whether an additive bias is added (`has_bias`) | the bias's (batch, head, query) strides |
 
-Forty objects on gfx950, forty-two on gfx942. A class -- (dtype, `head_dim`, causal,
+Forty-four objects on gfx950, fifty-four on gfx942. A class -- (dtype, `head_dim`, causal,
 bias) -- ships a default tier that serves every shape of it, and measured companions
 for the shapes where another schedule wins (§7.6). Two variants specialise a tier
 further and rank above it where they apply. The generic kernel can skip masking the
@@ -555,7 +557,7 @@ One SDPA-forward node, and:
 | Scale: `attn_scale_value` (> 0), a pass-by-value scalar tensor, or absent | Absent is `1/√head_dim`, the reference's default. The running max is over unscaled scores, which orders them correctly only for a positive scale. |
 | Key length a multiple of 64, for a `kv_align` 64 object | That object does not mask the last KV tile. |
 | Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor in packed (batch, head, query) order | The kernels write the natural-log LSE of the scaled scores as one contiguous `[B, H, Sq]`. |
-| Bias (`attn_mask`), if present, gfx950 `head_dim` 64 and 128 only: in the query's dtype, rank 1–4 right-aligned to `[B, H, Sq, Skv]`, any of B, H and Sq broadcast, the key axis contiguous; strides multiples of 8 elements, a query stride of at least `Skv` (or 0); one (batch, head) slice within 32-bit addressing | Added to the scaled scores, as PyTorch adds a float `attn_mask`, which it requires in the query's dtype. Only the dual-wave kernel can add a bias; rows move as 16-byte vectors; each slice is one buffer view. A bias in another dtype, broadcast along the keys, or misaligned (a key length not a multiple of 8 in a packed bias) declines. |
+| Bias (`attn_mask`), if present: in the query's dtype, rank 1–4 right-aligned to `[B, H, Sq, Skv]`, any of B, H and Sq broadcast, the key axis contiguous; strides multiples of 8 elements, a query stride of at least `Skv` (or 0); one (batch, head) slice within 32-bit addressing | Added to the scaled scores, as PyTorch adds a float `attn_mask`, which it requires in the query's dtype. Both kernels add it (the generic one by modification 12); rows move as 16-byte vectors; each slice is one buffer view. A bias in another dtype, broadcast along the keys, or misaligned (a key length not a multiple of 8 in a packed bias) declines. |
 | Declined outright: padding / varlen, dropout, paged KV, block masks, sinks, FP8 descales, ALiBi, the split max / sum-exp stats, a non-`AUTO` implementation | The objects are built without them. |
 | Batch pitch and grid within int32 | 32-bit addressing. |
 
@@ -577,7 +579,7 @@ against the coverage it buys. In order:
 | ~~Sliding windows~~ | Done on the generic kernel: a runtime lower edge in the mask and the KV loop's start (modification 11). The dual-wave kernel's pipeline starts at a fixed tile; gfx950 windows run on its generic tiers. |
 | ~~`head_dim` 64 and 256, f16~~ | Done: rows in the instance table. Other head dims need the generic kernel's row loads generalised past powers of two. 256 on gfx942 followed with unpadded LDS tiles (modification 9). |
 | Varlen, paged KV | Both kernels already take cumulative sequence offsets and a block table, passed unused today. |
-| ~~Additive bias~~ | Done on gfx950 (modification 8). gfx942 and gfx950's `head_dim` 256 run the generic kernel, which has no bias operand; f32 bias and misaligned rows need a conversion or unaligned path. |
+| ~~Additive bias~~ | Done: the dual-wave kernel's (modification 8), and the generic kernel's (modification 12) for gfx942 and gfx950's `head_dim` 256. f32 bias and misaligned rows need a conversion or unaligned path. |
 
 The instance set is then chosen by the provider's AOT selection process (build
 every candidate, tune, cover, prune) rather than by hand -- done for the features
@@ -639,7 +641,11 @@ the harness's own bias. The measurements are kept outside the repository.
    place of the padding (as K has), a smaller KV tile, or a head-dim split as the RDNA
    kernel does at 256 are the candidates. Nothing else in hipDNN serves this class on
    gfx942, so it ships as it is.
-7. *The window compares on the generic causal objects.* Every diagonal tile's mask does
+7. *The generic kernel's bias loads.* They are issued in the score path with no
+   prefetch, so their latency is exposed: a bias object pays well beyond the bias's own
+   bytes, even for a broadcast padding mask. Prefetching the next tile's bias with its
+   K tile, or staging it through LDS as the dual-wave kernel does, would hide it.
+8. *The window compares on the generic causal objects.* Every diagonal tile's mask does
    a lower-edge compare too, and `window_lo` is read whether or not a window is bound;
    a window-free causal build beside the windowed one would remove it. Also: gfx950
    windows run on the generic kernel at about half the dual-wave kernel's speed --
