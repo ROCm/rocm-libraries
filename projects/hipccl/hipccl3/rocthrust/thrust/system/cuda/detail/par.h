@@ -36,7 +36,6 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/allocator_aware_execution_policy.h>
-#include <thrust/detail/dependencies_aware_execution_policy.h>
 #include <thrust/system/cuda/detail/execution_policy.h>
 #include <thrust/system/cuda/detail/util.h>
 
@@ -120,11 +119,9 @@ struct execute_on_stream_nosync : execute_on_stream_nosync_base<execute_on_strea
       : base_t(stream){};
 };
 
-_CCCL_SUPPRESS_DEPRECATED_PUSH
 struct par_t
     : execution_policy<par_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_base>
-    , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_base>
 {
   using base_t = execution_policy<par_t>;
 
@@ -139,13 +136,10 @@ struct par_t
     return execute_on_stream(stream);
   }
 };
-_CCCL_SUPPRESS_DEPRECATED_POP
 
-_CCCL_SUPPRESS_DEPRECATED_PUSH
 struct par_nosync_t
     : execution_policy<par_nosync_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_nosync_base>
-    , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_nosync_base>
 {
   using base_t = execution_policy<par_nosync_t>;
 
@@ -168,7 +162,6 @@ private:
     return false;
   }
 };
-_CCCL_SUPPRESS_DEPRECATED_POP
 
 _CCCL_GLOBAL_CONSTANT par_t par;
 

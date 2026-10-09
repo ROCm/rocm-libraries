@@ -33,13 +33,21 @@
 #  define THRUST_DEBUG_SYNC_FLAG false
 #endif
 
-#include <thrust/detail/config.h>
+#include <thrust/detail/config.h> // IWYU pragma: export
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 
 // We don't directly include <cub/version.cuh> since it doesn't exist in
 // older releases. This header will always pull in version info:
-#include <cub/detail/detect_cuda_runtime.cuh>
-#include <cub/util_debug.cuh>
-#include <cub/util_namespace.cuh>
+#include <cub/detail/detect_cuda_runtime.cuh> // IWYU pragma: export
+#include <cub/util_debug.cuh> // IWYU pragma: export
+#include <cub/util_namespace.cuh> // IWYU pragma: export
 
 /**
  * \def THRUST_RUNTIME_FUNCTION
@@ -57,37 +65,6 @@
 #ifdef CUB_RDC_ENABLED
 #  define THRUST_RDC_ENABLED
 #endif
-
-/**
- * \def __THRUST_HAS_CUDART__
- *
- * Whether or not the active compiler pass is allowed to invoke device kernels
- * or methods from the CUDA runtime API.
- *
- * This macro should not be used in Thrust, as it depends on `__CUDA_ARCH__`
- * and is not compatible with `NV_IF_TARGET`. It is provided for legacy
- * purposes only.
- *
- * Replace any usages with `THRUST_RDC_ENABLED` and `NV_IF_TARGET`.
- */
-#ifdef CUB_RUNTIME_ENABLED
-#  define __THRUST_HAS_CUDART__ 1
-#else
-#  define __THRUST_HAS_CUDART__ 0
-#endif
-
-// These definitions were intended for internal use only and are now obsolete.
-// If you relied on them, consider porting your code to use the functionality
-// in libcu++'s <nv/target> header.
-//
-// For a temporary workaround, define THRUST_PROVIDE_LEGACY_ARCH_MACROS to make
-// them available again. These should be considered deprecated and will be
-// fully removed in a future version.
-#ifdef THRUST_PROVIDE_LEGACY_ARCH_MACROS
-#  ifdef __CUDA_ARCH__
-#    define THRUST_DEVICE_CODE
-#  endif // __CUDA_ARCH__
-#endif // THRUST_PROVIDE_LEGACY_ARCH_MACROS
 
 #ifdef THRUST_AGENT_ENTRY_NOINLINE
 #  define THRUST_AGENT_ENTRY_INLINE_ATTR __noinline__
@@ -115,7 +92,7 @@
 #  endif
 
 // Make sure the CUB namespace has been declared using the modern macros:
-CUB_NAMESPACE_BEGIN // cppcheck-suppress unknownMacro
+CUB_NAMESPACE_BEGIN
 CUB_NAMESPACE_END
 
 #else // THRUST_IGNORE_CUB_VERSION_CHECK
