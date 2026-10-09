@@ -25,6 +25,10 @@
  *       build one LDS vector access of n elem values; print "ok", or
  *       "error: <message>" when the builder refuses it.
  *
+ *   --scalar-bits
+ *       print "<name> <bits>" for every IR scalar type, the width the engine
+ *       gives it (test_dtypes.py compares the map with _IR_SCALAR_BITS).
+ *
  *   --bitcast <case>
  *       build the bitcast named <case> (a row of k_bitcast_cases, mirrored in
  *       tests/core/test_bitcast_width.py); print "ok", or
@@ -609,6 +613,37 @@ static int test_scalar_widths()
     return 0;
 }
 
+/* Every IR scalar type by name: one per rocke_scalar_kind_t, which the
+ * static_assert and test_scalar_kinds_are_covered hold to. Widths are not
+ * listed: they come from the engine. */
+static const char* const k_scalar_names[]
+    = {"i1",  "i4",   "u4",  "i8",      "u8",      "i16",     "i32",     "i64",     "f16",  "bf16",
+       "f32", "tf32", "f64", "fp8e4m3", "bf8e5m2", "fp6e2m3", "fp6e3m2", "fp4e2m1", "e8m0", "e5m3"};
+static_assert(sizeof k_scalar_names / sizeof k_scalar_names[0] == ROCKE_SCALAR__COUNT,
+              "add the new scalar type's name to k_scalar_names");
+
+/* Each name resolves to the singleton of that name, and no two names share a
+ * scalar kind, so the list holds every kind exactly once. */
+static int test_scalar_kinds_are_covered()
+{
+    bool seen[ROCKE_SCALAR__COUNT] = {};
+    for(const char* name : k_scalar_names)
+    {
+        const rocke_type_t* t = rocke_scalar_by_name(name);
+        CHECK(t != NULL && strcmp(t->name, name) == 0);
+        CHECK(!seen[t->scalar]);
+        seen[t->scalar] = true;
+    }
+    return 0;
+}
+
+static int print_scalar_bits()
+{
+    for(const char* name : k_scalar_names)
+        printf("%s %d\n", name, rocke_i_type_bits(rocke_scalar_by_name(name)));
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc == 3 && strcmp(argv[1], "--unsigned") == 0)
@@ -617,6 +652,8 @@ int main(int argc, char** argv)
         return print_packed_only_value(argv[2], argv[3]);
     if(argc == 5 && strcmp(argv[1], "--smem-vector") == 0)
         return print_smem_vector_access(argv[2], argv[3], argv[4]);
+    if(argc == 2 && strcmp(argv[1], "--scalar-bits") == 0)
+        return print_scalar_bits();
     if(argc == 3 && strcmp(argv[1], "--bitcast") == 0)
         return print_bitcast(argv[2]);
     CHECK(argc == 1);
@@ -625,6 +662,7 @@ int main(int argc, char** argv)
     CHECK(test_smem_vector_elements() == 0);
     CHECK(test_bitcast_width() == 0);
     CHECK(test_scalar_widths() == 0);
+    CHECK(test_scalar_kinds_are_covered() == 0);
     printf("rocke_ir_types: ok\n");
     return 0;
 }
