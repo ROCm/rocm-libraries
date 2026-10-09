@@ -78,5 +78,12 @@ diff against upstream plus the modifications below.
    argument's layout rank-4 like every other tensor's. The launchers pass 0, 0: a
    dense `[seq_len, seq_len_kv]` bias, upstream's contract.
 
+9. **LDS row padding as builder arguments** (`flash_attn_generic.py`,
+   `flash_attn_utils.py`). `k_pad` and `vt_pad` override the K tile's row padding
+   (upstream: 4 elements on gfx942 without DMA, else 0, or `FLYDSL_FLASH_ATTN_FUNC_K_PAD`)
+   and the transposed V tile's (upstream: 2), forwarded through the builder's re-builds.
+   At `head_dim` 256 the padded tiles need 67,072 bytes of LDS, past gfx942's 64 KiB;
+   unpadded they need exactly 64 KiB. Unset, upstream's padding.
+
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

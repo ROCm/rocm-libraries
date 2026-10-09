@@ -1497,6 +1497,8 @@ def _make_flash_attn_generic_traits(
     sm_scale=None,
     skip_kv_pad_mask=None,
     return_lse=False,
+    k_pad=None,
+    vt_pad=None,
 ):
     """Build compile-time traits for ``flash_attn_generic``."""
     block_n = 64
@@ -1584,13 +1586,15 @@ def _make_flash_attn_generic_traits(
     stride_token_kv = num_kv_heads * head_dim
     _k_pad_default = 4 if (gpu_arch.startswith("gfx942") and not enable_dma) else 0
     _k_pad = int(os.getenv("FLYDSL_FLASH_ATTN_FUNC_K_PAD", str(_k_pad_default)))
+    if k_pad is not None:
+        _k_pad = int(k_pad)
     k_stride = head_dim + _k_pad
     k_swz_rowmask = head_dim // 16 - 1
     if use_hw_tr:
         vt_stride = 0
         v_stride = head_dim if enable_dma else head_dim + 4
     else:
-        vt_stride = block_n + 2
+        vt_stride = block_n + (2 if vt_pad is None else int(vt_pad))
         v_stride = vt_stride
 
     vec_v_line = 544

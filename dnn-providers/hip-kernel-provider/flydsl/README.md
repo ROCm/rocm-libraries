@@ -71,7 +71,7 @@ in [COVERAGE.md §5](COVERAGE.md).
 **SDPA forward on CDNA** (`hipkernel:flydsl_sdpa_cdna`), a separate engine with
 objects built per arch: FlyDSL's own dual-wave MFMA kernel on **gfx950** and its
 generic MFMA kernel on **gfx942** and for `head_dim` 256 on gfx950: bf16 and f16 at
-`head_dim` 64 and 128, and 256 on gfx950, causal and non-causal; both sequence
+`head_dim` 64, 128 and 256, causal and non-causal; both sequence
 lengths, the head counts, every operand's strides (BSHD, BHSD, packed QKV), the
 softmax scale, the causal diagonal and the LSE output are runtime arguments, and
 gfx950 adds a bias in the query's dtype at `head_dim` 64 and 128. Each class ships a default
@@ -243,7 +243,7 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 108/108 per RDNA family, 40/40 gfx950, 30/30 gfx942
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 108/108 per RDNA family, 40/40 gfx950, 42/42 gfx942
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (hsaco UKDs)

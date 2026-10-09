@@ -492,12 +492,15 @@ and f16, the default tier first:
 | gfx950 | 256 | `generic` 128; `generic` 64 (each + `kv_align` 64), one wave per SIMD | `generic` 128; `generic` 64, preferred below 256 query rows |
 | gfx942 | 64 | `generic` 128 (three waves per EU); `generic` 64, preferred for small problems (each + `kv_align` 64) | the same, without `kv_align` |
 | gfx942 | 128 | `generic` 128; `generic` 64 for small problems, 256 for large ones (each + `kv_align` 64) | the same, the 128 tile without KV global prefetch |
+| gfx942 | 256 | `generic` 128; `generic` 64 for small problems (each + `kv_align` 64), LDS tiles unpadded | the same, without `kv_align` |
 | gfx950 bias | 64, 128 | `dualwave` | `dualwave` (+ offset-0 build at 128) |
 
 The dual-wave kernel takes `head_dim` 64 and 128 only, so gfx950's 256 comes from the
 generic kernel, which at that width holds its tile without spilling only with the
-whole register file per wave. The generic kernel takes powers of two only, and at
-256 its tile needs more LDS than gfx942's 64 KiB.
+whole register file per wave. The generic kernel takes powers of two only. At 256 its
+padded K and transposed-V tiles need 67,072 bytes of LDS, past gfx942's 64 KiB, so gfx942's
+objects are built with both unpadded -- exactly 64 KiB (vendored-kernel modification 9);
+K keeps its XOR swizzle against bank conflicts.
 
 ### 7.1 What is baked, and what is not
 
@@ -507,7 +510,7 @@ baked field at a time (§7.3).
 | Baked per object | Runtime kernel argument |
 |---|---|
 | dtype (`bf16`, `f16`) | batch |
-| `head_dim` (64, 128; and 256 on gfx950) | query and key lengths, independently |
+| `head_dim` (64, 128, 256) | query and key lengths, independently |
 | causal, or none | the causal diagonal: top-left, bottom-right, a band to its right |
 | | query and KV head counts (MHA, GQA, MQA) |
 | | every operand's (batch, sequence, head) strides: BSHD, BHSD, packed QKV |
@@ -518,7 +521,7 @@ baked field at a time (§7.3).
 | gfx950 d128 causal: whether any diagonal is served (`any_diagonal`) | |
 | gfx950: whether an additive bias is added (`has_bias`) | the bias's (batch, head, query) strides |
 
-Forty objects on gfx950, thirty on gfx942. A class -- (dtype, `head_dim`, causal,
+Forty objects on gfx950, forty-two on gfx942. A class -- (dtype, `head_dim`, causal,
 bias) -- ships a default tier that serves every shape of it, and measured companions
 for the shapes where another schedule wins (§7.6). Two variants specialise a tier
 further and rank above it where they apply. The generic kernel can skip masking the
@@ -571,7 +574,7 @@ against the coverage it buys. In order:
 | ~~Full strides: BHSD, packed QKV~~ | Done: per-(batch, head) buffer views, the head's offset in each view's base (modification 6). K and V with different strides, and stats strides, are next. |
 | ~~LSE output~~ | Done: compiled in, switched at launch (modification 4). Any stats strides are next, with the full strides. |
 | ~~`Sq ≠ Skv`, both causal alignments, right-side bands~~ | Done: the diagonal offset is a kernel argument (modification 5). Top-left with more queries than keys and wider bands need the last KV tile's padding masked apart from the diagonal; sliding windows need a left bound in the mask and the KV loop's start. |
-| ~~`head_dim` 64 and 256, f16~~ | Done: rows in the instance table. Other head dims need the generic kernel's row loads generalised past powers of two; 256 on gfx942 needs a smaller tile. |
+| ~~`head_dim` 64 and 256, f16~~ | Done: rows in the instance table. Other head dims need the generic kernel's row loads generalised past powers of two. 256 on gfx942 followed with unpadded LDS tiles (modification 9). |
 | Varlen, paged KV | Both kernels already take cumulative sequence offsets and a block table, passed unused today. |
 | ~~Additive bias~~ | Done on gfx950 (modification 8). gfx942 and gfx950's `head_dim` 256 run the generic kernel, which has no bias operand; f32 bias and misaligned rows need a conversion or unaligned path. |
 
@@ -625,6 +628,12 @@ the harness's own bias. The measurements are kept outside the repository.
 5. *Runtime strides on the generic kernel.* gfx942 d128 and gfx950 d256 pay a
    little for per-head addressing; a contiguous-BSHD build beside the strided one,
    or a schedule that recovers it.
+6. *gfx942 `head_dim` 256.* Correct on every corpus shape, but its throughput is well
+   below gfx942's `head_dim` 128 -- further below than gfx950's 256 is below its 128.
+   Its tile runs one wave per SIMD with all 64 KiB of LDS and unpadded K/V rows. A
+   smaller KV tile, a head-dim split as the RDNA kernel does at 256, or a V layout that
+   avoids the transposed scalar stores are the candidates. Nothing else in hipDNN
+   serves this class on gfx942, so it ships as it is.
 
 ### 7.6 How the instance set was chosen
 

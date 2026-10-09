@@ -71,6 +71,8 @@ def build_flash_attn_func_module_primary(
     skip_kv_pad_mask=None,
     return_lse=False,
     extra_llvm_options=None,
+    k_pad=None,
+    vt_pad=None,
 ):
     """Build a generic f16/bf16 flash-attention launcher.
 
@@ -115,6 +117,8 @@ def build_flash_attn_func_module_primary(
             skip_kv_pad_mask=skip_kv_pad_mask,
             return_lse=return_lse,
             extra_llvm_options=extra_llvm_options,
+            k_pad=k_pad,
+            vt_pad=vt_pad,
         )
         _launcher_m256 = build_flash_attn_func_module_primary(
             num_heads,
@@ -139,6 +143,8 @@ def build_flash_attn_func_module_primary(
             skip_kv_pad_mask=skip_kv_pad_mask,
             return_lse=return_lse,
             extra_llvm_options=extra_llvm_options,
+            k_pad=k_pad,
+            vt_pad=vt_pad,
         )
         _bs_threshold = (
             2048 * num_heads if gpu_arch.startswith("gfx942") else 4096 * num_heads
@@ -231,6 +237,8 @@ def build_flash_attn_func_module_primary(
         sm_scale=sm_scale,
         skip_kv_pad_mask=skip_kv_pad_mask,
         return_lse=return_lse,
+        k_pad=k_pad,
+        vt_pad=vt_pad,
     )
     _flash_attn_generic_cache_tag = traits.cache_tag
 
@@ -881,6 +889,8 @@ def build_flash_attn_func_module_primary(
             skip_kv_pad_mask=True,
             return_lse=return_lse,
             extra_llvm_options=extra_llvm_options,
+            k_pad=k_pad,
+            vt_pad=vt_pad,
         )
         _launch_mask = build_flash_attn_func_module_primary(
             num_heads,
@@ -905,6 +915,8 @@ def build_flash_attn_func_module_primary(
             skip_kv_pad_mask=False,
             return_lse=return_lse,
             extra_llvm_options=extra_llvm_options,
+            k_pad=k_pad,
+            vt_pad=vt_pad,
         )
 
         def _pad_dispatch(*args, **kwargs):

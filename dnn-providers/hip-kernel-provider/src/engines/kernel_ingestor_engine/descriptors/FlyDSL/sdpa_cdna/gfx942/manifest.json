@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "4499394c497ed28f3c7dfaef92dd67f167dd3fef743a741cb7888a9e96d5fee2"
+    "inputs_sha256": "4d345459c7555d2a942f89eafe2b3d1767ea9cc74e791a7e42a4253ad956a0f2"
   },
   "instances": [
     {
@@ -83,6 +83,7 @@
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -158,6 +159,7 @@
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -233,6 +235,7 @@
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -308,6 +311,7 @@
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -383,6 +387,7 @@
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -458,6 +463,7 @@
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -531,6 +537,7 @@
       "vgprs": 288,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -604,6 +611,7 @@
       "vgprs": 264,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -677,6 +685,7 @@
       "vgprs": 303,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -750,6 +759,7 @@
       "vgprs": 290,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -823,6 +833,7 @@
       "vgprs": 256,
       "vgpr_spills": 2,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -896,6 +907,7 @@
       "vgprs": 254,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -969,6 +981,7 @@
       "vgprs": 248,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1042,6 +1055,7 @@
       "vgprs": 276,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1115,6 +1129,469 @@
       "vgprs": 256,
       "vgpr_spills": 2,
       "llvm_options": {},
+      "lds_pads": {},
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_bf16_generic_d256_causal0_bm128",
+      "op": "sdpa_cdna",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0
+      },
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448}
+      ],
+      "file": "sdpa_cdna_bf16_generic_d256_causal0_bm128.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 21752,
+      "sha256": "cbe68c8fb794c8a244902ad48eac42fddc444f67809d3c22b5eb598e5d9c284a",
+      "kernarg_segment_size": 452,
+      "lds_bytes": 65536,
+      "vgprs": 439,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {
+        "k_pad": 0,
+        "vt_pad": 0
+      },
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_bf16_generic_d256_causal0_bm128_kva64",
+      "op": "sdpa_cdna",
+      "dtype": "bf16",
+      "priority": 110,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 64,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0
+      },
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448}
+      ],
+      "file": "sdpa_cdna_bf16_generic_d256_causal0_bm128_kva64.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 21240,
+      "sha256": "b81eb4fd7792fc0f9e9904c4b6474abf5ccea4547269192c17452e81d710eb0f",
+      "kernarg_segment_size": 452,
+      "lds_bytes": 65536,
+      "vgprs": 444,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {
+        "k_pad": 0,
+        "vt_pad": 0
+      },
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_bf16_generic_d256_causal0_bm64",
+      "op": "sdpa_cdna",
+      "dtype": "bf16",
+      "priority": 80,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 64,
+        "kv_align": 0,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "rows",
+        "prefer_min": 0,
+        "prefer_max": 24576
+      },
+      "block": [
+        128,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448}
+      ],
+      "file": "sdpa_cdna_bf16_generic_d256_causal0_bm64.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 23672,
+      "sha256": "2f39337cfacee41c4b207898a9e54cc0e45a2fe16557c90af35296d4bbe4e4f0",
+      "kernarg_segment_size": 452,
+      "lds_bytes": 65536,
+      "vgprs": 502,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {
+        "k_pad": 0,
+        "vt_pad": 0
+      },
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_bf16_generic_d256_causal0_bm64_kva64",
+      "op": "sdpa_cdna",
+      "dtype": "bf16",
+      "priority": 85,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 64,
+        "kv_align": 64,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "rows",
+        "prefer_min": 0,
+        "prefer_max": 24576
+      },
+      "block": [
+        128,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448}
+      ],
+      "file": "sdpa_cdna_bf16_generic_d256_causal0_bm64_kva64.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 22968,
+      "sha256": "f8efa3ba3517dbc027f2127980800eb0af4952895dd341befa78614dab5e2df6",
+      "kernarg_segment_size": 452,
+      "lds_bytes": 65536,
+      "vgprs": 504,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {
+        "k_pad": 0,
+        "vt_pad": 0
+      },
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_bf16_generic_d256_causal1_bm128",
+      "op": "sdpa_cdna",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0
+      },
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448}
+      ],
+      "file": "sdpa_cdna_bf16_generic_d256_causal1_bm128.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 22328,
+      "sha256": "424812864fb6ed32fc038ebe64b60a5e4a6df3b382523253d1a184839e355ca1",
+      "kernarg_segment_size": 452,
+      "lds_bytes": 65536,
+      "vgprs": 416,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {
+        "k_pad": 0,
+        "vt_pad": 0
+      },
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_bf16_generic_d256_causal1_bm64",
+      "op": "sdpa_cdna",
+      "dtype": "bf16",
+      "priority": 80,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 64,
+        "kv_align": 0,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "rows",
+        "prefer_min": 0,
+        "prefer_max": 24576
+      },
+      "block": [
+        128,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448}
+      ],
+      "file": "sdpa_cdna_bf16_generic_d256_causal1_bm64.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 24120,
+      "sha256": "0a808ded8dbe279e7cc74417220b8e4ba0216942153a584635b5124cbf4eefe0",
+      "kernarg_segment_size": 452,
+      "lds_bytes": 65536,
+      "vgprs": 486,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {
+        "k_pad": 0,
+        "vt_pad": 0
+      },
       "named_args": 0
     },
     {
@@ -1190,6 +1667,7 @@
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1265,6 +1743,7 @@
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1340,6 +1819,7 @@
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1415,6 +1895,7 @@
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1490,6 +1971,7 @@
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1565,6 +2047,7 @@
       "llvm_options": {
         "amdgpu-use-amdgpu-trackers": true
       },
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1638,6 +2121,7 @@
       "vgprs": 258,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1711,6 +2195,7 @@
       "vgprs": 264,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1784,6 +2269,7 @@
       "vgprs": 301,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1857,6 +2343,7 @@
       "vgprs": 288,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1930,6 +2417,7 @@
       "vgprs": 244,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2003,6 +2491,7 @@
       "vgprs": 246,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2076,6 +2565,7 @@
       "vgprs": 249,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2149,6 +2639,7 @@
       "vgprs": 274,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2222,6 +2713,469 @@
       "vgprs": 239,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_f16_generic_d256_causal0_bm128",
+      "op": "sdpa_cdna",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 0,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0
+      },
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448}
+      ],
+      "file": "sdpa_cdna_f16_generic_d256_causal0_bm128.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 17400,
+      "sha256": "e6c0b39ed9c950432ff6ed5095ee7814dd22efe66d4a7a0d05b1131b68f7c1f3",
+      "kernarg_segment_size": 452,
+      "lds_bytes": 65536,
+      "vgprs": 411,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {
+        "k_pad": 0,
+        "vt_pad": 0
+      },
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_f16_generic_d256_causal0_bm128_kva64",
+      "op": "sdpa_cdna",
+      "dtype": "f16",
+      "priority": 110,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 128,
+        "kv_align": 64,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0
+      },
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448}
+      ],
+      "file": "sdpa_cdna_f16_generic_d256_causal0_bm128_kva64.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 16696,
+      "sha256": "ef0695378e8a1e76c11456ac6dd3943c7acfecdeb9221a0eeece9fb0961c1b37",
+      "kernarg_segment_size": 452,
+      "lds_bytes": 65536,
+      "vgprs": 409,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {
+        "k_pad": 0,
+        "vt_pad": 0
+      },
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_f16_generic_d256_causal0_bm64",
+      "op": "sdpa_cdna",
+      "dtype": "f16",
+      "priority": 80,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 64,
+        "kv_align": 0,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "rows",
+        "prefer_min": 0,
+        "prefer_max": 24576
+      },
+      "block": [
+        128,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448}
+      ],
+      "file": "sdpa_cdna_f16_generic_d256_causal0_bm64.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 19192,
+      "sha256": "13dc8ee9f71f4c69b4df06ce1b379cc94ce5c789c44a30c929175470424cfa47",
+      "kernarg_segment_size": 452,
+      "lds_bytes": 65536,
+      "vgprs": 483,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {
+        "k_pad": 0,
+        "vt_pad": 0
+      },
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_f16_generic_d256_causal0_bm64_kva64",
+      "op": "sdpa_cdna",
+      "dtype": "f16",
+      "priority": 85,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 256,
+        "causal": 0,
+        "block_m": 64,
+        "kv_align": 64,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "rows",
+        "prefer_min": 0,
+        "prefer_max": 24576
+      },
+      "block": [
+        128,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448}
+      ],
+      "file": "sdpa_cdna_f16_generic_d256_causal0_bm64_kva64.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 18488,
+      "sha256": "f4dd0be8fdbd6e0c401ff5e7899e09c23b4dfb23b9ff899b6f9e3e80ae7746cb",
+      "kernarg_segment_size": 452,
+      "lds_bytes": 65536,
+      "vgprs": 481,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {
+        "k_pad": 0,
+        "vt_pad": 0
+      },
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_f16_generic_d256_causal1_bm128",
+      "op": "sdpa_cdna",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 128,
+        "kv_align": 0,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "none",
+        "prefer_min": 0,
+        "prefer_max": 0
+      },
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448}
+      ],
+      "file": "sdpa_cdna_f16_generic_d256_causal1_bm128.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 17272,
+      "sha256": "6a5bf0d8f7af9b67c53819496d4d99d7272020a566a35225660ab60bb14221e4",
+      "kernarg_segment_size": 452,
+      "lds_bytes": 65536,
+      "vgprs": 401,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {
+        "k_pad": 0,
+        "vt_pad": 0
+      },
+      "named_args": 0
+    },
+    {
+      "name": "sdpa_cdna_f16_generic_d256_causal1_bm64",
+      "op": "sdpa_cdna",
+      "dtype": "f16",
+      "priority": 80,
+      "tier": "specialized",
+      "knobs": {
+        "kernel": "generic",
+        "head_dim": 256,
+        "causal": 1,
+        "block_m": 64,
+        "kv_align": 0,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "kv_gpfetch": 1,
+        "prefer_feature": "rows",
+        "prefer_min": 0,
+        "prefer_max": 24576
+      },
+      "block": [
+        128,
+        1,
+        1
+      ],
+      "grid_rule": "batch_x_qtiles_x_heads",
+      "args": [
+        {"name": "Q", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Q.layout", "kind": "by_value", "size": 40, "offset": 8},
+        {"name": "K", "kind": "global_buffer", "size": 8, "offset": 48},
+        {"name": "K.layout", "kind": "by_value", "size": 40, "offset": 56},
+        {"name": "V", "kind": "global_buffer", "size": 8, "offset": 96},
+        {"name": "V.layout", "kind": "by_value", "size": 40, "offset": 104},
+        {"name": "O", "kind": "global_buffer", "size": 8, "offset": 144},
+        {"name": "O.layout", "kind": "by_value", "size": 40, "offset": 152},
+        {"name": "LSE", "kind": "global_buffer", "size": 8, "offset": 192},
+        {"name": "LSE.layout", "kind": "by_value", "size": 40, "offset": 200},
+        {"name": "seq_len", "kind": "by_value", "size": 4, "offset": 240},
+        {"name": "seq_len_kv", "kind": "by_value", "size": 4, "offset": 244},
+        {"name": "CuSeqQ", "kind": "global_buffer", "size": 8, "offset": 248},
+        {"name": "CuSeqQ.layout", "kind": "by_value", "size": 40, "offset": 256},
+        {"name": "CuSeqKv", "kind": "global_buffer", "size": 8, "offset": 296},
+        {"name": "CuSeqKv.layout", "kind": "by_value", "size": 40, "offset": 304},
+        {"name": "BlockTable", "kind": "global_buffer", "size": 8, "offset": 344},
+        {"name": "BlockTable.layout", "kind": "by_value", "size": 40, "offset": 352},
+        {"name": "block_table_stride", "kind": "by_value", "size": 4, "offset": 392},
+        {"name": "sm_scale", "kind": "by_value", "size": 4, "offset": 396},
+        {"name": "num_heads_q", "kind": "by_value", "size": 4, "offset": 400},
+        {"name": "num_heads_kv", "kind": "by_value", "size": 4, "offset": 404},
+        {"name": "stride_q_n", "kind": "by_value", "size": 4, "offset": 408},
+        {"name": "stride_kv_n", "kind": "by_value", "size": 4, "offset": 412},
+        {"name": "lse_on", "kind": "by_value", "size": 4, "offset": 416},
+        {"name": "diag_offset", "kind": "by_value", "size": 4, "offset": 420},
+        {"name": "stride_q_b", "kind": "by_value", "size": 4, "offset": 424},
+        {"name": "stride_q_h", "kind": "by_value", "size": 4, "offset": 428},
+        {"name": "stride_o_b", "kind": "by_value", "size": 4, "offset": 432},
+        {"name": "stride_o_n", "kind": "by_value", "size": 4, "offset": 436},
+        {"name": "stride_o_h", "kind": "by_value", "size": 4, "offset": 440},
+        {"name": "stride_kv_b", "kind": "by_value", "size": 4, "offset": 444},
+        {"name": "stride_kv_h", "kind": "by_value", "size": 4, "offset": 448}
+      ],
+      "file": "sdpa_cdna_f16_generic_d256_causal1_bm64.hsaco",
+      "symbol": "flash_attn_generic_kernel_0",
+      "bytes": 19064,
+      "sha256": "6356cae9ba34f70c8e13786e4c1b76174331c5b3e9355c8b44d50504a810cb3c",
+      "kernarg_segment_size": 452,
+      "lds_bytes": 65536,
+      "vgprs": 473,
+      "vgpr_spills": 0,
+      "llvm_options": {},
+      "lds_pads": {
+        "k_pad": 0,
+        "vt_pad": 0
+      },
       "named_args": 0
     }
   ]

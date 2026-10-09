@@ -171,6 +171,20 @@ _TRACE_HEADS = 32
 _TRACE_KV_HEADS = 8
 
 
+# LDS row padding for the generic kernel, per (arch, head_dim), where upstream's
+# default does not fit: at head_dim 256 its padded K and transposed-V tiles need
+# 67,072 bytes, past gfx942's 64 KiB, and unpadded they need exactly 64 KiB. K keeps
+# its XOR swizzle against bank conflicts. Recorded per object as `lds_pads`.
+_GENERIC_LDS_PADS = {("gfx942", 256): {"k_pad": 0, "vt_pad": 0}}
+
+
+def _lds_pads(instance: Instance, arch: str) -> dict:
+    """The generic kernel's LDS padding for @p instance, or {} for upstream's."""
+    if instance.knobs["kernel"] != "generic":
+        return {}
+    return dict(_GENERIC_LDS_PADS.get((arch, instance.knobs["head_dim"]), {}))
+
+
 def _llvm_options(instance: Instance, arch: str) -> dict:
     """The LLVM options this pack adds to the kernel's own for @p instance."""
     if instance.knobs["kernel"] != "generic":
@@ -246,6 +260,7 @@ def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
             skip_kv_pad_mask=bool(knobs["kv_align"]),
             return_lse=True,
             extra_llvm_options=_llvm_options(instance, arch),
+            **_lds_pads(instance, arch),
             **(
                 {"waves_per_eu": knobs["waves_per_eu"]} if knobs["waves_per_eu"] else {}
             ),
@@ -387,6 +402,7 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
                 "vgpr_spills": described.get("vgpr_spill_count", 0),
                 # Added to the kernel's own compile hints, which are not repeated here.
                 "llvm_options": _llvm_options(instance, arch),
+                "lds_pads": _lds_pads(instance, arch),
                 "named_args": described["named_args"],
             }
         )

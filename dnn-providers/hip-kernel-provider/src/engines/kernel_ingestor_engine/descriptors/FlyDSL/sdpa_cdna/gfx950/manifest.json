@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "1189b2aa910189b8d19492d37a4f8b01e2228ed962b8d03f0e8c445d1e9d8a26"
+    "inputs_sha256": "e9ecd02a178b5e65e479b9365d9eac362b8f92ca5c3c3fb01913e4625acd1215"
   },
   "instances": [
     {
@@ -94,6 +94,7 @@
       "vgprs": 166,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -167,6 +168,7 @@
       "vgprs": 149,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -253,6 +255,7 @@
       "vgprs": 168,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -326,6 +329,7 @@
       "vgprs": 149,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -412,6 +416,7 @@
       "vgprs": 248,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -485,6 +490,7 @@
       "vgprs": 226,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -571,6 +577,7 @@
       "vgprs": 250,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -657,6 +664,7 @@
       "vgprs": 250,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -730,6 +738,7 @@
       "vgprs": 256,
       "vgpr_spills": 6,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -803,6 +812,7 @@
       "vgprs": 374,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -876,6 +886,7 @@
       "vgprs": 380,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -949,6 +960,7 @@
       "vgprs": 394,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1022,6 +1034,7 @@
       "vgprs": 402,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1095,6 +1108,7 @@
       "vgprs": 360,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1168,6 +1182,7 @@
       "vgprs": 384,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1254,6 +1269,7 @@
       "vgprs": 188,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1340,6 +1356,7 @@
       "vgprs": 190,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1426,6 +1443,7 @@
       "vgprs": 256,
       "vgpr_spills": 4,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1512,6 +1530,7 @@
       "vgprs": 256,
       "vgpr_spills": 4,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1598,6 +1617,7 @@
       "vgprs": 256,
       "vgpr_spills": 4,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1684,6 +1704,7 @@
       "vgprs": 166,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1757,6 +1778,7 @@
       "vgprs": 149,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1843,6 +1865,7 @@
       "vgprs": 170,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -1916,6 +1939,7 @@
       "vgprs": 147,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2002,6 +2026,7 @@
       "vgprs": 252,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2075,6 +2100,7 @@
       "vgprs": 226,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2161,6 +2187,7 @@
       "vgprs": 254,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2247,6 +2274,7 @@
       "vgprs": 252,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2320,6 +2348,7 @@
       "vgprs": 256,
       "vgpr_spills": 6,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2393,6 +2422,7 @@
       "vgprs": 374,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2466,6 +2496,7 @@
       "vgprs": 380,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2539,6 +2570,7 @@
       "vgprs": 394,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2612,6 +2644,7 @@
       "vgprs": 400,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2685,6 +2718,7 @@
       "vgprs": 360,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2758,6 +2792,7 @@
       "vgprs": 384,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2844,6 +2879,7 @@
       "vgprs": 188,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -2930,6 +2966,7 @@
       "vgprs": 194,
       "vgpr_spills": 0,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -3016,6 +3053,7 @@
       "vgprs": 256,
       "vgpr_spills": 7,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -3102,6 +3140,7 @@
       "vgprs": 256,
       "vgpr_spills": 8,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     },
     {
@@ -3188,6 +3227,7 @@
       "vgprs": 256,
       "vgpr_spills": 4,
       "llvm_options": {},
+      "lds_pads": {},
       "named_args": 0
     }
   ]

@@ -413,8 +413,7 @@ def _assert_unique(instances: list[Instance]) -> None:
 
 # FlyDSL's own CDNA kernels (kernels_src/kernels/attention_cdna/): the dual-wave
 # software-pipelined kernel (gfx950 only; head_dim 64 and 128) and the generic one
-# (powers of two from 64; up to 128 on gfx942, whose 64 KiB of LDS a 256 tile
-# overflows). Unlike every table above, which tables an op for all of its targets,
+# (powers of two from 64 to 256). Unlike every table above, which tables an op for all of its targets,
 # this one differs by target, so it takes the arch.
 #
 # What ships was chosen by measurement, not by hand (COVERAGE.md section 7.6): every
@@ -518,6 +517,16 @@ SDPA_CDNA_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
             CdnaTier(_GEN, 128, kv_gpfetch=0),
             CdnaTier(_GEN, 64, prefer=("rows", 0, 18432)),
             CdnaTier(_GEN, 256, prefer=("rows", 49152, 0)),
+        ),
+        # head_dim 256 fits gfx942's 64 KiB of LDS only with the K and V tiles unpadded
+        # (gen_sdpa_cdna._GENERIC_LDS_PADS); the 256-row tile spills.
+        (256, 0): (
+            CdnaTier(_GEN, 128, kv_aligned=True),
+            CdnaTier(_GEN, 64, kv_aligned=True, prefer=("rows", 0, 24576)),
+        ),
+        (256, 1): (
+            CdnaTier(_GEN, 128),
+            CdnaTier(_GEN, 64, prefer=("rows", 0, 24576)),
         ),
     },
 }
