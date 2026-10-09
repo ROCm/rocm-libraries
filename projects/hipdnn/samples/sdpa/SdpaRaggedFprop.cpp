@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -23,8 +24,9 @@ using namespace hipdnn_data_sdk;
 namespace
 {
 
-// Ragged SDPA runner: iterates data types but hardcodes BSHD (the only
-// ragged-legal layout). Filtering mirrors runSdpa() in SdpaFprop.cpp.
+// Ragged SDPA runner: iterates data types but hardcodes the BSHD physical layout
+// (the only ragged-legal layout) over BHSD logical dims. Filtering mirrors
+// runSdpa() in SdpaFprop.cpp.
 template <typename F>
 bool runSdpaRagged(F&& f)
 {
@@ -68,31 +70,33 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running ragged SDPA forward graph " << inputType << " [bshd]...\n";
 
     // ── Dimensions ──────────────────────────────────────────────────────
-    // BSHD dims: [batch, seq_len, num_heads, head_dim]
+    // Logical dims: [batch, num_heads, seq_len, head_dim] (BHSD)
     constexpr int64_t B = 3;
-    constexpr int64_t S_MAX = 5;
     constexpr int64_t H = 4;
+    constexpr int64_t S_MAX = 5;
     constexpr int64_t D = 128;
-    constexpr int64_t SEQ_STRIDE = H * D; // 512
+    constexpr int64_t TOKEN_STRIDE = H * D; // elements per token (sequence stride in BSHD)
 
     // Per-batch sequence lengths (ragged)
     const std::vector<int32_t> qSeqLens = {2, 5, 3};
     const std::vector<int32_t> kvSeqLens = {3, 5, 4};
 
-    // ── Ragged offsets (cumulative sums in element units) ───────────────
-    auto computeOffsets
-        = [](const std::vector<int32_t>& seqLens, int32_t seqStride) -> std::vector<int32_t> {
-        std::vector<int32_t> offsets(seqLens.size() + 1);
-        offsets[0] = 0;
-        for(size_t i = 0; i < seqLens.size(); ++i)
+    // ── Ragged offsets (cumulative sums in token units) ─────────────────
+    // Each ragged tensor sets ragged_offset_multiplier = H*D, so the backend scales these
+    // token offsets to element offsets. That keeps the offset tables independent of H and D.
+    auto computeOffsets = [](const std::vector<int32_t>& seqLens) -> std::vector<int32_t> {
+        std::vector<int32_t> offsets;
+        offsets.reserve(seqLens.size() + 1);
+        offsets.push_back(0);
+        for(const auto seqLen : seqLens)
         {
-            offsets[i + 1] = offsets[i] + seqLens[i] * seqStride;
+            offsets.push_back(offsets.back() + seqLen);
         }
         return offsets;
     };
 
-    const auto qOffsetsHost = computeOffsets(qSeqLens, static_cast<int32_t>(SEQ_STRIDE));
-    const auto kvOffsetsHost = computeOffsets(kvSeqLens, static_cast<int32_t>(SEQ_STRIDE));
+    const auto qOffsetsHost = computeOffsets(qSeqLens);
+    const auto kvOffsetsHost = computeOffsets(kvSeqLens);
 
     // ── Graph construction ──────────────────────────────────────────────
     auto graph = std::make_shared<graph::Graph>();
@@ -102,9 +106,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     setPreferredEngine(graph, config);
 
-    // BSHD-ordered dims: {B, S, H, D}
-    const std::vector<int64_t> qDims = {B, S_MAX, H, D};
-    const std::vector<int64_t> kvDims = {B, S_MAX, H, D};
+    // BHSD logical dims with BSHD physical strides: [S_MAX*H*D, D, H*D, 1].
+    // The batch stride is ignored for ragged tensors in favor of the ragged offset.
+    const std::vector<int64_t> qDims = {B, H, S_MAX, D};
+    const std::vector<int64_t> kvDims = {B, H, S_MAX, D};
 
     auto bshdStrides = utilities::generateStrides(qDims, layout.strideOrder);
 
@@ -131,10 +136,11 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_data_type(hipdnn_frontend::DataType::INT32)
         .set_stride(raggedOffsetStrides);
 
-    // Wire ragged offsets to primary tensors
-    qAttr->set_ragged_offset(qRaggedAttr);
-    kAttr->set_ragged_offset(kvRaggedAttr);
-    vAttr->set_ragged_offset(kvRaggedAttr); // shared aux across K/V
+    // Wire ragged offsets to primary tensors; the multiplier converts token offsets to
+    // elements. K and V share the same offset aux.
+    qAttr->set_ragged_offset(qRaggedAttr).set_ragged_offset_multiplier(TOKEN_STRIDE);
+    kAttr->set_ragged_offset(kvRaggedAttr).set_ragged_offset_multiplier(TOKEN_STRIDE);
+    vAttr->set_ragged_offset(kvRaggedAttr).set_ragged_offset_multiplier(TOKEN_STRIDE);
 
     // ── Sequence-length TensorAttributes ({B, 1, 1, 1}, INT32) ────────
     const std::vector<int64_t> seqLenDims = {B, 1, 1, 1};
@@ -168,7 +174,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     oAttr->set_output(true);
 
     // Wire ragged offset to O (uses Q's offsets since O has Q's sequence lengths)
-    oAttr->set_ragged_offset(qRaggedAttr);
+    oAttr->set_ragged_offset(qRaggedAttr).set_ragged_offset_multiplier(TOKEN_STRIDE);
 
     HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
@@ -193,27 +199,30 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     }
 
     // Ragged primaries — demonstrating both construction forms:
-    //   Form (a): size-inference (reads ragged_offset[B] from aux)
+    //   Form (a): size-inference (reads ragged_offset[B] * multiplier from aux)
     //   Form (b): explicit physicalElementCount
+    // The sequence axis is SDPA_SEQ_AXIS (2) because dims are BHSD logical.
 
     // Q: Form (a) — size-inference
     utilities::RaggedTensor<InputType> qTensor(
-        qDims, bshdStrides, utilities::BSHD_SEQ_AXIS, qRaggedOffset);
+        qDims, bshdStrides, utilities::SDPA_SEQ_AXIS, qRaggedOffset, std::nullopt, TOKEN_STRIDE);
 
-    // K: Form (b) — explicit physicalElementCount
-    utilities::RaggedTensor<InputType> kTensor(kvDims,
-                                               bshdStrides,
-                                               utilities::BSHD_SEQ_AXIS,
-                                               kvRaggedOffset,
-                                               static_cast<size_t>(kvOffsetsHost.back()));
+    // K: Form (b) — explicit physicalElementCount (total tokens * H*D elements)
+    utilities::RaggedTensor<InputType> kTensor(
+        kvDims,
+        bshdStrides,
+        utilities::SDPA_SEQ_AXIS,
+        kvRaggedOffset,
+        static_cast<size_t>(static_cast<int64_t>(kvOffsetsHost.back()) * TOKEN_STRIDE),
+        TOKEN_STRIDE);
 
     // V: Form (a) — size-inference, shares kvRaggedOffset with K
     utilities::RaggedTensor<InputType> vTensor(
-        kvDims, bshdStrides, utilities::BSHD_SEQ_AXIS, kvRaggedOffset);
+        kvDims, bshdStrides, utilities::SDPA_SEQ_AXIS, kvRaggedOffset, std::nullopt, TOKEN_STRIDE);
 
     // O: Form (a) — size-inference, uses Q's ragged offsets
     utilities::RaggedTensor<InputType> oTensor(
-        qDims, bshdStrides, utilities::BSHD_SEQ_AXIS, qRaggedOffset);
+        qDims, bshdStrides, utilities::SDPA_SEQ_AXIS, qRaggedOffset, std::nullopt, TOKEN_STRIDE);
 
     // Sequence-length tensors (dense, non-ragged — constructed as today)
     utilities::Tensor<int32_t> seqLenQTensor(seqLenDims);
