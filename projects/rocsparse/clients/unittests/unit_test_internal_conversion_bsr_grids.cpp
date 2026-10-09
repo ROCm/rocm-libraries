@@ -33,10 +33,11 @@
 //
 // The cases below shrink handle->properties.maxGridSize[0] with
 // ScopedMaxGridSizeX to 1, 3 and 7 blocks, so a few hundred block rows take the
-// clamped path. bsr2csr_real_threshold_block_dim_8 does not: rocsparse_sbsr2csr
-// with block_dim 8 (1024 threads) and mb = 2^22 + 1 crosses (2^32 - 1) / 1024
-// and has to clamp inside get_grid_size_x. bsr2csr targets are filled with 0xFF
-// before launch, so a kernel that skips block rows cannot pass on leftover bytes.
+// clamped path. The bsr2csr_real_threshold tests do not: rocsparse_sbsr2csr with
+// block_dim 8 and 33 (1024 threads, mb = 2^22 + 1) and block_dim 2 (256
+// threads, mb = 2^24 + 1) cross (2^32 - 1) / blockDim.x and have to clamp inside
+// get_grid_size_x. Device targets are filled with 0xFF before launch, in both
+// directions, so a kernel that skips block rows cannot pass on leftover bytes.
 //
 // WHAT MAKES EACH CASE LOAD-BEARING. block_dim <= 16 uses mb = 150: the
 // wavefront kernels cover 16 (block_dim <= 4) or 256 / wavefront size block
@@ -247,6 +248,10 @@ namespace
             }
             msg << "row pointer differs at " << i;
         }
+        else if(got.ind.size() != want.ind.size())
+        {
+            msg << "column index count is " << got.ind.size() << ", want " << want.ind.size();
+        }
         else if(got.ind != want.ind)
         {
             size_t i = 0;
@@ -259,6 +264,10 @@ namespace
             {
                 msg << ": " << got.ind[i] << ", want " << want.ind[i];
             }
+        }
+        else if(got.val.size() != want.val.size())
+        {
+            msg << "value count is " << got.val.size() << ", want " << want.val.size();
         }
         else if(got.val != want.val)
         {
@@ -367,11 +376,12 @@ namespace
             ADD_FAILURE() << "device allocation failed";
             return {};
         }
-        // Poison bsr2csr targets. A kernel that skips block rows must not pass
-        // on bytes left by the previous launch.
-        if(!to_bsr && hipMemset(t_ptr.ptr, 0xFF, t_ptr.n * sizeof(I)) != hipSuccess)
+        // Poison the targets. The allocator hands the same blocks, still holding
+        // a correct result, to the next run, so a kernel that skips block rows
+        // would otherwise pass on leftover bytes.
+        if(hipMemset(t_ptr.ptr, 0xFF, t_ptr.n * sizeof(I)) != hipSuccess)
         {
-            ADD_FAILURE() << "hipMemset of csr row pointer failed";
+            ADD_FAILURE() << "hipMemset of the target row pointer failed";
             return {};
         }
 
@@ -444,9 +454,8 @@ namespace
             {
                 status = rocsparse_status_memory_error;
             }
-            else if(!to_bsr
-                    && (hipMemset(t_ind->ptr, 0xFF, t_ind->n * sizeof(J)) != hipSuccess
-                        || hipMemset(t_val->ptr, 0xFF, t_val->n * sizeof(T)) != hipSuccess))
+            else if(hipMemset(t_ind->ptr, 0xFF, t_ind->n * sizeof(J)) != hipSuccess
+                    || hipMemset(t_val->ptr, 0xFF, t_val->n * sizeof(T)) != hipSuccess)
             {
                 status = rocsparse_status_memory_error;
             }
@@ -573,18 +582,30 @@ namespace
                            check_bsr2csr<int64_t, int32_t, double>>(handle, block_dim);
     }
 
-
-    // 1024-thread bsr2csr crosses (2^32 - 1) / 1024 at mb = 2^22 + 1. Nonzero
-    // blocks sit on block rows 0, 4194303 and 4194304. The last two are past
-    // grid.x = 4194303, so they are right only when the kernel grid-strides.
-    void check_bsr2csr_real_threshold(rocsparse_handle handle)
+    // bsr2csr launched with blockDim.x threads crosses (2^32 - 1) / blockDim.x
+    // block rows at mb = (2^32 - 1) / blockDim.x + 2. Nonzero blocks sit on block
+    // rows 0, grid_x and grid_x + 1. The last two are past the clamped grid.x, so
+    // they are right only when the kernel grid-strides.
+    void check_bsr2csr_real_threshold(rocsparse_handle handle,
+                                      rocsparse_int    block_dim,
+                                      rocsparse_int    threads)
     {
-        constexpr rocsparse_int mb         = 4194305;
-        constexpr rocsparse_int nb         = 1;
-        constexpr rocsparse_int block_dim  = 8;
-        constexpr rocsparse_int bs         = block_dim * block_dim;
-        constexpr rocsparse_int nnz_blocks = 3;
-        const rocsparse_int     nz_rows[nnz_blocks] = {0, 4194303, 4194304};
+        const rocsparse_int grid_x
+            = static_cast<rocsparse_int>(((uint64_t(1) << 32) - 1) / threads);
+        const rocsparse_int     mb                  = grid_x + 2;
+        const rocsparse_int     nb                  = 1;
+        const rocsparse_int     bs                  = block_dim * block_dim;
+        constexpr rocsparse_int nnz_blocks          = 3;
+        const rocsparse_int     nz_rows[nnz_blocks] = {0, grid_x, grid_x + 1};
+
+        // Device row pointers: BSR (mb + 1) and CSR (mb * block_dim + 1).
+        const size_t need = (static_cast<size_t>(mb) * (1 + block_dim) + 2) * sizeof(rocsparse_int);
+        size_t       free_bytes  = 0;
+        size_t       total_bytes = 0;
+        if(hipMemGetInfo(&free_bytes, &total_bytes) != hipSuccess || free_bytes < 2 * need)
+        {
+            GTEST_SKIP() << "Insufficient device memory: need about " << need << " bytes";
+        }
 
         std::vector<rocsparse_int> h_bsr_ptr(static_cast<size_t>(mb) + 1, 0);
         rocsparse_int              acc = 0;
@@ -765,7 +786,8 @@ TEST_F(BsrConversionGrids, csr2bsr_block_dim_80)
 
 // ---------------------------------------------------------------------------
 // bsr2csr. Each block_dim from 2 to 7 has its own instantiation of the 2-7
-// kernel; 8, 16 and 32 take the 8-32 kernel and 64 and 128 the 33-256 kernel.
+// kernel; 8, 16 and 32 take the 8-32 kernel and 64, 128 and 200 the 33-256
+// kernel.
 // ---------------------------------------------------------------------------
 
 // Control: block_dim 1 copies the BSR arrays, and its launch is not clamped.
@@ -808,9 +830,28 @@ TEST_F(BsrConversionGrids, bsr2csr_block_dim_128)
     check_bsr2csr_all(handle, 128);
 }
 
+// The 129-256 bucket, launch_bsr2csr_block_per_row_33_256_kernel(1024, 256, 32).
+TEST_F(BsrConversionGrids, bsr2csr_block_dim_200)
+{
+    check_bsr2csr_all(handle, 200);
+}
+
 // Legacy int32 rocsparse_sbsr2csr, 1024 threads, mb past (2^32 - 1) / 1024.
 // Goes through get_grid_size_x with the device's real grid limit.
 TEST_F(BsrConversionGrids, bsr2csr_real_threshold_block_dim_8)
 {
-    check_bsr2csr_real_threshold(handle);
+    check_bsr2csr_real_threshold(handle, 8, 1024);
+}
+
+// The 2-7 kernels launch 256 threads, so their limit is (2^32 - 1) / 256.
+TEST_F(BsrConversionGrids, bsr2csr_real_threshold_block_dim_2)
+{
+    check_bsr2csr_real_threshold(handle, 2, 256);
+}
+
+// The 33-256 kernel, 1024 threads. block_dim 33 is the smallest in the bucket,
+// which keeps the CSR row pointer to about 550 MB.
+TEST_F(BsrConversionGrids, bsr2csr_real_threshold_block_dim_33)
+{
+    check_bsr2csr_real_threshold(handle, 33, 1024);
 }

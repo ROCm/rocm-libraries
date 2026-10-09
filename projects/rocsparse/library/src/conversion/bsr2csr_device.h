@@ -96,7 +96,6 @@ namespace rocsparse
                     }
                 }
             }
-
         }
     }
 
@@ -159,11 +158,15 @@ namespace rocsparse
                     csr_val[offset] = bsr_val[block_dim * block_dim * i + block_dim * c + r];
                 }
             }
-
         }
     }
 
-    template <uint32_t BLOCK_SIZE, uint32_t BLOCK_DIM, uint32_t SUB_BLOCK_DIM, typename T, typename I, typename J>
+    template <uint32_t BLOCK_SIZE,
+              uint32_t BLOCK_DIM,
+              uint32_t SUB_BLOCK_DIM,
+              typename T,
+              typename I,
+              typename J>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void bsr2csr_block_per_row_33_256_kernel(rocsparse_direction  direction,
                                              J                    mb,
@@ -236,7 +239,6 @@ namespace rocsparse
                     }
                 }
             }
-
         }
     }
 

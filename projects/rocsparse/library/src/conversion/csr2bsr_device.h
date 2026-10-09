@@ -325,11 +325,9 @@ namespace rocsparse
                       "BLOCKSIZE must be a power of two.");
         J lane_id = hipThreadIdx_x;
 
-        // One segment per physical block. The buffer holds min(mb, grid.x)
-        // segments and each block reuses its segment across grid-stride
-        // iterations. Indexing by block row stays in bounds only while the
-        // buffer is sized for every block row; the physical partition is what
-        // makes this smaller buffer valid.
+        // One scratch segment per physical block, reused across grid-stride
+        // iterations, so the buffer holds min(mb, grid.x) segments. The offsets
+        // are 64-bit: with J = int32_t the 32-bit product would wrap.
         const int64_t phys = hipBlockIdx_x;
         const int64_t rows = static_cast<int64_t>(rows_per_segment);
         const int64_t span = rows * static_cast<int64_t>(BLOCKSIZE);
