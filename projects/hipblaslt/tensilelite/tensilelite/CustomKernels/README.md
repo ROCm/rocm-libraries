@@ -139,7 +139,7 @@ assembler's flag applies, or emit it with `-mcode-object-version=4`.
 
 ## Validation
 
-Two ways to validate:
+Three ways to validate:
 
 1. **CI gate** (recommended for pull-request checks):
 
@@ -151,10 +151,18 @@ Two ways to validate:
    on any failure. Without `--strict`, failures are reported as warnings only
    and the exit code is `0`.
 
-2. **Build-time** (off by default):
+2. **Logic-file check**:
+
+   ```bash
+   tensilelite logic --check-only-custom-kernels <path to logic file>
+   ```
+
+   Validates the custom kernels referenced by the selected logic file.
+
+3. **Build-time** (off by default):
 
    Set the YAML toggle `GlobalParameters.ValidateMetadata: True` in your
-   benchmark configuration, or pass `--validate-metadata` to `Tensile`. With
+   benchmark configuration, or pass `--validate-metadata` to `tensilelite run`. With
    the flag on, `buildAssemblyCodeObjectFiles` validates every kernel that
    participates in the build and prints `Tensile::WARNING: ...` for any
    missing or invalid `custom.config` while letting the build proceed.
