@@ -69,13 +69,30 @@ jobs:
             exit 1
           fi
 
+      - name: Validate upstream repository
+        id: upstream
+        env:
+          UPSTREAM_REPO: ${{ github.event.inputs.subrepo-upstream }}
+        run: |
+          # subrepo-upstream is "<owner>/<name>" under this repository's owner,
+          # e.g. "ROCm/rocBLAS".
+          if [[ ! "${UPSTREAM_REPO}" =~ ^${GITHUB_REPOSITORY_OWNER}/([A-Za-z0-9._-]+)$ ]]; then
+            echo "❌ subrepo-upstream must be ${GITHUB_REPOSITORY_OWNER}/<name>, got '${UPSTREAM_REPO}'"
+            exit 1
+          fi
+          echo "name=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
       - name: Generate a token
         id: generate-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+          repositories: |
+            ${{ github.event.repository.name }}
+            ${{ steps.upstream.outputs.name }}
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -86,6 +103,8 @@ jobs:
           sparse-checkout-cone-mode: true
           token: ${{ steps.generate-token.outputs.token }}
           fetch-depth: 0  #for subtree operations
+          # "Split subrepo prefix from main branch" pushes the import branch.
+          persist-credentials: true
 
       - name: Set up Git user
         run: |

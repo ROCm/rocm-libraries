@@ -10,6 +10,8 @@ updates:
       github-actions:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/hipcub/docs/sphinx" # Location of package manifests
@@ -20,6 +22,8 @@ updates:
       hipcub-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocprim/docs/sphinx" # Location of package manifests
@@ -30,6 +34,8 @@ updates:
       rocprim-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/hiprand/docs/sphinx" # Location of package manifests
@@ -40,6 +46,8 @@ updates:
       hiprand-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocthrust/docs/sphinx" # Location of package manifests
@@ -50,6 +58,8 @@ updates:
       rocthrust-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/hipblaslt/docs/sphinx" # Location of package manifests
@@ -60,6 +70,8 @@ updates:
       hipblaslt-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/hipsparselt/docs/sphinx" # Location of package manifests
@@ -70,6 +82,8 @@ updates:
       hipsparselt-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocsparse/docs/sphinx" # Location of package manifests
@@ -80,6 +94,8 @@ updates:
       rocsparse-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/hipsparse/docs/sphinx" # Location of package manifests
@@ -90,6 +106,8 @@ updates:
       hipsparse-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/hipblas/docs/sphinx" # Location of package manifests
@@ -100,6 +118,8 @@ updates:
       hipblas-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/miopen/docs/sphinx" # Location of package manifests
@@ -110,6 +130,8 @@ updates:
       miopen-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/hipfft/docs/sphinx" # Location of package manifests
@@ -120,6 +142,8 @@ updates:
       hipfft-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocfft/docs/sphinx" # Location of package manifests
@@ -130,6 +154,8 @@ updates:
       rocfft-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocblas/docs/sphinx" # Location of package manifests
@@ -140,6 +166,8 @@ updates:
       rocblas-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocsolver/docs/sphinx" # Location of package manifests
@@ -150,6 +178,8 @@ updates:
       rocsolver-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/hipsolver/docs/sphinx" # Location of package manifests
@@ -160,6 +190,8 @@ updates:
       hipsolver-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocrand/docs/sphinx" # Location of package manifests
@@ -170,6 +202,8 @@ updates:
       rocrand-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/hiptensor/docs/sphinx" # Location of package manifests
@@ -180,6 +214,8 @@ updates:
       hiptensor-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "projects/rocwmma/docs/sphinx" # Location of package manifests
@@ -190,6 +226,8 @@ updates:
       rocwmma-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "pip"
     directory: "shared/tensile/docs/sphinx" # Location of package manifests
@@ -200,3 +238,5 @@ updates:
       tensile-docs-dependencies:
         patterns:
           - "*"
+    cooldown:
+      default-days: 7

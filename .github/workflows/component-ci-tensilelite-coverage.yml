@@ -32,13 +32,16 @@ jobs:
     name: Linux
     runs-on: ${{ inputs.linux_runner }}
     container:
-      image: ${{ inputs.docker_image }}
+      # Callers pass ci-env's docker-image, which is pinned by digest.
+      image: ${{ inputs.docker_image }} # zizmor: ignore[unpinned-images]
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm-linux
+        uses: $/.github/actions/setup-rocm-linux
         with:
           amdgpu_family: gfx94X-dcgpu
 

@@ -12,6 +12,9 @@ on:
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   # This workflow contains a single job called "build"
@@ -22,7 +25,9 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2.8.0
+        with:
+          persist-credentials: false
 
       - name: getting branch name
         shell: bash
@@ -33,12 +38,17 @@ jobs:
         run: echo "##[set-output name=tag;]$(echo ${GITHUB_REF_NAME})"
         id: tag_name
       - name: zipping files
-        run: zip -r ${{ github.event.repository.name }}_${{ steps.tag_name.outputs.tag }}.zip . -x '*.git*' '*.idea*'
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          TAG: ${{ steps.tag_name.outputs.tag }}
+        run: zip -r ${REPO_NAME}_${TAG}.zip . -x '*.git*' '*.idea*'
       - name: echo-step
-        run: echo "${{ github.event.release.target_commitish }}"
+        env:
+          TARGET_COMMITISH: ${{ github.event.release.target_commitish }}
+        run: echo "${TARGET_COMMITISH}"
       - name: uploading archive to prod
         if: ${{ steps.branch_name.outputs.branch == 'master' || github.event.release.target_commitish == 'master'}}
-        uses: wlixcc/SFTP-Deploy-Action@v1.0
+        uses: wlixcc/SFTP-Deploy-Action@fe288f8e0f466f9567fb3e54434b41800cc7b880 # v1.0
         with:
           username: ${{ secrets.USERNAME }}
           server: ${{ secrets.SERVER }}
@@ -48,7 +58,7 @@ jobs:
           args: '-o ConnectTimeout=5'
       - name: uploading archive to staging
         if: ${{ steps.branch_name.outputs.branch == 'develop' || github.event.release.target_commitish == 'develop' }}
-        uses: wlixcc/SFTP-Deploy-Action@v1.0
+        uses: wlixcc/SFTP-Deploy-Action@fe288f8e0f466f9567fb3e54434b41800cc7b880 # v1.0
         with:
           username: ${{ secrets.USERNAME }}
           server: ${{ secrets.SERVER }}

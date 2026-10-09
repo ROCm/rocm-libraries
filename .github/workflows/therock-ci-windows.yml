@@ -54,6 +54,8 @@ jobs:
 
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -61,6 +63,7 @@ jobs:
           repository: "ROCm/TheRock"
           path: "TheRock"
           ref: ${{ inputs.therock_ref }}
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -167,7 +170,7 @@ jobs:
         run: |
           python3 TheRock/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
-            --artifact-group ${{ env.AMDGPU_FAMILIES }} \
+            --artifact-group ${AMDGPU_FAMILIES} \
             --build-dir ${{ env.BUILD_DIR }} \
             --upload
 
@@ -191,7 +194,7 @@ jobs:
   therock-test-windows:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-windows]
-    uses: ./.github/workflows/therock-test-packages.yml
+    uses: $/.github/workflows/therock-test-packages.yml
     with:
       therock_ref: ${{ inputs.therock_ref }}
       projects_to_test: ${{ inputs.projects_to_test }}

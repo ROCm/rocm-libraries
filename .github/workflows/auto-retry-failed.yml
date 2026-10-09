@@ -29,7 +29,11 @@
 
 name: Auto-retry failed CI
 
-on:
+# SECURITY: workflow_run runs with this repository's token even when the
+# watched run came from a fork PR. This workflow checks out nothing, executes
+# no code from the triggering run, and only passes its numeric run ID to
+# `gh run rerun`, so the rerun keeps the original run's own (fork) context.
+on: # zizmor: ignore[dangerous-triggers]
   workflow_run:
     workflows:
       - "TheRock CI Nightly"

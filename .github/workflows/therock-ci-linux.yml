@@ -41,7 +41,8 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ${{ inputs.docker_image }}
+      # Callers pass ci-env's docker-image, which is pinned by digest.
+      image: ${{ inputs.docker_image }} # zizmor: ignore[unpinned-images]
     strategy:
       fail-fast: true
     env:
@@ -52,6 +53,8 @@ jobs:
     steps:
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -59,6 +62,7 @@ jobs:
           repository: "ROCm/TheRock"
           path: TheRock
           ref: ${{ inputs.therock_ref }}
+          persist-credentials: false
 
       - name: Install python deps
         run: |
@@ -146,7 +150,7 @@ jobs:
         run: |
           python3 TheRock/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
-            --artifact-group ${{ env.AMDGPU_FAMILIES }} \
+            --artifact-group "${AMDGPU_FAMILIES}" \
             --build-dir TheRock/build \
             --upload
 
@@ -173,7 +177,7 @@ jobs:
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
     # TODO(mi450-pool): Remove gfx125X exclusion once mi450 test runners are provisioned
     if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.amdgpu_families != 'gfx125X' }}
-    uses: ./.github/workflows/therock-test-packages.yml
+    uses: $/.github/workflows/therock-test-packages.yml
     with:
       therock_ref: ${{ inputs.therock_ref }}
       projects_to_test: ${{ inputs.projects_to_test }}
