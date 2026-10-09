@@ -46,6 +46,7 @@
     }
 
 //! [doc example]
+#if defined(ROCSPARSE_WITH_SPSORT)
 int main()
 {
     //     1 2 3 4 0 5
@@ -167,4 +168,15 @@ int main()
 
     return 0;
 }
+
+#else
+
+int main()
+{
+    std::cout << "rocsparse was built without rocsparse_spsort (BUILD_WITH_SPSORT=OFF)"
+              << std::endl;
+    return 0;
+}
+
+#endif
 //! [doc example]
