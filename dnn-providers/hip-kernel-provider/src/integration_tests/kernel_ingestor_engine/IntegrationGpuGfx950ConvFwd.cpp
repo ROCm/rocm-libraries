@@ -21,7 +21,9 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/utilities/CacheRoot.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PathSanitizer.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
@@ -489,9 +491,35 @@ protected:
         EXPECT_TRUE(validator->allClose(cpu.getTensor(3), gpu.getTensor(3)));
     }
 
+    // The engine keys its shard by its full identity (revision, UHD id, model hash), which
+    // only the loaded descriptor set knows. Each test owns a fresh cache, so the engine's
+    // one shard for this arch is found on disk instead:
+    // <engine>/<uhd id>/<revision>-<model hash>/<arch>/winners.jsonl.
+    std::filesystem::path winnerShardPath() const
+    {
+        const auto engineDir = hipdnn_data_sdk::utilities::cacheRoot() / "ingestor-winners"
+                               / std::string(ingestor::winnerCacheVersion())
+                               / hipdnn_data_sdk::utilities::sanitizeForPath(engineName());
+        const std::string arch(hipdnn_plugin_sdk::stripArchFeatures(_arch));
+        std::vector<std::filesystem::path> shards;
+        std::error_code error;
+        for(auto it = std::filesystem::recursive_directory_iterator(engineDir, error);
+            !error && it != std::filesystem::recursive_directory_iterator();
+            it.increment(error))
+        {
+            const auto& path = it->path();
+            if(path.filename() == "winners.jsonl" && path.parent_path().filename() == arch)
+            {
+                shards.push_back(path);
+            }
+        }
+        EXPECT_LE(shards.size(), 1U) << "more than one winner shard under " << engineDir;
+        return shards.empty() ? std::filesystem::path{} : shards.front();
+    }
+
     std::optional<ingestor::WinnerRecord> persistedRanking() const
     {
-        const auto path = ingestor::winnerCacheShardPath(engineName(), _arch);
+        const auto path = winnerShardPath();
         std::ifstream stream(path);
         std::string line;
         std::optional<ingestor::WinnerRecord> ranking;
@@ -513,7 +541,7 @@ protected:
     std::optional<std::pair<ingestor::WinnerKey, ingestor::WinnerRecord>>
         lastPersistedRecord() const
     {
-        std::ifstream stream(ingestor::winnerCacheShardPath(engineName(), _arch));
+        std::ifstream stream(winnerShardPath());
         std::string line;
         std::optional<std::pair<ingestor::WinnerKey, ingestor::WinnerRecord>> last;
         while(std::getline(stream, line))
@@ -531,7 +559,10 @@ protected:
     void appendPersistedRecord(const ingestor::WinnerKey& key,
                                const ingestor::WinnerRecord& record) const
     {
-        auto [shard, opened] = ingestor::openWinnerCacheShard(engineName(), _arch);
+        const auto path = winnerShardPath();
+        ASSERT_FALSE(path.empty()) << "The engine has not written its winner shard";
+        auto [shard, opened]
+            = hipdnn_data_sdk::utilities::openLineStore(path, ingestor::winnerCacheVersion());
         ASSERT_EQ(opened, hipdnn_data_sdk::utilities::LineStoreStatus::OK);
         ASSERT_TRUE(shard.has_value());
         ASSERT_EQ(hipdnn_data_sdk::utilities::lockLineStore(*shard),

@@ -34,7 +34,9 @@ install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 # a build without the ingestor, or with HIPDNN_SKIP_TESTS, registers neither. The suites self-skip (pytest.importorskip)
 # when lightgbm/flatbuffers/numpy/pandas are absent; HIPDNN_REQUIRE_UHD_GEN_TESTS turns
 # the skips of all four suites into failures (uhd_gen/conftest.py, which the two suites outside
-# uhd_gen/ load with `-p`) and a missing pytest into a configure error.
+# uhd_gen/ load with `-p`) and a missing pytest into a configure error. HIPDNN_SKIP_TESTS
+# registers neither: cmake/Tests.cmake returns before it defines
+# _apply_hipdnn_test_category_labels.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
     if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
         set(_uhd_gen_missing_severity FATAL_ERROR)
