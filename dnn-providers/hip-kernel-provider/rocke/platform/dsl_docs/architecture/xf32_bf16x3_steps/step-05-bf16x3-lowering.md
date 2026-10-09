@@ -138,12 +138,13 @@ claiming a parity that is not yet there.
 
 ## Follow-ups left open
 
-- The bare-`op_id` fragment lookups still do not know the emulated atoms, so the
-  C builder's `rocke_b_mma` cannot construct an xf32 `tile.mma` from a string.
-  Python's `IRBuilder.mma` is unaffected because it takes the `MmaOp` object.
-  This is why the C test embeds serialized IR instead of building the kernel.
-  Harmless for lowering — serialized IR spells the vector types outright — but
-  it is the remaining half of the step-4 follow-up.
+- **Closed after review.** The bare-`op_id` fragment lookups did not know the
+  emulated atoms, so neither the C builder's `rocke_b_mma` nor the bare-string
+  form of Python's `IRBuilder.mma` could construct an xf32 `tile.mma`. Both now
+  resolve the logical op_id through its physical atom — see
+  [step 4](step-04-gfx950-xf32-rows.md#follow-ups-left-open). The C test still
+  embeds serialized IR, now so that it pins the recipe independent of the
+  builder.
 - No golden kernel exercises the expansion yet, so the byte-identity gate covers
   it only through the two focused tests above. That changes when a kernel family
   selects xf32.

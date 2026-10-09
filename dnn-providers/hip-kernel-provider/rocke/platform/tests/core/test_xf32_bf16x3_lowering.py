@@ -43,8 +43,11 @@ _EMULATED = {
 }
 
 
-def _mma_kernel(op_id: str) -> KernelDef:
-    """A kernel whose whole body is one ``tile.mma`` on the named atom."""
+def _mma_kernel(op_id: str, *, bare: bool = False) -> KernelDef:
+    """A kernel whose whole body is one ``tile.mma`` on the named atom.
+
+    ``bare`` hands ``IRBuilder.mma`` the op_id string instead of the ``MmaOp``.
+    """
     atom = ArchTarget.from_gfx(_ARCH).mma.by_op_id(op_id)
     # The kernel name deliberately avoids the string "xf32" so the "nothing
     # downstream sees an xf32 atom" check cannot pass or fail on the name.
@@ -53,7 +56,7 @@ def _mma_kernel(op_id: str) -> KernelDef:
     a = builder.vector_splat(builder.const_f32(1.0), atom.a_frag_len)
     b = builder.vector_splat(builder.const_f32(2.0), atom.b_frag_len)
     c = builder.vector_splat(builder.const_f32(0.0), atom.c_frag_len)
-    builder.mma(atom, a, b, c)
+    builder.mma(op_id if bare else atom, a, b, c)
     builder.ret()
     return builder.kernel
 
@@ -196,6 +199,21 @@ class TestBf16x3Expansion(unittest.TestCase):
                 self.assertFalse(
                     names[2].startswith("%xf32_acc."),
                     "the last term writes the tile.mma result the caller named",
+                )
+
+
+class TestBareOpIdForm(unittest.TestCase):
+    def test_the_bare_op_id_builds_the_same_kernel_as_the_atom(self):
+        """``IRBuilder.mma`` documents a bare-op_id form; emulated atoms take it.
+
+        The logical op_id has no fragment of its own, so this is the case that
+        needs the lookup to resolve through the physical atom.
+        """
+        for op_id in _EMULATED:
+            with self.subTest(op_id=op_id):
+                self.assertEqual(
+                    serialize(_mma_kernel(op_id, bare=True)),
+                    serialize(_mma_kernel(op_id)),
                 )
 
 

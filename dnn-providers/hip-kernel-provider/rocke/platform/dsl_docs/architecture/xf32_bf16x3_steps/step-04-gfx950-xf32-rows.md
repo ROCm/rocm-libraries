@@ -118,9 +118,13 @@ xf32 query and there is no native xf32 atom to shadow them — so only its premi
 
 - gfx942 has no XF32 row. Native gfx942 XF32 is AICK-1714's; this ticket only
   supplies the preference rule that will pick it over emulation when it lands.
-- The bare-op_id fragment lookups (`_mma_c_frag_len` in Python,
-  `rocke_arch_mma_c_frag_len` in C) do not know the emulated op_ids. That is
-  currently harmless — `IRBuilder.mma` prefers the `MmaOp`'s own `c_frag_len`
-  whenever an atom object is passed, which is how the xf32 atoms are reached —
-  but a caller that passes the bare op_id string would get "unknown MMA op_id".
-  Worth revisiting in step 5 when the lowering's actual call shape is settled.
+- **Closed after review.** The bare-op_id fragment lookups (`_frag_info` in
+  Python, `rocke_arch_mma_c_frag_len` in C) originally did not know the emulated
+  op_ids, so the bare-string form of `IRBuilder.mma` and the C builder's
+  `rocke_b_mma` — which has no other form — both failed with "unknown MMA
+  op_id". Both lookups now resolve a logical op_id through its physical atom,
+  one hop, via `target._op_id_physical_op_id` /
+  `rocke_arch_mma_op_id_physical_op_id`. The frag table itself still holds
+  physical atoms only, so the borrowed fragment cannot drift from the one it
+  borrows. Pinned by `tests/core/test_mma_frag_tables.py`,
+  `tests/core/mma_frag_ssot.cpp` and `tests/core/test_mma_catalog_lookup.cpp`.

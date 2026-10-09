@@ -308,7 +308,9 @@ const rocke_mma_op_t*
 
 /* Accumulator fragment length for op_id -- the c_frag_len projection of
  * target.py::_MMA_FRAGMENT_INFO (rocke_arch_mma_c_frag_len(op_id) ==
- * target._frag_info(op_id).c_frag_len). Returns 0 for an unknown atom (the
+ * target._frag_info(op_id).c_frag_len). An emulated atom's logical op_id
+ * resolves through the physical atom it expands into
+ * (rocke_arch_mma_op_id_physical_op_id). Returns 0 for an unknown atom (the
  * zero-length _FragInfo fallback). */
 int rocke_arch_mma_c_frag_len(const char* op_id);
 
@@ -339,6 +341,12 @@ bool rocke_arch_mma_op_is_native(const rocke_mma_op_t* op);
  * MmaOp.emulation.physical_op_id. Returns NULL for a native atom (and for a
  * NULL op), which is the same answer: nothing else to issue. Do not free. */
 const char* rocke_arch_mma_op_physical_op_id(const rocke_mma_op_t* op);
+
+/* The bare-op_id twin of rocke_arch_mma_op_physical_op_id, mirroring
+ * target._op_id_physical_op_id()[op_id]: the first catalog row that emulates
+ * op_id wins; natively-encoded rows contribute nothing. Returns NULL for an
+ * op_id that no catalog emulates. Do not free. */
+const char* rocke_arch_mma_op_id_physical_op_id(const char* op_id);
 
 /* Target-independent family projection. Unknown/NULL IDs return NULL;
  * conflicting families for one ID raise ROCKE_ERR_VALUE. */

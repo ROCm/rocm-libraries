@@ -91,6 +91,10 @@ int main(void)
     /* Integer WMMA: 8-wide i32 accumulator. */
     check_atom(&b, "wmma_i32_16x16x16_iu8", 8, true);
     check_atom(&b, "wmma_i32_16x16x16_iu4", 8, true);
+    /* Emulated XF32 atoms have no frag-table row of their own; the logical op_id
+     * sizes through the bf16 atom it expands into, so rocke_b_mma can build it. */
+    check_atom(&b, "xf32_bf16x3_f32_16x16x32", 4, false);
+    check_atom(&b, "xf32_bf16x3_f32_32x32x16", 16, false);
 
     /* Keep the C catalog in parity with Python _MMA_FRAGMENT_INFO. The scaled
      * matrix operands are <16 x i32>, so fragment length is 16 elements, not

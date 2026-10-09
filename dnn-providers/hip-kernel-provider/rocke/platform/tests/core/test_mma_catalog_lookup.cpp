@@ -421,9 +421,17 @@ static int test_emulated_rows_mirror_physical()
             CHECK(op->a_layout == physical->a_layout);
             CHECK(op->b_layout == physical->b_layout);
             CHECK(op->c_layout == physical->c_layout);
+            /* The bare-op_id path (rocke_b_mma's) reaches the same physical atom
+             * and fragment as the row; the physical atom resolves to nothing. */
+            const char* bare_physical = rocke_arch_mma_op_id_physical_op_id(op->op_id);
+            CHECK(bare_physical != NULL && strcmp(bare_physical, physical_id) == 0);
+            CHECK(rocke_arch_mma_c_frag_len(op->op_id) == physical->c_frag_len);
+            CHECK(rocke_arch_mma_op_id_physical_op_id(physical_id) == NULL);
             ++checked;
         }
     }
+    CHECK(rocke_arch_mma_op_id_physical_op_id("not_a_real_op_id") == NULL);
+    CHECK(rocke_arch_mma_op_id_physical_op_id(NULL) == NULL);
     printf("emulated rows: %d mirrored their physical atom\n", checked);
     return 0;
 }

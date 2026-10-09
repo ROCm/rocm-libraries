@@ -526,6 +526,30 @@ const char* rocke_arch_mma_op_id_d_dtype(const char* op_id)
     return NULL;
 }
 
+const char* rocke_arch_mma_op_id_physical_op_id(const char* op_id)
+{
+    int i;
+    if(!op_id)
+    {
+        return NULL;
+    }
+    /* The bare-op_id twin of rocke_arch_mma_op_physical_op_id, mirroring
+     * target._op_id_physical_op_id()[op_id]: the first catalog row that emulates
+     * op_id wins, and a natively-encoded row contributes nothing, so the scan
+     * goes on past one. Op_ids no catalog emulates return NULL. */
+    for(i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const rocke_arch_target_t* t = rocke_ati_arch_registry[i].target;
+        const rocke_mma_op_t* op = t ? rocke_mma_catalog_by_op_id(&t->mma, op_id) : NULL;
+        const char* physical = rocke_arch_mma_op_physical_op_id(op);
+        if(physical)
+        {
+            return physical;
+        }
+    }
+    return NULL;
+}
+
 /* ============================== arch target =========================== */
 
 const rocke_arch_target_t* rocke_arch_target_from_gfx(const char* gfx)

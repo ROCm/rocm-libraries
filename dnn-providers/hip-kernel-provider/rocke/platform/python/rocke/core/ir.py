@@ -134,15 +134,16 @@ def _check_cachepolicy(op: str, value: int) -> int:
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
-    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO``;
-    ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
-    the strictness callers relied on.
+    Resolved through ``core/arch/target._frag_info`` -- ``_MMA_FRAGMENT_INFO``,
+    or for an emulated atom the physical atom it expands into; ir.py holds no
+    private copy. Unknown op_ids (frag length 0) raise, matching the strictness
+    callers relied on.
     """
     frag_len = _arch._frag_info(op_id).c_frag_len
     if frag_len <= 0:
+        known = {*_arch._MMA_FRAGMENT_INFO, *_arch._op_id_physical_op_id()}
         raise ValueError(
-            f"unknown MMA op_id {op_id!r}; pass an MmaOp or one of "
-            f"{sorted(_arch._MMA_FRAGMENT_INFO)}"
+            f"unknown MMA op_id {op_id!r}; pass an MmaOp or one of {sorted(known)}"
         )
     return frag_len
 
@@ -1840,7 +1841,9 @@ class IRBuilder:
 
         The result vector type is ``<c_frag_len x float>`` (the per-lane
         accumulator length the atom produces). When ``op`` is an ``op_id``
-        string the frag length is resolved from the static MMA fragment table.
+        string the frag length is resolved from the static MMA fragment table;
+        an emulated atom's op_id resolves through the physical atom it expands
+        into.
 
         The ISA-named helpers (:meth:`mfma_f32_16x16x16_f16`,
         :meth:`wmma_f32_16x16x16_f16`, …) are thin wrappers over this method,

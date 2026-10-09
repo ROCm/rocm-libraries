@@ -858,9 +858,11 @@ static const rocke_layout_map_t lm_wmma_gfx1250_32_b
  *
  * `ati` = arch-target internal (see arch_target_internal.h): the naming prefix
  * reserved for storage private to this arch-target port, kept out of the public
- * rocke_ / rocke_arch_ namespace. This table is file-local static (only
- * rocke_arch_mma_c_frag_len below reads it), so it is not extern'd in the
- * internal header like the cross-bucket rocke_ati_ symbols are.
+ * rocke_ / rocke_arch_ namespace. This table is file-local static (only the
+ * rocke_arch_mma_c_frag_len lookup below reads it), so it is not extern'd in the
+ * internal header like the cross-bucket rocke_ati_ symbols are. It holds
+ * physical atoms only: an emulated atom's logical op_id has no row and resolves
+ * through the physical atom it expands into.
  *
  * NOTE (drift): this is still a hand-maintained mirror of the Python
  * _MMA_FRAGMENT_INFO c_frag_len column, not generated from it.
@@ -937,21 +939,39 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16", 8},
 };
 
-int rocke_arch_mma_c_frag_len(const char* op_id)
+/* The frag-table row registered for op_id itself, or NULL. */
+static const rocke_ati_mma_frag_row_t* rocke_ati_mma_frag_row_for(const char* op_id)
 {
     size_t i;
-    if(!op_id)
-    {
-        return 0;
-    }
     for(i = 0; i < sizeof(rocke_ati_mma_frag) / sizeof(rocke_ati_mma_frag[0]); ++i)
     {
         if(strcmp(rocke_ati_mma_frag[i].op_id, op_id) == 0)
         {
-            return rocke_ati_mma_frag[i].c_frag_len;
+            return &rocke_ati_mma_frag[i];
         }
     }
-    return 0; /* unknown atom: the zero-length _frag_info fallback */
+    return NULL;
+}
+
+int rocke_arch_mma_c_frag_len(const char* op_id)
+{
+    const rocke_ati_mma_frag_row_t* row;
+    const char* physical;
+    if(!op_id)
+    {
+        return 0;
+    }
+    row = rocke_ati_mma_frag_row_for(op_id);
+    if(!row)
+    {
+        /* Mirrors target._frag_info: an emulated atom has no fragment of its
+         * own and borrows the one belonging to the instruction it issues, so a
+         * bare logical op_id resolves through its physical atom. One hop only
+         * -- the catalog refuses an expansion chain. */
+        physical = rocke_arch_mma_op_id_physical_op_id(op_id);
+        row = physical ? rocke_ati_mma_frag_row_for(physical) : NULL;
+    }
+    return row ? row->c_frag_len : 0; /* unknown atom: the zero-length fallback */
 }
 
 /* =========================================================================

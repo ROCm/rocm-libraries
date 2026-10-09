@@ -11,11 +11,10 @@
  * closes that hole: it parses serialized IR (the same artifact the Python test
  * lowers) and pins the emitted text directly.
  *
- * Input IR is embedded rather than generated because rocke_b_mma takes a bare
- * op_id and resolves the fragment lengths from the static frag table, which
- * does not carry the emulated op_ids. Serialized IR spells the vector types
- * outright, so it needs no such lookup -- and it is the artifact the engine is
- * actually contracted to lower.
+ * Input IR is embedded rather than built through rocke_b_mma so these checks
+ * hold independent of the builder: serialized IR spells the vector types
+ * outright, and it is the artifact the engine is contracted to lower. The
+ * builder path is pinned by tests/core/mma_frag_ssot.cpp.
  */
 #include <stdio.h>
 #include <stdlib.h>

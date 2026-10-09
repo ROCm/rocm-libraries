@@ -957,6 +957,13 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
 def _frag_info(op_id: str) -> _FragInfo:
     info = _MMA_FRAGMENT_INFO.get(op_id)
     if info is None:
+        # An emulated atom has no fragment of its own: it borrows the one
+        # belonging to the instruction it issues, so a bare logical op_id
+        # resolves through its physical atom. One hop only -- the catalog
+        # refuses an expansion chain (see _build_mma_emulation).
+        physical = _op_id_physical_op_id().get(op_id)
+        info = _MMA_FRAGMENT_INFO.get(physical) if physical else None
+    if info is None:
         # Unknown atoms still load (e.g. a future JSON-only op_id); they carry
         # zero frag lengths and no maps until registered here.
         return _FragInfo(0, 0, 0, 64)
@@ -1275,6 +1282,37 @@ def _op_id_d_dtype() -> Dict[str, str]:
                     f"An op_id names a specific atom, so its result dtype must be "
                     f"invariant across the arches that list it; fix the catalog so "
                     f"every row agrees."
+                )
+    return out
+
+
+@lru_cache(maxsize=1)
+def _op_id_physical_op_id() -> Dict[str, str]:
+    """``op_id -> physical op_id`` for every emulated atom in the JSON catalog.
+
+    The bare-op_id twin of ``MmaOp.emulation.physical_op_id``. A caller holding
+    only a logical op_id string (e.g. :meth:`rocke.core.ir.IRBuilder.mma`) needs
+    it to size a fragment the emulated atom borrows rather than owns. Natively
+    encoded rows contribute nothing. Same first-hit and raise-on-drift contract
+    as :func:`_op_id_c_dtype` — an op_id names a specific atom, so the
+    instruction it expands into must be invariant across the arches listing it.
+    Mirrored by ``rocke_arch_mma_op_id_physical_op_id`` in ``query.cpp``.
+    """
+    out: Dict[str, str] = {}
+    for row in _load_specs().values():
+        for o in row["mma"]:
+            emulation = o.get("emulation")
+            if emulation is None:
+                continue
+            op_id, physical = o["op_id"], emulation["physical_op_id"]
+            prev = out.setdefault(op_id, physical)  # first hit wins
+            if prev != physical:
+                raise ValueError(
+                    f"arch SSOT drift in {_DATA_FILE.name}: op_id {op_id!r} "
+                    f"expands into different physical atoms across arches "
+                    f"({prev!r} vs {physical!r}). An op_id names a specific atom, "
+                    f"so its expansion must be invariant across the arches that "
+                    f"list it; fix the catalog so every row agrees."
                 )
     return out
 
