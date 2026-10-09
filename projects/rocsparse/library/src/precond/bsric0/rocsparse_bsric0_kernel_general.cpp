@@ -61,8 +61,8 @@ namespace rocsparse
                 rocsparse::atomic_min(zero_pivot, block_row + idx_base);
 
                 // Last lane in wavefront writes "we are done" flag for its block row
-                __hip_atomic_store(
-                    &block_done[block_row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+                rocsparse::atomic_store(
+                    &block_done[block_row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
             }
 
             return;
@@ -99,7 +99,7 @@ namespace rocsparse
 
                 // Spin loop until dependency has been resolved
 
-                (void)rocsparse::spin_loop<SLEEP>(&block_done[block_col], __HIP_MEMORY_SCOPE_AGENT);
+                rocsparse::spin_loop<SLEEP>(&block_done[block_col], __MEMORY_SCOPE_DEVICE);
                 __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 
                 for(J k = 0; k < block_dim; k++)
@@ -225,12 +225,12 @@ namespace rocsparse
                                             static_cast<T>(rocsparse::sqrt(
                                                 rocsparse::abs(bsr_val[row_diag] - row_sum))),
                                             __ATOMIC_RELEASE,
-                                            __HIP_MEMORY_SCOPE_WAVEFRONT);
+                                            __MEMORY_SCOPE_WVFRNT);
                 }
 
                 // Acquire-load the diagonal entry; this pairs with the release-store above
                 T diag_val = rocsparse::atomic_load(
-                    &bsr_val[row_diag], __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WAVEFRONT);
+                    &bsr_val[row_diag], __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WVFRNT);
 
                 // Row has numerical zero pivot
                 if(diag_val == static_cast<T>(0))
@@ -327,8 +327,8 @@ namespace rocsparse
         if(lid == WFSIZE - 1)
         {
             // Last lane writes "we are done" flag for current block row
-            __hip_atomic_store(
-                &block_done[block_row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(
+                &block_done[block_row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
         }
     }
 

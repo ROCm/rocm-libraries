@@ -80,7 +80,8 @@ BenchmarkProblems:
         - SourceSwap: [True]
         - StoreVectorWidth: [-1]
         # StreamK_B8F8 dominant entry (19547): StreamK + CustomSchedule.
-        - StreamK: [3]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         # BBS entry (1277): GlobalSplitU.
         - GlobalSplitU: [1, 2]

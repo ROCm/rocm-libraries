@@ -21,10 +21,11 @@
 # SOFTWARE.
 #
 ################################################################################
+import re
 from functools import lru_cache
 
-from Tensile.Common.Constants import MAX_FILENAME_LENGTH
-from Tensile.Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
+from ..Common.Constants import MAX_FILENAME_LENGTH
+from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
 
 from .Problem import ProblemType
 
@@ -146,6 +147,11 @@ def getParameterValueAbbreviation(key, value):
     return "_".join(f"{pos:d}{k:d}" for pos,k in value.items())
 
 
+def _nameSafe(value) -> str:
+  """Filename-safe text for a tuning value ('-' -> 'n', '.' -> 'p'; other symbols dropped)."""
+  return re.sub(r"[^A-Za-z0-9]", "", str(value).replace("-", "n").replace(".", "p"))
+
+
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
   ck = state.get("CustomKernel")
@@ -181,6 +187,11 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
   requiredParametersTemp = set(requiredParameters.union(["GlobalSplitU"]))
+  if state.get("TileProcessingStrategy", "None") != "StreamK":
+    requiredParametersTemp.difference_update({"StreamKAtomic", "StreamKFixupTreeReduction", "DebugStreamK"})
+  if state.get("TileProcessingStrategy", "None") == "None":
+    requiredParametersTemp.difference_update({"WorkAssignment", "PersistentXCCMapping", "WorkQueueStealing"})
+
 
   if ignoreInternalArgs:
     if state["GlobalSplitU"] > 0 or state["GlobalSplitU"] == -1:
@@ -218,6 +229,8 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     components.append('CMS')
 
   components.append('SN')
+  if state.get("TileProcessingStrategy") == "DataParallel":
+    components.append(f'PLAV{state.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)}')
 
   # Skip SFA tag if using default wgm algo
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
@@ -234,6 +247,12 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     if key not in state or key == "CustomKernel":
       continue
     components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
+
+  # Tuning-only StinkyTofu overrides change the asm, so tag the name; absent when unused.
+  stinkyTune = state.get("_StinkyTofuParameters")
+  if stinkyTune:
+    components.append("STP")
+    components.extend(f"{k}{_nameSafe(v)}" for k, v in sorted(stinkyTune.items()))
 
   state["GlobalSplitU"] = gsuBackup
   state["ProblemType"]["GroupedGemm"] = ggBackup

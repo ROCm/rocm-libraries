@@ -105,7 +105,7 @@ namespace rocsparse
             // While there are threads in this workgroup that have been unable to
             // get their input, loop and wait for the flag to exist.
             const int local_done
-                = rocsparse::spin_loop<SLEEP>(&done_array[local_col], __HIP_MEMORY_SCOPE_AGENT);
+                = rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
 
             // Local maximum
             local_max = rocsparse::max(local_done, local_max);
@@ -125,7 +125,7 @@ namespace rocsparse
             {
                 // Index into shared memory to query for done flag
                 const int local_done = rocsparse::spin_loop<SLEEP>(
-                    &local_done_array[local_col - first_row], __HIP_MEMORY_SCOPE_WORKGROUP);
+                    &local_done_array[local_col - first_row], __MEMORY_SCOPE_WRKGRP);
                 local_max = rocsparse::max(local_done, local_max);
             }
         }
@@ -138,14 +138,12 @@ namespace rocsparse
         if(lid == WF_SIZE - 1)
         {
             // Write the local "row is done" flag
-            __hip_atomic_store(&local_done_array[wid],
-                               local_max + 1,
-                               __ATOMIC_RELAXED,
-                               __HIP_MEMORY_SCOPE_WORKGROUP);
+            rocsparse::atomic_store(
+                &local_done_array[wid], local_max + 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_WRKGRP);
 
             // Write the "row is done" flag
-            __hip_atomic_store(
-                &done_array[row], local_max + 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(
+                &done_array[row], local_max + 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
             // Obtain maximum nnz
             rocsparse::atomic_max(max_nnz, row_end - row_begin);
@@ -233,7 +231,7 @@ namespace rocsparse
             // While there are threads in this workgroup that have been unable to
             // get their input, loop and wait for the flag to exist.
             const int local_done
-                = rocsparse::spin_loop<SLEEP>(&done_array[local_col], __HIP_MEMORY_SCOPE_AGENT);
+                = rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
             // Local maximum
             local_max = rocsparse::max(local_done, local_max);
         }
@@ -252,7 +250,7 @@ namespace rocsparse
             {
                 // Index into shared memory to query for done flag
                 const int local_done = rocsparse::spin_loop<SLEEP>(
-                    &local_done_array[last_row - local_col], __HIP_MEMORY_SCOPE_WORKGROUP);
+                    &local_done_array[last_row - local_col], __MEMORY_SCOPE_WRKGRP);
                 local_max = rocsparse::max(local_done, local_max);
             }
         }
@@ -265,14 +263,12 @@ namespace rocsparse
         if(lid == WF_SIZE - 1)
         {
             // Write the local "row is done" flag
-            __hip_atomic_store(&local_done_array[wid],
-                               local_max + 1,
-                               __ATOMIC_RELAXED,
-                               __HIP_MEMORY_SCOPE_WORKGROUP);
+            rocsparse::atomic_store(
+                &local_done_array[wid], local_max + 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_WRKGRP);
 
             // Write the "row is done" flag
-            __hip_atomic_store(
-                &done_array[row], local_max + 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(
+                &done_array[row], local_max + 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
             // Obtain maximum nnz
             rocsparse::atomic_max(max_nnz, row_end - row_begin);
@@ -426,7 +422,7 @@ namespace rocsparse
             }
 
             // Spin loop until dependency has been resolved
-            (void)rocsparse::spin_loop<SLEEP>(&done_array[local_col], __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 
             // Local sum computation for each lane
@@ -451,7 +447,7 @@ namespace rocsparse
             rocsparse::nontemporal_store(local_sum, &y[row * y_inc]);
 
             // Mark row as done
-            __hip_atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
         }
     }
 }

@@ -177,7 +177,7 @@ def validateSubtileGRKPartition(state, printRejectionReason):
     return True
   # Lazy import: Components/Subtile pulls the Components package and would
   # deadlock at module-load time if imported from Solution.py's top level.
-  from Tensile.Components.Subtile.Kernel import selectABGeometry, TileInfo
+  from ...Components.Subtile.Kernel import selectABGeometry, TileInfo
   for tc in ("A", "B"):
     tileInfo = TileInfo(selectABGeometry(state, tc), tc, None, state)
     stack = int(tileInfo.subtileShape[0])

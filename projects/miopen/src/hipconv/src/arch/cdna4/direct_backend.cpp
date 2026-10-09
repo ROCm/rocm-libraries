@@ -10,6 +10,7 @@ using hipconv::ConvParams;
 extern const ConvKernelSpan direct_cdna4_kernels;
 extern const ConvKernelSpan direct_l1_cdna4_kernels;
 extern const ConvKernelSpan direct_wgrad_cdna4_kernels;
+extern const ConvKernelSpan patch_embed_cdna4_kernels;
 
 namespace
 {
@@ -19,10 +20,11 @@ bool is_applicable(const ConvParams& par)
     return par.dilation_h == 1 && par.dilation_w == 1;
 }
 
-constexpr std::array<const ConvKernelSpan*, 3> kernel_groups = {
+constexpr std::array<const ConvKernelSpan*, 4> kernel_groups = {
     &direct_l1_cdna4_kernels,
     &direct_cdna4_kernels,
     &direct_wgrad_cdna4_kernels,
+    &patch_embed_cdna4_kernels,
 };
 
 } // namespace

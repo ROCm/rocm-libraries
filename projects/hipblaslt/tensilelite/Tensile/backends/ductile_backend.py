@@ -17,22 +17,24 @@ import os
 import shutil
 from copy import deepcopy
 
-from Tensile.Common import Path, print1, printExit, printWarning
-from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.SolutionStructs.Naming import getKernelFileBase, getSolutionNameMin
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+import rocisa
+
+from ..Common import Path, print1, printExit, printWarning
+from ..Common.GlobalParameters import globalParameters
+from ..SolutionStructs.Naming import getKernelFileBase, getSolutionNameMin
+from ..KernelWriterAssembly import KernelWriterAssembly
 from .base import OptimizationBackend
 
 
-from Tensile.ductile import config as ductile_config
-from Tensile.ductile.core import SearchSpace, Selection, Crossover, Mutation, Mating, Survival
-from Tensile.ductile.algorithm import GeneticAlgorithm
+from ..ductile import config as ductile_config
+from ..ductile.core import SearchSpace, Selection, Crossover, Mutation, Mating, Survival
+from ..ductile.algorithm import GeneticAlgorithm
 
 
 
 def _generate_single_solution_with_groups(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap, silent=False):
     """Generate a single solution from a permutation, handling group_ parameter expansion."""
-    from Tensile.BenchmarkProblems import _build_and_validate_solution
+    from ..BenchmarkProblems import _build_and_validate_solution
 
     solution = {
         "ProblemType": deepcopy(problemType.state),
@@ -51,8 +53,12 @@ def _generate_single_solution_with_groups(perm, problemType, constantParams, ass
     return _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap, silent=silent)
 
 
-def _validate_solution(problemType, constantParams, assembler, debugConfig, isaInfoMap, perm, get_kernel_src=False):
-    """Validate a solution candidate for GA SearchSpace constraint checking."""
+def _validate_solution(problemType, constantParams, assembler, debugConfig, isaInfoMap, perm, get_kernel_src=False, rocIsaData=None):
+    """Validate a solution candidate for GA SearchSpace constraint checking.
+    """
+    if rocIsaData is not None:
+        rocisa.rocIsa.getInstance().setData(rocIsaData)
+
     solution_object = _generate_single_solution_with_groups(
         perm, problemType, constantParams, assembler, debugConfig, isaInfoMap, silent=True
     )
@@ -206,7 +212,11 @@ class DuctileBackend(OptimizationBackend):
         if problem_type is None or assembler is None or debug_config is None or isa_info_map is None:
             raise ValueError("DuctileBackend: Missing required config keys: problemType, assembler, debugConfig, isaInfoMap")
 
-        validate_fn = functools.partial(_validate_solution, problem_type, constant_params, assembler, debug_config, isa_info_map)
+        rocisa_data = rocisa.rocIsa.getInstance().getData()
+        validate_fn = functools.partial(
+            _validate_solution, problem_type, constant_params, assembler, debug_config, isa_info_map,
+            rocIsaData=rocisa_data,
+        )
 
         # Merge once per run from defaults.yaml + overrides.
         merged_config = ductile_config.update(backend_config)

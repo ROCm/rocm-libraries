@@ -1369,6 +1369,13 @@
     'AssertAILessThanEqual',
     'AssertFree0ElementMultiple',
     'AssertFree1ElementMultiple',
+    'AssertSizeEqual',
+    'AssertSizeGreaterThan',
+    'AssertSizeLessThan',
+    'AssertStrideAEqual',
+    'AssertStrideBEqual',
+    'AssertStrideCEqual',
+    'AssertStrideDEqual',
     'AssertSummationElementMultiple',
     'BufferLoad',
     'BufferStore',
@@ -1459,6 +1466,7 @@
     'NumLoadsCoalescedA',
     'NumLoadsCoalescedB',
     'OptNoLoadLoop',
+    'PersistentXCCMapping',
     'PrefetchAcrossPersistent',
     'PrefetchGL2',
     'PrefetchGlobalRead',
@@ -1478,6 +1486,7 @@
     'StaggerU',
     'StaggerUMapping',
     'StaggerUStride',
+    'StinkyTofuParameters',
     'StorePriorityOpt',
     'StoreRemapVectorWidth',
     'StoreSyncOpt',
@@ -1510,6 +1519,7 @@
     'TemporalHintMetadata',
     'TemporalHintWS',
     'ThreadTile',
+    'TileProcessingStrategy',
     'TransposeLDS',
     'TransposeLDSMetadata',
     'UnrollLoopSwapGlobalReadOrder',
@@ -1528,11 +1538,13 @@
     'WaveSeparateGlobalReadB',
     'WaveSplitK',
     'WavefrontSize',
+    'WorkAssignment',
     'WorkGroup',
     'WorkGroupMapping',
     'WorkGroupMappingXCC',
     'WorkGroupMappingXCCGroup',
     'WorkGroupReduction',
+    'WorkQueueStealing',
   ])
 # ---
 # name: test_valid_parameters_structure
@@ -1618,6 +1630,34 @@
       ]),
       'len': 9,
       'type': 'list',
+    }),
+    'AssertSizeEqual': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertSizeGreaterThan': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertSizeLessThan': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertStrideAEqual': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertStrideBEqual': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertStrideCEqual': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertStrideDEqual': dict({
+      'type': 'int',
+      'value': -1,
     }),
     'AssertSummationElementMultiple': dict({
       'head': list([
@@ -2416,6 +2456,15 @@
       'len': 3,
       'type': 'list',
     }),
+    'PersistentXCCMapping': dict({
+      'head': list([
+        0,
+        2,
+        3,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
     'PrefetchAcrossPersistent': dict({
       'head': list([
         0,
@@ -2570,6 +2619,10 @@
       ]),
       'len': 10,
       'type': 'list',
+    }),
+    'StinkyTofuParameters': dict({
+      'type': 'int',
+      'value': -1,
     }),
     'StorePriorityOpt': dict({
       'head': list([
@@ -2858,6 +2911,15 @@
       'len': 5625,
       'type': 'list',
     }),
+    'TileProcessingStrategy': dict({
+      'head': list([
+        'None',
+        'DataParallel',
+        'StreamK',
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'TransposeLDS': dict({
       'head': list([
         -1,
@@ -3013,6 +3075,15 @@
       'len': 3,
       'type': 'list',
     }),
+    'WorkAssignment': dict({
+      'head': list([
+        'StaticGrid',
+        'DynamicWorkQueue',
+        'Hybrid',
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'WorkGroup': dict({
       'head': list([
         list([
@@ -3066,6 +3137,14 @@
         False,
       ]),
       'len': 1,
+      'type': 'list',
+    }),
+    'WorkQueueStealing': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
   })

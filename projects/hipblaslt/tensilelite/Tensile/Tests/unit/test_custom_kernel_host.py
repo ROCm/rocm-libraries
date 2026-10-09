@@ -42,7 +42,8 @@ def _ck_state(**over):
             "workspaceSizePerElemC": 0,
             "workspaceSizePerElemBias": 0,
         },
-        "StreamK": 0,
+        "TileProcessingStrategy": "None",
+        "WorkAssignment": "StaticGrid",
         "StreamKAtomic": 0,
         "GlobalSplitUAlgorithm": "",
         "ProblemType": problem_type,
@@ -114,6 +115,66 @@ def test_assign_custom_kernel_params_default_depthu_is_not_a_tile():
         Solution._assignCustomKernelParameters(state)
 
 
+@pytest.mark.parametrize("grid", [
+    ["TilesX", "TilesYGSU", "Batch"],
+    ["TilesXYBatchGSU", "One", "One"],
+])
+def test_assign_custom_kernel_params_split_k_grid_is_accepted(grid):
+    state = _ck_state(
+        GlobalSplitU=16,
+        GlobalSplitUAlgorithm="MultipleBufferSingleKernel",
+        InternalSupportParams={"SupportUserGSU": True},
+    )
+    state["CustomKernel"]["grid"] = grid
+    Solution._assignCustomKernelParameters(state)
+    assert state["_GlobalAccumulation"] == "MultipleBufferSingleKernel"
+    assert state["InternalSupportParams"]["SupportUserGSU"] is True
+
+
+@pytest.mark.parametrize("over", [
+    {"GlobalSplitU": 16},
+    {"GlobalSplitU": -1},  # lets the runtime pick a split above 1
+    # generateCustomCall judges the grid alone, so a persistent kernel with a
+    # tile-count grid has to be rejected here too rather than at launch.
+    {"GlobalSplitU": 16, "TileProcessingStrategy": "StreamK"},
+])
+def test_assign_custom_kernel_params_split_k_without_gsu_grid_raises(over):
+    # A split-K kernel reduces into D only once every GSU slice has arrived, so a
+    # grid without a GSU term would launch one slice and leave D unwritten.
+    state = _ck_state(GlobalSplitUAlgorithm="MultipleBufferSingleKernel", **over)
+    state["CustomKernel"]["grid"] = ["TilesX", "TilesY", "Batch"]
+    with pytest.raises(RuntimeError, match="launches one GSU slice per tile"):
+        Solution._assignCustomKernelParameters(state)
+
+
+@pytest.mark.parametrize("gsu", [1, 0])  # 0: GSU disabled
+def test_assign_custom_kernel_params_grid_without_gsu_term_rejects_user_gsu(gsu):
+    # Such a grid launches one GSU slice per tile, so a runtime GSU override has to
+    # be turned away during solution selection rather than fail at launch.
+    state = _ck_state(GlobalSplitU=gsu, InternalSupportParams={"SupportUserGSU": True})
+    state["CustomKernel"]["grid"] = ["TilesX", "TilesY", "Batch"]
+    Solution._assignCustomKernelParameters(state)
+    assert state["InternalSupportParams"]["SupportUserGSU"] is False
+
+
+@pytest.mark.parametrize("strategy,grid", [
+    ("StreamK", ["StreamKWithBatch", "One", "One"]),
+    ("DataParallel", ["PersistentGrid", "One", "One"]),
+    ("None", ["PersistentNoBatch", "One", "One"]),
+])
+def test_assign_custom_kernel_params_persistent_keeps_user_gsu(strategy, grid):
+    # Persistent kernels distribute work through their own grid, so neither the
+    # GSU check nor the override flag applies to them.
+    state = _ck_state(
+        GlobalSplitU=16,
+        TileProcessingStrategy=strategy,
+        InternalSupportParams={"SupportUserGSU": True},
+    )
+    state["CustomKernel"]["grid"] = grid
+    Solution._assignCustomKernelParameters(state)
+    assert state["InternalSupportParams"]["SupportUserGSU"] is True
+
+
 def test_assign_custom_kernel_params_enable_mi_sets_wave_params():
     state = _ck_state()
     Solution._assignCustomKernelParameters(state)
@@ -146,7 +207,7 @@ def test_assign_custom_kernel_params_direct_to_lds(dtl, expect_a, expect_b):
 
 
 def test_assign_custom_kernel_params_streamk_partials_accumulation():
-    state = _ck_state(StreamK=2, StreamKAtomic=0)
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
     Solution._assignCustomKernelParameters(state)
     assert state["_GlobalAccumulation"] == "PartialsBuffer"
 
@@ -154,7 +215,7 @@ def test_assign_custom_kernel_params_streamk_partials_accumulation():
 def test_assign_custom_kernel_params_derives_streamk_workspace():
     # Non-atomic Stream-K reduces partial tiles through the workspace, so a
     # block that declares none must be sized from the compute type.
-    state = _ck_state(StreamK=2, StreamKAtomic=0)
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
     Solution._assignCustomKernelParameters(state)
     assert state["CustomKernel"]["workspaceType"] == "StreamKWithReduction"
     assert state["CustomKernel"]["workspaceSizePerElemC"] == 4
@@ -163,7 +224,7 @@ def test_assign_custom_kernel_params_derives_streamk_workspace():
 
 def test_assign_custom_kernel_params_derives_streamk_workspace_from_compute_type():
     state = _ck_state(
-        StreamK=2,
+        TileProcessingStrategy="StreamK",
         StreamKAtomic=0,
         ProblemType={"ComputeDataType": DataType("d"), "DestDataType": DataType("d")},
     )
@@ -172,7 +233,7 @@ def test_assign_custom_kernel_params_derives_streamk_workspace_from_compute_type
 
 
 def test_assign_custom_kernel_params_keeps_declared_workspace():
-    state = _ck_state(StreamK=2, StreamKAtomic=0)
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
     state["CustomKernel"]["workspaceType"] = "StreamK"
     state["CustomKernel"]["workspaceSizePerElemC"] = 2
     Solution._assignCustomKernelParameters(state)
@@ -182,7 +243,7 @@ def test_assign_custom_kernel_params_keeps_declared_workspace():
 
 @pytest.mark.parametrize("over", [
     {},                                # not Stream-K at all
-    {"StreamK": 2, "StreamKAtomic": 1},  # atomic Stream-K needs no reduction buffer
+    {"TileProcessingStrategy": "StreamK", "StreamKAtomic": 1},  # atomic needs no reduction buffer
 ])
 def test_assign_custom_kernel_params_no_workspace_without_partials(over):
     state = _ck_state(**over)

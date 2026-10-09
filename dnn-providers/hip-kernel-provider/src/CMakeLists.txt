@@ -16,6 +16,17 @@ add_library(
 
 add_subdirectory(engines)
 
+# --- kpack C runtime library (needed by ASM SDPA and/or kernel ingestor) ---
+# find_package lives here (not in asm_sdpa_engine/) so the imported target is
+# visible to _impl, _private, and the shared hip_kernel_provider.
+set(KPACK_NEEDED FALSE)
+if(ENABLE_ASM_SDPA_ENGINE OR HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(KPACK_NEEDED TRUE)
+    if(NOT TARGET rocm::rocm_kpack)
+        find_package(rocm-kpack CONFIG REQUIRED)
+    endif()
+endif()
+
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../include
@@ -25,6 +36,12 @@ target_include_directories(hip_kernel_provider_impl PUBLIC
 
 dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_impl ${CMAKE_CURRENT_LIST_DIR}/..)
 target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
+if(KPACK_NEEDED)
+    target_link_libraries(hip_kernel_provider_impl PRIVATE rocm::rocm_kpack)
+    if(NOT WIN32)
+        target_link_libraries(hip_kernel_provider_impl PRIVATE dl)
+    endif()
+endif()
 
 target_compile_options(hip_kernel_provider_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(hip_kernel_provider_impl PROPERTIES
@@ -45,6 +62,12 @@ target_include_directories(hip_kernel_provider_private PUBLIC
 target_link_libraries(hip_kernel_provider_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip_kernel_provider_impl)
 if(ENABLE_ASM_SDPA_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
+endif()
+if(KPACK_NEEDED)
+    target_link_libraries(hip_kernel_provider_private PUBLIC rocm::rocm_kpack)
+    if(NOT WIN32)
+        target_link_libraries(hip_kernel_provider_private PUBLIC dl)
+    endif()
 endif()
 
 if(ENABLE_HIP_MLOPS_ENGINE)
@@ -99,12 +122,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         compilation/KpackKernelLoader.cpp
         compilation/KpackProgram.cpp
     )
-
-    # The object library gets rocm::rocm_kpack for its include directories; the two
-    # targets that actually link have to name it themselves, because they consume the
-    # objects via $<TARGET_OBJECTS:...>, which carries no link interface.
-    target_link_libraries(hip_kernel_provider_impl PRIVATE rocm::rocm_kpack)
-    target_link_libraries(hip_kernel_provider_private PUBLIC rocm::rocm_kpack)
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
@@ -112,11 +129,13 @@ add_library(hip_kernel_provider SHARED
     $<TARGET_OBJECTS:hip_kernel_provider_impl>
 )
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
-
-if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # See the note above hip_kernel_provider_impl: $<TARGET_OBJECTS:...> carries no link
-    # interface, so the plugin has to name the kpack reader itself.
+if(KPACK_NEEDED)
+    # $<TARGET_OBJECTS:...> carries no link interface, so the plugin has to name
+    # the kpack reader itself (same for _private above).
     target_link_libraries(hip_kernel_provider PRIVATE rocm::rocm_kpack)
+    if(NOT WIN32)
+        target_link_libraries(hip_kernel_provider PRIVATE dl)
+    endif()
 endif()
 
 if(NOT WIN32)
@@ -191,18 +210,19 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${hip_kernel_provider_tests_TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
         # hip_kernel_provider_integration_tests_TEST_ENVIRONMENT is TEST_ENVIRONMENT
-        # merged with any per-target ENVIRONMENT passed to add_integration_test_target()
-        # (e.g. HIPDNN_AITER_ASM_DIR for the SDPA engine), published by
-        # dnn-providers/cmake/Tests.cmake since the raw test name below is never
-        # itself registered as a CTest test in this YAML-categorized mode.
+        # merged with any per-target ENVIRONMENT passed to add_integration_test_target(),
+        # published by dnn-providers/cmake/Tests.cmake since the raw test name below is
+        # never itself registered as a CTest test in this YAML-categorized mode.
         apply_test_category_labels(
             hip_kernel_provider_integration_tests
             "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${hip_kernel_provider_integration_tests_TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
     endif()
 
@@ -213,6 +233,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             TEST_NAME_PREFIX ${PROJECT_NAME}-external-integration
             ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
     endif()
 
@@ -276,16 +297,17 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     endif()
 
     set(_asm_sdpa_external_category_args "")
-    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA)
         list(APPEND _asm_sdpa_external_category_args
             TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
             INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             TEST_NAME_PREFIX ${PROJECT_NAME}-asm-sdpa-external-integration
             ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
     endif()
 
-    if(TARGET hipdnn_integration_tests)
+    if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA AND TARGET hipdnn_integration_tests)
         add_external_integration_test_target(
             TARGET_NAME    ${PROJECT_NAME}-asm-sdpa-external-integration-check
             PLUGIN_TARGET  hip_kernel_provider
@@ -306,6 +328,10 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         # test names). ASM_SDPA's own category suites are labeled via
         # TEST_CATEGORIES_YAML/INSTALL_TEST_FILE in
         # _asm_sdpa_external_category_args above.
+    elseif(NOT ENABLE_ASM_SDPA_ENGINE)
+        message(STATUS "ASM SDPA engine disabled - skipping asm-sdpa-external-integration-check")
+    elseif(NOT HIPDNN_ENABLE_SDPA)
+        message(STATUS "hipDNN built with HIPDNN_ENABLE_SDPA=OFF - skipping asm-sdpa-external-integration-check")
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping asm-sdpa-external-integration-check")
     endif()
@@ -342,7 +368,6 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
     endif()
     if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
-       AND HIPKERNELPROVIDER_ENABLE_ROCKE
        AND _hkp_gfx950_attention_dense
        AND TARGET hipdnn_integration_tests)
         # Route the installed entry and its TOML into the gfx950 shard, so pruning to
@@ -360,7 +385,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx950)
 
-        # GTEST_FILTER and ENVIRONMENT belong here rather than in
+        # GTEST_FILTER, ENVIRONMENT and ENVIRONMENT_MODIFICATION belong here rather than in
         # _gfx950_attention_dense_category_args: that list is populated only under YAML
         # categorization, so anything folded into it is absent from a legacy-label build,
         # which then enumerates the whole bundle tree pinned to this engine and runs
@@ -375,6 +400,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionDense.toml
             GTEST_FILTER   "quick_SdpaFwd_bshd_*:standard_SdpaFwd_bshd_*"
             ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
             ${_gfx950_attention_dense_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-gfx950-attention-dense-external-integration-check target")

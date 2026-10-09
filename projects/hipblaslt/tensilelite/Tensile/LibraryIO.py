@@ -23,21 +23,22 @@
 ################################################################################
 
 from .CustomKernels import getCustomKernelConfig
+from .ExecutionPolicy import normalize_execution_policy_with_defaults
 from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
 from .CustomYamlLoader import load_yaml_stream
-from Tensile import __version__
-from Tensile.Common import printExit, printWarning, print2, \
+from . import __version__
+from .Common import printExit, printWarning, print2, \
                            versionIsCompatible, IsaInfo
-from Tensile.Common.TimingInstrumentation import timing_context
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.SolutionStructs import Solution, ProblemSizes
-from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
-from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
+from .Common.TimingInstrumentation import timing_context
+from .Common.Architectures import gfxToIsa
+from .SolutionStructs import Solution, ProblemSizes
+from .SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
+from .SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
 from typing import IO, NamedTuple, List, Dict, Optional, Any
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, GateTypeArgs
+from .Common.GlobalParameters import defaultSolution
+from .SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, GateTypeArgs
 from copy import deepcopy
 import io
 import os
@@ -114,7 +115,6 @@ try:
     import msgpack
 except ImportError:
     print("Message pack python library not detected. Must use YAML backend instead.")
-
 
 
 ###################
@@ -549,7 +549,8 @@ def parseLibraryLogicFile(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool
+        lazyLibraryLoading: bool,
+        archRenames: Optional[Dict[str, str]] = None,
     ):
     """Wrapper function to read and parse a library logic file."""
     return parseLibraryLogicData(
@@ -560,7 +561,8 @@ def parseLibraryLogicFile(
                printSolutionRejectionReason,
                printIndexAssignmentInfo,
                isaInfoMap,
-               lazyLibraryLoading
+               lazyLibraryLoading,
+               archRenames,
            )
 
 
@@ -604,9 +606,11 @@ def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
 def reorderSolutionsParams(data: Dict[str, Any]) -> None:
     """Reorder solution dict keys after list-to-dict conversion.
 
-    Moves ``SolutionIndex``, ``KernelNameMin``, and ``SolutionNameMin`` to the
-    top of each entry in ``data["Solutions"]``. Used when migrating legacy
-    list-format logic to dict format and after :func:`reorderSolutionDictForDictMerge`.
+    Moves ``SolutionIndex``, ``SolutionUID``, ``KernelNameMin``, and
+    ``SolutionNameMin`` to the top of each entry in ``data["Solutions"]``.
+    ``SolutionUID`` is dropped from that lead list when the solution has no
+    such field. Used when migrating legacy list-format logic to dict format
+    and after :func:`reorderSolutionDictForDictMerge`.
 
     Args:
         data: Dict-format library logic data (mutated in place). Must contain
@@ -618,16 +622,19 @@ def reorderSolutionsParams(data: Dict[str, Any]) -> None:
     Raises:
         None.
     """
-    keys = ["SolutionIndex", "KernelNameMin", "SolutionNameMin"]
     sols = data.get("Solutions")
     if not sols:
         return
     for solIdx in range(len(sols)):
+        sol = sols[solIdx]
+        keys = ["SolutionIndex", "SolutionUID", "KernelNameMin", "SolutionNameMin"]
+        if "SolutionUID" not in sol:
+            keys.remove("SolutionUID")
         vals: Dict[str, Any] = {}
         for key in keys:
-            if key in sols[solIdx]:
-                vals[key] = sols[solIdx].pop(key)
-        sols[solIdx] = {**vals, **sols[solIdx]}
+            if key in sol:
+                vals[key] = sol.pop(key)
+        sols[solIdx] = {**vals, **sol}
 
 
 def reorderSolutionDictForDictMerge(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -672,9 +679,14 @@ def parseLibraryLogicData(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool
+        lazyLibraryLoading: bool,
+        archRenames: Optional[Dict[str, str]] = None,
     ):
-    """Parses the data of a library logic file."""
+    """Parses the data of a library logic file.
+
+    ``archRenames`` maps a declared ArchitectureName to the name the library is
+    keyed and its files are named by, for a build alias (see ARCH_BUILD_ALIASES).
+    """
     # Reset the type mismatch collector at the start to capture all type
     # mismatches from both ProblemType and Solution constructors
     resetTypeMismatchCollector()
@@ -684,6 +696,8 @@ def parseLibraryLogicData(
     elif isinstance(data, dict):
         prepareLibraryLogicDict(data)
 
+    if archRenames:
+        data["ArchitectureName"] = archRenames.get(data["ArchitectureName"], data["ArchitectureName"])
     if "CUCount" not in data:
         data["CUCount"] = None
     if 'MacDataTypeA' not in data["ProblemType"]: #it will either be set as d['MacDataType'] or a specified input
@@ -722,10 +736,8 @@ def parseLibraryLogicData(
 
     # unpack solution
     def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Optional[Solution]:
-        # Fill missing keys: library DefaultSolution, then GlobalParameters defaultSolution.
-        for key, val in libDefaults.items():
-            if key not in solutionState:
-                solutionState[key] = val
+        # Normalize before global defaults can look like explicit selectors.
+        solutionState = normalize_execution_policy_with_defaults(solutionState, libDefaults)
         for key, val in defaultSolution.items():
             if key not in solutionState:
                 solutionState[key] = val
@@ -759,8 +771,7 @@ def parseLibraryLogicData(
                 printWarning(f"Skipping custom kernel '{customKernelName}': "
                              f"missing or invalid custom.config ({e})")
                 return None
-            for key, value in customConfig.items():
-                solutionState[key] = value
+            solutionState = normalize_execution_policy_with_defaults(customConfig, solutionState)
 
             if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:
                 raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")
@@ -971,7 +982,9 @@ def createLibraryLogic(
 
     Emits the root mapping written for YAML (``ProblemType``, ``Solutions``,
     ``ExactLogic``, etc.) including sorted ``ProblemType`` keys and merge-aligned
-    solution key layout. ``DefaultSolution`` is a sorted snapshot of
+    solution key layout (``SolutionIndex``, ``SolutionUID``,
+    ``KernelNameMin``, ``SolutionNameMin``, then remaining keys).
+    ``DefaultSolution`` is a sorted snapshot of
     ``defaultSolution`` at write time; any solution field equal to that snapshot
     is omitted from per-solution dicts so defaults live only under
     ``DefaultSolution``.
