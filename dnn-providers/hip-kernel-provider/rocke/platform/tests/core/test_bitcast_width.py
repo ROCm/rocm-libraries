@@ -3,15 +3,15 @@
 """A bitcast keeps every bit, so ``bitcast`` and ``vec_bitcast`` refuse a width change.
 
 ``type_bits`` is the one place that answers how many bits a value of an IR type
-occupies. Equal-width casts lower to one LLVM ``bitcast`` exactly as before; a cast
-that changes the width fails when the kernel is built instead of inside clang.
+occupies; the scalar widths are pinned in test_dtypes.py. Equal-width casts lower to
+one LLVM ``bitcast``; a cast that changes the width fails when the kernel is built
+instead of inside clang.
 """
 
 import re
 
 import pytest
 from rocke.core import ir
-from rocke.core.dtypes import dtype_info
 from rocke.core.ir import (
     F16,
     F32,
@@ -29,16 +29,6 @@ from rocke.tests.ir_validity import assert_target_accepts
 
 def _lower(b: IRBuilder) -> str:
     return _lower_kernel_to_llvm_python(b.kernel, arch="gfx90a")
-
-
-def _scalar_types() -> list:
-    """Every scalar IR type constant the module defines, so later types are covered."""
-    return [t for t in vars(ir).values() if type(t) is ir.Type]
-
-
-@pytest.mark.parametrize("t", _scalar_types(), ids=lambda t: t.name)
-def test_a_scalar_occupies_its_format_width(t):
-    assert type_bits(t) == dtype_info(t.name).encoded_bits
 
 
 def test_a_vector_occupies_count_times_its_element_width():

@@ -10,7 +10,8 @@ import pytest
 from rocke.core.dtypes import normalize_dtype
 from rocke.core.dtypes import dtype_info
 from rocke.core.arch.target import MmaScaleDType
-from rocke.core.ir import FP8E4M3, I8, IRBuilder, dtype_to_ir_type
+from rocke.core import ir
+from rocke.core.ir import FP8E4M3, I8, IRBuilder, Type, dtype_to_ir_type, type_bits
 from rocke.helpers.mma_io import storage_ir_type
 from rocke.core.ir_serialize import parse, serialize
 from rocke.helpers.quant import (
@@ -47,6 +48,49 @@ def test_logical_dtype_and_serialization(dtype, bits):
     b = IRBuilder("dtype_transport")
     b.param("code", logical)
     assert serialize(parse(serialize(b.kernel))) == serialize(b.kernel)
+
+
+# The width of every IR scalar type, written out by hand so that the format table
+# in core/dtypes.py and type_bits are checked against an independent source.
+# Adding an IR scalar type means adding its width here; see section 5.4,
+# "Adding a dtype", in dsl_docs/development/extending.md.
+_IR_SCALAR_BITS = {
+    "i1": 1,
+    "i4": 4,
+    "u4": 4,
+    "i8": 8,
+    "u8": 8,
+    "i16": 16,
+    "i32": 32,
+    "i64": 64,
+    "f16": 16,
+    "bf16": 16,
+    "f32": 32,
+    "tf32": 32,
+    "f64": 64,
+    "fp8e4m3": 8,
+    "bf8e5m2": 8,
+    "fp6e2m3": 6,
+    "fp6e3m2": 6,
+    "fp4e2m1": 4,
+    "e8m0": 8,
+    "e5m3": 8,
+}
+
+
+def test_every_ir_scalar_type_has_a_reference_width():
+    defined = {t.name for t in vars(ir).values() if type(t) is Type}
+    assert not defined - set(_IR_SCALAR_BITS), (
+        f"add the width of {sorted(defined - set(_IR_SCALAR_BITS))} to "
+        "_IR_SCALAR_BITS"
+    )
+    assert not set(_IR_SCALAR_BITS) - defined
+
+
+@pytest.mark.parametrize(("name", "bits"), sorted(_IR_SCALAR_BITS.items()))
+def test_an_ir_scalar_type_has_its_reference_width(name, bits):
+    assert dtype_info(name).encoded_bits == bits
+    assert type_bits(Type(name)) == bits
 
 
 @pytest.mark.parametrize("dtype", ["fp4", "fp6", "bf6"])
