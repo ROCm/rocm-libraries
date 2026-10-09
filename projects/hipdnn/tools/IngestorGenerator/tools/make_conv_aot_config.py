@@ -17,12 +17,14 @@ reason and the tool exits non-zero, unless ``--skip-unsupported`` is given. Entr
 are de-duplicated by ``instance_id`` (``KernelIdentity.stable_hash()``), which is the
 key that ties a packaged kernel back to the identity it was built from.
 
-The shipped catalog is ``configs/gfx950_conv_fwd_aot.instances.json``, written by
-``tools/enumerate_conv_aot_instances.py``. ``--engine-name`` emits the same instances
-as another engine over the shipped engine's native code: the test-only seed is
+The shipped catalog is rocKE's full forward sweep, one list per dtype
+(``configs/gfx950_conv_fwd_aot_<dtype>.instances.json``), written by
+``tools/enumerate_conv_aot_instances.py``; ``--instances`` takes them all as one
+catalog. ``--engine-name`` emits the same instances as another engine over the
+shipped engine's native code: the test-only seed is
 ``configs/gfx950_conv_fwd_aot_seed.instances.json`` as
 ``hipkernel:Gfx950ConvFwdAotSeed``. The config is an intermediate, regenerated from
-the list on every run; only the seed's small one is kept, as a worked example.
+the lists on every run; only the seed's small one is kept, as a worked example.
 
 Then run ``generate.py --config <output>`` and ``--stabilize-ids`` on the emitted
 bundle: the generator mints random kernel UUIDs, and a recorded autotune winner is
@@ -30,12 +32,15 @@ keyed by kernel UUID, so this tool re-derives each kernel's UUID from its
 ``instance_id`` (and engine) to keep it stable across regenerations::
 
     python tools/make_conv_aot_config.py --rocke-root "$ROCKE" \\
-        --instances configs/gfx950_conv_fwd_aot.instances.json --output "$WORK"/aot.yaml
+        --instances configs/gfx950_conv_fwd_aot_{fp16,bf16}.instances.json \\
+        --output "$WORK"/aot.yaml
     python generate.py --config "$WORK"/aot.yaml --output-dir "$GENERATED" --force
     python tools/make_conv_aot_config.py --stabilize-ids "$GENERATED"/<...>/*.kdp.json
 
-The config holds one pack, so one KDP, per dtype: a shard of the one catalog, which
-keeps every emitted file well below the size a source host accepts.
+The config splits the catalog into packs, so KDPs, by ``--sharding``
+(:data:`SHARDINGS`): by default one per dtype, pipeline and K loop, plus one per
+dtype for the direct instances. Each is a shard of the one catalog, which keeps
+every emitted file well below the size a source host accepts.
 """
 
 from __future__ import annotations
@@ -43,6 +48,8 @@ from __future__ import annotations
 import argparse
 import collections
 import json
+import multiprocessing
+import os
 import re
 import sys
 import uuid
@@ -172,6 +179,20 @@ def instance_spec(identity_dict: dict):
     if identity.direction == "direct_fwd":
         return _direct_instance_spec(identity)
     return _implicit_instance_spec(identity)
+
+
+def instance_specs(identities: list, jobs: int = 1) -> list:
+    """:func:`instance_spec` of each identity, in order, over ``jobs`` forked worker
+    processes (serially where ``fork`` is not available)."""
+    if (
+        jobs <= 1
+        or len(identities) < 1000
+        or "fork" not in multiprocessing.get_all_start_methods()
+    ):
+        return [instance_spec(identity) for identity in identities]
+    chunk = max(1, len(identities) // (jobs * 8))
+    with multiprocessing.get_context("fork").Pool(jobs) as pool:
+        return pool.map(instance_spec, identities, chunksize=chunk)
 
 
 def _carried_values(identity) -> dict:
@@ -313,8 +334,31 @@ def engine_slug(engine_name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
 
 
+#: How :func:`build_config` splits a catalog into packs, one KDP each.
+#: ``dtype``: one pack per dtype. ``k-loop``: one pack per dtype, implicit-GEMM
+#: pipeline and K loop (``plain``, ``unroll`` or ``async``), and one per dtype for
+#: the direct instances, which keeps every KDP of rocKE's full sweep well below
+#: the size a source host accepts.
+SHARDINGS = ("dtype", "k-loop")
+
+
+def shard_name(spec, sharding: str = "dtype") -> str:
+    """The pack ``spec`` belongs to under ``sharding`` (see :data:`SHARDINGS`)."""
+    if sharding == "dtype":
+        return spec.dtype
+    if sharding != "k-loop":
+        raise ValueError(f"unknown sharding {sharding!r}; expected one of {SHARDINGS}")
+    if spec.is_direct:
+        return f"{spec.dtype}_direct"
+    k_loop = "async" if spec.async_dma else ("unroll" if spec.unroll_k else "plain")
+    return f"{spec.dtype}_{spec.pipeline}_{k_loop}"
+
+
 def build_config(
-    specs: list, engine_name: str = PRODUCT_ENGINE, authored_subpath: str = ""
+    specs: list,
+    engine_name: str = PRODUCT_ENGINE,
+    authored_subpath: str = "",
+    sharding: str = "dtype",
 ) -> dict:
     """The generator config for ``specs`` (already validated, de-duplicated).
 
@@ -323,12 +367,12 @@ def build_config(
     (``native_symbols_from``). ``authored_subpath`` defaults to
     ``rocKE/<engine slug>``.
 
-    One pack per dtype, each its own KDP, so no file has to hold the whole catalog.
-    The packs declare no discriminator: they are shards of one catalog, and the
-    engine's graph_match and the shared kernel matcher admit every one of them.
-    Within a pack, implicit-GEMM instances keep their own variant and leave the
-    direct fields to their builder_default; direct instances are a second variant
-    stating them.
+    The catalog is split into packs by ``sharding`` (:func:`shard_name`), each
+    its own KDP, so no file has to hold the whole catalog. The packs declare no
+    discriminator: they are shards of one catalog, and the engine's graph_match
+    and the shared kernel matcher admit every one of them. Within a pack,
+    implicit-GEMM instances keep their own variant and leave the direct fields to
+    their builder_default; direct instances are a second variant stating them.
     """
     kmd = [
         {"name": name, "type": "int" if name in _INT_FIELDS else "string"}
@@ -343,19 +387,22 @@ def build_config(
         for name, default in DIRECT_FIELDS.items()
     ]
     metadata = list(DIRECT_SPEC_ORDER)
+    shards = collections.defaultdict(list)
+    for spec in specs:
+        shards[shard_name(spec, sharding)].append(spec)
     packs = []
-    for dtype in sorted({s.dtype for s in specs}):
+    for shard in sorted(shards):
         variants = []
         for name, order, family in (
             ("gfx950_conv_fwd_aot_{dtype}_{instance_id}", SPEC_ORDER, False),
             ("gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}", DIRECT_SPEC_ORDER, True),
         ):
-            members = [s for s in specs if s.dtype == dtype and s.is_direct == family]
+            members = [s for s in shards[shard] if s.is_direct == family]
             if members:
                 variants.append(_variant(name, order, members))
         packs.append(
             {
-                "name": dtype,
+                "name": shard,
                 "arch": ["gfx950"],
                 "kernel_defaults": {
                     "kind": "rocke",
@@ -487,7 +534,10 @@ def main(argv=None) -> int:
         "--rocke-root", type=Path, help="rocKE tree (platform/, library/)."
     )
     parser.add_argument(
-        "--instances", type=Path, help="JSON list of KernelIdentity dicts."
+        "--instances",
+        type=Path,
+        nargs="+",
+        help="JSON lists of KernelIdentity dicts, read as one catalog.",
     )
     parser.add_argument("--output", type=Path, help="Generator config to write.")
     parser.add_argument(
@@ -508,6 +558,19 @@ def main(argv=None) -> int:
         help="The bundle's authored subpath (default: rocKE/<engine slug>).",
     )
     parser.add_argument(
+        "--jobs",
+        type=int,
+        default=min(32, os.cpu_count() or 1),
+        help="Worker processes that convert the identities (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--sharding",
+        choices=SHARDINGS,
+        default="k-loop",
+        help="How the catalog is split into packs, one KDP each (default: "
+        "%(default)s; the test-only seed uses dtype).",
+    )
+    parser.add_argument(
         "--stabilize-ids",
         type=Path,
         nargs="+",
@@ -525,22 +588,29 @@ def main(argv=None) -> int:
         parser.error("--rocke-root, --instances and --output are required")
     _bind_rocke(args.rocke_root)
 
-    entries = json.loads(args.instances.read_text())
-    if not isinstance(entries, list):
-        parser.error("--instances must hold a JSON list")
+    entries = []
+    for path in args.instances:
+        listed = json.loads(path.read_text())
+        if not isinstance(listed, list):
+            parser.error(f"--instances {path} must hold a JSON list")
+        entries += listed
     specs, seen, rejected = [], set(), []
+    identities = {}
     for index, entry in enumerate(entries):
         identity = entry.get("identity", entry) if isinstance(entry, dict) else None
-        if not isinstance(identity, dict):
+        if isinstance(identity, dict):
+            identities[index] = identity
+        else:
             rejected.append((index, "entry is not an identity dict"))
-            continue
-        spec, reason = instance_spec(identity)
+    converted = instance_specs(list(identities.values()), args.jobs)
+    for index, (spec, reason) in zip(identities, converted):
         if spec is None:
             rejected.append((index, reason))
         elif spec.instance_id not in seen:
             seen.add(spec.instance_id)
             specs.append(spec)
     specs.sort(key=lambda s: (s.dtype, s.instance_id))
+    rejected.sort()
     for index, reason in rejected:
         print(f"unsupported instance [{index}]: {reason}", file=sys.stderr)
     if rejected and not args.skip_unsupported:
@@ -551,11 +621,12 @@ def main(argv=None) -> int:
     if not specs:
         print("no supported instances; nothing written", file=sys.stderr)
         return 1
+    sources = ", ".join(path.name for path in args.instances)
     header = (
-        "# Generated by tools/make_conv_aot_config.py from "
-        f"{args.instances.name}; do not edit by hand.\n"
+        f"# Generated by tools/make_conv_aot_config.py from {sources}; "
+        "do not edit by hand.\n"
     )
-    config = build_config(specs, args.engine_name, args.authored_subpath)
+    config = build_config(specs, args.engine_name, args.authored_subpath, args.sharding)
     args.output.write_text(header + dump_config(config))
     print(
         f"{len(specs)} instance(s) written to {args.output} "

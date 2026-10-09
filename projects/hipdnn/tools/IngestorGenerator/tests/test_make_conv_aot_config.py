@@ -6,6 +6,7 @@
 import copy
 import dataclasses
 import json
+import os
 import re
 import sys
 import uuid
@@ -40,15 +41,22 @@ _SEED_KDP = _SEED_DIR / "gfx950_conv_fwd_aot_seed_fp16.kdp.json"
 #: GitHub warns about any file above 50 MB; every emitted file stays below it.
 _FILE_SIZE_LIMIT = 50 * 1000 * 1000
 
-#: Each bundle the tool emits: (engine, its descriptor folder, its instance list).
+#: Each bundle the tool emits: (engine, its descriptor folder, its instance lists,
+#: its sharding).
 _BUNDLES = {
     "product": (
         tool.PRODUCT_ENGINE,
         _SHIPPED_DIR,
-        _CONFIGS / "gfx950_conv_fwd_aot.instances.json",
+        [
+            _CONFIGS / f"gfx950_conv_fwd_aot_{dtype}.instances.json"
+            for dtype in ("bf16", "fp16")
+        ],
+        "k-loop",
     ),
-    "seed": (_SEED_ENGINE, _SEED_DIR, _INSTANCES),
+    "seed": (_SEED_ENGINE, _SEED_DIR, [_INSTANCES], "dtype"),
 }
+#: Worker processes that convert a catalog.
+_JOBS = min(32, os.cpu_count() or 1)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -63,11 +71,14 @@ def _rocke_on_path():
 
 def _specs(identities):
     specs = []
-    for identity in identities:
-        spec, reason = tool.instance_spec(identity)
+    for spec, reason in tool.instance_specs(identities, _JOBS):
         assert spec is not None, reason
         specs.append(spec)
     return sorted(specs, key=lambda s: (s.dtype, s.instance_id))
+
+
+def _listed(paths):
+    return [identity for path in paths for identity in json.loads(path.read_text())]
 
 
 @pytest.fixture(scope="module")
@@ -80,11 +91,17 @@ def seed_specs(seed_identities):
     return _specs(seed_identities)
 
 
+@pytest.fixture(scope="module")
+def catalogs():
+    """The specs of the seed's and the product's committed instance lists."""
+    return {name: _specs(_listed(_BUNDLES[name][2])) for name in sorted(_BUNDLES)}
+
+
 @pytest.fixture(scope="module", params=sorted(_BUNDLES))
-def bundle(request):
-    """``(engine, descriptor folder, specs)`` of each emitted bundle."""
-    engine, folder, instances = _BUNDLES[request.param]
-    return engine, folder, _specs(json.loads(instances.read_text()))
+def bundle(request, catalogs):
+    """``(engine, descriptor folder, specs, sharding)`` of each emitted bundle."""
+    engine, folder, _, sharding = _BUNDLES[request.param]
+    return engine, folder, catalogs[request.param], sharding
 
 
 def test_seed_config_is_what_the_tool_generates(seed_specs):
@@ -94,19 +111,19 @@ def test_seed_config_is_what_the_tool_generates(seed_specs):
 
 
 def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
-    engine, folder, specs = bundle
+    engine, folder, specs, sharding = bundle
     slug = tool.engine_slug(engine)
     shipped = {}
     for kdp in sorted(folder.glob("*.kdp.json")):
         document = json.loads(kdp.read_text())
-        dtype = kdp.name[: -len(".kdp.json")].rsplit("_", 1)[1]
-        assert document["name"] == f"hipkernel:{slug}_{dtype}"
+        shard = kdp.name[: -len(".kdp.json")][len(slug) + 1 :]
+        assert document["name"] == f"hipkernel:{slug}_{shard}"
         for kernel in document["kernelDescriptors"]:
-            assert kernel["metadata"]["dtype"] == dtype
-            shipped[kernel["metadata"]["instance_id"]] = kernel
+            shipped[kernel["metadata"]["instance_id"]] = (shard, kernel)
     assert sorted(shipped) == sorted(s.instance_id for s in specs)
     for spec in specs:
-        kernel = shipped[spec.instance_id]
+        shard, kernel = shipped[spec.instance_id]
+        assert shard == tool.shard_name(spec, sharding)
         expected = {name: getattr(spec, name) for name in tool.spec_order(spec)}
         assert kernel["kernel_source"]["spec"] == expected
         assert kernel["metadata"] == expected
@@ -115,12 +132,13 @@ def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
 
 
 def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
-    engine, folder, _ = bundle
+    engine, folder, specs, sharding = bundle
     slug = tool.engine_slug(engine)
     names = sorted(path.name for path in folder.iterdir())
+    shards = {tool.shard_name(spec, sharding) for spec in specs}
     assert names == sorted(
         [f"{slug}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
-        + [f"{slug}_{dtype}.kdp.json" for dtype in ("bf16", "fp16")]
+        + [f"{slug}_{shard}.kdp.json" for shard in shards]
         + ["kernel_dtype_matches_graph.umd.json"]
     )
     matcher = json.loads((folder / "kernel_dtype_matches_graph.umd.json").read_text())
@@ -131,8 +149,17 @@ def test_shipped_bundle_is_sharded_below_the_hosting_size_limit(bundle):
         assert json.loads(kdp.read_text())["matchers"] == [matcher["id"]]
 
 
+def test_committed_instance_lists_and_census_are_below_the_hosting_size_limit():
+    census = (
+        _REPO / "dnn-providers/hip-kernel-provider/src/tests/engines"
+        "/kernel_ingestor_engine/packs/TestGfx950ConvFwdAotPacks.cpp"
+    )
+    for path in _BUNDLES["product"][2] + [census]:
+        assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
+
+
 def test_every_bundle_runs_the_shipped_engines_native_code():
-    for engine, folder, _ in _BUNDLES.values():
+    for engine, folder, _, _ in _BUNDLES.values():
         ued = json.loads((folder / f"{tool.engine_slug(engine)}.ued.json").read_text())
         assert ued["name"] == engine
         assert ued["graph_match"] == {
@@ -151,7 +178,7 @@ def test_the_seed_is_a_second_engine_with_its_own_ids(seed_specs):
     # Both engines load into one process, so neither a document id nor a kernel id
     # may repeat across their bundles.
     ids = {}
-    for _, folder, _ in _BUNDLES.values():
+    for _, folder, _, _ in _BUNDLES.values():
         for path in folder.glob("*.json"):
             document = json.loads(path.read_text())
             found = [document["id"]] + [
@@ -184,6 +211,38 @@ def test_config_shards_the_catalog_into_one_pack_per_dtype(tmp_path, seed_specs)
         "gfx950_conv_fwd_aot_bf16",
         "gfx950_conv_fwd_aot_fp16",
     ]
+
+
+def test_k_loop_sharding_splits_by_dtype_pipeline_and_k_loop(seed_specs):
+    config = tool.build_config(seed_specs, sharding="k-loop")
+    expected = set()
+    for spec in seed_specs:
+        if spec.is_direct:
+            expected.add(f"{spec.dtype}_direct")
+        else:
+            loop = "async" if spec.async_dma else "unroll" if spec.unroll_k else "plain"
+            expected.add(f"{spec.dtype}_{spec.pipeline}_{loop}")
+    assert [pack["name"] for pack in config["packs"]] == sorted(expected)
+    for pack in config["packs"]:
+        assert "discriminator" not in pack
+        for variant in pack["variants"]:
+            for shape in variant["shapes"]:
+                spec = next(
+                    s for s in seed_specs if s.instance_id == shape["instance_id"]
+                )
+                assert tool.shard_name(spec, "k-loop") == pack["name"]
+    assert sum(
+        len(variant["shapes"])
+        for pack in config["packs"]
+        for variant in pack["variants"]
+    ) == len(seed_specs)
+    with pytest.raises(ValueError, match="unknown sharding"):
+        tool.shard_name(seed_specs[0], "tile")
+
+
+def test_instance_specs_in_parallel_are_the_serial_ones(seed_identities):
+    identities = seed_identities * 40
+    assert tool.instance_specs(identities, 4) == tool.instance_specs(identities, 1)
 
 
 def test_instance_id_is_the_identity_stable_hash(seed_identities):
@@ -504,15 +563,6 @@ def _serving_counts(specs, problem, dtype):
     return tuple(counts)
 
 
-@pytest.fixture(scope="module")
-def catalogs():
-    """The specs of the seed's and the product's committed instance lists."""
-    return {
-        name: _specs(json.loads(_BUNDLES[name][2].read_text()))
-        for name in ("seed", "product")
-    }
-
-
 def test_gpu_suite_serving_counts_are_the_python_serves_counts(catalogs):
     """IntegrationGpuGfx950ConvFwd.cpp states, per graph, how many instances of each
     family serve it in the seed and in the full catalog; the native matcher is checked
@@ -584,8 +634,8 @@ _PROBLEM_CLASSES = {
 
 @pytest.mark.parametrize("problem_class", sorted(_PROBLEM_CLASSES))
 def test_the_catalog_serves_every_problem_class(catalogs, problem_class):
-    """Every problem class keeps at least one implicit-GEMM instance after the knob
-    rule and R1, in both dtypes."""
+    """Every problem class is served by at least one implicit-GEMM instance, in both
+    dtypes."""
     for dtype in ("fp16", "bf16"):
         counted = _serving_counts(
             catalogs["product"], _PROBLEM_CLASSES[problem_class], dtype
@@ -595,28 +645,39 @@ def test_the_catalog_serves_every_problem_class(catalogs, problem_class):
 
 def test_the_seed_runs_every_knob_value_the_catalog_ships(seed_identities):
     """The seed pins each of its instances on the GPU, so it holds, per dtype, at least
-    one instance of every pipeline, width pair and epilogue the full catalog ships."""
-    product = json.loads(_BUNDLES["product"][2].read_text())
+    one implicit-GEMM instance of every pipeline, epilogue, K loop, load width and
+    store width the full catalog ships, and the default epilogue's store width."""
+    product = _listed(_BUNDLES["product"][2])
 
     def knobs(identity):
+        k_loop = (
+            "async"
+            if identity.get("async_dma")
+            else "unroll" if identity.get("unroll_k") else "plain"
+        )
+        epilogue = identity.get("epilogue", "default")
         return (
             identity["pipeline"],
-            (identity["vector_size_a"], identity["vector_size_c"]),
-            identity.get("epilogue", "default"),
+            epilogue,
+            k_loop,
+            identity["vector_size_a"],
+            identity["vector_size_c"],
+            (epilogue, identity["vector_size_c"]) if epilogue == "default" else None,
         )
 
     for dtype in ("fp16", "bf16"):
         implicit = [
-            i
+            knobs(i)
             for i in seed_identities
             if i["dtype_a"] == dtype and i["algorithm"] == "implicit_gemm"
         ]
-        shipped = [
-            i
+        shipped = {
+            knobs(i)
             for i in product
             if i["dtype_a"] == dtype and i["algorithm"] == "implicit_gemm"
-        ]
-        for position in range(3):
-            assert {knobs(i)[position] for i in shipped} <= {
-                knobs(i)[position] for i in implicit
-            }, (dtype, position)
+        }
+        for position in range(6):
+            assert {k[position] for k in shipped} <= {k[position] for k in implicit}, (
+                dtype,
+                position,
+            )
