@@ -109,4 +109,42 @@ inline std::vector<std::pair<std::string, std::string>> parseQueryArgument(const
     return parsed;
 }
 
+/// @brief @p text as one POSIX shell word: single-quoted, an embedded quote closed, escaped
+/// and reopened, so a space or a `$` in a path or value reaches the program unchanged.
+inline std::string shellWord(const std::string& text)
+{
+    std::string word = "'";
+    for(const char character : text)
+    {
+        word += character == '\'' ? std::string("'\\''") : std::string(1, character);
+    }
+    return word + "'";
+}
+
+/// @brief One line of `commands.txt`: hipdnn_bench sweeping @p graph, its CSV (with its own
+/// header) written to @p csv. One file per graph: graphs whose catalogs expose different
+/// knobs have different `kernel.*` columns, so their rows cannot share one header.
+inline std::string benchCommandLine(const std::string& bench,
+                                    const std::vector<std::string>& pluginDirs,
+                                    const std::string& graph,
+                                    const std::string& engineName,
+                                    const std::string& problemId,
+                                    const ProblemPoint& point,
+                                    const std::string& csv)
+{
+    std::string line = shellWord(bench);
+    for(const auto& dir : pluginDirs)
+    {
+        line += " --plugin-dir " + shellWord(dir);
+    }
+    line += " --graph " + shellWord(graph);
+    if(!engineName.empty())
+    {
+        line += " --engine-name " + shellWord(engineName);
+    }
+    line += " --sweep --problem-id " + shellWord(problemId);
+    line += " --query " + shellWord(asQueryArgument(point));
+    return line + " > " + shellWord(csv);
+}
+
 } // namespace hipdnn_corpus_gen

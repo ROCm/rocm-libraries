@@ -50,7 +50,6 @@
 namespace
 {
 
-using hipdnn_corpus_gen::asQueryArgument;
 using hipdnn_corpus_gen::asQueryColumns;
 using hipdnn_corpus_gen::ExplorationRequest;
 using hipdnn_corpus_gen::ProblemPoint;
@@ -205,7 +204,8 @@ void printHelp(const char* program)
               << "                         guess that nothing here verifies. Use only when a\n"
               << "                         provider cannot be staged.\n"
               << "  --plugin-dir <dir>     Engine plugin directory (repeatable)\n"
-              << "  --output <dir>         Corpus root: graphs/, manifest.json, manifest.csv\n"
+              << "  --output <dir>         Corpus root: graphs/, manifest.json, manifest.csv, and\n"
+              << "                         commands.txt, one bench sweep per graph into results/\n"
               << "  --bench-path <path>    hipdnn_bench to name in commands.txt\n"
               << "  --operation <name>     Restrict to one declared operation\n"
               << "  --count <n>            Corpus size per operation. Combinations the engine\n"
@@ -1097,6 +1097,8 @@ int runGenerator(const std::vector<std::string>& args)
     {
         root = options.outputDir;
         std::filesystem::create_directories(root / "graphs");
+        // commands.txt writes one CSV per graph here.
+        std::filesystem::create_directories(root / "results");
         commands.open(root / "commands.txt");
         if(!commands)
         {
@@ -1590,18 +1592,15 @@ int runGenerator(const std::vector<std::string>& args)
             }
             index << graph.name << "," << asQueryColumns(entry.point, false) << "\n";
 
-            commands << options.benchPath;
-            for(const auto& dir : options.pluginDirs)
-            {
-                commands << " --plugin-dir " << dir;
-            }
-            commands << " --graph " << graphPath.string();
-            if(!options.engineName.empty())
-            {
-                commands << " --engine-name " << options.engineName;
-            }
-            commands << " --sweep --no-header" << " --problem-id " << graph.name << " --query "
-                     << asQueryArgument(entry.point) << "\n";
+            commands << hipdnn_corpus_gen::benchCommandLine(
+                options.benchPath,
+                options.pluginDirs,
+                graphPath.string(),
+                options.engineName,
+                graph.name,
+                entry.point,
+                (root / "results" / (graph.name + ".csv")).string())
+                     << "\n";
             ++total;
         }
     }

@@ -103,4 +103,30 @@ TEST(TestCorpusOutput, MalformedQueriesAreRefusedRatherThanPartlyParsed)
     EXPECT_EQ(parseQueryArgument("N=8").size(), 1U) << "a single valid field must still parse";
 }
 
+TEST(TestCorpusOutput, AShellWordSurvivesSpacesQuotesAndExpansion)
+{
+    EXPECT_EQ(shellWord("plain"), "'plain'");
+    EXPECT_EQ(shellWord("/my dir/$HOME"), "'/my dir/$HOME'");
+    EXPECT_EQ(shellWord("it's"), "'it'\\''s'");
+}
+
+TEST(TestCorpusOutput, EachBenchCommandWritesItsOwnCsvWithAHeader)
+{
+    // Concatenated runs would share one header, though each graph's catalog may expose
+    // different knobs and so different kernel.* columns.
+    const ProblemPoint point{{"batch", int64_t{2}}, {"dtype", std::string("bf16")}};
+    const auto line = benchCommandLine("/opt/my tools/hipdnn_bench",
+                                       {"/plugins"},
+                                       "/corpus/graphs/g.fb",
+                                       "hipkernel:ConvFwd",
+                                       "g",
+                                       point,
+                                       "/corpus/results/g.csv");
+    EXPECT_EQ(line,
+              "'/opt/my tools/hipdnn_bench' --plugin-dir '/plugins' --graph '/corpus/graphs/g.fb' "
+              "--engine-name 'hipkernel:ConvFwd' --sweep --problem-id 'g' --query '"
+                  + asQueryArgument(point) + "' > '/corpus/results/g.csv'");
+    EXPECT_EQ(line.find("--no-header"), std::string::npos);
+}
+
 } // namespace hipdnn_corpus_gen
