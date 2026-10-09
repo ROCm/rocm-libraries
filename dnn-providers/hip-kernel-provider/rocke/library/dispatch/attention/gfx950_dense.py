@@ -165,6 +165,14 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
             ):
                 bm, bn, ragged = int(tile["block_m"]), int(tile["block_n"]), False
                 break
+    if bool(req.use_fp8):
+        # gfx950 decodes OCP fp8; reject an FNUZ-encoded request here (it would
+        # otherwise map to the same OCP spec and be decoded ~2x off).
+        from .tuning_specs import validate_explicit_fp8_encoding
+
+        validate_explicit_fp8_encoding(
+            arch="gfx950", use_fp8=True, fp8_fnuz=bool(getattr(req, "fp8_fnuz", False))
+        )
     return Gfx950AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
