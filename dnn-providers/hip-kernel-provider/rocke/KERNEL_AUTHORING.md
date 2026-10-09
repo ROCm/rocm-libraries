@@ -128,7 +128,22 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 - [ ] **Dispatcher wiring:** candidates registered so the family is selectable —
       the generic `CandidateRegistry` + `dispatch_<family>` for a platform family
       ([dispatch/families/](platform/python/rocke/dispatch/families/)), or
-      `ATTENTION_REGISTRY` for attention. A family not in a registry is unreachable.
+      `ATTENTION_ROUTE_REGISTRY` for attention. A family not in a registry is
+      unreachable.
+- [ ] **Sweep coverage:** route-only registration is not enough. Every
+      sweep-only variant is registered with `opt_in=True` (so `algorithm="auto"`
+      never picks it) and its `sweep_space` returns every variant, and the
+      family exposes all three sweep entry points over its registry —
+      `registered_<family>_combos`, `<family>_sweep_space`,
+      `dispatch_<family>_all` (pattern:
+      [families/norm.py](platform/python/rocke/dispatch/families/norm.py)).
+      Attention registers anything with `build` + `bind_torch` on
+      `ATTENTION_EXECUTION_REGISTRY` too. A CPU-only test asserts the sweep
+      returns the opt-in variants that production dispatch hides. Full recipe:
+      [dispatch/AGENTS.md](library/dispatch/AGENTS.md#how-to-add-a-new-specialized-candidate).
+      `<family>` means one set per registry (GEMM exposes `gemm_fp16_*` and
+      `gemm_bf16_*`). Known gap, tracked as a backlog item: GDN decode lacks
+      `registered_gdn_combos`, and GDN prefill exposes none of the three.
 - [ ] Golden created for the new family; gate GREEN at every flavor in `LLVM_FLAVORS`.
 - [ ] **End-user visibility:** family added to the support matrix
       (`SUPPORT_MATRIX.md` / operation-support doc) so users can see it is
@@ -234,8 +249,11 @@ scoped to library.
    spec-driven builder (a dataclass `Spec` with a `__post_init__` validator +
    `build_<family>()` returning a `KernelDef`). No one-off scripts —
    [AGENTS.md](platform/AGENTS.md) requires reusable spec-driven builders.
-4. **Wire dispatch.** Register the candidate in `ATTENTION_REGISTRY` in
-   [library/dispatch/attention/](library/dispatch/attention/) and, if it introduces a new
+4. **Wire dispatch.** Register the candidate in `ATTENTION_ROUTE_REGISTRY` in
+   [library/dispatch/attention/](library/dispatch/attention/) and, if it has
+   `build` + `bind_torch`, in `ATTENTION_EXECUTION_REGISTRY` too so the sweeps
+   see it; sweep-only variants take `opt_in=True`
+   ([sweep coverage](#a-new-kernel-family)). If it introduces a new
    selection axis, extend `select_path` / `supports_native_unified_attention`
    (keep the decision a **pure** function of the problem so it mirrors on the C
    side).

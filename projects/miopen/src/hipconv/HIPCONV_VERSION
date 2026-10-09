@@ -1,6 +1,6 @@
-EMU version: v0.3.2-0-ga6c85d2a
-EMU commit: a6c85d2a8592b918d9c79f94b4d3bf6473021fb3
-Snapshot date: 2026-10-02
+EMU version: v0.4.0
+EMU commit: d6e403450af5fabd2f38c6bebb58cab2b8274bf8
+Snapshot date: 2026-10-06
 Arches: cdna3,cdna4,cdna5
 Files:
   ./CHANGELOG.md
@@ -10,6 +10,8 @@ Files:
   ./cmake/libautoshard.cpp
   ./cmake/libautoshard.hpp
   ./CMakeLists.txt
+  ./cmake/version.cpp.in
+  ./cmake/write_version.cmake
   ./HIPCONV_VERSION
   ./include/hipconv/conv_params.hpp
   ./include/hipconv/export.hpp
@@ -25,8 +27,12 @@ Files:
   ./src/arch/cdna4/bunnies_cdna4.hpp
   ./src/arch/cdna4/CMakeLists.txt
   ./src/arch/cdna4/depthwise_backend.cpp
+  ./src/arch/cdna4/depthwise/depthwise_1d_toeplitz/config_desc.cpp
+  ./src/arch/cdna4/depthwise/depthwise_1d_toeplitz/config_desc.h
   ./src/arch/cdna4/depthwise/depthwise_1d_toeplitz/config_table.h
   ./src/arch/cdna4/depthwise/depthwise_1d_toeplitz/kernel.h
+  ./src/arch/cdna4/depthwise/depthwise_2d_toeplitz/config_desc.cpp
+  ./src/arch/cdna4/depthwise/depthwise_2d_toeplitz/config_desc.h
   ./src/arch/cdna4/depthwise/depthwise_2d_toeplitz/config_table.h
   ./src/arch/cdna4/depthwise/depthwise_2d_toeplitz/kernel.h
   ./src/arch/cdna4/depthwise/depthwise_wgrad_hankel/config_desc.cpp
@@ -116,10 +122,19 @@ Files:
   ./src/arch/cdna5/direct/config_matcher.hpp
   ./src/arch/cdna5/direct/config_table.hpp
   ./src/arch/cdna5/direct/kernel.hpp
+  ./src/arch/cdna5/direct_wgrad/config.hpp
+  ./src/arch/cdna5/direct_wgrad/config_matcher.cpp
+  ./src/arch/cdna5/direct_wgrad/config_matcher.hpp
+  ./src/arch/cdna5/direct_wgrad/config_table.hpp
+  ./src/arch/cdna5/direct_wgrad/kernel.hpp
   ./src/arch/cdna5/grouped_backend.cpp
+  ./src/arch/cdna5/grouped/grouped_multi_g/config_desc.cpp
+  ./src/arch/cdna5/grouped/grouped_multi_g/config_desc.h
   ./src/arch/cdna5/grouped/grouped_multi_g/config.hpp
   ./src/arch/cdna5/grouped/grouped_multi_g/config_table.hpp
   ./src/arch/cdna5/grouped/grouped_multi_g/kernel.hpp
+  ./src/arch/cdna5/grouped/grouped_multi_g_wgrad/config_desc.cpp
+  ./src/arch/cdna5/grouped/grouped_multi_g_wgrad/config_desc.h
   ./src/arch/cdna5/grouped/grouped_multi_g_wgrad/config.hpp
   ./src/arch/cdna5/grouped/grouped_multi_g_wgrad/config_table.hpp
   ./src/arch/cdna5/grouped/grouped_multi_g_wgrad/kernel.hpp
@@ -133,11 +148,15 @@ Files:
   ./src/conv_kernel.h
   ./src/conv_kernel_table.h
   ./src/conv_params.cpp
+  ./src/data_type_field.cpp
+  ./src/data_type_field.h
   ./src/depthwise_algorithm_stub.h
   ./src/depthwise_conv_kernel.h
   ./src/detail.h
   ./src/direct_algorithm_stub.h
   ./src/direct_conv_kernel.h
+  ./src/direction_field.cpp
+  ./src/direction_field.h
   ./src/explicit_gemm/explicit_gemm_algorithm.cpp
   ./src/explicit_gemm/hipblaslt_matmul.cpp
   ./src/explicit_gemm/hipblaslt_matmul.hpp
@@ -167,3 +186,4 @@ Files:
   ./src/transpose_lds_layout.h
   ./src/types.h
   ./src/unreachable.h
+  ./VERSION

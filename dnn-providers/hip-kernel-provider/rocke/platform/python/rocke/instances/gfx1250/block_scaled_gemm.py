@@ -179,8 +179,6 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
         )
     matrix_path = spec.resolved_matrix_path()
     native_scale = matrix_path in ("wmma_scale", "wmma_scale16")
-    if native_scale and _canon_lowbit(spec.dtype_a) != _canon_lowbit(spec.dtype_b):
-        return False, "native gfx1250 SCALE/SCALE16 requires matching matrix formats"
     family = matrix_path if native_scale else "wmma"
     atom_k = _WMMA_SCALE_K if native_scale else _WMMA_K
     if not native_scale and not target.mma.has_shape(
@@ -238,7 +236,8 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
     if native_scale:
         return (
             True,
-            f"ok: gfx1250 K=128 native {matrix_path} {_canon_lowbit(spec.dtype_a)} GEMM",
+            f"ok: gfx1250 K=128 native {matrix_path} "
+            f"{_canon_lowbit(spec.dtype_a)}x{_canon_lowbit(spec.dtype_b)} GEMM",
         )
     return True, "ok: gfx1250 K=64 FP8/BF8 WMMA block-scaled GEMM"
 

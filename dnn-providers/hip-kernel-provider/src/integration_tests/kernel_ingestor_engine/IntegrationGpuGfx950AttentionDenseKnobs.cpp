@@ -12,8 +12,10 @@
 #include <memory>
 #include <optional>
 #include <ostream>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
@@ -165,9 +167,12 @@ GraphShape withoutScale(GraphShape shape)
     return shape;
 }
 
-/// Thirteen forced (tile, head size) pairs, then four cold cases, then two forced cases
-/// with no attn_scale_value. Within them: bounds on both corners and both deprecated
-/// flags, fp16 and bf16, MHA, GQA and MQA, and four forced cases with B > 1 and Sq != Skv.
+/// Forced (tile, head size) pairs and cold cases first; then one case for each remaining
+/// catalog head configuration, in ascending (head size, Hq, Hkv) order at B=1, Sq=Skv=256;
+/// then further cases until every (head size, dtype, causal, tile) class the catalog compiles
+/// runs at least once; then cold cases of an fp16 graph with an explicit mma_core_mode; then
+/// two forced cases with no attn_scale_value. Within them: bounds on both corners and both
+/// deprecated flags, fp16 and bf16, MHA, GQA and MQA, and forced cases with B > 1 and Sq != Skv.
 std::vector<KnobCase> knobCases()
 {
     constexpr auto FP16 = DataType::HALF;
@@ -248,6 +253,162 @@ std::vector<KnobCase> knobCases()
          makeShape(BF16, 128, 9, 9, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 2, 256, 256),
          COLD,
          Tile{256, 64}},
+        // One case for each catalog head configuration the cases above leave out, at
+        // Sq=Skv=256 where the cold winner is 256/64, so no forced tile is the cold winner.
+        // Dtype, mask and tile are chosen, not rotated: together with the rows around them
+        // they run every (head size, dtype, causal, tile) class the catalog compiles.
+        {"D64_Hq20Kv20_Bm128Bn64",
+         makeShape(BF16, 64, 20, 20, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 64}},
+        {"D64_Hq32Kv4_Bm256Bn32",
+         makeShape(BF16, 64, 32, 4, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 32}},
+        {"D64_Hq32Kv8_Bm256Bn128",
+         makeShape(BF16, 64, 32, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 128}},
+        {"D64_Hq32Kv32_Bm256Bn256",
+         makeShape(BF16, 64, 32, 32, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 256}},
+        {"D64_Hq64Kv8_Bm128Bn32",
+         makeShape(BF16, 64, 64, 8, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 32}},
+        {"D64_Hq128Kv128_Bm128Bn64",
+         makeShape(BF16, 64, 128, 128, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 64}},
+        {"D128_Hq16Kv16_Bm128Bn64",
+         makeShape(BF16, 128, 16, 16, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 64}},
+        {"D128_Hq24Kv24_Bm128Bn128",
+         makeShape(BF16, 128, 24, 24, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 128}},
+        {"D128_Hq28Kv4_Bm256Bn128",
+         makeShape(BF16, 128, 28, 4, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 128}},
+        {"D128_Hq32Kv4_Bm128Bn32",
+         makeShape(BF16, 128, 32, 4, Mask::CAUSAL_MASK_FLAG, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 32}},
+        {"D128_Hq32Kv8_Bm128Bn128",
+         makeShape(BF16, 128, 32, 8, Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 128}},
+        {"D128_Hq32Kv32_Bm256Bn32",
+         makeShape(BF16, 128, 32, 32, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 32}},
+        {"D128_Hq40Kv8_Bm128Bn32",
+         makeShape(FP16, 128, 40, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 32}},
+        {"D128_Hq40Kv10_Bm128Bn64",
+         makeShape(FP16, 128, 40, 10, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 64}},
+        {"D128_Hq40Kv40_Bm256Bn32",
+         makeShape(FP16, 128, 40, 40, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 32}},
+        {"D128_Hq48Kv8_Bm256Bn128",
+         makeShape(FP16, 128, 48, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 128}},
+        {"D128_Hq64Kv4_Bm128Bn64",
+         makeShape(FP16, 128, 64, 4, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 64}},
+        {"D128_Hq64Kv8_Bm128Bn128",
+         makeShape(FP16, 128, 64, 8, Mask::CAUSAL_MASK_FLAG, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 128}},
+        {"D128_Hq64Kv64_Bm256Bn32",
+         makeShape(FP16, 128, 64, 64, Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 32}},
+        {"D128_Hq96Kv8_Bm256Bn128",
+         makeShape(FP16, 128, 96, 8, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 128}},
+        {"D128_Hq128Kv8_Bm128Bn32",
+         makeShape(FP16, 128, 128, 8, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 32}},
+        // The remaining D64 classes: there are more D64 classes than D64 head configurations.
+        {"D64_Hq8Kv1_Bm128Bn128",
+         makeShape(BF16, 64, 8, 1, Mask::CAUSAL_MASK_FLAG, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 128}},
+        {"D64_Hq8Kv8_Bm256Bn32",
+         makeShape(BF16, 64, 8, 8, Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 32}},
+        {"D64_Hq10Kv10_Bm256Bn256",
+         makeShape(BF16, 64, 10, 10, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 256}},
+        {"D64_Hq12Kv12_Bm128Bn64",
+         makeShape(FP16, 64, 12, 12, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 64}},
+        {"D64_Hq16Kv2_Bm128Bn128",
+         makeShape(FP16, 64, 16, 2, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 128}},
+        {"D64_Hq16Kv16_Bm256Bn32",
+         makeShape(FP16, 64, 16, 16, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 32}},
+        {"D64_Hq20Kv20_Bm256Bn128",
+         makeShape(FP16, 64, 20, 20, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 128}},
+        {"D64_Hq8Kv1_Bm128Bn32",
+         makeShape(FP16, 64, 8, 1, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 32}},
+        {"D64_Hq8Kv8_Bm128Bn128",
+         makeShape(FP16, 64, 8, 8, Mask::CAUSAL_MASK_FLAG, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{128, 128}},
+        {"D64_Hq10Kv10_Bm256Bn128",
+         makeShape(FP16, 64, 10, 10, Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 128}},
+        {"D64_Hq12Kv12_Bm256Bn256",
+         makeShape(FP16, 64, 12, 12, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 1, 256, 256),
+         FORCED,
+         Tile{256, 256}},
+        // The non-causal 256/64 classes. 256/64 is the cold winner at Sq=Skv=256, so only a
+        // cold case reaches it here.
+        {"Cold_D64Hq8Kv8_Bf16NoMask",
+         makeShape(BF16, 64, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         COLD,
+         Tile{256, 64}},
+        {"Cold_D64Hq16Kv16_Fp16NoMask",
+         makeShape(FP16, 64, 16, 16, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         COLD,
+         Tile{256, 64}},
+        {"Cold_D128Hq8Kv8_Bf16NoMask",
+         makeShape(BF16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+         COLD,
+         Tile{256, 64}},
+        // An fp16 graph with each explicit mma_core_mode.
+        {"Cold_Fp16MmaHalf",
+         makeShape(FP16, 128, 16, 16, Mask::BOUNDS_TOP_LEFT, FP16, 2, 256, 512),
+         COLD,
+         Tile{256, 64}},
+        {"Cold_Fp16MmaBfloat16",
+         makeShape(FP16, 64, 32, 8, Mask::NO_MASK, BF16, 1, 384, 256),
+         COLD,
+         Tile{128, 32}},
         // No attn_scale_value: the CPU reference applies 1.0 (no scaling), so a kernel
         // launched with any other scale fails the comparison.
         {"D64_Bm256Bn64_NoScale",
@@ -419,32 +580,13 @@ const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& runtimeCatalog()
     return s_catalog;
 }
 
-/// The id of the one kernel this engine's gfx950 packs carry for @p shape's semantic fields
-/// and @p tile, as the selection line spells it. Records a failure naming the key and the
-/// number of kernels carrying it, and returns nullopt, when that is not exactly one.
-std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile& tile)
+/// Calls @p visit for every kernel runtimeCatalog() serves this engine with on SERVED_ARCH:
+/// each kernel of each pack that is not conflicted, belongs to ENGINE_NAME and lists
+/// SERVED_ARCH.
+template <typename Visit>
+void forEachServedKernel(Visit&& visit)
 {
-    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
-    {
-        ADD_FAILURE() << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set, so there are no production "
-                         "descriptors to read the expected kernel id from";
-        return std::nullopt;
-    }
-
-    const MetadataKey key{
-        {"dtype", std::string(shape.dataType == DataType::HALF ? "FP16" : "BF16")},
-        {"head_size", shape.headSize},
-        {"num_query_heads", shape.queryHeads},
-        {"num_kv_heads", shape.kvHeads},
-        {"causal", int64_t{shape.mask == Mask::NO_MASK ? 0 : 1}},
-        {"ragged", int64_t{0}},
-        {"sliding_window", int64_t{0}},
-        {"block_m", tile.blockM},
-        {"block_n", tile.blockN},
-    };
-
     const auto& catalog = runtimeCatalog();
-    std::vector<std::string> ids;
     for(const auto& entry : catalog.packs)
     {
         const auto& pack = entry.second;
@@ -458,17 +600,58 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile&
         }
         for(const auto& kernel : pack.descriptor.kernels)
         {
-            const bool carriesKey
-                = std::all_of(key.begin(), key.end(), [&kernel](const auto& field) {
-                      const auto value = kernel.metadata.find(field.first);
-                      return value != kernel.metadata.end() && value->second == field.second;
-                  });
-            if(carriesKey)
-            {
-                ids.push_back(hipdnn_plugin_sdk::ingestor::toString(kernel.id));
-            }
+            visit(kernel);
         }
     }
+}
+
+/// The catalog's `dtype` spelling for a graph dtype; the catalog carries only these two.
+std::string catalogDtypeName(DataType dataType)
+{
+    return dataType == DataType::HALF ? "FP16" : "BF16";
+}
+
+/// The catalog's `causal` value for a mask: every spelling but NO_MASK is causal.
+int64_t catalogCausal(Mask mask)
+{
+    return mask == Mask::NO_MASK ? 0 : 1;
+}
+
+/// The id of the one kernel this engine's gfx950 packs carry for @p shape's semantic fields
+/// and @p tile, as the selection line spells it. Records a failure naming the key and the
+/// number of kernels carrying it, and returns nullopt, when that is not exactly one.
+std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile& tile)
+{
+    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
+    {
+        ADD_FAILURE() << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set, so there are no production "
+                         "descriptors to read the expected kernel id from";
+        return std::nullopt;
+    }
+
+    const MetadataKey key{
+        {"dtype", catalogDtypeName(shape.dataType)},
+        {"head_size", shape.headSize},
+        {"num_query_heads", shape.queryHeads},
+        {"num_kv_heads", shape.kvHeads},
+        {"causal", catalogCausal(shape.mask)},
+        {"ragged", int64_t{0}},
+        {"sliding_window", int64_t{0}},
+        {"block_m", tile.blockM},
+        {"block_n", tile.blockN},
+    };
+
+    std::vector<std::string> ids;
+    forEachServedKernel([&key, &ids](const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
+        const bool carriesKey = std::all_of(key.begin(), key.end(), [&kernel](const auto& field) {
+            const auto value = kernel.metadata.find(field.first);
+            return value != kernel.metadata.end() && value->second == field.second;
+        });
+        if(carriesKey)
+        {
+            ids.push_back(hipdnn_plugin_sdk::ingestor::toString(kernel.id));
+        }
+    });
 
     if(ids.size() != 1)
     {
@@ -615,6 +798,132 @@ protected:
 using IntegrationGpuGfx950AttentionDenseKnobs = IntegrationGpuGfx950AttentionDenseBase<KnobCase>;
 using IntegrationGpuGfx950AttentionDenseKnobFilter
     = IntegrationGpuGfx950AttentionDenseBase<UnsatisfiableCase>;
+
+using IntegrationGpuGfx950AttentionDenseKnobCoverage
+    = IntegrationGpuGfx950AttentionDenseBase<KnobCase>;
+
+/// knobCases() is a static table because its cases register before main() names the
+/// descriptor root. This keeps it honest: the (head_size, Hq, Hkv) configurations it covers
+/// must be exactly those the shipped catalog carries.
+TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogHeadConfiguration)
+{
+    ASSERT_FALSE(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
+        << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set, so there are no production descriptors to "
+           "read the catalog's head configurations from";
+
+    using HeadConfig = std::tuple<int64_t, int64_t, int64_t>;
+
+    std::set<HeadConfig> tableConfigs;
+    for(const auto& knobCase : knobCases())
+    {
+        tableConfigs.emplace(
+            knobCase.shape.headSize, knobCase.shape.queryHeads, knobCase.shape.kvHeads);
+    }
+
+    std::set<HeadConfig> catalogConfigs;
+    forEachServedKernel([&catalogConfigs](
+                            const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
+        const auto intField = [&kernel](const char* field) -> const int64_t* {
+            const auto value = kernel.metadata.find(field);
+            return value == kernel.metadata.end() ? nullptr : std::get_if<int64_t>(&value->second);
+        };
+        const auto* headSize = intField("head_size");
+        const auto* queryHeads = intField("num_query_heads");
+        const auto* kvHeads = intField("num_kv_heads");
+        if(headSize == nullptr || queryHeads == nullptr || kvHeads == nullptr)
+        {
+            ADD_FAILURE() << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
+                          << " carries no integer head_size, num_query_heads and num_kv_heads";
+            return;
+        }
+        catalogConfigs.emplace(*headSize, *queryHeads, *kvHeads);
+    });
+
+    const auto onlyIn = [](const std::set<HeadConfig>& from, const std::set<HeadConfig>& other) {
+        std::string text;
+        for(const auto& [headSize, queryHeads, kvHeads] : from)
+        {
+            if(other.count({headSize, queryHeads, kvHeads}) == 0)
+            {
+                text += " (D" + std::to_string(headSize) + ", Hq" + std::to_string(queryHeads)
+                        + ", Hkv" + std::to_string(kvHeads) + ")";
+            }
+        }
+        return text.empty() ? std::string(" none") : text;
+    };
+    EXPECT_EQ(tableConfigs, catalogConfigs)
+        << "in the catalog but not knobCases():" << onlyIn(catalogConfigs, tableConfigs)
+        << "\nin knobCases() but not the catalog:" << onlyIn(tableConfigs, catalogConfigs)
+        << "\nunder HIPDNN_DESCRIPTOR_RUNTIME_DIR='"
+        << hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR") << "'";
+}
+
+/// Every row runs one compiled kernel, and what the compiler specializes on is the head size,
+/// dtype, causal flag and tile. The table must run every such class the catalog carries, so a
+/// row edited or removed cannot silently leave a code path unexecuted.
+TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogKernelClass)
+{
+    ASSERT_FALSE(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
+        << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set, so there are no production descriptors to "
+           "read the catalog's kernel classes from";
+
+    using KernelClass = std::tuple<int64_t, std::string, int64_t, int64_t, int64_t>;
+
+    std::set<KernelClass> tableClasses;
+    for(const auto& knobCase : knobCases())
+    {
+        tableClasses.emplace(knobCase.shape.headSize,
+                             catalogDtypeName(knobCase.shape.dataType),
+                             catalogCausal(knobCase.shape.mask),
+                             knobCase.tile.blockM,
+                             knobCase.tile.blockN);
+    }
+
+    std::set<KernelClass> catalogClasses;
+    forEachServedKernel([&catalogClasses](
+                            const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
+        const auto intField = [&kernel](const char* field) -> const int64_t* {
+            const auto value = kernel.metadata.find(field);
+            return value == kernel.metadata.end() ? nullptr : std::get_if<int64_t>(&value->second);
+        };
+        const auto dtype = kernel.metadata.find("dtype");
+        const auto* dtypeName
+            = dtype == kernel.metadata.end() ? nullptr : std::get_if<std::string>(&dtype->second);
+        const auto* headSize = intField("head_size");
+        const auto* causal = intField("causal");
+        const auto* blockM = intField("block_m");
+        const auto* blockN = intField("block_n");
+        if(dtypeName == nullptr || headSize == nullptr || causal == nullptr || blockM == nullptr
+           || blockN == nullptr)
+        {
+            ADD_FAILURE() << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
+                          << " carries no string dtype and integer head_size, causal, block_m "
+                             "and block_n";
+            return;
+        }
+        catalogClasses.emplace(*headSize, *dtypeName, *causal, *blockM, *blockN);
+    });
+
+    const auto onlyIn = [](const std::set<KernelClass>& from, const std::set<KernelClass>& other) {
+        std::string text;
+        for(const auto& kernelClass : from)
+        {
+            if(other.count(kernelClass) == 0)
+            {
+                const auto& [headSize, dtype, causal, blockM, blockN] = kernelClass;
+                text += " (D" + std::to_string(headSize) + ", " + dtype + ", causal "
+                        + std::to_string(causal) + ", " + std::to_string(blockM) + "/"
+                        + std::to_string(blockN) + ")";
+            }
+        }
+        return text.empty() ? std::string(" none") : text;
+    };
+    EXPECT_EQ(tableClasses, catalogClasses)
+        << "in the catalog but not knobCases():" << onlyIn(catalogClasses, tableClasses)
+        << "\nin knobCases() but not the catalog:" << onlyIn(tableClasses, catalogClasses)
+        << "\nunder HIPDNN_DESCRIPTOR_RUNTIME_DIR='"
+        << hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR") << "'";
+}
 
 /// The selected kernel is read from the plugin's own selection line, so a knob dropped
 /// anywhere between the frontend and the plugin's filter reads as the cold winner; the

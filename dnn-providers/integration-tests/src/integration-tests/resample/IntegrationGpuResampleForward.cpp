@@ -6,9 +6,8 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-
-#include <type_traits>
 
 #include "harness/IntegrationGraphVerificationHarness.hpp"
 
@@ -131,24 +130,6 @@ std::vector<ResampleFwdTestCase> getResampleFwdTestCases()
     return testCases;
 }
 
-template <typename T>
-constexpr float getTolerance()
-{
-    if constexpr(std::is_same_v<T, float>)
-    {
-        return 1e-5f;
-    }
-    else if constexpr(std::is_same_v<T, half>)
-    {
-        return 1e-3f;
-    }
-    else
-    {
-        static_assert(std::is_same_v<T, bfloat16>);
-        return 1e-2f;
-    }
-}
-
 template <typename XDataType, typename YDataType, typename ComputeDataType>
 class ResampleForward : public IntegrationGraphVerificationHarness<XDataType, ResampleFwdTestCase>
 {
@@ -187,7 +168,7 @@ protected:
         auto [yTensorAttr, indexTensorAttr] = graphObj.resample(xTensorAttr, resampleAttrs);
         yTensorAttr->set_output(true);
         yTensorAttr->set_data_type(yDataType);
-        this->registerValidator(yTensorAttr, getTolerance<YDataType>());
+        this->registerValidator(yTensorAttr, resample::getTolerance<YDataType>());
 
         if(generateIndex)
         {

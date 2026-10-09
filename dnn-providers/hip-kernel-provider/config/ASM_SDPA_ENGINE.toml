@@ -22,6 +22,7 @@ version = 1
 #   atol: absolute tolerance
 #   rtol: relative tolerance
 #
+
 # The common suite's ToleranceResolver maps both SdpaAttributes and
 # SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
 # forward). SDPA backward gradients (dQ/dK/dV) accumulate more numerical error

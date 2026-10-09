@@ -32,19 +32,24 @@ __forceinline__ __device__ float fma(float a, float b, float c) { return ::fma(a
 // Half precision overloads
 //=============================================================================
 
-__forceinline__ __device__ _Float16 exp(_Float16 x) { return __ocml_exp_f16(x); }
-__forceinline__ __device__ _Float16 log(_Float16 x) { return __ocml_log_f16(x); }
-__forceinline__ __device__ _Float16 sqrt(_Float16 x) { return __ocml_sqrt_f16(x); }
-__forceinline__ __device__ _Float16 rsqrt(_Float16 x) { return __ocml_rsqrt_f16(x); }
+__forceinline__ __device__ _Float16 exp(_Float16 x)
+{
+    float x_scaled = static_cast<float>(x) * 1.4426950408889634f; // 0x1.715476p+0f = log2(e)
+    return static_cast<_Float16>(__builtin_amdgcn_exp2f(x_scaled));
+}
+__forceinline__ __device__ _Float16 log(_Float16 x)
+{
+    float log2_x = __builtin_amdgcn_logf(static_cast<float>(x));
+    return static_cast<_Float16>(log2_x * 0.6931471805599453f); // 0x1.62e430p-1f = ln(2)
+}
+__forceinline__ __device__ _Float16 sqrt(_Float16 x) { return hsqrt(__half(x)); }
+__forceinline__ __device__ _Float16 rsqrt(_Float16 x) { return hrsqrt(__half(x)); }
 __forceinline__ __device__ _Float16 sin(_Float16 x) { return hsin(__half(x)); }
 __forceinline__ __device__ _Float16 cos(_Float16 x) { return hcos(__half(x)); }
-__forceinline__ __device__ _Float16 fabs(_Float16 x) { return __ocml_fabs_f16(x); }
-__forceinline__ __device__ _Float16 fmin(_Float16 x, _Float16 y) { return __ocml_fmin_f16(x, y); }
-__forceinline__ __device__ _Float16 fmax(_Float16 x, _Float16 y) { return __ocml_fmax_f16(x, y); }
-__forceinline__ __device__ _Float16 pow(_Float16 x, _Float16 y)
-{
-    return __ocml_exp_f16(y * __ocml_log_f16(x));
-}
+__forceinline__ __device__ _Float16 fabs(_Float16 x) { return __habs(__half(x)); }
+__forceinline__ __device__ _Float16 fmin(_Float16 x, _Float16 y) { return __builtin_fminf16(x, y); }
+__forceinline__ __device__ _Float16 fmax(_Float16 x, _Float16 y) { return __builtin_fmaxf16(x, y); }
+__forceinline__ __device__ _Float16 pow(_Float16 x, _Float16 y) { return exp(y * log(x)); }
 __forceinline__ __device__ _Float16 tanh(_Float16 x)
 {
     float x_scaled = static_cast<float>(x) * 1.4426950408889634f; // 0x1.715476p+0f = log2(e)
@@ -54,7 +59,7 @@ __forceinline__ __device__ _Float16 tanh(_Float16 x)
     _Float16 ret = static_cast<_Float16>((a - b) * __builtin_amdgcn_rcpf(a + b));
     _Float16 one = __builtin_copysignf(1.0f, x);
 
-    return __ocml_fabs_f16(x) > 4.5f ? one : ret;
+    return fabs(x) > 4.5f ? one : ret;
 }
 
 __forceinline__ __device__ _Float16 fma(_Float16 a, _Float16 b, _Float16 c)
