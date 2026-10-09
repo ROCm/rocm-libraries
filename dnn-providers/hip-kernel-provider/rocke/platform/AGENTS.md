@@ -234,10 +234,11 @@ ERROR: support is already registered for analysis`. It stays first; if it
 cannot handle the target ISA, the compile fails at `set_isa`.
 
 On Linux, if exactly one distinct COMGR path is mapped and `ROCKE_COMGR_LIB`
-names another existing file, the Python loader raises `ComgrError` before
-`dlopen` can load a second LLVM. An alias of the same file still works. With
-multiple mapped paths or unreadable maps, this narrow check does not change
-override precedence or the mapped-library selection policy. To use a different
+names another existing file with an ELF header, the Python loader raises
+`ComgrError` before `dlopen` can load a second LLVM. An alias of the same file
+still works. Missing or non-ELF overrides keep the existing load-failure
+fallback. With multiple mapped paths or unreadable maps, this check does not
+change override precedence or mapped-library selection. To use a different
 COMGR, compile in a separate process before importing torch.
 
 If you hit `cannot load libamd_comgr.so` in a torch-less process, set

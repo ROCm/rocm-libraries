@@ -138,9 +138,10 @@ ERROR: support is already registered for analysis`. It stays first; if it
 cannot handle the target ISA, the compile fails at `set_isa`.
 
 On Linux, the Python COMGR loader rejects `ROCKE_COMGR_LIB` before `dlopen` if
-it names an existing file different from the only distinct mapped COMGR path.
-An alias of the same file remains valid. With multiple mapped paths or
-unreadable maps, the existing override precedence remains unchanged. Compile
+it names an existing file with an ELF header different from the only mapped
+COMGR path. An alias of the same file remains valid. Missing or non-ELF
+overrides retain the existing load-failure fallback. With multiple mapped
+paths or unreadable maps, override precedence remains unchanged. Compile
 with another COMGR in a separate process before importing torch.
 
 torch is therefore **optional** — required only for the `torch.fx` fusion

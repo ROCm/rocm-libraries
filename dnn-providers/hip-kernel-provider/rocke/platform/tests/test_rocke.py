@@ -6912,10 +6912,13 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
             site, core_lib, torch_stub = self._fake_torch_site(tmp)
             wheel = os.path.join(core_lib, "libamd_comgr.so.3")
+            with open(wheel, "wb") as fh:
+                fh.write(b"\x7fELF")
             root = os.path.join(tmp, "rocm-10.2.0", "lib")
             os.makedirs(root)
             host = os.path.join(root, "libamd_comgr.so.3")
-            open(host, "wb").close()
+            with open(host, "wb") as fh:
+                fh.write(b"\x7fELF")
             maps = os.path.join(tmp, "maps")
             with open(maps, "w") as fh:
                 # Multiple map segments for one file are still one copy.
@@ -6962,6 +6965,22 @@ class TestLibDiscoveryOrder(unittest.TestCase):
                 comgr_mod._load_lib()
                 self.assertEqual(
                     [call.args[0] for call in load.call_args_list], [missing, wheel]
+                )
+
+            # An existing text file is still an unloadable override, not a
+            # second COMGR. The native detector can map the fallback before
+            # Python resolves it, so this check must not reject its fallback.
+            invalid = os.path.join(tmp, "broken.so")
+            with open(invalid, "w") as fh:
+                fh.write("not a shared library")
+            os.environ["ROCKE_COMGR_LIB"] = invalid
+            loaded = object()
+            with mock.patch.object(
+                comgr_mod.ctypes, "CDLL", side_effect=[OSError("invalid ELF"), loaded]
+            ) as load:
+                self.assertIs(comgr_mod._load_lib(), loaded)
+                self.assertEqual(
+                    [call.args[0] for call in load.call_args_list], [invalid, wheel]
                 )
 
             # No mapped copy, or multiple distinct mapped copies, leaves the

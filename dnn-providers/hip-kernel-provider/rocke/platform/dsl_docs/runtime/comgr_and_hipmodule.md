@@ -84,10 +84,11 @@ registered for analysis` (seen with the ROCm 10.1 wheel comgr, LLVM 23,
 beside the ROCm 10.2 `/opt/rocm` comgr, LLVM 24). The stale demotion skips
 a mapped wheel comgr for this reason. On Linux, when exactly one distinct
 COMGR path is mapped, the Python loader rejects an existing
-`ROCKE_COMGR_LIB` file that differs from it before calling `dlopen`. An
-alias of the same file still works; with multiple mapped paths or unreadable
-maps, the existing override priority is unchanged. This check does not
-govern native C++ COMGR AUTO discovery. To compile with another comgr, do
+`ROCKE_COMGR_LIB` file with an ELF header that differs from it before
+calling `dlopen`. An alias of the same file still works. Missing or non-ELF
+overrides retain the existing load-failure fallback. With multiple mapped
+paths or unreadable maps, override priority is unchanged. This check does
+not govern native C++ COMGR AUTO discovery. To compile with another comgr, do
 it in a separate process before importing torch, and hand the HSACO bytes
 to the torch process. A stale mapped comgr rejecting an unsupported ISA
 still reports the ordinary `set_isa` error; #12919 tracks that diagnostic.

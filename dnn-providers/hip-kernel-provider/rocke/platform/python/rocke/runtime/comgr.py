@@ -78,8 +78,8 @@ def _load_lib() -> ctypes.CDLL:
     # A different explicit COMGR beside an already mapped one can load a
     # second LLVM and abort the process before COMGR can return an error.
     # Only the single-copy case identifies that conflict without choosing a
-    # policy for multiple mappings. Invalid/unreadable overrides keep their
-    # normal candidate fallback.
+    # policy for multiple mappings. A non-ELF override cannot load as COMGR;
+    # let the existing candidate fallback handle invalid or unreadable files.
     override = os.environ.get("ROCKE_COMGR_LIB")
     if override and not _IS_WINDOWS and os.path.isfile(override):
         mapped = _mapped_lib("amd_comgr", require_unique=True)
@@ -90,12 +90,18 @@ def _load_lib() -> ctypes.CDLL:
                 pass
             else:
                 if not same_file:
-                    raise ComgrError(
-                        f"ROCKE_COMGR_LIB={override!r} differs from the only "
-                        f"mapped COMGR {mapped!r}; opening a second COMGR can "
-                        "abort LLVM. Point ROCKE_COMGR_LIB at the mapped file "
-                        "or compile in a separate process before loading torch."
-                    )
+                    try:
+                        with open(override, "rb") as candidate:
+                            is_elf = candidate.read(4) == b"\x7fELF"
+                    except OSError:
+                        is_elf = False
+                    if is_elf:
+                        raise ComgrError(
+                            f"ROCKE_COMGR_LIB={override!r} differs from the only "
+                            f"mapped COMGR {mapped!r}; opening a second COMGR can "
+                            "abort LLVM. Point ROCKE_COMGR_LIB at the mapped file "
+                            "or compile in a separate process before loading torch."
+                        )
     failures: List[Tuple[str, OSError]] = []
     for p in _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"]):
         try:
