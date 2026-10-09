@@ -116,9 +116,66 @@ direct arm for the graph's group count first (spatial with one wave below 64 gro
 otherwise std with `block_w` 4 and one wave). Among implicit-GEMM instances,
 `aotInstanceScore` prefers less tile padding and a grid that fills the device, with
 wider vectors breaking ties. It is a placeholder until rocKE's dispatcher ranks
-instances. With benchmarking, hipDNN measures every instance that serves the graph and
-records the fastest. The `kernel_family` knob forces one family, as on the exact-shape
+instances. With benchmarking, hipDNN measures every instance selected for the graph (see
+[Serves and selected](#serves-and-selected)) and records the fastest. The `kernel_family` knob forces one family, as on the exact-shape
 engine.
+
+## Serves and selected
+
+"Serves" and "selected" are separate. An instance **serves** a graph when its binary
+computes it: the capability check of the previous section, one instance at a time. Of
+the instances that serve, the engine **selects** the ones rocKE's own runtime selection
+would run, and only those are its candidates: ranked, benchmarked, or limited by
+`HIPDNN_INGESTOR_CANDIDATE_LIMIT`.
+
+The policy is the default of rocKE's `--run-from-cache` benchmark
+(`_run_from_cache` in `rocke/library/benchmarks/common/benchmark_implicit_gemm_conv.py`):
+`KernelCache.compatible` gives the kernels that serve, then `_widest_vector_sizes` keeps
+the widest vector widths the problem admits. The catalog holds a binary per width
+combination of each configuration, so a problem whose channel runs admit 8-wide access
+is served by the 8-, 4-, 2- and 1-wide copies of most configurations. Narrower access
+does not win, so only one combination runs:
+
+- Kernels are grouped by kind: direction, epilogue, split-K mode, two-stage and group
+  merge. Every packaged instance is forward with the default split-K, two-stage and group
+  merge, so here the kind is the epilogue.
+- The default epilogue stores scalars. When any serving instance stores wider than 1,
+  every default-epilogue instance is dropped, since a `cshuffle` copy stores wider.
+- Per kind, only the widest combination present among the serving instances is kept,
+  widest being the greatest (`a + b + c`, `a`, `b`, `c`). A configuration that cannot
+  reach it is dropped: its tile admits only narrower loads, or its grid does not fit.
+
+The widest combination depends on which instances serve, not on one instance, so the
+policy is a property of the candidate set. The plugin SDK lets a pack refine a
+kernel-scoped matcher with a set-level stage for this: a `CandidateFilterFn`
+(`NativeRegistry.hpp`), registered under the symbol of a kernel-scoped matcher the pack
+already declares. Once every pack is matched, it sees every kernel that matcher admitted
+for the graph, across all packs listing it (both dtype shards here), and keeps a subset.
+No descriptor changes: a matcher with no filter registered keeps what it admitted.
+`hipkernel:Gfx950ConvFwdAot` registers `aotCandidateFilter` under its kernel matcher's
+symbol; the policy itself is `conv::widestVectorSelection` in
+`Gfx950ConvFwdAotSelection.hpp`. Direct depthwise instances are all kept: rocKE's direct
+benchmark (`direct_plans` in `benchmarks/common/direct_kernel_sweep.py`) runs every
+direct kernel that serves, with no cross-candidate rule.
+
+The selected instances are the engine's catalog for the graph, so everything after it
+applies to them alone, in this order: the knob filter (a forced `tile_k` or
+`kernel_family`), the ranking (`aotScore` or a benchmarked record), and
+`HIPDNN_INGESTOR_CANDIDATE_LIMIT`. A forced knob therefore picks among the selected
+instances; a knob value that only narrower copies have selects nothing.
+
+The Python mirror is `gfx950_conv_fwd_aot_runtime_candidates` in
+`rocke/library/builders/common/convolution_forward.py`. Three tests hold the three
+together:
+
+- `library/tests/test_convolution_forward_aot_packaging.py` calls rocKE's own
+  `KernelCache.compatible` and `_widest_vector_sizes` on every identity of the AOT sweep,
+  over a fixed grid of problems, and requires the mirror's selection to be exactly
+  theirs, in both dtypes.
+- `TestGfx950ConvFwdAotSelection.cpp` runs the native kernel matcher and candidate
+  filter over a sample of sweep identities and synthetic graphs.
+  `tests/test_make_conv_aot_config.py` recomputes its expected rows with the mirror.
+- The plugin SDK's `TestKernelIngestorStateManager.cpp` covers the filter stage itself.
 
 ## The shipped catalog
 
@@ -272,15 +329,16 @@ Size limits the catalog stays within:
 
 ### Selecting among thousands of candidates
 
-The catalog is not narrowed for any problem: at full size, a dense graph is served by
-every implicit-GEMM instance of its dtype. Which of them a problem considers is decided
-at runtime. An unbenchmarked plan takes the best by score. Benchmarking loads and
-measures every candidate, so a cold plan build grows with the catalog.
-`HIPDNN_INGESTOR_CANDIDATE_LIMIT=<n>` (`GlobalKnobDefines.hpp`) keeps only the `n`
-best-ranked candidates after knob filtering, before the winner-record lookup, with
-benchmarking on or off. A record benchmarked under a limit therefore covers exactly the
-candidates a later build under the same limit walks. Unset, or any value that is not a
-positive integer, means no limit.
+At full size, a dense graph is served by every implicit-GEMM instance of its dtype; the
+runtime selection ([Serves and selected](#serves-and-selected)) keeps one width
+combination per configuration and epilogue. An unbenchmarked plan takes the best by score.
+Benchmarking loads and measures every selected candidate, so a cold plan build still
+grows with the number of configurations. `HIPDNN_INGESTOR_CANDIDATE_LIMIT=<n>`
+(`GlobalKnobDefines.hpp`) keeps only the `n` best-ranked candidates after knob
+filtering, before the winner-record lookup, with benchmarking on or off. A record
+benchmarked under a limit therefore covers exactly the candidates a later build under
+the same limit walks. Unset, or any value that is not a positive integer, means no
+limit.
 
 ## The seed engine and the GPU tests
 
@@ -314,25 +372,28 @@ with the converter's `--engine-name hipkernel:Gfx950ConvFwdAotSeed`. Its config,
 `configs/gfx950_conv_fwd_aot_seed.yaml`, is committed as a worked example. Its census,
 `TestGfx950ConvFwdAotSeedPacks`, reads the integration root's gfx950 shard.
 
-`IntegrationGpuGfx950ConvFwd.cpp` runs one table of 19 graphs per dtype against both
+`IntegrationGpuGfx950ConvFwd.cpp` runs one table of 24 graphs per dtype against both
 engines, 9 of them depthwise over several group counts, batches and images:
 
-- **`IntegrationGpuGfx950ConvFwdAotSeed`** benchmarks every serving instance, then pins
+- **`IntegrationGpuGfx950ConvFwdAotSeed`** benchmarks every selected instance, then pins
   each one in turn and checks it against the CPU reference. It also forces each family
-  through the `kernel_family` knob.
+  through the `kernel_family` knob. Five graphs exist only so that every seed instance
+  is selected for some graph: an instance never selected would never be pinned.
 - **`IntegrationGpuGfx950ConvFwdAot`** runs the shipped catalog. An unbenchmarked plan
-  is executed and checked. The serving count of each family is checked through the
+  is executed and checked. The selected count of each family is checked through the
   `kernel_family` knob. The 4 best instances by score are pinned and checked. So are 8
   more, drawn by a seeded shuffle of every kernel in the dtype's shards: a record that
   orders all of them covers every candidate, so it serves the first instance in its
-  order that serves the graph. A benchmark under `HIPDNN_INGESTOR_CANDIDATE_LIMIT=64`
-  is checked, and so is its reuse.
+  order that is selected for the graph. A benchmark under
+  `HIPDNN_INGESTOR_CANDIDATE_LIMIT=64` is checked, and so is its reuse.
 
-Each row of the table states how many instances of each family serve the graph, in the
-seed and in the full catalog, with the full catalog's implicit-GEMM count per dtype,
-since each dtype's list is rocKE's sweep for that dtype.
+Each row of the table states how many instances of each family are selected for the
+graph, in the seed and in the full catalog, with the full catalog's implicit-GEMM count
+per dtype, since each dtype's list is rocKE's sweep for that dtype.
 `tests/test_make_conv_aot_config.py` recomputes the counts with
-`gfx950_conv_fwd_aot_serves` over the committed lists. The integration
+`gfx950_conv_fwd_aot_runtime_candidates` over the committed lists, checks that they never
+exceed what `gfx950_conv_fwd_aot_serves` counts, and checks that every seed instance is
+selected for some graph. The integration
 CMake compiles each engine's suite only where that engine ships: the seed's where the
 integration root packs it for gfx950, the product's where the product root offers it.
 
@@ -343,6 +404,6 @@ integration root packs it for gfx950, the product's where the product root offer
   launches this pack does not have, so the converter refuses them and the enumeration
   leaves them out, reporting each algorithm with its reason.
 - One score heuristic, as described above. It is a placeholder until rocKE's
-  dispatcher ranks instances. Benchmarking every serving instance grows with the
-  catalog; `HIPDNN_INGESTOR_CANDIDATE_LIMIT` bounds it to the best-ranked ones, which
-  makes the quality of the score matter more.
+  dispatcher ranks instances. Benchmarking every selected instance grows with the
+  number of configurations in the catalog; `HIPDNN_INGESTOR_CANDIDATE_LIMIT` bounds it
+  to the best-ranked ones, which makes the quality of the score matter more.
