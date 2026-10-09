@@ -2,6 +2,9 @@
   "version": "1.0",
   "id": "bca15e6d-a06a-41d3-83d8-8d26ccefa7ff",
   "name": "Gfx950ConvFwd selector",
-  "kind": "native",
-  "payload": "hipkernel.gfx950_conv_fwd.score"
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.gfx950_conv_fwd.score"
+  }
 }
