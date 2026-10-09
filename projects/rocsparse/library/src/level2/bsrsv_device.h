@@ -75,8 +75,7 @@ namespace rocsparse
         // Initialize y with alpha and x
         for(rocsparse_int bi = lid; bi < block_dim; bi += WFSIZE)
         {
-            rocsparse::store_done_row_data(&y[row * block_dim + bi],
-                                           alpha * x[row * block_dim + bi]);
+            y[row * block_dim + bi] = alpha * x[row * block_dim + bi];
         }
 
         // Loop over the current row
@@ -97,8 +96,8 @@ namespace rocsparse
             // Spin loop until dependency has been resolved
             rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
 
-            // Read the results of the dependencies only after their done flags
-            rocsparse::acquire_done_rows();
+            // Wait for y to be visible globally
+            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 
             // Local sum computation
             for(rocsparse_int bi = lid; bi < block_dim; bi += WFSIZE)
@@ -109,15 +108,11 @@ namespace rocsparse
                 for(rocsparse_int bj = 0; bj < block_dim; ++bj)
                 {
                     local_sum = rocsparse::fma(
-                        bsr_val[BSR_IND(j, bi, bj, dir)],
-                        rocsparse::load_done_row_data(&y[local_col * block_dim + bj]),
-                        local_sum);
+                        bsr_val[BSR_IND(j, bi, bj, dir)], y[local_col * block_dim + bj], local_sum);
                 }
 
                 // Write local sum to y
-                rocsparse::store_done_row_data(
-                    &y[row * block_dim + bi],
-                    rocsparse::load_done_row_data(&y[row * block_dim + bi]) - local_sum);
+                y[row * block_dim + bi] -= local_sum;
             }
         }
 
@@ -134,7 +129,7 @@ namespace rocsparse
                                    : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
-                T val = rocsparse::load_done_row_data(&y[row * block_dim + bi]);
+                T val = y[row * block_dim + bi];
                 // Check for numerical pivot
                 if(diag == static_cast<T>(0))
                 {
@@ -143,17 +138,13 @@ namespace rocsparse
                 else
                 {
                     // Divide result of bi-th BSR row by diagonal entry
-                    val /= diag;
-                    rocsparse::store_done_row_data(&y[row * block_dim + bi], val);
+                    y[row * block_dim + bi] = val /= diag;
                 }
 
                 // Update remaining non-diagonal entries
                 for(rocsparse_int bj = bi + lid + 1; bj < block_dim; bj += WFSIZE)
                 {
-                    rocsparse::store_done_row_data(
-                        &y[row * block_dim + bj],
-                        rocsparse::load_done_row_data(&y[row * block_dim + bj])
-                            - val * bsr_val[BSR_IND(j, bj, bi, dir)]);
+                    y[row * block_dim + bj] -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
                 }
             }
         }
@@ -161,7 +152,7 @@ namespace rocsparse
         // Write "row is done" flag
         if(lid == 0)
         {
-            rocsparse::set_done_flag(&done_array[row], 1);
+            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 
             if(pivot == true)
             {
@@ -216,8 +207,7 @@ namespace rocsparse
         // Initialize y with alpha and x
         for(rocsparse_int bi = lid; bi < block_dim; bi += WFSIZE)
         {
-            rocsparse::store_done_row_data(&y[row * block_dim + bi],
-                                           alpha * x[row * block_dim + bi]);
+            y[row * block_dim + bi] = alpha * x[row * block_dim + bi];
         }
 
         // Loop over the current row
@@ -238,8 +228,8 @@ namespace rocsparse
             // Spin loop until dependency has been resolved
             rocsparse::spin_loop<SLEEP>(&done_array[local_col], __MEMORY_SCOPE_DEVICE);
 
-            // Read the results of the dependencies only after their done flags
-            rocsparse::acquire_done_rows();
+            // Wait for y to be visible globally
+            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 
             // Local sum computation
             for(rocsparse_int bi = lid; bi < block_dim; bi += WFSIZE)
@@ -250,15 +240,11 @@ namespace rocsparse
                 for(rocsparse_int bj = 0; bj < block_dim; ++bj)
                 {
                     local_sum = rocsparse::fma(
-                        bsr_val[BSR_IND(j, bi, bj, dir)],
-                        rocsparse::load_done_row_data(&y[local_col * block_dim + bj]),
-                        local_sum);
+                        bsr_val[BSR_IND(j, bi, bj, dir)], y[local_col * block_dim + bj], local_sum);
                 }
 
                 // Write local sum to y
-                rocsparse::store_done_row_data(
-                    &y[row * block_dim + bi],
-                    rocsparse::load_done_row_data(&y[row * block_dim + bi]) - local_sum);
+                y[row * block_dim + bi] -= local_sum;
             }
         }
 
@@ -275,7 +261,7 @@ namespace rocsparse
                                    : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
-                T val = rocsparse::load_done_row_data(&y[row * block_dim + bi]);
+                T val = y[row * block_dim + bi];
 
                 // Check for numerical pivot
                 if(diag == static_cast<T>(0))
@@ -285,17 +271,13 @@ namespace rocsparse
                 else
                 {
                     // Divide result of bi-th BSR row by diagonal entry
-                    val /= diag;
-                    rocsparse::store_done_row_data(&y[row * block_dim + bi], val);
+                    y[row * block_dim + bi] = val /= diag;
                 }
 
                 // Update remaining non-diagonal entries
                 for(rocsparse_int bj = lid; bj < bi; bj += WFSIZE)
                 {
-                    rocsparse::store_done_row_data(
-                        &y[row * block_dim + bj],
-                        rocsparse::load_done_row_data(&y[row * block_dim + bj])
-                            - val * bsr_val[BSR_IND(j, bj, bi, dir)]);
+                    y[row * block_dim + bj] -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
                 }
             }
         }
@@ -303,7 +285,7 @@ namespace rocsparse
         // Write "row is done" flag
         if(lid == 0)
         {
-            rocsparse::set_done_flag(&done_array[row], 1);
+            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 
             if(pivot == true)
             {

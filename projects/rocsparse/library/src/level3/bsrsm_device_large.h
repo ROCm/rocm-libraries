@@ -95,12 +95,8 @@ namespace rocsparse
                 rocsparse::spin_loop<SLEEP>(&done_array[local_col + id], __MEMORY_SCOPE_DEVICE);
             }
 
-            // Make the results of the dependencies visible. With non-coherent XCD L2s they are
-            // read with device scope atomics instead.
-            if constexpr(!rocsparse::has_noncoherent_xcd_l2)
-            {
-                __threadfence();
-            }
+            // Make sure updated X is visible globally
+            __threadfence();
 
             // Wait for spin looping thread to finish as the whole block depends on this row
             __syncthreads();
@@ -120,15 +116,12 @@ namespace rocsparse
                     for(int bj = 0; bj < block_dim; ++bj)
                     {
                         sum = rocsparse::fma(bsr_val[BSR_IND(j, bi, bj, dir)],
-                                             rocsparse::load_done_row_data(
-                                                 &X[(block_dim * local_col + bj) * ldx + col_X]),
+                                             X[(block_dim * local_col + bj) * ldx + col_X],
                                              sum);
                     }
 
                     // Write local sum to X
-                    T* x_row = &X[(block_dim * row + bi) * ldx + col_X];
-                    rocsparse::store_done_row_data(x_row,
-                                                   rocsparse::load_done_row_data(x_row) - sum);
+                    X[(block_dim * row + bi) * ldx + col_X] -= sum;
                 }
             }
         }
@@ -147,7 +140,7 @@ namespace rocsparse
                                    : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
-                T val = rocsparse::load_done_row_data(&X[(block_dim * row + bi) * ldx + col_X]);
+                T val = X[(block_dim * row + bi) * ldx + col_X];
 
                 // Check for numerical pivot
                 if(diag == static_cast<T>(0))
@@ -157,31 +150,26 @@ namespace rocsparse
                 else
                 {
                     // Divide result of bi-th BSR row by diagonal entry
-                    val /= diag;
-                    rocsparse::store_done_row_data(&X[(block_dim * row + bi) * ldx + col_X], val);
+                    X[(block_dim * row + bi) * ldx + col_X] = val /= diag;
                 }
 
                 // Update remaining non-diagonal entries
                 for(int bj = lid; bj < bi; bj += WFSIZE)
                 {
-                    T* x_row = &X[(block_dim * row + bj) * ldx + col_X];
-                    rocsparse::store_done_row_data(x_row,
-                                                   rocsparse::load_done_row_data(x_row)
-                                                       - val * bsr_val[BSR_IND(j, bj, bi, dir)]);
+                    X[(block_dim * row + bj) * ldx + col_X]
+                        -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
                 }
             }
         }
 
-        // Complete the stores of the results before the done flag is set
-        rocsparse::release_done_row_data();
+        // Make sure X is written to global memory before setting row is done flag
+        __threadfence();
 
-        // Wait for all wavefronts to complete their stores before we mark the row "done"
+        // Wait for all threads to finish the threadfence before we mark the row "done"
         __syncthreads();
 
         if(row < mb && threadIdx.x == 0)
         {
-            // The stores of all wavefronts completed before the barrier, so a relaxed store
-            // suffices; set_done_flag only covers the calling wavefront.
             // Write "row is done" flag
             rocsparse::atomic_store(
                 &done_array[row + id], 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
@@ -260,12 +248,8 @@ namespace rocsparse
                 rocsparse::spin_loop<SLEEP>(&done_array[local_col + id], __MEMORY_SCOPE_DEVICE);
             }
 
-            // Make the results of the dependencies visible. With non-coherent XCD L2s they are
-            // read with device scope atomics instead.
-            if constexpr(!rocsparse::has_noncoherent_xcd_l2)
-            {
-                __threadfence();
-            }
+            // Make sure updated X is visible globally
+            __threadfence();
 
             // Wait for spin looping thread to finish as the whole block depends on this row
             __syncthreads();
@@ -285,15 +269,12 @@ namespace rocsparse
                     for(int bj = 0; bj < block_dim; ++bj)
                     {
                         sum = rocsparse::fma(bsr_val[BSR_IND(j, bi, bj, dir)],
-                                             rocsparse::load_done_row_data(
-                                                 &X[(block_dim * local_col + bj) * ldx + col_X]),
+                                             X[(block_dim * local_col + bj) * ldx + col_X],
                                              sum);
                     }
 
                     // Write local sum to X
-                    T* x_row = &X[(block_dim * row + bi) * ldx + col_X];
-                    rocsparse::store_done_row_data(x_row,
-                                                   rocsparse::load_done_row_data(x_row) - sum);
+                    X[(block_dim * row + bi) * ldx + col_X] -= sum;
                 }
             }
         }
@@ -312,7 +293,7 @@ namespace rocsparse
                              : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
-                T val = rocsparse::load_done_row_data(&X[(block_dim * row + bi) * ldx + col_X]);
+                T val = X[(block_dim * row + bi) * ldx + col_X];
 
                 // Check for numerical pivot
                 if(diag == static_cast<T>(0))
@@ -322,31 +303,26 @@ namespace rocsparse
                 else
                 {
                     // Divide result of bi-th BSR row by diagonal entry
-                    val /= diag;
-                    rocsparse::store_done_row_data(&X[(block_dim * row + bi) * ldx + col_X], val);
+                    X[(block_dim * row + bi) * ldx + col_X] = val /= diag;
                 }
 
                 // Update remaining non-diagonal entries
                 for(int bj = bi + lid + 1; bj < block_dim; bj += WFSIZE)
                 {
-                    T* x_row = &X[(block_dim * row + bj) * ldx + col_X];
-                    rocsparse::store_done_row_data(x_row,
-                                                   rocsparse::load_done_row_data(x_row)
-                                                       - val * bsr_val[BSR_IND(j, bj, bi, dir)]);
+                    X[(block_dim * row + bj) * ldx + col_X]
+                        -= val * bsr_val[BSR_IND(j, bj, bi, dir)];
                 }
             }
         }
 
-        // Complete the stores of the results before the done flag is set
-        rocsparse::release_done_row_data();
+        // Make sure X is written to global memory before setting row is done flag
+        __threadfence();
 
-        // Wait for all wavefronts to complete their stores before we mark the row "done"
+        // Wait for all threads to finish the threadfence before we mark the row "done"
         __syncthreads();
 
         if(row < mb && threadIdx.x == 0)
         {
-            // The stores of all wavefronts completed before the barrier, so a relaxed store
-            // suffices; set_done_flag only covers the calling wavefront.
             // Write "row is done" flag
             rocsparse::atomic_store(
                 &done_array[row + id], 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
