@@ -436,10 +436,12 @@ DataflowState WaitDataflow::mergeFromPredecessors(
         const auto& predState = it->second;
         const LdsRingData* edgeRing = nullptr;
         uint32_t edgeWaves = LdsRingAccess::kAllWaves;
+        bool takenEdge = false;
         if (IRBase* terminator = p->getTerminator()) {
             if (auto* inst = dyn_cast<StinkyInstruction>(terminator)) {
                 edgeRing = inst->getModifier<LdsRingData>();
                 edgeWaves = waveRoleEdgeMask(*inst, *p, bb);
+                takenEdge = isBranch(*inst) && getBranchTarget(*inst) == bb.getLabel();
             }
         }
         const bool backEdge = isBackEdge(p, &bb);
@@ -462,7 +464,7 @@ DataflowState WaitDataflow::mergeFromPredecessors(
                         }
                     }
                 }
-                if (edgeRing != nullptr && !edgeRing->advances.empty() && backEdge) {
+                if (edgeRing != nullptr && !edgeRing->advances.empty() && (backEdge || takenEdge)) {
                     for (QueuedOp& queued : q.ops) {
                         const auto* opRing =
                             queued.op == nullptr ? nullptr : queued.op->getModifier<LdsRingData>();

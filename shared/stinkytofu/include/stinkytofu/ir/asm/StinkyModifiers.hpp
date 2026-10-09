@@ -1129,7 +1129,8 @@ struct LdsRingAccess {
     bool operator==(const LdsRingAccess&) const = default;
 };
 
-/// Frame movement performed by one CFG edge.
+/// Frame movement along the edge a branch takes: a loop's back edge, or a jump
+/// that skips loop trips (a negative amount).
 struct LdsFrameAdvance {
     int frame = 0;
     int amount = 0;
