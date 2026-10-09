@@ -42,8 +42,11 @@
 #include "hipblaslt_vector.hpp"
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
-#include "w4a16_datagen.hpp"
 #endif
+// Not behind HIPBLASLT_ENABLE_MXDATAGENERATOR: w4a16 generates its own data and
+// generateW4A16Input is called unconditionally below, so gating this header
+// breaks the clients wherever that option is off (the Windows default).
+#include "w4a16_datagen.hpp"
 #include "near.hpp"
 #include "norm.hpp"
 #include "ulp.hpp"

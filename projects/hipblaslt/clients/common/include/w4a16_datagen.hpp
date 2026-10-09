@@ -84,7 +84,11 @@ inline std::vector<float> generateW4A16Input(void*       packedA,
     const int64_t kGroups     = (k + groupSize - 1) / groupSize;
     const bool    unsignedEnc = encoding != HIPBLASLT_INT4_ENCODING_SIGNED_EXT;
     auto*         weights     = static_cast<uint8_t*>(packedA);
-    auto*         zeros       = static_cast<uint8_t*>(scale) + zeroPointOffset(m, kGroups);
+    // Symmetric modes allocate no zero-point region, so the offset would land
+    // past one-past-the-end; forming that pointer at all is undefined.
+    auto*         zeros       = zeroPoint ? static_cast<uint8_t*>(scale)
+                                                + zeroPointOffset(m, kGroups)
+                                          : nullptr;
 
     std::mt19937                          rng(seed);
     std::uniform_int_distribution<int>    nibbleDist(0, 15);
