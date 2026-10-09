@@ -3,10 +3,12 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -157,6 +159,113 @@ TEST(TestIngestorWinnerCache, OrderByRecordFallsThroughToRankOneWhenRankZeroDisp
     ASSERT_EQ(ordered.size(), 1U);
     EXPECT_EQ(ordered[0].kernelId, validRankOne.kernelId)
         << "a stale rank 0 must fall through to rank 1, not empty the result";
+}
+
+/// The quadratic scans recordCovers and orderByRecord replaced, kept verbatim as the
+/// oracle the hashed versions must agree with.
+bool referenceRecordCovers(const WinnerRecord& record, const std::vector<KernelDefinition>& kernels)
+{
+    return std::all_of(kernels.begin(), kernels.end(), [&record](const KernelDefinition& kernel) {
+        return std::any_of(record.begin(), record.end(), [&kernel](const RankedEntry& entry) {
+            return entry.kernelId == kernel.kernelId;
+        });
+    });
+}
+
+std::vector<KernelDefinition> referenceOrderByRecord(const WinnerRecord& record,
+                                                     const std::vector<KernelDefinition>& kernels)
+{
+    std::vector<KernelDefinition> ordered;
+    for(const auto& entry : record)
+    {
+        const auto match = std::find_if(
+            kernels.begin(), kernels.end(), [&entry](const KernelDefinition& kernel) {
+                return kernel.kernelId == entry.kernelId && kernel.packId == entry.packId
+                       && kernel.dispatchId == entry.dispatchId;
+            });
+        if(match != kernels.end())
+        {
+            ordered.push_back(*match);
+        }
+    }
+    return ordered;
+}
+
+/// Small id alphabets so collisions are common: repeated kernels in the candidates (the
+/// first must win), repeated record entries (each repeats its kernel), ids the record
+/// covers under a stale pack or dispatch, and record entries no candidate carries.
+TEST(TestIngestorWinnerCache, HashedRecordFunctionsAgreeWithTheLinearScansOnRandomInputs)
+{
+    std::mt19937 random(0x5eed);
+    const auto pick
+        = [&random](int bound) { return std::uniform_int_distribution<int>(0, bound - 1)(random); };
+
+    constexpr int TRIALS = 2000;
+    for(int trial = 0; trial < TRIALS; ++trial)
+    {
+        const int kernelAlphabet = 1 + pick(24);
+        const int packAlphabet = 1 + pick(3);
+        const int dispatchAlphabet = 1 + pick(2);
+        const auto randomDefinition = [&] {
+            return definitionFor(static_cast<uint8_t>(pick(kernelAlphabet)),
+                                 static_cast<uint8_t>(0xA0 + pick(packAlphabet)),
+                                 static_cast<uint8_t>(0xD0 + pick(dispatchAlphabet)));
+        };
+
+        std::vector<KernelDefinition> kernels(static_cast<size_t>(pick(20)));
+        for(size_t index = 0; index < kernels.size(); ++index)
+        {
+            kernels[index] = randomDefinition();
+            // Tells two candidates sharing a triple apart, so "the first one wins" is checked.
+            kernels[index].priority = static_cast<int64_t>(index);
+        }
+
+        WinnerRecord record(static_cast<size_t>(pick(24)));
+        for(auto& entry : record)
+        {
+            // Mostly entries taken from the candidates, so full coverage happens often.
+            entry = !kernels.empty() && pick(4) != 0
+                        ? entryFor(
+                              kernels[static_cast<size_t>(pick(static_cast<int>(kernels.size())))],
+                              1.0)
+                        : entryFor(randomDefinition(), 1.0);
+        }
+
+        ASSERT_EQ(recordCovers(record, kernels), referenceRecordCovers(record, kernels))
+            << "trial " << trial;
+
+        const auto ordered = orderByRecord(record, kernels);
+        const auto expected = referenceOrderByRecord(record, kernels);
+        ASSERT_EQ(ordered.size(), expected.size()) << "trial " << trial;
+        for(size_t index = 0; index < ordered.size(); ++index)
+        {
+            ASSERT_EQ(ordered[index].kernelId, expected[index].kernelId) << "trial " << trial;
+            ASSERT_EQ(ordered[index].packId, expected[index].packId) << "trial " << trial;
+            ASSERT_EQ(ordered[index].dispatchId, expected[index].dispatchId) << "trial " << trial;
+            ASSERT_EQ(ordered[index].priority, expected[index].priority)
+                << "trial " << trial << ": a repeated triple must resolve to its first candidate";
+        }
+
+        const auto served = orderIfFullyCovered(record, kernels);
+        const bool expectServed
+            = referenceRecordCovers(record, kernels) && expected.size() == kernels.size();
+        ASSERT_EQ(served.has_value(), expectServed) << "trial " << trial;
+    }
+}
+
+TEST(TestIngestorWinnerCache, OrderByRecordResolvesARepeatedTripleToItsFirstCandidate)
+{
+    auto first = definitionFor(0x01);
+    first.priority = 1;
+    auto repeat = definitionFor(0x01);
+    repeat.priority = 2;
+    const WinnerRecord record{entryFor(first, 1.0), entryFor(first, 2.0)};
+
+    const auto ordered = orderByRecord(record, {first, repeat});
+
+    ASSERT_EQ(ordered.size(), 2U) << "a repeated record entry repeats its kernel";
+    EXPECT_EQ(ordered[0].priority, 1);
+    EXPECT_EQ(ordered[1].priority, 1);
 }
 
 TEST(TestIngestorWinnerCache, KeysDifferingOnlyInDeviceAreDistinct)

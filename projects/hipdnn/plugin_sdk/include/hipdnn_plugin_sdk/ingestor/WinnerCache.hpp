@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
@@ -82,33 +84,93 @@ enum class WinnerWriteCause
 /// Does @p record carry a measurement for every kernel in @p kernels? One-directional:
 /// entries in @p record absent from @p kernels do not fail coverage. Production
 /// decisions go through `orderIfFullyCovered` below, not this directly.
+///
+/// Linear in `record.size() + kernels.size()`: the record's ids are hashed once rather
+/// than scanned per kernel, since a record can cover tens of thousands of candidates.
 inline bool recordCovers(const WinnerRecord& record, const std::vector<KernelDefinition>& kernels)
 {
-    return std::all_of(kernels.begin(), kernels.end(), [&record](const KernelDefinition& kernel) {
-        return std::any_of(record.begin(), record.end(), [&kernel](const RankedEntry& entry) {
-            return entry.kernelId == kernel.kernelId;
-        });
+    if(kernels.empty())
+    {
+        return true;
+    }
+    std::unordered_set<DescriptorId, DescriptorIdHash> recorded;
+    recorded.reserve(record.size());
+    for(const auto& entry : record)
+    {
+        recorded.insert(entry.kernelId);
+    }
+    return std::all_of(kernels.begin(), kernels.end(), [&recorded](const KernelDefinition& kernel) {
+        return recorded.find(kernel.kernelId) != recorded.end();
     });
 }
+
+namespace detail
+{
+
+/// The `(kernelId, packId, dispatchId)` triple `orderByRecord` matches on.
+struct RecordedKernelKey
+{
+    DescriptorId kernelId{};
+    DescriptorId packId{};
+    DescriptorId dispatchId{};
+
+    bool operator==(const RecordedKernelKey& other) const
+    {
+        return kernelId == other.kernelId && packId == other.packId
+               && dispatchId == other.dispatchId;
+    }
+};
+
+struct RecordedKernelKeyHash
+{
+    size_t operator()(const RecordedKernelKey& key) const noexcept
+    {
+        const DescriptorIdHash hash;
+        size_t seed = hash(key.kernelId);
+        for(const size_t part : {hash(key.packId), hash(key.dispatchId)})
+        {
+            seed ^= part + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+        }
+        return seed;
+    }
+};
+
+} // namespace detail
 
 /// Reorders @p kernels into @p record's ranked order, dropping any kernel the record
 /// does not carry and any entry whose `packId`/`dispatchId` no longer agree (distinct
 /// from `recordCovers`'s coverage check). An empty result means the caller falls back.
+///
+/// Each record entry resolves to the FIRST kernel in @p kernels carrying its triple, and
+/// an entry repeated in the record repeats its kernel, exactly as a linear scan per entry
+/// would; the kernels are indexed once so the whole call is linear rather than quadratic.
 inline std::vector<KernelDefinition> orderByRecord(const WinnerRecord& record,
                                                    const std::vector<KernelDefinition>& kernels)
 {
     std::vector<KernelDefinition> ordered;
     ordered.reserve(kernels.size());
+    if(record.empty() || kernels.empty())
+    {
+        return ordered;
+    }
+
+    std::unordered_map<detail::RecordedKernelKey, size_t, detail::RecordedKernelKeyHash> firstIndex;
+    firstIndex.reserve(kernels.size());
+    for(size_t index = 0; index < kernels.size(); ++index)
+    {
+        const auto& kernel = kernels[index];
+        // emplace keeps the first index on a repeat, matching find_if's first hit.
+        firstIndex.emplace(
+            detail::RecordedKernelKey{kernel.kernelId, kernel.packId, kernel.dispatchId}, index);
+    }
+
     for(const auto& entry : record)
     {
-        const auto match = std::find_if(
-            kernels.begin(), kernels.end(), [&entry](const KernelDefinition& kernel) {
-                return kernel.kernelId == entry.kernelId && kernel.packId == entry.packId
-                       && kernel.dispatchId == entry.dispatchId;
-            });
-        if(match != kernels.end())
+        const auto match = firstIndex.find(
+            detail::RecordedKernelKey{entry.kernelId, entry.packId, entry.dispatchId});
+        if(match != firstIndex.end())
         {
-            ordered.push_back(*match);
+            ordered.push_back(kernels[match->second]);
         }
     }
     return ordered;
