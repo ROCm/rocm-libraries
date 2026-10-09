@@ -359,7 +359,8 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         nargs="+",
         default=None,
         dest="group_by",
-        help="Columns for GroupKFold (prevents problem leakage)",
+        help="Columns identifying a problem, shape column first. Cross-validation folds "
+        "by the shape, so no shape is in both train and validation on any device",
     )
     parser.add_argument(
         "--group-by-feature",

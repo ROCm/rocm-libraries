@@ -320,3 +320,40 @@ def test_a_caller_that_installs_the_model_itself_gets_no_hint(
     assert train(_l1_arguments(corpus, output, "--feature-evaluator", evaluator)) == 0
     assert (output / "heuristic.uhd.json").is_file()
     assert "Install:" not in capsys.readouterr().out
+
+
+def test_cross_validation_never_splits_a_shape_across_devices(monkeypatch):
+    """A shape validated on one GPU while trained on another is not unseen."""
+    import numpy as np
+    import pandas as pd
+
+    from uhd_gen import train_uhd
+
+    captured = {}
+    real_cv = train_uhd.lgb.cv
+
+    def capture(params, train_set, **kwargs):
+        captured["folds"] = kwargs["folds"]
+        return real_cv(params, train_set, **kwargs)
+
+    monkeypatch.setattr(train_uhd.lgb, "cv", capture)
+    frame = pd.DataFrame(
+        [
+            {
+                "benchmark": f"g{shape}",
+                "device": device,
+                "m": shape,
+                "tflops": 1.0 + shape,
+            }
+            for shape in range(20)
+            for device in ("mi300x", "mi325x")
+        ]
+    )
+    train_uhd.train_model(
+        frame, ["m"], "tflops", ["benchmark", "device"], num_boost_round=5
+    )
+
+    shapes = frame["benchmark"].to_numpy()
+    for train, valid in captured["folds"]:
+        assert set(shapes[train]) & set(shapes[valid]) == set()
+    assert np.unique(shapes).size == 20

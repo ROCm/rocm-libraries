@@ -284,10 +284,12 @@ def _problem_digest(key: Sequence[str], seed: int) -> str:
 def split_problems(
     keys: Iterable[tuple[str, ...]], fraction: float, seed: int
 ) -> Split:
-    """Hold out `fraction` of the problems, reproducibly.
+    """Hold out `fraction` of the shapes, reproducibly, with every problem on them.
 
-    Assigned by a seeded hash of the problem key, so row order or appended rows do not
-    move the split (§5.6.3).
+    A problem key starts with its shape (`benchmark`); all its devices land on one side,
+    so a shape trained on one GPU is never scored as unseen on another. Assigned by a
+    seeded hash of the shape, so row order or appended rows do not move the split
+    (§5.6.3).
     """
     if not 0.0 < fraction <= 1.0:
         raise ValueError(f"--eval-fraction must be in (0, 1]; got {fraction}")
@@ -296,13 +298,16 @@ def split_problems(
     if not ordered:
         return Split(seed, fraction, (), ())
 
-    ranked = sorted(ordered, key=lambda key: _problem_digest(key, seed))
+    shapes = sorted(
+        {key[0] for key in ordered}, key=lambda shape: _problem_digest((shape,), seed)
+    )
     if fraction >= 1.0:
-        count = len(ranked)
+        count = len(shapes)
     else:
-        # At least one problem, so a small corpus gets an imprecise slice, not an empty one.
-        count = max(1, round(fraction * len(ranked)))
-    held_out = set(ranked[:count])
+        # At least one shape, so a small corpus gets an imprecise slice, not an empty one.
+        count = max(1, round(fraction * len(shapes)))
+    held_shapes = set(shapes[:count])
+    held_out = {key for key in ordered if key[0] in held_shapes}
     return Split(
         seed,
         fraction,

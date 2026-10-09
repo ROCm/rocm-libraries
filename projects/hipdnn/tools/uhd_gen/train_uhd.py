@@ -106,7 +106,9 @@ def train_model(
 ) -> lgb.Booster:
     """Train a LightGBM regressor on log(target) -- score_transform.TRAINED.
 
-    `group_cols` selects GroupKFold so no problem is in both train and validation.
+    `group_cols` identifies a problem (shape first, then device) and selects GroupKFold
+    over shapes: every device's measurements of one shape fall in the same fold, so no
+    shape is in both train and validation.
     `categorical_encoding` (from features.derive_categorical_encoding) is the map the
     model is fitted with, so it is the map the descriptor must ship.
     """
@@ -132,9 +134,9 @@ def train_model(
 
     # `folds` takes precomputed splits; a plain split count must go in `nfold`.
     if group_cols:
-        groups = df.groupby(group_cols).ngroup().values
+        groups = df.groupby(group_cols[0]).ngroup().values
         cv_kwargs = {"folds": list(GroupKFold(n_splits=n_splits).split(X, y, groups))}
-        logger.info("Using GroupKFold with %d groups", len(np.unique(groups)))
+        logger.info("Using GroupKFold with %d shapes", len(np.unique(groups)))
     else:
         # stratified=True would use StratifiedKFold, which rejects a continuous target.
         cv_kwargs = {"nfold": n_splits, "stratified": False}
