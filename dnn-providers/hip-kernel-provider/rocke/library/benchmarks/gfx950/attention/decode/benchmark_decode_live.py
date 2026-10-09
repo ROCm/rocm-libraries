@@ -35,7 +35,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, List, Optional
 
-
 # ---------------------------------------------------------------------------
 # Shape loading
 # ---------------------------------------------------------------------------
@@ -287,7 +286,7 @@ def _run_dsl(shape: DecodeShape, data: dict, num_cus: int, *, warmup: int, iters
 
     try:
         from dispatch.attention import AttentionRequest, dispatch_attention
-        from kernels import UnifiedAttentionProblem, run_unified_attention_torch  # type: ignore
+        from kernels import UnifiedAttentionProblem, run_unified_attention_torch, prepare_unified_attention_torch  # type: ignore
         from kernels.common.attention_unified import _resolve_attention_arch
     except ImportError:
         return None, None, None
@@ -339,29 +338,39 @@ def _run_dsl(shape: DecodeShape, data: dict, num_cus: int, *, warmup: int, iters
             fp8_fnuz=shape.fp8_fnuz,
         )
 
-        def call_once():
-            run_unified_attention_torch(
-                problem=prob,
-                q=data["q"],
-                k=data["kc"],
-                v=data["vc"],
-                out=out,
-                cu_seqlens_q=data["cu_q"],
-                seqused_k=data["kv_lens"],
-                softmax_scale=data["scale"],
-                block_table=data["block_table"],
-                softcap=data["softcap"],
-                sinks=data["sinks"],
-                alibi_slopes=data["alibi_slopes"],
-                qq_bias=data["qq_bias"],
-                backend=run_backend,
-                k_scale=data["k_scale"],
-                v_scale=data["v_scale"],
-                stream=hip_stream,
+        arguments = dict(
+            problem=prob,
+            q=data["q"],
+            k=data["kc"],
+            v=data["vc"],
+            out=out,
+            cu_seqlens_q=data["cu_q"],
+            seqused_k=data["kv_lens"],
+            softmax_scale=data["scale"],
+            block_table=data["block_table"],
+            softcap=data["softcap"],
+            sinks=data["sinks"],
+            alibi_slopes=data["alibi_slopes"],
+            qq_bias=data["qq_bias"],
+            backend=run_backend,
+            k_scale=data["k_scale"],
+            v_scale=data["v_scale"],
+            stream=hip_stream,
+        )
+        execution = (
+            prepare_unified_attention_torch(**arguments) if path == "3d" else None
+        )
+        try:
+            call_once = (
+                execution.launch
+                if execution
+                else lambda: run_unified_attention_torch(**arguments)
             )
-
-        ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
-        synchronize_and_release(hip_stream)
+            ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
+            synchronize_and_release(hip_stream)
+        finally:
+            if execution is not None:
+                execution.close()
         return ms, path, kernel_name
     except Exception:
         return None, None, None
