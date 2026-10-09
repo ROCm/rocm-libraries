@@ -5724,8 +5724,11 @@ namespace TensileLite
     size_t ContractionSolution::requiredWorkspaceSize(Problem const&  problem,
                                                       Hardware const& hardware) const
     {
+        // Forced data-parallel solutions need no GSU/StreamK workspace, but a fused
+        // RMSNorm epilogue still needs its transient partial-sum-of-squares buffer
+        // (accounted for below), so this must not skip past that.
         if(sizeMapping.isPersistentDataParallel())
-            return 0;
+            return sizeMapping.rmsEpilogue ? partialRMSPartialBufBytes(problem) : 0;
         size_t size = 0;
         // TODO: Pass GSU from problem and change value[2] to gsu if gsu != default value
         size_t gsu
