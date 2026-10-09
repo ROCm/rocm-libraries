@@ -58,24 +58,38 @@ function(hipccl_install_legacy_header_symlink SUBDIR)
     # failed link (read-only prefix, insufficient privileges) produced a
     # successful-looking install with no symlink.
     #
-    # A link that file(CREATE_LINK) reports as created is not necessarily usable.
-    # On Windows, with the symlink privilege available, it succeeds for this
-    # relative directory target but yields a broken file-type link (a
-    # forward-slash relative target does not resolve, and the link is not made
-    # a directory link), which then fails with WinError 123 in any tool that
-    # opens or copies it. So Windows hosts copy directly, and every platform
-    # checks IS_DIRECTORY after creating a link and falls back to a copy.
-    set(_hipccl_copy_only FALSE)
+    # On Windows, file(CREATE_LINK) can report success for this relative
+    # directory target yet yield a broken file-type link (a forward-slash
+    # relative target does not resolve, and the link is not made a directory
+    # link), which then fails with WinError 123 in any tool that opens or copies
+    # it. More fundamentally, symlinks are optional on Windows (they need
+    # Developer Mode or a privilege) and ROCm packages must work without them,
+    # so Windows hosts never get a link: the headers are copied. Elsewhere, a
+    # link that fails the IS_DIRECTORY check falls back to a copy.
+    #
+    # The platform is chosen here, at configure time, with two separate
+    # install(CODE) bodies. Do not interpolate a TRUE/FALSE flag into the
+    # generated script instead: it runs without this project's policy settings,
+    # so under CMP0012 OLD (CMake < 4.0) a literal TRUE in if() is not read as a
+    # constant and the wrong branch is taken.
     if(CMAKE_HOST_WIN32)
-        set(_hipccl_copy_only TRUE)
+        install(CODE "
+            set(SRC \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/${SUBDIR})
+            get_filename_component(DEST_PARENT \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/.. ABSOLUTE)
+            file(MAKE_DIRECTORY \${DEST_PARENT})
+            message(STATUS \"legacy header copy: \${DEST_PARENT}/${SUBDIR} (Windows: symlinks are not used)\")
+            file(COPY \${SRC} DESTINATION \${DEST_PARENT})
+        ")
+        return()
     endif()
-    set(HIPCCL_INSTALL_CMD "
+
+    install(CODE "
         set(SRC \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/${SUBDIR})
         get_filename_component(DEST_PARENT \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/.. ABSOLUTE)
         set(DEST \${DEST_PARENT}/${SUBDIR})
         file(MAKE_DIRECTORY \${DEST_PARENT})
         file(RELATIVE_PATH SRC_REL \${DEST_PARENT} \${SRC})
-        if(NOT ${_hipccl_copy_only} AND EXISTS \${DEST} AND NOT IS_SYMLINK \${DEST})
+        if(EXISTS \${DEST} AND NOT IS_SYMLINK \${DEST})
             message(WARNING
                 \"legacy header symlink: \${DEST} already exists and is not \"
                 \"a symlink (looks like a real, separately-installed package) \"
@@ -85,29 +99,19 @@ function(hipccl_install_legacy_header_symlink SUBDIR)
             if(IS_SYMLINK \${DEST})
                 file(REMOVE \${DEST})
             endif()
-            set(_hipccl_linked FALSE)
-            if(NOT ${_hipccl_copy_only})
-                message(STATUS \"legacy header symlink: \${DEST} -> \${SRC_REL}\")
-                file(CREATE_LINK \${SRC_REL} \${DEST} RESULT _hipccl_link_result SYMBOLIC)
-                if(_hipccl_link_result STREQUAL \"0\" AND IS_DIRECTORY \${DEST})
-                    set(_hipccl_linked TRUE)
-                elseif(IS_SYMLINK \${DEST})
+            message(STATUS \"legacy header symlink: \${DEST} -> \${SRC_REL}\")
+            file(CREATE_LINK \${SRC_REL} \${DEST} RESULT _hipccl_link_result SYMBOLIC)
+            if(NOT _hipccl_link_result STREQUAL \"0\" OR NOT IS_DIRECTORY \${DEST})
+                if(IS_SYMLINK \${DEST})
                     file(REMOVE \${DEST})
                 endif()
-            endif()
-            if(NOT _hipccl_linked)
-                if(${_hipccl_copy_only})
-                    message(STATUS \"legacy header copy: \${DEST} (Windows: symlinks are not used)\")
-                else()
-                    message(WARNING
-                        \"legacy header symlink: no usable link at \${DEST} \"
-                        \"(result: '\${_hipccl_link_result}') - copying the headers \"
-                        \"there instead. Unlike a symlink, the copy will not pick \"
-                        \"up later changes to \${SRC}.\")
-                endif()
+                message(WARNING
+                    \"legacy header symlink: no usable link at \${DEST} \"
+                    \"(result: '\${_hipccl_link_result}') - copying the headers \"
+                    \"there instead. Unlike a symlink, the copy will not pick \"
+                    \"up later changes to \${SRC}.\")
                 file(COPY \${SRC} DESTINATION \${DEST_PARENT})
             endif()
         endif()
     ")
-    install(CODE "${HIPCCL_INSTALL_CMD}")
 endfunction()

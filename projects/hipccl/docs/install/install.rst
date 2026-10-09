@@ -105,12 +105,13 @@ details, and plan to update include paths to
 
 .. note::
 
-   On Windows the compatibility paths are installed as copies of the headers,
-   not symlinks, because symlinks created at install time are not reliable
-   there. The copies use additional disk space and are not refreshed if only
-   one of the two header trees is updated later. Whether they are present in a
-   given binary distribution depends on how it was built: if
-   ``<prefix>/include/rocprim`` does not exist, use
+   Symlink support on Windows is optional (it requires Developer Mode or an
+   elevated privilege), and ROCm packages must work without it. On Windows the
+   compatibility paths are therefore always installed as copies of the
+   headers, never as symlinks. The copies use additional disk space and are
+   refreshed only when hipCCL is installed again. Do not rely on the
+   compatibility paths on Windows: they may be absent from a given binary
+   distribution. If ``<prefix>/include/rocprim`` does not exist, use
    ``-I<prefix>/include/hipccl`` instead.
 
 .. _install-upgrading:
