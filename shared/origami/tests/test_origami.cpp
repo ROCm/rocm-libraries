@@ -607,19 +607,18 @@ TEST_CASE("Origami: buffer load/store tie-break", "[origami]") {
       REQUIRE_FALSE(results[3].config.tensile().buffer_load);
       REQUIRE_FALSE(results[3].config.tensile().buffer_store);
 
-      // A higher-arithmetic-intensity tile outranks buffer preference inside the
-      // latency tie. Its flags are buffer load on and buffer store off, which is
-      // only the second buffer rank, so it finishes first because the
-      // arithmetic-intensity sort runs after the buffer sort. Equal-intensity
-      // tiles keep the buffer order established above.
+      // Buffer preference outranks arithmetic intensity inside the latency tie:
+      // the buffer sort runs last, so arithmetic intensity only orders tiles
+      // within the same buffer rank. Each higher-intensity tile leads its own
+      // buffer group but stays behind every tile with a better buffer rank.
       auto arithmetic_intensity = [](const origami::config_t& config) {
         const double flops          = 2.0 * config.mt.m * config.mt.n * config.mt.k;
         const double memory_traffic = static_cast<double>(
             config.mt.m * config.mt.k + config.mt.n * config.mt.k + config.mt.m * config.mt.n);
         return flops / memory_traffic;
       };
-      auto higher_ai = with_buffer_flags(true, false, 4);
-      higher_ai.mt   = {128, 256, 64};
+      auto higher_ai  = with_buffer_flags(true, false, 4);
+      higher_ai.mt    = {128, 256, 64};
       auto higher_ai2 = with_buffer_flags(false, false, 5);
       higher_ai2.mt   = {128, 256, 64};
       REQUIRE(arithmetic_intensity(higher_ai) > arithmetic_intensity(configs.front()));
@@ -632,14 +631,17 @@ TEST_CASE("Origami: buffer load/store tie-break", "[origami]") {
       auto ranked_ai = origami::rank_configs(problem, hardware, with_higher_ai);
       origami::runtime_options::get().heuristics_variance = saved_variance;
       REQUIRE(ranked_ai.size() == with_higher_ai.size());
-      REQUIRE(ranked_ai[0].config.index == 4);
-      REQUIRE(ranked_ai[0].config.mt.n == 256);
-      REQUIRE(ranked_ai[0].config.tensile().buffer_load);
-      REQUIRE_FALSE(ranked_ai[0].config.tensile().buffer_store);
-      REQUIRE(ranked_ai[1].config.index == 5);
-      REQUIRE(ranked_ai[2].config.index == 3);
-      REQUIRE(ranked_ai[3].config.index == 2);
-      REQUIRE(ranked_ai[4].config.index == 1);
+      REQUIRE(ranked_ai[0].config.index == 3);
+      REQUIRE(ranked_ai[1].config.index == 4);
+      REQUIRE(ranked_ai[1].config.mt.n == 256);
+      REQUIRE(ranked_ai[1].config.tensile().buffer_load);
+      REQUIRE_FALSE(ranked_ai[1].config.tensile().buffer_store);
+      REQUIRE(ranked_ai[2].config.index == 2);
+      REQUIRE(ranked_ai[3].config.index == 1);
+      REQUIRE(ranked_ai[4].config.index == 5);
+      REQUIRE(ranked_ai[4].config.mt.n == 256);
+      REQUIRE_FALSE(ranked_ai[4].config.tensile().buffer_load);
+      REQUIRE_FALSE(ranked_ai[4].config.tensile().buffer_store);
       REQUIRE(ranked_ai[5].config.index == 0);
 
       // Equal buffer ranks keep their incoming order.
