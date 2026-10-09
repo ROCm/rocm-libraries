@@ -106,6 +106,7 @@ namespace TensileLite
             const std::string WaveGranularity  = "wave-gran";
             const std::string TotalGranularity = "total-gran";
             const std::string TilesPerCu       = "tiles-per-cu";
+            const std::string GlobalSplitU     = "global-split-u";
 
             const std::string MemReadBytes    = "mem-read-bytes";
             const std::string MemWriteBytes   = "mem-write-bytes";

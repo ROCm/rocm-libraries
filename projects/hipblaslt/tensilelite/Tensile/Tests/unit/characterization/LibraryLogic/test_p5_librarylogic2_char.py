@@ -152,8 +152,14 @@ def _write_exact_csv(path, problem_sizes, num_solutions, gflops_data,
             writer.writerow(row)
 
 
-def _write_csvwinner_csv(path, problem_sizes, num_solutions, gflops_data):
-    """Write a CSV with _CSVWinner in name containing WinnerGFlops/WinnerIdx cols."""
+def _write_csvwinner_csv(path, problem_sizes, num_solutions, gflops_data, gsu_data=None):
+    """Write a CSV with _CSVWinner in name containing WinnerGFlops/WinnerIdx cols.
+
+    gsu_data: optional list of per-problem-size GSU values. When given, an extra
+    " WinnerGSU" column is written after " WinnerIdx" (mirroring the real
+    ResultFileReporter output). When omitted, the CSV has no GSU column at all,
+    exercising LibraryLogic.py's fallback to "N/A" for older CSVs.
+    """
     num_indices = len(problem_sizes[0]) if problem_sizes else 0
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -164,6 +170,8 @@ def _write_csvwinner_csv(path, problem_sizes, num_solutions, gflops_data):
         for s in range(num_solutions):
             header.append("Sol%d" % s)
         header += [" WinnerGFlops", " WinnerIdx"]
+        if gsu_data is not None:
+            header += [" WinnerGSU"]
         writer.writerow(header)
         for idx, sizes in enumerate(problem_sizes):
             total_flops = 2
@@ -174,6 +182,8 @@ def _write_csvwinner_csv(path, problem_sizes, num_solutions, gflops_data):
             winner_gflops = row_gflops[winner_idx]
             row = ["GFlops"] + list(sizes) + [total_flops] + row_gflops
             row += [winner_gflops, winner_idx]
+            if gsu_data is not None:
+                row += [gsu_data[idx]]
             writer.writerow(row)
 
 
@@ -420,7 +430,8 @@ class TestAddFromCSVWinnerPath:
         # Use _CSVWinner in the filename to trigger that code path
         csv_path = str(tmp_path / "bench_CSVWinner.csv")
         _write_csvwinner_csv(csv_path, exact_sizes, 2,
-                             [[20.0, 15.0], [10.0, 18.0]])
+                             [[20.0, 15.0], [10.0, 18.0]],
+                             gsu_data=[4, 16])
 
         with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
              patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name), \
@@ -433,6 +444,32 @@ class TestAddFromCSVWinnerPath:
         assert la.exactWinners[(128, 128, 1, 512)][1] == pytest.approx(20.0)
         # Second size: sol_b wins (gflops 18 > 10)
         assert la.exactWinners[(256, 256, 1, 512)][0] == 1
+        # The WinnerGSU column is read into exactWinnersGSU, keyed the same way.
+        assert la.exactWinnersGSU[(128, 128, 1, 512)] == 4
+        assert la.exactWinnersGSU[(256, 256, 1, 512)] == 16
+
+    def test_csvwinner_missing_gsu_column_falls_back_to_na(self, tmp_path, analysis_params):
+        """_CSVWinner file without a WinnerGSU column records 'N/A' for GSU."""
+        from Tensile.LibraryLogic import LogicAnalyzer
+
+        pt = _MockProblemType()
+        exact_sizes = [(128, 128, 1, 512)]
+        mock_ps = _MockProblemSizes(exact_sizes=exact_sizes)
+        sol_a = _MockSolution(idx=0)
+        sol_b = _MockSolution(idx=1)
+
+        # No gsu_data passed -> no " WinnerGSU" column, same as an older-client CSV.
+        csv_path = str(tmp_path / "bench_CSVWinner_nogsu.csv")
+        _write_csvwinner_csv(csv_path, exact_sizes, 2, [[20.0, 15.0]])
+
+        with patch("Tensile.LibraryLogic.getSolutionNameMin", _mock_name), \
+             patch("Tensile.LibraryLogic.getKernelNameMin", _mock_name), \
+             patch("Tensile.LibraryLogic.getSolutionNameFull", _mock_name_full):
+            la = LogicAnalyzer(pt, [mock_ps], [[sol_a, sol_b]],
+                               [csv_path], analysis_params, splitGSU=False)
+
+        assert la.exactWinners[(128, 128, 1, 512)][0] == 0
+        assert la.exactWinnersGSU[(128, 128, 1, 512)] == "N/A"
 
     def test_csvwinner_missing_columns_fallback(self, tmp_path, analysis_params):
         """_CSVWinner file without WinnerGFlops/WinnerIdx columns falls back to scanning."""

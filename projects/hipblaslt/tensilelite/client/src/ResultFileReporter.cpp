@@ -98,6 +98,8 @@ namespace TensileLite
                                 = std::stod(m_output.readValueFromKey(ResultKey::TilesPerCu));
                             m_fastestTotalGranularity
                                 = std::stod(m_output.readValueFromKey(ResultKey::TotalGranularity));
+                            m_fastestGSU
+                                = std::stod(m_output.readValueFromKey(ResultKey::GlobalSplitU));
                         }
                     }
                 }
@@ -185,6 +187,7 @@ namespace TensileLite
                     m_output.setHeaderForKey(ResultKey::TimeUS, "WinnerTimeUS");
                     m_output.setHeaderForKey(ResultKey::SolutionWinnerIdx, "WinnerIdx");
                     m_output.setHeaderForKey(ResultKey::SolutionWinner, "WinnerName");
+                    m_output.setHeaderForKey(ResultKey::GlobalSplitU, "WinnerGSU");
                 }
             }
         }
@@ -218,6 +221,7 @@ namespace TensileLite
                     m_output.setHeaderForKey(ResultKey::TimeUS, "WinnerTimeUS");
                     m_output.setHeaderForKey(ResultKey::SolutionWinnerIdx, "WinnerIdx");
                     m_output.setHeaderForKey(ResultKey::SolutionWinner, "WinnerName");
+                    m_output.setHeaderForKey(ResultKey::GlobalSplitU, "WinnerGSU");
                 }
             }
         }
@@ -257,6 +261,7 @@ namespace TensileLite
                         oldRow[ResultKey::SolutionWinner]    = newRow[ResultKey::SolutionWinner];
                         oldRow[ResultKey::TilesPerCu]        = newRow[ResultKey::TilesPerCu];
                         oldRow[ResultKey::TotalGranularity]  = newRow[ResultKey::TotalGranularity];
+                        oldRow[ResultKey::GlobalSplitU]      = newRow[ResultKey::GlobalSplitU];
                     }
                 }
                 else if(key.compare(ResultKey::TimeUS) == 0
@@ -300,6 +305,7 @@ namespace TensileLite
                 m_output.setValueForKey(ResultKey::TimeUS, m_fasterTimeUS);
                 m_output.setValueForKey(ResultKey::SolutionWinnerIdx, m_winnerSolutionIdx);
                 m_output.setValueForKey(ResultKey::SolutionWinner, m_winnerSolution);
+                m_output.setValueForKey(ResultKey::GlobalSplitU, m_fastestGSU);
             }
             m_output.setValueForKey(ResultKey::GbpsBW, m_fastestBandwidthGbps);
             // reset
@@ -310,6 +316,7 @@ namespace TensileLite
             m_fasterTimeUS            = -1.0;
             m_fastestTilesPerCu       = -1.0;
             m_fastestTotalGranularity = -1.0;
+            m_fastestGSU              = -1.0;
             m_fastestBandwidthGbps    = -1.0;
 
             if(!m_mergeSameProblems)

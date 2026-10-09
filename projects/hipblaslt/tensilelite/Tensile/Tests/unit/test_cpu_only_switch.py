@@ -410,6 +410,7 @@ def test_synthetic_csv_schema(tmp_path, arch, monkeypatch):
         analyzer.exactProblemSizes = set(_SEED_SIZES)
         analyzer.rangeProblemSizes = set()
         analyzer.exactWinners = {}
+        analyzer.exactWinnersGSU = {}
         analyzer.perfMetric = None
         analyzer.addFromCSV(resultsFileName, numSolutions, solutionMap)
         return analyzer

@@ -84,6 +84,7 @@ namespace TensileLite
             double      m_fastestBandwidthGbps    = -1.0;
             double      m_fastestTilesPerCu       = -1.0;
             double      m_fastestTotalGranularity = -1.0;
+            double      m_fastestGSU              = -1.0;
             // for merge rows
             int64_t                                                         m_currProbID = -1;
             std::map<int64_t, std::unordered_map<std::string, std::string>> m_probMap;

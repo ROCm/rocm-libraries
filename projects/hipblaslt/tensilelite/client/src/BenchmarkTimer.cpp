@@ -233,6 +233,9 @@ namespace TensileLite
 
             m_reporter->report(ResultKey::NumCus, perf.CUs);
             m_reporter->report(ResultKey::TilesPerCu, pp.granularities.tilesPerCu);
+            // Resolved GlobalSplitU for this problem (auto-GSU solutions resolve this
+            // dynamically per problem size; fixed-GSU solutions just echo their static value).
+            m_reporter->report(ResultKey::GlobalSplitU, pp.granularities.GSU);
             m_reporter->report(ResultKey::MemReadBytes, pp.staticModel.memReadBytes);
             m_reporter->report(ResultKey::MemWriteBytes, pp.staticModel.memWriteBytesD);
         }

@@ -127,6 +127,7 @@ namespace TensileLite
                                                                      Empty,
                                                                      TotalGranularity,
                                                                      TilesPerCu,
+                                                                     GlobalSplitU,
                                                                      NumCus,
                                                                      Tile0Granularity,
                                                                      Tile1Granularity,

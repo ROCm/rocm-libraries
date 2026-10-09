@@ -354,6 +354,10 @@ class LogicAnalyzer:
 
     # Each entry in exactWinners is a 2D array [solutionIdx, perf]
     self.exactWinners = {}
+    # Resolved GlobalSplitU of the winning solution for each exact problem
+    # size ("N/A" if the CSV predates the WinnerGSU column). Tracked
+    # separately so exactWinners itself stays untouched.
+    self.exactWinnersGSU = {}
 
     """
     # map problem sizes -> index
@@ -405,6 +409,7 @@ class LogicAnalyzer:
     #print self.data
     # map exact problem sizes to solutions
     print1("# ExactWinners: %s" % self.exactWinners)
+    print1("GSU_winner: %s" % self.exactWinnersGSU)
 
 
   ##############################################################################
@@ -428,6 +433,7 @@ class LogicAnalyzer:
     # need to take care if the loaded csv is the export-winner-version
     csvHasWinner = "_CSVWinner" in dataFileName
     csvHasWinnerColumn = True
+    columnOfWinnerGSU = None
 
     # iterate over rows
     rowIdx = 0
@@ -454,6 +460,13 @@ class LogicAnalyzer:
             csvHasWinnerColumn = False
             print1(f"Error: Could not find WinnerGFlops or WinnerIdx column in CSV file: {e}")
 
+          # WinnerGSU is newer than WinnerGFlops/WinnerIdx, so look it up separately
+          # and tolerate CSVs produced by older clients that don't have it yet.
+          try:
+            columnOfWinnerGSU = row.index(" WinnerGSU")
+          except ValueError:
+            columnOfWinnerGSU = None
+
         # get the length of each row, and derive the first column of the solution instead of using wrong "solutionStartIdx = totalSizeIdx + 1"
         rowLength = len(row)
         solutionStartIdx = rowLength - numSolutions
@@ -476,6 +489,13 @@ class LogicAnalyzer:
             # Faster. Get the winner info from csv directly, avoid an extra loop
             winnerGFlops = float(row[columnOfWinnerGFlops])
             winnerIdx = int(row[columnOfWinnerIdx])
+            if columnOfWinnerGSU is not None:
+              try:
+                winnerGSU = int(float(row[columnOfWinnerGSU]))
+              except ValueError:
+                winnerGSU = "N/A"
+            else:
+              winnerGSU = "N/A"
           else:
             # Old code. TODO - Can we get rid of this in the future?
             # solution gflops
@@ -488,6 +508,9 @@ class LogicAnalyzer:
                 winnerIdx = solutionIdx
                 winnerGFlops = gflops
               solutionIdx += 1
+            # The per-solution GSU used by the winner isn't available in this
+            # (non-WinnerCSV) fallback path.
+            winnerGSU = "N/A"
 
           if globalParameters["UseEffLike"]:
             if not deviceMaxFreq:
@@ -516,8 +539,10 @@ class LogicAnalyzer:
               if winnerGFlops > self.exactWinners[problemSize][1]:
                 #print "update exact", problemSize, "CSV index=", winnerIdx, self.exactWinners[problemSize], "->", solutionMap[winnerIdx], winnerGFlops
                 self.exactWinners[problemSize] = [solutionMap[winnerIdx], performance_metric]
+                self.exactWinnersGSU[problemSize] = winnerGSU
             else:
               self.exactWinners[problemSize] = [solutionMap[winnerIdx], performance_metric]
+              self.exactWinnersGSU[problemSize] = winnerGSU
               #print "new exact", problemSize, "CSV index=", winnerIdx, self.exactWinners[problemSize]
 
         # Range Problem Size
