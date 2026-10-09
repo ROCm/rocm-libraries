@@ -14,12 +14,28 @@ among them is handed to the harness through the visibility env var. A node
 whose gfx950 sits at index 3 behind two other cards would otherwise skip the
 only gate that exercises the emulation.
 
-It skips only on a *confirmed* absence: the probe ran, and no visible device is
-a gfx950 (the emulated rows being gfx950-only). A probe that fails -- a broken
-install, a wedged driver, an import error -- is a failure, not a skip, because
-it establishes nothing about what hardware is present. ``get_device_count()``
-answers 0 rather than raising when HIP itself is missing, so a host with no
-ROCm at all still skips rather than failing.
+It skips only on a *confirmed* absence, of which there are three shapes:
+
+- the HIP library will not load, so there is no ROCm on this host;
+- ``hipGetDeviceCount`` answers ``hipErrorNoDevice``, which is a real answer:
+  the runtime looked and there is no GPU (what a host with ROCm installed but
+  an unusable ``/dev/kfd`` reports);
+- it answers success, and none of the devices it counted is a gfx950 -- the
+  emulated rows being gfx950-only.
+
+Anything else fails, because it establishes nothing about what hardware is
+present: any other error code, an import error, or -- when no gfx950 was found
+-- a device whose architecture HIP would not name, since that device could be
+the one this gate exists for.
+
+Which is why the probe cannot use ``get_device_count()`` / ``get_device_arch()``
+as they stand. Those are deliberately forgiving: both flatten *every* failure
+into the answer a healthy query gives for an empty machine, ``0`` and ``None``,
+collapsing two of the cases above together with all of the ones that must fail.
+``get_device_count`` also raises ``HipError`` when the library cannot be loaded
+-- the one case that should be a quiet skip. So the probe resolves the runtime
+itself and reads ``hipGetDeviceCount``'s own return code, which keeps the
+outcomes apart.
 
 ``ROCKE_REQUIRE_GFX950=1`` turns even the confirmed-absence skip into a
 failure, so a validation node that lost its device cannot report green.
@@ -41,14 +57,38 @@ _REQUIRE_ENV = "ROCKE_REQUIRE_GFX950"
 _PYROOT = Path(__file__).resolve().parents[2] / "python"
 _HARNESS = _PYROOT / "rocke" / "examples" / "gfx950" / "xf32" / "bf16x3_parity.py"
 
-# One "<index> <arch>" line per visible device; no output means none are
-# visible. Both queries answer None/0 instead of raising when the runtime is
-# absent, so a non-zero exit here is a real fault rather than a bare machine.
-_PROBE = (
-    "from rocke.runtime.hip_module import get_device_arch, get_device_count\n"
-    "for i in range(get_device_count()):\n"
-    "    print(i, get_device_arch(i))\n"
-)
+# Prints `NO_HIP <reason>` when the runtime cannot be loaded at all, otherwise
+# one `DEVICE <index> <arch>` line per visible device, with `?` for an
+# architecture HIP would not report. Any other failure -- including a
+# `hipGetDeviceCount` that returns an error -- exits non-zero, which the caller
+# turns into a test failure rather than a skip.
+_NO_HIP = "NO_HIP"
+_UNKNOWN_ARCH = "?"
+# hipErrorNoDevice. The one error code that is still an answer: the runtime
+# looked and there is no GPU here (this is what a host with ROCm installed but
+# no usable /dev/kfd reports). Every other code means the query did not
+# complete, which proves nothing either way.
+_HIP_ERROR_NO_DEVICE = 100
+_PROBE = f"""
+import ctypes
+from rocke.runtime import hip_module as hip
+
+try:
+    hip._resolve_hip()
+except hip.HipError as exc:
+    print("{_NO_HIP}", exc)
+    raise SystemExit(0)
+
+count = ctypes.c_int(0)
+rc = hip._hipGetDeviceCount(ctypes.byref(count))
+if rc == {_HIP_ERROR_NO_DEVICE}:
+    raise SystemExit(0)  # hipErrorNoDevice: answered, and the answer is none
+if rc != 0:
+    raise SystemExit(f"hipGetDeviceCount failed: hipError({{rc}})")
+
+for i in range(count.value):
+    print("DEVICE", i, hip.get_device_arch(i) or "{_UNKNOWN_ARCH}")
+"""
 
 # HIP reads the first of these that is set; the chosen index must be resolved
 # against that same list, since the indices a filtered process sees are
@@ -65,10 +105,13 @@ def _env() -> dict:
 
 
 def _visible_devices(env: dict):
-    """``[(index, arch)]`` for every visible device.
+    """``[(index, arch)]`` for every visible device, or ``None`` if HIP is absent.
 
-    Raises :class:`AssertionError` if the probe itself fails -- see the module
-    docstring on why that is not a skip.
+    ``None`` is a confirmed "there is no HIP runtime here" rather than an empty
+    list, which is a successful count of zero devices. An architecture HIP
+    would not report comes back as ``_UNKNOWN_ARCH``; the caller decides what
+    that means. Raises :class:`AssertionError` if the probe itself fails -- see
+    the module docstring on why that is not a skip.
     """
     probe = subprocess.run(
         [sys.executable, "-c", _PROBE],
@@ -86,7 +129,12 @@ def _visible_devices(env: dict):
         )
     found = []
     for line in probe.stdout.strip().splitlines():
-        index, _, arch = line.partition(" ")
+        kind, _, rest = line.partition(" ")
+        if kind == _NO_HIP:
+            return None
+        if kind != "DEVICE":
+            raise AssertionError(f"unreadable device probe output: {line!r}")
+        index, _, arch = rest.partition(" ")
         found.append((int(index), arch.strip()))
     return found
 
@@ -108,12 +156,25 @@ class TestBf16x3OnDevice(unittest.TestCase):
     def setUpClass(cls):
         env = _env()
         visible = _visible_devices(env)
-        for index, arch in visible:
+        for index, arch in visible or ():
             if arch == _ARCH:
                 cls.env = _select(env, index)
                 return
-        seen = ", ".join(f"{i}:{a}" for i, a in visible) or "none"
-        reason = f"no visible {_ARCH} device (visible: {seen})"
+        if visible is None:
+            reason = "no HIP runtime on this host"
+        else:
+            # Only now does an unreadable architecture matter: one of these
+            # devices may be the gfx950 this gate exists for, so concluding
+            # absence from them would be a guess.
+            unknown = [i for i, arch in visible if arch == _UNKNOWN_ARCH]
+            if unknown:
+                raise AssertionError(
+                    f"HIP reported {len(visible)} device(s) but would not name "
+                    f"the architecture of {unknown}, so the absence of a "
+                    f"{_ARCH} is unproven and a skip would be unsound"
+                )
+            seen = ", ".join(f"{i}:{a}" for i, a in visible) or "none"
+            reason = f"no visible {_ARCH} device (visible: {seen})"
         if env.get(_REQUIRE_ENV) == "1":
             raise AssertionError(f"{_REQUIRE_ENV}=1, but {reason}")
         raise unittest.SkipTest(reason)

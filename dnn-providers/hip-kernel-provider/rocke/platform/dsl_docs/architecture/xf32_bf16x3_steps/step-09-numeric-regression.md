@@ -155,12 +155,21 @@ other test:
   gate that touches silicon, not a conservative default;
 - on gfx950 the harness runs with `--require-device`, and anything but exit 0
   with `PASSED` fails the test;
-- it skips only on a *confirmed* absence — the probe ran and no visible device
-  is a gfx950. A probe that fails fails the test, because it establishes
-  nothing about what hardware is there; `get_device_count()` answers 0 rather
-  than raising when HIP is missing entirely, so a machine with no ROCm still
-  skips. Device absence is now the only reason it skips at all, the harness
-  needing nothing beyond numpy;
+- it skips only on a *confirmed* absence, which takes three shapes: the HIP
+  library will not load; `hipGetDeviceCount` answers `hipErrorNoDevice`, which
+  is a real answer and what a host with ROCm but an unusable `/dev/kfd`
+  reports; or the count succeeded and none of the devices it counted is a
+  gfx950. Anything else fails — another error code, an import error, or (only
+  when no gfx950 was found) a device whose architecture HIP would not name,
+  since that device could be the one the gate exists for. Device absence is now
+  the only reason it skips at all, the harness needing nothing beyond numpy;
+- the probe does **not** go through `get_device_count()` / `get_device_arch()`.
+  Both are deliberately forgiving — every failure becomes the `0` / `None` a
+  healthy query gives for an empty machine — so routing through them merges two
+  of those confirmed absences with every case that must fail, and
+  `get_device_count` raises `HipError` for a missing library, the one case that
+  should skip quietly. The probe resolves the runtime itself and reads
+  `hipGetDeviceCount`'s return code;
 - `ROCKE_REQUIRE_GFX950=1` turns even that skip into a failure. That is the
   spelling for a gfx950 validation node, mirroring `ROCKE_REQUIRE_GFX1250`.
 
@@ -187,10 +196,18 @@ is exactly what the bitwise differential above measures.
 - Earlier, on a gfx942 host — the harness prints `SKIPPED` (exit 0) and
   `FAILED` (exit 2) under `--require-device`, and the test skips, erroring
   under `ROCKE_REQUIRE_GFX950=1`.
-- The probe's own branches, driven with faked probe output on a host with no
-  device: a failing probe raises rather than skipping; a gfx950 at index 2
-  behind a gfx942 and a gfx1100 is found and selected; an existing
-  `HIP_VISIBLE_DEVICES=4,5,6` resolves to `6` rather than being re-indexed to
-  `2`; an empty device list takes the skip path.
+- The probe's own branches, driven on a host with no device — some with faked
+  probe output, and the load/count ones by running the real probe source
+  against a stubbed `_resolve_hip` / `_hipGetDeviceCount`: an unloadable HIP
+  library and `hipErrorNoDevice` both skip; `hipError(101)` fails; a device
+  whose architecture reads back as unknown fails when no gfx950 was found and
+  is ignored when one was; unstructured probe output fails rather than reading
+  as "no devices"; a gfx950 at index 2 behind a gfx942 and a gfx1100 is found
+  and selected; an existing `HIP_VISIBLE_DEVICES=4,5,6` resolves to `6` rather
+  than being re-indexed to `2`; and `ROCKE_REQUIRE_GFX950=1` turns each skip
+  into a failure.
+- On the development host as it stands — ROCm present, `hipGetDeviceCount`
+  answering `hipError(100)` — `tests/core` is 427 passed / 20 skipped, this
+  test among the skips, and 1 error under `ROCKE_REQUIRE_GFX950=1`.
 - No emission changed in this step, so the byte-identity result from
   [steps 5+6](step-05-bf16x3-lowering.md) still stands.
