@@ -115,7 +115,8 @@ jobs:
       # previously installed ROCm tree.
       - name: Run setup test environment workflow
         timeout-minutes: 15
-        uses: $/.github/actions/setup_test_environment
+        # TheRock's action, from the TheRock checkout at the workspace root.
+        uses: ./.github/actions/setup_test_environment # zizmor: ignore[self-repository]
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
           ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
