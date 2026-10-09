@@ -11208,6 +11208,23 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       print2(f"[postMainLoopBarrierCheckAndReset] skip: numWaves={numWaves} (must be > 1)")
       return
 
+    # A single-loop PGR bypass jumps over the main loop and ordinary no-load
+    # loop. The phase reconstruction below is a linear walk, so it cannot merge
+    # that path with the fallthrough state at toPGR1. Keep the writer-authored
+    # barriers until this pass has general CFG dataflow.
+    modulesToScan = [rootModule]
+    while modulesToScan:
+      currentModule = modulesToScan.pop()
+      for item in currentModule.items():
+        if isinstance(item, Module):
+          modulesToScan.append(item)
+          continue
+        target = getattr(item, "labelName", None)
+        if isinstance(item, BranchInstruction) and isinstance(target, str) \
+           and "toPGR1" in target and "toPGR1end" not in target:
+          print2(f"[postMainLoopBarrierCheckAndReset] skip: forward branch to {target} requires CFG token-state merging")
+          return
+
     removedCount = 0
     insertedCount = 0
 
