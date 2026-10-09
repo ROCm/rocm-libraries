@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import importlib.util
 from pathlib import Path
 import shlex
 import subprocess
@@ -15,6 +16,19 @@ import tasks
 pytestmark = pytest.mark.unit
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[4]
+
+
+def _load_hipblaslt_tasks():
+    spec = importlib.util.spec_from_file_location(
+        "hipblaslt_tasks", _SOURCE_ROOT.parent / "tasks.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+hipblaslt_tasks = _load_hipblaslt_tasks()
 
 
 def test_invoke_install_is_a_discoverable_developer_workflow():
@@ -75,6 +89,58 @@ def test_rocisa_install_uses_the_invoking_python_and_selected_rocm_compilers(
         "pip",
         "install",
     ]
+
+
+def test_build_client_forwards_the_selected_rocm_root(tmp_path, monkeypatch):
+    class RecordingContext:
+        def __init__(self):
+            self.commands = []
+
+        def run(self, command):
+            self.commands.append(command)
+
+    rocm_root = tmp_path / "rocm"
+    compiler_dir = rocm_root / "bin"
+    compiler_dir.mkdir(parents=True)
+    monkeypatch.setattr(tasks.subprocess, "run", lambda *args, **kwargs: None)
+    context = RecordingContext()
+
+    tasks.build_client.body(
+        context,
+        build_dir=str(tmp_path / "build"),
+        gpu_targets="gfx942",
+        rocm_path=str(rocm_root),
+        build=False,
+    )
+
+    configure_command = context.commands[0]
+    assert f"-DROCM_PATH={rocm_root}" in configure_command
+    assert f"-DCMAKE_C_COMPILER={compiler_dir / 'amdclang'}" in configure_command
+    assert f"-DCMAKE_CXX_COMPILER={compiler_dir / 'amdclang++'}" in configure_command
+
+
+class TestBuildTaskCommandLine:
+    """invoke assigns short flags in signature order, so a new parameter's
+    position is part of the interface: placed too early it steals a letter."""
+
+    def _short_flags(self, flag):
+        from invoke.parser import Context as ParserContext
+
+        context = ParserContext(
+            name="build", args=hipblaslt_tasks.build.get_arguments()
+        )
+        return context.flags[flag].nicknames
+
+    @pytest.mark.parametrize(
+        "flag,short",
+        [
+            ("--logic-filter", "f"),  # the first casualty if -g is stolen
+            ("--gprof", "g"),
+            ("--architecture", "a"),
+        ],
+    )
+    def test_existing_short_flags_are_unchanged(self, flag, short):
+        assert self._short_flags(flag) == (short,)
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="invoke install is Linux-only")

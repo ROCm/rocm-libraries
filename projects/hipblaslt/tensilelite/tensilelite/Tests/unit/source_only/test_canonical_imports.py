@@ -198,9 +198,9 @@ def test_test_modules_do_not_import_legacy_internal_packages():
 
 def test_installed_artifacts_exclude_source_only_tests():
     cmake = (_PACKAGE_ROOT.parent.parent / "CMakeLists.txt").read_text(encoding="utf-8")
-    package_install = cmake.split('DIRECTORY "${_tensilelite_src}/tensilelite/"', 1)[1].split(
-        ")", 1
-    )[0]
+    package_install = cmake.split(
+        'DIRECTORY "${_tensilelite_src}/tensilelite/Tests/"', 1
+    )[1].split(")", 1)[0]
 
     assert 'PATTERN "source_only" EXCLUDE' in package_install
 
