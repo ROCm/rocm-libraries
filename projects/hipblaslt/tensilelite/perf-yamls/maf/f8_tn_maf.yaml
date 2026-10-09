@@ -99,7 +99,7 @@ BenchmarkProblems:
         - CompactLoopStore: [False]
         - PreloadKernArgs: [True]
         #- PrefetchGL2SAddr: [True]
-        - DsReadThrottleLatency: [112]
+        #- DsReadThrottleLatency: [112]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
