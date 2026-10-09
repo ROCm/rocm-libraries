@@ -29,6 +29,7 @@ The things that can quietly break the lane:
 from __future__ import annotations
 
 import ast
+import re
 import subprocess
 import sys
 import warnings
@@ -581,6 +582,59 @@ def test_an_aliased_declare_no_alias_accounts_for_is_a_refusal(
     with pytest.raises(ArchDomainError) as excinfo:
         check_arch_domain_in_ir(f"{decl}\n", arch, flavor)
     assert excinfo.value.key in keys
+
+
+BINDINGS = PLATFORM / "cpp" / "bindings"
+
+
+@_needs_sources
+@pytest.mark.skipif(not BINDINGS.is_dir(), reason="installed layout omits cpp/")
+def test_no_binding_lowers_without_a_diagnostic_buffer() -> None:
+    """``rocke_lower_kernel_to_llvm`` has no ``err`` out-parameter.
+
+    A refusal's status alone says only *that* the target cannot lower the
+    kernel; the intrinsic, target and flavor live in the message, which is
+    also all ``backend.py`` has to rebuild the Python error from. Lowering
+    through the err-less entry reached Python as an ArchDomainError with an
+    empty message. The ``take_*`` helpers now take ``err`` by reference so a
+    null cannot be passed, and this keeps the err-less entry itself out of the
+    bindings, where the type system has nothing to say.
+    """
+    offenders = [
+        f"{path.name}:{n}"
+        for path in sorted(BINDINGS.glob("*.cpp"))
+        for n, line in enumerate(path.read_text().splitlines(), 1)
+        if "rocke_lower_kernel_to_llvm(" in line
+    ]
+    assert not offenders, "lower through rocke_lower_kernel_to_llvm_ex instead"
+
+
+@_needs_sources
+@pytest.mark.skipif(not BINDINGS.is_dir(), reason="installed layout omits cpp/")
+def test_every_binding_lowering_converts_a_refusal() -> None:
+    """A refusal reaches Python as ``ArchDomainError`` only if the binding that
+    lowered the kernel hands its status and message to ``throw_if_arch_domain``,
+    directly or through ``take_lowered`` / ``take_ll``. A binding that formats
+    its own failure raises a plain ``RuntimeError`` instead, and the two engines
+    then disagree about what a refusal is.
+
+    Two bindings that lowered through a family convenience wrapper, rather than
+    calling the lowerer themselves, did exactly that, and the err-less-entry scan
+    above could not see them. This one looks at every call whose name ends in
+    ``to_llvm`` and requires a conversion in the same function.
+    """
+    call = re.compile(r"rocke_\w*to_llvm\w*\(")
+    handled = re.compile(r"take_lowered\(|take_ll\(|throw_if_arch_domain\(")
+    offenders = []
+    for path in sorted(BINDINGS.glob("*.cpp")):
+        text = path.read_text()
+        for m in call.finditer(text):
+            end = text.find("\n}\n", m.end())
+            body = text[m.end() : end if end != -1 else len(text)]
+            if not handled.search(body):
+                line = text.count("\n", 0, m.start()) + 1
+                offenders.append(f"{path.name}:{line}")
+    assert not offenders, f"no refusal conversion after the lowering at {offenders}"
 
 
 def test_the_post_pass_honours_the_off_switch(monkeypatch: pytest.MonkeyPatch) -> None:
