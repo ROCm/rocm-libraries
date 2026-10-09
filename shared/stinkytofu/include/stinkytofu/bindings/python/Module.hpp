@@ -146,12 +146,11 @@
     X(WmmaQueueLowCoverCycles, int, 0) /* >0: hysteresis low mark for WmmaQueueCoverCycles */     \
     X(BarrierAfterShiftWmmas, int, 0)  /* shift of tensor_load-feeding barrier groups */          \
     X(BarrierBeforeShiftWmmas, int, 0) /* shift of ds_load-feeding barrier groups */              \
-    X(DsCapWindow1Begin, int, -1) /* ds cap window [Begin,End) in region WMMA index; -1 = off */  \
-    X(DsCapWindow1End, int, -1)                                                                   \
-    X(DsCapWindow2Begin, int, -1)                                                                 \
-    X(DsCapWindow2End, int, -1)                                                                   \
-    X(DsCapWindowPerCap, int, -1) /* >0: ds cap per span inside the windows; 0 = off; -1 = unset  \
-                                     (TDM kernels: policy [8,40) x1) */
+    X(DsCapTdmBeginCycles, int,                                                                   \
+      -1) /* ds cap window: tensor_load age [Begin,End) cycles; -1 unset */                       \
+    X(DsCapTdmEndCycles, int, -1)                                                                 \
+    X(DsCapTdmPerCap, int, -1) /* >0: ds cap per span in the TDM window; 0 = off; -1 = unset      \
+                                  (TDM kernels: policy 576-840 cycles x1) */
 
 namespace stinkytofu {
 /**
