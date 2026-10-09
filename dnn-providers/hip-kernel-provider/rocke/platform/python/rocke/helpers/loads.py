@@ -17,9 +17,11 @@ Two strategies are exposed, both with the same authoring surface:
   without a register intermediate. The intrinsic writes
   *lane-contiguous* bytes: lane `i` of a wave deposits its payload at
   `lds_addr + i * size_bytes`. Each call moves `dwords ∈ {1, 3, 4}`
-  dwords per lane (so 4, 12, or 16 bytes per lane). Completion is
-  signalled via the VMEM counter, so consumers must drop an
-  `s_waitcnt(vmcnt=0)` before reading the LDS.
+  dwords per lane (so 4, 12, or 16 bytes per lane), capped per arch by
+  `ArchTarget.async_lds_max_dwords` — only CDNA4 (gfx950) has the 3/4
+  forms, CDNA3 (gfx942) is dword-only. Completion is signalled via the
+  VMEM counter, so consumers must drop an `s_waitcnt(vmcnt=0)` before
+  reading the LDS.
 
 Both loaders share the same authoring contract:
 
@@ -576,6 +578,14 @@ class AsyncTileLoader:
         4 for f32/i32).  Each chunk carries ``dwords * 4 // elem_bytes``
         elements; ``tile_cols`` must be a multiple of that count and the
         tile must have at least ``block_size`` chunks.
+
+        ``max_dwords`` is the caller's cap and must not exceed the target's
+        ``ArchTarget.async_lds_max_dwords``: CDNA3 (gfx942) moves only a dword
+        per lane to LDS, the b96/b128 forms (3 and 4) arrived with CDNA4
+        (gfx950). Asking for a wider one than the arch has is not a compile
+        error -- the AMDGPU backend aborts the process with ``LLVM ERROR: Do
+        not know how to expand this operator's operand!``. ``max_dwords=0``
+        (an arch with no DRAM->LDS DMA at all) raises, as no width fits.
         """
         if max_dwords > 4:
             max_dwords = 4
