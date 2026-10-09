@@ -606,11 +606,7 @@ void testing_sptrsm(const Arguments& arg)
             // Set the mode.
             //
             void* alpha = (mode == rocsparse_pointer_mode_host) ? halpha : dalpha;
-            //	  std::cout <<"halpha"<< halpha[0] << std::endl;
-            //	  std::cout <<"halpha"<< halpha[0] << std::endl;
             rocsparse_clients::sptrsm_compute(handle, sptrsm_descr, A, X, Y, mode, alpha, p_error);
-            //	  Y.host().print();
-            //	  Y.host().print();
 
             //
             // Get singularity_position.

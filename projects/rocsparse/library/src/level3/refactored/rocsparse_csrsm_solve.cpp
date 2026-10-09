@@ -432,24 +432,29 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
         = (op_B == rocsparse_operation_none && B->order == rocsparse_order_column);
     if(nrhs == 1)
     {
-        const int64_t          b_batch_count  = B->batch_count;
-        const int64_t          b_batch_stride = B->batch_stride;
-        auto                   buf            = reinterpret_cast<char*>(buffer);
+        const int64_t b_batch_count  = B->batch_count;
+        const int64_t b_batch_stride = B->batch_stride;
+        auto          buf            = reinterpret_cast<char*>(buffer);
+
+        const int64_t b_inc
+            = (op_B == rocsparse_operation_none && B->order == rocsparse_order_column) ? 1 : B->ld;
+
         _rocsparse_dnvec_descr b_st(
-            b_batch_count,
-            M,
-            B->data_type,
-            B->const_values,
-            B->values,
-            (op_B == rocsparse_operation_none && B->order == rocsparse_order_column) ? 1 : B->ld,
-            b_batch_stride);
+            b_batch_count, M, B->data_type, B->const_values, B->values, b_inc, b_batch_stride);
+
         rocsparse_dnvec_descr b = &b_st;
 
-        const int64_t          y_size         = M;
-        const int64_t          y_batch_count  = B->batch_count;
-        const int64_t          y_batch_stride = (B->batch_count == 1) ? 0 : M;
-        const int64_t          y_inc          = 1;
-        const auto             y_datatype     = B->data_type;
+        if(op_B == rocsparse_operation_conjugate_transpose)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnvec_conjugate(handle, b, p_error));
+        }
+
+        const int64_t y_size         = M;
+        const int64_t y_batch_count  = B->batch_count;
+        const int64_t y_batch_stride = (B->batch_count == 1) ? 0 : M;
+        const int64_t y_inc          = 1;
+        const auto    y_datatype     = B->data_type;
+
         _rocsparse_dnvec_descr y_st(
             y_batch_count, y_size, y_datatype, buf, buf, y_inc, y_batch_stride);
 
@@ -460,6 +465,7 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                                     * y->size * y->batch_count);
         buf += nbytes;
         buffer_size_in_bytes -= nbytes;
+
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
                                                          op_A,
                                                          A_load_conjugate,
