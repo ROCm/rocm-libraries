@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "ued.json",
   "title": "hipDNN UED",
-  "description": "Universal Engine Descriptor. Implements a subset of RFC 0020 section 4.2, and differs from the RFC's inline schema in two ways: 'heuristic' is a single UHD id in place of the role maps ('sort_kernel_catalog', 'predict_engine', 'predict_applicable_kernels'), and 'sdk_version' is MAJOR.MINOR.PATCH. Structural shape only; registry and cross-reference rules are semantic (section 13.2). Keys starting with 'x-' or '_', and the key 'provenance', are extensions the loader ignores.",
+  "description": "Universal Engine Descriptor. Implements a subset of RFC 0020 section 4.2, and differs from the RFC's inline schema in four ways: 'heuristic' is a single UHD id in place of the role maps ('sort_kernel_catalog', 'predict_engine', 'predict_applicable_kernels'); 'sdk_version' is MAJOR.MINOR.PATCH; keys starting with 'x-' or '_', and the key 'provenance', are extensions the loader ignores; and 'nodes' and 'one_of' hold at most 32 items (section 4.3.2). Structural shape only; registry and cross-reference rules are semantic (section 13.2).",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "id", "name", "metadata"],

@@ -1,0 +1,29 @@
+{
+  "description": "An opcode set whose 'one_of' is a string, not an array.",
+  "valid": false,
+  "error": "must be an array of opcode strings",
+  "ued": {
+    "version": "1.0",
+    "id": "18301ef3-7d5b-549a-8ebc-7600e41ac157",
+    "name": "ued_fixture:one_of_not_array",
+    "metadata": "7719737a-4b19-5243-a33f-d436263efec1",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pw",
+          "op": {
+            "one_of": "pointwise"
+          },
+          "operands": {
+            "in_0": "$input_a",
+            "in_1": "$input_b"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

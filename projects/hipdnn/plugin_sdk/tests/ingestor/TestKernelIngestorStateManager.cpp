@@ -39,11 +39,6 @@ using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
 using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
-/// One binary pointwise node, published under the names its slots bind.
-const std::string BINARY_POINTWISE_PATTERN = R"([{"kind": "op", "id": "pointwise",
-    "op": "pointwise", "operands": {"in_0": "$input_a", "in_1": "$input_b"},
-    "results": {"out_0": "$output"}}])";
-
 inline bool rejectSecondCriterion(const MatchContext& /*context*/, const BoundTokens& /*bound*/)
 {
     ++counters().graphCalls;

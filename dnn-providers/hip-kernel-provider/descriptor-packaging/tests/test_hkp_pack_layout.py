@@ -1072,30 +1072,58 @@ def test_generic_descriptors_are_validated_against_the_loader_schema(
 @pytest.mark.parametrize(
     "updates,remove,expected",
     [
-        ({}, "metadata", "metadata"),
-        ({"metadata": ""}, None, "metadata"),
-        ({"heuristic": 7}, None, "heuristic"),
-        ({"name": "test:engine\n"}, None, "scoped"),
-        ({"tensor_roots": ["input_a"]}, None, "tensor_roots"),
-        ({"graph_match": None}, None, "graph_match"),
+        ({}, "metadata", "missing required field 'metadata'"),
+        ({"metadata": ""}, None, "field 'metadata' must be a nonempty string"),
+        ({"heuristic": 7}, None, "field 'heuristic' must be a nonempty string"),
+        ({"name": "test:engine\n"}, None, "must be scoped 'namespace:local'"),
+        ({"tensor_roots": ["input_a"]}, None, "has unknown key 'tensor_roots'"),
+        ({"graph_match": None}, None, "graph_match must be an object"),
         ({"graph_match": {}}, None, "exactly one of 'nodes' or 'native'"),
-        ({"graph_match": {"native": ""}}, None, "native"),
-        ({"graph_match": {"native": 7}}, None, "native"),
+        (
+            {"graph_match": {"native": ""}},
+            None,
+            "field 'native' must be a nonempty string",
+        ),
+        (
+            {"graph_match": {"native": 7}},
+            None,
+            "field 'native' must be a nonempty string",
+        ),
         (
             {"graph_match": {"native": "hipkernel.pointwise.graph_match", "nodes": []}},
             None,
             "exactly one of 'nodes' or 'native'",
         ),
-        ({"graph_match": {"nodes": "pointwise"}}, None, "'nodes' must be a nonempty"),
-        ({"knobs": "block_size"}, None, "knobs"),
-        ({"knobs": ["block_size", "block_size"]}, None, "duplicates"),
-        ({"numerical_notes": [7]}, None, "numerical_notes"),
-        ({"behavior_notes": ["future_note"]}, None, "behavior note"),
+        (
+            {"graph_match": {"nodes": "pointwise"}},
+            None,
+            "graph_match 'nodes' must be a nonempty array",
+        ),
+        ({"knobs": "block_size"}, None, "field 'knobs' must be an array of strings"),
+        (
+            {"knobs": ["block_size", "block_size"]},
+            None,
+            "field 'knobs' contains duplicates",
+        ),
+        (
+            {"numerical_notes": [7]},
+            None,
+            "field 'numerical_notes' must be an array of strings",
+        ),
+        (
+            {"behavior_notes": ["future_note"]},
+            None,
+            "unknown behavior note 'future_note'",
+        ),
         ({"sdk_version": 1}, None, "'sdk_version' must be a nonempty string"),
         ({"sdk_version": "1.2"}, None, "'sdk_version' '1.2' is not a MAJOR.MINOR"),
         ({"sdk_version": "1.2.x"}, None, "'sdk_version' '1.2.x' is not a MAJOR"),
         # Version{} reads each component into an int; this one overflows it.
-        ({"sdk_version": "1.2.2147483648"}, None, "is not a MAJOR.MINOR.PATCH"),
+        (
+            {"sdk_version": "1.2.2147483648"},
+            None,
+            "'sdk_version' '1.2.2147483648' is not a MAJOR.MINOR.PATCH",
+        ),
     ],
 )
 def test_ued_body_rejected_before_packaging(
@@ -1110,7 +1138,7 @@ def test_ued_body_rejected_before_packaging(
         document.pop(remove)
     path.write_text(json.dumps(document), encoding="utf-8")
 
-    with pytest.raises(HkpPackError, match=expected):
+    with pytest.raises(HkpPackError, match=re.escape(expected)):
         load_flat_input(root)
 
 
@@ -1131,13 +1159,8 @@ def test_ued_sdk_version_accepts_what_the_runtime_parses(
     load_flat_input(root)
 
 
-@pytest.mark.quick
-@pytest.mark.parametrize("env_set", [True, False])
-def test_an_empty_registry_argument_falls_back(
-    tmp_path, empty_arch_fixture, monkeypatch, env_set
-):
-    """HkpPackaging.cmake passes an empty `--op-schema-registry` when its variable
-    is unset. That must mean "not given", not the current directory."""
+def _empty_arch_pattern_root(tmp_path, empty_arch_fixture):
+    """The empty-arch fixture, its UED matching by a `nodes` pattern."""
     root = tmp_path / "root"
     folder = _nest(root, "hip", empty_arch_fixture)
     path = folder / "solo.ued.json"
@@ -1154,13 +1177,29 @@ def test_an_empty_registry_argument_falls_back(
         ]
     }
     path.write_text(json.dumps(document), encoding="utf-8")
+    return root
 
-    if not env_set:
-        monkeypatch.delenv(OP_SCHEMA_REGISTRY_ENV, raising=False)
-        load_flat_input(root, op_schema_registry="")
-        return
+
+# HkpPackaging.cmake passes an empty `--op-schema-registry` when its variable is
+# unset. That must mean "not given", not the current directory.
+@pytest.mark.quick
+def test_an_empty_registry_argument_falls_back_to_the_repo_registry(
+    tmp_path, empty_arch_fixture, monkeypatch
+):
+    root = _empty_arch_pattern_root(tmp_path, empty_arch_fixture)
+    monkeypatch.delenv(OP_SCHEMA_REGISTRY_ENV, raising=False)
+
+    load_flat_input(root, op_schema_registry="")
+
+
+@pytest.mark.quick
+def test_an_empty_registry_argument_falls_back_to_the_environment(
+    tmp_path, empty_arch_fixture, monkeypatch
+):
+    root = _empty_arch_pattern_root(tmp_path, empty_arch_fixture)
     missing = tmp_path / "absent" / "op_schema_registry.json"
     monkeypatch.setenv(OP_SCHEMA_REGISTRY_ENV, str(missing))
+
     with pytest.raises(HkpPackError, match="cannot read op-schema registry") as exc:
         load_flat_input(root, op_schema_registry="")
     assert str(missing) in str(exc.value)

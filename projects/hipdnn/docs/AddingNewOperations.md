@@ -307,15 +307,29 @@ The generator refuses to write either file, naming the table and field, when:
 ### Regenerating
 
 Like `cachekey_generated.h`, the registry does not come from the ordinary `flatc` step.
-Regenerate both files with:
+A normal build regenerates both files: the `generate_hipdnn_op_schema_registry` target
+reruns the generator whenever a schema or the generator changes. It runs when
+`HIPDNN_GENERATE_SDK_HEADERS` is on (the default) and CMake finds Python 3.
+
+To regenerate both files by hand, run the generator from the repository root:
 
 ```shell
 python3 projects/hipdnn/scripts/gen_op_schema_registry.py
 ```
 
-The `op-schema-registry-hipdnn` pre-commit hook runs it on any change under
-`flatbuffers_sdk/schemas/` or to the generator, and the build reruns it through the
-`generate_hipdnn_op_schema_registry` target. The generator's own tests are
+This form needs `flatc` on `PATH`, at the exact version pinned in
+`projects/hipdnn/cmake/default_flatc_version.txt`. The generator stops with an `ERROR:` naming
+the required version if `flatc` is missing or a different version. A hipDNN build that fetches
+FlatBuffers places a pinned `flatc` in its `bin` directory, so you can pass that binary
+instead:
+
+```shell
+python3 projects/hipdnn/scripts/gen_op_schema_registry.py --flatc <build>/bin/flatc
+```
+
+The `op-schema-registry-hipdnn` pre-commit hook runs the first form on any change under
+`flatbuffers_sdk/schemas/` or to the generator, so it also needs the pinned `flatc` on
+`PATH`. The generator's own tests are
 `scripts/test_gen_op_schema_registry.py`; `flatbuffers_sdk/tests/TestOpSchemaRegistry.cpp`
 checks that the committed header covers every `NodeAttributes` member and reads real
 nodes.

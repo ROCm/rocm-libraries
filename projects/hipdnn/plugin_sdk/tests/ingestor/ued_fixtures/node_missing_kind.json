@@ -1,0 +1,27 @@
+{
+  "description": "A node without the required key 'kind'.",
+  "valid": false,
+  "runtime_error": "missing required key 'kind' in graph_match.nodes[0]",
+  "packager_error": "graph_match node 0 missing required field 'kind'",
+  "ued": {
+    "version": "1.0",
+    "id": "7277909d-a264-5fcf-a9a9-99cf5e4061ae",
+    "name": "ued_fixture:node_missing_kind",
+    "metadata": "359d5091-ddd2-55ac-8d2a-749e8dbf30c3",
+    "graph_match": {
+      "nodes": [
+        {
+          "id": "pw",
+          "op": "pointwise",
+          "operands": {
+            "in_0": "$input_a",
+            "in_1": "$input_b"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

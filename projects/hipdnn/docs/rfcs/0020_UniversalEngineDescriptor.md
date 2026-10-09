@@ -239,12 +239,23 @@ entirely to its packs' criteria. That is a narrow way to write an engine, not a 
 keeping it absence-safe is what holds the format on the `1.0` line (§ 14.2).
 
 A single JSON Schema **file** is delivered with the provider. The inline copy below is the target
-that file converges on. The delivered file currently implements a subset of it, with two
-substitutions: one `heuristic` UHD id in place of the three role maps (§ 4.6), and `sdk_version`
-as `MAJOR.MINOR.PATCH` rather than `<major>.<minor>`. The runtime loader documents both
-differences. A build check that verifies the two match lands with the role maps. The file
-reflects the latest version the runtime supports and covers **all** supported versions at once:
-its `version` property enumerates the accepted versions (here, only `1.0`), and each new version
+that file converges on. The delivered file implements a subset of it and differs in these ways:
+
+- **One heuristic id.** A single `heuristic` UHD id stands in for the three role maps (§ 4.6).
+- **Three-part `sdk_version`.** `sdk_version` is `MAJOR.MINOR.PATCH` rather than `<major>.<minor>`.
+- **Extension keys.** The top-level object, `graph_match`, each pattern node, and each `op`
+  object also accept `x-`- or `_`-prefixed keys and the key `provenance`. The loader warns about
+  and ignores these keys (§ 4.3.2).
+- **Size caps.** `nodes` and `one_of` each carry `"maxItems": 32`, the pattern limits of § 4.3.2.
+  The per-node edge limit spans two objects, so no schema keyword expresses it; the loader checks
+  it.
+
+The runtime loader documents the first two as divergences from this RFC. The last two are not
+divergences: they encode rules this RFC states in prose (§ 4.3.2) that the inline schema does not
+spell out. A build check that verifies the two schemas match lands with the role maps.
+
+The file reflects the latest version the runtime supports and covers **all** supported versions at
+once: its `version` property enumerates the accepted versions (here, only `1.0`), and each new version
 adds its value to the `enum`. The runtime supports exactly one major version, so every enumerated
 version is of that major. Every field is present, with fields introduced after the earliest version
 marked **optional**, so the schema is a structural **superset**: it accepts any supported version
@@ -598,6 +609,11 @@ These are checkable from the block alone and are part of the structural check (�
 load rejection, never a warning:
 
 - **The block is non-empty.** `"nodes": []` is refused.
+- **The block has at most 32 nodes.** A 33-node block is refused. This limit and the next two keep
+  a broken or hostile UED from making pattern compile or match unbounded. The loader enforces all
+  three, and `hkp_pack` enforces the same values when it packages a UED.
+- **A node binds at most 64 edges**, counting its `operands` and `results` entries together.
+- **An opcode set lists at most 32 opcodes.** A `one_of` with 33 members is refused.
 - **`kind` is `"op"`.** Any other value is refused rather than ignored.
 - **Node `id` is unique within the block**, and is an `ident`. A duplicate `id` would make an
   Attributes reference ambiguous.
@@ -759,16 +775,16 @@ of § 6.
 
 **The registry is generated from schema annotations, not name conventions.** A table-level
 FlatBuffers attribute names the op, and field-level attributes on each op's attribute table declare
-the binding contract next to the field they govern. `umd_opcode` on the attribute table gives the
-op's descriptor-facing opcode (`SdpaAttributes (umd_opcode: "sdpa_fwd")`); a pattern node's `op`
+the binding contract next to the field they govern. `matcher_opcode` on the attribute table gives the
+op's descriptor-facing opcode (`SdpaAttributes (matcher_opcode: "sdpa_fwd")`); a pattern node's `op`
 names it, and the registry keys on it. Every table in the `NodeAttributes` union must carry one, and
 the generator fails the build on a table without it, so the schema is the single source of truth
 for the opcode rather than an ad-hoc string.
-`umd_input_tensor` / `umd_output_tensor` mark a UID field and `umd_name` names it, so SDPA's Q
-operand is `q_tensor_uid: long (umd_input_tensor, umd_name: "q")` and its O result is `o_tensor_uid:
-long (umd_output_tensor, umd_name: "o")`. The same flag on a `[long]` UID vector, such as a custom
+`matcher_input_tensor` / `matcher_output_tensor` mark a UID field and `matcher_name` names it, so SDPA's Q
+operand is `q_tensor_uid: long (matcher_input_tensor, matcher_name: "q")` and its O result is `o_tensor_uid:
+long (matcher_output_tensor, matcher_name: "o")`. The same flag on a `[long]` UID vector, such as a custom
 op's `input_tensor_uids`, makes it an **edge list**: its UIDs are the node's operands or results,
-but no pattern edge binds it, so it takes no `umd_name`. Optionality is not re-annotated: a UID
+but no pattern edge binds it, so it takes no `matcher_name`. Optionality is not re-annotated: a UID
 field's `= null` default already encodes it (`attn_mask_tensor_uid: long = null`), and the
 `NodeAttributes` union already maps each opcode to its table, so every unannotated *scalar* field
 is a scalar attribute by elimination (other unannotated non-scalar fields, such as vectors and
@@ -1638,19 +1654,26 @@ declaration before an attribute may be used, and declared attributes — on a ta
 retained in the binary reflection schema (`.bfbs`), which is what the generator reads.
 
 ```fbs
-attribute "umd_opcode";         // table: the op's UMD-facing opcode (e.g. "sdpa_fwd"); required
-attribute "umd_input_tensor";   // field flag: an input (operand) tensor UID, or a vector of them
-attribute "umd_output_tensor";  // field flag: an output (result) tensor UID, or a vector of them
-attribute "umd_name";           // field string: the name the UMD binds a scalar UID by (e.g. "q")
+// Table annotation: the opcode a UED pattern names the op by, for example "sdpa_fwd".
+// Required on every `NodeAttributes` member. A table has one opcode, so a table that
+// serves several modes exposes the mode as an enum attribute.
+attribute "matcher_opcode";
+// Field flag: the field is an input (operand) tensor uid or a vector of them.
+attribute "matcher_input_tensor";
+// Field flag: the field is an output (result) tensor uid or a vector of them.
+attribute "matcher_output_tensor";
+// Field string: the edge name a pattern binds a flagged scalar field by. By convention it
+// is the field name without the `_tensor_uid` suffix, for example "q".
+attribute "matcher_name";
 ```
 
-`umd_opcode` is a **table-level** attribute (applied in parentheses after the table name); the other
+`matcher_opcode` is a **table-level** attribute (applied in parentheses after the table name); the other
 three are field-level. No separate operand/result type attribute is needed: an operand or result always
 binds a `Tensor` — a tensor UID is the only edge kind in a UID-centric graph
 (§ 5) — and every scalar attribute is precisely an
-unannotated scalar field (B.3). The `long` UID field type and the `umd_input_tensor`/`umd_output_tensor` flag
+unannotated scalar field (B.3). The `long` UID field type and the `matcher_input_tensor`/`matcher_output_tensor` flag
 together already fix what the binding is. A `[long]` UID vector with a flag is an **edge list** (B.3):
-its UIDs are the node's operands or results, but it is never bound by name, so it takes no `umd_name`.
+its UIDs are the node's operands or results, but it is never bound by name, so it takes no `matcher_name`.
 
 ### B.2 Annotated schema
 
@@ -1660,12 +1683,12 @@ re-annotated: a UID field's `= null` default (an optional field) already encodes
 derives required-vs-optional from the field's presence semantics rather than a fourth attribute.
 
 ```fbs
-table SdpaAttributes (umd_opcode: "sdpa_fwd") {              // table-level opcode shorthand
-  q_tensor_uid:long (cache_uid, umd_input_tensor, umd_name: "q");   // required input
-  k_tensor_uid:long (cache_uid, umd_input_tensor, umd_name: "k");
-  v_tensor_uid:long (cache_uid, umd_input_tensor, umd_name: "v");
-  o_tensor_uid:long (cache_uid, umd_output_tensor, umd_name: "o");  // required output
-  attn_mask_tensor_uid:long = null (cache_uid, umd_input_tensor, umd_name: "attn_mask");  // optional input
+table SdpaAttributes (matcher_opcode: "sdpa_fwd") {              // table-level opcode shorthand
+  q_tensor_uid:long (cache_uid, matcher_input_tensor, matcher_name: "q");   // required input
+  k_tensor_uid:long (cache_uid, matcher_input_tensor, matcher_name: "k");
+  v_tensor_uid:long (cache_uid, matcher_input_tensor, matcher_name: "v");
+  o_tensor_uid:long (cache_uid, matcher_output_tensor, matcher_name: "o");  // required output
+  attn_mask_tensor_uid:long = null (cache_uid, matcher_input_tensor, matcher_name: "attn_mask");  // optional input
   // ... other optional UID operands, likewise annotated ...
   dropout_probability:float = null;                        // unannotated -> scalar attribute
   alibi_mask:bool = false;                                 // unannotated -> scalar attribute
@@ -1676,19 +1699,19 @@ table SdpaAttributes (umd_opcode: "sdpa_fwd") {              // table-level opco
 ### B.3 Field classification (normative)
 
 For every table reachable from the `NodeAttributes` union (which already maps each opcode to its
-attribute table), the generator reads the table's `umd_opcode` (the entry's opcode key; **required**
+attribute table), the generator reads the table's `matcher_opcode` (the entry's opcode key; **required**
 on every union member, since an opcode silently derived from the table name would become
-UMD-visible under a name no one chose) and classifies each field by these rules; a violation
+visible to patterns under a name no one chose) and classifies each field by these rules; a violation
 **fails the build** rather than emitting a wrong registry:
 
 | Field carries | Classified as | Requirements |
 |---|---|---|
-| `umd_input_tensor` + `umd_name` | input (operand) edge for that name | field type MUST be a scalar signed 64-bit integer UID (`long`); `umd_name` MUST be a non-empty identifier |
-| `umd_output_tensor` + `umd_name` | output (result) edge for that name | field type MUST be a scalar signed 64-bit integer UID (`long`); `umd_name` MUST be a non-empty identifier |
-| `umd_input_tensor` on a vector | input (operand) edge list, named by the field | field type MUST be `[long]`; MUST NOT carry `umd_name` |
-| `umd_output_tensor` on a vector | output (result) edge list, named by the field | field type MUST be `[long]`; MUST NOT carry `umd_name` |
+| `matcher_input_tensor` + `matcher_name` | input (operand) edge for that name | field type MUST be a scalar signed 64-bit integer UID (`long`); `matcher_name` MUST be a non-empty identifier |
+| `matcher_output_tensor` + `matcher_name` | output (result) edge for that name | field type MUST be a scalar signed 64-bit integer UID (`long`); `matcher_name` MUST be a non-empty identifier |
+| `matcher_input_tensor` on a vector | input (operand) edge list, named by the field | field type MUST be `[long]`; MUST NOT carry `matcher_name` |
+| `matcher_output_tensor` on a vector | output (result) edge list, named by the field | field type MUST be `[long]`; MUST NOT carry `matcher_name` |
 | neither flag, a **scalar** field | scalar attribute, named by the field name | MUST NOT carry `cache_uid` |
-| neither flag, a **non-scalar** field (vector, sub-table, union, string) | skipped (not a UMD scalar) | a vector MUST NOT carry `cache_uid` |
+| neither flag, a **non-scalar** field (vector, sub-table, union, string) | skipped (not a scalar attribute) | a vector MUST NOT carry `cache_uid` |
 
 - **Edge lists are carried, never bound.** A variable-length tensor reference, such as
   `CustomOpAttributes.input_tensor_uids` or `BatchnormAttributes.peer_stats_tensor_uid`, has no
@@ -1704,7 +1727,7 @@ UMD-visible under a name no one chose) and classifies each field by these rules;
 - **Optionality** is derived, not annotated: a field with a `= null` default (an optional UID or an
   optional scalar) is optional; it supplies the `?`-binding of § 4.3 and is what the
   `present` / `not_present` operators of § 6.1 report on.
-- **One opcode per attribute table.** `umd_opcode` sits on the table, so each `NodeAttributes`
+- **One opcode per attribute table.** `matcher_opcode` sits on the table, so each `NodeAttributes`
   member is exactly one opcode. A table that serves several modes is still one opcode and exposes
   its mode as an enum attribute: `PointwiseAttributes` is `pointwise`, and its mode is
   `$<node_id>.operation` (`"ADD"`, `"RELU_FWD"`, …). Two consequences follow. The root-opcode
@@ -1712,30 +1735,37 @@ UMD-visible under a name no one chose) and classifies each field by these rules;
   and a graph rooted at any pointwise mode consults all of them. And a wrong mode is a **criterion
   decline**, reported against the pack's criterion, not a pattern decline: the pattern matched the
   shape, and a criterion such as `{"==": ["$act.operation", "RELU_FWD"]}` rejected it.
-- **Edge names follow the field.** By convention `umd_name` is the field name without its
+- **Edge names follow the field.** By convention `matcher_name` is the field name without its
   `_tensor_uid` suffix (`q_tensor_uid` is `"q"`, `in_0_tensor_uid` is `"in_0"`). This is an
   authoring convention checked in review, not a rule the generator infers (see below): the flag and
-  `umd_name` are always written out.
-- **Build errors (fail closed):** a `NodeAttributes` member without `umd_opcode`;
-  `umd_input_tensor` and `umd_output_tensor` on the same field; `umd_name` without either flag; a
-  scalar flag without a non-empty `umd_name`; `umd_input_tensor`/`umd_output_tensor` on anything
+  `matcher_name` are always written out.
+- **Build errors (fail closed):** a `NodeAttributes` member without `matcher_opcode`;
+  `matcher_input_tensor` and `matcher_output_tensor` on the same field; `matcher_name` without either flag; a
+  scalar flag without a non-empty `matcher_name`; `matcher_input_tensor`/`matcher_output_tensor` on anything
   but a scalar `long` or a `[long]` vector; a scalar integer field carrying `cache_uid` but neither
-  flag, since a tensor reference must be an edge and would otherwise publish as an `Int`
+  flag, since a tensor reference must be an edge and would otherwise publish as an `int`
   attribute; a vector carrying `cache_uid` but neither flag, since a tensor-reference vector must
-  be an edge list and would otherwise be skipped; `umd_name` on an edge list; a duplicate
-  `umd_name` within one op; a duplicate attribute name within one op, including the `Node`-table
+  be an edge list and would otherwise be skipped; `matcher_name` on an edge list; a duplicate
+  `matcher_name` within one op; a duplicate attribute name within one op, including the `Node`-table
   merge below; an input/output tensor whose name collides with a reserved token (§ 6.1); a
-  `umd_opcode` or `umd_name` that is not an identifier; a duplicate `umd_opcode` across ops;
-  `umd_opcode` on a table outside the `NodeAttributes` union; any `umd_*` annotation on a `Node`
-  table field; an unknown `umd_*` annotation; or an unsigned 64-bit scalar attribute, which an
-  `Int` cannot represent.
+  `matcher_opcode` or `matcher_name` that is not an identifier; a duplicate `matcher_opcode` across ops;
+  `matcher_opcode` on a table outside the `NodeAttributes` union; any `matcher_*` annotation on a `Node`
+  table field; an unknown `matcher_*` annotation; or an unsigned 64-bit scalar attribute, which a
+  signed `int` cannot represent.
 - **Scalar attribute value kind.** A scalar attribute carries its value kind for compile-time type
-  checking ([RFC 0018 A.5](0018_UniversalMatchDescriptor.md#a5-compile-time-validation-normative)): integer fields bind as `Int`,
-  float/double as `Float`, `bool` as `Bool`, and an **enum-typed** field as `Dtype`, carrying the
-  enum-value name string (e.g. `diagonal_alignment` → `"TOP_LEFT"`). This mirrors the tensor `dtype`
-  representation and lets a criterion compare an enum attribute against a literal enum name.
+  checking ([RFC 0018 A.5](0018_UniversalMatchDescriptor.md#a5-compile-time-validation-normative)).
+  There are four kinds:
+  - `int`: any integer field, widened to a signed 64-bit integer.
+  - `float`: a `float` or `double` field, widened to a double.
+  - `bool`: a `bool` field.
+  - `enum_name`: an **enum-typed** field. It carries the enum value's name as a string
+    (`diagonal_alignment` → `"TOP_LEFT"`), so a criterion compares an enum attribute against a
+    literal enum name, as it does a tensor `dtype`.
+
+  These spellings are the `kind` values in `op_schema_registry.json`. The generated C++ header
+  names the same kinds `ValueKind::INT`, `FLOAT`, `BOOL`, and `ENUM_NAME`.
 - **No name-suffix inference.** `PointwiseAttributes::axis_tensor_uid` is a plain axis index, not a
-  tensor UID; because it carries no `umd_input_tensor`/`umd_output_tensor` it is classified a scalar attribute,
+  tensor UID; because it carries no `matcher_input_tensor`/`matcher_output_tensor` it is classified a scalar attribute,
   exactly as intended — nothing keys off the `_tensor_uid` suffix.
 - **Scalar attributes need no annotation, and are still fully bound.** An annotation carries the two
   facts that cannot be inferred for an *edge*: that a `long` field is a tensor UID rather than a plain
@@ -1746,9 +1776,9 @@ UMD-visible under a name no one chose) and classifies each field by these rules;
   (§ 6.1) with its reflected type and its
   `= null`-derived optionality — `$sdpa_fwd.dropout_probability`, `$sdpa_fwd.alibi_mask`,
   `$sdpa_fwd.left_bound` bind with no annotation (B.5). The one consequence is that a scalar's bind
-  name is coupled to its field name: renaming the field renames the symbol, whereas `umd_name`
+  name is coupled to its field name: renaming the field renames the symbol, whereas `matcher_name`
   insulates an operand from a field rename. If a scalar ever needs that insulation, the additive
-  extension is an optional `umd_name` on an unflagged field, used purely as a bind-name override; the
+  extension is an optional `matcher_name` on an unflagged field, used purely as a bind-name override; the
   flag remains the operand/result discriminator.
 - **The `Node` table's own scalars bind too.** The rules above run over each op's attribute table,
   which is the table `NodeAttributes` selects. A node carries scalars outside it, on the `Node`
@@ -1769,16 +1799,16 @@ UMD-visible under a name no one chose) and classifies each field by these rules;
 ### B.4 Generation pipeline
 
 1. `flatc` compiles the graph schema and emits the binary reflection schema `graph.bfbs`, which
-   transitively covers every attribute table and carries the declared `umd_*` attributes (custom
+   transitively covers every attribute table and carries the declared `matcher_*` attributes (custom
    attributes surface through reflection, not through the generated C++ headers).
 2. A build-time generator loads `graph.bfbs` through the FlatBuffers reflection API, enumerates the
-   `NodeAttributes` union members (opcode → table), reads each table's `umd_opcode`, and applies the
+   `NodeAttributes` union members (opcode → table), reads each table's `matcher_opcode`, and applies the
    B.3 rules to each table's fields. Because `graph.fbs` pulls the per-op tables in via `include`, the
    `.bfbs` (and thus the registry) must regenerate when **any** included schema changes, not only when
    the top-level schema does.
 3. The generator emits the op-schema registry as generated C++ the provider compiles (a header-only
    registry emitted into the schema-owning SDK, so it needs no dependency on the provider): a table
-   keyed by the `umd_opcode` shorthand, each entry also carrying its attribute-table name and the
+   keyed by the `matcher_opcode` shorthand, each entry also carrying its attribute-table name and the
    integer `NodeAttributes` value, and listing its input and output tensors (name, optionality, and
    the typed accessor for the UID field), its input and output edge lists (field name and the typed
    accessor for the UID vector), and its scalar attributes (name, optionality, value kind, and
@@ -1796,7 +1826,7 @@ The emitted entry for one opcode is, conceptually:
 
 ```jsonc
 // generated; illustrative shape, not a wire format
-"sdpa_fwd": {                          // key: the table's umd_opcode
+"sdpa_fwd": {                          // key: the table's matcher_opcode
   "attributes_type": "SdpaAttributes", // NodeAttributes union member; matched via Node::attributes_type()
   "operands": [
     {"name": "q", "uid": "&SdpaAttributes::q_tensor_uid",         "optional": false},
@@ -1808,8 +1838,8 @@ The emitted entry for one opcode is, conceptually:
   "operand_lists": [],                 // e.g. custom_op: [{"name": "input_tensor_uids", ...}]
   "result_lists":  [],
   "attributes": [
-    {"name": "dropout_probability", "get": "&SdpaAttributes::dropout_probability", "optional": true},
-    {"name": "alibi_mask",          "get": "&SdpaAttributes::alibi_mask",          "optional": false}
+    {"name": "dropout_probability", "kind": "float", "get": "&SdpaAttributes::dropout_probability", "optional": true},
+    {"name": "alibi_mask",          "kind": "bool",  "get": "&SdpaAttributes::alibi_mask",          "optional": false}
   ]
 }
 ```
@@ -1824,10 +1854,9 @@ graph is reported by `not_present` and is read only through a guarded reference 
 
 ### B.6 Lockstep and failure modes
 
-- **Lockstep.** Adding or renaming an operand is one `.fbs` edit that carries its `umd_input_tensor` /
-  `umd_name` with it; the next build regenerates the registry, so a UMD naming that name resolves and a
-  UMD referencing a name that no longer exists fails compile
-  ([RFC 0018 A.5](0018_UniversalMatchDescriptor.md#a5-compile-time-validation-normative)).
+- **Lockstep.** Adding or renaming an operand is one `.fbs` edit that carries its `matcher_input_tensor` /
+  `matcher_name` with it; the next build regenerates the registry, so a pattern naming that edge
+  resolves and a pattern naming an edge that no longer exists fails to compile (§ 4.3.3).
 - **Unknown op or name at match compile.** The matcher fails closed: a pattern node whose opcode or
   name is absent from the registry is refused, never bound to a guessed field
   ([RFC 0018 § 16](0018_UniversalMatchDescriptor.md#16-risks)).

@@ -39,6 +39,11 @@ inline std::shared_ptr<const CompiledGraphPattern> compilePatternText(const std:
     return compileGraphPattern(parsePatternText(nodes), PATTERN_TEST_UED);
 }
 
+/// One binary pointwise node, published under the names its slots bind.
+inline constexpr const char* BINARY_POINTWISE_PATTERN = R"([{"kind": "op", "id": "pointwise",
+    "op": "pointwise", "operands": {"in_0": "$input_a", "in_1": "$input_b"},
+    "results": {"out_0": "$output"}}])";
+
 /// A 1x1x1x1 packed tensor.
 inline std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>
     patternTensor(int64_t uid, bool isVirtual = false)

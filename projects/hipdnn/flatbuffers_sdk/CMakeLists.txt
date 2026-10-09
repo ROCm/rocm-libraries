@@ -14,6 +14,7 @@ hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_FLATBUFFERS_SDK_DATA_SDK_MIN
 
 set(HIP_DNN_FLATBUFFERS_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/flatbuffers_sdk")
+set(HIP_DNN_FLATBUFFERS_SDK_INSTALL_DATA_DIR "${CMAKE_INSTALL_DATADIR}/hipdnn_flatbuffers_sdk")
 
 # --- FlatBuffers dependency ---
 # HIPDNN_FLATBUFFERS_VERSION (set in projects/hipdnn/CMakeLists.txt) is the
@@ -280,6 +281,7 @@ configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_flatbuffers_sdkConfig.cmake.in"
     "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk/hipdnn_flatbuffers_sdkConfig.cmake"
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk
+    PATH_VARS HIP_DNN_FLATBUFFERS_SDK_INSTALL_DATA_DIR
 )
 
 # Generate package version file for find_package version checking
@@ -306,11 +308,12 @@ install(
     COMPONENT Development
 )
 
-# The op-schema registry JSON for build-time tools (hkp_pack). The header installs with the
-# include directory above.
+# The op-schema registry JSON for build-time tools (hkp_pack). The package config names
+# its installed path in HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY. The header installs
+# with the include directory above.
 install(
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/op_schema_registry.json"
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/hipdnn_flatbuffers_sdk
+    DESTINATION ${HIP_DNN_FLATBUFFERS_SDK_INSTALL_DATA_DIR}
     COMPONENT Development
 )
 

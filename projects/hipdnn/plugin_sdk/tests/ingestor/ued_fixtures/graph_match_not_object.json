@@ -1,0 +1,13 @@
+{
+  "description": "graph_match is a symbol string instead of an object naming an arm.",
+  "valid": false,
+  "runtime_error": "graph_match must be a JSON object",
+  "packager_error": "graph_match must be an object",
+  "ued": {
+    "version": "1.0",
+    "id": "01e8fb18-319e-5888-bdc2-6798f67f0312",
+    "name": "ued_fixture:graph_match_not_object",
+    "metadata": "65530705-3f85-5ce3-9415-8132c64088d6",
+    "graph_match": "hipkernel.pointwise.graph_match"
+  }
+}

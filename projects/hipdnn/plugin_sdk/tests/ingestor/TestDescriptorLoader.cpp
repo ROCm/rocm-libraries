@@ -1168,11 +1168,6 @@ INSTANTIATE_TEST_SUITE_P(
                           documentOfType(documents, ".ued.json")["features_signature"]
                               = nlohmann::json::array({"tensor_core"});
                       }},
-        ViolationCase{"publication_declarations",
-                      [](Documents& documents) {
-                          documentOfType(documents, ".ued.json")["tensor_roots"]
-                              = nlohmann::json::array({"input_a"});
-                      }},
         ViolationCase{"graph_match_not_an_object",
                       [](Documents& documents) {
                           documentOfType(documents, ".ued.json")["graph_match"] = nullptr;
@@ -2208,10 +2203,10 @@ TEST(TestDescriptorLoader, AnUnsupportedVersionDropsBeforeItCanCollideById)
     EXPECT_EQ(sets.front().engine.name, "test:survivor");
 }
 
-TEST(TestDescriptorLoader, MalformedPublicationDoesNotPoisonAnAcceptedUuid)
+TEST(TestDescriptorLoader, MalformedGraphMatchDoesNotPoisonAnAcceptedUuid)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("body_before_uuid"));
-    auto documents = makeSetDocuments('1', "test:publication_survivor");
+    auto documents = makeSetDocuments('1', "test:graph_match_survivor");
     auto malformed = documentOfType(documents, ".ued.json");
     malformed["graph_match"] = {{"native", ""}};
     writeDocument(dir.path() / "a", TestDocument{".ued.json", malformed});
@@ -2220,14 +2215,14 @@ TEST(TestDescriptorLoader, MalformedPublicationDoesNotPoisonAnAcceptedUuid)
     const auto sets = loadFrom(dir.path());
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(toString(sets.front().engine.id), testUuid('1', ROLE_ENGINE));
-    EXPECT_EQ(sets.front().engine.name, "test:publication_survivor");
+    EXPECT_EQ(sets.front().engine.name, "test:graph_match_survivor");
 }
 
-TEST(TestDescriptorLoader, PackResolvesALaterRootUedAfterMalformedPublicationIsSkipped)
+TEST(TestDescriptorLoader, PackResolvesALaterRootUedAfterMalformedGraphMatchIsSkipped)
 {
     const ScopedSymbols symbols;
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("body_across_roots"));
-    auto documents = makeSetDocuments('1', "test:publication_cross_root");
+    auto documents = makeSetDocuments('1', "test:graph_match_cross_root");
     const auto valid = documentOfType(documents, ".ued.json");
     documentOfType(documents, ".ued.json")["graph_match"] = {{"nodes", nlohmann::json::array()}};
     const auto first = dir.path() / "first";
@@ -2252,7 +2247,7 @@ TEST(TestDescriptorLoader, NativeAdmissionDoesNotFallBackToALaterRootUed)
     auto documents = makeSetDocuments('1', "test:native_no_fallback");
     const auto later = documentOfType(documents, ".ued.json");
     documentOfType(documents, ".ued.json")["graph_match"]
-        = {{"native", "descriptorloader.absent_publication"}};
+        = {{"native", "descriptorloader.absent_native"}};
     writeDocuments(first, documents);
     writeDocument(second, TestDocument{".ued.json", later});
     writeDocuments(second, makeSetDocuments('2', "test:native_fallback_sibling"));

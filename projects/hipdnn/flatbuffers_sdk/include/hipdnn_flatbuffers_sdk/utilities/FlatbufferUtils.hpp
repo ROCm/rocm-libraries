@@ -65,6 +65,13 @@ auto readTensorValue(data_objects::TensorValue valueType, const void* value, con
     return static_cast<const Value*>(value)->value();
 }
 
+inline int8_t int8FromBits(uint8_t bits)
+{
+    int8_t result;
+    std::memcpy(&result, &bits, sizeof(result));
+    return result;
+}
+
 template <typename Convert>
 auto convertTensorValue(data_objects::DataType dataType,
                         data_objects::TensorValue valueType,
@@ -96,12 +103,8 @@ auto convertTensorValue(data_objects::DataType dataType,
     case data_objects::DataType::UINT8:
         return convert(readTensorValue<data_objects::Float8Value>(valueType, value, paramName));
     case data_objects::DataType::INT8:
-    {
-        const auto bits = readTensorValue<data_objects::Float8Value>(valueType, value, paramName);
-        int8_t signedValue;
-        std::memcpy(&signedValue, &bits, sizeof(signedValue));
-        return convert(signedValue);
-    }
+        return convert(
+            int8FromBits(readTensorValue<data_objects::Float8Value>(valueType, value, paramName)));
     case data_objects::DataType::FP8_E4M3:
         return convert(static_cast<float>(hipdnn_data_sdk::types::fp8_e4m3::from_bits(
             readTensorValue<data_objects::Float8Value>(valueType, value, paramName))));

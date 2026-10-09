@@ -42,7 +42,11 @@ def is_extension_key(key):
 
 
 def require_known_keys(doc, allowed, where):
-    """Raise HkpPackError on a key that is neither allowed nor an extension key."""
-    for key in doc:
+    """Raise HkpPackError on a key that is neither allowed nor an extension key.
+
+    Keys are checked in sorted order, the order the runtime walks them, so a
+    document with several unknown keys reports the same one on both sides.
+    """
+    for key in sorted(doc):
         if key not in allowed and not is_extension_key(key):
             raise HkpPackError(f"{where} has unknown key '{key}'")

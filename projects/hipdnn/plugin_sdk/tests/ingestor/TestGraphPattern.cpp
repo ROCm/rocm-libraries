@@ -222,7 +222,6 @@ TEST(TestGraphPattern, ParsesConvBiasReluWithEdgesSortedByName)
     ASSERT_EQ(nodes.size(), 3U);
     EXPECT_EQ(nodes[0].id, "conv");
     EXPECT_EQ(nodes[0].opcodes, std::vector<std::string>{"convolution_fwd"});
-    EXPECT_FALSE(nodes[0].opcodeSet);
     ASSERT_EQ(nodes[0].operands.size(), 2U);
     EXPECT_EQ(nodes[0].operands[0].name, "w");
     EXPECT_EQ(nodes[0].operands[0].binding.variable, "w");
@@ -271,7 +270,6 @@ TEST(TestGraphPattern, IgnoresExtensionKeysAndKeepsOpcodeSetOrder)
          "operands": {"w": "$w"}}
     ])");
     const auto& node = pattern.nodes().front();
-    EXPECT_TRUE(node.opcodeSet);
     EXPECT_EQ(node.opcodes, (std::vector<std::string>{"convolution_fwd", "convolution_bwd_data"}));
     EXPECT_TRUE(node.results.empty());
 }

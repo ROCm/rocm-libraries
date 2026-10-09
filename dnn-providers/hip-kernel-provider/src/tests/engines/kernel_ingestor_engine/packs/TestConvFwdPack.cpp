@@ -626,7 +626,10 @@ TEST(TestConvFwdPack, HasAGraphMatchAndOneKernelMatcher)
     // A single-pack engine has nothing to discriminate between, so it carries no
     // graph-scoped criterion at all: the engine's graph_match both admits the node type
     // and fully validates the shape.
-    EXPECT_FALSE(std::holds_alternative<std::monostate>(set.engine.graphMatch));
+    const auto* native
+        = std::get_if<hipdnn_plugin_sdk::ingestor::NativeGraphMatch>(&set.engine.graphMatch);
+    ASSERT_NE(native, nullptr);
+    EXPECT_FALSE(native->symbol.empty());
     EXPECT_EQ(std::count_if(set.matchers.begin(),
                             set.matchers.end(),
                             [](const auto& matcher) {

@@ -19,6 +19,7 @@
 #include <hipdnn_plugin_sdk/ingestor/LruCache.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
+#include "ingestor/GraphPatternTestSupport.hpp"
 #include "ingestor/KernelIngestorTestFixtures.hpp"
 
 /**
@@ -31,6 +32,7 @@ namespace
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
+using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
 constexpr int THREAD_COUNT = 8;
 constexpr int ITERATIONS_PER_THREAD = 200;
@@ -185,6 +187,43 @@ TEST(TestIngestorStateManagerConcurrency, ServesUncacheableGraphsConcurrently)
         {
             const MatchContext context{graph, 0, properties};
             ASSERT_EQ(manager->unsortedDefinitions(context).size(), 2U);
+        }
+    });
+}
+
+TEST(TestIngestorStateManagerConcurrency, BindsACompiledPatternFromManyThreads)
+{
+    // The graph carries no id, so no catalog is served from the cache: every call runs the
+    // pattern matcher over the same graph, from every thread at once.
+    const ScopedTestSymbols symbols;
+    const KernelIngestorStateManager<TestHandle> manager(
+        makeSchema(),
+        std::vector<MatchDescriptor>{
+            {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, KERNEL_MATCH_SYMBOL}},
+        makeTestDispatches(),
+        {makePack({KERNEL_MATCHER_ID})},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        GraphMatch{compilePatternText(BINARY_POINTWISE_PATTERN)});
+
+    PatternGraphBuilder add;
+    add.tensor(1).tensor(2).tensor(3).node(pointwiseNode(PointwiseMode::ADD, 1, 2, 3));
+    const auto graph = add.build();
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph.context().graph, 0, properties};
+
+    const auto expected = manager.unsortedCatalog(context);
+    ASSERT_EQ(expected.entries.size(), 2U);
+    ASSERT_EQ(tryGetBoundInt(expected.bound, "input_b"), 2);
+    const auto* operation = tryGetBoundValue<std::string>(expected.bound, "pointwise.operation");
+    ASSERT_NE(operation, nullptr);
+    ASSERT_EQ(*operation, "ADD");
+
+    runConcurrently(THREAD_COUNT, [&](int) {
+        for(int i = 0; i < ITERATIONS_PER_THREAD; ++i)
+        {
+            const auto catalog = manager.unsortedCatalog(context);
+            ASSERT_EQ(catalog.entries.size(), 2U);
+            ASSERT_EQ(catalog.bound, expected.bound);
         }
     });
 }

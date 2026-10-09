@@ -1,0 +1,33 @@
+{
+  "description": "An opcode set with a member that is a number, not a string.",
+  "valid": false,
+  "runtime_error": "must list non-empty opcode strings",
+  "packager_error": "op 'one_of' must list nonempty opcode strings",
+  "ued": {
+    "version": "1.0",
+    "id": "c8c5aba4-c314-57ca-ad6a-c2bbae1bbad7",
+    "name": "ued_fixture:one_of_non_string_member",
+    "metadata": "fd7d960a-7229-5864-b9cf-bb6afa33da1f",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "pw",
+          "op": {
+            "one_of": [
+              "pointwise",
+              7
+            ]
+          },
+          "operands": {
+            "in_0": "$input_a",
+            "in_1": "$input_b"
+          },
+          "results": {
+            "out_0": "$output"
+          }
+        }
+      ]
+    }
+  }
+}

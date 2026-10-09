@@ -1,0 +1,29 @@
+{
+  "description": "'?' on an operand one opcode-set member declares required: 'mean' is optional in batchnorm_bwd and required by batchnorm_inference. The '?' check runs per member before the members are compared, so it fails rather than the disagreement.",
+  "valid": false,
+  "runtime_error": "operand 'mean' of opcode 'batchnorm_inference' is required, so binding '$mean?' cannot be optional",
+  "packager_error": "operand 'mean' is bound with '?', but the registry declares it required in op 'batchnorm_inference'",
+  "ued": {
+    "version": "1.0",
+    "id": "b2dbcdae-d225-5801-9695-d0064e3a9952",
+    "name": "ued_fixture:one_of_optional_required_operand",
+    "metadata": "7c34c81b-c764-58d8-a35d-7ba242606f30",
+    "graph_match": {
+      "nodes": [
+        {
+          "kind": "op",
+          "id": "bn",
+          "op": {
+            "one_of": [
+              "batchnorm_bwd",
+              "batchnorm_inference"
+            ]
+          },
+          "operands": {
+            "mean": "$mean?"
+          }
+        }
+      ]
+    }
+  }
+}

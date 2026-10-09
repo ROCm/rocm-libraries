@@ -42,8 +42,8 @@
  * Three packs (add, mul, sub) share one applicability matcher -- node shape, binary,
  * one element, uniform dtype -- evaluated once per graph; each pack adds only an
  * operation check, so RFC 0017 §6 keeps them disjoint without duplicating that work.
- * That check also re-reads the operand facts from the binding, because a declarative
- * `graph_match` can replace the shared matcher.
+ * That check also re-reads the operand facts from the binding and checks operand roles
+ * against the node, because a declarative `graph_match` can replace the shared matcher.
  * Symbol names are restated here rather than shared via a header, since a descriptor
  * can't reference a C++ constant; the loader pre-flights every symbol a descriptor
  * names, so a mismatched string is caught without becoming a compile error.
@@ -263,30 +263,40 @@ std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
  * Listing this second matcher is the whole cost of a pack, and two packs claiming the
  * same operation would be the authoring mistake, not two packs sharing the graph check.
  * Every pack lists it, so it also re-checks the binding the dispatch relies on. A
- * declarative `graph_match` can admit graphs the native one refuses. Operand roles are
- * not checked because the binding does not record which edge fed which root. A pattern
- * that binds `input_a` to `in_1`, reversing a SUB, is an authoring error.
+ * declarative `graph_match` can admit graphs the native one refuses. It also checks
+ * operand roles: a pattern that binds `input_a` to the node's `in_1` edge passes every
+ * operand check and makes SUB compute b - a.
  */
-bool pointwiseOperationMatches(const BoundTokens& bound, data_objects::PointwiseMode operation)
+bool pointwiseOperationMatches(const MatchContext& context,
+                               const BoundTokens& bound,
+                               data_objects::PointwiseMode operation)
 {
     const auto* published = tryGetBoundValue<std::string>(bound, "pointwise.operation");
-    return published != nullptr && *published == data_objects::EnumNamePointwiseMode(operation)
-           && isServableBinding(bound);
+    if(published == nullptr || *published != data_objects::EnumNamePointwiseMode(operation)
+       || !isServableBinding(bound))
+    {
+        return false;
+    }
+    const auto* attributes = pointwiseNode(context);
+    return attributes != nullptr && attributes->in_1_tensor_uid().has_value()
+           && tryGetBoundInt(bound, INPUT_A_TOKEN) == attributes->in_0_tensor_uid()
+           && tryGetBoundInt(bound, INPUT_B_TOKEN) == *attributes->in_1_tensor_uid()
+           && tryGetBoundInt(bound, OUTPUT_TOKEN) == attributes->out_0_tensor_uid();
 }
 
-bool pointwiseAddMatches(const MatchContext& /*context*/, const BoundTokens& bound)
+bool pointwiseAddMatches(const MatchContext& context, const BoundTokens& bound)
 {
-    return pointwiseOperationMatches(bound, data_objects::PointwiseMode::ADD);
+    return pointwiseOperationMatches(context, bound, data_objects::PointwiseMode::ADD);
 }
 
-bool pointwiseMulMatches(const MatchContext& /*context*/, const BoundTokens& bound)
+bool pointwiseMulMatches(const MatchContext& context, const BoundTokens& bound)
 {
-    return pointwiseOperationMatches(bound, data_objects::PointwiseMode::MUL);
+    return pointwiseOperationMatches(context, bound, data_objects::PointwiseMode::MUL);
 }
 
-bool pointwiseSubMatches(const MatchContext& /*context*/, const BoundTokens& bound)
+bool pointwiseSubMatches(const MatchContext& context, const BoundTokens& bound)
 {
-    return pointwiseOperationMatches(bound, data_objects::PointwiseMode::SUB);
+    return pointwiseOperationMatches(context, bound, data_objects::PointwiseMode::SUB);
 }
 
 /// Accepts only kernels compiled for the binding's dtype.

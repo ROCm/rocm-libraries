@@ -1635,25 +1635,37 @@ function(hkp_add_packaging)
 
     _hkp_resolve_production_root(_source_root)
 
-    # The op-schema registry is generated from the hipDNN graph schemas and
-    # committed beside them, so a full checkout always has it. When projects/hipdnn
-    # is absent, set this to the copy hipDNN installs under
-    # <prefix>/share/hipdnn_flatbuffers_sdk/.
+    # The op-schema registry defaults to the one that matches the hipDNN this provider
+    # builds against, since the runtime header the matcher runs on comes from that
+    # hipDNN. An installed hipDNN (imported hipdnn_flatbuffers_sdk target) names its
+    # registry, under <prefix>/share/hipdnn_flatbuffers_sdk/, through its package
+    # config. An in-tree hipDNN, or a build without the target, uses the copy generated
+    # and committed beside the repository's graph schemas.
     get_filename_component(_default_op_schema_registry
         "${HKP_PKG_DIR}/../../../projects/hipdnn/flatbuffers_sdk/op_schema_registry.json"
         ABSOLUTE)
+    if(TARGET hipdnn_flatbuffers_sdk)
+        get_target_property(_flatbuffers_sdk_imported hipdnn_flatbuffers_sdk IMPORTED)
+        if(_flatbuffers_sdk_imported)
+            set(_default_op_schema_registry "${HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY}")
+        else()
+            get_target_property(_flatbuffers_sdk_dir hipdnn_flatbuffers_sdk SOURCE_DIR)
+            set(_default_op_schema_registry "${_flatbuffers_sdk_dir}/op_schema_registry.json")
+        endif()
+    endif()
     set(HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY "${_default_op_schema_registry}"
         CACHE FILEPATH
         "The op-schema registry JSON that UED graph_match.nodes patterns resolve \
-against when descriptors are packed. Defaults to the committed copy in the \
-repository's hipDNN tree.")
+against when descriptors are packed. Defaults to the registry of the hipDNN the \
+provider builds against.")
     if(NOT EXISTS "${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}")
         message(FATAL_ERROR
             "hkp: the op-schema registry does not exist: "
-            "${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}. Descriptor packaging "
+            "'${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}'. Descriptor packaging "
             "resolves UED graph patterns against it. Set "
             "HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY to the op_schema_registry.json "
-            "that hipDNN installs under share/hipdnn_flatbuffers_sdk/.")
+            "of the hipDNN this provider builds against: an installed hipDNN "
+            "ships it under share/hipdnn_flatbuffers_sdk/.")
     endif()
 
     # One list for every root, so "every root is wired to rocKE identically" holds in

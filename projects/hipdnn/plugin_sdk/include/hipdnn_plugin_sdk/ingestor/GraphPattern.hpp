@@ -79,8 +79,6 @@ struct PatternNode
     std::string id;
     /// Opcodes in authored order. A bare-string `op` gives one entry.
     std::vector<std::string> opcodes;
-    /// True when authored as `{"one_of": [...]}`.
-    bool opcodeSet = false;
     /// Sorted by edge name.
     std::vector<PatternEdge> operands;
     /// Sorted by edge name.
@@ -240,7 +238,6 @@ inline void
         fail("key 'one_of' in " + setLocator + " lists " + std::to_string(members->size())
              + " opcodes; the limit is " + std::to_string(MAX_PATTERN_OPCODE_SET));
     }
-    node.opcodeSet = true;
     for(const auto& member : *members)
     {
         if(!member.is_string() || member.get_ref<const std::string&>().empty())
