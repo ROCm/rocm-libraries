@@ -27,6 +27,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -570,7 +571,13 @@ public:
                 HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
                 "Cannot enumerate a graph without stable serialized content");
         }
-        page.graph_id = std::to_string(graphKey.hash());
+        // The graph's own id, as hipdnn_bench reports it and corpora and their evaluation
+        // slices name a problem by; the content hash only for a graph that carries none.
+        // Not tryGetGraphId(): corpus ids are content-derived, not v4.
+        namespace fb_utils = hipdnn_flatbuffers_sdk::utilities;
+        const auto* graphId = opGraph.getGraph().id();
+        page.graph_id = graphId != nullptr ? fb_utils::formatUuid(fb_utils::toUuidBytes(*graphId))
+                                           : std::to_string(graphKey.hash());
         page.device_id = std::to_string(DeviceKey{context.deviceProperties}.hash());
         page.device_arch = context.deviceProperties.gcnArchName;
         page.total_count = filtered.size();
