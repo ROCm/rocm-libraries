@@ -1938,12 +1938,20 @@ def build_implicit_gemm_conv_wgrad(
         # (NHWK) the free axis is k_out, dense over kpg; for X (NHWC) it is the
         # inner c of N_wg=(y,x,c), dense only over cpg -- a wider chunk would
         # cross a filter position and silently fetch the wrong elements.
+        # max_dwords: the arch's own cap on how many dwords per lane its
+        # buffer_load_lds can move (CDNA3 has only the dword form; the b96/b128
+        # forms arrived with CDNA4). Over-wide is not diagnosed -- the backend
+        # aborts the process -- so the cap belongs here, at the width choice.
+        from rocke.core.arch import ArchTarget
+
+        _async_max_dwords = ArchTarget.from_gfx(arch).async_lds_max_dwords
         a_loader = AsyncTileLoader.from_tile(
             tile_rows=block_k,
             tile_cols=block_m,
             block_size=threads,
             wave_size=spec.wave_size,
             elem_dtype=ir_dtype_a,
+            max_dwords=_async_max_dwords,
             contig_cols=p_load.kpg,
         )
         b_loader = AsyncTileLoader.from_tile(
@@ -1952,6 +1960,7 @@ def build_implicit_gemm_conv_wgrad(
             block_size=threads,
             wave_size=spec.wave_size,
             elem_dtype=ir_dtype_b,
+            max_dwords=_async_max_dwords,
             contig_cols=p_load.cpg,
         )
         a_sync_loader = None

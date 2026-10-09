@@ -31,6 +31,28 @@ Known bugs:
   # REMOVE this entry once the output-store path is fixed so the case re-activates
   # as an enforced bit-exact regression gate.
 
+  # ROCM-32152: on gfx950 some direct-to-LDS kernels (DTLA1_DTLB1) write wrong values
+  # into large outputs, a different set of elements on each run. ROCM-32151: on gfx950
+  # bf16 solution 354888 writes about half the right value. Both show up in these
+  # every-solution cases. REMOVE each entry in the PR that fixes the last defect it
+  # lists. Review by 2026-11-01.
+  - { name: matmul_fast_check_store_extent_ROCM31016, function: matmul, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_size_t_output_overflow_all_solutions, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
+  # ROCM-32151: some bf16 solutions write about half the right value in the last
+  # partial M tile. On gfx942 they are offered only with
+  # TENSILE_SOLUTION_SELECTION_METHOD=2, which the Stream-K case needs. ROCM-32153:
+  # gfx950 f16 solutions 405799 and 407668 are wrong at 4099 x 2053 x 129. REMOVE each
+  # entry in the PR that fixes its defect. Review by 2026-11-01.
+  - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: bf16_r, known_bug_platforms: "gfx942, gfx950" }
+  - { name: matmul_fast_check_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, known_bug_platforms: gfx950 }
+  - { name: matmul_fast_check_streamk_every_solution_repeat, function: matmul, a_type: f16_r, M: 4099, known_bug_platforms: gfx950 }
+  # ROCM-32062: the client CPU reference (cast_mul in cblas_interface.cpp) applies
+  # scaleAlpha_vector to the wrong rows of A when lda exceeds A's row count, so
+  # unit_check fails a correct GPU result. Host-side, so every platform is affected
+  # and no platform is listed. REMOVE this entry in the PR that fixes ROCM-32062;
+  # the test then becomes its regression gate. Review by 2026-11-01.
+  - { name: matmul_fast_check_epilogue_padded_lda_ROCM32062, function: matmul }
   # ROCM-27082: gfx950 MXFP4 subtile scaleAlphaVec TN cases fail the norm/accuracy
   # check on asymmetric (M!=N) tiles. Square tiles (128x128, 192x192) still pass and
   # remain covered. Suspected TensileLite codegen regression; remove once root-caused.
