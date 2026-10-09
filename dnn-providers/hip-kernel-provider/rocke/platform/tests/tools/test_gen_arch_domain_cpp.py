@@ -45,8 +45,9 @@ def gen():
     return module
 
 
-def _python_view() -> dict[str, list[tuple[str, str, str, str]]]:
-    """Every negative cell per committed flavor, as the Python lane sees them."""
+def _python_view() -> dict[str, list[tuple[str, str, str, str, bool]]]:
+    """Every negative cell per committed flavor, as the Python lane sees them,
+    with whether a committed waiver covers it."""
     view = {}
     for flavor in arch_domain.committed_flavors():
         table = arch_domain.load(flavor)
@@ -56,7 +57,8 @@ def _python_view() -> dict[str, list[tuple[str, str, str, str]]]:
             for arch in table.arches(key):
                 cell = table.lookup(key, arch)
                 if cell is not None and arch_domain.is_negative(cell.status):
-                    cells.append((key, arch, cell.status, cell.evidence))
+                    waived = arch_domain.is_waived(key, arch, flavor)
+                    cells.append((key, arch, cell.status, cell.evidence, waived))
         view[flavor] = sorted(cells)
     return view
 
@@ -80,17 +82,23 @@ def _c_unescape(literal: str) -> str:
 
 
 _STR = r'"((?:[^"\\]|\\.)*)"'
-_CELL = re.compile(rf"^    \{{{_STR}, {_STR}, {_STR}, {_STR}\}},$", re.M)
-_ARRAY = re.compile(
-    r"^const rocke_arch_domain_cell_t (\w+)\[\] = \{$(.*?)^\};$", re.M | re.S
+_CELL = re.compile(
+    rf"^    \{{{_STR}, {_STR}, {_STR}, {_STR}, ([01])\}},$", re.MULTILINE
 )
-_COLUMN = re.compile(rf"^    \{{{_STR}, (\w+), (\d+)\}},$", re.M)
+_ARRAY = re.compile(
+    r"^const rocke_arch_domain_cell_t (\w+)\[\] = \{$(.*?)^\};$",
+    re.MULTILINE | re.DOTALL,
+)
+_COLUMN = re.compile(rf"^    \{{{_STR}, (\w+), (\d+)\}},$", re.MULTILINE)
 
 
-def _parse(text: str) -> dict[str, list[tuple[str, str, str, str]]]:
+def _parse(text: str) -> dict[str, list[tuple[str, str, str, str, bool]]]:
     """The generated text read back into cells, keyed by flavor."""
     arrays = {
-        name: [tuple(_c_unescape(f) for f in m.groups()) for m in _CELL.finditer(body)]
+        name: [
+            (*(_c_unescape(f) for f in m.groups()[:4]), m.group(5) == "1")
+            for m in _CELL.finditer(body)
+        ]
         for name, body in _ARRAY.findall(text)
     }
     out = {}
@@ -129,8 +137,12 @@ def test_the_generator_reads_through_the_python_reader(gen) -> None:
         committed_flavors=lambda: ("llvm99",),
         load=lambda flavor: table,
         is_negative=lambda status: status == "k.two",
+        is_waived=lambda key, arch, flavor: False,
+        DEFAULT_MODE="warn",
     )
-    assert _parse(gen.render(fake)) == {"llvm99": [("k.two", "gfx942", "k.two", "e")]}
+    assert _parse(gen.render(fake)) == {
+        "llvm99": [("k.two", "gfx942", "k.two", "e", False)]
+    }
 
 
 def test_an_empty_column_is_a_null_entry_not_an_empty_array(gen) -> None:
@@ -140,6 +152,8 @@ def test_an_empty_column_is_a_null_entry_not_an_empty_array(gen) -> None:
         committed_flavors=lambda: ("llvm99",),
         load=lambda flavor: SimpleNamespace(keys=lambda: (), arches=lambda key: ()),
         is_negative=lambda status: True,
+        is_waived=lambda key, arch, flavor: False,
+        DEFAULT_MODE="warn",
     )
     text = gen.render(fake)
     assert '{"llvm99", nullptr, 0},' in text
@@ -158,9 +172,49 @@ def test_a_non_ascii_key_is_refused(gen) -> None:
         committed_flavors=lambda: ("llvm99",),
         load=lambda flavor: table,
         is_negative=lambda status: True,
+        is_waived=lambda key, arch, flavor: False,
+        DEFAULT_MODE="warn",
     )
     with pytest.raises(ValueError, match="non-ASCII"):
         gen.render(fake)
+
+
+def test_a_waiver_reaches_the_cpp_table(gen) -> None:
+    """The C++ engine decides waived-or-refused from this flag alone, so it has
+    to be ``domain.is_waived`` for that exact cell, not for the key."""
+    table = SimpleNamespace(
+        keys=lambda: ("k",),
+        arches=lambda key: ("gfx942", "gfx950"),
+        lookup=lambda key, arch: SimpleNamespace(status="arch_absent", evidence=""),
+    )
+    fake = SimpleNamespace(
+        committed_flavors=lambda: ("llvm99",),
+        load=lambda flavor: table,
+        is_negative=lambda status: True,
+        is_waived=lambda key, arch, flavor: (key, arch, flavor)
+        == ("k", "gfx950", "llvm99"),
+        DEFAULT_MODE="warn",
+    )
+    assert _parse(gen.render(fake)) == {
+        "llvm99": [
+            ("k", "gfx942", "arch_absent", "", False),
+            ("k", "gfx950", "arch_absent", "", True),
+        ]
+    }
+
+
+def test_the_default_mode_is_generated_from_python(gen) -> None:
+    """Changing ``domain.DEFAULT_MODE`` must move both engines, with no second
+    place to edit."""
+    for mode in ("warn", "error"):
+        fake = SimpleNamespace(
+            committed_flavors=lambda: ("llvm99",),
+            load=lambda flavor: SimpleNamespace(keys=lambda: (), arches=lambda key: ()),
+            is_negative=lambda status: True,
+            is_waived=lambda key, arch, flavor: False,
+            DEFAULT_MODE=mode,
+        )
+        assert f'ROCKE_ARCH_DOMAIN_DEFAULT_MODE = "{mode}";' in gen.render(fake)
 
 
 @pytest.mark.parametrize(
@@ -202,6 +256,7 @@ def test_the_generated_table_compiles_into_the_lookup(gen, tmp_path: Path) -> No
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert proc.returncode == 0, proc.stderr
 
@@ -214,3 +269,4 @@ def test_the_engine_carries_the_python_readers_table() -> None:
     for flavor, cells in view.items():
         assert [tuple(c) for c in engine.arch_domain_column(flavor)] == cells, flavor
     assert engine.arch_domain_column("llvm-that-nobody-ships") == []
+    assert engine.arch_domain_default_mode() == arch_domain.DEFAULT_MODE

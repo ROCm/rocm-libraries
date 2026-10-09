@@ -55,7 +55,10 @@ typedef enum rocke_status
     ROCKE_ERR_TYPE, /* maps to Python TypeError                           */
     ROCKE_ERR_KEY, /* maps to Python KeyError (unknown op_id / param)    */
     ROCKE_ERR_OOM, /* allocation failure                                 */
-    ROCKE_ERR_NOTIMPL /* maps to Python NotImplementedError                 */
+    ROCKE_ERR_NOTIMPL, /* maps to Python NotImplementedError                 */
+    ROCKE_ERR_ARCH_DOMAIN /* maps to Python ArchDomainError: the committed    */
+    /* arch-domain table says the target cannot lower  */
+    /* an intrinsic the kernel demands                  */
 } rocke_status_t;
 
 #define ROCKE_ERR_MSG_CAP 256

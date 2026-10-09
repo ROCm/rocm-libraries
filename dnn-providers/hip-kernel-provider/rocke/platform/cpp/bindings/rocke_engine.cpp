@@ -631,6 +631,7 @@ std::string take_lowered(rocke_status_t st, char* llvm_text, const char* err, co
     {
         if(llvm_text)
             free(llvm_text);
+        throw_if_arch_domain(st, err);
         std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st)
                           + "): " + (err && err[0] ? err : "unknown error");
         throw std::runtime_error(msg);
@@ -3816,6 +3817,12 @@ std::string lower_serialized_ir(const std::string& ir_text,
     err[0] = '\0';
     st = rocke_lower_kernel_to_llvm_ex(kernel, fl, a, &out_ll, err, sizeof(err));
     std::unique_ptr<char, decltype(&std::free)> text(out_ll, std::free);
+    /* The builder and `text` are owned, so the refusal can unwind without
+     * freeing by hand (a manual free here would run twice). */
+    if(st == ROCKE_ERR_ARCH_DOMAIN)
+    {
+        throw_if_arch_domain(st, err);
+    }
     if(st != ROCKE_OK || !out_ll)
     {
         std::string msg = std::string("rocke_engine.lower_serialized_ir: lower failed for arch '")
@@ -3833,6 +3840,10 @@ PYBIND11_MODULE(rocke_engine, m)
 {
     m.doc() = "pybind11 binding for the C++ rocke engine (universal GEMM "
               "family). Foundation of the ROCKE_BACKEND=cpp dual-backend path.";
+
+    /* Raised when the arch-domain lane refuses a lowering; see
+     * ArchDomainRefusal in family_glue.hpp. */
+    py::register_exception<ArchDomainRefusal>(m, "ArchDomainError", PyExc_NotImplementedError);
 
     /* ---- engine freshness / provenance stamp ----
      * build_id() is a content hash of the engine sources this .so was built
@@ -3909,18 +3920,27 @@ PYBIND11_MODULE(rocke_engine, m)
     m.def(
         "arch_domain_column",
         [](const std::string& flavor) {
-            std::vector<std::tuple<std::string, std::string, std::string, std::string>> out;
+            std::vector<std::tuple<std::string, std::string, std::string, std::string, bool>> out;
             size_t n = 0;
             const rocke_arch_domain_cell_t* cells = rocke_arch_domain_column(flavor.c_str(), &n);
             out.reserve(n);
             for(size_t i = 0; i < n; ++i)
-                out.emplace_back(cells[i].key, cells[i].arch, cells[i].status, cells[i].evidence);
+                out.emplace_back(cells[i].key,
+                                 cells[i].arch,
+                                 cells[i].status,
+                                 cells[i].evidence,
+                                 cells[i].waived != 0);
             return out;
         },
         py::arg("flavor"),
-        "Every negative (key, arch, status, evidence) cell compiled into this "
+        "Every negative (key, arch, status, evidence, waived) cell compiled into this "
         "engine for one LLVM flavor, sorted by (key, arch); empty for a flavor "
         "with no committed column.");
+    m.def(
+        "arch_domain_default_mode",
+        []() { return std::string(rocke_arch_domain_default_mode()); },
+        "What an unset ROCKE_ARCH_DOMAIN means to this engine. Generated from "
+        "rocke.core.arch.domain.DEFAULT_MODE, so the two must be equal.");
 
     m.def("gemm_lower_llvm",
           &gemm_lower_llvm,

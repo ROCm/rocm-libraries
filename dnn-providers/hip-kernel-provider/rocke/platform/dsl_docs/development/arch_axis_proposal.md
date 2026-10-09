@@ -349,17 +349,19 @@ default for compatibility, make the default explicit and logged rather than an
 `or` fallback buried in a constructor. Commit `8a901dd99b` already fixed the
 known leaking call sites; this prevents the next ones.
 
-### S4 — Mirror into the C++ engine from the same source
+### S4 — Mirror into the C++ engine from the same source — **DONE**
 
 Byte-identity is the #1 invariant, and it covers behaviour, not just bytes: if
 Python raises on an unavailable key and C++ emits a declare, the engines have
 diverged. So S1's artifact must feed **both**.
 
-Generate the C++ table into `cpp/core/lower_llvm/` from the same record set and
-commit the generated file, rather than hand-transcribing it — hand-transcription
-is what made the Tier 0 declare-parity test necessary
-(`tests/core/test_intrinsic_decl_table_parity.py`). One source, two emitted
-tables, CI checks regeneration is a no-op.
+*As built:* the C++ table is generated **at build time** rather than committed.
+CMake runs `tools/gen_arch_domain_cpp.py`, which reads the columns through
+`rocke.core.arch.domain` itself and emits the negative cells into the build
+tree; `rocke_ll_need` consults them. A committed copy would have needed a no-op
+gate to keep it honest; a build dependency cannot go stale, and regenerating a
+column reaches both engines with no other step. The cost is that configuring
+the C++ build now needs a Python interpreter.
 
 ### 4.1 Rollout order
 
@@ -368,8 +370,10 @@ tables, CI checks regeneration is a no-op.
    consumes it yet, so it cannot break anything. B9 shows up here immediately.
 3. **S2 (warn)** — wire `_need()` to the artifact, warnings only. Route the one
    bypass through `_need()` first.
-4. **S4** — mirror to C++, re-run byte-identity at every flavor.
-5. **S2 (error)** — promote once the warning stream is quiet.
+4. **S4** *(done)* — mirror to C++, re-run byte-identity at every flavor.
+5. **S2 (error)** — promote once the warning stream is quiet. The `error` mode
+   and the per-cell waivers exist in both engines; the default stays `warn`
+   until the judgement that the stream is quiet on real kernels is recorded.
 
 ### 4.2 What does and does not change
 

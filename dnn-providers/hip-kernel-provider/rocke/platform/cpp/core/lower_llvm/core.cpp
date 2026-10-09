@@ -19,6 +19,7 @@
  * Every spine helper below is fully ported from its Python counterpart; no
  * stub bodies remain in this file.
  */
+#include "rocke/arch_domain.h"
 #include "rocke/arch_target.h"
 #include "rocke/lower_llvm_internal.h"
 #include "rocke/tf32_internal.h"
@@ -531,6 +532,28 @@ static bool ll_need_has(const rocke_lower_t* L, const char* key)
     return false;
 }
 
+/* Python: _Lowerer._check_arch_domain. Refuses the lowering when the committed
+ * arch-domain table says this target cannot lower `key`, the lane is in error
+ * mode, and no waiver covers the cell. Warn mode has nothing to do here: this
+ * engine has no warning channel, so the Python side reports what it emitted
+ * (lower_llvm.check_arch_domain_in_ir). Run once per key, as Python does. */
+static void ll_check_arch_domain(rocke_lower_t* L, const char* key)
+{
+    if(L->arch_domain_mode != ROCKE_ARCH_DOMAIN_ERROR)
+    {
+        return;
+    }
+    char msg[ROCKE_ERR_MSG_CAP];
+    const char* flavor = rocke_llvm_flavor_name(L->flavor);
+    const rocke_arch_domain_cell_t* cell = rocke_arch_domain_negative(flavor, key, L->backend->gfx);
+    if(cell == NULL || cell->waived)
+    {
+        return;
+    }
+    rocke_arch_domain_message(cell, flavor, msg, sizeof msg);
+    rocke_ll_fail(L, ROCKE_ERR_ARCH_DOMAIN, "%s", msg);
+}
+
 void rocke_ll_need(rocke_lower_t* L, const char* key)
 {
     if(!L || !key)
@@ -550,6 +573,7 @@ void rocke_ll_need(rocke_lower_t* L, const char* key)
     {
         rocke_ll_fail(L, ROCKE_ERR_OOM, "need push");
     }
+    ll_check_arch_domain(L, key);
 }
 
 void rocke_ll_need_dynamic(rocke_lower_t* L, const char* key, const char* decl)
@@ -2075,6 +2099,20 @@ static void ll_lower_into(rocke_lower_t* L,
         }
         rocke_ll_fail(L, bst != ROCKE_OK ? bst : ROCKE_ERR_KEY, "unknown arch backend %s", arch);
     }
+    /* The lane's mode is read here, once, so a misspelled ROCKE_ARCH_DOMAIN
+     * fails every lowering and not only one that demands an intrinsic -- the
+     * same check lower_kernel_to_llvm makes on the Python side. Reading it per
+     * demand let one bad value pass or fail depending on what the kernel asked
+     * for, and parsed the environment again for every distinct intrinsic. */
+    {
+        char msg[ROCKE_ERR_MSG_CAP];
+        if(rocke_arch_domain_mode(
+               getenv(ROCKE_ARCH_DOMAIN_ENV), &L->arch_domain_mode, msg, sizeof msg)
+           != ROCKE_OK)
+        {
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", msg);
+        }
+    }
     /* The AMDGPU datalayout is FLAVOR-KEYED (Python backend.datalayout(flavor)
      * via _datalayout_for_flavor): the p8 field drifts between LLVM20 and
      * LLVM22. backend_for installs the LLVM20 form by default; rebind the
@@ -2174,6 +2212,7 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     L.needs_fp_atomic_md = false;
     L.needs_av_scope_md = false;
     L.needs_nontemporal_md = false;
+    L.arch_domain_mode = ROCKE_ARCH_DOMAIN_WARN; /* replaced by ll_lower_into */
     rocke_vec_init(&L.blocks);
     rocke_vec_init(&L.needs);
     rocke_vec_init(&L.dyn_decls);

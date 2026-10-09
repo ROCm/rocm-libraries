@@ -194,52 +194,75 @@ class ArchDomainWarning(UserWarning):
 
     The measured cell is exposed as attributes as well as in the message, so a
     gate can key on ``(key, arch, flavor)`` instead of parsing prose.
-    ``evidence`` is the toolchain diagnostic the artifact recorded.
+    ``evidence`` is the toolchain diagnostic the artifact recorded. ``waived``
+    is true when a committed waiver is why this is a warning and not an
+    :class:`ArchDomainError`.
     """
 
     def __init__(
-        self, key: str, arch: str, flavor: str, status: str, evidence: str
+        self,
+        key: str,
+        arch: str,
+        flavor: str,
+        status: str,
+        evidence: str,
+        *,
+        waived: bool = False,
     ) -> None:
+        from .arch import domain as arch_domain
+
         self.key = key
         self.arch = arch
         self.flavor = flavor
         self.status = status
         self.evidence = evidence
-        detail = f": {evidence}" if evidence else ""
-        super().__init__(
-            f"intrinsic {key!r} is not available on {arch} at {flavor} "
-            f"({status}){detail}"
-        )
+        self.waived = waived
+        super().__init__(arch_domain.message(key, arch, flavor, status, evidence))
 
 
-# ``warn`` (the default) reports an unavailable intrinsic and keeps going;
-# ``off`` disables the lookup entirely. A mode rather than a boolean so the lane
-# can later be promoted to a hard error without a second variable.
-_ARCH_DOMAIN_ENV = "ROCKE_ARCH_DOMAIN"
-_ARCH_DOMAIN_WARN = "warn"
-_ARCH_DOMAIN_OFF = "off"
-_ARCH_DOMAIN_MODES = (_ARCH_DOMAIN_WARN, _ARCH_DOMAIN_OFF)
+_ARCH_DOMAIN_HELP = (
+    "The target cannot lower this intrinsic, so this kernel cannot be built for "
+    "it: take a code path the target supports. If the measurement is wrong, "
+    "waive the cell in rocke/core/arch/data/arch_domain_waivers.json and fix "
+    "the column. ROCKE_ARCH_DOMAIN=warn reports every such demand instead of "
+    "stopping at the first. See the arch-domain section of rocke/TESTING.md."
+)
 
 
-def _arch_domain_mode() -> str:
-    """The configured lane mode; raises on a value outside the vocabulary.
+class ArchDomainError(NotImplementedError):
+    """The lane refused a lowering: the target provably cannot lower an
+    intrinsic the kernel demands.
 
-    Refusing rather than defaulting to ``warn``: every misspelling (``0``,
-    ``false``, ``ofF``) is an attempt to switch the lane *off*, and falling
-    back to the default would leave it on without saying so. Unset and empty
-    mean ``warn``.
+    Raised in ``error`` mode, by either engine, for a measured negative that
+    no waiver covers. A NotImplementedError like any other kernel the lowerer
+    declines for its target. It carries the attributes of
+    :class:`ArchDomainWarning`, and its message is the same bytes whichever
+    engine refused; the guidance goes in a note so that stays true.
     """
-    raw = os.environ.get(_ARCH_DOMAIN_ENV, "").strip()
-    if not raw:
-        return _ARCH_DOMAIN_WARN
-    mode = raw.lower()
-    if mode not in _ARCH_DOMAIN_MODES:
-        raise ValueError(
-            f"{_ARCH_DOMAIN_ENV}={raw!r} is not a mode; expected one of "
-            f"{', '.join(_ARCH_DOMAIN_MODES)} (unset means "
-            f"{_ARCH_DOMAIN_WARN})."
+
+    def __init__(
+        self, key: str, arch: str, flavor: str, status: str, evidence: str
+    ) -> None:
+        from .arch import domain as arch_domain
+
+        self.key = key
+        self.arch = arch
+        self.flavor = flavor
+        self.status = status
+        self.evidence = evidence
+        super().__init__(arch_domain.message(key, arch, flavor, status, evidence))
+        if hasattr(self, "add_note"):  # Python 3.11+
+            self.add_note(_ARCH_DOMAIN_HELP)
+
+    def __reduce__(self):
+        # The base class keeps only the message, but the constructor takes the
+        # measured cell, so the default would rebuild this as
+        # ``ArchDomainError(message)`` and raise TypeError. A refusal raised in
+        # a worker process could then not reach its parent as itself.
+        return (
+            type(self),
+            (self.key, self.arch, self.flavor, self.status, self.evidence),
         )
-    return mode
 
 
 class LlvmDatalayoutKind(enum.Enum):
@@ -1176,13 +1199,10 @@ def _decls_for_flavor(flavor: str) -> Dict[str, str]:
 def check_arch_domain_in_ir(ir_text: str, arch: str, flavor: Optional[str]) -> None:
     """Run the arch-domain lane over already-emitted IR.
 
-    The lane proper lives in ``_Lowerer._need``, which reaches only the Python
-    backend. The default is the C++ engine, which returns finished IR without
-    the Python lowerer ever running, so the lane was dead for most users. A
-    requirement enforced on one of two backends is not a requirement.
-
-    Checking emitted text beats mirroring the lane into C++: ``_need`` vets
-    what the emitter *intended* to declare, this vets what came out.
+    The C++ engine checks the table at its own demand chokepoint, but it has no
+    warning channel: it can refuse a kernel, not report one. So after a
+    successful C++ lowering this pass does the reporting, from what came out,
+    and doubles as a check that the engine refused what it had to.
 
     The declare -> key mapping is exact, not heuristic -- ``finalize`` emits
     declares verbatim from the flavor's table and the C++ engine is held to
@@ -1190,10 +1210,11 @@ def check_arch_domain_in_ir(ir_text: str, arch: str, flavor: Optional[str]) -> N
     something never measured (the dynamic ``llvm.smax.v<N>i<W>`` declares),
     which is silence by the same rule as the rest of the lane.
     """
-    if _arch_domain_mode() == _ARCH_DOMAIN_OFF:
-        return
     from .arch import domain as arch_domain
 
+    mode = arch_domain.mode()
+    if mode == arch_domain.MODE_OFF:
+        return
     table = arch_domain.load(flavor if flavor is not None else _resolve_llvm_flavor())
     if table is None:
         return
@@ -1207,8 +1228,22 @@ def check_arch_domain_in_ir(ir_text: str, arch: str, flavor: Optional[str]) -> N
         cell = table.lookup(key, arch)
         if cell is None or not arch_domain.is_negative(cell.status):
             continue
+        waived = arch_domain.is_waived(key, arch, table.flavor)
+        if mode == arch_domain.MODE_ERROR and not waived:
+            refusal = ArchDomainError(
+                key, arch, table.flavor, cell.status, cell.evidence
+            )
+            if hasattr(refusal, "add_note"):
+                refusal.add_note(
+                    "The C++ engine emitted this declare instead of refusing it, "
+                    "so the rocke_engine extension was built from a different "
+                    "table than this checkout's: rebuild it."
+                )
+            raise refusal
         warnings.warn(
-            ArchDomainWarning(key, arch, table.flavor, cell.status, cell.evidence),
+            ArchDomainWarning(
+                key, arch, table.flavor, cell.status, cell.evidence, waived=waived
+            ),
             stacklevel=4,
         )
 
@@ -1895,26 +1930,33 @@ class _Lowerer:
         self._check_arch_domain(key)
 
     def _check_arch_domain(self, key: str) -> None:
-        """Warn if the arch-domain table says this target cannot lower ``key``.
+        """Act on what the arch-domain table says about ``key`` on this target.
 
         Only a measured, definite negative speaks. A missing column, an
         unswept target, a key absent from the table, and every no-data status
         are all silent -- a spurious warning trains people to ignore the lane,
-        and 14% of the llvm20 column is no-data.
+        and 14% of the llvm20 column is no-data. A negative is refused in
+        ``error`` mode unless waived, and reported otherwise. The C++ engine
+        makes the same decision in ``rocke_ll_need``.
         """
-        if _arch_domain_mode() == _ARCH_DOMAIN_OFF:
-            return
         from .arch import domain as arch_domain
 
+        mode = arch_domain.mode()
+        if mode == arch_domain.MODE_OFF:
+            return
         table = arch_domain.load(self._flavor)
         if table is None:
             return
-        cell = table.lookup(key, self._backend.arch.gfx)
+        arch = self._backend.arch.gfx
+        cell = table.lookup(key, arch)
         if cell is None or not arch_domain.is_negative(cell.status):
             return
+        waived = arch_domain.is_waived(key, arch, self._flavor)
+        if mode == arch_domain.MODE_ERROR and not waived:
+            raise ArchDomainError(key, arch, self._flavor, cell.status, cell.evidence)
         warnings.warn(
             ArchDomainWarning(
-                key, self._backend.arch.gfx, self._flavor, cell.status, cell.evidence
+                key, arch, self._flavor, cell.status, cell.evidence, waived=waived
             ),
             stacklevel=3,
         )

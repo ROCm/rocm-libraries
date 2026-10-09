@@ -32,6 +32,7 @@ function(rocke_compute_build_id out_var root_dir)
   file(GLOB _rocke_arch_domain
        "${root_dir}/python/rocke/core/arch/data/intrinsic_arch_domain.*.json")
   list(APPEND _rocke_arch_domain
+       "${root_dir}/python/rocke/core/arch/data/arch_domain_waivers.json"
        "${root_dir}/python/rocke/core/arch/domain.py"
        "${root_dir}/tools/gen_arch_domain_cpp.py")
   set(_rocke_all ${_rocke_src} ${_rocke_hdr} ${_rocke_arch_domain})

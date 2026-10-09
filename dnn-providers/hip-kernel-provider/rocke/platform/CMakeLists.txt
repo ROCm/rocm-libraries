@@ -170,10 +170,11 @@ target_include_directories(rocke_core PUBLIC
 
 # --- Intrinsic arch-domain table ---------------------------------------------
 # Which intrinsic declarations each gfx target can lower is measured by
-# tools/gen_arch_domain.py and committed as one JSON column per LLVM flavor.
-# Those columns are the one source of truth. The Python engine reads them when
-# it lowers; this engine gets a copy generated here, through the same Python
-# reader, so there is no hand-maintained mirror to drift. Regenerating a column
+# tools/gen_arch_domain.py and committed as one JSON column per LLVM flavor,
+# beside the reviewed waivers in arch_domain_waivers.json. Those files are the
+# one source of truth. The Python engine reads them when it lowers; this engine
+# gets a copy generated here, through the same Python reader, so there is no
+# hand-maintained mirror to drift. Regenerating a column or editing a waiver
 # needs no other step: the next build rewrites this file. It lives in the
 # build tree and is never committed.
 set(_rocke_arch_domain_inc
@@ -187,6 +188,7 @@ add_custom_command(
           --out "${_rocke_arch_domain_inc}"
   DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain_cpp.py"
           "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/core/arch/domain.py"
+          "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/core/arch/data/arch_domain_waivers.json"
           ${_rocke_arch_domain_columns}
   COMMENT "Generating the C++ arch-domain table from the committed columns"
   VERBATIM)

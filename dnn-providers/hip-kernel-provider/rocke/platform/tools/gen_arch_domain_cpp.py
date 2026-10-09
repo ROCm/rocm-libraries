@@ -17,9 +17,10 @@
 # so this script does not read the JSON itself. It loads domain.py -- by path,
 # since that module imports only the standard library -- and asks it:
 # domain.load() parses and validates each column, and domain.is_negative()
-# decides which cells the C++ engine gets. Only negative cells are emitted. The
-# C++ engine needs the answers, not the policy, so widening or narrowing the
-# policy stays a change to one Python function.
+# decides which cells the C++ engine gets. Only negative cells are emitted,
+# each with whether domain.waivers() exempts it, plus domain.DEFAULT_MODE. The
+# C++ engine needs the answers, not the policy, so changing the policy stays a
+# change to Python alone.
 #
 # Usage (normally run by CMake, see CMakeLists.txt):
 #   python rocke/platform/tools/gen_arch_domain_cpp.py --out <file.inc>
@@ -90,7 +91,15 @@ def negative_cells(domain: ModuleType, flavor: str) -> list:
                         f"{flavor}: non-ASCII {field!r} would break the C++ "
                         "lookup's strcmp ordering"
                     )
-            cells.append((key, arch, cell.status, cell.evidence))
+            if not cell.evidence.isascii():
+                # The engine cuts a message at a byte count and Python at a
+                # character count; they agree only while the text is ASCII.
+                raise ValueError(
+                    f"{flavor}: non-ASCII evidence {cell.evidence!r} would make "
+                    "the two engines cut the same refusal at different places"
+                )
+            waived = domain.is_waived(key, arch, flavor)
+            cells.append((key, arch, cell.status, cell.evidence, waived))
     return sorted(cells)
 
 
@@ -102,10 +111,15 @@ def render(domain: ModuleType) -> str:
         "//",
         "// The C++ engine's copy of the intrinsic arch-domain table: every cell",
         "// rocke.core.arch.domain.is_negative() calls negative, taken from the",
-        "// committed columns python/rocke/core/arch/data/"
-        "intrinsic_arch_domain.<flavor>.json.",
-        "// CMake regenerates it whenever a column, domain.py or the generator",
-        "// changes. Included only by cpp/core/arch/domain.cpp.",
+        (
+            "// committed columns python/rocke/core/arch/data/"
+            "intrinsic_arch_domain.<flavor>.json."
+        ),
+        "// CMake regenerates it whenever a column, the waiver list, domain.py or",
+        "// the generator changes. Included only by cpp/core/arch/domain.cpp.",
+        "",
+        "/* domain.DEFAULT_MODE: what an unset or empty ROCKE_ARCH_DOMAIN means. */",
+        f"const char* const ROCKE_ARCH_DOMAIN_DEFAULT_MODE = {c_string(domain.DEFAULT_MODE)};",
         "",
     ]
     columns = []
@@ -122,10 +136,10 @@ def render(domain: ModuleType) -> str:
             f"/* {flavor}: {len(cells)} negative cells, sorted by (key, arch). */"
         )
         lines.append(f"const rocke_arch_domain_cell_t {name}[] = {{")
-        for key, arch, status, evidence in cells:
+        for key, arch, status, evidence, waived in cells:
             lines.append(
                 f"    {{{c_string(key)}, {c_string(arch)}, "
-                f"{c_string(status)}, {c_string(evidence)}}},"
+                f"{c_string(status)}, {c_string(evidence)}, {int(waived)}}},"
             )
         lines.append("};")
         lines.append("")
