@@ -13,6 +13,7 @@
  * losers) and does not tune in EXHAUSTIVE mode (engines would then pick their own kernel).
  */
 
+#include <hipdnn_bench/CandidatePageJson.hpp>
 #include <hipdnn_bench/CsvOutput.hpp>
 #include <hipdnn_bench/NumericalValidation.hpp>
 #include <hipdnn_bench/VariantPackBuilder.hpp>
@@ -453,42 +454,6 @@ std::string knobFor(const AutotuneResult& result, const std::string& knob)
     return {};
 }
 
-nlohmann::json
-    knobJson(const std::map<hipdnn_frontend::KnobType_t, hipdnn_frontend::KnobValueVariant>& knobs)
-{
-    nlohmann::json result = nlohmann::json::object();
-    for(const auto& entry : knobs)
-    {
-        std::visit([&result, &entry](const auto& value) { result[entry.first] = value; },
-                   entry.second);
-    }
-    return result;
-}
-
-nlohmann::json pageJson(const hipdnn_frontend::EngineCandidatePage& page)
-{
-    nlohmann::json candidates = nlohmann::json::array();
-    for(const auto& candidate : page.candidates)
-    {
-        candidates.push_back({{"id", candidate.id},
-                              {"knob_settings", knobJson(candidate.variant.knobSettings)},
-                              {"kernel_features", candidate.kernelFeatures}});
-    }
-    return {{"engine_id", page.engineId},
-            {"graph_id", page.graphId},
-            {"engine_name", page.engineName},
-            {"engine_descriptor_id", page.engineDescriptorId},
-            {"device_id", page.deviceId},
-            {"device_arch", page.deviceArch},
-            {"problem_features", page.problemFeatures},
-            {"device_features", page.deviceFeatures},
-            {"candidates", std::move(candidates)},
-            {"total_count", page.totalCount},
-            {"offset", page.offset},
-            {"next_offset",
-             page.nextOffset ? nlohmann::json(*page.nextOffset) : nlohmann::json(nullptr)}};
-}
-
 hipdnn_frontend::Error hipError(hipError_t status, const char* operation)
 {
     if(status != hipSuccess)
@@ -499,15 +464,24 @@ hipdnn_frontend::Error hipError(hipError_t status, const char* operation)
     return {};
 }
 
+/// The id @p graph carries, as its serialized form names it.
+hipdnn_frontend::Error graphIdOf(const hipdnn_frontend::graph::Graph& graph, std::string& graphId)
+{
+    nlohmann::json serializedGraph;
+    HIPDNN_CHECK_ERROR(graph.serialize(serializedGraph));
+    graphId = serializedGraph.at("id").get<std::string>();
+    return {};
+}
+
 hipdnn_frontend::Error engineIdentity(hipdnnHandle_t handle,
                                       const hipdnn_frontend::graph::Graph& graph,
                                       int64_t engineId,
                                       hipStream_t& stream,
                                       nlohmann::json& output)
 {
-    nlohmann::json serializedGraph;
-    HIPDNN_CHECK_ERROR(graph.serialize(serializedGraph));
-    output["graph_id"] = serializedGraph.at("id").get<std::string>();
+    std::string graphId;
+    HIPDNN_CHECK_ERROR(graphIdOf(graph, graphId));
+    output["graph_id"] = graphId;
 
     size_t nameSize = 0;
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -807,7 +781,7 @@ int runEngineMode(hipdnnHandle_t handle, BenchGraph& graph, const Options& optio
             kind == hipdnn_frontend::PredictionKind::ENGINE ? "ENGINE" : "CONFIGURATION"},
            {"evaluate", evaluate},
            {"metric", options.rankingMetric},
-           {"constraints", knobJson(toVariantKnobs(settings))}};
+           {"constraints", hipdnn_bench::knobJson(toVariantKnobs(settings))}};
     if(collect)
     {
         output.update({{"selection_mode", "immediate"},
@@ -998,8 +972,16 @@ int runBench(const std::vector<std::string>& args)
     }
     hipdnn_frontend::EngineCandidatePage catalog;
     const bool useCatalog = options.enumerate || options.json || options.sweep;
+    // What the graph is called in output: its own id, not the page's structural hash.
+    std::string graphId;
     if(useCatalog)
     {
+        const auto named = graphIdOf(graph, graphId);
+        if(named.is_bad())
+        {
+            std::cerr << "Could not read the graph's id: " << named.get_message() << "\n";
+            return 1;
+        }
         const auto discovery
             = hipdnn_frontend::detail::getEngineCandidates(graph.get_raw_graph_descriptor(),
                                                            options.engineId,
@@ -1014,7 +996,7 @@ int runBench(const std::vector<std::string>& args)
         }
         if(options.enumerate)
         {
-            std::cout << pageJson(catalog).dump() << "\n";
+            std::cout << hipdnn_bench::pageJson(catalog, graphId).dump() << "\n";
             return 0;
         }
         while(catalog.nextOffset)
@@ -1050,7 +1032,8 @@ int runBench(const std::vector<std::string>& args)
         for(const auto& candidate : catalog.candidates)
         {
             if(!ids.insert(candidate.id).second
-               || !tuples.insert(knobJson(candidate.variant.knobSettings).dump()).second)
+               || !tuples.insert(hipdnn_bench::knobJson(candidate.variant.knobSettings).dump())
+                       .second)
             {
                 std::cerr << "Ambiguous candidate identity across enumeration pages\n";
                 return 1;
@@ -1183,7 +1166,7 @@ int runBench(const std::vector<std::string>& args)
 
     if(options.json)
     {
-        auto output = pageJson(catalog);
+        auto output = hipdnn_bench::pageJson(catalog, graphId);
         // --sweep keeps the catalog so callers need not enumerate separately; a single
         // configuration run drops it since the caller already named the tuple.
         if(!options.sweep)
@@ -1220,7 +1203,7 @@ int runBench(const std::vector<std::string>& args)
             // Separate from `is_valid` so an unmeasured row and an incorrect row stay distinct.
             const auto& verdict = verdicts[index];
             output["results"].push_back({{"candidate_id", candidate->id},
-                                         {"knob_settings", knobJson(tuple)},
+                                         {"knob_settings", hipdnn_bench::knobJson(tuple)},
                                          {"kernel_features", candidate->kernelFeatures},
                                          {"rank", result.rank},
                                          {"succeeded", result.succeeded},
