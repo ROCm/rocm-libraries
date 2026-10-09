@@ -125,6 +125,7 @@ class BlockScaledGemmSpec:
             self.name,
             "block_scaled",
             f"{_canon_lowbit(self.dtype_a)}_{_canon_lowbit(self.dtype_b)}",
+            f"out_{normalize_dtype(self.dtype_c)}",
             f"M{self.M}N{self.N}K{self.K}",
             f"bk{self.block_k}",
             f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",
@@ -256,7 +257,8 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
     if native_scale:
         return (
             True,
-            f"ok: gfx1250 K=128 native {matrix_path} {_canon_lowbit(spec.dtype_a)} GEMM",
+            f"ok: gfx1250 K=128 native {matrix_path} "
+            f"{_canon_lowbit(spec.dtype_a)}x{_canon_lowbit(spec.dtype_b)} GEMM",
         )
     return True, "ok: gfx1250 K=64 FP8/BF8 WMMA block-scaled GEMM"
 

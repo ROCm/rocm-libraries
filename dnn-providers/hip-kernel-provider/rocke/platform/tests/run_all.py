@@ -11,7 +11,19 @@
 #
 # Usage:
 #   python rocke/platform/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
-#       [--no-both] [--only SUBSTR] [--build-root DIR] [--config CONFIG]
+#       [--no-both] [--only SUBSTR] [--only-ir SUBSTR] [--build-root DIR]
+#       [--config CONFIG]
+#
+# The two filters are deliberately separate. `--only` selects *families* for the
+# byte-identity gate; `--only-ir` selects *case ids* for the emitted-IR validity
+# gate, and a case id is `family/arch/variant`, so the two vocabularies overlap
+# without being the same. Forwarding one substring to both was a real trap: a
+# word can be a legal family while matching no corpus case, and the two tools
+# read an empty selection oppositely -- run_diff runs zero families and reports
+# green, check_ir_validity calls it FATAL -- so a partial run could go red for a
+# filter that was valid where the user aimed it. Filtering is also kept separate
+# from skipping: an unfiltered gate still runs in full; use `--no-gate` /
+# `--no-ir-validity` to opt out of one.
 
 from __future__ import annotations
 
@@ -115,10 +127,38 @@ def ctest_ready(build_root: Path, config: str) -> bool:
     return False
 
 
+# Native C++ test binaries that a pytest file drives through an env var. With a
+# configured build each one is resolved from CTest, so its pytest cases run
+# instead of skipping: (env var, CTest name, label).
+NATIVE_PARITY_TESTS = (
+    ("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),
+    (
+        "ROCKE_NONTEMPORAL_HIP_TEST",
+        "rocke_nontemporal_hip",
+        "native nontemporal HIP parity",
+    ),
+)
+
+
+def _native_executable(
+    env: dict[str, str], build_root: Path, config: str, var: str, ctest_name: str
+) -> str | None:
+    """An explicit env value wins; otherwise ask CTest for the built binary."""
+    executable = env.get(var)
+    if not executable and (build_root / "CMakeCache.txt").is_file():
+        tests = ctest_tests(build_root, config, f"^{ctest_name}$")
+        commands = [
+            test.get("command", []) for test in tests if test["name"] == ctest_name
+        ]
+        if len(commands) != 1 or not commands[0]:
+            raise ValueError(f"CTest did not resolve the built {ctest_name} executable")
+        executable = commands[0][0]
+    return executable
+
+
 def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     """Build the configured suite and supply native parity to both pytest passes."""
     env = dict(os.environ)
-    executable = env.get("ROCKE_STORAGE_TEST")
     if (build_root / "CMakeCache.txt").is_file():
         subprocess.run(
             [
@@ -130,28 +170,16 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
             ],
             check=True,
         )
-        if not executable:
-            tests = ctest_tests(build_root, config, "^rocke_storage$")
-            commands = [
-                test.get("command", [])
-                for test in tests
-                if test["name"] == "rocke_storage"
-            ]
-            if len(commands) != 1 or not commands[0]:
-                raise ValueError(
-                    "CTest did not resolve the built rocke_storage executable"
-                )
-            executable = commands[0][0]
-    if executable:
-        path = Path(executable).resolve()
-        if not path.is_file():
-            raise ValueError(f"native storage test executable does not exist: {path}")
-        env["ROCKE_STORAGE_TEST"] = str(path)
-        print(f"\n== native storage parity: {path} ==")
-    else:
-        print(
-            "\n== native storage parity: SKIPPED (no configured build or ROCKE_STORAGE_TEST) =="
-        )
+    for var, ctest_name, label in NATIVE_PARITY_TESTS:
+        executable = _native_executable(env, build_root, config, var, ctest_name)
+        if executable:
+            path = Path(executable).resolve()
+            if not path.is_file():
+                raise ValueError(f"{label} test executable does not exist: {path}")
+            env[var] = str(path)
+            print(f"\n== {label}: {path} ==")
+        else:
+            print(f"\n== {label}: SKIPPED (no configured build or {var}) ==")
     return env
 
 
@@ -215,6 +243,11 @@ def main() -> int:
     ap.add_argument("--no-gate", action="store_true")
     ap.add_argument("--no-pytest", action="store_true")
     ap.add_argument(
+        "--no-ir-validity",
+        action="store_true",
+        help="skip the emitted-IR validity gate (compile+link every corpus case)",
+    )
+    ap.add_argument(
         "--no-both",
         action="store_true",
         help="skip the ROCKE_BACKEND=both differential pytest pass",
@@ -222,7 +255,14 @@ def main() -> int:
     ap.add_argument(
         "--only",
         default="",
-        help="restrict byte-identity gate to families containing SUBSTR",
+        help="restrict byte-identity gate to families containing SUBSTR "
+        "(comma-separated); does not affect the emitted-IR validity gate",
+    )
+    ap.add_argument(
+        "--only-ir",
+        default="",
+        help="restrict emitted-IR validity gate to case ids containing SUBSTR "
+        "(comma-separated); a case id is family/arch/variant",
     )
     ap.add_argument(
         "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
@@ -249,11 +289,26 @@ def main() -> int:
             gate += ["--only", args.only]
         status |= subprocess.run(gate).returncode
 
+    if not args.no_ir_validity:
+        # Complements the gate above rather than duplicating it: byte-identity
+        # proves the two engines agree, this proves what they agree on is legal
+        # IR the AMDGPU toolchain accepts. Self-skips (green, loudly) on a host
+        # with no LLVM tools -- pass --strict there to make that a failure.
+        print("\n== emitted-IR validity gate ==")
+        ir_gate = [sys.executable, str(TOOLS / "check_ir_validity.py")]
+        # `--only-ir`, never `--only`: see the module header. An empty selection
+        # is FATAL in that tool and that stays correct here, because reaching it
+        # now means the user aimed a case-id filter at the case-id gate and hit
+        # nothing -- a typo, which is worth a red.
+        if args.only_ir:
+            ir_gate += ["--only", args.only_ir]
+        status |= subprocess.run(ir_gate).returncode
+
     if not args.no_pytest:
         try:
             pytest_env = native_pytest_env(Path(args.build_root).resolve(), args.config)
         except (OSError, ValueError, subprocess.CalledProcessError) as exc:
-            print(f"native storage parity setup failed: {exc}", file=sys.stderr)
+            print(f"native parity test setup failed: {exc}", file=sys.stderr)
             return 1
         print("\n== pytest ==")
         status |= subprocess.run(

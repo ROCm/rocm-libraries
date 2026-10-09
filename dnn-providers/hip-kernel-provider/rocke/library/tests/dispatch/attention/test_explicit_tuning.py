@@ -188,8 +188,8 @@ class TestExplicitAttentionBuilders(unittest.TestCase):
 
 class TestAttentionTuningRegistry(unittest.TestCase):
     def test_tuning_candidates_are_arch_specific_and_opt_in(self):
-        from dispatch.attention.gfx942_tuning import GFX942_TUNING_VARIANTS
-        from dispatch.attention.gfx950_tuning import GFX950_TUNING_VARIANTS
+        from dispatch.attention.gfx942_unified import GFX942_TUNING_VARIANTS
+        from dispatch.attention.gfx950_unified import GFX950_TUNING_VARIANTS
 
         tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
         self.assertEqual(
@@ -270,11 +270,11 @@ class TestAttentionTuningRegistry(unittest.TestCase):
         Production offers the three masks the curated stacks shipped. The full
         knob space offers every mask the kernel accepts.
         """
-        from dispatch.attention.tuning_common import (
+        from dispatch.attention.axes import (
             _PROD_SCHED_BARRIER_MASKS,
             _SCHED_BARRIER_MASKS,
-            configure_sweep,
         )
+        from rocke.dispatch.tuning.walk import configure_sweep
 
         prefix = "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm"
         specs = self._specs_for(prefix)

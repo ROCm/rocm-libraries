@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <set>
@@ -24,16 +25,25 @@
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/SweepManifestCache.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
 
-// Loaded tensors keyed by tensor UID. Inputs carry their data. Outputs carry
-// expected golden values only when output blobs are present; otherwise the
-// harness verifies outputs against a reference executor.
+// Tensors keyed by tensor UID. Inputs carry their data. Outputs carry expected golden
+// values only when output blobs are present; otherwise the harness verifies outputs
+// against a reference executor.
 using TensorMap = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
-// One test's worth of bundle data loaded from disk.
+// Where a bundle's tensor blobs sit on disk. Nothing is read until a test asks for it.
+struct TensorBlobs
+{
+    std::vector<int64_t> inputUids; // every declared tensor that is not an output
+    std::vector<int64_t> outputUids; // golden outputs; empty unless hasGoldenOutputs
+    std::function<std::filesystem::path(int64_t)> pathForUid;
+};
+
+// One test's worth of bundle data located on disk.
 //
 //   graphBuffer      — the parsed graph, as a flatbuffer. Always present in a
 //                      loaded bundle; the engine deserializes it (from_binary)
@@ -43,24 +53,30 @@ using TensorMap = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::u
 //   metadata         — .meta.json contents for direct bundles, or inline sweep
 //                      metadata for template-sweep cases. Metadata is mandatory
 //                      only when golden output blobs are present; graph-only and
-//                      reference-verified bundles default to empty metadata.
+//                      reference-verified bundles without a .meta.json default to
+//                      empty metadata. Present-but-malformed metadata throws
+//                      BundleMetadataError rather than loading.
 //   outputTensorUids — UIDs of the graph's output tensors, derived from the
 //                      graph. Always available, even for graph-only bundles, so
 //                      the harness knows which tensors to compare or allocate.
-//   tensors          — loaded tensor data, keyed by uid. Present when input blobs
-//                      are available. If present and hasGoldenOutputs is false,
-//                      it carries inputs only and outputs are reference-verified.
-//                      Absent means the bundle is graph-only; the harness may
-//                      fill inputs, otherwise it skips the case.
-//   hasGoldenOutputs — true iff every output tensor's .bin blob was present and
-//                      loaded into `tensors`. When false, engine output must be
-//                      checked against a reference executor instead of golden data.
+//   blobs            — where the tensor data is, present when every input blob
+//                      exists. If present and hasGoldenOutputs is false, it covers
+//                      inputs only and outputs are reference-verified. Absent means
+//                      the bundle is graph-only; the harness may fill inputs,
+//                      otherwise it skips the case.
+//   hasGoldenOutputs — true iff every output tensor's .bin blob is present. When
+//                      false, engine output must be checked against a reference
+//                      executor instead of golden data.
+//
+// A registered bundle lives for the whole process, so it holds no tensor data itself:
+// reading every golden blob at registration kept all of it in memory for the run.
+// Each test reads what it needs with loadTensors() and owns the result.
 struct IntegrationTestBundle
 {
     flatbuffers::DetachedBuffer graphBuffer;
     hipdnn_integration_tests::BundleMetadata metadata;
     std::vector<int64_t> outputTensorUids;
-    std::optional<TensorMap> tensors;
+    std::optional<TensorBlobs> blobs;
     bool hasGoldenOutputs = false;
 
     // View over the graph flatbuffer, valid as long as this bundle lives.
@@ -69,18 +85,65 @@ struct IntegrationTestBundle
         return hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper{graphBuffer.data(),
                                                                           graphBuffer.size()};
     }
+
+    // Reads the bundle's blobs into fresh tensors: the inputs, plus the golden outputs
+    // when it has them. Empty for a graph-only bundle. The caller owns the result, so
+    // the memory is freed with it. Throws if a blob is unreadable, the wrong size, or
+    // of a type that has no tensor.
+    TensorMap loadTensors() const
+    {
+        TensorMap tensors;
+        if(!blobs.has_value())
+        {
+            return tensors;
+        }
+
+        const auto& graph = *hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuffer.data());
+        std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
+            attrByUid;
+        for(const auto* attributes : *graph.tensors())
+        {
+            attrByUid[attributes->uid()] = attributes;
+        }
+
+        const auto loadUids = [&](const std::vector<int64_t>& uids) {
+            for(const int64_t uid : uids)
+            {
+                const auto it = attrByUid.find(uid);
+                if(it == attrByUid.end())
+                {
+                    continue;
+                }
+                tensors[uid] = hipdnn_test_sdk::utilities::tensorFromFileAndAttributes(
+                    blobs->pathForUid(uid), *it->second);
+            }
+        };
+
+        loadUids(blobs->inputUids);
+        loadUids(blobs->outputUids);
+        return tensors;
+    }
 };
 
 // Why a load did NOT produce a bundle. These are authoring failures in the
 // bundle or sweep case. A valid graph-only bundle is still a loaded bundle and is
 // skipped later only if the harness cannot fill inputs.
+//
+// UNVALIDATABLE_GOLDEN_DATA is deliberately separate from MISSING_METADATA: it is
+// the one load failure that gets louder as the checkout gets more complete. Golden
+// blobs are on disk but nothing describes how they were produced, so the bundle
+// would be dropped at exactly the moment its data became available. Callers
+// (classifyBundle()) turn that one red; the rest stay log-and-skip.
+//
+// Metadata that is present but malformed is not a LoadError at all: the loader
+// lets BundleMetadataError propagate so its detail reaches the failure message.
 enum class LoadError
 {
     MALFORMED_JSON, // graph/template/sweep JSON is unreadable or syntactically invalid
     INVALID_GRAPH_SCHEMA, // expanded graph JSON cannot build a valid graph flatbuffer
-    MISSING_METADATA, // direct golden bundle is missing valid .meta.json metadata
-    TENSOR_LOAD_FAILED, // a present tensor blob is unreadable, wrong-sized, or unsupported
-    INVALID_SWEEP_CASE // sweep case id, placeholders, metadata, or golden path are invalid
+    MISSING_METADATA, // metadata absent, and no golden data that would need validating
+    UNVALIDATABLE_GOLDEN_DATA, // golden blobs present but their metadata is absent
+    INVALID_SWEEP_CASE // sweep case id, placeholders, or golden path are invalid
 };
 
 // A load either yields a bundle or explains why it could not. std::visit at the
@@ -96,9 +159,10 @@ inline const char* toString(LoadError error)
     case LoadError::INVALID_GRAPH_SCHEMA:
         return "graph JSON is not a valid graph";
     case LoadError::MISSING_METADATA:
-        return "missing or invalid .meta.json companion";
-    case LoadError::TENSOR_LOAD_FAILED:
-        return "tensor .bin present but failed to load";
+        return "metadata is missing";
+    case LoadError::UNVALIDATABLE_GOLDEN_DATA:
+        return "golden tensor .bin files are present but their metadata is missing, "
+               "so the data cannot be validated";
     case LoadError::INVALID_SWEEP_CASE:
         return "template-sweep case is invalid";
     default:
@@ -280,71 +344,44 @@ inline bool buildGraphBuffer(const nlohmann::json& graphJson,
     return true;
 }
 
-template <typename BlobPathFn>
-inline std::optional<LoadError> loadTensorDataIfPresent(IntegrationTestBundle& bundle,
-                                                        const nlohmann::json& graphJson,
-                                                        BlobPathFn&& blobPathForUid)
+// Records where a bundle's tensor blobs are, without reading them. Inputs are every
+// declared tensor that is not an output. The bundle carries blobs only when all inputs
+// are present, and golden outputs only when all outputs are too.
+//
+// `blobPathForUid` is stored, so it must own what it captures.
+inline void describeTensorBlobs(IntegrationTestBundle& bundle,
+                                const nlohmann::json& graphJson,
+                                std::function<std::filesystem::path(int64_t)> blobPathForUid)
 {
     const std::vector<int64_t> allUids = allTensorUids(graphJson);
     const std::set<int64_t> outputUidSet(bundle.outputTensorUids.begin(),
                                          bundle.outputTensorUids.end());
 
-    std::vector<int64_t> inputUids;
-    inputUids.reserve(allUids.size());
+    TensorBlobs blobs;
+    blobs.inputUids.reserve(allUids.size());
     for(const int64_t uid : allUids)
     {
         if(outputUidSet.count(uid) == 0)
         {
-            inputUids.push_back(uid);
+            blobs.inputUids.push_back(uid);
         }
     }
 
-    const bool inputsPresent = !inputUids.empty() && blobsPresentFor(inputUids, blobPathForUid);
-    const bool outputsPresent = !bundle.outputTensorUids.empty()
-                                && blobsPresentFor(bundle.outputTensorUids, blobPathForUid);
+    const bool inputsPresent
+        = !blobs.inputUids.empty() && blobsPresentFor(blobs.inputUids, blobPathForUid);
     if(!inputsPresent)
     {
-        return std::nullopt;
+        return;
     }
 
-    const auto& graph = *hipdnn_flatbuffers_sdk::data_objects::GetGraph(bundle.graphBuffer.data());
-    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
-        attrByUid;
-    for(const auto* attributes : *graph.tensors())
+    if(!bundle.outputTensorUids.empty() && blobsPresentFor(bundle.outputTensorUids, blobPathForUid))
     {
-        attrByUid[attributes->uid()] = attributes;
+        blobs.outputUids = bundle.outputTensorUids;
+        bundle.hasGoldenOutputs = true;
     }
 
-    const auto loadUids = [&](const std::vector<int64_t>& uids, TensorMap& into) {
-        for(const int64_t uid : uids)
-        {
-            const auto it = attrByUid.find(uid);
-            if(it == attrByUid.end())
-            {
-                continue;
-            }
-            into[uid] = hipdnn_test_sdk::utilities::tensorFromFileAndAttributes(blobPathForUid(uid),
-                                                                                *it->second);
-        }
-    };
-
-    try
-    {
-        TensorMap tensorMap;
-        loadUids(inputUids, tensorMap);
-        if(outputsPresent)
-        {
-            loadUids(bundle.outputTensorUids, tensorMap);
-            bundle.hasGoldenOutputs = true;
-        }
-        bundle.tensors = std::move(tensorMap);
-    }
-    catch(const std::exception&)
-    {
-        return LoadError::TENSOR_LOAD_FAILED;
-    }
-
-    return std::nullopt;
+    blobs.pathForUid = std::move(blobPathForUid);
+    bundle.blobs = std::move(blobs);
 }
 
 inline std::string firstPathToken(const std::string& path)
@@ -666,26 +703,6 @@ inline void applyTensorPatches(nlohmann::json& expandedGraph, const nlohmann::js
     }
 }
 
-inline const nlohmann::json* findSweepCase(const nlohmann::json& sweepJson,
-                                           const std::string& caseId)
-{
-    if(!sweepJson.contains("cases") || !sweepJson.at("cases").is_array())
-    {
-        return nullptr;
-    }
-
-    for(const auto& caseJson : sweepJson.at("cases"))
-    {
-        if(caseJson.is_object() && caseJson.contains("id") && caseJson.at("id").is_string()
-           && caseJson.at("id").get<std::string>() == caseId)
-        {
-            return &caseJson;
-        }
-    }
-
-    return nullptr;
-}
-
 inline std::optional<std::filesystem::path>
     resolveSweepGoldenDirectory(const std::filesystem::path& sweepPath,
                                 const nlohmann::json& caseJson)
@@ -716,20 +733,20 @@ inline std::optional<std::filesystem::path>
 //
 //   * graph .json not parseable            -> LoadError::MALFORMED_JSON
 //   * parseable but not a valid graph      -> LoadError::INVALID_GRAPH_SCHEMA
-//   * golden outputs present, no metadata  -> LoadError::MISSING_METADATA
+//   * golden outputs present, no metadata  -> LoadError::UNVALIDATABLE_GOLDEN_DATA
 //   * no golden outputs, no metadata       -> bundle with empty metadata
-//   * valid graph, input blobs absent      -> bundle with tensors == nullopt
-//   * present blob fails to load           -> LoadError::TENSOR_LOAD_FAILED
+//   * metadata present but malformed       -> throws BundleMetadataError
+//   * valid graph, input blobs absent      -> bundle with blobs == nullopt
 //   * inputs present, outputs absent       -> bundle verified against reference
 //   * inputs and outputs present           -> bundle verified against golden data
 //
 // Inputs and outputs are loaded independently. Output uids come from the graph;
 // every other declared tensor is treated as input. Every failure above is
-// reported through the return value, except one: a
-// RuntimePassByValueInvariantError from buildGraphBuffer() propagates
-// uncaught, since callers (see BundleRegistration.hpp's classifyBundle())
-// deliberately treat that one contradiction as a hard failure rather than a
-// quiet skip.
+// reported through the return value, except two that propagate uncaught: a
+// BundleMetadataError from malformed metadata, and a
+// RuntimePassByValueInvariantError from buildGraphBuffer(). Callers (see
+// BundleRegistration.hpp's classifyBundle()) deliberately treat both as hard
+// failures rather than quiet skips, and the exception carries the detail.
 inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPath)
 {
     const auto graphJson = detail::parseJsonFile(jsonPath);
@@ -761,56 +778,57 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
         }
     }
 
-    const auto blobPathForUid = [&](int64_t uid) { return detail::tensorBlobPath(jsonPath, uid); };
+    const auto blobPathForUid
+        = [jsonPath](int64_t uid) { return detail::tensorBlobPath(jsonPath, uid); };
     const bool goldenOutputsPresent
         = !bundle.outputTensorUids.empty()
           && detail::blobsPresentFor(bundle.outputTensorUids, blobPathForUid);
 
+    // An absent .meta.json is fine for a graph-only bundle (default metadata) but
+    // not next to golden blobs. A present-but-malformed one is an authoring error
+    // either way: loadBundleMetadata() throws BundleMetadataError, which is left
+    // to propagate so it never falls back to default metadata.
     auto metadata = hipdnn_integration_tests::loadBundleMetadata(jsonPath);
     if(!metadata.has_value())
     {
         if(goldenOutputsPresent)
         {
-            return LoadError::MISSING_METADATA;
+            return LoadError::UNVALIDATABLE_GOLDEN_DATA;
         }
         metadata.emplace();
     }
     bundle.metadata = std::move(*metadata);
 
-    if(const auto loadError = detail::loadTensorDataIfPresent(bundle, *graphJson, blobPathForUid);
-       loadError.has_value())
-    {
-        return *loadError;
-    }
+    detail::describeTensorBlobs(bundle, *graphJson, blobPathForUid);
 
     return bundle;
 }
 
 // Load either a direct bundle or one logical template-sweep case.
 //
-// Sweep cases parse graph.template.json plus sweep.json, locate the discovered
-// case id, expand `${case...}` placeholders, load inline metadata, and resolve an
-// optional golden directory. Sweep authoring errors are reported as
+// Sweep cases take graph.template.json plus sweep.json from `sweeps`, locate the
+// discovered case id, expand `${case...}` placeholders, load inline metadata, and
+// resolve an optional golden directory. Sweep authoring errors are reported as
 // INVALID_SWEEP_CASE; an expanded graph that still fails schema conversion is
-// INVALID_GRAPH_SCHEMA. As with the direct-bundle overload, a
-// RuntimePassByValueInvariantError from buildGraphBuffer() is the one
-// exception that propagates uncaught rather than being folded into
-// INVALID_GRAPH_SCHEMA.
-inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
+// INVALID_GRAPH_SCHEMA. As with the direct-bundle overload, two exceptions
+// propagate uncaught: a BundleMetadataError from a malformed metadata block, and
+// a RuntimePassByValueInvariantError from buildGraphBuffer().
+inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
+                                            SweepManifestCache& sweeps)
 {
     if(!discovered.isTemplateSweepCase())
     {
         return loadIntegrationTestBundle(discovered.jsonPath);
     }
 
-    const auto templateJson = detail::parseJsonFile(discovered.sweep->templatePath);
-    const auto sweepJson = detail::parseJsonFile(discovered.jsonPath);
-    if(!templateJson.has_value() || !sweepJson.has_value())
+    const auto& sweep = sweeps.get(discovered);
+    const auto& templateJson = sweep.templateJson;
+    if(!templateJson.has_value() || !sweep.manifest.has_value())
     {
         return LoadError::MALFORMED_JSON;
     }
 
-    const auto* caseJson = detail::findSweepCase(*sweepJson, discovered.sweep->caseId);
+    const auto* caseJson = sweep.manifest->findCase(discovered.sweep->caseId);
     if(caseJson == nullptr)
     {
         return LoadError::INVALID_SWEEP_CASE;
@@ -854,36 +872,46 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
         }
     }
 
+    // Golden blobs without metadata cannot be validated, so that combination is
+    // UNVALIDATABLE_GOLDEN_DATA and hard-fails downstream (see LoadError). Mirrors
+    // the direct-bundle path above.
+    const bool goldenOutputsPresent
+        = goldenDirectory.has_value() && !bundle.outputTensorUids.empty()
+          && detail::blobsPresentFor(bundle.outputTensorUids, [&](int64_t uid) {
+                 return *goldenDirectory / ("tensor" + std::to_string(uid) + ".bin");
+             });
+
     // Every sweep case must carry a metadata block. Metadata (arch lock,
     // ROCm/GPU version, seed, VRAM guard) is what validates golden data and
-    // anchors the case, so an absent block is MISSING_METADATA and a present
-    // but unparseable block is an authoring error (INVALID_SWEEP_CASE).
+    // anchors the case, so an absent block is MISSING_METADATA. A present but
+    // malformed block is an authoring error: parseBundleMetadataJson() throws
+    // BundleMetadataError, which is left to propagate (a typo in the metadata
+    // block must not quietly delete the case).
     if(!caseJson->contains("metadata") || caseJson->at("metadata").is_null())
     {
-        return LoadError::MISSING_METADATA;
+        return goldenOutputsPresent ? LoadError::UNVALIDATABLE_GOLDEN_DATA
+                                    : LoadError::MISSING_METADATA;
     }
-    auto metadata = hipdnn_integration_tests::parseBundleMetadataJson(
+    bundle.metadata = hipdnn_integration_tests::parseBundleMetadataJson(
         caseJson->at("metadata"), discovered.diagnosticPath().string());
-    if(!metadata.has_value())
-    {
-        return LoadError::INVALID_SWEEP_CASE;
-    }
-    bundle.metadata = std::move(*metadata);
 
     if(goldenDirectory.has_value())
     {
-        const auto blobPathForUid = [&](int64_t uid) {
-            return *goldenDirectory / ("tensor" + std::to_string(uid) + ".bin");
+        const auto blobPathForUid = [goldenDir = *goldenDirectory](int64_t uid) {
+            return goldenDir / ("tensor" + std::to_string(uid) + ".bin");
         };
-        if(const auto loadError
-           = detail::loadTensorDataIfPresent(bundle, expandedGraph, blobPathForUid);
-           loadError.has_value())
-        {
-            return *loadError;
-        }
+        detail::describeTensorBlobs(bundle, expandedGraph, blobPathForUid);
     }
 
     return bundle;
+}
+
+// Loads one bundle on its own. A pass over many sweep cases should share one
+// SweepManifestCache instead, so each manifest is parsed once.
+inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
+{
+    SweepManifestCache sweeps;
+    return loadIntegrationTestBundle(discovered, sweeps);
 }
 
 } // namespace hipdnn_integration_tests::bundle

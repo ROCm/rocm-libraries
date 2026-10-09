@@ -40,7 +40,10 @@ def test_mixed_catalog_storage_and_lowering(a, b, block_k):
         scale_dtype="e8m0",
         block_k=block_k,
     )
-    assert is_valid_spec(spec) == (True, f"ok: gfx1250 K=128 native {mode} {a} GEMM")
+    assert is_valid_spec(spec) == (
+        True,
+        f"ok: gfx1250 K=128 native {mode} {a}x{b} GEMM",
+    )
     atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
         family="wmma_scaled",
         a_dtype=a,

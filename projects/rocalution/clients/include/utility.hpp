@@ -370,6 +370,7 @@ public:
     int ordering       = 1;
     int cycle          = 0;
     int rebuildnumeric = 0;
+    int max_levels     = 0;
 
     // Interpolation truncation
     float trunc_factor = 0.0f;
@@ -411,6 +412,7 @@ public:
         this->ordering       = rhs.ordering;
         this->cycle          = rhs.cycle;
         this->rebuildnumeric = rhs.rebuildnumeric;
+        this->max_levels     = rhs.max_levels;
 
         this->coarsening_strategy = rhs.coarsening_strategy;
         this->interpolation_type  = rhs.interpolation_type;
