@@ -98,6 +98,8 @@ namespace hiptensor
         void ElementwisePermuteSolution5DFloatNoopInstances();
         void ElementwisePermuteSolution5DHalfInstances();
         void ElementwisePermuteSolution5DHalfNoopInstances();
+        void ElementwisePermuteSolution6DDoubleInstances();
+        void ElementwisePermuteSolution6DDoubleNoopInstances();
         void ElementwisePermuteSolution6DFloatInstances();
         void ElementwisePermuteSolution6DFloatNoopInstances();
         void ElementwisePermuteSolution6DHalfInstances();

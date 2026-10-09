@@ -89,6 +89,8 @@ set(HIPTENSOR_ELEMENTWISE_SOURCES
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank5_float_noop_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank5_half_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank5_half_noop_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank6_double_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank6_double_noop_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank6_float_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank6_float_noop_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/instances/elementwise_permute_solution_rank6_half_instances.cpp
