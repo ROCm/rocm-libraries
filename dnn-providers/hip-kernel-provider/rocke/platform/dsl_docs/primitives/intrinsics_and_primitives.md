@@ -249,6 +249,63 @@ b.global_atomic_add(Hist, eid, b.const_i32(1))
 local_off = b.global_atomic_add(Counter, eid, b.const_i32(1))
 ```
 
+### Cross-workgroup flags and fences
+
+Stream-K fixups hand a partial tile from one workgroup to another through
+global memory, guarded by i32 flags. Three leaf ops cover the protocol:
+
+```text
+fence(*, scope="agent", ordering="acq_rel")
+global_flag_store(ptr, idx, value, *, scope="agent", ordering="release")
+global_flag_wait_eq(ptr, idx, expect, *, scope="agent")
+```
+
+`scope` is one of `workgroup`, `agent`, `system` (LLVM `syncscope`;
+`system` has no clause). `ptr` must be a `ptr<i32,global>`: the builders and
+the verifier reject any other element type, because the LLVM lowering
+addresses the flag as an i32 while the HIP lowering indexes the pointee.
+Both lowerers also reject a missing or unknown `scope` / `ordering` instead
+of defaulting it, so IR that skipped the verifier cannot lower to an invalid
+`fence` or atomic.
+
+The wgrad stream-K fixups (`linear` and `tree` in
+`library/kernels/common/conv_implicit_gemm_wgrad.py`) keep one flag per
+(stream-K CTA, wave), at index `sk_cta * n_waves + warp_id`. A consumer lane
+only reads the partial written by the same lane of the same wave in the
+producer CTA, so each wave hands off on its own, with no workgroup barrier
+on either side:
+
+- Producer wave: store this wave's slice of the partial tile, issue
+  `fence(scope="agent", ordering="release")`, then
+  `global_flag_store(flags, sk_cta * n_waves + warp_id, 1)`.
+- Consumer wave: `global_flag_wait_eq(flags, partner * n_waves + warp_id, 1)`,
+  which lowers to a self-contained loop around an `acquire` atomic load,
+  then load the partner's partial. The acquire orders those loads after the
+  observed flag, so they see what the producer wave released.
+
+At `agent` scope on multi-XCD CDNA parts the release writes back and the
+acquire invalidates the per-XCD L2. The flag region must be zeroed before
+each launch; the partials are always written before they are read.
+
+Forward progress: a CTA only waits on a higher-index stream-K CTA (the
+`linear` owner folds `sk_cta + 1 ...`, a `tree` receiver folds
+`sk_cta + stride`), never on a lower one. If the whole CTA pool is resident
+at once, every wait terminates. When the pool is larger than what can be
+resident, the protocol relies on workgroups being dispatched in ascending
+index order, which the hardware does in practice but the programming model
+does not guarantee. Under that order only the CTAs of the tile straddling
+the dispatch front can wait on a CTA that has not started, and they hold a
+bounded number of slots (one for `linear`, about one per round for
+`tree`), so the other resident CTAs finish and free slots for the producers.
+Do not add a wait on a lower-index CTA, and do not reorder the grid (for
+example by remapping `block_id_x`) without revisiting this.
+
+| IR op | LLVM | HIP |
+|---|---|---|
+| `memref.fence` | `fence syncscope("agent") release` | `__builtin_amdgcn_fence` |
+| `memref.global_flag_store` | `store atomic i32 ... release` | `__hip_atomic_store` |
+| `memref.global_flag_wait_eq` | `load atomic i32 ... acquire` spin | `while (__hip_atomic_load(...) != e)` |
+
 Block-level histogram + scan helpers in `helpers/scan.py` wrap the
 common patterns:
 
