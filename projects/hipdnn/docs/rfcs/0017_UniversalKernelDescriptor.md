@@ -575,7 +575,9 @@ basis on which to prefer one over the other, and no answer to give. The catalog 
 therefore keyed on the tuple: a duplicate key is logged as an error and the colliding
 kernel dropped, rather than silently admitted into a set where selection cannot choose
 between its entries. Uniqueness is engine-wide, not per-pack, because the catalog spans
-every KDP that names the engine.
+every KDP that names the engine. A device sees at most one kernel per tuple: kernels sharing a
+tuple are resolved by arch tier (step 4 of the load flow, below), and only same-tier
+duplicates are errors.
 
 The remedy when two kernels must coexist is to add the KMD field that distinguishes them,
 so the schema grows to describe the variants the engine spans. This is additive and
@@ -1425,6 +1427,19 @@ provider's descriptor cache, reused by every later graph.
 contributes a matcher set, one dispatch-descriptor (**UDD**) id, and a kernel vector with each
 kernel's metadata values. A pack whose `arch` list excludes this device is dropped here. The
 dispatch descriptor is named but **not** loaded; nothing dispatches yet.
+
+*Arch tiers.* For one device, each kernel sits in one tier: an explicit arch id (e.g. `gfx1151`)
+outranks an LLVM generic target containing the device (e.g. `gfx11-generic`), which outranks an
+empty `arch` (unrestricted). When kernels sharing one metadata tuple are admitted for the device,
+the loader keeps the one in the best tier, so the tuple stays unique in the catalog. Two kernels
+with the same tuple in the *same* tier on a device (two explicit lists naming `gfx1151`, two
+generics sharing a member, two empty-`arch` kernels) are an identical definition with no basis to
+pick one, and the collision is an error. A family may ship a generic-target
+build for portability and a member-specialized build with identical metadata; the specialized build
+is expected to be better tuned for its device, so it wins there, and the generic remains the
+fallback on the other members. The same ranking picks which arch key of one kernel's archive is
+loaded: explicit before generic.
+
 *Stored:* the parsed packs, matchers, and kernel metadata, in the same descriptor cache.
 
 **5. Run the engine's `graph_match`, lazily, on the first pack that cleared the gate.** It either

@@ -12,13 +12,17 @@
 #include "utilities/Digest.hpp"
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_plugin_sdk/GpuGenericTargets.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace hip_kernel_provider::compilation
 {
@@ -101,6 +105,31 @@ public:
                + "::" + std::to_string(deviceOrdinal) + "::" + expectedSha256;
     }
 
+    /// The best-tier archive key serving @p deviceArch (ties: archive order), else nullptr.
+    /// Points into @p archiveArches.
+    static const std::string* selectArch(const std::vector<std::string>& archiveArches,
+                                         std::string_view deviceArch)
+    {
+        const std::string* best = nullptr;
+        std::optional<hipdnn_plugin_sdk::ArchTier> bestTier;
+        for(const auto& candidate : archiveArches)
+        {
+            const auto tier = hipdnn_plugin_sdk::entryTier(candidate, deviceArch);
+            if(tier && (!bestTier || *tier < *bestTier))
+            {
+                best = &candidate;
+                bestTier = tier;
+            }
+        }
+        if(bestTier == hipdnn_plugin_sdk::ArchTier::GENERIC)
+        {
+            HIPDNN_PLUGIN_LOG_INFO("kpack: device arch '"
+                                   << deviceArch << "' is served by generic archive key '" << *best
+                                   << "'");
+        }
+        return best;
+    }
+
     /// @throws KpackModuleLoadFailure on any stage that fails. Never returns a null
     ///         module: ModuleCache would decline to cache it, but with no message, and
     ///         the caller could not tell which stage gave up.
@@ -145,16 +174,7 @@ public:
         // Deliberate pre-check rather than letting kpack_get_kernel fail: a bare
         // KERNEL_NOT_FOUND cannot distinguish "wrong GPU" from "wrong toc_key", and
         // those two send a reader to entirely different places.
-        const std::string* matched = nullptr;
-        for(const auto& candidate : arches)
-        {
-            if(hipdnn_plugin_sdk::archMatches(
-                   deviceArch, candidate, hipdnn_plugin_sdk::ArchMatchMode::PREFIX))
-            {
-                matched = &candidate;
-                break;
-            }
-        }
+        const std::string* matched = selectArch(arches, deviceArch);
         if(matched == nullptr)
         {
             std::string available;

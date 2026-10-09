@@ -4,6 +4,42 @@ Build-time UKD/KMD/KDP -> kpack packaging. Provider-internal (`tools/hkp_pack.py
 see `python/hkp_pack/` for the pipeline and `examples/descriptors/` for a real,
 minimal authored source root.
 
+## Generic GPU targets
+
+`arch` accepts the LLVM generic targets in `projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json`
+(for example `gfx11-generic`), read through the required `--generic-targets-json`. Keep
+`GPU_TARGETS` concrete. The packer builds each selected generic once and copies its descriptors
+and archive (`arch: [<G>]`) into each selected member's folder; no generic-named folder is
+installed. Disk use grows with the number of members.
+
+Copies depend only on the source tree, the generic's spelling, hipcc and the table, so they are
+identical across member folders and separate per-arch builds, and the loader collapses them to
+one entry. Copies from different compilers differ in `provenance`, and the loader drops both.
+
+Kernels sharing a metadata tuple are ranked per device by arch tier; see
+[RFC 0017](../../../projects/hipdnn/docs/rfcs/0017_UniversalKernelDescriptor.md#4-resolve-the-kernel-packs-that-name-this-engine-and-apply-the-arch-gate).
+
+Authoring rules. Each violation fails the packer, raises a generator ConfigError, and makes the
+loader log an ERROR and drop the pack:
+
+- Every `-generic` name is in the table.
+- One `arch` list never holds a generic and one of its members, or two generics sharing a member.
+- A UKD names no generic its KDP does not list.
+- Under a KDP listing generics, a UKD with its own `arch` lists every KDP generic and only
+  entries the KDP lists; an inline UKD without `arch` inherits the pack.
+
+Packer only: a standalone UKD with empty `arch` needs an empty-`arch` KDP; shards with intersecting member sets may not write one path with different bytes.
+Packer and generator only: `kind: rocke` takes no generic.
+
+### hsaco kernels and `arch`
+
+An `hsaco` kernel's `arch` resolves in order: the kernel's own `arch`, else its pack's. The
+result must be non-empty; the generator rejects the kernel otherwise, because an unrestricted
+object would ship the same bytes to every shard. The generator writes the resolved list onto the
+descriptor, and the packer requires a non-empty `arch` there; it does not inherit, so an inline
+hsaco UKD without `arch` is refused even under an arch-scoped KDP. A generic-target object
+lists each member or its generic.
+
 ## Source roots and what the walk accepts
 
 Each wired root is walked recursively and packs into **its own** `OUT_ROOT`; no two
@@ -91,10 +127,9 @@ bytes are packed as-is into the arch's kpack, the kernel signature is read from 
 object's AMDGPU metadata as for a compiled object, and the UKD ships as `kind: kpack`.
 The toc key derives from the file's resolved root-relative path, so one file serving
 several symbols is one archive entry, and one key claimed by two different files is a
-hard error. The packer does not check the object's format or target processor. An
-`hsaco` UKD must list the arch(es) its object runs on in `arch` (a generic-target
-object lists every arch it runs on); an absent or empty `arch` is rejected. The author's own load test on the target arch
-is the only check; no in-tree load test covers `hsaco`. The shipped provenance records
+hard error. The packer does not check the object's format or target processor;
+`arch` follows [hsaco kernels and `arch`](#hsaco-kernels-and-arch). The author's own load
+test on the target arch is the only check; no in-tree load test covers `hsaco`. The shipped provenance records
 `origin_kind: "hsaco"`, the root-relative `file`, its `sha256` and the `symbol`, and makes no
 toolchain claim. As for `hip`, the specialization contract must declare
 `metadata_fields: []`: no compiler ran whose specialization a binding could observe.
@@ -359,8 +394,8 @@ Every architecture named explicitly under the production root gets an **automati
 in every lane that does not build it. At configure, `hkp_load_packaging_probes()` runs
 `tools/hkp_probe_derive_root.py --list-arches` on
 `HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT`: the union of the explicit `arch`
-entries of every KDP and UKD (inline and standalone), read with the packer's own loader.
-It subtracts the lane's own architectures (`hkp_selected_arches()`, i.e. `GPU_TARGETS`)
+entries of every KDP and UKD (inline and standalone), read with the packer's own loader and
+the generic target table, generic names mapped as below. It subtracts the lane's own architectures (`hkp_selected_arches()`, i.e. `GPU_TARGETS`)
 and declares `hkp_add_packaging_probe(ARCH <arch>)` for each one left: probe `<arch>`,
 ctest entry `hkp-probe-<arch>`, packing the default sample. Configure prints the result:
 
@@ -381,13 +416,35 @@ build targets, so each lane's own production pack packs it, and its GPU test lan
 on every PR. Only an architecture the lane does not build needs a probe, and only an
 explicit `arch` entry can make a descriptor ship there and nowhere else.
 
-**Non-concrete names are skipped.** An explicit `arch` entry that is not a concrete
-target, such as a generic target (`gfx9-4-generic`) or a TheRock family name, gets no
-automatic probe; configure prints which ones it skipped. No build packs for such a name:
-`GPU_TARGETS` drops it, and the packer matches arch names exactly, so it never selects a
-family member in its place either. Concrete names with a distinct-target word
-(`gfx1250-strict`) are probed like any other arch. The rule is `hkp_is_concrete_arch()`
-in `cmake/HkpPackaging.cmake`, the same one `GPU_TARGETS` goes through.
+**Generic targets are probed through one member.** A generic target in the generic target
+table (`projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json`) that a descriptor names
+gets its probe through the first member the table lists for it: `gfx11-generic` through
+`gfx1100`, `gfx12-generic` through `gfx1200`. The packer compiles the generic once, for the
+generic target, and merges the result into each requested member's folder, so which member
+carries the probe only names the folder; the table's order picks it, with no configuration.
+The probe for `gfx1100` packs every pass that applies to `gfx1100`, its own and the
+generic's: a KDP that ships only for the generic is trimmed like any other, and the
+assertion expects its UKDs with `arch: gfx11-generic` and the generic's archive
+(`kpack/hip_kernel_provider_gfx11-generic.kpack`) in the `gfx1100` folder.
+
+- A lane that targets any member of the generic gets no probe for it: its production pack
+  compiles the generic already. Linux (`gfx942`) probes `gfx11-generic` through `gfx1100`;
+  Windows (`gfx1151`, a member) does not.
+- One probe per member arch: a member that is also named explicitly, or chosen for two
+  generics, is probed once, because `--arches <member>` runs every pass that applies to it.
+
+```
+hkp: generic targets probed through their first member: [gfx11-generic -> gfx1100]
+hkp: automatic probe arches: [gfx1100, gfx950] (probe arches of the explicit arches under <root>: [gfx1100, gfx950]; build targets: [gfx942])
+```
+
+**TheRock family names are skipped; an unlisted generic fails configure.** An explicit `arch`
+entry that is a TheRock family name gets no automatic probe; configure prints which ones it
+skipped. No build packs for such a name: `GPU_TARGETS` drops it. A `*-generic` entry the table
+does not list fails configure with the packer loader's message, since the packer rejects it
+too. Concrete names with a distinct-target word (`gfx1250-strict`) are
+probed like any other arch. The rule is `hkp_is_concrete_arch()` in
+`cmake/HkpPackaging.cmake`, the same one `GPU_TARGETS` goes through.
 
 ### How to use
 
@@ -690,8 +747,8 @@ test module imports from another. Helpers both sides use live in plain modules:
 ### Desk-check a variant set (`hkp_pack.desk_check`, `tools/hkp_desk_check.py`)
 
 ```
-tools/hkp_desk_check.py --mode {full,structural} [--kpack-python-dir D]
-                        [--field F] [--drift-field F] <path/to/*.kdp.json>
+tools/hkp_desk_check.py --mode {full,structural} --generic-targets-json J
+                        [--kpack-python-dir D] [--field F] [--drift-field F] <path/to/*.kdp.json>
 ```
 
 The desk check resolves KDP engine → UED metadata → KMD UUID within the selected

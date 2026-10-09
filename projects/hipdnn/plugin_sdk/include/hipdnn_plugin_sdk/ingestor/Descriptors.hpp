@@ -105,7 +105,8 @@ static_assert(
         std::vector<int64_t>>,
     "MetadataType::INT_LIST no longer indexes MetadataValue's vector<int64_t> alternative.");
 
-/// A kernel's complete metadata tuple; must be unique per kernel within an engine.
+/// A kernel's complete metadata tuple. Kernels of one engine sharing a tuple must not compete at
+/// the same arch tier on any device; a better tier shadows a worse one.
 using MetadataValues = std::map<std::string, MetadataValue>;
 
 /// One field a kernel may vary along, as declared by an engine's KMD.

@@ -26,8 +26,15 @@ from hkp_pack.desk_check import (
     symbol_distinctness,
     toc_key_uniqueness,
 )
-from hkp_pack.pipeline import run_pipeline
-from pack_helpers import _EXAMPLES, _ROOT_IDS, _read, _require_bundles, _run_cli
+from pack_helpers import (
+    _EXAMPLES,
+    _ROOT_IDS,
+    GENERIC_TARGETS,
+    _read,
+    _require_bundles,
+    _run_cli,
+    run_pipeline,
+)
 
 ARCH = "gfx950"
 # The KMD fields the desk-check compares -- `DEFAULT_MATCHER_FIELDS`, narrowed
@@ -139,7 +146,10 @@ class TestInvariant1MetadataSpecDrift:
 class TestInvariant2DuplicateMatcherTuples:
     def test_distinct_variants_report_no_duplicates(self, packed_desk_check):
         assert (
-            duplicate_matcher_tuples(_kernels(packed_desk_check), _MATCHER_FIELDS) == {}
+            duplicate_matcher_tuples(
+                _kernels(packed_desk_check), _MATCHER_FIELDS, GENERIC_TARGETS
+            )
+            == {}
         )
 
     def test_real_pack_of_two_identical_matcher_tuples_is_detected(
@@ -161,7 +171,9 @@ class TestInvariant2DuplicateMatcherTuples:
         shipped = _pack_mutated(
             tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate
         )
-        dupes = duplicate_matcher_tuples(_kernels(shipped), _MATCHER_FIELDS)
+        dupes = duplicate_matcher_tuples(
+            _kernels(shipped), _MATCHER_FIELDS, GENERIC_TARGETS
+        )
         assert dupes == {(1, 64): 2}, dupes
 
 

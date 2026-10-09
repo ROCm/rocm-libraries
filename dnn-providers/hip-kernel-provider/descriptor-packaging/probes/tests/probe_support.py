@@ -24,6 +24,14 @@ STAMP_NAME = ".hkp-packed.stamp"
 HKP_PACK = _PKG_DIR / "tools" / "hkp_pack.py"
 PROBE_ASSERT = _PKG_DIR / "tools" / "hkp_probe_assert.py"
 PROBE_DERIVE = _PKG_DIR / "tools" / "hkp_probe_derive_root.py"
+GENERIC_TARGETS_JSON = (
+    _HKP_DIR.parent.parent
+    / "projects"
+    / "hipdnn"
+    / "plugin_sdk"
+    / "data"
+    / "gpu_generic_targets.json"
+)
 FIXTURES = _PKG_DIR / "tests" / "fixtures"
 ROCKE_FIXTURE = FIXTURES / "rocke"
 MAIN_FIXTURE = FIXTURES / "main"
@@ -62,9 +70,17 @@ def comgr_lib():
 
 
 def pack_root(
-    src, work, rocm_kpack_dir, hipcc, comgr_lib, *, rocke=False, filters=((), ())
+    src,
+    work,
+    rocm_kpack_dir,
+    hipcc,
+    comgr_lib,
+    *,
+    rocke=False,
+    filters=((), ()),
+    arch=ARCH,
 ):
-    """Pack `src` for ARCH with the real packer; return the output root.
+    """Pack `src` for `arch` with the real packer; return the output root.
 
     `rocke` packs with the rocKE toolchain (wheel stamp, in-tree rocke on PYTHONPATH,
     comgr), as a build with HIPKERNELPROVIDER_ENABLE_ROCKE=ON does; the default packs
@@ -85,9 +101,11 @@ def pack_root(
         "--out-root",
         str(out),
         "--arches",
-        ARCH,
+        arch,
         "--hipcc",
         hipcc,
+        "--generic-targets-json",
+        str(GENERIC_TARGETS_JSON),
         "--inter-root",
         str(work / "inter"),
         "--kpack-python-dir",
@@ -123,14 +141,14 @@ def packed_root(tmp_path_factory, rocm_kpack_dir, hipcc, comgr_lib):
     return pack_root(ROCKE_FIXTURE, work, rocm_kpack_dir, hipcc, comgr_lib, rocke=True)
 
 
-def run_assert(out_root, expect_path, rocm_kpack_dir, expect_comgr=None):
+def run_assert(out_root, expect_path, rocm_kpack_dir, expect_comgr=None, arch=ARCH):
     cmd = [
         sys.executable,
         str(PROBE_ASSERT),
         "--out-root",
         str(out_root),
         "--arch",
-        ARCH,
+        arch,
         "--expect",
         str(expect_path),
         "--kpack-python-dir",
@@ -151,6 +169,8 @@ def run_derive(src, arch, out, ukds=(), filters=((), ())):
         str(PROBE_DERIVE),
         "--from",
         str(src),
+        "--generic-targets-json",
+        str(GENERIC_TARGETS_JSON),
         "--arch",
         arch,
         "--out",
@@ -188,10 +208,11 @@ def derive_and_pack(
     *,
     rocke=False,
     filters=((), ()),
+    arch=ARCH,
 ):
-    """Derive `src` for ARCH, pack the derived root under the same `filters`; return
+    """Derive `src` for `arch`, pack the derived root under the same `filters`; return
     (out root, expect path). `rocke` as in pack_root."""
-    r = run_derive(src, ARCH, work / "probe" / "root", ukds, filters)
+    r = run_derive(src, arch, work / "probe" / "root", ukds, filters)
     assert r.returncode == 0, r.stderr
     out = pack_root(
         work / "probe" / "root",
@@ -201,5 +222,6 @@ def derive_and_pack(
         comgr_lib,
         rocke=rocke,
         filters=filters,
+        arch=arch,
     )
     return out, work / "probe" / "expect.json"

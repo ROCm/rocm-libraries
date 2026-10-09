@@ -14,6 +14,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from . import generic_targets as gtmod
 from .models import (
     KERNEL_SOURCE_KIND_HSACO,
     KERNEL_SOURCE_KIND_KPACK,
@@ -336,8 +337,7 @@ def _dedup_key(metadata: dict, config: IngestorConfig) -> str:
     """Identity of a descriptor as the matcher sees it: the completed tuple,
     not the emitted document.
 
-    Architecture is not part of this key; `build_kdp` decides overlap against
-    the arch coverage recorded beside each key.
+    Architecture is not part of this key; `build_kdp` compares arch separately.
     """
     return json.dumps(_completed_metadata(metadata, config), sort_keys=True)
 
@@ -356,11 +356,9 @@ def _candidate_identity(kernel: KernelSpec) -> str:
     )
 
 
-def _arch_overlaps(left: list, right: list) -> bool:
-    """Whether two arch coverages can select on the same device. An empty list
-    is the loader's wildcard and overlaps everything. Mirrors
-    ``hkp_pack.agreement.overlap``."""
-    return not left or not right or bool(set(left) & set(right))
+def _arch_competes(left: list, right: list) -> bool:
+    """Whether two arch lists tie on some device at the same tier."""
+    return gtmod.compete(left, right, gtmod.default_table())
 
 
 def _pack_index(config: IngestorConfig, pack: PackSpec) -> int:
@@ -451,9 +449,8 @@ def build_kdp(
     if config.is_multi_pack:
         matchers.insert(0, ids[("operation_umd", pack_index)])
     # Generation expressions targeting one engine may overlap, so a shared
-    # tuple has four outcomes: disjoint arch coverage is not a duplicate;
-    # overlapping coverage with the same candidate and equal arch de-duplicates
-    # here; a different candidate, or unequal coverage, is refused.
+    # tuple is a duplicate only when arch coverage competes: the same candidate
+    # with equal arch de-duplicates, anything else is refused.
     kernel_descriptors = []
     if seen_metadata is None:
         seen_metadata = {}
@@ -475,7 +472,7 @@ def build_kdp(
         identity = _candidate_identity(kernel)
         already = None
         for prior in seen_metadata.setdefault(key, []):
-            if not _arch_overlaps(arch, prior["arch"]):
+            if not _arch_competes(arch, prior["arch"]):
                 continue
             if prior["identity"] == identity:
                 if sorted(prior["arch"]) == sorted(arch):
@@ -616,8 +613,8 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
     lowered to ``kpack`` first. A descriptor with no ``arch`` is filed under
     its pack's; a pack with none under `ARCH_WILDCARD`.
 
-    Each concrete arch row is unioned with the wildcard row, one way only,
-    because a wildcard entry ships on that device too.
+    Each generic's descriptors also fill the rows of its members; the wildcard
+    row fills every row.
     """
     arches: dict[str, dict] = {}
 
@@ -634,6 +631,21 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
             total += 1
             for arch in list(descriptor.get("arch") or []) or pack_arch:
                 bucket(arch)["descriptors"].append(descriptor["name"])
+
+    table = gtmod.default_table()
+    generic_rows = {
+        name: (list(arches[name]["descriptors"]), set(arches[name]["pack_names"]))
+        for name in table.names()
+        if name in arches
+    }
+    for name in generic_rows:
+        for member in table.members(name):
+            bucket(member)
+    for arch, entry in arches.items():
+        for name, (descriptors, pack_names) in generic_rows.items():
+            if arch in table.members(name):
+                entry["descriptors"].extend(descriptors)
+                entry["pack_names"].update(pack_names)
 
     wildcard = arches.get(ARCH_WILDCARD)
     if wildcard is not None:
