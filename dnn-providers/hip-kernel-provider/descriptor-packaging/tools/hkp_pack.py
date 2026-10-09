@@ -141,6 +141,25 @@ def _parse_args(argv):
         "recorded in each rocKE UKD's provenance, so a shipped kernel names "
         "the wheel that produced it.",
     )
+    p.add_argument(
+        "--exclude-folder",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="A top-level child folder of the source root that this build does "
+        "not pack (a descriptor family whose build flag is off), matched "
+        "case-insensitively. A name that matches no folder is ignored. "
+        "Repeatable.",
+    )
+    p.add_argument(
+        "--disable-kind",
+        action="append",
+        default=[],
+        metavar="KIND",
+        help="A kernel_source kind this build has no producer for. Its UKDs are "
+        "pruned like arch-pruned ones, and a KDP left with none is dropped. "
+        "Repeatable; an unknown kind is an error.",
+    )
     return p.parse_args(argv)
 
 
@@ -157,6 +176,8 @@ def main(argv=None):
         rocke_wheel_stamp=args.rocke_wheel_stamp,
         group=args.group,
         source_label=args.source_label,
+        exclude_folders=tuple(args.exclude_folder),
+        disabled_kinds=tuple(args.disable_kind),
     )
     return 0
 

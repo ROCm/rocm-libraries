@@ -409,6 +409,31 @@ def _spec_raw(idx: int):
             ),
             "gfx950",
         )
+    if idx == 20:
+        # gfx942 (CDNA3) async_dma: same shape as config 3, but on an arch whose
+        # buffer_load_lds moves only a dword (not CDNA4's b128) per lane --
+        # covers the arch-width cap in the C++ async-conv port, which previously
+        # had parity coverage only on gfx950. warp_tile is 16x16x16 (not config
+        # 3's 32x32x16): that atom is CDNA4-only, gfx942's MFMA catalog tops
+        # out at 16x16x16 / 32x32x8.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                async_dma=True,
+            ),
+            "gfx942",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

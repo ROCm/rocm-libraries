@@ -12,10 +12,13 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -233,6 +236,38 @@ Documents makeSetDocuments(char tag, const std::string& engineName)
     };
 }
 
+/// A document's top-level members, in the order a file states them. A repeated key is two
+/// members: nlohmann::json can hold neither that nor an order of its own choosing.
+using Members = std::vector<std::pair<std::string, nlohmann::json>>;
+
+std::string membersText(const Members& members)
+{
+    std::string text = "{";
+    for(const auto& [key, value] : members)
+    {
+        text += (text.size() == 1 ? "" : ",") + nlohmann::json(key).dump() + ":" + value.dump();
+    }
+    return text + "}";
+}
+
+/// @p pack's members as the packer writes them: every header key, then `kernelDescriptors`
+/// last. nlohmann::json sorts keys, which would put `matchers`, `name` and `version` after
+/// the kernels and send every pack through the loader's second pass instead of the single
+/// pass a packed tree takes.
+Members packerLayout(const nlohmann::json& pack)
+{
+    Members members;
+    for(auto it = pack.begin(); it != pack.end(); ++it)
+    {
+        if(it.key() != "kernelDescriptors")
+        {
+            members.emplace_back(it.key(), it.value());
+        }
+    }
+    members.emplace_back("kernelDescriptors", pack.at("kernelDescriptors"));
+    return members;
+}
+
 void writeDocument(const std::filesystem::path& directory, const TestDocument& document)
 {
     std::filesystem::create_directories(directory);
@@ -241,7 +276,9 @@ void writeDocument(const std::filesystem::path& directory, const TestDocument& d
     std::ofstream file(
         directory / (document.body.at("id").get<std::string>() + std::string(document.suffix)),
         std::ios::binary);
-    file << document.body.dump(2) << '\n';
+    const bool packed
+        = document.suffix == ".kdp.json" && document.body.contains("kernelDescriptors");
+    file << (packed ? membersText(packerLayout(document.body)) : document.body.dump(2)) << '\n';
 }
 
 void writeDocuments(const std::filesystem::path& directory, const Documents& documents)
@@ -331,9 +368,29 @@ std::vector<DescriptorSet> loadFrom(const std::filesystem::path& root)
     return resolveDescriptorSets(loadDescriptorCatalog(root));
 }
 
+/// The sets validation kept under @p root, without the state managers it built for them.
+std::vector<DescriptorSet> validatedSetsFrom(const std::filesystem::path& root)
+{
+    std::vector<DescriptorSet> sets;
+    for(auto& validated : loadValidatedDescriptorSets<LoaderHandle>(root))
+    {
+        sets.push_back(std::move(validated.set));
+    }
+    return sets;
+}
+
 std::vector<DescriptorSet> loadFromRoots(const std::vector<std::filesystem::path>& roots)
 {
     return resolveDescriptorSets(loadDescriptorCatalog(roots));
+}
+
+size_t countLogsContaining(const hipdnn_test_sdk::utilities::SharedLogRecorder& recorder,
+                           const std::string& text)
+{
+    const auto logs = recorder.getRecordedLogs();
+    return static_cast<size_t>(std::count_if(logs.begin(), logs.end(), [&text](const auto& log) {
+        return log.message.find(text) != std::string::npos;
+    }));
 }
 
 } // namespace
@@ -469,7 +526,7 @@ TEST(TestDescriptorLoader, KeepsPerArchShardsSharingAMetadataTupleThroughTheStat
         writeDocuments(dir.path() / arch, documents);
     }
 
-    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+    const auto sets = validatedSetsFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().packs.size(), 2u);
@@ -844,12 +901,12 @@ TEST(TestDescriptorLoader, ValidatesAnEngineComingOnlyFromTheDropInRoot)
     writeDocuments(installed, makeSetDocuments('1', "test:validated_installed"));
     writeDocuments(dropIn, makeSetDocuments('2', "test:validated_drop_in"));
 
-    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(
+    const auto validated = loadValidatedDescriptorSets<LoaderHandle>(
         std::vector<std::filesystem::path>{installed, dropIn});
 
-    ASSERT_EQ(sets.size(), 2u);
-    EXPECT_EQ(sets.front().engine.name, "test:validated_installed");
-    EXPECT_EQ(sets.back().engine.name, "test:validated_drop_in");
+    ASSERT_EQ(validated.size(), 2u);
+    EXPECT_EQ(validated.front().set.engine.name, "test:validated_installed");
+    EXPECT_EQ(validated.back().set.engine.name, "test:validated_drop_in");
     EXPECT_TRUE(
         recorder.hasLogContaining(HIPDNN_SEV_INFO, "2 descriptor-backed engine(s) loaded from"))
         << recorder.getRecordedLogsAsString();
@@ -889,6 +946,77 @@ TEST(TestDescriptorLoader, DropsAnIdTwoFilesDisagreeAbout)
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:survivor");
 }
+
+namespace
+{
+
+/// One way the first of two same-id files stops being readable before the second arrives,
+/// and the ERROR that names it.
+struct RereadFailureCase
+{
+    std::string name;
+    std::function<void(const std::filesystem::path&)> spoil;
+    std::string diagnostic;
+};
+
+class TestDescriptorLoaderRereadFailure : public ::testing::TestWithParam<RereadFailureCase>
+{
+};
+
+} // namespace
+
+TEST_P(TestDescriptorLoaderRereadFailure, DropsAnIdWhoseEarlierFileCanNoLongerBeReRead)
+{
+    // A collision is settled by re-reading both files, and a file that no longer reads cannot
+    // prove the two equal: even identical copies drop the id, under an ERROR that says the
+    // comparison failed rather than that the contents differ.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("reread_failure_" + GetParam().name));
+    auto documents = makeSetDocuments('1', "test:reread");
+    const auto& body = documentOfType(documents, ".udd.json");
+    const auto first = dir.path() / "first.udd.json";
+    const auto second = dir.path() / "second.udd.json";
+    for(const auto& path : {first, second})
+    {
+        std::ofstream(path, std::ios::binary) << body.dump(2);
+    }
+
+    DescriptorMap<DispatchDescriptor> dispatches;
+    detail::insertCatalogEntry(
+        dispatches, detail::parseDispatchDescriptor(body, first.string()), first);
+    GetParam().spoil(first);
+    detail::insertCatalogEntry(
+        dispatches, detail::parseDispatchDescriptor(body, second.string()), second);
+
+    ASSERT_EQ(dispatches.size(), 1u);
+    const auto& entry = dispatches.begin()->second;
+    EXPECT_TRUE(entry.conflicted);
+    EXPECT_EQ(detail::findDescriptor(dispatches, entry.descriptor.id), nullptr);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, GetParam().diagnostic))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "could not be compared"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining("with different contents"))
+        << recorder.getRecordedLogsAsString();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Collision,
+    TestDescriptorLoaderRereadFailure,
+    ::testing::Values(RereadFailureCase{"deleted",
+                                        [](const std::filesystem::path& path) {
+                                            ASSERT_TRUE(std::filesystem::remove(path));
+                                        },
+                                        "failed to re-open"},
+                      RereadFailureCase{"unparsable",
+                                        [](const std::filesystem::path& path) {
+                                            std::ofstream(path, std::ios::binary | std::ios::trunc)
+                                                << "not json";
+                                        },
+                                        "failed to re-read"}),
+    [](const ::testing::TestParamInfo<RereadFailureCase>& info) { return info.param.name; });
 
 TEST(TestDescriptorLoader, LoadsNothingFromAnEmptyDirectory)
 {
@@ -946,6 +1074,33 @@ TEST(TestDescriptorLoader, RejectsADescriptorWhoseRootIsNotAnObject)
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:intact");
+}
+
+TEST(TestDescriptorLoader, RejectsAPackTruncatedAsItsKernelsOpenAndKeepsTheSibling)
+{
+    // The header fails (it has no id) before the text does, and the syntax error still wins,
+    // as it does for a whole-document parse. Every other unreadable spelling is an oracle
+    // row, which derives the parser's wording at runtime.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unreadable_pack"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / "unreadable.kdp.json", std::ios::binary)
+        << R"({"version": "1.0", "kernelDescriptors": [)";
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+    EXPECT_EQ(sets.front().packs.size(), 1u);
+    const auto logs = recorder.getRecordedLogs();
+    EXPECT_TRUE(std::any_of(logs.begin(), logs.end(), [](const auto& log) {
+        return log.severity == HIPDNN_SEV_ERROR
+               && log.message.find("failed to parse") != std::string::npos
+               && log.message.find("unreadable.kdp.json") != std::string::npos;
+    })) << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining("missing required key"))
+        << recorder.getRecordedLogsAsString();
 }
 
 namespace
@@ -1373,7 +1528,7 @@ TEST(TestDescriptorLoader, DropsAPackWhoseKernelOmitsAnUndefaultedMetadataField)
     documents.push_back(TestDocument{".kdp.json", brokenPack});
     writeDocuments(dir.path(), documents);
 
-    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+    const auto sets = validatedSetsFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().packs.size(), 1u);
@@ -1432,11 +1587,84 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredSymbol)
     documentOfType(unregistered, ".umd.json")["match_symbol"] = "descriptorloader.absent";
     writeDocuments(dir.path(), unregistered);
 
-    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+    const auto sets = validatedSetsFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:symbol_check_sibling");
 }
+
+namespace
+{
+
+/// One way validation drops the middle of three descriptor sets, and the ERROR text that shows
+/// which check dropped it.
+struct MiddleSetDropCase
+{
+    std::string name;
+    std::function<void(Documents&)> corrupt;
+    std::vector<std::string> reasons;
+};
+
+class TestDescriptorLoaderStateManagerOrder : public ::testing::TestWithParam<MiddleSetDropCase>
+{
+};
+
+} // namespace
+
+TEST_P(TestDescriptorLoaderStateManagerOrder, HandsBackOneStateManagerPerValidatedSetInTheSameOrder)
+{
+    // Engine i is built over state manager i: off by one, an engine serves its neighbor's
+    // kernels while every id it advertises is still correct.
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("state_managers_" + GetParam().name));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:first_valid"));
+    auto dropped = makeSetDocuments('2', "test:dropped_middle");
+    GetParam().corrupt(dropped);
+    writeDocuments(dir.path(), dropped);
+    writeDocuments(dir.path(), makeSetDocuments('3', "test:second_valid"));
+
+    const auto validated
+        = loadValidatedDescriptorSets<LoaderHandle>(std::vector<std::filesystem::path>{dir.path()});
+
+    for(const auto& reason : GetParam().reasons)
+    {
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, reason))
+            << reason << "\n"
+            << recorder.getRecordedLogsAsString();
+    }
+    ASSERT_EQ(validated.size(), 2u);
+    EXPECT_EQ(validated[0].set.engine.name, "test:first_valid");
+    EXPECT_EQ(validated[1].set.engine.name, "test:second_valid");
+    for(const auto& entry : validated)
+    {
+        ASSERT_NE(entry.stateManager, nullptr) << entry.set.engine.name;
+        EXPECT_EQ(toString(entry.stateManager->metadataSchema().id), toString(entry.set.schema.id))
+            << entry.set.engine.name;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MiddleSetDrop,
+    TestDescriptorLoaderStateManagerOrder,
+    ::testing::Values(MiddleSetDropCase{"symbol_pre_flight",
+                                        [](Documents& documents) {
+                                            documentOfType(documents, ".umd.json")["match_symbol"]
+                                                = "descriptorloader.absent";
+                                        },
+                                        {"names unregistered match symbol"}},
+                      // Passes every check the loader makes itself; only building the state manager
+                      // rejects it. Valid until a model heuristic adapter exists; then pick another
+                      // construction-time failure.
+                      MiddleSetDropCase{"construction_failure",
+                                        [](Documents& documents) {
+                                            documentOfType(documents, ".uhd.json")["kind"]
+                                                = "model";
+                                        },
+                                        {"does not validate", "names a kind with no adapter yet"}}),
+    [](const ::testing::TestParamInfo<MiddleSetDropCase>& info) { return info.param.name; });
 
 /// The graph_match arm of the same pre-flight. An engine naming a graph match this build
 /// does not ship is dropped while it is read, rather than constructing and then throwing
@@ -1453,7 +1681,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredGraphMatch
         = nlohmann::json{{"native", "descriptorloader.absent_graph_match"}};
     writeDocuments(dir.path(), unregistered);
 
-    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+    const auto sets = validatedSetsFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:graph_match_sibling");
@@ -1478,7 +1706,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAGraphSymbolAsItsKernelS
     secondDocumentOfType(misrouted, ".umd.json")["match_symbol"] = GRAPH_SYMBOL;
     writeDocuments(dir.path(), misrouted);
 
-    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+    const auto sets = validatedSetsFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:kernel_scope_check_sibling");
@@ -1501,7 +1729,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredDispatchSy
     documentOfType(unregistered, ".udd.json")["dispatch_symbol"] = "descriptorloader.absent";
     writeDocuments(dir.path(), unregistered);
 
-    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+    const auto sets = validatedSetsFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:dispatch_check_sibling");
@@ -1524,7 +1752,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredScoreSymbo
     documentOfType(unregistered, ".uhd.json")["payload"] = "descriptorloader.absent";
     writeDocuments(dir.path(), unregistered);
 
-    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+    const auto sets = validatedSetsFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:score_check_sibling");
@@ -1551,7 +1779,7 @@ TEST(TestDescriptorLoader, ReportsHowManyDescriptorSetsWereDropped)
     secondDocumentOfType(misrouted, ".umd.json")["match_symbol"] = GRAPH_SYMBOL;
     writeDocuments(dir.path(), misrouted);
 
-    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+    const auto sets = validatedSetsFrom(dir.path());
 
     EXPECT_EQ(sets.size(), 1u);
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
@@ -1576,7 +1804,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineWhoseKernelsShareAMetadataTupl
     kernels[1]["metadata"] = kernels[0]["metadata"];
     writeDocuments(dir.path(), duplicated);
 
-    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+    const auto sets = validatedSetsFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:tuple_check_sibling");
@@ -1594,7 +1822,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineCollidingWithARegisteredName)
     static const hipdnn_data_sdk::utilities::EngineRegistrar s_registrar{s_claimed};
     writeDocuments(dir.path(), makeSetDocuments('2', s_claimed));
 
-    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+    const auto sets = validatedSetsFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:collision_check_sibling");
@@ -1608,9 +1836,9 @@ TEST(TestDescriptorLoader, ValidationIsIdempotentAcrossReloads)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("reload"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:reloaded"));
 
-    ASSERT_EQ(loadValidatedDescriptorSets<LoaderHandle>(dir.path()).size(), 1u);
+    ASSERT_EQ(validatedSetsFrom(dir.path()).size(), 1u);
 
-    const auto reloaded = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+    const auto reloaded = validatedSetsFrom(dir.path());
 
     ASSERT_EQ(reloaded.size(), 1u);
     EXPECT_EQ(reloaded.front().engine.name, "test:reloaded");
@@ -2312,8 +2540,6 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
     // Which two, not merely how many: the gate has to drop the entry that declared 1.1.
     EXPECT_EQ(toString(kernels[0].id), testUuid('1', '9'));
     EXPECT_EQ(toString(kernels[1].id), testUuid('1', 'a'));
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "declares version 1.1"))
-        << recorder.getRecordedLogsAsString();
     // The locator names the pack file; "a 'kernelDescriptors' entry" alone names nothing,
     // and a shard layout ships the same filename under every arch.
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, ".kdp.json"));
@@ -2394,6 +2620,884 @@ TEST(TestDescriptorLoader, DropsAPackReferencingAStandaloneKernelOfANewerUkdVers
     EXPECT_EQ(sets.front().engine.name, "test:valid");
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "which no descriptor defines"))
         << recorder.getRecordedLogsAsString();
+}
+
+namespace
+{
+
+/// Replaces the `.kdp.json` writeDocuments() wrote for @p documents with @p text: a layout
+/// the packer never writes, or text no packer could write at all.
+void overwritePack(const std::filesystem::path& directory,
+                   Documents& documents,
+                   const std::string& text)
+{
+    const auto id = documentOfType(documents, ".kdp.json").at("id").get<std::string>();
+    std::ofstream(directory / (id + ".kdp.json"), std::ios::binary | std::ios::trunc)
+        << text << '\n';
+}
+
+/// One spelling of a pack's top-level keys, and how many times the loader reads that pack's
+/// header and kernels for it: exactly, or at least where the exact count is not the point.
+struct PackReadingsCase
+{
+    std::string name;
+    std::function<std::string(const nlohmann::json& pack)> spell;
+    size_t readings;
+    bool exactly;
+};
+
+class TestDescriptorLoaderPackReadings : public ::testing::TestWithParam<PackReadingsCase>
+{
+};
+
+} // namespace
+
+TEST_P(TestDescriptorLoaderPackReadings, WarnsOncePerReadingOfThePack)
+{
+    // Each reading of the pack logs each WARN once, so the count tells kernels parsed while
+    // streaming (one reading) from kernels parsed again in a second pass (two).
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("pack_readings_" + GetParam().name));
+    auto documents = makeSetDocuments('1', "test:pack_readings");
+    auto& pack = documentOfType(documents, ".kdp.json");
+    pack["x-pack-note"] = "header";
+    auto& kernels = pack.at("kernelDescriptors");
+    kernels[0]["version"] = "1.1";
+    kernels[1]["x-kernel-note"] = "kernel";
+    writeDocuments(dir.path(), documents);
+    overwritePack(dir.path(), documents, GetParam().spell(pack));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 2u);
+    const auto& param = GetParam();
+    for(const std::string warning :
+        {"extension key 'x-pack-note'", "declares version 1.1", "extension key 'x-kernel-note'"})
+    {
+        const auto count = countLogsContaining(recorder, warning);
+        if(param.exactly)
+        {
+            EXPECT_EQ(count, param.readings) << warning << "\n"
+                                             << recorder.getRecordedLogsAsString();
+        }
+        else
+        {
+            EXPECT_GE(count, param.readings) << warning << "\n"
+                                             << recorder.getRecordedLogsAsString();
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Layout,
+    TestDescriptorLoaderPackReadings,
+    ::testing::Values(
+        PackReadingsCase{"packers_layout",
+                         [](const nlohmann::json& pack) { return membersText(packerLayout(pack)); },
+                         1,
+                         true},
+        // Streamed, then read again by the second pass the trailing key forces. A floor, so
+        // that logging those WARNs only once would not have to touch this row.
+        PackReadingsCase{"key_after_the_kernels",
+                         [](const nlohmann::json& pack) {
+                             auto members = packerLayout(pack);
+                             members.emplace_back("x-trailing-note", "after the kernels");
+                             return membersText(members);
+                         },
+                         1,
+                         false},
+        // The header is complete but for its version when the kernels open, and nothing
+        // streams before the version is known, so the second pass is the only reading.
+        PackReadingsCase{"version_after_the_kernels",
+                         [](const nlohmann::json& pack) {
+                             auto members = packerLayout(pack);
+                             const auto version = std::find_if(
+                                 members.begin(), members.end(), [](const auto& member) {
+                                     return member.first == "version";
+                                 });
+                             auto moved = *version;
+                             members.erase(version);
+                             members.push_back(std::move(moved));
+                             return membersText(members);
+                         },
+                         1,
+                         true}),
+    [](const ::testing::TestParamInfo<PackReadingsCase>& info) { return info.param.name; });
+
+namespace
+{
+
+/// One reading of a `.kdp.json`: the pack, the stage and reason that refused it, or neither
+/// when the version gate declined it.
+struct PackReading
+{
+    std::optional<KernelDescriptorPack> pack;
+    std::string stage; ///< "failed to parse" or "is not a valid descriptor"
+    std::string reason;
+};
+
+enum class PackOutcome
+{
+    LOADS,
+    SKIPPED,
+    REJECTED,
+};
+
+PackOutcome outcomeOf(const PackReading& reading)
+{
+    if(reading.pack)
+    {
+        return PackOutcome::LOADS;
+    }
+    return reading.reason.empty() ? PackOutcome::SKIPPED : PackOutcome::REJECTED;
+}
+
+/// Reads a `.kdp.json` as one DOM. It shares four production functions with the walk --
+/// requireObject, versionIsSupported, parseKernelDescriptorPackHeader and addPackKernelEntry
+/// -- so it is a streaming-equivalence oracle rather than a second reading of the rules: on a
+/// row that breaks one of them, both readings raise the same error by construction.
+PackReading readPackAsOneDocument(const std::string& text, const std::string& where)
+{
+    static const auto* const s_kdp = detail::findFileType("pack.kdp.json");
+    PackReading reading;
+    nlohmann::json document;
+    try
+    {
+        document = nlohmann::json::parse(
+            text, nullptr, /*allow_exceptions=*/true, /*ignore_comments=*/true);
+    }
+    catch(const std::exception& error)
+    {
+        reading.stage = "failed to parse";
+        reading.reason = error.what();
+        return reading;
+    }
+    try
+    {
+        detail::requireObject(document, "the document root");
+        if(!detail::versionIsSupported(document, s_kdp->major, s_kdp->minor, where))
+        {
+            return reading;
+        }
+        auto pack = detail::parseKernelDescriptorPackHeader(document, where);
+        for(const auto& entry : document.at("kernelDescriptors"))
+        {
+            detail::addPackKernelEntry(pack, entry, where);
+        }
+        reading.pack = std::move(pack);
+    }
+    catch(const std::exception& error)
+    {
+        reading.stage = "is not a valid descriptor";
+        reading.reason = error.what();
+    }
+    return reading;
+}
+
+void expectSameKernel(const KernelDescriptor& actual, const KernelDescriptor& expected)
+{
+    SCOPED_TRACE("kernel '" + expected.name + "'");
+    EXPECT_EQ(toString(actual.id), toString(expected.id));
+    EXPECT_EQ(actual.name, expected.name);
+    EXPECT_EQ(actual.source.kind, expected.source.kind);
+    EXPECT_EQ(actual.source.sourceFile, expected.source.sourceFile);
+    EXPECT_EQ(actual.source.entryPoint, expected.source.entryPoint);
+    EXPECT_EQ(actual.source.library, expected.source.library);
+    EXPECT_EQ(actual.source.tocKey, expected.source.tocKey);
+    EXPECT_EQ(actual.source.symbol, expected.source.symbol);
+    EXPECT_EQ(actual.source.sha256, expected.source.sha256);
+    ASSERT_EQ(actual.source.signature.size(), expected.source.signature.size());
+    for(size_t i = 0; i < expected.source.signature.size(); ++i)
+    {
+        EXPECT_EQ(actual.source.signature[i].kind, expected.source.signature[i].kind);
+        EXPECT_EQ(actual.source.signature[i].size, expected.source.signature[i].size);
+        EXPECT_EQ(actual.source.signature[i].offset, expected.source.signature[i].offset);
+        EXPECT_EQ(actual.source.signature[i].name, expected.source.signature[i].name);
+    }
+    EXPECT_TRUE(actual.metadata == expected.metadata);
+    EXPECT_EQ(actual.priority, expected.priority);
+    EXPECT_EQ(actual.arch, expected.arch);
+    EXPECT_EQ(actual.originDirectory, expected.originDirectory);
+    EXPECT_EQ(actual.treeRoot, expected.treeRoot);
+}
+
+void expectSamePack(const KernelDescriptorPack& actual, const KernelDescriptorPack& expected)
+{
+    EXPECT_EQ(toString(actual.id), toString(expected.id));
+    EXPECT_EQ(actual.name, expected.name);
+    EXPECT_EQ(actual.matcherIds, expected.matcherIds);
+    EXPECT_EQ(toString(actual.engineId), toString(expected.engineId));
+    EXPECT_EQ(toString(actual.dispatchId), toString(expected.dispatchId));
+    EXPECT_EQ(actual.arch, expected.arch);
+    EXPECT_EQ(actual.kernelIds, expected.kernelIds);
+    ASSERT_EQ(actual.kernels.size(), expected.kernels.size());
+    for(size_t i = 0; i < expected.kernels.size(); ++i)
+    {
+        expectSameKernel(actual.kernels[i], expected.kernels[i]);
+    }
+}
+
+bool endsWith(const std::string& text, const std::string& suffix)
+{
+    return text.size() >= suffix.size()
+           && text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+void replaceAll(std::string& text, std::string_view token, const std::string& value)
+{
+    for(auto at = text.find(token); at != std::string::npos;
+        at = text.find(token, at + value.size()))
+    {
+        text.replace(at, token.size(), value);
+    }
+}
+
+/// A well-formed UUID per index, for a pack holding more kernels than testUuid has tags.
+std::string indexedUuid(size_t index)
+{
+    std::string id = "00000000-0000-4000-8000-000000000000";
+    const auto digits = std::to_string(index);
+    id.replace(id.size() - digits.size(), digits.size(), digits);
+    return id;
+}
+
+/// The oracle pack's header, every key valid. Its ids name nothing: the oracle compares
+/// catalog entries, before any cross-reference is resolved.
+Members oracleHeader()
+{
+    return {{"version", "1.0"},
+            {"id", testUuid('e', ROLE_PACK)},
+            {"name", "oracle pack"},
+            {"matchers",
+             nlohmann::json::array(
+                 {testUuid('e', ROLE_GRAPH_MATCHER), testUuid('e', ROLE_KERNEL_MATCHER)})},
+            {"engine", testUuid('e', ROLE_ENGINE)},
+            {"dispatch", testUuid('e', ROLE_DISPATCH)}};
+}
+
+Members oracleHeaderWithArch(const std::vector<std::string>& arch)
+{
+    auto header = oracleHeader();
+    header.emplace_back("arch", arch);
+    return header;
+}
+
+/// The oracle header without its @p key, for a row that spells that key itself.
+Members oracleHeaderWithout(const std::string& key)
+{
+    auto header = oracleHeader();
+    header.erase(std::find_if(
+        header.begin(), header.end(), [&key](const auto& member) { return member.first == key; }));
+    return header;
+}
+
+nlohmann::json oracleKernel(size_t index)
+{
+    return {
+        {"version", "1.0"},
+        {"id", indexedUuid(index)},
+        {"name", "kernel_" + std::to_string(index)},
+        {"kernel_source",
+         {{"kind", "embedded_source"}, {"source_file", "Kernel.cpp"}, {"entry_point", "Entry"}}},
+        {"metadata", {{"block_size", index}}},
+        {"priority", 0}};
+}
+
+/// @p header, then @p kernels as `kernelDescriptors`, then @p after.
+std::string oraclePackText(Members header, nlohmann::json kernels, const Members& after = {})
+{
+    header.emplace_back("kernelDescriptors", std::move(kernels));
+    header.insert(header.end(), after.begin(), after.end());
+    return membersText(header);
+}
+
+/// @p text with `$HEADER` standing for the oracle header's members, `$KERNEL` and
+/// `$KERNEL2` for two valid kernels, and `$KERNEL_BODY` for the first kernel's members
+/// without its `metadata` and `priority` -- so a row spells only the bytes it is about.
+std::string spell(std::string text)
+{
+    const auto inner
+        = [](const std::string& object) { return object.substr(1, object.size() - 2); };
+    auto body = oracleKernel(1);
+    body.erase("metadata");
+    body.erase("priority");
+    replaceAll(text, "$HEADER", inner(membersText(oracleHeader())));
+    replaceAll(text, "$KERNEL_BODY", inner(body.dump()));
+    replaceAll(text, "$KERNEL2", oracleKernel(2).dump());
+    replaceAll(text, "$KERNEL", oracleKernel(1).dump());
+    return text;
+}
+
+std::string packersLayoutText()
+{
+    return spell(R"({$HEADER,"kernelDescriptors":[$KERNEL,$KERNEL2]})");
+}
+
+/// nlohmann::json's own layout: keys sorted, so `version` follows `kernelDescriptors`.
+std::string sortedPackText()
+{
+    auto document = nlohmann::json::object();
+    for(const auto& [key, value] : oracleHeader())
+    {
+        document[key] = value;
+    }
+    document["kernelDescriptors"] = nlohmann::json::array({oracleKernel(1), oracleKernel(2)});
+    return document.dump();
+}
+
+/// The oracle pack with a comment in every position RFC 0020 §4.3's authored form allows
+/// one: around the root, around each key and value, and between and inside the kernels.
+std::string commentedPackText()
+{
+    auto members = oracleHeader();
+    members.emplace_back("kernelDescriptors",
+                         nlohmann::json::array({oracleKernel(1), oracleKernel(2)}));
+    std::string text = "// a leading line comment\n/* and a block */ {";
+    for(size_t i = 0; i < members.size(); ++i)
+    {
+        const auto& [key, value] = members[i];
+        text += std::string(i == 0 ? "" : ",") + " /* before a key */ " + nlohmann::json(key).dump()
+                + " // after a key\n : /* before a value */ ";
+        if(key != "kernelDescriptors")
+        {
+            text += value.dump();
+            continue;
+        }
+        text += "[ // the kernels\n";
+        for(size_t k = 0; k < value.size(); ++k)
+        {
+            text += std::string(k == 0 ? "" : ", /* between kernels */ ")
+                    + "{ /* inside a kernel */ " + value[k].dump().substr(1);
+        }
+        text += " /* after the last kernel */ ]";
+    }
+    return text + " } // a trailing line comment";
+}
+
+/// A pack of several hundred KiB, with a header value longer than 64 KiB ahead of the
+/// kernels, so no reader can take it in one buffer.
+std::string largePackText(bool keyAfterTheKernels)
+{
+    auto header = oracleHeader();
+    header.emplace_back("x-padding", std::string(size_t{70} * 1024, 'p'));
+    auto kernels = nlohmann::json::array();
+    for(size_t index = 1; index <= 1500; ++index)
+    {
+        kernels.push_back(oracleKernel(index));
+    }
+    Members after;
+    if(keyAfterTheKernels)
+    {
+        after.emplace_back("x-after", true);
+    }
+    return oraclePackText(std::move(header), std::move(kernels), after);
+}
+
+/// One oracle row. The whole-document reading shares the rules' code, so a row pins that
+/// streaming reads the pack as a DOM does, not which rule refused it; @c rule does that, as
+/// substrings of the streamed ERROR, for a REJECTED row whose rule no other test pins.
+struct OracleCase
+{
+    OracleCase(std::string caseName,
+               PackOutcome outcome,
+               std::function<std::string()> makeText,
+               std::vector<std::string> ruleText = {})
+        : name(std::move(caseName))
+        , expected(outcome)
+        , text(std::move(makeText))
+        , rule(std::move(ruleText))
+    {
+    }
+
+    std::string name;
+    PackOutcome expected;
+    std::function<std::string()> text;
+    std::vector<std::string> rule;
+};
+
+class TestDescriptorLoaderStreamingOracle : public ::testing::TestWithParam<OracleCase>
+{
+};
+
+std::function<std::string()> spelled(std::string text)
+{
+    return [text = std::move(text)] { return spell(text); };
+}
+
+std::vector<OracleCase> oracleCases()
+{
+    const auto loads = PackOutcome::LOADS;
+    const auto skipped = PackOutcome::SKIPPED;
+    const auto rejected = PackOutcome::REJECTED;
+    return {
+        // Layouts: the single pass, and the second pass behind each thing that forces it.
+        {"packers_layout", loads, packersLayoutText},
+        {"kernels_first", loads, spelled(R"({"kernelDescriptors":[$KERNEL,$KERNEL2],$HEADER})")},
+        {"key_after_kernels",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[$KERNEL,$KERNEL2],"x-after":true})")},
+        {"sorted_keys", loads, sortedPackText},
+        {"no_kernels", loads, spelled(R"({$HEADER,"kernelDescriptors":[]})")},
+        {"referenced_kernels",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":["00000000-0000-4000-8000-000000000007",)"
+                 R"($KERNEL,"00000000-0000-4000-8000-000000000008"]})")},
+        {"packaged_kernel",
+         loads,
+         [] {
+             auto kernel = oracleKernel(1);
+             kernel["kernel_source"]
+                 = {{"kind", "kpack"},
+                    {"library", "kpack/oracle.kpack"},
+                    {"toc_key", "oracle/1"},
+                    {"symbol", "oracle_kernel"},
+                    {"sha256", std::string(64, 'a')},
+                    {"signature",
+                     nlohmann::json::array(
+                         {{{"kind", "global_buffer"}, {"size", 8}, {"offset", 0}, {"name", "x"}},
+                          {{"kind", "by_value"}, {"size", 4}, {"offset", 8}}})}};
+             kernel["provenance"] = {{"tool", "hkp_pack"}, {"inputs", {1, 2.5, nullptr, true}}};
+             return oraclePackText(oracleHeader(), nlohmann::json::array({kernel}));
+         }},
+        {"kernel_arch_within_pack",
+         loads,
+         [] {
+             auto kernel = oracleKernel(1);
+             kernel["arch"] = nlohmann::json::array({"gfx950"});
+             return oraclePackText(oracleHeaderWithArch({"gfx942", "gfx950"}),
+                                   nlohmann::json::array({kernel}));
+         }},
+        {"inline_kernel_newer_version",
+         loads,
+         [] {
+             auto skewed = oracleKernel(2);
+             skewed["version"] = "1.1";
+             return oraclePackText(oracleHeader(),
+                                   nlohmann::json::array({oracleKernel(1), skewed}));
+         }},
+        {"large_packers_layout", loads, [] { return largePackText(false); }},
+        {"large_key_after_kernels", loads, [] { return largePackText(true); }},
+        // Values of every JSON kind, as the lexer reports them.
+        {"floats",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"a":0.1,)"
+                 R"("b":-2.5e-300,"c":1.7976931348623157e308,"d":-0.0,"e":1E+2,)"
+                 R"("f":123456789.123456789,"g":4.9e-324}}]})")},
+        {"negatives",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"a":-1,)"
+                 R"("b":-9223372036854775808,"c":[-1,0,-7]},"priority":-3}]})")},
+        {"int64_max",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":)"
+                 R"({"a":9223372036854775807,"b":[9223372036854775807]},)"
+                 R"("priority":9223372036854775807}]})")},
+        // Past uint64, the lexer stops reporting an integer and reports a float.
+        {"beyond_uint64",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":)"
+                 R"({"a":18446744073709551616}}]})")},
+        {"booleans",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":)"
+                 R"({"a":true,"b":false}}]})")},
+        {"nulls_under_extension_keys",
+         loads,
+         spelled(R"({$HEADER,"x-null":null,"x-deep":{"a":[null,true,false,1.5,-2,{"b":null}]},)"
+                 R"("kernelDescriptors":[{$KERNEL_BODY,"x-null":null,"x-deep":[null,{"c":[]}],)"
+                 R"("metadata":{}}]})")},
+        {"string_escapes",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{)"
+                 R"("s":"\"q\" \\ \/ \b\f\n\r\t \u0041\u00e9\u4e2d\ud83d\ude00",)"
+                 R"("k\u00e9y\n":"a\u0000b"}}]})")},
+        {"escaped_header_key",
+         loads,
+         [] {
+             const auto text = oraclePackText(oracleHeaderWithout("name"),
+                                              nlohmann::json::array({oracleKernel(1)}));
+             return R"({"\u006eame":"escaped key",)" + text.substr(1);
+         }},
+        {"raw_utf8",
+         loads,
+         spelled(std::string(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"s":")")
+                 + "\xc3\xa9\xe4\xb8\xad\xf0\x9f\x98\x80" + R"("}}]})")},
+        {"utf8_bom", loads, [] { return "\xEF\xBB\xBF" + packersLayoutText(); }},
+        {"comments", loads, commentedPackText},
+        // A repeated key: a whole-document nlohmann parse keeps the last value, and streaming
+        // must agree, wherever the repeat falls relative to the kernels -- a bad earlier
+        // `kernelDescriptors` is ignored, and a bad later one replaces a good one
+        // (repeated_kernels_last_bad). Inherited behaviour, not format policy: if the format
+        // ever refuses duplicates, these rows flip to rejected.
+        {"repeated_header_key",
+         loads,
+         spelled(R"({$HEADER,"name":"renamed","kernelDescriptors":[$KERNEL]})")},
+        {"repeated_version_newer_first",
+         loads,
+         spelled(R"({"version":"2.0",$HEADER,"kernelDescriptors":[$KERNEL]})")},
+        {"repeated_kernel_keys",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"block_size":1},)"
+                 R"("metadata":{"block_size":2,"block_size":3},"priority":1,"priority":2}]})")},
+        {"repeated_kernels_last_good",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[42],"kernelDescriptors":[$KERNEL]})")},
+        // `kernelDescriptors` anywhere but the top level is not the pack's kernels.
+        {"nested_kernels_key_before",
+         loads,
+         spelled(R"({"x-note":{"kernelDescriptors":[42]},$HEADER,"kernelDescriptors":[$KERNEL]})")},
+        {"nested_kernels_key_after",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[$KERNEL],"x-note":{"kernelDescriptors":[42]}})")},
+        {"nested_kernels_key_in_a_kernel",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,)"
+                 R"("x-note":{"kernelDescriptors":[{"id":42}]},"metadata":{"block_size":1}}]})")},
+        // Declined by the version gate: no pack, and no error.
+        {"version_newer",
+         skipped,
+         [] {
+             auto header = oracleHeaderWithout("version");
+             header.emplace_back("version", "1.1");
+             return oraclePackText(header, nlohmann::json::array({oracleKernel(1)}));
+         }},
+        // Needs the repeated `version`: the kernels stream under 1.0, and the last value
+        // then declines the pack.
+        {"version_newer_after_a_streamed_kernel_error",
+         skipped,
+         spelled(R"({$HEADER,"kernelDescriptors":[{"version":"1.0"}],"version":"2.0"})")},
+        // Well-formed text that is not a valid pack.
+        {"root_array",
+         rejected,
+         [] { return "[" + packersLayoutText() + "]"; },
+         {"the document root must be a JSON object"}},
+        {"root_empty_array", rejected, spelled("[]"), {"the document root must be a JSON object"}},
+        {"root_string",
+         rejected,
+         spelled(R"("pack")"),
+         {"the document root must be a JSON object"}},
+        {"missing_version",
+         rejected,
+         [] {
+             return oraclePackText(oracleHeaderWithout("version"),
+                                   nlohmann::json::array({oracleKernel(1)}));
+         }},
+        {"version_not_a_string",
+         rejected,
+         [] {
+             auto header = oracleHeaderWithout("version");
+             header.emplace_back("version", 1.0);
+             return oraclePackText(header, nlohmann::json::array({oracleKernel(1)}));
+         },
+         {"key 'version' in ", " must be a string"}},
+        {"missing_kernel_descriptors",
+         rejected,
+         spelled(R"({$HEADER})"),
+         {"missing required key 'kernelDescriptors'"}},
+        {"nested_kernels_key_only",
+         rejected,
+         spelled(R"({$HEADER,"x-note":{"kernelDescriptors":[$KERNEL]}})"),
+         {"missing required key 'kernelDescriptors'"}},
+        {"kernel_descriptors_object",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":{"a":$KERNEL}})"),
+         {"key 'kernelDescriptors' in ", " must be an array"}},
+        {"kernel_descriptors_string",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":"kernels"})"),
+         {"key 'kernelDescriptors' in ", " must be an array"}},
+        {"kernel_entry_number",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[42]})"),
+         {"a 'kernelDescriptors' entry in ", " must be a JSON object"}},
+        {"kernel_entry_array",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[[$KERNEL]]})"),
+         {"a 'kernelDescriptors' entry in ", " must be a JSON object"}},
+        {"kernel_entry_bad_uuid",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":["not-a-uuid"]})"),
+         {"key 'kernelDescriptors' in ", "holds a value that is not a UUID"}},
+        {"first_bad_kernel_wins",
+         rejected,
+         [] {
+             auto missingId = oracleKernel(2);
+             missingId.erase("id");
+             auto unknownKey = oracleKernel(3);
+             unknownKey["zzz"] = 1;
+             return oraclePackText(oracleHeader(),
+                                   nlohmann::json::array({oracleKernel(1), missingId, unknownKey}));
+         },
+         {"missing required key 'id' in a 'kernelDescriptors' entry"}},
+        {"null_metadata_value",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"a":null}}]})"),
+         {"metadata 'a' must be a boolean, a number, a string, or an array of integers"}},
+        {"float_list_metadata",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"a":[1.5]}}]})"),
+         {"metadata 'a' must be an array of integers"}},
+        {"metadata_above_int64_max",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":)"
+                 R"({"a":9223372036854775808}}]})"),
+         {"metadata 'a' is too large for a 64-bit signed integer"}},
+        {"priority_uint64_max",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,)"
+                 R"("priority":18446744073709551615}]})"),
+         {"priority is too large for a 64-bit signed integer"}},
+        {"priority_float",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"priority":1.5}]})"),
+         {"priority must be an integer"}},
+        {"header_unknown_key_before_kernels",
+         rejected,
+         spelled(R"({$HEADER,"bogus":1,"kernelDescriptors":[{"version":"1.0"}]})")},
+        {"header_unknown_key_after_kernels",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{"version":"1.0"}],"bogus":1})")},
+        // The repeated-key rule above, the other way round.
+        {"repeated_kernels_last_bad",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[$KERNEL],"kernelDescriptors":[42]})")},
+        {"pack_arch_after_kernels",
+         rejected,
+         [] {
+             auto kernel = oracleKernel(1);
+             kernel["arch"] = nlohmann::json::array({"gfx942"});
+             return oraclePackText(oracleHeader(),
+                                   nlohmann::json::array({kernel}),
+                                   {{"arch", nlohmann::json::array({"gfx90a"})}});
+         }},
+        // Text a JSON parser refuses, with the error in every position relative to the
+        // kernels and to the errors a valid-looking pack would raise.
+        {"empty", rejected, spelled("")},
+        {"whitespace_only", rejected, spelled(" \n\t ")},
+        {"comment_only", rejected, spelled("// nothing but a comment\n")},
+        {"not_json", rejected, spelled("not json")},
+        {"missing_colon", rejected, spelled(R"({"version" "1.0"})")},
+        {"bad_literal",
+         rejected,
+         spelled(R"({$HEADER,"x-flag":tru,"kernelDescriptors":[$KERNEL]})")},
+        {"leading_zero",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"a":01}}]})")},
+        {"float_overflow",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"a":1e400}}]})")},
+        {"truncated",
+         rejected,
+         [] {
+             auto text = packersLayoutText();
+             text.pop_back();
+             return text;
+         }},
+        {"truncated_inside_a_kernel",
+         rejected,
+         [] {
+             const auto text = packersLayoutText();
+             return text.substr(0, text.find("kernel_source"));
+         }},
+        {"trailing_comma_in_kernels",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[$KERNEL,]})")},
+        {"trailing_comma_after_kernels",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[$KERNEL],})")},
+        {"trailing_garbage", rejected, [] { return packersLayoutText() + "x"; }},
+        {"two_documents", rejected, [] { return packersLayoutText() + packersLayoutText(); }},
+        {"invalid_utf8",
+         rejected,
+         spelled(std::string(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"s":")")
+                 + "\xff" + R"("}}]})")},
+        {"control_character",
+         rejected,
+         spelled(std::string(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"s":")")
+                 + "\x01" + R"("}}]})")},
+        {"lone_surrogate",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"s":"\ud800"}}]})")},
+        {"bad_escape",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"s":"\x"}}]})")},
+        {"partial_bom", rejected, [] { return "\xEF\xBB" + packersLayoutText(); }},
+        {"unterminated_block_comment",
+         rejected,
+         [] { return packersLayoutText() + "/* never closed"; }},
+        {"kernel_error_then_syntax_error",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{"version":"1.0"}])")},
+        {"header_error_then_syntax_error",
+         rejected,
+         spelled(R"({$HEADER,"bogus":1,"kernelDescriptors":[$KERNEL])")},
+    };
+}
+
+} // namespace
+
+TEST_P(TestDescriptorLoaderStreamingOracle, ReadsAPackAsTheWholeDocumentReadingDoes)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("oracle_" + GetParam().name));
+    const auto path = dir.path() / "pack.kdp.json";
+    const auto text = GetParam().text();
+    std::ofstream(path, std::ios::binary) << text;
+
+    std::optional<KernelDescriptorPack> streamed;
+    std::vector<std::string> errors;
+    {
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const auto catalog = loadDescriptorCatalog(dir.path());
+        ASSERT_LE(catalog.packs.size(), 1u);
+        if(!catalog.packs.empty())
+        {
+            streamed = catalog.packs.begin()->second.descriptor;
+        }
+        for(const auto& log : recorder.getRecordedLogs())
+        {
+            if(log.severity == HIPDNN_SEV_ERROR)
+            {
+                errors.push_back(log.message);
+            }
+        }
+    }
+    // Read once the recorder is closed: this reading warns as the walk does, and those
+    // lines are not the walk's.
+    const auto whole = readPackAsOneDocument(text, path.string());
+    std::string logged;
+    for(const auto& error : errors)
+    {
+        logged += error + "\n";
+    }
+
+    // Pinning the expected outcome keeps a row honest: a typo that turned a value row into
+    // a syntax error would otherwise agree with itself and pass.
+    ASSERT_EQ(outcomeOf(whole), GetParam().expected) << whole.reason;
+    ASSERT_EQ(streamed.has_value(), whole.pack.has_value()) << logged;
+    if(whole.pack)
+    {
+        expectSamePack(*streamed, *whole.pack);
+    }
+    if(whole.reason.empty())
+    {
+        EXPECT_TRUE(errors.empty()) << logged;
+        return;
+    }
+    ASSERT_EQ(errors.size(), 1u) << logged;
+    EXPECT_NE(errors.front().find(whole.stage), std::string::npos) << logged;
+    EXPECT_NE(errors.front().find("pack.kdp.json"), std::string::npos) << logged;
+    EXPECT_TRUE(endsWith(errors.front(), whole.reason))
+        << "streamed: " << errors.front() << "\nwhole document: " << whole.reason;
+    for(const auto& part : GetParam().rule)
+    {
+        EXPECT_NE(errors.front().find(part), std::string::npos)
+            << "rule '" << part << "' not in: " << errors.front();
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(Kdp,
+                         TestDescriptorLoaderStreamingOracle,
+                         ::testing::ValuesIn(oracleCases()),
+                         [](const ::testing::TestParamInfo<OracleCase>& info) {
+                             return info.param.name;
+                         });
+
+TEST(TestDescriptorLoader, ScansAPackInThePackersLayoutInOnePass)
+{
+    // The single pass's defining property: the header is whole when the kernels open, so
+    // they are parsed as they stream past and nothing is left for a second pass.
+    const auto* const kdp = detail::findFileType("pack.kdp.json");
+    ASSERT_NE(kdp, nullptr);
+    const std::string where = "pack.kdp.json";
+    nlohmann::json header;
+    detail::PackScan scan;
+    detail::scanKernelDescriptorPack(
+        packersLayoutText(), header, scan, where, kdp->major, kdp->minor);
+
+    EXPECT_EQ(scan.kernelArrays, 1u);
+    EXPECT_FALSE(scan.keysAfterKernels);
+    EXPECT_FALSE(scan.headerError);
+    EXPECT_FALSE(scan.kernelError);
+    ASSERT_TRUE(scan.pack.has_value());
+    ASSERT_EQ(scan.pack->kernels.size(), 2u);
+    EXPECT_EQ(scan.pack->kernels[0].name, "kernel_1");
+    EXPECT_EQ(scan.pack->kernels[1].name, "kernel_2");
+}
+
+namespace
+{
+
+std::string readText(const std::filesystem::path& path)
+{
+    std::ifstream file(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
+/// What resolveDescriptorSets must make of the pack @p documents wrote under @p root: its
+/// inline kernels, then its referenced kernels, each stamped with the file it came from.
+KernelDescriptorPack resolvedPackAsOneDocument(const std::filesystem::path& root,
+                                               Documents& documents)
+{
+    const auto packPath
+        = root / (documentOfType(documents, ".kdp.json").at("id").get<std::string>() + ".kdp.json");
+    auto reading = readPackAsOneDocument(readText(packPath), packPath.string());
+    if(!reading.pack)
+    {
+        throw std::runtime_error(packPath.string() + " does not read as a pack: " + reading.reason);
+    }
+    auto pack = std::move(*reading.pack);
+    for(auto& kernel : pack.kernels)
+    {
+        kernel.originDirectory = packPath.parent_path();
+        kernel.treeRoot = root;
+    }
+    for(const auto& kernelId : pack.kernelIds)
+    {
+        const auto kernelPath = root / (toString(kernelId) + ".ukd.json");
+        auto kernel = detail::parseKernelDescriptor(
+            nlohmann::json::parse(readText(kernelPath), nullptr, true, /*ignore_comments=*/true),
+            kernelPath.string());
+        kernel.originDirectory = kernelPath.parent_path();
+        kernel.treeRoot = root;
+        pack.kernels.push_back(std::move(kernel));
+    }
+    return pack;
+}
+
+} // namespace
+
+TEST(TestDescriptorLoader, ResolvesEachPackToItsWholeDocumentReading)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("resolve_oracle"));
+    auto first = makeSetDocuments('1', "test:resolve_first");
+    referenceLastKernel(first);
+    auto second = makeSetDocuments('2', "test:resolve_second");
+    // The second pack references the first engine's standalone kernel, so one catalog
+    // kernel lands in two packs, and is written in nlohmann's sorted layout, so it takes
+    // the second pass.
+    documentOfType(second, ".kdp.json")["kernelDescriptors"].push_back(testUuid('1', 'a'));
+    writeDocuments(dir.path(), first);
+    writeDocuments(dir.path(), second);
+    overwritePack(dir.path(), second, documentOfType(second, ".kdp.json").dump(2));
+
+    const auto sets = resolveDescriptorSets(loadDescriptorCatalog(dir.path()));
+
+    const std::array<KernelDescriptorPack, 2> expected{
+        resolvedPackAsOneDocument(dir.path(), first),
+        resolvedPackAsOneDocument(dir.path(), second)};
+    ASSERT_EQ(sets.size(), expected.size());
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        SCOPED_TRACE(sets[i].engine.name);
+        ASSERT_EQ(sets[i].packs.size(), 1u);
+        expectSamePack(sets[i].packs.front(), expected[i]);
+    }
 }
 
 namespace

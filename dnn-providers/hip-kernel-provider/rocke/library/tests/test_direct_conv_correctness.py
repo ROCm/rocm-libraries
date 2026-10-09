@@ -57,6 +57,10 @@ _SKIP_REASON = _skip_reason()
 
 _TOL = 5e-2
 _TOL_BF16 = 1e-1  # bf16 has 3 fewer mantissa bits than fp16 (~8x coarser precision)
+# The tiled depthwise kernel accumulates in fp32 and rounds once on store, so a
+# correct result is within about one output ulp; the loose tolerances above
+# would still pass it with a filter tap dropped.
+_TILED_TOL = {"fp16": 5e-3, "bf16": 1.5e-2}
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +179,85 @@ _SHAPES: List[_Shape] = [
 # Shapes for DirectDepthwiseSpatialSpec (groups <= wave_size=64, cpg=kpg=1).
 # groups=3 is intentionally not a power-of-two to cover the non-divisor path;
 # groups=64 exercises full-wave utilisation; stride=2 validates Ho/Wo output.
+# Output-stationary depthwise (DirectDepthwiseTiledSpec): (shape, knobs). Each
+# pins one branch: a 31x31 filter, the unrolled filter-row loop, stride-2
+# phases on ragged H/W tiles (rolled and unrolled), block_h 1 (no carried
+# window), non-"same" padding, and a partial channel tile over two waves.
+_TILED_CASES: List[Tuple[_Shape, dict]] = [
+    (
+        _Shape(
+            "dwt_k31_N1H28W28_g64",
+            N=1,
+            H=28,
+            W=28,
+            groups=64,
+            cpg=1,
+            KH=31,
+            KW=31,
+            PAD=15,
+        ),
+        dict(block_w=8, block_h=2),
+    ),
+    (
+        _Shape(
+            "dwt_k7_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1, KH=7, KW=7, PAD=3
+        ),
+        dict(block_w=14, block_h=7, unroll_rows=True),
+    ),
+    (
+        _Shape(
+            "dwt_k5s2_N2H13W11_g64",
+            N=2,
+            H=13,
+            W=11,
+            groups=64,
+            cpg=1,
+            KH=5,
+            KW=5,
+            PAD=2,
+            stride=2,
+        ),
+        dict(block_w=4, block_h=4),
+    ),
+    (
+        _Shape(
+            "dwt_k5s2u_N2H13W11_g64",
+            N=2,
+            H=13,
+            W=11,
+            groups=64,
+            cpg=1,
+            KH=5,
+            KW=5,
+            PAD=2,
+            stride=2,
+        ),
+        dict(block_w=4, block_h=4, unroll_rows=True),
+    ),
+    (
+        _Shape("dwt_k3_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1),
+        dict(block_w=16, block_h=1),
+    ),
+    (
+        _Shape("dwt_k3p0_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1, PAD=0),
+        dict(block_w=4, block_h=2),
+    ),
+    (
+        _Shape(
+            "dwt_k13_N2H17W19_g96",
+            N=2,
+            H=17,
+            W=19,
+            groups=96,
+            cpg=1,
+            KH=13,
+            KW=13,
+            PAD=6,
+        ),
+        dict(block_w=7, block_h=4, block_waves=2),
+    ),
+]
+
 _SPATIAL_SHAPES: List[_Shape] = [
     _Shape("sp_dw_N2H14W14_g3", N=2, H=14, W=14, groups=3, cpg=1),
     _Shape("sp_dw_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1),
@@ -419,7 +502,14 @@ def _conv_ref_grouped(A_t, B_t, p) -> "torch.Tensor":
     # A: (N, H, W, C) → (N, C, H, W);  B: (K, KH, KW, cpg) → (K, cpg, KH, KW)
     A_nchw = A_t.permute(0, 3, 1, 2).float()
     B_nchw = B_t.permute(0, 3, 1, 2).float()
-    out_nchw = F.conv2d(A_nchw, B_nchw, padding=p.PAD, stride=p.stride, groups=p.groups)
+    out_nchw = F.conv2d(
+        A_nchw,
+        B_nchw,
+        padding=p.PAD,
+        stride=p.stride,
+        dilation=(p.dil_h, p.dil_w),
+        groups=p.groups,
+    )
     return out_nchw.permute(0, 2, 3, 1).contiguous().cuda()
 
 
@@ -549,13 +639,18 @@ def _run_grouped_one(arch: str, shape: _Shape, dtype: str = "fp16") -> Tuple[boo
 
 
 def _run_depthwise_one(
-    arch: str, shape: _Shape, dtype: str = "fp16", spatial: bool = False
+    arch: str,
+    shape: _Shape,
+    dtype: str = "fp16",
+    spatial: bool = False,
+    tiled: "dict | None" = None,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one depthwise forward kernel.
 
     ``DirectDepthwiseSpec`` (one channel per lane) by default,
     ``DirectDepthwiseSpatialSpec`` (lanes split over channels and output
-    columns, groups <= wave_size) with ``spatial``. cpg = kpg = 1.
+    columns, groups <= wave_size) with ``spatial``, and the output-stationary
+    ``DirectDepthwiseTiledSpec`` with the knobs ``tiled``. cpg = kpg = 1.
 
     Returns ``(passed, reason)``.  ``reason`` starts with ``"skip "`` when a
     spatial shape is architecturally unsupported.
@@ -570,10 +665,13 @@ def _run_depthwise_one(
         DirectConvProblem,
         DirectDepthwiseSpatialSpec,
         DirectDepthwiseSpec,
+        DirectDepthwiseTiledSpec,
         build_direct_depthwise,
         build_direct_depthwise_spatial,
+        build_direct_depthwise_tiled,
         is_valid_depthwise_spatial_spec,
         is_valid_depthwise_spec,
+        is_valid_depthwise_tiled_spec,
     )
     from rocke.runtime import synchronize_and_release
     from rocke.runtime.hip_module import HipError, Runtime
@@ -595,7 +693,15 @@ def _run_depthwise_one(
         dtype=dtype,
     )
 
-    if spatial:
+    if tiled is not None:
+        spec = DirectDepthwiseTiledSpec(
+            problem=p, name=f"test_direct_dwt_{shape.id}", **tiled
+        )
+        ok, reason = is_valid_depthwise_tiled_spec(spec, arch=arch)
+        if not ok:
+            return False, f"invalid spec (cases should be pre-validated): {reason}"
+        build = build_direct_depthwise_tiled
+    elif spatial:
         spec = DirectDepthwiseSpatialSpec(
             problem=p, name=f"test_direct_sp_dw_{shape.id}"
         )
@@ -676,7 +782,10 @@ def _run_depthwise_one(
     abs_diff = (out_f32 - ref_f32).abs()
     ref_scale = ref_f32.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)
-    tol = _TOL_BF16 if dtype == "bf16" else _TOL
+    if tiled is not None:
+        tol = _TILED_TOL[dtype]
+    else:
+        tol = _TOL_BF16 if dtype == "bf16" else _TOL
     if not rel_err < tol:
         return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
     print(
@@ -986,6 +1095,12 @@ class TestDirectConvCorrectness(unittest.TestCase):
         for s in _SPATIAL_SHAPES:
             with self.subTest(shape=s.id):
                 self._run_depthwise_spatial(s)
+
+    def test_depthwise_tiled(self):
+        for s, knobs in _TILED_CASES:
+            with self.subTest(shape=s.id):
+                passed, reason = _run_depthwise_one(GPU_ARCH, s, tiled=knobs)
+                self.assertTrue(passed, f"FAIL {s.id} on {GPU_ARCH}: {reason}")
 
     def _assert_ran(self, ran: int, what: str) -> None:
         """A sweep whose every subTest skipped still reports *passed*.
@@ -1524,6 +1639,16 @@ class TestDirectConvBf16Correctness(unittest.TestCase):
                         passed, f"FAIL bf16 depthwise {s.id} on {GPU_ARCH}: {reason}"
                     )
 
+    def test_bf16_depthwise_tiled(self):
+        for s, knobs in _TILED_CASES:
+            with self.subTest(shape=s.id):
+                passed, reason = _run_depthwise_one(
+                    GPU_ARCH, s, dtype="bf16", tiled=knobs
+                )
+                self.assertTrue(
+                    passed, f"FAIL bf16 depthwise tiled {s.id} on {GPU_ARCH}: {reason}"
+                )
+
     def test_bf16_depthwise_spatial(self):
         for s in _SPATIAL_SHAPES:
             with self.subTest(shape=s.id):
@@ -1568,6 +1693,8 @@ class _NgCase:
     PAD: int = 1
     stride: int = 1
     dtype: str = "bf16"
+    dil_h: int = 1
+    dil_w: int = 1
     tile_h: int = 8
     tile_w: int = 32
     tile_k: int = 64
@@ -1592,6 +1719,25 @@ class _NgCase:
 # remap is not the identity, with a partial tail block past the last full one.
 _NG_CASES: List[_NgCase] = [
     _NgCase("ng_exact", N=1, H=16, W=32, C=64, K=64),
+    # Dilation: tap rows / columns dil apart in a taller / wider staged halo,
+    # with the padding the dilated workloads use (not "same" for the filter).
+    _NgCase("ng_dil3x1", N=2, H=14, W=14, C=64, K=64, dil_h=3),
+    _NgCase("ng_dil1x4_p4", N=1, H=32, W=32, C=64, K=64, PAD=4, dil_w=4),
+    _NgCase("ng_dil3x1_s2", N=1, H=29, W=33, C=64, K=96, stride=2, dil_h=3),
+    _NgCase(
+        "ng_dil2x2_fp16_db",
+        N=1,
+        H=20,
+        W=40,
+        C=64,
+        K=64,
+        PAD=2,
+        dtype="fp16",
+        dil_h=2,
+        dil_w=2,
+        ck=16,
+        double_buffer=True,
+    ),
     _NgCase("ng_partial_w", N=2, H=16, W=40, C=64, K=64),
     _NgCase("ng_partial_h", N=1, H=20, W=32, C=64, K=64, tile_h=16, waves_n=4),
     _NgCase("ng_partial_k", N=1, H=16, W=32, C=64, K=96),
@@ -1703,6 +1849,8 @@ def _run_nongrouped_one(arch: str, case: _NgCase) -> Tuple[bool, str]:
         PAD=case.PAD,
         stride=case.stride,
         dtype=case.dtype,
+        dil_h=case.dil_h,
+        dil_w=case.dil_w,
     )
     spec = DirectNongroupedConvSpec(
         problem=p,

@@ -1778,7 +1778,9 @@ becomes concrete.
   satisfiability, dispatch-to-ABI agreement, and metadata/heuristic feature-signature consistency,
   so problems surface at author time rather than at load.
 - **Bundling and packaging**: tools that assemble a kernel pack and its per-arch code objects into
-  a distributable bundle with its manifest and verify arch and toolchain provenance.
+  installable kpack archives beside the descriptors that name them, and that check at build and test
+  time that each packed descriptor matches the archive entry it names and its provenance sidecar
+  ([Section 12](#12-packaging-and-delivery)).
 - **Inspection**: viewers that render a descriptor set the way the provider sees it (the resolved plan,
   the why-not trace, the catalog of engines and packs), so a change can be reviewed without deploying it.
 
@@ -1792,11 +1794,15 @@ needed during implementation, on top of the stable descriptor format this RFC de
 The two ingestion paths differ only in where a kernel's code comes from:
 
 - **Build-time (AOT).** Discover and validate descriptors, compile each kernel per target
-  architecture, or take a prebuilt code object as authored, pack the code objects into per-arch
-  bundles with a self-describing manifest, and install them beside the provider. The manifest
-  records provenance (architecture, toolchain, build id) so incompatible bundles are rejected
-  before load; a prebuilt object records its file and digest instead of a toolchain. The author
-  restricts a prebuilt object to the architecture it was built for.
+  architecture, or take a prebuilt code object as authored, pack the code objects into one kpack
+  archive per architecture, and install each archive beside the provider with the descriptors that
+  name it. No separate manifest is emitted: each packed descriptor names its shard's architecture
+  and, per kernel, the archive entry, symbol and payload sha256, and the archive's own architecture
+  table refuses a device it holds no binary for, so an incompatible kernel is rejected before its
+  module loads. The author restricts a prebuilt object to the architecture it was built for.
+  Per-kernel provenance (authored source, spec, producing compiler and toolchain, or a prebuilt
+  object's file and digest) is never read at load, so shipped UKDs carry none: the packer moves it
+  to a sidecar (below).
 - **Runtime drop-in.** The path is opt-in and off by default. When enabled, the provider scans a
   dedicated drop-in location for custom bundles, compiles each descriptor to a matcher once on first
   use, and registers it the same way as an installed one. A single package may declare many
@@ -1804,9 +1810,48 @@ The two ingestion paths differ only in where a kernel's code comes from:
   on first use and cache their result. (The concrete enablement and location mechanism is left to
   the delivery follow-up RFC.)
 
-Compatibility is gated the same way in both paths: a descriptor whose schema version, required
-architecture, or toolchain does not match the runtime is refused with a clear error rather than
-risking silent misexecution.
+Compatibility is gated the same way in both paths: a descriptor whose schema version this runtime
+does not read ([Section 4](#4-descriptor-formats)) is skipped with a warning, and a kernel whose architecture
+the device does not match is never loaded, rather than risking silent misexecution. The toolchain
+that built a kernel is provenance for build and test tools, not a load-time check.
+
+**Provenance sidecar (format v1).** In the build tree the packer writes each packed descriptor's
+per-UKD provenance to a sidecar named after the descriptor file, `foo.kdp.provenance.json.gz`
+beside `foo.kdp.json` and `foo.ukd.provenance.json.gz` beside `foo.ukd.json`: gzip-compressed JSON
+`{"version": "1.0", "kdp_id": <id or null>, "entries": {<ukd id>: {"ukd_sha256": <hex>, "provenance": {...}}}}`.
+`version` is major.minor, gated as a descriptor's is ([Section 4](#4-descriptor-formats)): a reader
+accepts major 1 at minor 0 or earlier and refuses a missing version, another major, or a newer
+minor. `ukd_sha256` is the sha256 of the UKD as packed, with `provenance` removed, serialised as
+compact key-sorted UTF-8 JSON, so it binds every kernel-source kind, not only those that carry a
+payload digest. A KDP's own header `provenance` stays inline. Build and test tools read sidecars
+through one reader (`hkp_pack.provenance_sidecar`), which reports corrupt or oversized input as an
+error. The packer also writes an empty `hkp-packed.marker` into every directory it writes a packed
+descriptor into; a descriptor is packed exactly when its own directory holds one. A packed
+descriptor must have its sidecar; any other is authored, its sidecar unread, and refused if it holds
+a `kpack` UKD. A tree that lost its marker (a copy that kept only `*.json`, a hand-staged tree)
+reads as authored, so a shard of only `embedded_source` UKDs then gets no provenance check.
+
+**Sidecar install location.** Only build and test tools read provenance, so the runtime package
+ships none: the installed `arch_content/hip-kernel-provider/` tree holds descriptors, archives and
+the empty markers, a deliberate exception to keeping build and test data out of the runtime package:
+a marker holds no provenance and sits under its `<arch>/` folder, so it splits with its shard. With
+the provider's tests enabled, the sidecars install with the test package under
+`test_arch_content/hip-kernel-provider/provenance/`, at the same relative paths as their
+descriptors under `arch_content/hip-kernel-provider/`, so per-architecture packaging splits each
+one with its architecture. A tool reading an installed tree takes that folder as its provenance
+root: the sidecar for `<descriptor root>/<rel>/foo.kdp.json` is
+`<provenance root>/<rel>/foo.kdp.provenance.json.gz`. The provenance root only relocates
+sidecars; it does not make a descriptor without a marker packed.
+
+**kpack archive lifetime.** An opened kpack archive is shared by every load that names it and stays
+open while any hipDNN handle on the provider exists; destroying the last handle closes it. With no
+handle alive, a load opens the archive, reads its entry and closes it. An archive that fails to
+yield an intact entry (its entry fails to decompress, or its bytes miss the descriptor's sha256) is
+closed, so the next load reopens it; a missing entry or architecture leaves it open. An archive
+replaced on disk while open is not re-read, which is the inventory change
+[Section 8.6](#86-the-base-path-invariant) already admits as a cause of a failed plan build; the
+sha256 check refuses its changed bytes. Loaded modules stay resident for the life of the process
+either way.
 
 **Trust boundary.** Prebuilt code objects, whether packed in a bundle or installed into the
 provider's tree, inherit the trust of that install tree: an actor who can write them there can
@@ -2258,7 +2303,7 @@ follow-up RFCs.
   are handled by arbitration.
 - **Compatibility and caching.** Each descriptor file type is versioned independently as
   `major.minor`; a descriptor newer than the runtime understands is refused, an older minor within
-  the same major always loads, and architecture and toolchain are gated before load. This covers both
+  the same major always loads, and architecture is gated before load. This covers both
   directions: a pack built against an older minor keeps loading as the runtime advances, and a pack
   built against a newer runtime is refused by an older one. Whether a drop-in pack may carry its own
   engine/heuristic pair instead of binding an installed one is deferred to the drop-in packaging

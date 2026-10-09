@@ -22,6 +22,7 @@ from hkp_pack.errors import HkpPackError
 from hkp_pack.hsaco_source import hsaco_variant_key
 from hkp_pack.kernel_signature import kernel_signature
 from hkp_pack.pipeline import compile_intermediate, run_pipeline
+from pack_helpers import read_shipped
 
 ARCH = "gfx942"
 OTHER_ARCH = "gfx950"
@@ -111,7 +112,7 @@ def _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir, mutate=None):
 
 
 def _shipped_ukds(kdp_path):
-    return {u["id"]: u for u in _read(kdp_path)["kernelDescriptors"]}
+    return {u["id"]: u for u in read_shipped(kdp_path)["kernelDescriptors"]}
 
 
 @pytest.mark.quick
@@ -134,7 +135,7 @@ def test_inline_hsaco_round_trips_byte_identical(
     results = _run(root, tmp_path, rocm_kpack_dir)
 
     out = tmp_path / "out" / ARCH
-    shipped = _read(out / "solo" / "solo.kdp.json")["kernelDescriptors"][0]
+    shipped = read_shipped(out / "solo" / "solo.kdp.json")["kernelDescriptors"][0]
     ks = shipped["kernel_source"]
     assert ks["kind"] == "kpack"
     assert ks["toc_key"] == hsaco_variant_key(f"solo/{CO_NAME}")
@@ -218,7 +219,7 @@ def test_standalone_and_nested_resolution(
 
     results = _run(root, tmp_path, rocm_kpack_dir)
 
-    shipped = _read(tmp_path / "out" / ARCH / "a" / "standalone.ukd.json")
+    shipped = read_shipped(tmp_path / "out" / ARCH / "a" / "standalone.ukd.json")
     ks = shipped["kernel_source"]
     assert ks["kind"] == "kpack"
     assert ks["toc_key"] == hsaco_variant_key(f"shared/{CO_NAME}")
@@ -241,8 +242,12 @@ def test_standalone_and_nested_resolution(
 
     _run(nested / "root", nested, rocm_kpack_dir)
 
-    key_p = _read(nested / "out" / ARCH / "p" / "p.kdp.json")["kernelDescriptors"][0]
-    key_q = _read(nested / "out" / ARCH / "q" / "q.kdp.json")["kernelDescriptors"][0]
+    key_p = read_shipped(nested / "out" / ARCH / "p" / "p.kdp.json")[
+        "kernelDescriptors"
+    ][0]
+    key_q = read_shipped(nested / "out" / ARCH / "q" / "q.kdp.json")[
+        "kernelDescriptors"
+    ][0]
     assert key_p["kernel_source"]["toc_key"] == hsaco_variant_key(f"p/{CO_NAME}")
     assert key_q["kernel_source"]["toc_key"] == hsaco_variant_key(f"q/{CO_NAME}")
     assert key_p["kernel_source"]["toc_key"] != key_q["kernel_source"]["toc_key"]
@@ -423,7 +428,7 @@ def test_every_spelling_of_one_file_has_one_identity(
 
     _run(source_root, tmp_path, rocm_kpack_dir)
 
-    shipped = _read(tmp_path / "out" / ARCH / "solo" / "solo.kdp.json")
+    shipped = read_shipped(tmp_path / "out" / ARCH / "solo" / "solo.kdp.json")
     ukd = shipped["kernelDescriptors"][0]
     identity = f"solo/sub/{CO_NAME}"
     assert ukd["kernel_source"]["toc_key"] == hsaco_variant_key(identity)
@@ -445,7 +450,7 @@ def test_parent_segment_collapses_before_a_symlink_is_followed(
 
     _run(root, tmp_path, rocm_kpack_dir)
 
-    shipped = _read(tmp_path / "out" / ARCH / "solo" / "solo.kdp.json")
+    shipped = read_shipped(tmp_path / "out" / ARCH / "solo" / "solo.kdp.json")
     assert shipped["kernelDescriptors"][0]["provenance"]["file"] == f"solo/{CO_NAME}"
 
 

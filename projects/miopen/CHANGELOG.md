@@ -5,12 +5,25 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
+### Resolved Issues
+* [Reduce] Fixed `miopenReduceTensor` silently truncating tensor lengths, strides, element counts
+  and byte spans above INT32_MAX, and single reductions of about 2^30 or more fp16, bf16 or int8
+  elements, which produced incorrect results. Such tensors are now rejected with
+  `miopenStatusBadParm`.
+
 ### Added
 * [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise
   kernels to the `ConvHipConv` solver (hipconv v0.3.1).
 * [Conv] Added gfx950 patch-embedding kernels (fp16/bf16), gfx950 TF32 kernels for dense
   and depthwise forward/backward-data and dense backward-weights, and gfx1250 depthwise
   backward-weights kernels (fp16/bf16) to the `ConvHipConv` solver (hipconv v0.3.2).
+
+### Changed
+* [Reduce] `miopenGetReductionWorkspaceSize` and `miopenGetReductionIndicesSize` now reject tensors
+  of rank greater than 6, matching `miopenReduceTensor`.
+* [Reduce] Invalid arguments to the reduction API (mismatched descriptors, unsupported types,
+  undersized workspace or indices buffers) now return `miopenStatusBadParm` instead of
+  `miopenStatusUnknownError`.
 
 ### Removed
 * [Conv] Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.

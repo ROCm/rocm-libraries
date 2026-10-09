@@ -5,6 +5,8 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include "compilation/KpackModuleCache.hpp"
+
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
@@ -33,6 +35,7 @@ void resetIngestorModuleCachesForTesting()
             pack.resetModuleCache();
         }
     }
+    compilation::SharedKpackArchives::resetForTesting();
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

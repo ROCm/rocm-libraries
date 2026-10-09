@@ -25,6 +25,13 @@ python tools/check_byte_identity.py   # build engine fresh + byte-identity gate 
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
 across layers without `__init__.py`.
 
+On Linux, `test_compiler_detection_native.py` compiles its wrapper and fake COMGR
+libraries from stdin and links the production `librocke_core.a`. Installed tests
+carry that archive beside the test module, including in the test artifact. Source
+runs build it in pytest's temporary directory, or use a matching fresh archive
+specified by `ROCKE_TEST_ENGINE_ARCHIVE`. These fixtures require C/C++ compilers;
+source builds also require CMake. They do not need a GPU or private source headers.
+
 See [the pre-merge testing strategy](../../TESTING.md#51-before-merging-source-backends-and-installed-ci)
 for the required source backend matrix and installed CI replay procedure.
 
@@ -119,18 +126,22 @@ divergence - the Python builder correctly rejects wave32 WMMA on gfx942.)
   package) and `test_rocke_examples.py` (drives the external `example/ck_tile/dsl`
   tree, not part of rocKE) stay in `composablekernel/python/test`.
 
-### Native storage parity in the standard runner
+### Native parity binaries in the standard runner
 
 `run_all.py --build-root <build>` builds all configured targets before pytest,
-then obtains the `rocke_storage` executable path from CTest. Both pytest passes
-receive that path, so storage IR/HIP parity and serialization tests run automatically.
-`--config` selects the native test configuration (default `Release`). A build or
-fixture-discovery failure stops the runner instead of silently skipping coverage.
+then obtains each native parity executable from CTest, as listed in
+`NATIVE_PARITY_TESTS`: `rocke_storage` (`ROCKE_STORAGE_TEST`) and
+`rocke_nontemporal_hip` (`ROCKE_NONTEMPORAL_HIP_TEST`). Both pytest passes
+receive those paths, so the storage IR/HIP parity, serialization and nontemporal
+HIP-source parity tests run automatically. `--config` selects the native test
+configuration (default `Release`). A build or fixture-discovery failure stops the
+runner instead of silently skipping coverage.
 
-An explicit `ROCKE_STORAGE_TEST` overrides discovery and must name an existing
-executable; it does not skip the configured build. With no configured build or
-explicit override, the runner reports native storage parity as skipped; direct
-pytest invocations can use the same override.
+An explicit `ROCKE_STORAGE_TEST` / `ROCKE_NONTEMPORAL_HIP_TEST` overrides
+discovery for that binary and must name an existing executable; it does not skip
+the configured build. With no configured build or explicit override, the runner
+reports that parity as skipped; direct pytest invocations can use the same
+overrides.
 
 ## Installed pinned-reference suites
 
@@ -140,20 +151,24 @@ environment without Torch; they do not invoke the offline CPU oracles.
 
 | CTest entry | Scope | Registration |
 |---|---|---|
-| `rocke_reference_common_pytest` | Shared artifact integrity and worker import isolation | Host suite; independent of bundles |
+| `rocke_reference_common_pytest` | Shared numerical budgets, artifact integrity, and worker isolation | Host suite; independent of bundles |
 | `rocke_sdpa_reference_unit_pytest` | SDPA numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_sdpa_gpu_gfx942_pytest` | Eight gfx942 numerical cases and three failure checks | When the SDPA bundle is installed |
-| `rocke_conv_gpu_gfx942_pytest` | Twelve gfx942 forward cases and three failure checks | When the convolution bundle is installed |
+| `rocke_conv_gpu_gfx942_pytest` | Sixteen gfx942 forward cases and three failure checks | When the convolution bundle is installed |
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of all published
 operation/architecture pairs. SDPA/gfx942 and convolution/gfx942 are published
-and installed by default for provider builds. Local source/lock overrides
-select replacement candidates. Each operation
+and installed by default for provider builds. Publication is listed in
+`platform/cmake/PublishedGpuReferences.cmake` relative to the rocKE root. CMake
+uses the standard archives and committed locks; verify replacement candidates
+with the offline CLI using explicit `--bundle` and `--lock` paths. Each operation
 and architecture retains a separate archive, lock, and installed payload.
 
 The optional `conv_reference/check_torch_reference.py` is an explicit offline
 oracle audit. It is excluded from installation and normal pytest discovery.
+For adding cases, replacing bundles, or enrolling targets, follow the
+[authoritative reference workflow](../../docs/gpu-reference-workflow.md).
 See [the installed reference procedure](../../TESTING.md#running-installed-reference-tests-without-torch)
 and the [convolution guide](../../docs/conv-test-reference.md) for commands,
 publication requirements, and coverage limits.

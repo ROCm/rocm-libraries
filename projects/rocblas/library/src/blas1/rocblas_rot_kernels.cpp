@@ -70,33 +70,31 @@ rocblas_status rocblas_rot_check_numerics(const char*    function_name,
 // If there are any changes in template parameters in the files *rot*.cpp
 // instantiations below will need to be manually updated to match the changes.
 
-// clang-format off
 #ifdef INSTANTIATE_ROT_CHECK_NUMERICS
 #error INSTANTIATE_ROT_CHECK_NUMERICS already defined
 #endif
 
-#define INSTANTIATE_ROT_CHECK_NUMERICS(T_)                               \
-template rocblas_status rocblas_rot_check_numerics<T_>                   \
-                                         (const char*    function_name,  \
-                                          rocblas_handle handle,         \
-                                          int64_t    n,              \
-                                          T_             x,              \
-                                          rocblas_stride offset_x,       \
-                                          int64_t    inc_x,          \
-                                          rocblas_stride stride_x,       \
-                                          T_             y,              \
-                                          rocblas_stride offset_y,       \
-                                          int64_t    inc_y,          \
-                                          rocblas_stride stride_y,       \
-                                          int64_t    batch_count,    \
-                                          const int      check_numerics, \
-                                          bool           is_input);
+#define INSTANTIATE_ROT_CHECK_NUMERICS(T_)                                                \
+    template rocblas_status rocblas_rot_check_numerics<T_>(const char*    function_name,  \
+                                                           rocblas_handle handle,         \
+                                                           int64_t        n,              \
+                                                           T_             x,              \
+                                                           rocblas_stride offset_x,       \
+                                                           int64_t        inc_x,          \
+                                                           rocblas_stride stride_x,       \
+                                                           T_             y,              \
+                                                           rocblas_stride offset_y,       \
+                                                           int64_t        inc_y,          \
+                                                           rocblas_stride stride_y,       \
+                                                           int64_t        batch_count,    \
+                                                           const int      check_numerics, \
+                                                           bool           is_input);
 
 //  instantiate for rocblas_Xrot and rocblas_Xrot_strided_batched
-INSTANTIATE_ROT_CHECK_NUMERICS(float* )
-INSTANTIATE_ROT_CHECK_NUMERICS(double* )
-INSTANTIATE_ROT_CHECK_NUMERICS(rocblas_float_complex* )
-INSTANTIATE_ROT_CHECK_NUMERICS(rocblas_double_complex* )
+INSTANTIATE_ROT_CHECK_NUMERICS(float*)
+INSTANTIATE_ROT_CHECK_NUMERICS(double*)
+INSTANTIATE_ROT_CHECK_NUMERICS(rocblas_float_complex*)
+INSTANTIATE_ROT_CHECK_NUMERICS(rocblas_double_complex*)
 
 //  instantiate for rocblas_Xrot__batched
 INSTANTIATE_ROT_CHECK_NUMERICS(float* const*)
@@ -168,7 +166,8 @@ rocblas_status rocblas_internal_rot_launcher(rocblas_handle handle,
                               c,
                               c_stride,
                               s,
-                              s_stride, batch_count);
+                              s_stride,
+                              batch_count);
     else // c and s are on host
         ROCBLAS_LAUNCH_KERNEL((rocblas_rot_kernel<API_INT, NB, Tex>),
                               blocks,
@@ -187,7 +186,8 @@ rocblas_status rocblas_internal_rot_launcher(rocblas_handle handle,
                               *c,
                               c_stride,
                               *s,
-                              s_stride, batch_count);
+                              s_stride,
+                              batch_count);
 
     return rocblas_status_success;
 }
@@ -203,11 +203,11 @@ rocblas_status rocblas_internal_rot_launcher(rocblas_handle handle,
             rocblas_int    n,                                                      \
             Tx_            x,                                                      \
             rocblas_stride offset_x,                                               \
-            int64_t    incx,                                                   \
+            int64_t        incx,                                                   \
             rocblas_stride stride_x,                                               \
             Ty_            y,                                                      \
             rocblas_stride offset_y,                                               \
-            int64_t    incy,                                                   \
+            int64_t        incy,                                                   \
             rocblas_stride stride_y,                                               \
             Tc_ * c,                                                               \
             rocblas_stride c_stride,                                               \
@@ -215,30 +215,106 @@ rocblas_status rocblas_internal_rot_launcher(rocblas_handle handle,
             rocblas_stride s_stride,                                               \
             rocblas_int    batch_count);
 
-
 //  instantiate for rocblas_Xrot and rocblas_Xrot_strided_batched
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,  float,  float*,         float*,         float const,  float const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, double, double*,        double*,        double const, double const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, float, rocblas_bfloat16*,        rocblas_bfloat16*,        rocblas_bfloat16 const, rocblas_bfloat16 const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, float,     rocblas_half*,            rocblas_half*,            rocblas_half const,     rocblas_half const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, rocblas_float_complex, rocblas_float_complex*,        rocblas_float_complex*,                        float const,                 float const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, rocblas_float_complex, rocblas_float_complex*,        rocblas_float_complex*,                        float const, rocblas_float_complex const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, rocblas_float_complex, rocblas_float_complex*,        rocblas_float_complex*,        rocblas_float_complex const, rocblas_float_complex const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, rocblas_double_complex, rocblas_double_complex*,               rocblas_double_complex*, double const, double const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, rocblas_double_complex, rocblas_double_complex*,               rocblas_double_complex*, double const, rocblas_double_complex const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, rocblas_double_complex, rocblas_double_complex*,               rocblas_double_complex*, rocblas_double_complex const, rocblas_double_complex const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, float, float*, float*, float const, float const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, double, double*, double*, double const, double const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         float,
+                         rocblas_bfloat16*,
+                         rocblas_bfloat16*,
+                         rocblas_bfloat16 const,
+                         rocblas_bfloat16 const)
+INSTANTIATE_ROT_LAUNCHER(
+    ROCBLAS_ROT_NB, float, rocblas_half*, rocblas_half*, rocblas_half const, rocblas_half const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         rocblas_float_complex,
+                         rocblas_float_complex*,
+                         rocblas_float_complex*,
+                         float const,
+                         float const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         rocblas_float_complex,
+                         rocblas_float_complex*,
+                         rocblas_float_complex*,
+                         float const,
+                         rocblas_float_complex const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         rocblas_float_complex,
+                         rocblas_float_complex*,
+                         rocblas_float_complex*,
+                         rocblas_float_complex const,
+                         rocblas_float_complex const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         rocblas_double_complex,
+                         rocblas_double_complex*,
+                         rocblas_double_complex*,
+                         double const,
+                         double const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         rocblas_double_complex,
+                         rocblas_double_complex*,
+                         rocblas_double_complex*,
+                         double const,
+                         rocblas_double_complex const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         rocblas_double_complex,
+                         rocblas_double_complex*,
+                         rocblas_double_complex*,
+                         rocblas_double_complex const,
+                         rocblas_double_complex const)
 
 //  instantiate for rocblas_Xrot__batched
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,  float,  float* const*,  float* const*,  float const,  float const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, double, double* const*, double* const*, double const, double const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, float, rocblas_bfloat16* const*, rocblas_bfloat16* const*, rocblas_bfloat16 const, rocblas_bfloat16 const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, float,     rocblas_half* const*,     rocblas_half* const*,     rocblas_half const,     rocblas_half const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, rocblas_float_complex, rocblas_float_complex* const*, rocblas_float_complex* const*,                 float const,                 float const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, rocblas_float_complex, rocblas_float_complex* const*, rocblas_float_complex* const*,                 float const, rocblas_float_complex const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, rocblas_float_complex, rocblas_float_complex* const*, rocblas_float_complex* const*, rocblas_float_complex const, rocblas_float_complex const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, rocblas_double_complex, rocblas_double_complex* const*, rocblas_double_complex* const*, rocblas_double_complex const, rocblas_double_complex const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, rocblas_double_complex, rocblas_double_complex* const*, rocblas_double_complex* const*, double const, double const)
-INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB, rocblas_double_complex, rocblas_double_complex* const*, rocblas_double_complex* const*, double const, rocblas_double_complex const)
+INSTANTIATE_ROT_LAUNCHER(
+    ROCBLAS_ROT_NB, float, float* const*, float* const*, float const, float const)
+INSTANTIATE_ROT_LAUNCHER(
+    ROCBLAS_ROT_NB, double, double* const*, double* const*, double const, double const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         float,
+                         rocblas_bfloat16* const*,
+                         rocblas_bfloat16* const*,
+                         rocblas_bfloat16 const,
+                         rocblas_bfloat16 const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         float,
+                         rocblas_half* const*,
+                         rocblas_half* const*,
+                         rocblas_half const,
+                         rocblas_half const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         rocblas_float_complex,
+                         rocblas_float_complex* const*,
+                         rocblas_float_complex* const*,
+                         float const,
+                         float const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         rocblas_float_complex,
+                         rocblas_float_complex* const*,
+                         rocblas_float_complex* const*,
+                         float const,
+                         rocblas_float_complex const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         rocblas_float_complex,
+                         rocblas_float_complex* const*,
+                         rocblas_float_complex* const*,
+                         rocblas_float_complex const,
+                         rocblas_float_complex const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         rocblas_double_complex,
+                         rocblas_double_complex* const*,
+                         rocblas_double_complex* const*,
+                         rocblas_double_complex const,
+                         rocblas_double_complex const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         rocblas_double_complex,
+                         rocblas_double_complex* const*,
+                         rocblas_double_complex* const*,
+                         double const,
+                         double const)
+INSTANTIATE_ROT_LAUNCHER(ROCBLAS_ROT_NB,
+                         rocblas_double_complex,
+                         rocblas_double_complex* const*,
+                         rocblas_double_complex* const*,
+                         double const,
+                         rocblas_double_complex const)
 
 #undef INSTANTIATE_ROT_LAUNCHER
-// clang-format on

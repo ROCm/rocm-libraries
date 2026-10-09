@@ -352,12 +352,13 @@ __forceinline__ __device__ void reduce2_welford(FloatAccum& mean,
     const unsigned int ldsidx =
         lid >> (warpSize == 32 ? 5 : 6); // warpSize is either 32 or 64 on AMD hardware.
 
-    if constexpr(!miopen::batchnorm::config::use_amdgcn)
+    // The DPP ASM needs GFX9 row broadcasts and 64-bit VCC; use_gfx9_dpp is false elsewhere.
+    if constexpr(!miopen::batchnorm::config::use_gfx9_dpp)
     {
         shfl_interleaved_reduction_welford<FloatAccum>(mean, variance, count);
         __builtin_amdgcn_sched_barrier(0);
 
-        // Last thread
+        // The shuffle reduction produces the wave's result in lane 0.
         if((lid % warpSize) == 0)
         {
             lcl_data_mean[ldsidx]     = mean;
