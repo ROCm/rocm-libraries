@@ -1123,8 +1123,33 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
     if(!arg.gradient && arg.activation_type != hipblaslt_activation_type::none && !arg.use_e)
         return "fast_check checks an activation through E, the pre-activation output, so it "
                "requires use_e";
+    // MX: integer_exact fills fp8 elements with small integers and E8M0 scales with 1, 2 or 4,
+    // and fast_check checks against the dequantized values, so both operands must be MX fp8.
     if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
-        return "fast_check does not support MX block scales";
+    {
+        auto isMxFp8 = [](hipDataType t) { return t == HIP_R_8F_E4M3 || t == HIP_R_8F_E5M2; };
+        if(!isBlockScaling(arg.scaleA) || !isBlockScaling(arg.scaleB))
+            return "fast_check supports MX scales only on both A and B";
+        if(!isMxFp8(TiA) || !isMxFp8(TiB))
+            return "fast_check supports MX scales only with fp8 (E4M3, E5M2) A and B";
+        // integer_exact writes E8M0 scale codes, which a UE4M3 or UE5M3 format would read as
+        // other values.
+        if(scaleDataType(arg.scaleA) != HIP_R_8F_UE8M0
+           || scaleDataType(arg.scaleB) != HIP_R_8F_UE8M0)
+            return "fast_check supports MX scales only in an E8M0 (UE8M0) format";
+        // Other orientations have not established agreement between the generator's
+        // reference and the device scale layout. In particular, the MX caller currently
+        // treats C differently from T even for real inputs. Refuse before allocation.
+        if(char_to_hipblas_operation(arg.transA) != HIPBLAS_OP_T
+           || char_to_hipblas_operation(arg.transB) != HIPBLAS_OP_N)
+            return "fast_check with MX scales requires transA=T and transB=N";
+        // The reference recomputes each element's scale as its linear index over the block size,
+        // which holds only when no K block is partial.
+        if(arg.K[0] % blockSize(arg.scaleA) != 0 || arg.K[0] % blockSize(arg.scaleB) != 0)
+            return "fast_check supports MX scales only when K is a multiple of the scale block";
+        if(arg.batch_count > 1)
+            return "fast_check supports MX scales for a single batch only";
+    }
     if(do_swizzle)
         return "fast_check does not support swizzled A or B";
     // Without a gradient, fast_check models the bias as one value per row of D, which is what
@@ -2149,6 +2174,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     // Contiguous host copies of the A, B and C regions, without padding, for fast_check, and the
     // expected probe sums, which depend only on the inputs and are shared by every solution.
     std::vector<std::unique_ptr<char[]>> fcA(gemm_count), fcB(gemm_count), fcC(gemm_count);
+    std::vector<hipDataType>             fcTypeA(gemm_count), fcTypeB(gemm_count);
     std::vector<FastCheckExpected>       fcExpected(gemm_count);
     std::vector<HipHostBuffer> hScaleAlphaVec, hScaleA, hScaleB, hScaleC, hScaleD, hScaleE,
         hAmaxD_gold, hAmaxD, hD_gold_epl, hD_gold_ScaleAlpha, hBias_gold_epl;
@@ -2437,7 +2463,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             arg, batchMode, do_swizzle_a || do_swizzle_b, TiA, TiB, To, Tc);
         for(int i = 0; i < gemm_count && why.empty(); i++)
         {
-            if(lda[i] < A_row[i] || ldb[i] < B_row[i] || ldc[i] < M[i] || ldd[i] < M[i])
+            if(isBlockScaling(arg.scaleA) && (lda[i] != A_row[i] || ldb[i] != B_row[i]))
+                why = "fast_check with MX scales requires lda and ldb equal to the rows stored";
+            else if(lda[i] < A_row[i] || ldb[i] < B_row[i] || ldc[i] < M[i] || ldd[i] < M[i])
                 why = "fast_check requires each leading dimension to be at least the number of "
                       "rows stored";
             else if(num_batches[i] > 1
@@ -2459,7 +2487,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     if(arg.placement[0])
     {
         static const char* operands[]
-            = {"a", "b", "c", "d", "bias", "scale_alpha_vec", "workspace"};
+            = {"a", "b", "c", "d", "bias", "scale_alpha_vec", "scale_a", "scale_b", "workspace"};
         std::string why;
         if(!arg.fast_check)
             why = "placement requires fast_check";
@@ -2475,6 +2503,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             why = "placing the bias requires bias_vector";
         else if(!strcmp(arg.placement, "scale_alpha_vec") && !arg.scaleAlpha_vector)
             why = "placing the scaleAlpha vector requires scaleAlpha_vector";
+        else if((!strcmp(arg.placement, "scale_a") && !isBlockScaling(arg.scaleA))
+                || (!strcmp(arg.placement, "scale_b") && !isBlockScaling(arg.scaleB)))
+            why = "placing scale_a or scale_b requires MX block scales";
         if(!why.empty())
         {
 #ifdef GOOGLE_TEST
@@ -2575,14 +2606,20 @@ void testing_matmul_with_bias(const Arguments& arg,
                        + (size_scaleAVec[i] + size_scaleBVec[i]) * num_batches[i])
                           * sizeAlpha)
                    * size_t(block_count);
-            // fast_check's contiguous copies of the A, B and C regions.
-            hostBytes += size_t(A_row[i] * A_col[i] * num_batches[i]) * realDataTypeSize(TiA)
-                         + size_t(B_row[i] * B_col[i] * num_batches[i]) * realDataTypeSize(TiB)
+            // MX keeps both a float reference and a float copy for fast_check.
+            // Other inputs keep only the compact copy in their original type.
+            const bool mxA = isBlockScaling(arg.scaleA), mxB = isBlockScaling(arg.scaleB);
+            hostBytes += size_t(A_row[i] * A_col[i] * num_batches[i])
+                             * (mxA ? 2 * sizeof(float) : realDataTypeSize(TiA))
+                         + size_t(B_row[i] * B_col[i] * num_batches[i])
+                               * (mxB ? 2 * sizeof(float) : realDataTypeSize(TiB))
                          + size_t(M[i] * N[i] * num_batches[i]) * sizeTo;
-            // The host buffers: operands, the reference and epilogue copies of D, bias, E and the
-            // scale vectors, counted as the device counts them, which is at least their size.
-            if(!fast_check_only)
-                hostBytes += size_A[i] * realDataTypeSize(TiA) + size_B[i] * realDataTypeSize(TiB);
+            // The host buffers: MX generation also retains its packed host operands,
+            // even in fast_check_only mode. Count the remaining buffers as before.
+            if(!fast_check_only || mxA)
+                hostBytes += size_A[i] * realDataTypeSize(TiA);
+            if(!fast_check_only || mxB)
+                hostBytes += size_B[i] * realDataTypeSize(TiB);
             if(!fast_check_only || arg.c_equal_d)
                 hostBytes += size_C[i] * sizeTo;
             hostBytes += size_D_copy[i] * (2 * sizeTo + 3 * sizeAlpha)
@@ -2972,8 +3009,19 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(isBlockScaling(arg.scaleA))
             {
-                // For MX format, use uint8_t for the scale (E8M0), allocate for all batches
-                dScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i] * num_batches[i] * block_count, HMM);
+                // For MX format, use uint8_t for the scale (E8M0), allocate for all batches. A
+                // placed scale buffer is typed int8 so its poison windows hold 0x28, which E8M0
+                // reads as 2^-87: a misdirected scale read collapses its block toward zero.
+                if(!strcmp(arg.placement, "scale_a"))
+                    CHECK_PLACEMENT(allocate(dScaleA,
+                                             HIP_R_8I,
+                                             size_scaleAVec[i] * num_batches[i] * block_count,
+                                             "scale_a"),
+                                    placement_unsupported,
+                                    placement_why);
+                else
+                    dScaleA.emplace_back(
+                        HIP_R_8U, size_scaleAVec[i] * num_batches[i] * block_count, HMM);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
@@ -2985,7 +3033,16 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(isBlockScaling(arg.scaleB))
             {
                 // For MX format, use uint8_t for the scale (E8M0), allocate for all batches
-                dScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i] * num_batches[i] * block_count, HMM);
+                if(!strcmp(arg.placement, "scale_b"))
+                    CHECK_PLACEMENT(allocate(dScaleB,
+                                             HIP_R_8I,
+                                             size_scaleBVec[i] * num_batches[i] * block_count,
+                                             "scale_b"),
+                                    placement_unsupported,
+                                    placement_why);
+                else
+                    dScaleB.emplace_back(
+                        HIP_R_8U, size_scaleBVec[i] * num_batches[i] * block_count, HMM);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
             if(arg.scaleC)
@@ -3011,8 +3068,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
 
             // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory
-            hA.emplace_back(TiA, fast_check_only ? 0 : size_A[i]);
-            hB.emplace_back(TiB, fast_check_only ? 0 : size_B[i]);
+            // MX operands are generated on the host, so they keep their host copy.
+            hA.emplace_back(TiA, fast_check_only && !isBlockScaling(arg.scaleA) ? 0 : size_A[i]);
+            hB.emplace_back(TiB, fast_check_only && !isBlockScaling(arg.scaleB) ? 0 : size_B[i]);
             // With c_equal_d, hC restores the shared C/D buffer before each solution.
             hC.emplace_back(To, fast_check_only && !arg.c_equal_d ? 0 : size_C[i]);
             hD_gold.emplace_back(To, size_D_copy[i]);
@@ -3229,7 +3287,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::zero
                && arg.initialization != hipblaslt_initialization::norm_dist
                && arg.initialization != hipblaslt_initialization::rand_int
-               && arg.initialization != hipblaslt_initialization::uniform_low_precision)
+               && arg.initialization != hipblaslt_initialization::uniform_low_precision
+               && !(arg.initialization == hipblaslt_initialization::integer_exact
+                    && arg.fast_check))
             {
 #ifdef GOOGLE_TEST
                 GTEST_SKIP() << "unsupported MX initialization: "
@@ -3338,7 +3398,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::zero
                && arg.initialization != hipblaslt_initialization::norm_dist
                && arg.initialization != hipblaslt_initialization::rand_int
-               && arg.initialization != hipblaslt_initialization::uniform_low_precision)
+               && arg.initialization != hipblaslt_initialization::uniform_low_precision
+               && !(arg.initialization == hipblaslt_initialization::integer_exact
+                    && arg.fast_check))
             {
 #ifdef GOOGLE_TEST
                 GTEST_SKIP() << "unsupported MX initialization: "
@@ -3485,6 +3547,22 @@ void testing_matmul_with_bias(const Arguments& arg,
                     {dB[i].buf(), TiB, B_row[i], B_col[i], ldb[i], stride_b[i]},
                     num_batches[i],
                     stream));
+                fcTypeA[i] = TiA;
+                fcTypeB[i] = TiB;
+                // MX: check against the dequantized values, element times block scale, which the
+                // generator returns in the stored layout (lda and ldb equal the rows here).
+                if(isBlockScaling(arg.scaleA))
+                {
+                    fcA[i].reset(new char[refA[i].size() * sizeof(float)]);
+                    std::memcpy(fcA[i].get(), refA[i].data(), refA[i].size() * sizeof(float));
+                    fcTypeA[i] = HIP_R_32F;
+                }
+                if(isBlockScaling(arg.scaleB))
+                {
+                    fcB[i].reset(new char[refB[i].size() * sizeof(float)]);
+                    std::memcpy(fcB[i].get(), refB[i].data(), refB[i].size() * sizeof(float));
+                    fcTypeB[i] = HIP_R_32F;
+                }
                 // fast_check reads C only when beta is nonzero.
                 if(get_computeInterface(h_beta[i], Tc) != 0)
                 {
@@ -5825,8 +5903,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             fp.batch_count = num_batches[i];
             fp.transA      = transA != HIPBLAS_OP_N;
             fp.transB      = transB != HIPBLAS_OP_N;
-            fp.A           = {fcA[i].get(), TiA, A_row[i], A_col[i], A_row[i], A_row[i] * A_col[i]};
-            fp.B           = {fcB[i].get(), TiB, B_row[i], B_col[i], B_row[i], B_row[i] * B_col[i]};
+            fp.A = {fcA[i].get(), fcTypeA[i], A_row[i], A_col[i], A_row[i], A_row[i] * A_col[i]};
+            fp.B = {fcB[i].get(), fcTypeB[i], B_row[i], B_col[i], B_row[i], B_row[i] * B_col[i]};
             fp.C           = {fcC[i].get(), To, M[i], N[i], M[i], M[i] * N[i]};
             fp.D           = d_dev;
             fp.compute_type = Tc;
@@ -6262,6 +6340,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                             buffers.push_back({"scaleAlpha_vector",
                                                dScaleAlphaVec[i].buf(),
                                                size_scaleAlphaVec[i] * realDataTypeSize(Talpha)});
+                        // MX scales are one byte each, and either can be placed.
+                        if(isBlockScaling(arg.scaleA))
+                            buffers.push_back(
+                                {"scale_a", dScaleA[i].buf(), size_scaleAVec[i] * num_batches[i]});
+                        if(isBlockScaling(arg.scaleB))
+                            buffers.push_back(
+                                {"scale_b", dScaleB[i].buf(), size_scaleBVec[i] * num_batches[i]});
                         reportFailure("fast_check",
                                       scan.message + res.message
                                           + fast_check_describe_buffers(buffers));
@@ -6270,7 +6355,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                 // A write that missed a placed operand by exactly 4 GiB lands in its poison.
                 const PlacedRegion* placed = placedWorkspace.get();
-                for(auto* v : {&dA, &dB, &dC, &dD, &dBias, &dScaleAlphaVec})
+                for(auto* v : {&dA, &dB, &dC, &dD, &dBias, &dScaleAlphaVec, &dScaleA, &dScaleB})
                     if(!placed && !v->empty() && (*v)[0].placement())
                         placed = (*v)[0].placement();
                 // A placement that silently fell back to a normal allocation would pass while

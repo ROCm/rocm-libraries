@@ -507,6 +507,9 @@ jobs:
 
       - name: Run tests
         id: run-tests
+        env:
+          # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
+          ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
         run: ctest --test-dir build --output-on-failure
 
       # The tooling suites run inside the ctest step above as two ctest tests, which pass
