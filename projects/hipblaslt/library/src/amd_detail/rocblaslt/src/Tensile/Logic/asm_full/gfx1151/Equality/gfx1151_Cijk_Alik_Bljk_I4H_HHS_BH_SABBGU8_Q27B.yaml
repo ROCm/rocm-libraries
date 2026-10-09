@@ -988,7 +988,7 @@ ProblemType:
   UseGateResidual: false
   UseInitialStridesAB: false
   UseInitialStridesCD: false
-  UseScaleAB: ''
+  UseScaleAB: Block
   UseScaleAlphaVec: 0
   UseScaleCD: false
   isMixMode: false
@@ -997,15 +997,12 @@ ScheduleName: gfx1151
 Solutions:
 - ActivationFuncCall: false
   AssertSummationElementMultiple: 64
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
-  BaseName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   CUCount: null
   CUOccupancy: -1
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
-  CustomKernelName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+  CustomKernelName: ''
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1041,7 +1038,6 @@ Solutions:
     UseSFC: false
     UseUniversalArgs: true
   Kernel: true
-  KernelNameMin: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   LDSSegInterleaveOffsets: null
   LSCA: 64
   LSCB: 64
@@ -1251,15 +1247,12 @@ Solutions:
   WorkGroupMapping: 1
 - ActivationFuncCall: false
   AssertSummationElementMultiple: 64
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
-  BaseName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   CUCount: null
   CUOccupancy: -1
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
-  CustomKernelName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
+  CustomKernelName: ''
   DepthU: 64
   DirectToLdsA: false
   DirectToLdsB: false
@@ -1295,7 +1288,6 @@ Solutions:
     UseSFC: false
     UseUniversalArgs: true
   Kernel: true
-  KernelNameMin: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   LDSSegInterleaveOffsets: null
   LSCA: 64
   LSCB: 64
@@ -1505,16 +1497,12 @@ Solutions:
   WorkGroupMapping: 4
 - SolutionIndex: 2
   CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
-  BaseName: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
-  KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
   ConvertAfterDS: false
 - ActivationFuncCall: false
   AssertSummationElementMultiple: 64
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
   CUCount: null
   CUOccupancy: -1
   ClusterBarrier: false
@@ -1762,13 +1750,11 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
   WorkGroupMapping: 1
-  CustomKernelName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151
+  CustomKernelName: ''
   NumElementsPerBatchStore: 1
   1LDSBuffer: 1
 - ActivationFuncCall: false
   AssertSummationElementMultiple: 64
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
   CUCount: null
   CUOccupancy: -1
   ClusterBarrier: false
@@ -2016,45 +2002,35 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
   WorkGroupMapping: 1
-  CustomKernelName: RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT128x256x64_MI16x16x1_gfx1151
+  CustomKernelName: ''
   NumElementsPerBatchStore: 1
   1LDSBuffer: 1
 - SolutionIndex: 5
   CustomKernelName: RuntimeGroup_Decode_W4_U1_A4_Symmetric_UnsignedBias8_gfx1151
-  BaseName: RuntimeGroup_Decode_W4_U1_A4_Symmetric_UnsignedBias8_gfx1151
-  KernelNameMin: RuntimeGroup_Decode_W4_U1_A4_Symmetric_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
   ConvertAfterDS: false
 - SolutionIndex: 6
   CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_Symmetric_UnsignedBias8_gfx1151
-  BaseName: RuntimeGroup_Decode_W4_NativePerm_Symmetric_UnsignedBias8_gfx1151
-  KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_Symmetric_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
   ConvertAfterDS: false
 - SolutionIndex: 7
   CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_N4_UnsignedBias8_gfx1151
-  BaseName: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_N4_UnsignedBias8_gfx1151
-  KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_N4_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
   ConvertAfterDS: false
 - SolutionIndex: 8
   CustomKernelName: RuntimeGroup_Decode_W4_U1_A4_Symmetric_N4_UnsignedBias8_gfx1151
-  BaseName: RuntimeGroup_Decode_W4_U1_A4_Symmetric_N4_UnsignedBias8_gfx1151
-  KernelNameMin: RuntimeGroup_Decode_W4_U1_A4_Symmetric_N4_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
   ConvertAfterDS: false
 - SolutionIndex: 9
   CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_Symmetric_N4_UnsignedBias8_gfx1151
-  BaseName: RuntimeGroup_Decode_W4_NativePerm_Symmetric_N4_UnsignedBias8_gfx1151
-  KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_Symmetric_N4_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false
@@ -2071,8 +2047,6 @@ Solutions:
   AssertFree0ElementMultiple: 1
   AssertFree1ElementMultiple: 1
   AssertSummationElementMultiple: 64
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
   CUOccupancy: -1
@@ -2436,7 +2410,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  CustomKernelName: RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x112x64_W8_gfx1151
+  CustomKernelName: ''
   SolutionIndex: 10
   ProblemType:
     Activation: false
@@ -2565,8 +2539,6 @@ Solutions:
   AssertFree0ElementMultiple: 1
   AssertFree1ElementMultiple: 1
   AssertSummationElementMultiple: 64
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
   CUOccupancy: -1
@@ -2930,7 +2902,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  CustomKernelName: RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x128x64_W8_gfx1151
+  CustomKernelName: ''
   SolutionIndex: 11
   ProblemType:
     Activation: false
@@ -3059,8 +3031,6 @@ Solutions:
   AssertFree0ElementMultiple: 1
   AssertFree1ElementMultiple: 1
   AssertSummationElementMultiple: 64
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
   CUOccupancy: -1
@@ -3424,7 +3394,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  CustomKernelName: RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x256x64_W16_gfx1151
+  CustomKernelName: ''
   SolutionIndex: 12
   ProblemType:
     Activation: false
@@ -3553,8 +3523,6 @@ Solutions:
   AssertFree0ElementMultiple: 1
   AssertFree1ElementMultiple: 1
   AssertSummationElementMultiple: 64
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
   CUOccupancy: -1
@@ -3918,7 +3886,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  CustomKernelName: RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT128x96x64_W8_gfx1151
+  CustomKernelName: ''
   SolutionIndex: 13
   ProblemType:
     Activation: false
@@ -4047,8 +4015,6 @@ Solutions:
   AssertFree0ElementMultiple: 1
   AssertFree1ElementMultiple: 1
   AssertSummationElementMultiple: 64
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
   CUOccupancy: -1
@@ -4412,7 +4378,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  CustomKernelName: RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x112x64_W4_gfx1151
+  CustomKernelName: ''
   SolutionIndex: 14
   ProblemType:
     Activation: false
@@ -4541,8 +4507,6 @@ Solutions:
   AssertFree0ElementMultiple: 1
   AssertFree1ElementMultiple: 1
   AssertSummationElementMultiple: 64
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
   CUOccupancy: -1
@@ -4906,7 +4870,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  CustomKernelName: RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x128x64_W4_gfx1151
+  CustomKernelName: ''
   SolutionIndex: 15
   ProblemType:
     Activation: false
@@ -5035,8 +4999,6 @@ Solutions:
   AssertFree0ElementMultiple: 1
   AssertFree1ElementMultiple: 1
   AssertSummationElementMultiple: 64
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
   CUOccupancy: -1
@@ -5400,7 +5362,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  CustomKernelName: RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x32x64_W4_gfx1151
+  CustomKernelName: ''
   SolutionIndex: 16
   ProblemType:
     Activation: false
@@ -5529,8 +5491,6 @@ Solutions:
   AssertFree0ElementMultiple: 1
   AssertFree1ElementMultiple: 1
   AssertSummationElementMultiple: 64
-  AssignedDerivedParameters: true
-  AssignedProblemIndependentDerivedParameters: true
   BufferLoad: true
   BufferStore: true
   CUOccupancy: -1
@@ -5894,7 +5854,7 @@ Solutions:
   reorderGRInstForDTVB: false
   tailLoopOptA: false
   tailLoopOptB: false
-  CustomKernelName: RuntimeGroup_Prefill_I4H_HHS_SABBGU8_MT64x96x64_W4_gfx1151
+  CustomKernelName: ''
   SolutionIndex: 17
   ProblemType:
     Activation: false
@@ -6013,8 +5973,6 @@ Solutions:
     isMixMode: false
 - SolutionIndex: 18
   CustomKernelName: RuntimeGroup_Decode_W2_U1_A4_T512_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
-  BaseName: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
-  KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
   MatrixInstruction: []
   SourceSwap: false

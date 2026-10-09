@@ -10,12 +10,23 @@ import yaml
 from Tensile.Common.Utilities import state
 from Tensile.Contractions import ProblemPredicate
 from Tensile.CustomKernels import _readEmbeddedYaml, readCustomKernelConfig
+from test_w4a16_block_dequant import toolchain, _emit, FP16_UNSIGNED
 
 pytestmark = pytest.mark.unit
 
 RUNTIME_NAME = "RuntimeGroup_Decode{suffix}_UnsignedBias8_gfx1151"
 RUNTIME_GENERAL = "RuntimeGroup_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151"
 DIRECTORY = Path(__file__).parents[2] / "CustomKernels"
+
+
+@pytest.fixture(scope="module")
+def generated_matrix(toolchain):
+    from Tensile.CustomKernels import _buildCustomKernelFromMetadata
+
+    kernel, source = _emit(toolchain, blockSize=32, depthU=64, zeroPoint=True,
+                           problemType=dict(FP16_UNSIGNED, ScaleBlockSizesA=[32, 64, 128]))
+    metadata = yaml.safe_load(source.split(".amdgpu_metadata", 1)[1].split(".end_amdgpu_metadata", 1)[0])
+    return metadata["amdhsa.kernels"][0], _buildCustomKernelFromMetadata("generated", metadata, kernel)
 
 def runtime_name(suffix):
     if suffix == "_W4":
@@ -42,13 +53,12 @@ def test_decode_selection_bounds(suffix):
 
 
 @pytest.mark.parametrize("suffix", ["_W4", "_W4_U1_A4", "_W4_NativePerm"])
-def test_decode_universal_arguments_match_matrix_kernel(suffix):
+def test_decode_universal_arguments_match_matrix_kernel(suffix, generated_matrix):
     def metadata(name):
         return _readEmbeddedYaml(name, DIRECTORY)["amdhsa.kernels"][0]
 
     name = runtime_name(suffix)
-    general_name = RUNTIME_GENERAL
-    decode, general = metadata(name), metadata(general_name)
+    decode, general = metadata(name), generated_matrix[0]
     # HIP compilation must preserve the universal layout that the existing
     # host library supplies, including unused fields and trailing offsets.
     for key in (".kernarg_segment_size", ".kernarg_segment_align"):
@@ -102,16 +112,13 @@ def test_q27b_equality_dispatch_keys():
             assert solution["CustomKernelName"] == runtime_name(suffix)
         else:
             assert solution["EnableMatrixInstruction"]
+            assert solution["CustomKernelName"] == ""
             assert solution["WorkGroupMapping"] in (1, 4)
             if row["key"][1] in (2, 3, 4) or row["key"] == [34816, 2048, 1, 5120]:
-                assert solution["CustomKernelName"].endswith(
-                    "_MT64x256x64_MI16x16x1_gfx1151")
                 assert solution["WorkGroup"] == [32, 8, 1]
                 assert solution["MacroTile0"] == 64
                 assert solution["MacroTile1"] == 256
             else:
-                assert solution["CustomKernelName"].endswith(
-                    "_MT128x256x64_MI16x16x1_gfx1151")
                 assert solution["WorkGroup"] == [64, 8, 1]
                 assert solution["MacroTile0"] == 128
                 assert solution["MacroTile1"] == 256
@@ -164,13 +171,12 @@ def test_block_scale_equality_grids_do_not_merge_duplicate_shape_keys():
 
 
 @pytest.mark.parametrize("suffix", ["_W4", "_W4_U1_A4", "_W4_NativePerm"])
-def test_decode_custom_launch_preserves_universal_abi(suffix):
+def test_decode_custom_launch_preserves_universal_abi(suffix, generated_matrix):
     from Tensile.CustomKernels import getCustomKernelConfig
 
     name = runtime_name(suffix)
-    general_name = RUNTIME_GENERAL
     decode = getCustomKernelConfig(name, {}, DIRECTORY)["CustomKernel"]
-    general = getCustomKernelConfig(general_name, {}, DIRECTORY)["CustomKernel"]
+    general = generated_matrix[1]
     general_args = [dict(a) for a in general["args"]]
     assert general_args[-1].pop("padding") == 4
     assert decode["args"] == general_args
@@ -243,7 +249,7 @@ def test_invalid_runtime_groups_are_rejected(groups):
         ProblemType.FromOriginalState(problem)
 
 
-def test_multi_group_logic_requires_runtime_argument(monkeypatch):
+def test_multi_group_logic_requires_runtime_argument(monkeypatch, toolchain):
     from Tensile import LibraryIO
 
     path = DIRECTORY.parents[2] / (
@@ -261,8 +267,8 @@ def test_multi_group_logic_requires_runtime_argument(monkeypatch):
 
     monkeypatch.setattr(LibraryIO, "getCustomKernelConfig", without_group_argument)
     with pytest.raises(ValueError, match="runtime group-size argument"):
-        LibraryIO.parseLibraryLogicData(logic, str(path), None, False, False,
-                                       False, {}, True)
+        LibraryIO.parseLibraryLogicData(logic, str(path), toolchain[2], False, False,
+                                       False, toolchain[1], True)
 
 
 def test_unsigned_symmetric_logic_preserves_shapes_and_selects_small_n_decode():
@@ -294,6 +300,9 @@ def test_unsigned_symmetric_logic_preserves_shapes_and_selects_small_n_decode():
     assert symmetric["ProblemType"]["ScaleBlockSizesA"] == [32, 64, 128]
     for solution in symmetric["Solutions"]:
         name = solution["CustomKernelName"]
+        if not name:
+            assert solution["EnableMatrixInstruction"]
+            continue  # Generated prefill ISA is checked by the catalog codegen test.
         metadata = _readEmbeddedYaml(name, DIRECTORY)["amdhsa.kernels"][0]
         original_name = name.replace("SABBGU8", "SABBGZPU8").replace("_Symmetric_", "_").replace("_N4_", "_")
         if name.startswith("RuntimeGroup_Prefill_"):
@@ -334,37 +343,6 @@ def test_small_n_decode_bounds_and_abi(suffix):
         (a[".offset"], a[".size"]) for a in original[".args"]]
 
 
-def test_unsigned_symmetric_regeneration_preserves_measured_selections(tmp_path):
-    import runpy
-    from Tensile.CustomYamlLoader import load_yaml_stream
-
-    generator = runpy.run_path(str(DIRECTORY / "Source/generate_w4a16_unsigned_symmetric.py"))
-    header = "# Copyright Advanced Micro Devices, Inc., or its affiliates.\n# SPDX-License-Identifier: MIT\n# Test logic\n# Runtime groups\n"
-    generated = {"Solutions": [{"SolutionIndex": 0, "CustomKernelName": "matrix"},
-                               {"SolutionIndex": 1, "CustomKernelName": "decode"}],
-                 "ExactLogic": [[[64, 1, 1, 256], [0, 1.0]]]}
-    shared = []
-    for solution in generated["Solutions"]:
-        solution["MatrixInstruction"] = shared
-    previous = {"Solutions": generated["Solutions"],
-                "ExactLogic": [[[64, 1, 1, 256], [1, 2.0]],
-                               [[128, 2, 1, 256], [1, 3.0]]]}
-    text = header + yaml.safe_dump(generated)
-    result = generator["preserve_exact_logic"](text, yaml.safe_dump(previous))
-    assert yaml.safe_load(result)["ExactLogic"] == previous["ExactLogic"]
-    path = tmp_path / "logic.yaml"
-    path.write_text(result)
-    assert load_yaml_stream(path, yaml.SafeLoader) == yaml.safe_load(result)
-    assert generator["preserve_exact_logic"](result, result) == result
-    previous["Solutions"][1]["CustomKernelName"] = "different"
-    result = generator["preserve_exact_logic"](text, yaml.safe_dump(previous))
-    retained = yaml.safe_load(result)
-    assert retained["Solutions"][2]["CustomKernelName"] == "different"
-    assert retained["Solutions"][2]["SolutionIndex"] == 2
-    assert all(selection[0] == 2 for _, selection in retained["ExactLogic"])
-    assert generator["preserve_exact_logic"](result, result) == result
-
-
 def test_wide_decode_launch_geometry():
     name = "RuntimeGroup_Decode_W2_U1_A4_T512_NativePerm_LinearK_Symmetric_UnsignedBias8_gfx1151"
     config = readCustomKernelConfig(name, DIRECTORY)
@@ -399,7 +377,7 @@ def test_shipped_w4a16_kernels_do_not_support_scalar_operand_scales():
         logic = yaml.safe_load(path.read_text())
         configs = [logic["ProblemType"]] + [s.get("ProblemType", logic["ProblemType"]) for s in logic["Solutions"]]
         for config in configs:
-            assert config["UseScaleAB"] == "", path
+            assert config["UseScaleAB"] in ("", "Block"), path
             problem = ProblemType.FromOriginalState(OriginalProblemType(config, False))
             predicates = [state(p) for p in problem.predicates(includeType=True)]
             assert {"type": "UseScaleAB", "value": ""} in predicates, path

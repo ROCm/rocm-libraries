@@ -541,6 +541,21 @@ void cmp_inst(nb::module_ m_cmp)
         .def("__deepcopy__",
              [](const rocisa::VCmpNeU64& self, nb::dict&) { return new rocisa::VCmpNeU64(self); });
 
+    nb::class_<rocisa::VCmpClassF16, rocisa::VCmpInstruction>(m_cmp, "VCmpClassF16")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VCmpClassF16& self, nb::dict&) {
+            return new rocisa::VCmpClassF16(self);
+        });
+
     nb::class_<rocisa::VCmpClassF32, rocisa::VCmpInstruction>(m_cmp, "VCmpClassF32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,

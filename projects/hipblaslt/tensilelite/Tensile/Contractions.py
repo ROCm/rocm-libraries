@@ -76,7 +76,7 @@ class ProblemType:
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
                  'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A',
-                 'scaleBlockSizeA', 'scaleZeroPointA', 'int4EncodingA']
+                 'scaleBlockSizeA', 'scaleBlockSizesA', 'scaleZeroPointA', 'int4EncodingA']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -265,6 +265,8 @@ class ProblemType:
         rv.useScaleAB = ""
         if 'UseScaleAB' in d:
             rv.useScaleAB = d['UseScaleAB']
+        if rv.useScaleAB == "Block":
+            rv.useScaleAB = ""
         # W4A16 group scaling is independent of scalar/vector operand scales.
         rv.scaleBlockSizeA = d.get('ScaleBlockSizeA', 0)
         groups = d.get('ScaleBlockSizesA', [])

@@ -1355,6 +1355,7 @@ namespace TensileLite
             int  metadataLayout             = 0;
             // K-group size for dense [M][ceil(K/G)] scales of B's type.
             int              scaleBlockSizeA = 0;
+            std::vector<int> scaleBlockSizesA;
             // Enable per-group zero-points: (q - z)*s.
             bool             scaleZeroPointA = false;
             ContractionProblemGemm::Int4Encoding int4EncodingA

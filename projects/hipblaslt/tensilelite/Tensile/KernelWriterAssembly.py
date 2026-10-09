@@ -50,7 +50,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   FlatLoadD16B16, FlatLoadD16HIB16, FlatStoreB128, FlatStoreB32, FlatStoreB64, \
   FlatStoreD16B16, FlatStoreD16HIB16, GlobalReadInstruction, MXMFMAInstruction, MFMAInstruction, MUBUFReadInstruction, \
   MacroInstruction, SAShiftRightI32, SAbsI32, SAddCU32, SAddI32, SAddU32, SAddU64, SAndB32, \
-  VAddPKF16, VAndOrB32, VMulPKF16, \
+  VAddPKF16, VAndOrB32, VMulPKF16, VFmaPKF16, VCmpClassF16, \
   SAndB64, SAndN2B32, SAtomicDec, SBarrier, SBfmB32, SBitcmp1B32, SBranch, SCBranchSCC0, \
   SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCSelectB64, SCmpEQI32, \
   SCmpEQU32, SCmpEQU64, SCmpGeI32, SCmpGeU32, SCmpGtI32, SCmpGtU32, SCmpKEQU32, \
@@ -2520,6 +2520,10 @@ class KernelWriterAssembly(KernelWriter):
       kernelArgs.add(self.argLoader.loadKernArg("AddressDbg", "KernArgAddress", dword=2))
     self.argLoader.resetOffset()
     kernelArgs.addModuleAsFlatItems(self.argLoader.loadAllKernArg(sgprStartIdx, "KernArgAddress", numsOfLoad, preloadNum))
+    if kernel["ProblemType"]["ScaleBlockSizesA"]:
+      kernelArgs.add(self.argLoader.loadKernArg(
+          "ScaleAGMinus1", "KernArgAddress",
+          sgprOffset=hex(self.states.scaleGroupKernArgOffset), dword=1))
     if kernel["ProblemType"]["UseScaleAB"] in ("Scalar", "Block"):
       sgprOffset = self.argLoader.getOffset()
       for preloadScale, name in zip([self.states.preloadScaleA, self.states.preloadScaleB], ['A','B']):
@@ -5301,13 +5305,30 @@ class KernelWriterAssembly(KernelWriter):
     bpe       = self.blockScaleABytesPerElement(kernel)
     unrollIdx = kernel["ProblemType"]["IndexUnroll"]
 
+    runtimeGroup = bool(kernel["ProblemType"]["ScaleBlockSizesA"])
+    if runtimeGroup:
+      module.add(SFf1B32(dst=sgpr("ScaleAGShift"), src=sgpr("ScaleAGMinus1")))
+      module.add(SLShiftRightB32(dst=sgpr("ScaleAKMask"), src=sgpr("ScaleAGMinus1"),
+                                shiftHex=log2(kernel["DepthU"])))
+      module.add(SMaxU32(dst=sgpr("ScaleAKMask"), src0=sgpr("ScaleAKMask"), src1=1))
+      module.add(SSubU32(dst=sgpr("ScaleAKMask"), src0=sgpr("ScaleAKMask"), src1=1))
+      module.add(SMovB32(dst=sgpr("ScaleZeroAInc"), src=kernel["DepthU"]))
+      module.add(SLShiftRightB32(dst=sgpr("ScaleZeroAInc"), src=sgpr("ScaleZeroAInc"),
+                                shiftHex=sgpr("ScaleAGShift")))
+      module.add(SMaxU32(dst=sgpr("ScaleZeroAInc"), src0=sgpr("ScaleZeroAInc"), src1=1))
+      module.add(SLShiftLeftB32(dst=sgpr("ScaleAInc"), src=sgpr("ScaleZeroAInc"),
+                               shiftHex=log2(bpe)))
+      module.add(SLShiftLeftB32(dst=sgpr("ScaleZeroAInc"), src=sgpr("ScaleZeroAInc"), shiftHex=2))
+      module.add(SSubU32(dst=sgpr("ScaleAGMinus1"), src0=sgpr("ScaleAGMinus1"), src1=1))
+      module.add(SMovB32(dst=sgpr("ScaleAKCnt"), src=0))
+
     with self.allocTmpSgpr(2, tag="blockScaleAComputeSrd") as tmpSgprInfo:
       tmp = tmpSgprInfo.idx
 
       # StrideScaleA = ceil(SizeL / blockSize), in scale elements.
       module.add(SAddU32(dst=sgpr("StrideScaleA"), src0=self.sizeRef(unrollIdx),
-                         src1=hex(blockSize - 1), comment="SizeL + G-1"))
-      module.add(SLShiftRightB32(dst=sgpr("StrideScaleA"), shiftHex=log2(blockSize),
+                         src1=sgpr("ScaleAGMinus1") if runtimeGroup else hex(blockSize - 1), comment="SizeL + G-1"))
+      module.add(SLShiftRightB32(dst=sgpr("StrideScaleA"), shiftHex=sgpr("ScaleAGShift") if runtimeGroup else log2(blockSize),
                                  src=sgpr("StrideScaleA"),
                                  comment="StrideScaleA = ceil(SizeL/%u) scale elements" % blockSize))
 
@@ -5340,23 +5361,13 @@ class KernelWriterAssembly(KernelWriter):
                        comment="scaleA: set bits 127_96 in SRD"))
 
     if blockDequantPackedFp16A(kernel["ProblemType"]):
-      n = len(self.FP16_PK_LIFTS)
-      for i, (_m, magicBits, magicVal, _sh) in enumerate(self.FP16_PK_LIFTS):
-        module.add(SMovB32(dst=sgpr("ScaleAPkMagic+%u" % i),
-                           src=hex((magicBits << 16) | magicBits),
-                           comment="w4a16: two fp16 holding %d, for the fused mask+OR"
-                                   % magicVal))
-        neg = 0x8000 | magicBits
-        module.add(SMovB32(dst=sgpr("ScaleAPkMagic+%u" % (n + i)),
-                           src=hex((neg << 16) | neg),
-                           comment="w4a16: two fp16 holding -%d, for the fused bias"
-                                   % magicVal))
+      for i, (mask, magicBits, _value, shift) in enumerate(self.FP16_PK_LIFTS):
+        module.add(SMovB32(dst=sgpr("ScaleAPkMagic+%u" % i), src=hex(mask)))
+        bias = (0x8000 | magicBits) | (8 << shift)
+        module.add(SMovB32(dst=sgpr("ScaleAPkMagic+%u" % (2 + i)),
+                           src=hex((bias << 16) | bias)))
 
-      for i, selector in enumerate((0x05040100, 0x07060302)):
-        module.add(SMovB32(dst=sgpr("ScaleAPkPermute+%u" % i), src=hex(selector),
-                           comment="w4a16: sequential FP16 pair selector"))
-
-    if self.blockScaleAItersPerGroup(kernel) > 1:
+    if not runtimeGroup and self.blockScaleAItersPerGroup(kernel) > 1:
       # Counts K iterations so the pointer can step every itersPerGroup of
       # them. Starts at 0 so the first increment, which closes iteration 0,
       # leaves the pointer alone.
@@ -5413,7 +5424,8 @@ class KernelWriterAssembly(KernelWriter):
     bpe       = self.blockScaleABytesPerElement(kernel)
     dst = "GlobalReadOffsetScaleA+%u" % graIdx
 
-    module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=log2(blockSize), src=vgpr(vgprUnroll),
+    module.add(VLShiftRightB32(dst=vgpr(tmp),
+                               shiftHex=sgpr("ScaleAGShift") if kernel["ProblemType"]["ScaleBlockSizesA"] else log2(blockSize), src=vgpr(vgprUnroll),
                                comment="scaleA: kGroup = k/%u" % blockSize))
     module.add(VMulLOU32(dst=vgpr(dst), src0=sgpr("StrideScaleA"), src1=vgpr(vgprTile),
                          comment="scaleA: row * StrideScaleA"))
@@ -5498,20 +5510,21 @@ class KernelWriterAssembly(KernelWriter):
     """
     module = Module("blockScaleASlowIncrement")
     itersPerGroup = self.blockScaleAItersPerGroup(kernel)
+    runtimeGroup = bool(kernel["ProblemType"]["ScaleBlockSizesA"])
     inc = tmpSgpr
 
     module.addComment1("global read inc block-scale A (%u bytes every %u iters)"
                        % (incBytes, itersPerGroup))
     module.add(SAddU32(dst=sgpr("ScaleAKCnt"), src0=sgpr("ScaleAKCnt"), src1=1,
                        comment="scaleA: one more K iteration done"))
-    module.add(SAndB32(dst=sgpr(inc), src0=sgpr("ScaleAKCnt"), src1=hex(itersPerGroup - 1),
+    module.add(SAndB32(dst=sgpr(inc), src0=sgpr("ScaleAKCnt"), src1=sgpr("ScaleAKMask") if runtimeGroup else hex(itersPerGroup - 1),
                        comment="scaleA: SCC = counter has not wrapped"))
     # Both selects read the SCC that SAndB32 left; neither writes it. The
     # SAddU32 below does write SCC, so every select has to come first.
-    module.add(SCSelectB32(dst=sgpr(inc), src0=0, src1=hex(incBytes),
+    module.add(SCSelectB32(dst=sgpr(inc), src0=0, src1=sgpr("ScaleAInc") if runtimeGroup else hex(incBytes),
                            comment="scaleA: advance only on a wrap"))
     if kernel["ProblemType"]["ScaleZeroPointA"]:
-      module.add(SCSelectB32(dst=sgpr(inc + 1), src0=0, src1=hex(zeroIncBytes),
+      module.add(SCSelectB32(dst=sgpr(inc + 1), src0=0, src1=sgpr("ScaleZeroAInc") if runtimeGroup else hex(zeroIncBytes),
                              comment="scaleZeroA: advance only on a wrap"))
 
     module.add(SAddU32(dst=sgpr("SrdScaleA+0"), src0=sgpr("SrdScaleA+0"), src1=sgpr(inc),
@@ -5535,7 +5548,7 @@ class KernelWriterAssembly(KernelWriter):
     blockSize = kernel["ProblemType"]["ScaleBlockSizeA"]
     bpe       = self.blockScaleABytesPerElement(kernel)
 
-    if self.blockScaleAItersPerGroup(kernel) > 1:
+    if kernel["ProblemType"]["ScaleBlockSizesA"] or self.blockScaleAItersPerGroup(kernel) > 1:
       # DepthU < blockSize: one group, one element, several iterations.
       numTmp = 2 if kernel["ProblemType"]["ScaleZeroPointA"] else 1
       with self.allocTmpSgpr(numTmp, tag="blockScaleAIncrement") as tmpSgprInfo:
@@ -5589,41 +5602,18 @@ class KernelWriterAssembly(KernelWriter):
 
   def blockScaleADequantFp16Pk(self, kernel, tP, destVgprPrefix, g2lIdx, loadIdx,
                                numSrcDwords, vSrc, vTmps, vScalePk, vNegZPk):
-    """Dequantize sequential unsigned int4 using packed FP16 arithmetic.
-
-    Lifting the low/high halves extracts (0,4), (1,5), (2,6), (3,7).
-    Four byte permutations after scaling restore consecutive element pairs
-    for the existing LDS layout, reusing the four chain temporaries.
-
-    Only the first pair of each dword used to avoid a shift. Lifting a nibble
-    in place with a magic chosen per nibble position (FP16_PK_LIFTS) gets that
-    for the second as well; the third and fourth would need mantissa bits 8-11,
-    which are the exponent, so the dword is shifted once and the pair of lifts
-    repeats. One shift per dword rather than three.
-
-    Exact, in the sense that it rounds exactly once, like the f32 path:
-
-      * magic|q is magic+q with no rounding (the magic's ulp is 1 at that
-        exponent, and q <= 15 fits the nibble's mantissa bits).
-      * subtracting magic+z is exact too: both operands are integers within a
-        binade, so Sterbenz applies and the difference q-z is exact.
-      * only the multiply by s rounds, which is the single rounding the f32
-        lowering also ends on.
-
-    Fusing the last two into one v_pk_fma_f16 would NOT be exact: its addend
-    -(magic+z)*s would have to be rounded to fp16 first, and that error -- half
-    an ulp of a quantity around magic*s -- is of the same order as the answer
-    (q-z)*s itself. That is the same cancellation that rules out
-    v_dot2_bf16_bf16 on the f32 path, for the same reason.
-    """
+    """Lift nibbles, subtract the exact integer bias, then round the scaled pair."""
     module = Module("blockScaleADequantFp16Pk")
     nLift = len(self.FP16_PK_LIFTS)
     for d in range(numSrcDwords):
       src = destVgprPrefix + "+%u+%u" % (g2lIdx + tP["shiftGR"], d)
-      # The expansion writes back over the source dword, so stash it first --
-      # and the stash is what gets shifted, leaving G2L untouched.
-      module.add(VMovB32(dst=vgpr(vSrc), src=vgpr(src),
-                         comment="w4a16: save packed int4 dword %u" % d))
+      unsigned = kernel["ProblemType"]["Int4EncodingA"] != "Signed"
+      source = vgpr(src)
+      if not unsigned:
+        module.add(VXorB32(dst=vgpr(vSrc), src0="0x88888888", src1=source,
+                           comment="w4a16: signed nibbles to biased unsigned"))
+        source = vgpr(vSrc)
+      module.addComment1("w4a16: save packed int4 dword %u" % d)
 
       # Emitted in stages rather than pair by pair: every lift first, then
       # every subtract, then every scale. Each pair is a three-deep dependent
@@ -5638,26 +5628,32 @@ class KernelWriterAssembly(KernelWriter):
         if pair == nLift:
           module.add(VLShiftRightB32(dst=vgpr(vSrc),
                                      shiftHex=hex(self.FP16_PK_LIFT_SHIFT),
-                                     src=vgpr(vSrc),
+                                     src=source,
                                      comment="w4a16: next two nibbles down to bits 0-7"))
-        module.add(VAndOrB32(dst=vgpr(vTmps[pair]), src0=vgpr(vSrc), src1=hex(mask),
-                             src2=sgpr("ScaleAPkMagic+%u" % which),
+          source = vgpr(vSrc)
+        module.add(VAndOrB32(dst=vgpr(vTmps[pair]), src0=source,
+                             src1=sgpr("ScaleAPkMagic+%u" % which),
+                             src2=hex((_magicBits << 16) | _magicBits),
                              comment="w4a16: int4 #%u and #%u -> two fp16 holding %d+q"
                                      % (pair, pair + 4, magicVal)))
       for pair in range(4):
         which = pair % nLift
         magicVal = self.FP16_PK_LIFTS[which][2]
         module.add(VAddPKF16(
-            dst=vgpr(vTmps[pair]), src0=vgpr(vTmps[pair]), src1=vgpr(vNegZPk + which),
+            dst=vgpr(vTmps[pair]), src0=vgpr(vTmps[pair]), src1=vgpr(vNegZPk + which) if kernel["ProblemType"]["ScaleZeroPointA"] else sgpr("ScaleAPkMagic+%u" % (2 + which)),
             comment="w4a16: q - z (exact: both sides are integers near %d)" % magicVal))
       for pair in range(4):
-        module.add(VMulPKF16(
-            dst=vgpr(vTmps[pair]), src0=vgpr(vTmps[pair]), src1=vgpr(vScalePk),
-            comment="w4a16: (q - z)*s, packed"))
+        operands = dict(dst=vgpr(vTmps[pair]), src0=vgpr(vTmps[pair]), src1=vgpr(vScalePk),
+                        comment="w4a16: (q - z)*s, packed")
+        if kernel["ProblemType"]["ScaleZeroPointA"]:
+          # Match the positive zero produced by the FP32 asymmetric FMA.
+          module.add(VFmaPKF16(**operands, src2=0))
+        else:
+          module.add(VMulPKF16(**operands))
       for pair, (lo, hi) in enumerate(((0, 1), (2, 3), (0, 1), (2, 3))):
         dst = destVgprPrefix + "+%u+%u" % (g2lIdx, d * 4 + pair)
         module.add(VPermB32(dst=vgpr(dst), src0=vgpr(vTmps[hi]),
-                           src1=vgpr(vTmps[lo]), src2=sgpr("ScaleAPkPermute+%u" % (pair // 2)),
+                           src1=vgpr(vTmps[lo]), src2=hex((0x05040100, 0x07060302)[pair // 2]),
                            comment="w4a16: restore sequential fp16 pair %u" % pair))
     return module
 
@@ -5688,12 +5684,12 @@ class KernelWriterAssembly(KernelWriter):
     hasPkBF16CVT = self.states.asmCaps.get(
         "HasPkBF16CVT", self.states.version[:2] in ((9, 5), (12, 5)))
 
-    implicitZ = 8.0 if unsigned else 0.0
+    biasedSymmetric = unsigned and not zeroPoint and not macIsHalf
+    implicitZ = 8.0 if unsigned and not biasedSymmetric else 0.0
     needBias = zeroPoint or implicitZ
-    wantBias = zeroPoint or unsigned
+    wantBias = zeroPoint or (unsigned and not biasedSymmetric)
 
-    # FP16 unsigned weights use exact packed subtraction, then one rounded
-    # multiply and byte permutations. Signed and BF16 retain the f32 lowering.
+    # FP16 uses exact packed subtraction followed by rounded scaling.
     fp16Pk = blockDequantPackedFp16A(kernel["ProblemType"])
 
     # 2 f32 lanes + 1 saved source dword + 1 f32 scale (+ 1 f32 -z*s bias),
@@ -5705,7 +5701,7 @@ class KernelWriterAssembly(KernelWriter):
       numTmp = max(numTmp, 4 + len(self.FP16_PK_LIFTS) + self.FP16_PK_CHAINS)
     tmp = self.vgprPool.checkOut(numTmp, tag="blockScaleADequant_tmp")
     vLo, vHi, vSrc, vScale = tmp, tmp + 1, tmp + 2, tmp + 3
-    vNegZS = tmp + 4 if wantBias else None
+    vNegZS = tmp + 4 if wantBias or fp16Pk else None
 
     vRnd = vBf16Inc = vFp32Nan = None
     tmpSgprNan = None
@@ -5756,55 +5752,33 @@ class KernelWriterAssembly(KernelWriter):
         insts.append(VCndMaskB32(dst=vgpr(src), src0=vgpr(vRnd), src1=vgpr(vFp32Nan),
                                  src2=sgpr(tmpSgprNan, self.states.laneSGPRCount),
                                  comment="w4a16: keep Nan"))
-        insts.append(VLShiftRightB32(dst=vgpr(src), shiftHex=16, src=vgpr(src),
-                                     comment="w4a16: f32 -> bf16"))
-      insts.append(VPackF16toB32(dst=vgpr(dst), src0=vgpr(srcLo), src1=vgpr(srcHi),
+      insts.append(VPermB32(dst=vgpr(dst), src0=vgpr(srcHi), src1=vgpr(srcLo),
+                                 src2="0x07060302",
                                  comment="w4a16: pack 2 bf16"))
       return insts
 
     if fp16Pk:
-      # Both operands want the value in each half. The scale was loaded with a
-      # zero-extending ushort load, so duplicating it is one op; the bias is a
-      # bit pattern, not arithmetic -- fp16 -(1024+z) is just 0xE400|z, because
-      # the magic constant puts z straight in the mantissa.
-      # The scale arrives via buffer_load_d16_b16, which writes only the low
-      # half and leaves the upper one at whatever it held, so mask before
-      # duplicating -- the f32 path never noticed because v_cvt_f16_f32 reads
-      # the low half only.
-      module.add(VAndB32(dst=vgpr(vScale), src0=hex(0xFFFF), src1=vgpr(scaleVgpr),
-                         comment="scaleA: drop the stale high half of the d16 load"))
-      module.add(VLShiftLeftOrB32(dst=vgpr(vScale), shiftHex=16, src0=vgpr(vScale),
-                                  src1=vgpr(vScale),
-                                  comment="scaleA: fp16 s -> both halves"))
+      module.add(VPackF16toB32(dst=vgpr(vScale), src0=vgpr(scaleVgpr), src1=vgpr(scaleVgpr),
+                               comment="scaleA: duplicate fp16 scale"))
       if zeroPoint:
+        with self.allocTmpSgpr(self.states.laneSGPRCount) as nanSgpr:
+          # Preserve the custom kernels' NaN result for nonfinite scales.
+          module.add(VCmpClassF16(dst=sgpr(nanSgpr.idx, self.states.laneSGPRCount),
+                                  src0=vgpr(scaleVgpr), src1="0x207"))
+          module.add(VCndMaskB32(dst=vgpr(vScale), src0=vgpr(vScale), src1="0x7e007e00",
+                                 src2=sgpr(nanSgpr.idx, self.states.laneSGPRCount)))
         module.add(VAndB32(dst=vgpr(vLo), src0=1,
-                           src1=vgpr("GlobalReadOffsetScaleZeroA+%u" % loadIdx),
-                           comment="scaleZeroA: 0 or 1 from row parity"))
-        module.add(VLShiftLeftB32(dst=vgpr(vLo), shiftHex=2, src=vgpr(vLo),
-                                  comment="scaleZeroA: -> nibble shift 0 or 4"))
+                           src1=vgpr("GlobalReadOffsetScaleZeroA+%u" % loadIdx)))
+        module.add(VLShiftLeftB32(dst=vgpr(vLo), shiftHex=2, src=vgpr(vLo)))
         module.add(VBfeU32(dst=vgpr(vLo), src0=vgpr("G2LScaleZeroA+%u" % loadIdx),
-                           src1=vgpr(vLo), src2=hex(4),
-                           comment="scaleZeroA: extract the selected nibble"))
-        module.add(VLShiftLeftOrB32(dst=vgpr(vLo), shiftHex=16, src0=vgpr(vLo),
-                                    src1=vgpr(vLo),
-                                    comment="scaleZeroA: z -> both halves"))
-      # One bias per lift: the zero-point has to sit at the same mantissa bits
-      # the lift puts the weight nibble in, so -(magic+z) is just the negated
-      # magic with z shifted into place.
-      for i, (_m, magicBits, magicVal, sh) in enumerate(self.FP16_PK_LIFTS):
-        negMagic = 0x8000 | magicBits
-        if zeroPoint:
-          module.add(VLShiftLeftOrB32(
-              dst=vgpr(vNegZS + i), shiftHex=sh, src0=vgpr(vLo),
-              src1=sgpr("ScaleAPkMagic+%u" % (len(self.FP16_PK_LIFTS) + i)),
-              comment="scaleZeroA: two fp16 holding -(%d+z)" % magicVal))
-        else:
-          # No zero-point tensor: UnsignedBias8 subtracts a constant 8.
-          biasBits = negMagic | (int(implicitZ) << sh)
-          module.add(VMovB32(dst=vgpr(vNegZS + i),
-                             src=hex((biasBits << 16) | biasBits),
-                             comment="w4a16: two fp16 holding -(%d+%d)"
-                                     % (magicVal, int(implicitZ))))
+                           src1=vgpr(vLo), src2=4))
+        if not unsigned:
+          module.add(VXorB32(dst=vgpr(vLo), src0=8, src1=vgpr(vLo)))
+        module.add(VLShiftLeftOrB32(dst=vgpr(vLo), shiftHex=16, src0=vgpr(vLo), src1=vgpr(vLo)))
+        for i, (_mask, magicBits, _value, shift) in enumerate(self.FP16_PK_LIFTS):
+          bias = 0x8000 | magicBits
+          module.add(VLShiftLeftOrB32(dst=vgpr(vNegZS + i), shiftHex=shift,
+                                      src0=vgpr(vLo), src1=hex((bias << 16) | bias)))
     elif scaleIsHalf:
       module.add(VCvtF16toF32(dst=vgpr(vScale), src=vgpr(scaleVgpr),
                               comment="scaleA: fp16 -> f32"))
@@ -5857,11 +5831,15 @@ class KernelWriterAssembly(KernelWriter):
     for d in range(numSrcDwords):
       src = destVgprPrefix + "+%u+%u" % (g2lIdx + tP["shiftGR"], d)
       # The expansion overwrites the source register, so stash it first.
-      module.add(VMovB32(dst=vgpr(vSrc), src=vgpr(src),
-                         comment="w4a16: save packed int4 dword %u" % d))
+      if biasedSymmetric:
+        module.add(VXorB32(dst=vgpr(vSrc), src0="0x88888888", src1=vgpr(src),
+                           comment="w4a16: save packed int4 dword %u, biased to signed" % d))
+      else:
+        module.add(VMovB32(dst=vgpr(vSrc), src=vgpr(src),
+                           comment="w4a16: save packed int4 dword %u" % d))
       for pair in range(4):
-        Bfe = VBfeU32 if unsigned else VBfeI32
-        how = "zero-extend" if unsigned else "sign-extend"
+        Bfe = VBfeU32 if unsigned and not biasedSymmetric else VBfeI32
+        how = "zero-extend" if unsigned and not biasedSymmetric else "sign-extend"
         module.add(Bfe(dst=vgpr(vLo), src0=vgpr(vSrc), src1=hex(8 * pair + 0), src2=hex(4),
                        comment="w4a16: %s int4 #%u" % (how, 2 * pair)))
         module.add(Bfe(dst=vgpr(vHi), src0=vgpr(vSrc), src1=hex(8 * pair + 4), src2=hex(4),

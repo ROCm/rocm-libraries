@@ -1733,7 +1733,7 @@ namespace TensileLite
 
 	// NOTE: an assumption here is A & B must be both MX data types or non-MX data types.
 	//       Mixing is not supported.
-        if(!problemType.useScaleAB.empty())
+        if(!problemType.useScaleAB.empty() || problemType.scaleBlockSizeA)
         {
             args.template append<void const*>("scaleA", inputs.scaleA);
             args.template append<void const*>("scaleB", inputs.scaleB);
@@ -2777,6 +2777,10 @@ namespace TensileLite
             rv.args.append<int64_t>("batchOffsetA", inputs.batchOffsetA);
             rv.args.append<int64_t>("batchOffsetB", inputs.batchOffsetB);
         }
+
+        if(!problemType.scaleBlockSizesA.empty()
+           && (customKernel.name.empty() || customKernel.generated))
+            rv.args.append<uint32_t>("groupSize", problem.scaleBlockSizeA());
 
         // The fused GEMM+A2A segment follows batchOffsets in the kernel signature.
         if(problem.fusedGemmA2A())

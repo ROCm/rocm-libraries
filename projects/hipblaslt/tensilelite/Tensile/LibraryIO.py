@@ -770,7 +770,7 @@ def parseLibraryLogicData(
 
             if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:
                 raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")
-        if problemType.get("ScaleBlockSizesA"):
+        if customKernelName and problemType.get("ScaleBlockSizesA"):
             args = solutionState.get("CustomKernel", {}).get("args", [])
             if not any(a.get("semantic") == "ScaleBlockSizeA" for a in args):
                 raise ValueError("ScaleBlockSizesA requires a custom runtime group-size argument")

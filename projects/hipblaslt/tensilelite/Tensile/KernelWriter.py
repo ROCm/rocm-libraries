@@ -380,6 +380,7 @@ class StateValues:
   batchOffsetCKernArgOffset: int         = 0
   batchOffsetAKernArgOffset: int         = 0
   batchOffsetBKernArgOffset: int         = 0
+  scaleGroupKernArgOffset: int           = 0
   numSgprAlpha: int                      = 0 # For user arguments
   numSgprBeta: int                       = 0 # For user arguments
   numStoreSgprNames: List[str]           = field(init=False) # For post-loop kernel args
@@ -10189,17 +10190,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # dense, so it needs no stride kernel argument), plus its buffer SRD.
       self.defineSgpr("StrideScaleA", 1)
       self.defineSgpr("SrdScaleA", 4, 4)
+      if kernel["ProblemType"]["ScaleBlockSizesA"]:
+        for name in ("ScaleAGMinus1", "ScaleAGShift", "ScaleAKMask",
+                     "ScaleAInc", "ScaleZeroAInc", "ScaleAKCnt"):
+          self.defineSgpr(name, 1)
       if blockDequantPackedFp16A(kernel["ProblemType"]):
-        # The packed lowering fuses its mask and magic OR into one
-        # v_and_or_b32, which can carry only one literal -- so the magic lives
-        # here rather than inline. An SGPR, not a VGPR: the tile is already
-        # close to the 256-VGPR ceiling and this value is wave-uniform.
-        # Two per nibble position: the magic the lift ORs in, and its negation
-        # for the bias. Both are wave-uniform, and VOP3 has already spent its
-        # one literal on the nibble mask.
+        # Two nibble masks and two symmetric packed biases.
         self.defineSgpr("ScaleAPkMagic", 4)
-        self.defineSgpr("ScaleAPkPermute", 2)
-      if blockDequantItersPerGroupA(kernel["ProblemType"], kernel["DepthU"]) > 1:
+      if (not kernel["ProblemType"]["ScaleBlockSizesA"]
+          and blockDequantItersPerGroupA(kernel["ProblemType"], kernel["DepthU"]) > 1):
         # DepthU < ScaleBlockSizeA: one group outlives the iteration, so the
         # scale pointer only steps once every itersPerGroup iterations and
         # needs a counter to know when. See blockScaleAIncrement.

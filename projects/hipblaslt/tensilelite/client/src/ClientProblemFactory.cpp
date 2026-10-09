@@ -536,7 +536,7 @@ namespace TensileLite
                                     rv.back().setActivationType(m_activationType);
                                 }
                                 rv.back().setActivationNoGuard(m_activationNoGuard);
-                            rv.back().setUseScaleAB(m_useScaleAB);
+                            rv.back().setUseScaleAB(m_useScaleAB == "Block" ? "" : m_useScaleAB);
                             if(m_useScaleAB == "Scalar")
                             {
                                 rv.back().setScaleA(
@@ -573,8 +573,6 @@ namespace TensileLite
                             if(m_scaleBlockSizeA)
                             {
                                 // Dense [M][ceil(K/G)], group dimension innermost.
-                                // Must come after setUseScaleAB so the "Block"
-                                // guard in setScaleA is already in effect.
                                 rv.back().setW4A16ScaleBlockSizeA(
                                     m_scaleBlockSizeA,
                                     m_scaleTypeA,

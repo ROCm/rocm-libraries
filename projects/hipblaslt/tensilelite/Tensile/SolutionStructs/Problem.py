@@ -445,12 +445,12 @@ def blockDequantUnsignedA(problemType):
 
 
 def blockDequantPackedFp16A(problemType):
-    """Unsigned int4 with FP16 scales and MAC operands can dequantize in pairs.
+    """Int4 with FP16 scales and MAC operands can dequantize in pairs.
 
     The two integer lifts and zero-point subtraction are exact; only scaling
     rounds to FP16. Sequential pairs are restored before the LDS write.
     """
-    return (blockDequantUnsignedA(problemType)
+    return (usesBlockDequantA(problemType)
             and problemType["MacDataTypeA"].isHalf()
             and problemType["DataTypeB"].isHalf())
 
@@ -485,7 +485,7 @@ _defaultProblemType = {
     "UseScaleAB": "",  # Support "", "Scalar", and "Vector"
     # Block scales: dense [M][ceil(K/G)] in DataTypeB, applied before LDS writes.
     "ScaleBlockSizeA": 0,  # 0 = off, else the K-group size (32, 64 or 128)
-    "ScaleBlockSizesA": [],  # Accepted groups for a custom runtime-group kernel.
+    "ScaleBlockSizesA": [],  # Accepted runtime group sizes.
     # Packed per-group zero-points; see setW4A16ScaleBlockSizeA for layout.
     "ScaleZeroPointA": False,
     # Int4 weight encoding; UnsignedBias8 uses implicit zero-point 8 when symmetric.
@@ -1445,7 +1445,7 @@ class ProblemType(Mapping):
     elif self["UseScaleAB"] == "Vector":
       name.append("SABV")
     if self["ScaleBlockSizeA"]:
-      name.append("SABB%u%s%s" % (self["ScaleBlockSizeA"],
+      name.append("SABB%s%s%s" % ("G" if self["ScaleBlockSizesA"] else str(self["ScaleBlockSizeA"]),
                                   "ZP" if self["ScaleZeroPointA"] else "",
                                   _INT4_ENCODING_CHAR[self["Int4EncodingA"]]))
     if self["UseScaleCD"]: name.append("SCD")

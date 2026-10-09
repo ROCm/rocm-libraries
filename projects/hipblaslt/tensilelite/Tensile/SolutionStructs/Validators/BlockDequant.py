@@ -34,6 +34,10 @@ def validateBlockDequantCombination(state, printRejectionReason):
     problemType = state["ProblemType"]
 
     if not usesBlockDequantA(problemType):
+        if problemType["ScaleBlockSizesA"]:
+            reject(state, printRejectionReason,
+                   "ScaleBlockSizesA requires block dequantization")
+            return False
         # ScaleBlockSizeA without UseScaleAB="Block" is a config mistake that
         # would otherwise be silently ignored.
         if problemType["ScaleBlockSizeA"]:
@@ -53,6 +57,16 @@ def validateBlockDequantCombination(state, printRejectionReason):
         return True
 
     blockSize = problemType["ScaleBlockSizeA"]
+
+    groups = problemType["ScaleBlockSizesA"]
+    if groups:
+        if (any(type(g) is not int or g not in SUPPORTED_BLOCK_SIZES for g in groups)
+                or blockSize not in groups):
+            reject(state, printRejectionReason, "ScaleBlockSizesA must contain supported groups including ScaleBlockSizeA")
+            return False
+        if problemType["GroupedGemm"]:
+            reject(state, printRejectionReason, "Runtime block scaling requires non-grouped GEMM")
+            return False
 
     if problemType["Int4EncodingA"] not in INT4_ENCODINGS_A:
         reject(state, printRejectionReason,
