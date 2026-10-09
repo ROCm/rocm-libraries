@@ -14,11 +14,8 @@
 #include "fast_check.hpp"
 #include "hipBuffer.hpp"
 #include "hip_placement.hpp"
-#include "hipblaslt_init.hpp"
 #include "hipblaslt_test.hpp"
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-#include "mxDataGen.hpp"
-#endif
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
 
 #include <hip/hip_runtime.h>
 
@@ -572,35 +569,36 @@ namespace
         EXPECT_GT(max_result, max_partial) << "the beta and bias terms must count";
     }
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-    // integer_exact MX data: every dequantized value is an element in {0, 1, 2} (A) or
-    // {-2, ..., 2} (B) times a scale of 1, 2 or 4, and more than one scale is used, in both the
-    // layout the generator aligns itself and the one this change recomputes.
+    // integer_exact MX data uses small integer elements and varied scales of 1, 2 or 4.
+    // Decode the bytes independently to check the generated reference in either orientation.
     TEST(FastCheck_pre_checkin, integer_exact_mx_values_are_exact_with_varied_scales)
     {
+        using namespace roc::hostnumerics;
+        using namespace hipblaslt::hostnumerics;
         const uint64_t rows = 64, cols = 128;
         for(hipDataType type : {HIP_R_8F_E4M3, HIP_R_8F_E5M2})
             for(bool isMatrixA : {true, false})
                 for(bool transpose : {false, true})
                 {
-                    std::vector<uint8_t> data(rows * cols), scale(rows * cols / 32 + 64);
-                    std::vector<float>   ref = generateMXInput(type,
-                                                             HIP_R_8U,
-                                                             data.data(),
-                                                             scale.data(),
-                                                             rows,
-                                                             cols,
-                                                             rows,
-                                                             transpose,
-                                                             32,
-                                                             1,
-                                                             isMatrixA,
-                                                             MXScaleLayout::None,
-                                                             "integer_exact");
-                    ASSERT_EQ(ref.size(), rows * cols);
+                    const bool kMajor = isMatrixA == transpose;
+                    const auto generated
+                        = generateMxData(type,
+                                         HIP_R_8F_UE8M0,
+                                         Shape{rows, cols},
+                                         rows,
+                                         kMajor ? 0 : 1,
+                                         32,
+                                         hipblaslt_initialization::integer_exact,
+                                         17,
+                                         isMatrixA ? MatrixRole::A : MatrixRole::B);
+                    const auto  data  = generated.data.rawEncodedBackingStorage();
+                    const auto  scale = generated.scales.rawEncodedBackingStorage();
+                    const auto& ref   = generated.reference;
+                    ASSERT_EQ(ref.shape().elementCount(), rows * cols);
                     bool sawLargeScale = false, sawUnitScale = false, sawNegative = false;
-                    for(float v : ref)
+                    for(size_t idx = 0; idx < rows * cols; ++idx)
                     {
+                        const float v = ref.loadAs<float>({idx % rows, idx / rows});
                         const float a = std::fabs(v);
                         ASSERT_TRUE(a == 0 || a == 1 || a == 2 || a == 4 || a == 8)
                             << v << " isMatrixA=" << isMatrixA << " transpose=" << transpose;
@@ -611,13 +609,9 @@ namespace
                     EXPECT_TRUE(sawLargeScale && sawUnitScale);
                     EXPECT_EQ(sawNegative, !isMatrixA);
 
-                    // The reference must describe the bytes the GPU reads: decode each element and
-                    // its block's scale here, independently of the generator. K runs along the
-                    // stored rows when A is transposed or B is not; each run of 32 along K shares a
-                    // scale, which the other layouts index as (k / 32) * rows + row.
-                    const bool kMajor = isMatrixA == transpose;
-                    auto       decode = [type](uint8_t code) {
-                        // Normalize the E5M2 encodings of +/-1 to the E4M3 table.
+                    // K runs along the stored rows when A is transposed or B is not;
+                    // each run of 32 along K shares a scale.
+                    auto decode = [type](uint8_t code) {
                         if(type == HIP_R_8F_E5M2 && (code & 0x7f) == 0x3c)
                             code = uint8_t((code & 0x80) | 0x38);
                         switch(code)
@@ -636,65 +630,83 @@ namespace
                         ADD_FAILURE() << "unexpected fp8 code " << int(code);
                         return 0.f;
                     };
-                    for(size_t idx = 0; idx < ref.size(); idx++)
+                    for(size_t idx = 0; idx < rows * cols; idx++)
                     {
                         const size_t row = idx % rows, k = idx / rows;
-                        const size_t s = kMajor ? idx / 32 : (k / 32) * rows + row;
-                        const float  expected
-                            = decode(data[idx]) * std::ldexp(1.f, int(scale[s]) - 127);
-                        ASSERT_EQ(ref[idx], expected)
+                        const size_t si        = kMajor ? idx / 32 : (k / 32) * rows + row;
+                        const auto   scaleCode = std::to_integer<uint8_t>(scale[si]);
+                        ASSERT_GE(scaleCode, 127);
+                        ASSERT_LE(scaleCode, 129);
+                        const float expected = decode(std::to_integer<uint8_t>(data[idx]))
+                                               * std::ldexp(1.f, int(scaleCode) - 127);
+                        ASSERT_EQ(ref.loadAs<float>({row, k}), expected)
                             << "element " << idx << " isMatrixA=" << isMatrixA
                             << " transpose=" << transpose;
                     }
+                    const auto repeated = generateMxData(type,
+                                                         HIP_R_8F_UE8M0,
+                                                         Shape{rows, cols},
+                                                         rows,
+                                                         kMajor ? 0 : 1,
+                                                         32,
+                                                         hipblaslt_initialization::integer_exact,
+                                                         17,
+                                                         isMatrixA ? MatrixRole::A : MatrixRole::B);
+                    EXPECT_TRUE(std::ranges::equal(data, repeated.data.rawEncodedBackingStorage()));
+                    EXPECT_TRUE(
+                        std::ranges::equal(scale, repeated.scales.rawEncodedBackingStorage()));
                 }
     }
-    // The reference must match the actual swizzled scale bytes, or explicitly refuse the
-    // layout. Decode using the documented axis permutations rather than the swizzle helper.
+
+    // Decode the physical scale bytes using the documented axis permutations,
+    // independently of the layout helper used by the client.
     TEST(FastCheck_pre_checkin, integer_exact_mx_swizzled_references_match_or_refuse)
     {
+        using namespace roc::hostnumerics;
+        using namespace hipblaslt::hostnumerics;
+        using amd_gpu_layout::MxScaleStorageLayout;
         for(hipDataType type : {HIP_R_8F_E4M3, HIP_R_8F_E5M2})
             for(bool isA : {true, false})
                 for(bool transpose : {true, false})
-                    for(MXScaleLayout layout : {MXScaleLayout::GFX950, MXScaleLayout::GFX1250})
+                    for(auto layout : {MxScaleStorageLayout::Gfx950, MxScaleStorageLayout::Gfx1250})
                         for(const auto& shape : {std::pair<size_t, size_t>{64, 256}, {80, 160}})
                         {
-                            const auto [mn, K]          = shape;
-                            const bool           kMajor = isA == transpose;
-                            const size_t         rows = kMajor ? K : mn, cols = kMajor ? mn : K;
-                            const size_t         blocks = K / 32;
-                            std::vector<uint8_t> data(rows * cols), scale(rows * cols, 0xcc);
-                            std::vector<float>   ref;
-                            try
-                            {
-                                ref = generateMXInput(type,
-                                                      HIP_R_8U,
-                                                      data.data(),
-                                                      scale.data(),
-                                                      rows,
-                                                      cols,
-                                                      rows,
-                                                      transpose,
-                                                      32,
-                                                      1,
-                                                      isA,
-                                                      layout,
-                                                      "integer_exact");
-                            }
-                            catch(const std::runtime_error& e)
-                            {
-                                ASSERT_FALSE(kMajor) << e.what();
-                                EXPECT_NE(std::string(e.what()).find("integer_exact"),
-                                          std::string::npos);
-                                continue;
-                            }
-                            ASSERT_EQ(ref.size(), rows * cols);
-                            for(size_t idx = 0; idx < ref.size(); idx++)
+                            const auto [mn, K]  = shape;
+                            const bool   kMajor = isA == transpose;
+                            const size_t rows = kMajor ? K : mn, cols = kMajor ? mn : K;
+                            const size_t blocks = K / 32;
+                            const auto   generated
+                                = generateMxData(type,
+                                                 HIP_R_8F_UE8M0,
+                                                 Shape{rows, cols},
+                                                 rows,
+                                                 kMajor ? 0 : 1,
+                                                 32,
+                                                 hipblaslt_initialization::integer_exact,
+                                                 17,
+                                                 isA ? MatrixRole::A : MatrixRole::B);
+                            const auto scalesForDevice
+                                = layout == MxScaleStorageLayout::Gfx950 && !kMajor
+                                      ? generated.scales.copyWithPermutedDimensions({1, 0})
+                                      : generated.scales;
+                            const auto plan = amd_gpu_layout::planMxScaleStorage(
+                                {scalesForDevice.shape()[0], scalesForDevice.shape()[1]},
+                                32,
+                                layout);
+                            const auto scale = amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
+                                scalesForDevice.rawEncodedBackingStorage().data(),
+                                scalesForDevice.rawEncodedBackingStorage().size(),
+                                plan);
+                            const auto  data = generated.data.rawEncodedBackingStorage();
+                            const auto& ref  = generated.reference;
+                            ASSERT_EQ(ref.shape().elementCount(), rows * cols);
+                            for(size_t idx = 0; idx < rows * cols; idx++)
                             {
                                 const size_t k     = kMajor ? idx % rows : idx / rows;
                                 const size_t m     = kMajor ? idx / rows : idx % rows;
                                 const size_t block = k / 32;
                                 size_t       si;
-                                if(layout == MXScaleLayout::GFX1250)
+                                if(layout == MxScaleStorageLayout::Gfx1250)
                                 {
                                     const size_t fast = kMajor ? blocks : mn;
                                     const size_t slow = kMajor ? mn : blocks;
@@ -715,7 +727,8 @@ namespace
                                              * 2
                                          + (m / 16) % 2;
                                 }
-                                const uint8_t code = data[idx], magnitude = code & 0x7f;
+                                const uint8_t code      = std::to_integer<uint8_t>(data[idx]);
+                                const uint8_t magnitude = code & 0x7f;
                                 const uint8_t one = type == HIP_R_8F_E4M3 ? 0x38 : 0x3c;
                                 ASSERT_TRUE(magnitude == 0 || magnitude == one
                                             || magnitude == 0x40);
@@ -724,14 +737,15 @@ namespace
                                                                          : 0.f)
                                                     * ((code & 0x80) ? -1.f : 1.f);
                                 const float expected
-                                    = value * std::ldexp(1.f, int(scale[si]) - 127);
-                                ASSERT_EQ(ref[idx], expected)
+                                    = value
+                                      * std::ldexp(1.f,
+                                                   int(std::to_integer<uint8_t>(scale[si])) - 127);
+                                ASSERT_EQ(ref.loadAs<float>({idx % rows, idx / rows}), expected)
                                     << "idx=" << idx << " isA=" << isA << " transpose=" << transpose
                                     << " layout=" << int(layout);
                             }
                         }
     }
-#endif
 
     // ------------------------------------------------------------------------------------------
     // fast_check_result_device: D in device memory
@@ -958,161 +972,151 @@ namespace
         EXPECT_TRUE(res.passed) << res.message;
     }
 
-    // sparse_k must keep each row of A nonzero only at its chosen K indices, at most one per
-    // sixteenth of K plus the last, whichever way A is stored, and with at least K/16 rows every K
-    // index must be nonzero in some row; ternary must give B values in {-1, 0, 1} only.
-    TEST(FastCheckDevice_pre_checkin, integer_exact_patterns_keep_their_ranges)
+    // sparse_k keeps one nonzero per approximately sixteenth of K, plus the last,
+    // in either stored orientation. With enough rows, every K index is covered.
+    TEST(FastCheck_pre_checkin, integer_exact_patterns_keep_their_ranges)
     {
-        IntegerExactPatternScope scope;
-        const size_t             K = 200, M = 16, pad = 2;
+        using namespace roc::hostnumerics;
+        using namespace hipblaslt::hostnumerics;
+        const size_t K = 200, M = 16, pad = 2;
         for(bool k_is_row : {false, true})
         {
             const size_t rows = k_is_row ? K : M, cols = k_is_row ? M : K, ld = rows + pad;
-            float*       d = nullptr;
-            ASSERT_EQ(hipMalloc(&d, ld * cols * sizeof(float)), hipSuccess);
-            set_integer_exact_pattern_state(IntegerExactPattern::sparse_k, K, k_is_row);
-            hipblaslt_init_device(ABC_dims::A,
-                                  hipblaslt_initialization::integer_exact,
-                                  false,
-                                  d,
-                                  rows,
-                                  cols,
-                                  ld,
-                                  HIP_R_32F,
-                                  0,
-                                  1);
-            std::vector<float> h(ld * cols);
-            ASSERT_EQ(hipMemcpy(h.data(), d, h.size() * sizeof(float), hipMemcpyDeviceToHost),
-                      hipSuccess);
-            (void)hipFree(d);
-
+            Tensor       values(ScalarType::Float32, Layout(Shape{rows, cols}, {1, ptrdiff_t(ld)}));
+            initializeMatrix(
+                values,
+                MatrixRole::A,
+                hipblaslt_initialization::integer_exact,
+                17,
+                false,
+                std::nullopt,
+                false,
+                {.pattern = IntegerExactPattern::SparseK, .reductionAxis = k_is_row ? 0u : 1u});
             std::vector<bool> covered(K, false);
             for(size_t m = 0; m < M; m++)
             {
                 size_t kept = 0;
                 for(size_t k = 0; k < K; k++)
                 {
-                    const bool keep = integer_exact_sparse_k_kept(k, K, m);
+                    const size_t width = (K + 15) / 16;
+                    const bool   keep  = k % width == (k / width + m) % width || k + 1 == K;
                     kept += keep;
-                    float v = k_is_row ? h[m * ld + k] : h[k * ld + m];
+                    const float v
+                        = k_is_row ? values.loadAs<float>({k, m}) : values.loadAs<float>({m, k});
                     EXPECT_TRUE(v == 0 || v == 1 || v == 2) << "k=" << k << " m=" << m;
                     if(!keep)
                         EXPECT_EQ(v, 0.f) << "k=" << k << " m=" << m << " k_is_row=" << k_is_row;
+                    else
+                        EXPECT_NE(v, 0.f) << "k=" << k << " m=" << m;
                     if(v != 0)
                         covered[k] = true;
                 }
-                EXPECT_TRUE(integer_exact_sparse_k_kept(K - 1, K, m));
-                EXPECT_LE(kept, kIntegerExactSparseKTerms + 1) << "m=" << m;
-                EXPECT_GE(kept, kIntegerExactSparseKTerms - 1) << "m=" << m;
+                EXPECT_LE(kept, 17u) << "m=" << m;
+                EXPECT_GE(kept, 15u) << "m=" << m;
             }
             for(size_t k = 0; k < K; k++)
                 EXPECT_TRUE(covered[k]) << "K index " << k << " is zero in every row";
         }
 
-        float* d = nullptr;
-        ASSERT_EQ(hipMalloc(&d, 64 * 64 * sizeof(float)), hipSuccess);
-        set_integer_exact_pattern_state(IntegerExactPattern::ternary, 64, false);
-        hipblaslt_init_device(ABC_dims::B,
-                              hipblaslt_initialization::integer_exact,
-                              false,
-                              d,
-                              64,
-                              64,
-                              64,
-                              HIP_R_32F,
-                              0,
-                              1);
-        std::vector<float> h(64 * 64);
-        ASSERT_EQ(hipMemcpy(h.data(), d, h.size() * sizeof(float), hipMemcpyDeviceToHost),
-                  hipSuccess);
-        (void)hipFree(d);
-        int counts[3] = {0, 0, 0};
-        for(float v : h)
+        for(MatrixRole role : {MatrixRole::A, MatrixRole::B, MatrixRole::C})
         {
-            ASSERT_TRUE(v == -1 || v == 0 || v == 1) << v;
-            counts[int(v) + 1]++;
+            Tensor values(ScalarType::Float32, Shape{64, 64});
+            initializeMatrix(values,
+                             role,
+                             hipblaslt_initialization::integer_exact,
+                             17,
+                             false,
+                             std::nullopt,
+                             false,
+                             {.pattern = IntegerExactPattern::Ternary});
+            int counts[3] = {0, 0, 0};
+            for(size_t row = 0; row < 64; ++row)
+                for(size_t col = 0; col < 64; ++col)
+                {
+                    const float v = values.loadAs<float>({row, col});
+                    ASSERT_TRUE(v == -1 || v == 0 || v == 1) << v;
+                    counts[int(v) + 1]++;
+                }
+            EXPECT_GT(counts[0], 0);
+            EXPECT_GT(counts[1], 0);
+            EXPECT_GT(counts[2], 0);
         }
-        EXPECT_GT(counts[0], 0);
-        EXPECT_GT(counts[1], 0);
-        EXPECT_GT(counts[2], 0);
     }
 
-    // Test workers may finish while another thread is still filling its operands.
-    // A worker's scope cleanup must not reset another thread's selected pattern.
-    TEST(FastCheckDevice_pre_checkin, integer_exact_pattern_is_local_to_the_test_thread)
+    // Each initialization receives its own pattern; another worker cannot reset it.
+    TEST(FastCheck_pre_checkin, integer_exact_pattern_is_local_to_the_test_thread)
     {
-        IntegerExactPatternScope scope;
-        set_integer_exact_pattern_state(IntegerExactPattern::ternary, 64, false);
-        std::thread worker([] {
-            IntegerExactPatternScope workerScope;
-            set_integer_exact_pattern_state(IntegerExactPattern::sparse_k, 128, true);
+        using namespace roc::hostnumerics;
+        using namespace hipblaslt::hostnumerics;
+        Tensor      sparse(ScalarType::Float32, Shape{128, 16});
+        Tensor      ternary(ScalarType::Float32, Shape{64, 64});
+        std::thread worker([&] {
+            initializeMatrix(sparse,
+                             MatrixRole::A,
+                             hipblaslt_initialization::integer_exact,
+                             19,
+                             false,
+                             std::nullopt,
+                             false,
+                             {.pattern = IntegerExactPattern::SparseK, .reductionAxis = 0});
         });
+        initializeMatrix(ternary,
+                         MatrixRole::B,
+                         hipblaslt_initialization::integer_exact,
+                         17,
+                         false,
+                         std::nullopt,
+                         false,
+                         {.pattern = IntegerExactPattern::Ternary});
         worker.join();
-
-        HipDeviceBuffer d(HIP_R_32F, 64 * 64);
-        ASSERT_TRUE(d.buf());
-        hipblaslt_init_device(ABC_dims::B,
-                              hipblaslt_initialization::integer_exact,
-                              false,
-                              d.buf(),
-                              64,
-                              64,
-                              64,
-                              HIP_R_32F,
-                              0,
-                              1);
-        std::vector<float> h(64 * 64);
-        ASSERT_EQ(hipMemcpy(h.data(), d.buf(), h.size() * sizeof(float), hipMemcpyDeviceToHost),
-                  hipSuccess);
-        for(float v : h)
-            ASSERT_TRUE(v == -1 || v == 0 || v == 1) << v;
+        for(size_t row = 0; row < 64; ++row)
+            for(size_t col = 0; col < 64; ++col)
+            {
+                const float v = ternary.loadAs<float>({row, col});
+                ASSERT_TRUE(v == -1 || v == 0 || v == 1) << v;
+            }
     }
 
-    // With overlapping batches (a stride shorter than one matrix), the sparse_k fill must stay
-    // inside the allocation, lda * N + (batch_count - 1) * stride elements.
-    TEST(FastCheckDevice_pre_checkin, sparse_k_fill_stays_inside_overlapping_batches)
+    // An overlapping batch layout must not write past its allocation or into the guard.
+    TEST(FastCheck_pre_checkin, sparse_k_fill_stays_inside_overlapping_batches)
     {
-        IntegerExactPatternScope scope;
-        const size_t             K = 64, M = 5, ld = 8, stride = 2 * ld, batches = 3, guard = 64;
-        const size_t             used = ld * K + (batches - 1) * stride;
-        std::vector<float>       h(used + guard, 77.f);
-        float*                   d = nullptr;
-        ASSERT_EQ(hipMalloc(&d, h.size() * sizeof(float)), hipSuccess);
-        ASSERT_EQ(hipMemcpy(d, h.data(), h.size() * sizeof(float), hipMemcpyHostToDevice),
-                  hipSuccess);
-        set_integer_exact_pattern_state(IntegerExactPattern::sparse_k, K, false);
-        hipblaslt_init_device(ABC_dims::A,
-                              hipblaslt_initialization::integer_exact,
-                              false,
-                              d,
-                              M,
-                              K,
-                              ld,
-                              HIP_R_32F,
-                              stride,
-                              batches);
-        ASSERT_EQ(hipMemcpy(h.data(), d, h.size() * sizeof(float), hipMemcpyDeviceToHost),
-                  hipSuccess);
-        (void)hipFree(d);
+        using namespace roc::hostnumerics;
+        using namespace hipblaslt::hostnumerics;
+        const size_t       K = 64, M = 5, ld = 8, stride = 2 * ld, batches = 3, guard = 64;
+        const size_t       used = ld * K + (batches - 1) * stride;
+        std::vector<float> h(used + guard, 77.f);
+        auto               values = Tensor::copyNativeStorage(
+            Layout(Shape{M, K, batches}, {1, ptrdiff_t(ld), ptrdiff_t(stride)}),
+            std::span<const float>(h));
+        initializeMatrix(values,
+                         MatrixRole::A,
+                         hipblaslt_initialization::integer_exact,
+                         17,
+                         false,
+                         std::nullopt,
+                         false,
+                         {.pattern = IntegerExactPattern::SparseK, .reductionAxis = 1});
+        std::memcpy(h.data(), values.rawEncodedBackingStorage().data(), h.size() * sizeof(float));
         for(size_t idx = used; idx < h.size(); idx++)
             EXPECT_EQ(h[idx], 77.f) << "offset " << idx;
     }
 
-    // Pattern names parse to their pattern; an empty name means the standard one, and an unknown
-    // name is rejected.
+    // An empty name means standard; reject unknown names without changing the selection.
     TEST(FastCheck_pre_checkin, integer_exact_pattern_names_parse)
     {
-        IntegerExactPattern p = IntegerExactPattern::ternary;
-        EXPECT_TRUE(parse_integer_exact_pattern("standard", p));
-        EXPECT_EQ(p, IntegerExactPattern::standard);
-        p = IntegerExactPattern::ternary;
-        EXPECT_TRUE(parse_integer_exact_pattern("", p));
-        EXPECT_EQ(p, IntegerExactPattern::standard);
-        EXPECT_TRUE(parse_integer_exact_pattern("ternary", p));
-        EXPECT_EQ(p, IntegerExactPattern::ternary);
-        EXPECT_TRUE(parse_integer_exact_pattern("sparse_k", p));
-        EXPECT_EQ(p, IntegerExactPattern::sparse_k);
-        EXPECT_FALSE(parse_integer_exact_pattern("sparse", p));
+        using namespace hipblaslt::hostnumerics;
+        IntegerExactPattern p = IntegerExactPattern::Ternary;
+        EXPECT_TRUE(parseIntegerExactPattern("standard", p));
+        EXPECT_EQ(p, IntegerExactPattern::Standard);
+        p = IntegerExactPattern::Ternary;
+        EXPECT_TRUE(parseIntegerExactPattern("", p));
+        EXPECT_EQ(p, IntegerExactPattern::Standard);
+        EXPECT_TRUE(parseIntegerExactPattern("ternary", p));
+        EXPECT_EQ(p, IntegerExactPattern::Ternary);
+        EXPECT_TRUE(parseIntegerExactPattern("sparse_k", p));
+        EXPECT_EQ(p, IntegerExactPattern::SparseK);
+        EXPECT_FALSE(parseIntegerExactPattern("sparse", p));
+        EXPECT_EQ(p, IntegerExactPattern::SparseK);
     }
 
     // D must equal scale_d * act(E / scale_e) for relu and clamp; one wrong element of D is

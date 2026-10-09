@@ -1,11 +1,12 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "hipblaslt_math.hpp"
+#include <hipblaslt/hostnumerics/Types.hpp>
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 
 namespace
 {
@@ -17,7 +18,11 @@ namespace
             SCOPED_TRACE(bits);
             T value;
             value.__x      = static_cast<uint8_t>(bits);
-            const T result = negate(value);
+            const auto source = hipblaslt::hostnumerics::encodedScalar(value);
+            const auto negated
+                = roc::hostnumerics::Tensor::scalar(source.type(), -source.template item<float>());
+            T result;
+            std::memcpy(&result, negated.rawEncodedBackingStorage().data(), sizeof(T));
 
             // FNUZ has no negative zero: 0x00 is zero and 0x80 is NaN.
             if(bits == 0x00 || bits == 0x80)

@@ -251,3 +251,42 @@ TEST(CustomKernelTest, ComputeUnitsHonorTheCuBudget)
     EXPECT_EQ(computeUnitsLaunch(0, 96), std::make_pair(size_t{96}, int32_t{96}));
     EXPECT_EQ(computeUnitsLaunch(4 * cus, 0), std::make_pair(size_t{cus}, int32_t{cus}));
 }
+
+TEST(CustomKernelTest, Gfx950ScaleBatchStridesFollowTheBoundDimension)
+{
+    for(bool transA : {false, true})
+    {
+        for(bool transB : {false, true})
+        {
+            SCOPED_TRACE(::testing::Message() << "transA=" << transA << " transB=" << transB);
+            auto problem = ContractionProblemGemm::GEMM(transA,
+                                                        transB,
+                                                        17,
+                                                        33,
+                                                        256,
+                                                        transA ? 256 : 17,
+                                                        transB ? 33 : 256,
+                                                        17,
+                                                        1.0,
+                                                        false,
+                                                        2);
+            problem.setMXScaleA(rocisa::DataType::E8, 32);
+            problem.setMXScaleB(rocisa::DataType::E8, 32);
+            for(auto semantic :
+                {CustomArgSemantic::StrideScaleA1, CustomArgSemantic::StrideScaleB1})
+            {
+                ContractionSolution solution;
+                configureProbeKernel(solution, {CustomArgType::uint32, semantic});
+                solution.sizeMapping.globalSplitU = 1;
+                auto       device                 = probeDevice();
+                const auto invocation             = solution.generateCustomCall<false>(
+                    problem, ContractionInputs{}, device, StreamKSettings{});
+                ASSERT_EQ(invocation.args.size(), sizeof(uint32_t));
+                uint32_t stride = 0;
+                std::memcpy(&stride, invocation.args.data(), sizeof(stride));
+                // gfx950 pads MN to 32 and K/32 to 8 for every transpose combination.
+                EXPECT_EQ(stride, semantic == CustomArgSemantic::StrideScaleA1 ? 256u : 512u);
+            }
+        }
+    }
+}

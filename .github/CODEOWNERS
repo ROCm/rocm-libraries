@@ -84,8 +84,9 @@
 /projects/rocwmma/                                  @ROCm/rocwmma-reviewers
 /projects/rpp/                                      @ROCm/rpp-reviewers
 /shared/origami/                                    @ROCm/origami-reviewers
-/shared/mxdatagenerator/                            @ROCm/rocroller-developers
+# Temporary while the HostNumerics extraction remains experimental.
 /shared/hostnumerics/                               @newling
+/shared/mxdatagenerator/                            @newling
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
 /shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
@@ -107,9 +108,6 @@
 /shared/hostnumerics/**/*.cmake                     @ROCm/rocm-math-lib-build-infra
 /shared/hostnumerics/**/*.cmake.in                  @ROCm/rocm-math-lib-build-infra
 /shared/hostnumerics/**/CMakeLists.txt              @ROCm/rocm-math-lib-build-infra
-
-/shared/mxdatagenerator/**/*.cmake                  @ROCm/rocm-math-lib-build-infra
-/shared/mxdatagenerator/**/CMakeLists.txt           @ROCm/rocm-math-lib-build-infra
 
 /shared/origami/**/*.cmake                          @ROCm/rocm-math-lib-build-infra
 /shared/origami/**/CMakeLists.txt                   @ROCm/rocm-math-lib-build-infra
