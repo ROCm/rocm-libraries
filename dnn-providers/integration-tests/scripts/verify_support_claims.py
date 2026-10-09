@@ -31,6 +31,14 @@ import sys
 from pathlib import Path
 from typing import List
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from bundle_discovery import (  # noqa: E402
+    SWEEP_MANIFEST_NAME,
+    SWEEP_SUPPORT_NAME,
+    walk_bundle_tree,
+)
+
 BUNDLE_ROOT = Path(__file__).resolve().parent.parent / "integration-test-bundles"
 VALID_PLATFORMS = {"linux", "windows"}
 VALID_ENFORCEMENT_LEVELS = {"applicability", "buildable", "full"}
@@ -197,7 +205,7 @@ def check_enforcement_level_single(support_path: Path, errors: List[str]) -> Non
 
 
 def check_enforcement_level_sweep(support_path: Path, errors: List[str]) -> None:
-    sweep_path = support_path.parent / "sweep.json"
+    sweep_path = support_path.parent / SWEEP_MANIFEST_NAME
     if not sweep_path.exists():
         return
     try:
@@ -228,7 +236,7 @@ def check_enforcement_level_sweep(support_path: Path, errors: List[str]) -> None
 def check_sweep_case_ids(
     support_path: Path, support_data: dict, errors: List[str]
 ) -> None:
-    sweep_path = support_path.parent / "sweep.json"
+    sweep_path = support_path.parent / SWEEP_MANIFEST_NAME
     if not sweep_path.exists():
         # check_orphaned_sweep already reports this; no duplicate error.
         return
@@ -273,7 +281,7 @@ def check_orphaned_single_graph(support_path: Path, errors: List[str]) -> None:
 
 
 def check_orphaned_sweep(support_path: Path, errors: List[str]) -> None:
-    sweep_path = support_path.parent / "sweep.json"
+    sweep_path = support_path.parent / SWEEP_MANIFEST_NAME
     if not sweep_path.exists():
         _error(
             support_path,
@@ -284,7 +292,7 @@ def check_orphaned_sweep(support_path: Path, errors: List[str]) -> None:
 
 
 def is_sweep_sidecar(path: Path) -> bool:
-    return path.name == "support.json"
+    return path.name == SWEEP_SUPPORT_NAME
 
 
 def check_canonical_form(support_path: Path, data: object, errors: List[str]) -> None:
@@ -299,7 +307,11 @@ def verify_all(bundle_root: Path) -> List[str]:
     if not bundle_root.is_dir():
         return errors
 
-    for support_path in sorted(bundle_root.rglob("*.support.json")):
+    # Walk the tree the way the harness does, so a sidecar reached through a
+    # directory symlink is checked rather than silently skipped.
+    _, files = walk_bundle_tree(bundle_root)
+
+    for support_path in (f for f in files if f.name.endswith(".support.json")):
         try:
             with open(support_path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -318,7 +330,7 @@ def verify_all(bundle_root: Path) -> List[str]:
         if _has_non_empty_claims(data):
             check_enforcement_level_single(support_path, errors)
 
-    for support_path in sorted(bundle_root.rglob("support.json")):
+    for support_path in (f for f in files if is_sweep_sidecar(f)):
         try:
             with open(support_path, encoding="utf-8") as f:
                 data = json.load(f)
