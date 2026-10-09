@@ -598,6 +598,28 @@ def supports_attention_dense(
             f"block_n={spec.block_n} must be divisible by num_waves="
             f"{spec.num_waves} so K/V DMA rows distribute evenly"
         )
+    if spec.kv_storage_dtype is not None:
+        # The fp8 loaders stream KV in flat groups of 8 elems per thread, so the
+        # tile element count must divide evenly by threads*8. Without this gate
+        # the sync loader asserts at codegen (BN*D % (THREADS*8)) and the
+        # two-phase loader silently truncates its dequant loop -- emitting no
+        # Phase-2 dequant and reading uninitialized LDS. threads = num_waves*64.
+        threads = spec.num_waves * 64
+        if (spec.block_n * spec.head_size) % (threads * 8) != 0:
+            return False, (
+                f"fp8 dense requires block_n*head_size="
+                f"{spec.block_n * spec.head_size} divisible by threads*8="
+                f"{threads * 8} (block_n={spec.block_n}, "
+                f"head_size={spec.head_size}, num_waves={spec.num_waves})"
+            )
+        # fp8 is validated (golden + GPU) only for bf16 compute without sinks.
+        # The grid variant advertises fp8 alongside every grid feature, so gate
+        # the unverified combinations here rather than silently admitting them;
+        # lift once fp16-compute / sink fp8 paths carry their own coverage.
+        if spec.dtype != "bf16":
+            return False, (f"fp8 dense requires bf16 compute dtype, got {spec.dtype}")
+        if spec.use_sinks:
+            return False, "fp8 dense does not support attention sinks yet"
     return True, ""
 
 
@@ -718,8 +740,8 @@ def build_attention_dense(
     scale = b.param("scale", F32)
     if KV_FP8:
         # Per-tensor fp8 KV dequant scales, declared right after scale to fix their
-        # ABI position (mirrored in attention_dense_signature). Consumed by the
-        # two-phase fp8 loader; absent from the bf16 ABI.
+        # ABI position (mirrored in attention_dense_signature). Consumed by both
+        # fp8 loaders (sync and two-phase); absent from the bf16 ABI.
         k_scale = b.param("k_scale", F32)
         v_scale = b.param("v_scale", F32)
     # Problem shape as kernel params. Unconditional here: every spec reaching this

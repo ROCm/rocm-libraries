@@ -297,6 +297,15 @@ def bind_dense_attention_torch(
     """
     run = _dense_runner(str(getattr(request, "arch", "")))
     spec = tuning_spec.kernel_spec
+    if getattr(spec, "kv_storage_dtype", None) == "fp8e4m3":
+        # The loader decodes OCP fp8 (float8_e4m3fn) KV. Reject a bf16 K/V read as
+        # fp8 (silently wrong) and the FNUZ variant (gfx950 is OCP-only, ~2x off).
+        for name in ("k", "v"):
+            kind = _dtype_kind(tensors[name], name)
+            if kind != "fp8":
+                raise ValueError(
+                    f"fp8 dense expects OCP fp8 {name!r} (float8_e4m3fn), got {kind}"
+                )
     scale = kwargs.get("scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))
@@ -313,6 +322,13 @@ def bind_dense_attention_torch(
             "stream": int(_kw.get("stream", stream)),
             "arch": str(request.arch),
         }
+        # fp8 KV dequant reads per-tensor k_scale/v_scale; without forwarding them
+        # the runner falls back to 1.0 and silently dequantizes at unit scale. Only
+        # fp8 specs (gfx950) carry the scale kwargs -- the bf16/gfx942 runner would
+        # reject them -- so gate on the spec's storage dtype.
+        if getattr(spec, "kv_storage_dtype", None) is not None:
+            call["k_scale"] = float(_kw.get("k_scale", tensors.get("k_scale", 1.0)))
+            call["v_scale"] = float(_kw.get("v_scale", tensors.get("v_scale", 1.0)))
         optional = {
             "cu_seqlens_q": _kw.get("cu_seqlens_q", tensors.get("cu_seqlens_q")),
             "cu_seqlens_kv": _kw.get("cu_seqlens_kv", tensors.get("cu_seqlens_kv")),
@@ -393,6 +409,8 @@ def bind_tuning_attention_torch(
             cu_seqlens_q=tensors["cu_seqlens_q"],
             seqused_k=tensors["seqused_k"],
             softmax_scale=float(_kw.get("softmax_scale", scale)),
+            k_scale=float(_kw.get("k_scale", tensors.get("k_scale", 1.0))),
+            v_scale=float(_kw.get("v_scale", tensors.get("v_scale", 1.0))),
             block_table=tensors["block_table"],
             softcap=float(_kw.get("softcap", tensors.get("softcap", 0.0))),
             sinks=_kw.get("sinks", tensors.get("sinks")),
