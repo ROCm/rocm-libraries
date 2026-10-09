@@ -768,18 +768,6 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
 
   // Sort top candidates by arithmetic intensity (descending - highest first)
   if (num_the_same > 1) {
-    if (results.front().config.has_tensile_params()) {
-      std::stable_sort(
-          results.begin(),
-          results.begin() + num_the_same,
-          [](const prediction_result_t& a, const prediction_result_t& b) {
-            auto rank = [](bool bufferLoad, bool bufferStore) {
-              return (static_cast<int>(!bufferLoad) << 1) | static_cast<int>(!bufferStore);
-            };
-            return rank(a.config.tensile().buffer_load, a.config.tensile().buffer_store) <
-                   rank(b.config.tensile().buffer_load, b.config.tensile().buffer_store);
-          });
-    }
     std::stable_sort(results.begin(),
                      results.begin() + num_the_same,
                      [&compute_arithmetic_intensity](const prediction_result_t& a,
@@ -849,6 +837,20 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                 std::abs(static_cast<double>(b.config.occupancy) - need);
                        });
     }
+
+    if (results.front().config.has_tensile_params()) {
+      std::stable_sort(
+          results.begin(),
+          results.begin() + num_the_same,
+          [](const prediction_result_t& a, const prediction_result_t& b) {
+            auto rank = [](bool bufferLoad, bool bufferStore) {
+              return (static_cast<int>(!bufferLoad) << 1) | static_cast<int>(!bufferStore);
+            };
+            return rank(a.config.tensile().buffer_load, a.config.tensile().buffer_store) <
+                   rank(b.config.tensile().buffer_load, b.config.tensile().buffer_store);
+          });
+    }
+
   }
 
   OLOG_DEBUG("rank_configs selected MT=(" << results[0].config.mt.m << "," << results[0].config.mt.n
