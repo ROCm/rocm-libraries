@@ -3573,16 +3573,12 @@ std::string lower_serialized_ir(const std::string& ir_text,
         }
     }
 
-    else
-    {
-        fl = resolve_python_llvm_flavor();
-    }
-
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "lower_serialized_ir") != ROCKE_OK)
     {
         throw std::runtime_error("rocke_engine.lower_serialized_ir: builder init failed (OOM)");
     }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
 
     rocke_kernel_def_t* kernel = nullptr;
     rocke_status_t st = rocke_ir_parse(ir_text.c_str(), &b, &kernel);
@@ -3592,9 +3588,11 @@ std::string lower_serialized_ir(const std::string& ir_text,
         std::string msg = std::string("rocke_engine.lower_serialized_ir: parse failed (status ")
                           + std::to_string((int)st)
                           + "): " + ((m && *m) ? m : "unknown parse error");
-        rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
+
+    if(fl == ROCKE_LLVM_FLAVOR_AUTO)
+        fl = resolve_python_llvm_flavor();
 
     char* out_ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
@@ -3605,13 +3603,11 @@ std::string lower_serialized_ir(const std::string& ir_text,
         std::string msg = std::string("rocke_engine.lower_serialized_ir: lower failed for arch '")
                           + a + "' (status " + std::to_string((int)st)
                           + "): " + (err[0] ? err : "unknown lowering error");
-        rocke_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
 
     std::string result(out_ll);
     std::free(out_ll);
-    rocke_ir_builder_free(&b);
     return result;
 }
 

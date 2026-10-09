@@ -183,7 +183,33 @@ except RuntimeError as exc:
 else:
     raise AssertionError("invalid spec was accepted")
 
+# Serialized input validation must not depend on compiler availability.
+for text, message in (("", "empty IR input"), ("not serialized IR", "parse failed")):
+    try:
+        rocke_engine.lower_serialized_ir(text, arch="gfx950")
+    except ComgrError:
+        raise AssertionError("compiler lookup preceded serialized-input rejection")
+    except RuntimeError as exc:
+        assert message in str(exc)
+    else:
+        raise AssertionError("invalid serialized input was accepted")
+
+try:
+    rocke_engine.lower_serialized_ir("not serialized IR", flavor="invalid")
+except RuntimeError as exc:
+    assert "unknown LLVM flavor" in str(exc)
+else:
+    raise AssertionError("invalid explicit flavor was accepted")
+
 ir = serialize(IRBuilder("cleanup_explicit_probe").kernel)
+for _ in range(2):
+    try:
+        rocke_engine.lower_serialized_ir(ir, arch="gfx950")
+    except ComgrError as exc:
+        assert str(exc) == "cleanup probe: compiler unavailable"
+    else:
+        raise AssertionError("serialized-IR resolver failure did not propagate")
+
 assert rocke_engine.lower_serialized_ir(ir, arch="gfx950", flavor="llvm20")
 """
 
