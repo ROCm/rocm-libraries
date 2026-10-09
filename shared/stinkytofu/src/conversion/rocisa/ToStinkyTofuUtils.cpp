@@ -39,6 +39,7 @@
 #include <string_view>
 #include <typeinfo>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "AllHwMappings.hpp"
@@ -1606,11 +1607,20 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
                 nb::dict options = nb::cast<nb::dict>(options_obj);
 
                 bool hasSetOptions = false;
+                std::unordered_set<std::string> knownOptions;
 
             // Set stinky module options from valid options in the options dict
-#define SET_MODULE_OPTION(name, type) \
-    hasSetOptions |=                  \
-        (options.contains(#name) && nb::try_cast<type>(options[#name], moduleOptions.name));
+// A key that is unknown or has the wrong type is reported instead of silently ignored: a
+// stale build or a typo would otherwise run an experiment without the requested option.
+#define SET_MODULE_OPTION(name, type)                                  \
+    knownOptions.insert(#name);                                        \
+    if (options.contains(#name)) {                                     \
+        if (nb::try_cast<type>(options[#name], moduleOptions.name))    \
+            hasSetOptions = true;                                      \
+        else                                                           \
+            std::cerr << "[StinkyTofu] WARNING: module option '" #name \
+                         "' has the wrong type and is ignored\n";      \
+    }
 
 #define DEBUG_SET_MODULE_OPTION(name, type)                                                  \
     if (options.contains(#name) && nb::try_cast<type>(options[#name], moduleOptions.name)) { \
@@ -1624,6 +1634,12 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 #undef SET_MODULE_OPTION_WITH_DEFAULT
 #undef SET_MODULE_OPTION
 #undef DEBUG_SET_MODULE_OPTION
+                for (auto kv : options) {
+                    const std::string key = nb::cast<std::string>(kv.first);
+                    if (!knownOptions.count(key))
+                        std::cerr << "[StinkyTofu] WARNING: unknown module option '" << key
+                                  << "' is ignored (stale build or typo?)\n";
+                }
             }
 
             auto stinkyModule =

@@ -1,4 +1,4 @@
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -147,6 +147,10 @@ pp_3d_kernels = [
         NS(type=pp_transform_type.R2C.value, length=[216,104,100], batch_low=20, dims=[0,2], factors=[[6,6,6],[10,5]], factors_pp=[[2],[13,4]], threads_per_transform=[6,2], threads_per_transform_pp=[1,1], workgroup_size=[48,104], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_1201.value, precision=['sp']),
         NS(type=pp_transform_type.R2C.value, length=[216,104,100], batch_low=5, dims=[0,2], factors=[[6,6,6],[5,10]], factors_pp=[[4],[2,13]], threads_per_transform=[6,2], threads_per_transform_pp=[1,1], workgroup_size=[48,52], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_942.value, precision=['sp']),
         NS(type=pp_transform_type.R2C.value, length=[216,104,100], batch_low=50, dims=[0,2], factors=[[6,6,6],[5,10]], factors_pp=[[2],[4,13]], threads_per_transform=[36,2], threads_per_transform_pp=[1,1], workgroup_size=[288,104], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_90A.value, precision=['sp']),
+        NS(type=pp_transform_type.C2R.value, length=[216,104,100], batch_low=10, dims=[0,2], factors=[[6,6,6],[5,10]], factors_pp=[[4],[2,13]], threads_per_transform=[6,2], threads_per_transform_pp=[1,1], workgroup_size=[48,52], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_1201.value, precision=['sp']),
+        NS(type=pp_transform_type.C2R.value, length=[216,104,100], batch_low=50, dims=[0,2], factors=[[6,6,6],[5,10]], factors_pp=[[4],[2,13]], threads_per_transform=[6,2], threads_per_transform_pp=[1,1], workgroup_size=[48,52], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_90A.value, precision=['sp']),
+        NS(type=pp_transform_type.C2R.value, length=[216,104,100], dims=[0,2], factors=[[6,6,6],[5,10]], factors_pp=[[4],[2,13]], threads_per_transform=[6,2], threads_per_transform_pp=[1,1], workgroup_size=[48,52], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_942.value, precision=['sp']),
+        NS(type=pp_transform_type.C2R.value, length=[216,104,100], batch_low=5, batch_high=5000, dims=[0,2], factors=[[6,6,6],[5,10]], factors_pp=[[4],[2,13]], threads_per_transform=[6,2], threads_per_transform_pp=[1,1], workgroup_size=[48,52], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_950.value, precision=['sp']),
 
         NS(type=pp_transform_type.R2C.value, length=[216,104,104], batch_low=20, batch_high=5000 ,dims=[0,2], factors=[[6,6,6],[13,4]], factors_pp=[[2],[13,4]], threads_per_transform=[6,2], threads_per_transform_pp=[1,1], workgroup_size=[48,104], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_1201.value, precision=['sp']),
         NS(type=pp_transform_type.R2C.value, length=[216,104,104], batch_low=5, batch_high=5000, dims=[0,2], factors=[[6,6,6],[13,4]], factors_pp=[[4],[2,13]], threads_per_transform=[18,4], threads_per_transform_pp=[1,1], workgroup_size=[144,104], direct_to_from_reg=[False,False], gcn_arch_name=supported_arch.GFX_942.value, precision=['sp']),

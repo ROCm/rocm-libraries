@@ -93,7 +93,9 @@ def get_available_algorithms() -> List[str]:
         "device_reduce",
         "device_segmented_reduce",
         "device_reduce_by_key",
-        "device_histogram"
+        "device_histogram",
+        "device_transform",
+        "device_transform_pointer",
         # Add new algorithms here
     ])
 

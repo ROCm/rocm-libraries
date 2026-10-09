@@ -41,6 +41,8 @@ def run_static(
     mode: str,
     arch: str | None = None,
     kpack_python_dir: str | None = None,
+    *,
+    provenance_root: str | None = None,
 ) -> tuple[bool, str]:
     """Rung 1: structural properties of the set, plus compiled agreement in
     full mode, read off `verify_variant_sets`' exit code.
@@ -56,6 +58,8 @@ def run_static(
         argv += ["--arch", arch]
     if kpack_python_dir:
         argv += ["--kpack-python-dir", kpack_python_dir]
+    if provenance_root:
+        argv += ["--provenance-root", f"set={provenance_root}"]
     result = subprocess.run(argv, capture_output=True, text=True)
     # Both streams on failure: progress goes to stdout and refusals -- an
     # unresolvable reference, an ambiguous tree -- to stderr.
@@ -128,6 +132,15 @@ def main(argv=None) -> int:
         "verify_variant_sets.py so --mode full can read the payload bytes a packed "
         "descriptor names. Omit it to use the installed one.",
     )
+    parser.add_argument(
+        "--provenance-root",
+        help="Where a packed tree's provenance sidecars live when they are not "
+        "beside its descriptors, as in an installed production tree, forwarded to "
+        "verify_variant_sets.py. It mirrors --tree: the sidecar of "
+        "<tree>/<rel>/<name>.kdp.json is <dir>/<rel>/<name>.kdp.provenance.json.gz. "
+        "Every descriptor directory under --tree must hold the packer's "
+        "hkp-packed.marker.",
+    )
     parser.add_argument("--profile", help="Kernel profile for the static rung.")
     parser.add_argument(
         "--validator",
@@ -161,7 +174,13 @@ def main(argv=None) -> int:
     failures = []
 
     ok, detail = run_static(
-        tree, profile, static_tool, args.mode, args.arch, args.kpack_python_dir
+        tree,
+        profile,
+        static_tool,
+        args.mode,
+        args.arch,
+        args.kpack_python_dir,
+        provenance_root=args.provenance_root,
     )
     if not ok:
         verdict = "FAIL"
