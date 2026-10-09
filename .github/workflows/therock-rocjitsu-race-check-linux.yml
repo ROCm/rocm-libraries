@@ -72,6 +72,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           ref: ${{ inputs.therock_ref }}
+          persist-credentials: false
 
       - name: Checkout rocm-libraries repository for scripts
         timeout-minutes: 30
@@ -80,6 +81,7 @@ jobs:
           path: rocm-libraries
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Checkout rocm-systems for rocjitsu
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -94,6 +96,7 @@ jobs:
             emulation/rocjitsu
             shared/machine-readable-isa/isa
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       # The pinned base image already provides CA certificates, CMake, Git, and
       # Ninja. Install only the remaining host development files needed for the
@@ -112,7 +115,7 @@ jobs:
       # previously installed ROCm tree.
       - name: Run setup test environment workflow
         timeout-minutes: 15
-        uses: ./.github/actions/setup_test_environment
+        uses: $/.github/actions/setup_test_environment
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
           ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}

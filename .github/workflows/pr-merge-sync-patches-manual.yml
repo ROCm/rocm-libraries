@@ -41,14 +41,33 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Actor is: ${{ github.actor }}"
+          echo "Actor is: ${GITHUB_ACTOR}"
           PERMISSION=$(gh api \
-            repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission \
+            repos/${{ github.repository }}/collaborators/${GITHUB_ACTOR}/permission \
             --jq .permission)
           if [[ "$PERMISSION" != "admin" && "$PERMISSION" != "maintain" ]]; then
-            echo "❌ User ${{ github.actor }} is not authorized to run this workflow"
+            echo "❌ User ${GITHUB_ACTOR} is not authorized to run this workflow"
             exit 1
           fi
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: List sub-repos that receive patches
+        id: targets
+        run: |
+          # One repository name per line, e.g. "Tensile", for every
+          # repos-config.json entry with auto_subtree_push enabled.
+          {
+            echo "repos<<EOF"
+            jq -r '.repositories[] | select(.auto_subtree_push) | .url | split("/")[1]' \
+              .github/repos-config.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Generate a token
         id: generate-token
@@ -56,14 +75,11 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github
-          sparse-checkout-cone-mode: true
-          token: ${{ steps.generate-token.outputs.token }}
+          repositories: |
+            ${{ github.event.repository.name }}
+            ${{ steps.targets.outputs.repos }}
+          permission-contents: write
+          permission-pull-requests: read
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -84,10 +100,11 @@ jobs:
         id: detect
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.inputs.pr }}
         run: |
           python .github/scripts/pr_detect_changed_subtrees.py \
             --repo "${{ github.repository }}" \
-            --pr "${{ github.event.inputs.pr }}" \
+            --pr "${PR_NUMBER}" \
             --config ".github/repos-config.json" \
             --require-auto-push
 
@@ -99,14 +116,17 @@ jobs:
             ${{ steps.detect.outputs.subtrees }}
           token: ${{ steps.generate-token.outputs.token }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Generate and apply patches
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.inputs.pr }}
+          SUBTREES: ${{ steps.detect.outputs.subtrees }}
         run: |
           python .github/scripts/pr_merge_sync_patches.py \
             --repo "${{ github.repository }}" \
-            --pr "${{ github.event.inputs.pr }}" \
-            --subtrees "${{ steps.detect.outputs.subtrees }}" \
+            --pr "${PR_NUMBER}" \
+            --subtrees "${SUBTREES}" \
             --config ".github/repos-config.json" \
             --debug

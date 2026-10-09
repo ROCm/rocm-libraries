@@ -2,13 +2,18 @@ name: Check Clang-Format on Diff
 
 on: [pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   clang-format:
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@0717577d45739eb3c851188b29f50ed6c0b2194e # v2.8.0
+      with:
+        persist-credentials: false
 
     - name: Import LLVM GPG Key
       run: |
@@ -24,27 +29,32 @@ jobs:
         sudo apt-get install clang-format-17
 
     - name: Fetch branches to check
+      env:
+        HEAD_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
+        HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
       run: |
-        git fetch origin ${{ github.base_ref }}
-        if [ "${{ github.repository_owner }}" != "${{ github.event.pull_request.head.repo.owner.login }}" ]; then
-          fork_owner="${{ github.event.pull_request.head.repo.owner.login }}"
-          fork_repo="${{ github.event.pull_request.head.repo.full_name }}"
+        git fetch origin ${GITHUB_BASE_REF}
+        if [ "${GITHUB_REPOSITORY_OWNER}" != "${HEAD_OWNER}" ]; then
+          fork_owner="${HEAD_OWNER}"
+          fork_repo="${HEAD_REPO}"
           echo "Fork repo: ${fork_repo}"
           fork_url="https://github.com/${fork_repo}.git"
           echo "Fork URL: ${fork_url}"
           git remote add fork "${fork_url}"
-          git fetch fork ${{ github.head_ref }}
+          git fetch fork ${GITHUB_HEAD_REF}
         else
-          git fetch origin ${{ github.head_ref }}
+          git fetch origin ${GITHUB_HEAD_REF}
         fi
 
     - name: Apply clang-format locally
       if: github.event_name == 'pull_request'
+      env:
+        HEAD_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
       run: |
-        if [ "${{ github.repository_owner }}" != "${{ github.event.pull_request.head.repo.owner.login }}" ]; then
-          ./scripts/clang-format/clang-format-apply.sh origin/${{ github.base_ref }} fork/${{ github.head_ref }}
+        if [ "${GITHUB_REPOSITORY_OWNER}" != "${HEAD_OWNER}" ]; then
+          ./scripts/clang-format/clang-format-apply.sh origin/${GITHUB_BASE_REF} fork/${GITHUB_HEAD_REF}
         else
-          ./scripts/clang-format/clang-format-apply.sh origin/${{ github.base_ref }} origin/${{ github.head_ref }}
+          ./scripts/clang-format/clang-format-apply.sh origin/${GITHUB_BASE_REF} origin/${GITHUB_HEAD_REF}
         fi
 
     - name: Save clang-format changes as patch

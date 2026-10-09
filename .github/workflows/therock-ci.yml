@@ -74,12 +74,13 @@ jobs:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
           fetch-depth: 2
+          persist-credentials: false
 
       # Loads shared CI constants (TheRock ref, Docker image, runner labels)
       # from the ci-env composite action so they are defined in one place.
       - name: Load CI environment
         id: ci-env
-        uses: ./.github/actions/ci-env
+        uses: $/.github/actions/ci-env
 
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -87,6 +88,7 @@ jobs:
           repository: "ROCm/TheRock"
           path: TheRock
           ref: ${{ steps.ci-env.outputs.therock-ref }}
+          persist-credentials: false
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -94,6 +96,7 @@ jobs:
           repository: ROCm/therock-ci-config
           ref: main
           path: ci-config
+          persist-credentials: false
         continue-on-error: true
 
       - name: Set up Python
@@ -167,7 +170,7 @@ jobs:
       matrix:
         projects: ${{ fromJSON(needs.setup.outputs.linux_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.linux_package_targets) }}
-    uses: ./.github/workflows/therock-ci-linux.yml
+    uses: $/.github/workflows/therock-ci-linux.yml
     secrets:
       MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
       HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
@@ -194,7 +197,7 @@ jobs:
       matrix:
         projects: ${{ fromJSON(needs.setup.outputs.windows_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.windows_package_targets) }}
-    uses: ./.github/workflows/therock-ci-windows.yml
+    uses: $/.github/workflows/therock-ci-windows.yml
     secrets:
       MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
       HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
@@ -226,9 +229,11 @@ jobs:
 
       - name: Output failed jobs
         if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
         run: |
-          echo '${{ toJson(needs) }}'
-          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+          echo "${NEEDS_JSON}"
+          FAILED_JOBS="$(echo "${NEEDS_JSON}" \
             | jq --raw-output \
             'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
           )"

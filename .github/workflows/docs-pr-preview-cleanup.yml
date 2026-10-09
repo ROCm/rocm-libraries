@@ -23,6 +23,7 @@ jobs:
           sparse-checkout: |
             .github/docs-config.json
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Generate a token
         id: generate-token
@@ -30,19 +31,21 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: read
 
       - name: Get project slug from preview comment
         id: rtd
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           # Extract project identifier from the bot's comment.
           # The JSON output for a valid commit will have "assistant-librarian[bot]"
           # for key `user.login` and contain "rocm.docs.amd.com/projects/" for key `body`
           # and we need to parse "rocm.docs.amd.com/projects/project_slug/xyz..." to "project_slug"
 
-          comment=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+          comment=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
             --jq '[.[] | select(.user.login == "assistant-librarian[bot]" and (.body | contains("rocm.docs.amd.com/projects/")))] | last | .body')
 
           if [ -z "$comment" ] || [ "$comment" = "null" ]; then
@@ -64,8 +67,9 @@ jobs:
         if: steps.rtd.outputs.project_slug
         env:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+          PROJECT_SLUG: ${{ steps.rtd.outputs.project_slug }}
         run: |
-          branch_name="${{ github.head_ref }}"
+          branch_name="${GITHUB_HEAD_REF}"
           # Generate slug like 'user-me-my_test_branch' from 'user/me/my_test_branch'
           version_slug="${branch_name//\//-}"
 
@@ -78,5 +82,5 @@ jobs:
             --header "Authorization: Token $RTD_TOKEN" \
             --header "Content-Type: application/json" \
             --data '{"active": false}' \
-            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${version_slug}/")
+            "https://app.readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${version_slug}/")
           echo "RTD PATCH responded with HTTP $response"
