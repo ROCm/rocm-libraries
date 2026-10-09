@@ -4,7 +4,6 @@
 """Regression checks for TensileLite's distributable package metadata."""
 
 import configparser
-import re
 import subprocess
 import sys
 import tomllib
@@ -20,7 +19,11 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatch):
     """rocisa is currently provisioned from source, not resolved by pip."""
-    monkeypatch.setenv("ROCM_VERSION", "7.2.4")
+    rocm_root = tmp_path / "rocm"
+    (rocm_root / ".info").mkdir(parents=True)
+    (rocm_root / ".info/version").write_text("7.2.4\n", encoding="utf-8")
+    monkeypatch.setenv("ROCM_PATH", str(rocm_root))
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
 
     subprocess.run(
         [
@@ -49,11 +52,7 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
             next(name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt"))
         ).decode("utf-8")
 
-    component_version = re.search(
-        r'^__version__ = "([^"]+)"$',
-        (_PROJECT_ROOT / "tensilelite/__init__.py").read_text(encoding="utf-8"),
-        re.MULTILINE,
-    ).group(1)
+    component_version = (_PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
     assert f"Version: {component_version}+rocm7.2.4" in metadata
     assert "Requires-Dist: rocisa" not in metadata
 
@@ -124,6 +123,22 @@ def test_codegen_preflight_checks_the_package_command_modules():
         assert f'"${{_codegen_dir}}/{relative_path}"' in cmake
     assert '"${_codegen_dir}/tensilelite/bin/TensileLogic"' not in cmake
     assert '"${_codegen_dir}/tensilelite/tensilelite_create_library/__main__.py"' not in cmake
+
+
+def test_client_version_metadata_is_scoped_and_checked_exactly():
+    top_cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+    tests_cmake = (_PROJECT_ROOT / "tests/CMakeLists.txt").read_text(encoding="utf-8")
+    version_check = (_PROJECT_ROOT / "tests/check_client_version.cmake").read_text(
+        encoding="utf-8"
+    )
+
+    version_block = top_cmake.split(
+        'if(TENSILELITE_ENABLE_CLIENT)\n    set(_tensilelite_source_root', 1
+    )[1].split("\nendif()", 1)[0]
+    assert "TENSILELITE_DISTRIBUTION_VERSION" in version_block
+    assert "HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT" not in top_cmake
+    assert '"-DEXPECTED_VERSION=${TENSILELITE_DISTRIBUTION_VERSION}"' in tests_cmake
+    assert "actual_version STREQUAL EXPECTED_VERSION" in version_check
 
 
 def test_removed_source_autobuild_option_is_not_referenced():
