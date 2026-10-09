@@ -172,6 +172,10 @@ const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
                                        bool full_map,
                                        const char* op_desc);
 
+/* Python _reject_f64(op, tname): raises ROCKE_ERR_NOTIMPL "<op> does not support
+ * f64" when `tname` is "f64", for an op that has no f64 lowering. */
+void rocke_h_reject_f64(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* tname);
+
 /* --------------------------------------------------------- literals / encode */
 
 /* Python _f32_literal(val): C++ float-literal text for a double, special-casing

@@ -19,8 +19,8 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `arith.fmul`           | `fmul`                            | `fmul`                                 |
 | `arith.fdiv`           | `fdiv`                            | `fdiv`                                 |
 | `arith.fneg`           | `fneg`                            | `fneg`                                 |
-| `arith.fmax`           | `fmax`                            | `llvm.maxnum.{f32,f16,bf16}`           |
-| `arith.fmin`           | `fmin`                            | `llvm.minnum.{f32,f16,bf16}`           |
+| `arith.fmax`           | `fmax`                            | `llvm.maxnum.{f64,f32,f16,bf16}`       |
+| `arith.fmin`           | `fmin`                            | `llvm.minnum.{f64,f32,f16,bf16}`       |
 | `arith.cmp`            | `cmp_lt`, `cmp_le`, `cmp_gt`, `cmp_ge`, `cmp_eq`, `cmp_ne` | `icmp {slt,sle,sgt,sge,eq,ne}` |
 | `arith.fcmp`           | `fcmp(pred, ...)`                 | `fcmp {olt,ole,ogt,oge,oeq,one,ord,uno}` |
 | `arith.and`            | `land`                            | `and`                                  |
@@ -51,7 +51,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `math.tanh`    | `tanh`       | piecewise f32 expansion: OCML polynomial for `abs(x) < 0.625`, otherwise `exp2` + reciprocal; bitwise sign restoration |
 | `math.rcp`     | `rcp`        | `1.0 / v` (hardware reciprocal) |
 
-`exp2`, `sqrt`, `rsqrt` and `tanh` are f32-only and reject f64 inputs; `rcp` accepts f64.
+`exp2`, `exp2_fast`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `tanh`, `fabs`, `fma`, `fmax3`, `fmin3` and `vector_fma` have no f64 lowering and reject f64 inputs in both the LLVM and HIP lowerings; `rcp` accepts f64.
 
 `clamp_f32(v, lo, hi)` is `fmin(hi, fmax(lo, v))` — folds to `v_med3_f32`.
 

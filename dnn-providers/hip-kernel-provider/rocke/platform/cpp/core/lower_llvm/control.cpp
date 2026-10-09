@@ -60,7 +60,8 @@ static const char* ll_vec_elem_name(const rocke_type_t* t)
 static bool ll_is_fp_elem(const char* name)
 {
     return name
-           && (strcmp(name, "f16") == 0 || strcmp(name, "bf16") == 0 || strcmp(name, "f32") == 0);
+           && (strcmp(name, "f16") == 0 || strcmp(name, "bf16") == 0 || strcmp(name, "f32") == 0
+               || strcmp(name, "f64") == 0);
 }
 
 /* ======================================================================== */
