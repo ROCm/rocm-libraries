@@ -503,21 +503,292 @@ def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
         args.timing_statistic = LABEL_STATISTIC
 
 
-def _run_train(args: argparse.Namespace) -> int:
-    from .provenance import (
-        record_feature_semantics,
-        snapshot_provenance,
-        validate_provenance,
-    )
+def _immediate_training_rows(
+    args: argparse.Namespace, input_path: Path
+) -> tuple[pd.DataFrame, dict, dict]:
+    """An engine-immediate (L1) corpus's rows that train, its binding, and the provenance it
+    was measured under. Settles `args`' grouping, calibration, timing statistic and arches
+    from the corpus, refusing any that contradict it."""
     from .immediate import (
         LABEL_STATISTIC,
         ROLE,
-        check_signature_evaluates,
         read_corpus,
         require_binding_metric,
         training_binding,
-        validate_signature,
     )
+    from .provenance import snapshot_provenance, validate_provenance
+
+    if args.group_by_feature:
+        # The runtime scores only an engine-level model's root ensemble, so a
+        # grouped L1 artifact would not be scored the way it was fitted.
+        raise ValueError(
+            f"--group-by-feature is not supported for {ROLE}: a grouped "
+            "artifact has no engine-level (per-row) scoring contract"
+        )
+    df, binding = training_binding(read_corpus(input_path), args.engine)
+    # RFC 0019 §13.2: a pick checked wrong is never a label; null is unknown.
+    wrong = known_wrong(df)
+    if wrong.any():
+        logger.info(
+            "Dropped %d row(s) checked numerically wrong (numerically_valid=False)",
+            int(wrong.sum()),
+        )
+        df = df[~wrong]
+    # Check every row: rows of another metric describe another selector.
+    for index, row_binding in enumerate(df["binding"]):
+        require_binding_metric(
+            json.loads(row_binding), args.metric, f"{input_path} row {index}"
+        )
+    trained_against = binding["trained_against"]
+    if args.provenance:
+        recorded = validate_provenance(
+            json.loads(Path(args.provenance).read_text(encoding="utf-8"))
+        )
+        if recorded != trained_against:
+            raise ValueError(
+                "recorded provenance differs from immediate engine binding"
+            )
+    elif args.descriptor_tree:
+        recorded = snapshot_provenance(
+            Path(args.descriptor_tree), args.engine, args.arch
+        )
+        if recorded != trained_against:
+            raise ValueError(
+                "descriptor provenance differs from immediate engine binding"
+            )
+    if args.group_by is not None and args.group_by != ["benchmark", "device"]:
+        raise ValueError(
+            "L1 training groups must be benchmark device, never engine/candidate rows"
+        )
+    args.group_by = ["benchmark", "device"]
+    args.calibrated = True
+    # RFC 0019.13 §11.2: L1 is always calibrated, so its label comes from
+    # `avgTimeMs`.
+    if args.timing_statistic not in (None, LABEL_STATISTIC):
+        raise ValueError(
+            f"{ROLE} labels are derived from {LABEL_STATISTIC}; "
+            f"--timing-statistic {args.timing_statistic} contradicts the corpus"
+        )
+    args.timing_statistic = LABEL_STATISTIC
+    observed_arches = sorted(df["arch"].unique())
+    if args.training_arches and sorted(set(args.training_arches)) != observed_arches:
+        raise ValueError("--training-arches must match the measured immediate corpus")
+    args.training_arches = observed_arches
+    if args.arch is None:
+        if len(observed_arches) != 1:
+            raise ValueError("multi-architecture L1 training requires --arch default")
+        args.arch = observed_arches[0]
+    if args.arch != "default" and (
+        len(observed_arches) != 1 or args.arch != observed_arches[0]
+    ):
+        raise ValueError("L1 role-map arch must cover the complete training corpus")
+    return df, binding, trained_against
+
+
+def _catalog_training_rows(
+    args: argparse.Namespace, input_path: Path
+) -> tuple[pd.DataFrame, dict]:
+    """A catalog corpus's rows that train, and the provenance it was measured under.
+
+    Rows with no measurement, a collection error or a pick checked wrong are dropped, as
+    `evaluate` drops them, so training and evaluation agree on which rows exist."""
+    from .immediate import LABEL_STATISTIC
+    from .provenance import snapshot_provenance, validate_provenance
+
+    if args.provenance:
+        trained_against = validate_provenance(
+            json.loads(Path(args.provenance).read_text(encoding="utf-8"))
+        )
+    elif args.descriptor_tree:
+        arch = (
+            args.training_arches[0]
+            if args.training_arches and len(args.training_arches) == 1
+            else None
+        )
+        trained_against = snapshot_provenance(
+            Path(args.descriptor_tree), args.engine, arch
+        )
+    else:
+        raise ValueError("training requires --descriptor-tree or --provenance")
+    # The suffix picks the reader. Only the `.parquet` dataset is §8.3-checked; a
+    # collected CSV is a local escape hatch. The §11.2 rule below applies to both.
+    df = read_corpus_frame(input_path)
+    # A row with no measurement is `is_valid=False` (collected CSV) or carries an
+    # `error` (published dataset). Drop both, as `evaluate` does, so training and
+    # evaluation agree on which rows exist.
+    invalid = errored = unmeasured = 0
+    # RFC 0019 §13.2: a candidate shown wrong is never a label (a wrong-but-fast
+    # kernel would teach the ranker to prefer it). False is dropped; null is kept.
+    wrong = known_wrong(df)
+    numerically_wrong = int(wrong.sum())
+    df = df[~wrong]
+    if "is_valid" in df.columns:
+        keep = df["is_valid"].astype(str).str.strip().str.lower() == "true"
+        invalid = int((~keep).sum())
+        df = df[keep]
+    if "error" in df.columns:
+        failed = df["error"].fillna("").astype(str).str.strip().str.len() > 0
+        errored = int(failed.sum())
+        df = df[~failed]
+    if args.target in df.columns:
+        # Coerced: one empty CSV cell reads the column back as `object`.
+        finite = np.isfinite(pd.to_numeric(df[args.target], errors="coerce"))
+        unmeasured = int((~finite).sum())
+        df = df[finite]
+    if numerically_wrong or invalid or errored or unmeasured:
+        # Counted apart: each points at a different producer.
+        logger.info(
+            "Dropped %d row(s) checked numerically wrong, %d row(s) with "
+            "is_valid=False, %d row(s) carrying a collection error, and %d "
+            "row(s) whose %s is not a finite number",
+            numerically_wrong,
+            invalid,
+            errored,
+            unmeasured,
+            args.target,
+        )
+    # RFC 0019.13 §11.2: a calibrated score MUST train on `avgTimeMs`. Uncalibrated
+    # models may use any statistic but must record which.
+    if args.calibrated and args.timing_statistic != LABEL_STATISTIC:
+        raise ValueError(
+            "--calibrated requires --timing-statistic avgTimeMs (RFC 0019.13 "
+            f"§11.2); got {args.timing_statistic!r}"
+        )
+    return df, trained_against
+
+
+def _drop_constant_features(
+    df: pd.DataFrame,
+    signature: list,
+    names: list,
+    matrix: np.ndarray,
+    categorical_encoding: dict,
+    feature_evaluator: str | None,
+):
+    """Remove the features that never vary in this corpus.
+
+    Returns the pruned signature, names, matrix and encoding, the pruned signature's
+    features_hash (None when nothing was pruned), and the dropped columns."""
+    features_hash = None
+    constant_indices = [
+        index
+        for index in range(matrix.shape[1])
+        if np.all(matrix[:, index] == matrix[0, index])
+    ]
+    constants = []
+    for index in constant_indices:
+        value = (
+            df[signature[index][1:]].iloc[0]
+            if isinstance(signature[index], str)
+            else float(matrix[0, index])
+        )
+        constants.append(
+            (names[index], value.item() if hasattr(value, "item") else value)
+        )
+    if len(constants) == len(signature):
+        raise ValueError(
+            "Every requested feature column is constant: "
+            + ", ".join(f"{name}={value!r}" for name, value in constants)
+        )
+    dropped = [{"column": name, "value": value} for name, value in constants]
+    if constants:
+        # A constant column cannot be split on, yet RFC 0019 §6.3 hashes it into the
+        # descriptor's identity. Constancy is measured in THIS corpus, not by name
+        # (one arch spans boards with differing memory fields), and each drop is
+        # logged because only the author can tell under-sampled from pinned.
+        logger.warning(
+            "Dropping %d feature column(s) that never vary in this corpus: %s. "
+            "RFC 0019.13 §10.4: this prunes model inputs only, and leaves the "
+            "engine's authored public knobs untouched.",
+            len(constants),
+            ", ".join(f"{name}={value!r}" for name, value in constants),
+        )
+        if len(constants) / len(signature) >= CONSTANT_FEATURE_WARN_FRACTION:
+            logger.warning(
+                "High constant-feature proportion: check device and problem coverage"
+            )
+        keep = [
+            index for index in range(len(signature)) if index not in constant_indices
+        ]
+        signature = [signature[index] for index in keep]
+        names = [names[index] for index in keep]
+        matrix = matrix[:, keep]
+        remaining_refs = set(signature_references(signature))
+        categorical_encoding = {
+            key: value
+            for key, value in categorical_encoding.items()
+            if key in remaining_refs
+        }
+        # Pruning changed the signature, so restate its digest (§6.3).
+        features_hash = compute_features_hash(
+            signature, categorical_encoding, feature_evaluator
+        )
+    return signature, names, matrix, categorical_encoding, features_hash, dropped
+
+
+def _group_models(
+    args: argparse.Namespace,
+    df: pd.DataFrame,
+    names: list,
+    groups: list | None,
+    matrix: np.ndarray,
+    categorical_encoding: dict,
+) -> tuple[int, list[tuple[float, object]]]:
+    """Layer 2 of a grouped ranker: the slot of `--group-by-feature` in the feature row (-1
+    when there is none) and one ensemble per group value, each fitted on that group's rows
+    over the same feature columns, so one signature describes both layers."""
+    group_models: list[tuple[float, object]] = []
+    group_index = -1
+    if args.group_by_feature:
+        if args.group_by_feature not in names:
+            raise ValueError(
+                f"--group-by-feature {args.group_by_feature!r} is not among --features; "
+                "the runtime reads the group from a slot in the feature row, so it has "
+                "to be one of them"
+            )
+        group_index = names.index(args.group_by_feature)
+        # The runtime compares the group's feature SLOT value, which for a string
+        # column is its categorical code, so export codes rather than raw values.
+        codes = categorical_encoding.get(feature_reference(args.group_by_feature))
+        tagged = df.assign(_uhd_row=np.arange(len(df)))
+        for value, rows in tagged.groupby(args.group_by_feature, sort=True):
+            at = rows["_uhd_row"].to_numpy()
+            # Cross-validation is over problems, so a group may be unfittable; it then
+            # ranks by layer 1, which the adapter handles.
+            try:
+                group_models.append(
+                    (
+                        float(codes[value]) if codes is not None else float(value),
+                        train_model(
+                            df.iloc[at].reset_index(drop=True),
+                            names,
+                            args.target,
+                            groups,
+                            num_boost_round=args.num_boost_round,
+                            early_stopping_rounds=args.early_stopping,
+                            categorical_encoding=categorical_encoding,
+                            feature_matrix=None if matrix is None else matrix[at],
+                        ),
+                    )
+                )
+            except (ValueError, RuntimeError) as error:
+                # One unfittable group must not cost every other group's layer 2.
+                logger.warning(
+                    "group %s not fitted (%s); it will rank by layer 1",
+                    value,
+                    str(error).split(chr(10))[0][:90],
+                )
+        logger.info(
+            "Trained %d group model(s) on %s",
+            len(group_models),
+            args.group_by_feature,
+        )
+    return group_index, group_models
+
+
+def _run_train(args: argparse.Namespace) -> int:
+    from .provenance import record_feature_semantics
+    from .immediate import ROLE, check_signature_evaluates, validate_signature
 
     immediate = args.role == ROLE
     binding = None
@@ -533,139 +804,9 @@ def _run_train(args: argparse.Namespace) -> int:
         # Settled before data preparation or fitting, never stamped later.
         _resolve_score(args, immediate)
         if immediate:
-            if args.group_by_feature:
-                # The runtime scores only an engine-level model's root ensemble, so a
-                # grouped L1 artifact would not be scored the way it was fitted.
-                raise ValueError(
-                    f"--group-by-feature is not supported for {ROLE}: a grouped "
-                    "artifact has no engine-level (per-row) scoring contract"
-                )
-            df, binding = training_binding(read_corpus(input_path), args.engine)
-            # RFC 0019 §13.2: a pick checked wrong is never a label; null is unknown.
-            wrong = known_wrong(df)
-            if wrong.any():
-                logger.info(
-                    "Dropped %d row(s) checked numerically wrong (numerically_valid=False)",
-                    int(wrong.sum()),
-                )
-                df = df[~wrong]
-            # Check every row: rows of another metric describe another selector.
-            for index, row_binding in enumerate(df["binding"]):
-                require_binding_metric(
-                    json.loads(row_binding), args.metric, f"{input_path} row {index}"
-                )
-            trained_against = binding["trained_against"]
-            if args.provenance:
-                recorded = validate_provenance(
-                    json.loads(Path(args.provenance).read_text(encoding="utf-8"))
-                )
-                if recorded != trained_against:
-                    raise ValueError(
-                        "recorded provenance differs from immediate engine binding"
-                    )
-            elif args.descriptor_tree:
-                recorded = snapshot_provenance(
-                    Path(args.descriptor_tree), args.engine, args.arch
-                )
-                if recorded != trained_against:
-                    raise ValueError(
-                        "descriptor provenance differs from immediate engine binding"
-                    )
-            if args.group_by is not None and args.group_by != ["benchmark", "device"]:
-                raise ValueError(
-                    "L1 training groups must be benchmark device, never engine/candidate rows"
-                )
-            args.group_by = ["benchmark", "device"]
-            args.calibrated = True
-            # RFC 0019.13 §11.2: L1 is always calibrated, so its label comes from
-            # `avgTimeMs`.
-            if args.timing_statistic not in (None, LABEL_STATISTIC):
-                raise ValueError(
-                    f"{ROLE} labels are derived from {LABEL_STATISTIC}; "
-                    f"--timing-statistic {args.timing_statistic} contradicts the corpus"
-                )
-            args.timing_statistic = LABEL_STATISTIC
-            observed_arches = sorted(df["arch"].unique())
-            if (
-                args.training_arches
-                and sorted(set(args.training_arches)) != observed_arches
-            ):
-                raise ValueError(
-                    "--training-arches must match the measured immediate corpus"
-                )
-            args.training_arches = observed_arches
-            if args.arch is None:
-                if len(observed_arches) != 1:
-                    raise ValueError(
-                        "multi-architecture L1 training requires --arch default"
-                    )
-                args.arch = observed_arches[0]
-            if args.arch != "default" and (
-                len(observed_arches) != 1 or args.arch != observed_arches[0]
-            ):
-                raise ValueError(
-                    "L1 role-map arch must cover the complete training corpus"
-                )
+            df, binding, trained_against = _immediate_training_rows(args, input_path)
         else:
-            if args.provenance:
-                trained_against = validate_provenance(
-                    json.loads(Path(args.provenance).read_text(encoding="utf-8"))
-                )
-            elif args.descriptor_tree:
-                arch = (
-                    args.training_arches[0]
-                    if args.training_arches and len(args.training_arches) == 1
-                    else None
-                )
-                trained_against = snapshot_provenance(
-                    Path(args.descriptor_tree), args.engine, arch
-                )
-            else:
-                raise ValueError("training requires --descriptor-tree or --provenance")
-            # The suffix picks the reader. Only the `.parquet` dataset is §8.3-checked; a
-            # collected CSV is a local escape hatch. The §11.2 rule below applies to both.
-            df = read_corpus_frame(input_path)
-            # A row with no measurement is `is_valid=False` (collected CSV) or carries an
-            # `error` (published dataset). Drop both, as `evaluate` does, so training and
-            # evaluation agree on which rows exist.
-            invalid = errored = unmeasured = 0
-            # RFC 0019 §13.2: a candidate shown wrong is never a label (a wrong-but-fast
-            # kernel would teach the ranker to prefer it). False is dropped; null is kept.
-            wrong = known_wrong(df)
-            numerically_wrong = int(wrong.sum())
-            df = df[~wrong]
-            if "is_valid" in df.columns:
-                keep = df["is_valid"].astype(str).str.strip().str.lower() == "true"
-                invalid = int((~keep).sum())
-                df = df[keep]
-            if "error" in df.columns:
-                failed = df["error"].fillna("").astype(str).str.strip().str.len() > 0
-                errored = int(failed.sum())
-                df = df[~failed]
-            if args.target in df.columns:
-                # Coerced: one empty CSV cell reads the column back as `object`.
-                finite = np.isfinite(pd.to_numeric(df[args.target], errors="coerce"))
-                unmeasured = int((~finite).sum())
-                df = df[finite]
-            if numerically_wrong or invalid or errored or unmeasured:
-                # Counted apart: each points at a different producer.
-                logger.info(
-                    "Dropped %d row(s) checked numerically wrong, %d row(s) with "
-                    "is_valid=False, %d row(s) carrying a collection error, and %d "
-                    "row(s) whose %s is not a finite number",
-                    numerically_wrong,
-                    invalid,
-                    errored,
-                    unmeasured,
-                    args.target,
-                )
-            # RFC 0019.13 §11.2: a calibrated score MUST train on `avgTimeMs`. Uncalibrated
-            # models may use any statistic but must record which.
-            if args.calibrated and args.timing_statistic != LABEL_STATISTIC:
-                raise ValueError(
-                    "--calibrated requires --timing-statistic avgTimeMs (RFC 0019.13 "
-                    f"§11.2); got {args.timing_statistic!r}"
-                )
+            df, trained_against = _catalog_training_rows(args, input_path)
         if df.empty:
             raise ValueError("No valid rows to train on")
         if not immediate:
@@ -744,61 +885,17 @@ def _run_train(args: argparse.Namespace) -> int:
             entry[1:] if isinstance(entry, str) else f"expression_{index}"
             for index, entry in enumerate(signature)
         ]
-        constant_indices = [
-            index
-            for index in range(matrix.shape[1])
-            if np.all(matrix[:, index] == matrix[0, index])
-        ]
-        constants = []
-        for index in constant_indices:
-            value = (
-                df[signature[index][1:]].iloc[0]
-                if isinstance(signature[index], str)
-                else float(matrix[0, index])
+        signature, names, matrix, categorical_encoding, pruned_hash, dropped = (
+            _drop_constant_features(
+                df,
+                signature,
+                names,
+                matrix,
+                categorical_encoding,
+                args.feature_evaluator,
             )
-            constants.append(
-                (names[index], value.item() if hasattr(value, "item") else value)
-            )
-        if len(constants) == len(signature):
-            raise ValueError(
-                "Every requested feature column is constant: "
-                + ", ".join(f"{name}={value!r}" for name, value in constants)
-            )
-        dropped = [{"column": name, "value": value} for name, value in constants]
-        if constants:
-            # A constant column cannot be split on, yet RFC 0019 §6.3 hashes it into the
-            # descriptor's identity. Constancy is measured in THIS corpus, not by name
-            # (one arch spans boards with differing memory fields), and each drop is
-            # logged because only the author can tell under-sampled from pinned.
-            logger.warning(
-                "Dropping %d feature column(s) that never vary in this corpus: %s. "
-                "RFC 0019.13 §10.4: this prunes model inputs only, and leaves the "
-                "engine's authored public knobs untouched.",
-                len(constants),
-                ", ".join(f"{name}={value!r}" for name, value in constants),
-            )
-            if len(constants) / len(signature) >= CONSTANT_FEATURE_WARN_FRACTION:
-                logger.warning(
-                    "High constant-feature proportion: check device and problem coverage"
-                )
-            keep = [
-                index
-                for index in range(len(signature))
-                if index not in constant_indices
-            ]
-            signature = [signature[index] for index in keep]
-            names = [names[index] for index in keep]
-            matrix = matrix[:, keep]
-            remaining_refs = set(signature_references(signature))
-            categorical_encoding = {
-                key: value
-                for key, value in categorical_encoding.items()
-                if key in remaining_refs
-            }
-            # Pruning changed the signature, so restate its digest (§6.3).
-            features_hash = compute_features_hash(
-                signature, categorical_encoding, args.feature_evaluator
-            )
+        )
+        features_hash = pruned_hash or features_hash
         if (
             args.metric is None
             and args.objective == "max"
@@ -848,54 +945,9 @@ def _run_train(args: argparse.Namespace) -> int:
             feature_matrix=layer_one_matrix,
         )
 
-        # Layer 2: one ensemble per group on that group's rows, over the same feature
-        # columns so one signature describes both layers.
-        group_models: list[tuple[float, object]] = []
-        group_index = -1
-        if args.group_by_feature:
-            if args.group_by_feature not in names:
-                raise ValueError(
-                    f"--group-by-feature {args.group_by_feature!r} is not among --features; "
-                    "the runtime reads the group from a slot in the feature row, so it has "
-                    "to be one of them"
-                )
-            group_index = names.index(args.group_by_feature)
-            # The runtime compares the group's feature SLOT value, which for a string
-            # column is its categorical code, so export codes rather than raw values.
-            codes = categorical_encoding.get(feature_reference(args.group_by_feature))
-            tagged = df.assign(_uhd_row=np.arange(len(df)))
-            for value, rows in tagged.groupby(args.group_by_feature, sort=True):
-                at = rows["_uhd_row"].to_numpy()
-                # Cross-validation is over problems, so a group may be unfittable; it then
-                # ranks by layer 1, which the adapter handles.
-                try:
-                    group_models.append(
-                        (
-                            float(codes[value]) if codes is not None else float(value),
-                            train_model(
-                                df.iloc[at].reset_index(drop=True),
-                                names,
-                                args.target,
-                                groups,
-                                num_boost_round=args.num_boost_round,
-                                early_stopping_rounds=args.early_stopping,
-                                categorical_encoding=categorical_encoding,
-                                feature_matrix=None if matrix is None else matrix[at],
-                            ),
-                        )
-                    )
-                except (ValueError, RuntimeError) as error:
-                    # One unfittable group must not cost every other group's layer 2.
-                    logger.warning(
-                        "group %s not fitted (%s); it will rank by layer 1",
-                        value,
-                        str(error).split(chr(10))[0][:90],
-                    )
-            logger.info(
-                "Trained %d group model(s) on %s",
-                len(group_models),
-                args.group_by_feature,
-            )
+        group_index, group_models = _group_models(
+            args, df, names, groups, matrix, categorical_encoding
+        )
     except (OSError, TypeError, ValueError, KeyError) as error:
         logger.error("%s", error)
         return 1
