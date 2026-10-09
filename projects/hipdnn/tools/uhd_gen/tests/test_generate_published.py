@@ -221,9 +221,11 @@ def test_trained_on_every_row_it_is_the_model_train_makes_from_the_same_rows(
     )
     assert code == 0
     direct = published["root"] / "direct"
-    arguments = json.loads((output / "generation_manifest.json").read_text())["models"][
+    recorded = json.loads((output / "generation_manifest.json").read_text())["models"][
         0
-    ]["training_arguments"]
+    ]
+    assert recorded["evaluation_arguments"][0] == "evaluate", "a runnable command line"
+    arguments = recorded["training_arguments"]
     # The same training command, on the CSV published straight to Parquet.
     parquet = published["root"] / "published.parquet"
     write_parquet(

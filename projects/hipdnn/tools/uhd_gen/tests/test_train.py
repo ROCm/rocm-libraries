@@ -50,28 +50,30 @@ def _l1_corpus(path, metric="tflops"):
     return path
 
 
+def _l1_arguments(corpus, output, *extra):
+    """`uhd_gen train`'s arguments for a small L1 model."""
+    return [
+        "--role",
+        "predict_engine",
+        "--engine",
+        "probe:A",
+        "--input",
+        str(corpus),
+        "--output-dir",
+        str(output),
+        "--features",
+        "graph.flops",
+        "graph.nodes[0].x.dims[0]",
+        "--num-boost-round",
+        "2",
+        "--early-stopping",
+        "1",
+        *extra,
+    ]
+
+
 def _l1_train(corpus, output, *extra):
-    return main(
-        [
-            "train",
-            "--role",
-            "predict_engine",
-            "--engine",
-            "probe:A",
-            "--input",
-            str(corpus),
-            "--output-dir",
-            str(output),
-            "--features",
-            "graph.flops",
-            "graph.nodes[0].x.dims[0]",
-            "--num-boost-round",
-            "2",
-            "--early-stopping",
-            "1",
-            *extra,
-        ]
-    )
+    return main(["train", *_l1_arguments(corpus, output, *extra)])
 
 
 def test_rows_collected_under_another_metric_cannot_train_a_model(
@@ -305,14 +307,15 @@ def test_train_prints_the_promote_command_for_its_output(tmp_path, evaluator, ca
     printed = capsys.readouterr().out
     assert f"Install: python3 -m uhd_gen promote --model-dir {output} " in printed
 
-    assert (
-        _l1_train(
-            corpus,
-            tmp_path / "quiet",
-            "--feature-evaluator",
-            evaluator,
-            "--no-install-hint",
-        )
-        == 0
-    )
+
+def test_a_caller_that_installs_the_model_itself_gets_no_hint(
+    tmp_path, evaluator, capsys
+):
+    """`generate` trains through `train()` and prints the model's final path instead."""
+    from uhd_gen.__main__ import train
+
+    corpus = _l1_corpus(tmp_path / "corpus.json", metric="tflops")
+    output = tmp_path / "quiet"
+    assert train(_l1_arguments(corpus, output, "--feature-evaluator", evaluator)) == 0
+    assert (output / "heuristic.uhd.json").is_file()
     assert "Install:" not in capsys.readouterr().out
