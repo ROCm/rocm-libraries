@@ -244,7 +244,7 @@ class TestDefaultUniformKDecode(unittest.TestCase):
             self.assertEqual(
                 job.identity.uniform_k_decode, job.spec_kwargs["uniform_k_decode"]
             )
-            self.assertIn("ukd", job.identity.short_label())
+            self.assertIn("ukd", job.identity.label())
 
     def test_jit_sweep_worker_uses_the_policy(self):
         from benchmarks.common.benchmark_implicit_gemm_conv import _build_dgrad_one
@@ -316,7 +316,7 @@ class TestKernelIdentityUniformKDecode(unittest.TestCase):
     def test_on_is_a_distinct_identity(self):
         on = self._ident(uniform_k_decode=True)
         self.assertNotEqual(on.stable_hash(), self._ident().stable_hash())
-        self.assertIn("ukd", on.short_label())
+        self.assertIn("ukd", on.label())
 
 
 if __name__ == "__main__":

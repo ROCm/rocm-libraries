@@ -8,9 +8,12 @@
 # DirectConv8cSpec / DirectConv32cSpec / DirectDepthwiseSpec /
 # DirectDepthwiseColSpec /
 # DirectConvDgradSpec / DirectDepthwiseDgradSpec / DirectConvWgradSpec (and,
-# from index 42, the non-grouped DirectNongroupedConvSpec; from index 61 the
-# parametric DirectConvSpec and the MFMA dgrad weight transforms, baked and
-# runtime-channel), builds the kernel
+# from index 42, the non-grouped DirectNongroupedConvSpec, from index 57 the
+# output-stationary DirectDepthwiseTiledSpec, from index 63 the dilated
+# non-grouped DirectNongroupedConvSpec, from index 66 specs both engines
+# must reject, from index 71 the runtime-channel DirectConvWgradSpec and from
+# index 75 the parametric DirectConvSpec and the MFMA dgrad weight transforms,
+# baked and runtime-channel), builds the kernel
 # via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -26,6 +29,7 @@ from kernels.common.conv_direct_grouped import (
     DirectDepthwiseSpec,
     DirectDepthwiseSpatialSpec,
     DirectDepthwiseColSpec,
+    DirectDepthwiseTiledSpec,
     DirectConvDgradSpec,
     DirectConvSpec,
     DirectDepthwiseDgradSpec,
@@ -40,6 +44,7 @@ from kernels.common.conv_direct_grouped import (
     build_direct_depthwise,
     build_direct_depthwise_spatial,
     build_direct_depthwise_col,
+    build_direct_depthwise_tiled,
     build_direct_conv_dgrad,
     build_direct_depthwise_dgrad,
     build_direct_reorganize_weights,
@@ -67,17 +72,24 @@ from rocke.core.verify import verify
 # single vs double buffered LDS, chiplet swizzle on/off, iglp and waves_per_eu.
 # ---------------------------------------------------------------------------
 _NONGROUPED_CFG_BASE = 42
+# Output-stationary depthwise (DirectDepthwiseTiledSpec) configs follow the
+# 15 non-grouped ones.
+_TILED_CFG_BASE = 57
+# Dilated non-grouped configs follow the 6 tiled ones.
+_NONGROUPED_DIL_CFG_BASE = 63
+# Specs both engines must reject follow the 3 dilated non-grouped ones.
+_REJECT_CFG_BASE = 66
 
 
 # ---------------------------------------------------------------------------
 # Parametric DirectConvSpec (the MFMA dgrad compute pass) and the dgrad weight
-# transforms, indices 61..80. Each pins a branch of build_direct_conv: the
+# transforms, indices 75..94. Each pins a branch of build_direct_conv: the
 # plain-weight loops, the runtime K loop, the waves_k preload + LDS reduction,
 # fold_k32, waves_q, single buffering, the persistent grid, partial K-atoms and
 # M-tiles, a 5x5 filter; then the same with runtime channels; then the
 # transpose / reorganize transforms baked and with runtime channels.
 # ---------------------------------------------------------------------------
-_GENERIC_CFG_BASE = 61
+_GENERIC_CFG_BASE = 75
 
 
 def _gp(groups, cpg, kpg, *, N=2, H=20, W=24, KH=3, PAD=1, dtype="fp16"):
@@ -260,7 +272,9 @@ def _generic_spec(idx: int):
     return (sel[0], sel[1], "gfx950")
 
 
-def _nongrouped_p(N, H, W, C, K, *, KH=3, KW=3, PAD=1, stride=1, dtype="bf16"):
+def _nongrouped_p(
+    N, H, W, C, K, *, KH=3, KW=3, PAD=1, stride=1, dtype="bf16", dil_h=1, dil_w=1
+):
     return DirectConvProblem(
         N=N,
         H=H,
@@ -273,7 +287,39 @@ def _nongrouped_p(N, H, W, C, K, *, KH=3, KW=3, PAD=1, stride=1, dtype="bf16"):
         PAD=PAD,
         stride=stride,
         dtype=dtype,
+        dil_h=dil_h,
+        dil_w=dil_w,
     )
+
+
+def _nongrouped_dil_spec(idx: int):
+    """Return (spec, arch) for dilated non-grouped config ``idx`` (emitted as
+    ``_NONGROUPED_DIL_CFG_BASE + idx``), or None past the last one."""
+    if idx == 0:
+        # Row dilation 3, PAD 1: a taller halo, tap rows 3 input rows apart.
+        return (
+            _nongrouped_s(_nongrouped_p(2, 16, 32, 64, 128, dil_h=3)),
+            "gfx950",
+        )
+    if idx == 1:
+        # Column dilation 4, PAD 4: a wider halo, tap columns 4 apart.
+        return (
+            _nongrouped_s(_nongrouped_p(1, 32, 32, 64, 64, PAD=4, dil_w=4)),
+            "gfx950",
+        )
+    if idx == 2:
+        # fp16, both axes dilated, stride 2, double-buffered LDS.
+        return (
+            _nongrouped_s(
+                _nongrouped_p(
+                    1, 32, 64, 64, 64, PAD=2, stride=2, dtype="fp16", dil_h=2, dil_w=2
+                ),
+                ck=16,
+                double_buffer=True,
+            ),
+            "gfx950",
+        )
+    return None
 
 
 # The geometry every non-grouped config shares unless it overrides it: the
@@ -286,6 +332,131 @@ _NONGROUPED_BASE = dict(
 
 def _nongrouped_s(problem, **kw):
     return DirectNongroupedConvSpec(problem=problem, **{**_NONGROUPED_BASE, **kw})
+
+
+def _reject_spec(idx: int):
+    """Return (kind, spec, arch) for must-reject config ``idx`` (emitted as
+    ``_REJECT_CFG_BASE + idx``), or None past the last one. Each pins a
+    validator branch whose failure mode the engines must share."""
+    if idx == 0:
+        # The column-streamed tap indexing has no dilation term.
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=128, cpg=1, kpg=1, KH=3, KW=3, PAD=1, dil_h=2
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=2, dtype="fp16"),
+            "gfx950",
+        )
+    if idx == 1:
+        # Tiled: a filter larger than the padded input (Ho = Wo = -26).
+        p = DirectConvProblem(
+            N=1, H=4, W=4, groups=64, cpg=1, kpg=1, KH=31, KW=31, PAD=0
+        )
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(problem=p, block_w=8, block_h=2),
+            "gfx950",
+        )
+    if idx == 2:
+        # Tiled: H + 2*PAD - KH = -1 at stride 2. Ho floors to 0; a truncating
+        # division would make it 1.
+        p = DirectConvProblem(
+            N=1, H=4, W=16, groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2
+        )
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(problem=p, block_w=4, block_h=2),
+            "gfx950",
+        )
+    if idx == 3:
+        # Non-grouped: a zero dilation is refused, not read as 1.
+        return (
+            "nongrouped",
+            _nongrouped_s(_nongrouped_p(2, 16, 32, 64, 128, dil_h=0)),
+            "gfx950",
+        )
+    if idx == 4:
+        # 16c: any dilation other than 1, zero included, is refused.
+        p = DirectConvProblem(N=2, H=16, W=16, groups=16, cpg=16, kpg=16, dil_w=0)
+        return ("16c", DirectConv16cSpec(problem=p, block_groups=4), "gfx950")
+    return None
+
+
+def _tiled_spec(idx: int):
+    """Return (spec, arch) for depthwise-tiled config ``idx`` (emitted as
+    ``_TILED_CFG_BASE + idx``), or None past the last one."""
+
+    def prob(N, H, W, groups, KH, PAD, stride=1, dtype="bf16"):
+        return DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KH,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+
+    if idx == 0:
+        # 31x31: the large-filter case the row-streaming kernel cannot compile.
+        return (
+            DirectDepthwiseTiledSpec(
+                problem=prob(1, 56, 56, 192, 31, 15), block_w=8, block_h=2
+            ),
+            "gfx950",
+        )
+    if idx == 1:
+        # fp16 7x7, filter-row loop unrolled.
+        return (
+            DirectDepthwiseTiledSpec(
+                problem=prob(4, 14, 14, 128, 7, 3, dtype="fp16"),
+                block_w=14,
+                block_h=7,
+                unroll_rows=True,
+            ),
+            "gfx950",
+        )
+    if idx == 2:
+        # Stride 2: two phases with a window each; two waves; gfx942.
+        return (
+            DirectDepthwiseTiledSpec(
+                problem=prob(2, 28, 28, 256, 5, 2, stride=2),
+                block_w=8,
+                block_h=4,
+                block_waves=2,
+            ),
+            "gfx942",
+        )
+    if idx == 3:
+        # block_h 1: no carried window.
+        return (
+            DirectDepthwiseTiledSpec(
+                problem=prob(2, 16, 16, 64, 3, 1), block_w=16, block_h=1
+            ),
+            "gfx950",
+        )
+    if idx == 4:
+        # Non-"same" padding: outputs are indexed directly.
+        return (
+            DirectDepthwiseTiledSpec(
+                problem=prob(2, 16, 16, 64, 3, 0, dtype="fp16"), block_w=4, block_h=2
+            ),
+            "gfx950",
+        )
+    if idx == 5:
+        # Over the register budget: both engines reject.
+        return (
+            DirectDepthwiseTiledSpec(
+                problem=prob(1, 56, 56, 192, 31, 15), block_w=16, block_h=4
+            ),
+            "gfx950",
+        )
+    return None
 
 
 def _nongrouped_spec(idx: int):
@@ -940,10 +1111,14 @@ def _spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2),
             "gfx950",
         )
-    # ---- wgrad, runtime channels (indices 57..60) ----
+    if idx >= _GENERIC_CFG_BASE:
+        sel = _generic_spec(idx - _GENERIC_CFG_BASE)
+        if sel is not None:
+            return sel
+    # ---- wgrad, runtime channels (indices 71..74) ----
     # cpg/kpg come from p_total_c / p_total_k / p_groups: runtime k/c tile
     # counts in the grid decode, a dynamic dW descriptor and runtime masks.
-    if idx == 57:
+    if idx == 71:
         # Defaults otherwise: the baked config 25 with runtime channels.
         p = DirectConvProblem(
             N=2, H=8, W=8, groups=8, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
@@ -953,7 +1128,7 @@ def _spec(idx: int):
             DirectConvWgradSpec(problem=p, runtime_channels=True),
             "gfx950",
         )
-    if idx == 58:
+    if idx == 72:
         # bf16, K/C/Q split with a non-power-of-two block_c (waves_c=3).
         p = DirectConvProblem(
             N=2,
@@ -980,7 +1155,7 @@ def _spec(idx: int):
             ),
             "gfx950",
         )
-    if idx == 59:
+    if idx == 73:
         # 1x1 filter, PAD 0, the narrow atom and four k-waves.
         p = DirectConvProblem(
             N=2, H=8, W=8, groups=4, cpg=64, kpg=64, KH=1, KW=1, PAD=0, stride=1
@@ -996,7 +1171,7 @@ def _spec(idx: int):
             ),
             "gfx950",
         )
-    if idx == 60:
+    if idx == 74:
         # 5x5 filter with valid padding, bf16, a ragged channel count.
         p = DirectConvProblem(
             N=1,
@@ -1018,10 +1193,21 @@ def _spec(idx: int):
             ),
             "gfx950",
         )
-    if idx >= _GENERIC_CFG_BASE:
-        sel = _generic_spec(idx - _GENERIC_CFG_BASE)
+    if idx >= _REJECT_CFG_BASE:
+        sel = _reject_spec(idx - _REJECT_CFG_BASE)
         if sel is not None:
             return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _NONGROUPED_DIL_CFG_BASE:
+        sel = _nongrouped_dil_spec(idx - _NONGROUPED_DIL_CFG_BASE)
+        if sel is not None:
+            return ("nongrouped", *sel)
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _TILED_CFG_BASE:
+        sel = _tiled_spec(idx - _TILED_CFG_BASE)
+        if sel is not None:
+            return ("dw_tiled", *sel)
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _NONGROUPED_CFG_BASE:
         sel = _nongrouped_spec(idx - _NONGROUPED_CFG_BASE)
         if sel is not None:
@@ -1062,6 +1248,8 @@ def main() -> int:
         kernel = build_direct_transpose_weights_dgrad(spec, arch=arch)
     elif kind == "reorganize":
         kernel = build_direct_reorganize_weights(spec, arch=arch)
+    elif kind == "dw_tiled":
+        kernel = build_direct_depthwise_tiled(spec, arch=arch)
     else:
         kernel = build_direct_depthwise(spec, arch=arch)
     if mode == "ll":

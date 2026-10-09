@@ -327,7 +327,7 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
     def test_on_is_a_distinct_identity(self):
         on = self._ident(prefetch_addr=True)
         self.assertNotEqual(on.stable_hash(), self._ident().stable_hash())
-        self.assertIn("pfa", on.short_label())
+        self.assertIn("pfa", on.label())
 
 
 if __name__ == "__main__":
