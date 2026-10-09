@@ -1,6 +1,3 @@
-# f32 MAF winner, M=4096 N=3072 K=65536 TN: tensile_extended sweep SolutionIndex 4 (MT64x512x32, ClusterDim 1x1, PrefetchGL2 1)
-TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 GlobalParameters:
   SyncsPerBenchmark: 1
   NumElementsToValidate: 0
@@ -32,88 +29,74 @@ GlobalParameters:
 
 
 BenchmarkProblems:
-  -
-    - # ProblemType, TN
-      OperationType: GEMM
-      DataType: s
-      DestDataType: s
-      ComputeDataType: s
-      HighPrecisionAccumulate:  True
-      TransposeA: True
-      TransposeB: False
-      UseBeta: True
-      Batched: True
-      Activation: False
-      SupportUserArgs: True
-      UseBias: 0
-
-    - # BenchmarkProblemSizeGroup - Standard
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [True]
-        - MatrixInstruction:
-          - [16, 16, 4, 1, 1, 4, 8, 1, 4]
-        - DepthU: [32]
-        - TDMInst: [3]
-        - TDMPlusLdsBuf: [-1]
-        - HalfPLR: [0]
-        - TDMIterateMode: [-1]
-        - TDMSplit: [False]
-        - PrefetchGL2: [1]
-        - LDSSegmentInterleave: [0]
-        - TransposeLDS: [-1]
-        - LdsPadA: [-1]
-        - LdsPadB: [-1]
-        - LdsBlockSizePerPadA: [-1]
-        - LdsBlockSizePerPadB: [-1]
-        - LdsPadMXSA: [-1]
-        - LdsPadMXSB: [-1]
-        - LdsBlockSizePerPadMXSA: [-1]
-        - LdsBlockSizePerPadMXSB: [-1]
-        - LDSTrInst: [False]
-        - StaggerU: [0]
-        - ScheduleIterAlg: [4]
-        - PrefetchLocalRead: [1]
-        - PrefetchGlobalRead: [2]
-        - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [-1]
-        - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - GlobalReadVectorWidthA: [-1]
-        - GlobalReadVectorWidthB: [-1]
-        - VectorWidthA: [-1]
-        - VectorWidthB: [-1]
-        - LocalReadVectorWidth: [-1]
-        - 1LDSBuffer: [0]
-        - SourceSwap: [True]
-        - ClusterDim: [[1,1]]
-        - InitCIterWmma: [1]
-        - WorkGroupMapping: [1]
-        - StoreVectorWidth: [-1]
-        - WavefrontSize: [32]
-        - ExpandPointerSwap: [False]
-        - CompactLoopStore: [False]
-        - PreloadKernArgs: [True]
-      BenchmarkForkParameters:
-      JoinParameters:
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [4096, 3072, 1, 65536]
-
-#LibraryLogic:
-#    ScheduleName: "gfx1250"
-#    DeviceNames: ["Device 0073"]
-#    ArchitectureName: "gfx1250"
-#    LibraryType: "GridBased"
-#
-#LibraryClient:
-
+- - OperationType: GEMM
+    Batched: true
+    ComputeDataType: 0
+    DataType: 0
+    DestDataType: 0
+    HighPrecisionAccumulate: false
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Activation: false
+    SupportUserArgs: true
+    UseBias: 0
+  - InitialSolutionParameters:
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - ActivationFuncCall: [false]
+    - DepthU: [32]
+    - DirectToLdsMetadata: [0]
+    - DtlPlusLdsBuf: [0]
+    - ExpandPointerSwap: [false]
+    - ForceDisableShadowInit: [true]
+    - GlobalReadVectorWidthA: [1]
+    - GlobalReadVectorWidthB: [1]
+    - GlobalSplitU: [-1]
+    - InitCIterWmma: [1]
+    - LdsBlockSizePerPadA: [512]
+    - LdsBlockSizePerPadB: [512]
+    - LdsBlockSizePerPadMXSA: [0]
+    - LdsBlockSizePerPadMXSB: [0]
+    - LdsBlockSizePerPadMetadata: [0]
+    - LdsPadA: [4]
+    - LdsPadB: [4]
+    - LdsPadMXSA: [0]
+    - LdsPadMXSB: [0]
+    - LocalReadVectorWidthA: [4]
+    - LocalReadVectorWidthB: [4]
+    - MXLoadInst: [TDM]
+    - MXScaleFormat: [InMemorySwizzle]
+    - MaxLDS: [327680]
+    - MbskPrefetchMethod: [0]
+    - MinGRIncPerMfma: [1]
+    - PrefetchGL2: [1]
+    - PrefetchGlobalRead: [2]
+    - ScheduleGROverBarrier: [0]
+    - ScheduleIterAlg: [4]
+    - SourceSwap: [true]
+    - StaggerU: [0]
+    - StaggerUStride: [0]
+    - StoreVectorWidth: [4]
+    - TDMInst: [3]
+    - ThreadTile: [[1, 1]]
+    - TransposeLDS: [1]
+    - UseCustomMainLoopSchedule: [0]
+    - UseSgprForGRO: [0]
+    - VectorWidthA: [4]
+    - VectorWidthB: [4]
+    - WavefrontSize: [32]
+    - WorkGroupMapping: [1]
+    - Groups:
+      - - MatrixInstruction: [16, 16, 4, 1, 1, 4, 8, 1, 4]
+          WorkGroup: [16, 8, 1]
+          MIArchVgpr: true
+    BenchmarkJoinParameters:
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [4096, 3072, 1, 65536]
 LibraryLogic:
-  ScheduleName: gfx1250
-  DeviceNames:
-  - Device 75c7
-  ArchitectureName: gfx1250
-  LibraryType: GridBased
+  ScheduleName: "gfx1250"
+  DeviceNames: ["Device 75c7"]
+  ArchitectureName: "gfx1250"
