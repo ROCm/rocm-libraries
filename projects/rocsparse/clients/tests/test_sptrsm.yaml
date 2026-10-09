@@ -328,3 +328,27 @@ Tests:
   graph_test: true
 
 
+- name: sptrsm_file
+  category: quick
+  function: sptrsm
+  indextype: *i32i32_i64i32_i64i64
+  precision: *double_only_precisions_complex
+  M: [3]
+  N: [3]
+  K: [1]
+  alpha: [2]
+  alphai: [2]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_conjugate_transpose]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  sptrsm_alg: [rocsparse_sptrsm_alg_default]
+  matrix: [rocsparse_matrix_random]
+  batch_count_C: [4]
+  batch_count_B: [-1, 1]
+  batch_count_A: [-1, 1]
+  formatA: [rocsparse_format_csr]
+  direction: [rocsparse_direction_row]

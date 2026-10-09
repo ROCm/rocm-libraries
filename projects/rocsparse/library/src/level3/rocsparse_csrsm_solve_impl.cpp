@@ -590,6 +590,12 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
 
             _rocsparse_dnvec_descr dnx(
                 batch_count, m, rocsparse::get_datatype<T>(), B, nullptr, b_inc, batch_dist_zero);
+
+            if(trans_B == rocsparse_operation_conjugate_transpose)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dnvec_conjugate(handle, &dnx, nullptr));
+            }
+
             _rocsparse_dnvec_descr dny(
                 batch_count, m, rocsparse::get_datatype<T>(), y, y, inc_y, batch_dist_zero);
 
