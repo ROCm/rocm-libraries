@@ -23,6 +23,8 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    F32,
+    I32,
     KernelDef,
     Op,
     PtrType,
@@ -36,6 +38,11 @@ from .ir import (
     dpp_ctrl_attr,
     dpp_xor_ctrl,
     require_streaming_arch,
+)
+from .mma_operand import (
+    MmaOperandRole,
+    mma_operand_needs_reinterpret,
+    mma_operand_value,
 )
 
 
@@ -720,18 +727,40 @@ class _Lowerer:
         )
         self.lower_op(legacy)
 
+    def _mma_operand(
+        self, op: Op, op_id: str, role: MmaOperandRole, register_type: Type
+    ) -> str:
+        """Return MMA operand ``role`` of ``op`` as the instruction's register type.
+
+        The operand passes through unchanged, or is reinterpreted with one
+        ``__builtin_bit_cast``, as
+        :func:`~rocke.core.mma_operand.mma_operand_needs_reinterpret` decides;
+        that rule also raises for an operand it refuses. The LLVM lowering
+        renders the same decision as a ``bitcast``.
+        """
+        value = mma_operand_value(op, role)
+        if mma_operand_needs_reinterpret(
+            op_id, role, value.type, register_type, self.arch
+        ):
+            return f"__builtin_bit_cast({_type_to_hip(register_type)}, {_name(value)})"
+        return _name(value)
+
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
-        a, b, c = op.operands
+        op_id = "mfma_f32_16x16x4_f32"
+        a = self._mma_operand(op, op_id, "a", F32)
+        b = self._mma_operand(op, op_id, "b", F32)
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_16x16x4f32("
-            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+            f"{a}, {b}, {_name(op.operands[2])}, 0, 0, 0);"
         )
 
     def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
-        a, b, c = op.operands
+        op_id = "mfma_f32_32x32x2_f32"
+        a = self._mma_operand(op, op_id, "a", F32)
+        b = self._mma_operand(op, op_id, "b", F32)
         self._emit(
             f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x2f32("
-            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+            f"{a}, {b}, {_name(op.operands[2])}, 0, 0, 0);"
         )
 
     def _op_tile_mfma_f32_16x16x16_f16(self, op: Op) -> None:
@@ -833,14 +862,16 @@ class _Lowerer:
         self._emit_wmma_gfx1250_fp8(op, "bf8_bf8")
 
     def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
-        # gfx1250 K=64 FP8/BF8 builtin: A/B are <8 x i32> (32 low-bit
+        # gfx1250 K=64 FP8/BF8 builtin: A/B are passed as i32x8 (32 low-bit
         # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).
-        self._require_wmma_arch(f"wmma_gfx1250_f32_16x16x64_{ab}")
-        a, b, c = op.operands
+        op_id = f"wmma_gfx1250_f32_16x16x64_{ab}"
+        self._require_wmma_arch(op_id)
+        a = self._mma_operand(op, op_id, "a", VectorType(I32, 8))
+        b = self._mma_operand(op, op_id, "b", VectorType(I32, 8))
         self._emit(
             f"f32x8 {_name(op.result)} = "
             f"__builtin_amdgcn_wmma_f32_16x16x64_{ab}("
-            f"{_name(a)}, {_name(b)}, (int16_t)0, {_name(c)}, false, false);"
+            f"{a}, {b}, (int16_t)0, {_name(op.operands[2])}, false, false);"
         )
 
     def _emit_wmma_gfx1250_scaled(self, op: Op) -> None:
@@ -878,19 +909,23 @@ class _Lowerer:
     #
     # The integer twin of the f16 WMMA handler. Per-lane A/B operands are
     # ``i32x4`` (16 int8 packed 4-per-i32) and the accumulator / result are
-    # ``i32x8``. The builtin's two leading bool flags select each operand's
-    # *signedness* (``true`` => signed; verified on gfx11 — passing ``false``
-    # makes the unit compute the *unsigned* dot product), and the trailing bool
+    # ``i32x8``; packed bytes of the same width (``i8x16``) are passed through
+    # one ``__builtin_bit_cast`` (``_mma_operand``). The builtin's two leading
+    # bool flags select each operand's *signedness* (``true`` => signed;
+    # verified on gfx11 -- passing ``false`` makes the unit compute the
+    # *unsigned* dot product), and the trailing bool
     # is the clamp flag (``false`` => exact i32 wrap). This mirrors the verified
     # LLVM-IR emission in ``core/isa/backend.py`` (``_emit_wmma_int``):
     # ``llvm.amdgcn.wmma.i32.16x16x16.iu8(i1 1, A, i1 1, B, C, i1 0)``.
 
     def _op_tile_wmma_i32_16x16x16_iu8(self, op: Op) -> None:
-        self._require_wmma_arch("wmma_i32_16x16x16_iu8")
-        a, b, c = op.operands
+        op_id = "wmma_i32_16x16x16_iu8"
+        self._require_wmma_arch(op_id)
+        a = self._mma_operand(op, op_id, "a", VectorType(I32, 4))
+        b = self._mma_operand(op, op_id, "b", VectorType(I32, 4))
         self._emit(
             f"i32x8 {_name(op.result)} = __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32("
-            f"true, {_name(a)}, true, {_name(b)}, {_name(c)}, false);"
+            f"true, {a}, true, {b}, {_name(op.operands[2])}, false);"
         )
 
     # ---- WMMA iu4 (RDNA3/3.5, gfx11, wave32) — int4 matrix engine ----
@@ -901,11 +936,13 @@ class _Lowerer:
     # trailing bool is the (off) clamp. Mirrors the LLVM emission
     # ``llvm.amdgcn.wmma.i32.16x16x16.iu4(i1 1, A, i1 1, B, C, i1 0)``.
     def _op_tile_wmma_i32_16x16x16_iu4(self, op: Op) -> None:
-        self._require_wmma_arch("wmma_i32_16x16x16_iu4")
-        a, b, c = op.operands
+        op_id = "wmma_i32_16x16x16_iu4"
+        self._require_wmma_arch(op_id)
+        a = self._mma_operand(op, op_id, "a", VectorType(I32, 2))
+        b = self._mma_operand(op, op_id, "b", VectorType(I32, 2))
         self._emit(
             f"i32x8 {_name(op.result)} = __builtin_amdgcn_wmma_i32_16x16x16_iu4_w32("
-            f"true, {_name(a)}, true, {_name(b)}, {_name(c)}, false);"
+            f"true, {a}, true, {b}, {_name(op.operands[2])}, false);"
         )
 
     def _require_wmma_arch(self, op_id: str) -> None:

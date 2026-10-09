@@ -34,6 +34,7 @@
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
 #include "rocke/mfma_scale_internal.h"
+#include "rocke/mma_operand_internal.h"
 #include "rocke/tf32_internal.h"
 #include "rocke/wmma_scale_internal.h"
 
@@ -64,6 +65,29 @@ static const char* h_elem_scalar(rocke_h_lowerer_t* lw, const rocke_type_t* t)
 }
 
 /* ============================== mma ====================================== */
+
+/* MMA operand `role` (A or B) of `op` as the instruction's register type
+ * (Python _Lowerer._mma_operand): unchanged, or reinterpreted with one
+ * __builtin_bit_cast, as rocke_mma_operand_needs_reinterpret decides; that rule
+ * also throws for an operand it refuses. The LLVM lowering renders the same
+ * decision as a `bitcast`. */
+static const char* h_mma_operand(rocke_h_lowerer_t* lw,
+                                 const rocke_op_t* op,
+                                 const char* op_id,
+                                 rocke_mma_role_t role,
+                                 const rocke_type_t* register_type)
+{
+    const rocke_value_t* value = rocke_mma_operand_value(op, role);
+    if(!rocke_mma_operand_needs_reinterpret(op_id, role, value->type, register_type, lw->arch.gfx))
+        return rocke_h_name(lw, value);
+    const char* reinterpreted = rocke_arena_printf(&lw->b->arena,
+                                                   "__builtin_bit_cast(%s, %s)",
+                                                   rocke_h_type_to_hip(lw, register_type),
+                                                   rocke_h_name(lw, value));
+    if(!reinterpreted)
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "out of memory formatting an MMA operand");
+    return reinterpreted ? reinterpreted : "";
+}
 
 /* def _op_tile_mma(self, op):
  *     op_id = op.attrs["op_id"]
@@ -195,17 +219,20 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
                                 rocke_arch_mma_op_physical_op_id(atom));
         }
     }
-    /* Ordinary FP32 controls use catalog IDs that have no legacy opcode. */
+    /* Ordinary FP32 controls use catalog IDs that have no legacy opcode. A and
+     * B are passed as f32 (h_mma_operand). */
     if(strcmp(op_id, "mfma_f32_16x16x4_f32") == 0 || strcmp(op_id, "mfma_f32_32x32x2_f32") == 0)
     {
         bool small = strcmp(op_id, "mfma_f32_16x16x4_f32") == 0;
+        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f32());
+        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f32());
         rocke_h_emitf(lw,
                       "f32x%d %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
                       small ? 4 : 16,
                       rocke_h_name(lw, op->results[0]),
                       small ? "mfma_f32_16x16x4f32" : "mfma_f32_32x32x2f32",
-                      rocke_h_name(lw, op->operands[0]),
-                      rocke_h_name(lw, op->operands[1]),
+                      a_arg,
+                      b_arg,
                       rocke_h_name(lw, op->operands[2]));
         return ROCKE_OK;
     }

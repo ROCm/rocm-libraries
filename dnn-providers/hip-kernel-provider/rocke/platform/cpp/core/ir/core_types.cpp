@@ -136,23 +136,41 @@ const rocke_type_t* rocke_dtype_to_ir_type(const char* dtype)
     return rocke_scalar_by_name(info->name);
 }
 
-/* VectorType(elem, count) -> "vec<{elem}x{count}>" */
+/* Mirrors core/ir.py::dtype_to_ir_type, raising where rocke_dtype_to_ir_type
+ * returns NULL. */
+const rocke_type_t* rocke_require_ir_type(const char* dtype)
+{
+    const rocke_dtype_info_t* info = rocke_require_dtype_info(dtype);
+    const rocke_type_t* t = rocke_dtype_to_ir_type(info->name);
+    if(!t)
+        throw ckc::ValueError(ckc::format_error("no logical IR type for dtype '%s'", info->name));
+    return t;
+}
+
+/* VectorType(elem, count) -> "vec<{elem}x{count}>", allocated in `arena`. */
+const rocke_type_t*
+    rocke_i_vector_type_in_arena(rocke_arena_t* arena, const rocke_type_t* elem, int count)
+{
+    rocke_type_t* t = (rocke_type_t*)rocke_arena_calloc(arena, sizeof(*t));
+    if(!t)
+        return NULL;
+    t->kind = ROCKE_TYPE_VECTOR;
+    t->elem = elem;
+    t->count = count;
+    t->name = rocke_arena_printf(arena, "vec<%sx%d>", elem->name, count);
+    return t->name ? t : NULL;
+}
+
 const rocke_type_t* rocke_vector_type(rocke_ir_builder_t* b, const rocke_type_t* elem, int count)
 {
-    rocke_type_t* t;
+    const rocke_type_t* t;
     if(!rocke_i_live(b))
         return NULL;
     if(!elem)
         return (const rocke_type_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "vector_type: NULL element type");
-    t = (rocke_type_t*)rocke_arena_calloc(&b->arena, sizeof(*t));
+    t = rocke_i_vector_type_in_arena(&b->arena, elem, count);
     if(!t)
-        return (const rocke_type_t*)rocke_i_set_err(b, ROCKE_ERR_OOM, "vector_type: OOM");
-    t->kind = ROCKE_TYPE_VECTOR;
-    t->elem = elem;
-    t->count = count;
-    t->name = rocke_arena_printf(&b->arena, "vec<%sx%d>", elem->name, count);
-    if(!t->name)
         return (const rocke_type_t*)rocke_i_set_err(b, ROCKE_ERR_OOM, "vector_type: OOM");
     return t;
 }

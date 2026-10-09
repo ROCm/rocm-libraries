@@ -532,6 +532,13 @@ const char* rocke_ll_operand(rocke_lower_t* L, const rocke_value_t* v);
 /* "<type> <operand>" (Python _operand_with_type). */
 const char* rocke_ll_operand_with_type(rocke_lower_t* L, const rocke_value_t* v);
 
+/* Emit one `bitcast` of `v` to `register_type` and return the new name
+ * (Python _Lowerer._reinterpret). Only renders: the caller has established
+ * that the bit widths match (rocke_mma_operand_needs_reinterpret). */
+const char* rocke_ll_reinterpret(rocke_lower_t* L,
+                                 const rocke_value_t* v,
+                                 const rocke_type_t* register_type);
+
 /* Map an IR Type to its LLVM textual form (Python _llvm_type). Sets NOTIMPL on
  * an unmapped type and returns "" . */
 const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t);
