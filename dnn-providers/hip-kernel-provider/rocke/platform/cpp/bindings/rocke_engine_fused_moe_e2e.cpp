@@ -36,6 +36,8 @@
 #include <string>
 #include <vector>
 
+#include "family_glue.hpp"
+
 extern "C" {
 #include "rocke/instance_batched_gemm.h"
 #include "rocke/instance_fused_moe_e2e.h"
@@ -164,7 +166,7 @@ constexpr size_t FMOE_NSTAGES = sizeof(FMOE_STAGES) / sizeof(FMOE_STAGES[0]);
 std::string fmoe_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
-    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = require_arch(arch);
     rocke_fmoe_forward_spec_t s = fmoe_build(d, st);
     std::string out;
     for(size_t i = 0; i < FMOE_NSTAGES; ++i)
@@ -292,8 +294,7 @@ std::vector<std::string> fmoe_verify(const py::dict& d, const std::string& arch)
 
 void register_fused_moe_e2e(py::module_& m)
 {
-    m.def("fused_moe_e2e_lower_llvm", &fmoe_lower, py::arg("spec"), py::arg("arch") = "gfx950");
-    m.def(
-        "fused_moe_e2e_serialize_ir", &fmoe_serialize, py::arg("spec"), py::arg("arch") = "gfx950");
-    m.def("fused_moe_e2e_verify", &fmoe_verify, py::arg("spec"), py::arg("arch") = "gfx950");
+    m.def("fused_moe_e2e_lower_llvm", &fmoe_lower, py::arg("spec"), py::arg("arch"));
+    m.def("fused_moe_e2e_serialize_ir", &fmoe_serialize, py::arg("spec"), py::arg("arch"));
+    m.def("fused_moe_e2e_verify", &fmoe_verify, py::arg("spec"), py::arg("arch"));
 }

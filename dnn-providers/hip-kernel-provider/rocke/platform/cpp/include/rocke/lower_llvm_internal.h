@@ -218,8 +218,9 @@ typedef struct rocke_isa_backend
     bool (*ds_tr16_b128_spec)(const char* elem_type, rocke_ll_tr16_spec_t* out);
 } rocke_isa_backend_t;
 
-/* Resolve a gfx string to its backend (Python backend_for). NULL => "gfx950".
- * Returns NULL and sets *st on an unknown arch. */
+/* Resolve a gfx string to its backend (Python backend_for). Returns NULL and
+ * sets *st to ROCKE_ERR_VALUE for a NULL arch (there is no default) and to
+ * ROCKE_ERR_KEY for an unknown one. */
 const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st);
 
 /* The two CDNA waitcnt encoders (Python _encode_waitcnt_gfx9_10 /

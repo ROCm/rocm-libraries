@@ -548,7 +548,7 @@ class GemmLowerResult:
 def lower_universal_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> GemmLowerResult:
@@ -1103,7 +1103,7 @@ def _name_of(spec: Any) -> str:
 def lower_batched_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1140,7 +1140,7 @@ def lower_batched_gemm(
 def lower_grouped_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1177,7 +1177,7 @@ def lower_grouped_gemm(
 def lower_flatmm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1214,7 +1214,7 @@ def lower_flatmm(
 def lower_streamk_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1251,7 +1251,7 @@ def lower_streamk_gemm(
 def lower_block_scale_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1288,7 +1288,7 @@ def lower_block_scale_gemm(
 def lower_mx_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1325,7 +1325,7 @@ def lower_mx_gemm(
 def lower_mfma_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1400,7 +1400,7 @@ def lower_matmul_nbits(
 def lower_gemm_multi_d(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1437,7 +1437,7 @@ def lower_gemm_multi_d(
 def lower_gemm_multi_abd(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1474,7 +1474,7 @@ def lower_gemm_multi_abd(
 def lower_conv_implicit_gemm(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1512,7 +1512,7 @@ def lower_conv_direct_grouped(
     spec: Any,
     *,
     kind: str = "16c",
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1554,7 +1554,7 @@ def lower_conv_direct_grouped(
 def lower_conv_direct_nongrouped(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1591,7 +1591,7 @@ def lower_conv_direct_nongrouped(
 def lower_img2col(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
@@ -1628,7 +1628,7 @@ def lower_img2col(
 def lower_deep_fused_conv_pool(
     spec: Any,
     *,
-    arch: str = "gfx950",
+    arch: str,
     backend: Optional[str] = None,
     want_ir: bool = False,
 ) -> "GemmLowerResult":
