@@ -13,12 +13,11 @@
 // (splitting the list, trimming, converting scalars, comparing, rendering) is
 // mechanics every caller would otherwise repeat.
 //
-// KVDescriptor captures that: an owner derives from it and, in its constructor,
-// registers one entry per field with int_field() / bool_field() /
-// custom_field(). The base then drives both directions from that one table:
-// match() checks a spec against the fields, and describe() renders them. A field
-// is declared once and is automatically matchable and describable, so the two
-// can never drift.
+// KVDescriptor captures that: an owner registers one entry per field with
+// int_field() / bool_field() / custom_field(), either on a KVDescriptor it builds
+// or in the constructor of a class derived from it. The base then drives both directions from that
+// one table: match() checks a spec against the fields, and describe() renders them. A field is
+// declared once and is automatically matchable and describable, so the two can never drift.
 //
 // Match contract: match() returns false (setting error()) on an unknown key or a
 // value that does not parse; false (no error) on a known field whose value the
@@ -45,15 +44,20 @@ public:
 
     // Render the fields as a comma separated list of key-value pairs.
     //
-    // Default values are omitted. The result is a valid match() spec.
-    std::string describe() const;
+    // Fields at their default are omitted unless include_defaults, which renders
+    // every registered field. The result is a valid match() spec either way.
+    std::string describe(bool include_defaults = false) const;
 
     // Diagnostic set on an unknown key or unparseable value; empty otherwise.
     const std::string& error() const { return error_; }
 
-protected:
-    // Derived classes register their fields in their constructor.
-    KVDescriptor() = default;
+    // An owner registers its fields on a KVDescriptor it builds, or in the
+    // constructor of a class derived from it.
+    KVDescriptor()                               = default;
+    KVDescriptor(const KVDescriptor&)            = default;
+    KVDescriptor(KVDescriptor&&)                 = default;
+    KVDescriptor& operator=(const KVDescriptor&) = default;
+    KVDescriptor& operator=(KVDescriptor&&)      = default;
 
     // Register one field.
     //
@@ -85,6 +89,17 @@ protected:
             key, value, /*has_default=*/false, /*default_value=*/value, "value", parse, render);
     }
 
+    template <class T>
+    void custom_field(std::string_view key,
+                      T value,
+                      bool (*parse)(std::string_view, T&),
+                      const char* (*render)(T),
+                      T default_value)
+    {
+        add_field<T>(key, value, /*has_default=*/true, default_value, "value", parse, render);
+    }
+
+protected:
     // Record a malformed/unknown token: store `msg` as the error and return false.
     //
     // The single point that turns a diagnostic into the false return.
@@ -108,16 +123,19 @@ private:
                    bool (*parse)(std::string_view, T&),
                    Render render)
     {
+        // The descriptor arrives as a parameter, not a capture, so a copy reports
+        // into itself.
         fields_.push_back(Field{
             key,
-            [=, this](std::string_view val) {
+            [=](KVDescriptor& self, std::string_view val) {
             T parsed;
             if(!parse(val, parsed))
-                return fail(std::string("bad ") + type_label + " for '" + std::string(key) + "'");
+                return self.fail(std::string("bad ") + type_label + " for '" + std::string(key) +
+                                 "'");
             return value == parsed;
         },
-            [=]() -> std::string {
-            if(has_default && value == default_value)
+            [=](bool include_defaults) -> std::string {
+            if(!include_defaults && has_default && value == default_value)
                 return {};
             return std::string(key) + "=" + render(value);
         },
@@ -127,8 +145,8 @@ private:
     struct Field
     {
         std::string_view key;
-        std::function<bool(std::string_view)> matches; // parse val, compare to config's value
-        std::function<std::string()> render;           // "key=value", or "" if at default
+        std::function<bool(KVDescriptor&, std::string_view)> matches; // parse, compare to value
+        std::function<std::string(bool)> render; // "key=value", or "" if suppressed
     };
 
     std::vector<Field> fields_;

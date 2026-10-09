@@ -1,26 +1,27 @@
 #pragma once
 
+#include "hip_util.h"
 #include "hipconv/conv_params.hpp"
 
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 
-#include <stdexcept>
 #include <string>
 
 namespace hipconv::explicit_gemm
 {
 
-// Thrown when a hipBLASLt API call returns a non-success status. Derives from
-// std::runtime_error so it is still caught by generic handlers, while carrying
-// the raw status code for callers that want to react in a targeted way (e.g.
-// treat HIPBLAS_STATUS_NOT_SUPPORTED as a graceful fallback vs. a hard error).
-class HipblasltError : public std::runtime_error
+// Thrown when a hipBLASLt API call returns a non-success status.
+//
+// A HipError, so launch() returns it as hipErrorUnknown; hipErrorNotSupported is reserved for
+// a GEMM hipBLASLt has no algorithm for. status() carries hipBLASLt's own code.
+class HipblasltError : public HipError
 {
 public:
     HipblasltError(hipblasStatus_t status, const char* where)
-        : std::runtime_error(std::string("hipBLASLt error in ") + where + ": " +
-                             std::to_string(static_cast<int>(status)))
+        : HipError(hipErrorUnknown,
+                   std::string("hipBLASLt error in ") + where + ": " +
+                       std::to_string(static_cast<int>(status)))
         , status_(status)
     {
     }
@@ -30,6 +31,10 @@ public:
 private:
     hipblasStatus_t status_;
 };
+
+// Whether hipBLASLt has an algorithm on the current device for the GEMM launch_gemm runs
+// for `par` (#244).
+bool has_algorithm(const ConvParams& par);
 
 void launch_gemm(const ConvParams& par,
                  const void* in,
