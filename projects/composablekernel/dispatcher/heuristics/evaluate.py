@@ -27,6 +27,13 @@ from predict import Predictor
 from train import compute_tflops_efficiency
 
 
+#: This module evaluates universal-GEMM models only -- it groups shapes by
+#: (m, n, k) and builds a GemmUniversalFeatureEngine in main(). The operation is
+#: a required positional of compute_tflops_efficiency, which selects both the
+#: grouping columns and the measured-TFLOPS column, so it cannot be defaulted.
+_OPERATION = "gemm_universal"
+
+
 def classify_shape_family(m: int, n: int, k: int) -> str:
     """Classify a GEMM shape into a family for sliced evaluation.
 
@@ -106,7 +113,7 @@ def evaluate_model(
     rmse = np.sqrt(np.mean((y_true - y_pred) ** 2))
     mae = np.mean(np.abs(y_true - y_pred))
 
-    eff_df = compute_tflops_efficiency(valid, "pred_tflops")
+    eff_df = compute_tflops_efficiency(valid, _OPERATION, "pred_tflops")
 
     ndcg1_count = 0
     total_shapes = 0
@@ -150,7 +157,7 @@ def evaluate_model(
     def _slice_efficiency(slice_df):
         if len(slice_df) == 0:
             return {"count": 0}
-        eff = compute_tflops_efficiency(slice_df, "pred_tflops")
+        eff = compute_tflops_efficiency(slice_df, _OPERATION, "pred_tflops")
         if len(eff) == 0:
             return {"count": 0}
         return {
@@ -189,15 +196,30 @@ def evaluate_model(
     }
 
 
-def main():
+def build_arg_parser() -> argparse.ArgumentParser:
+    """The command-line parser."""
     parser = argparse.ArgumentParser(description="Evaluate CK Tile performance model")
     parser.add_argument(
         "--model_dir", required=True, help="Directory with trained models"
     )
     parser.add_argument("--data_dir", required=True, help="Directory with parquet data")
-    parser.add_argument("--op", default="gemm_universal")
+    parser.add_argument(
+        "--op",
+        default=_OPERATION,
+        choices=[_OPERATION],
+        help=(
+            f"Operation type. Only {_OPERATION} is supported: this module groups "
+            "shapes by (m, n, k) throughout, so another operation would load its "
+            "data and then fail on a missing column rather than say so."
+        ),
+    )
     parser.add_argument("--dtype", default="fp8")
     parser.add_argument("--output", "-o", help="Output JSON path for metrics")
+    return parser
+
+
+def main():
+    parser = build_arg_parser()
     args = parser.parse_args()
 
     print(f"Loading data from {args.data_dir}...")
