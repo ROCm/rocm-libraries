@@ -609,6 +609,17 @@ bool aotDirectVariantUses(conv::DirectVariant variant, std::string_view field)
         return among({"block_w", "block_h", "block_waves"});
     case conv::DirectVariant::GROUPED:
         return among({"block_h", "block_q", "block_groups", "double_buffer", "cpg", "kpg"});
+    case conv::DirectVariant::NONGROUPED:
+        return among({"tile_h",
+                      "tile_w",
+                      "tile_k_out",
+                      "ck",
+                      "waves_m",
+                      "waves_n",
+                      "atom",
+                      "swizzle_wgm",
+                      "iglp",
+                      "waves_per_eu"});
     case conv::DirectVariant::NONE:
     default:
         return false;
@@ -732,7 +743,26 @@ std::optional<conv::DirectInstance> aotDirectInstance(const KernelDefinition& ke
             return std::nullopt;
         }
     }
-    if(!metadataEquals(kernel, "atom", std::string("none")))
+    if(knob("iglp") < -1 || knob("waves_per_eu") < 0 || knob("swizzle_wgm") < 0)
+    {
+        return std::nullopt;
+    }
+    const auto* atom = stringMetadata(kernel, "atom");
+    if(atom == nullptr)
+    {
+        return std::nullopt;
+    }
+    int64_t atomTile = 0;
+    if(aotDirectVariantUses(variant, "atom"))
+    {
+        const auto tile = conv::nongroupedAtomTile(*atom);
+        if(!tile || knob("swizzle_wgm") < 1)
+        {
+            return std::nullopt;
+        }
+        atomTile = *tile;
+    }
+    else if(*atom != "none")
     {
         return std::nullopt;
     }
@@ -752,6 +782,13 @@ std::optional<conv::DirectInstance> aotDirectInstance(const KernelDefinition& ke
     instance.blockGroups = knob("block_groups");
     instance.cpg = knob("cpg");
     instance.kpg = knob("kpg");
+    instance.tileH = knob("tile_h");
+    instance.tileW = knob("tile_w");
+    instance.tileKOut = knob("tile_k_out");
+    instance.ck = knob("ck");
+    instance.wavesM = knob("waves_m");
+    instance.wavesN = knob("waves_n");
+    instance.atomTile = atomTile;
     return instance;
 }
 
