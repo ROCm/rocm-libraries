@@ -58,6 +58,16 @@ struct ResolvedMatcher
     KernelMatcherFn kernelFn = nullptr;
 };
 
+/// A kernel-scoped matcher's CandidateFilterFn, resolved once with the matcher, and the
+/// packs whose admitted kernels it refines as one set: every pack listing the matcher.
+struct ResolvedCandidateFilter
+{
+    DescriptorId matcherId;
+    std::string description;
+    CandidateFilterFn filter = nullptr;
+    std::unordered_set<DescriptorId, DescriptorIdHash> listingPacks;
+};
+
 /// A UDD plus the handler its dispatchSymbol resolved to at construction.
 template <typename THandle>
 struct ResolvedDispatch
@@ -243,6 +253,7 @@ public:
         }
 
         validateAndIndexPacks();
+        resolveCandidateFilters();
     }
 
     // Pinned in place: catalog pointers into `_definitions` rely on a stable address.
@@ -634,6 +645,14 @@ public:
     bool isOrdinalKnob(const std::string& field) const
     {
         return _ordinalDomains.find(field) != _ordinalDomains.end();
+    }
+
+    /// Every kernel-scoped matcher whose symbol also names a CandidateFilterFn, in the
+    /// order the packs first list them. Resolved at construction, like the matchers: the
+    /// registry is immutable once the provider loaded, and absence means no refinement.
+    const std::vector<ResolvedCandidateFilter>& candidateFilters() const
+    {
+        return _candidateFilters;
     }
 
 private:
@@ -1247,6 +1266,34 @@ private:
             {
                 it->second = i;
             }
+            if(candidates.empty())
+            {
+                continue;
+            }
+
+            const auto kept = resolved.filter(context, catalog.bound, candidates);
+            if(kept.size() != candidates.size())
+            {
+                throw std::runtime_error("the candidate filter of " + resolved.description
+                                         + " returned " + std::to_string(kept.size())
+                                         + " flag(s) for " + std::to_string(candidates.size())
+                                         + " kernel(s)");
+            }
+            size_t survivors = 0;
+            for(size_t i = 0; i < kept.size(); ++i)
+            {
+                if(kept[i])
+                {
+                    ++survivors;
+                }
+                else
+                {
+                    keep[indices[i]] = false;
+                }
+            }
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: the candidate filter of "
+                                   << resolved.description << " kept " << survivors << " of "
+                                   << candidates.size() << " kernel(s)");
         }
 
         bool anyShadowed = false;
