@@ -1208,21 +1208,44 @@ class TestDenseLseNumericGfx942:
         assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
         assert (lse - lse_ref).abs().max().item() < _tolerance("bf16")
 
-    def test_lse_runtime_shape_reuse(self):
-        """One LSE binary serves two runtime shapes; LSE-off keeps its own binary."""
+    @pytest.mark.parametrize(
+        "persistent,decode",
+        [
+            (False, "qb_major"),
+            (True, "qb_major"),
+            (True, "hkv_major"),
+        ],
+        ids=["ordinary", "persistent_qb", "persistent_hkv"],
+    )
+    def test_lse_runtime_shape_reuse(self, persistent, decode):
+        """One LSE binary serves different B/Sq/Hq/Hkv values and writes each row.
+
+        This directly guards the runtime LSE index ``((b*Hq+h)*Sq+q)`` and the two
+        persistent work-item decoders introduced by #12859.
+        """
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx942.attention_dense import _DENSE_LAUNCHER_CACHE
 
+        configs = [(1, 512, 8, 2), (2, 1024, 16, 4)]
         specs = [
-            _lse_spec("bf16", 128, 8, 2, False, batch=batch, sq=sq)
-            for batch, sq in [(1, 512), (2, 1024)]
+            _lse_spec(
+                "bf16",
+                128,
+                hq,
+                hkv,
+                persistent,
+                batch=batch,
+                sq=sq,
+                persist_decode=decode,
+            )
+            for batch, sq, hq, hkv in configs
         ]
-        assert specs[0].runtime_shape, "LSE row is not on the runtime-shape path"
+        assert all(s.runtime_shape for s in specs)
         off_specs = [dataclasses.replace(spec, emit_lse=False) for spec in specs]
         keys = {
             attention_dense_cache_key(spec, arch="gfx942") for spec in specs + off_specs
         }
-        # Own every potentially affected slot. Always restore prior entries.
+        assert len(keys) == 2, "LSE-on/off should each reuse one runtime-shape binary"
         old_entries = {key: _DENSE_LAUNCHER_CACHE.pop(key, None) for key in keys}
         scale = 0.5
         launchers = []
@@ -1232,13 +1255,18 @@ class TestDenseLseNumericGfx942:
                 q = torch.randn(
                     spec.batch,
                     spec.seqlen_q,
-                    8,
+                    spec.num_query_heads,
                     128,
                     device="cuda",
                     dtype=torch.bfloat16,
                 )
                 k = torch.randn(
-                    spec.batch, spec.seqlen_kv, 2, 128, device=q.device, dtype=q.dtype
+                    spec.batch,
+                    spec.seqlen_kv,
+                    spec.num_kv_heads,
+                    128,
+                    device=q.device,
+                    dtype=q.dtype,
                 )
                 v = torch.randn_like(k)
                 out, lse, off_out = _run_lse_and_off(spec, q, k, v, scale)

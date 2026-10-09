@@ -655,6 +655,37 @@ def test_kernel_name_drops_heads_on_the_runtime_shape_grid():
     assert len({_ir_body_sha(s) for s in specs}) == 1
 
 
+@pytest.mark.parametrize(
+    "make",
+    [
+        _spec,
+        lambda **kw: _persistent_spec(persist_decode="qb_major", **kw),
+        lambda **kw: _persistent_spec(persist_decode="hkv_major", **kw),
+    ],
+    ids=["ordinary", "persistent_qb", "persistent_hkv"],
+)
+def test_lse_ir_uses_runtime_sequence_and_head_counts(make):
+    """One LSE binary must serve different Sq/Hq values on every runtime path.
+
+    The LSE layout is [B,Hq,Sq,1], so a baked Hq or Sq in its flat output index
+    makes otherwise-shared binaries write the wrong row for another launch shape.
+    """
+    specs = [
+        make(
+            batch=batch,
+            seqlen_q=sq,
+            seqlen_kv=sq,
+            num_query_heads=hq,
+            num_kv_heads=hkv,
+            emit_lse=True,
+        )
+        for batch, sq, hq, hkv in ((1, 512, 8, 2), (2, 1024, 16, 4))
+    ]
+    assert all(s.runtime_shape for s in specs)
+    assert len({attention_dense_cache_key(s, arch="gfx942") for s in specs}) == 1
+    assert len({_ir_body_sha(s) for s in specs}) == 1
+
+
 def test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control():
     """Positive control for every "one body across shapes" assertion above.
 

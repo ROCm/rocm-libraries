@@ -2113,7 +2113,13 @@ def _build_attention_dense_single_buffer(
             )
             lse_index = b.add(
                 b.mul(
-                    b.add(b.mul(bt, b.const_i32(Hq)), hq),
+                    b.add(
+                        b.mul(
+                            bt,
+                            hq_p if spec.runtime_shape else b.const_i32(Hq),
+                        ),
+                        hq,
+                    ),
                     seqlen_q_p if spec.runtime_shape else b.const_i32(Sq),
                 ),
                 qtok,
