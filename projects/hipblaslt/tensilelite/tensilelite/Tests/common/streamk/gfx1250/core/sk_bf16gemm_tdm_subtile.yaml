@@ -88,5 +88,9 @@ BenchmarkProblems:
           - Exact: [384, 384, 1, 7168]
           - Exact: [512, 512, 1, 7168]
           - Exact: [1024, 1024, 1, 7168]
+          # Tail loop with K % 32 in [9, 23]: the K mask splits a WMMA K slice
+          - Exact: [96, 96, 1, 272]
+          - Exact: [96, 96, 1, 400]
+          - Exact: [96, 96, 1, 401]
         - ActivationArgs:
           - [Enum: none]
