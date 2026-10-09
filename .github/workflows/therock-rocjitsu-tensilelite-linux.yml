@@ -189,6 +189,8 @@ jobs:
       - name: Run rocjitsu tensilelite tests
         id: tests
         # The suite supervisor stops earlier, leaving time to reap and report.
+        # Recorded durations start the longest tests first; refresh them from
+        # a run's uploaded durations.json.
         timeout-minutes: 345
         run: |
           set -o pipefail
@@ -199,6 +201,7 @@ jobs:
               --config "${REPORT_DIR}/rocjitsu-config.json" -- \
             python -m pytest "${TENSILELITE_ROOT}/Tensile/Tests/common/test_config.py" \
               -p rocjitsu_pytest --rocjitsu-report-dir="${REPORT_DIR}" \
+              --rocjitsu-durations="${SCRIPTS_DIR}/rocjitsu_tensilelite_durations.json" \
               -m "${ROCJITSU_TARGET}" --gpu-targets="${ROCJITSU_TARGET}" \
               -v -s -n "${PYTEST_WORKERS}" --client-lock-scope=worker \
               --timeout="${PER_TEST_TIMEOUT}" \

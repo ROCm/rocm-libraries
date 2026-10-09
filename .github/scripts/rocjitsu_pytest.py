@@ -79,8 +79,52 @@ class Progress:
         self.save()
 
 
+def duration_key(nodeid):
+    """Drop the file path so recorded durations survive a different rootdir."""
+    return nodeid.rpartition("::")[2]
+
+
+def longest_paired_with_shortest(items, durations):
+    """Order tests as longest, shortest, next longest, next shortest, ...
+
+    pytest-xdist's load scheduler hands each worker consecutive tests and keeps
+    one queued behind the running test. Pairing every long test with a short one
+    starts the long tests first and keeps them from queuing behind each other,
+    which otherwise sets the suite's wall time. Tests without a recorded duration
+    count as the longest.
+    """
+    longest = max(durations.values(), default=0)
+    ranked = sorted(
+        items,
+        key=lambda item: (
+            -durations.get(duration_key(item.nodeid), longest),
+            item.nodeid,
+        ),
+    )
+    order = []
+    while ranked:
+        order.append(ranked.pop(0))
+        if ranked:
+            order.append(ranked.pop())
+    return order
+
+
 def pytest_addoption(parser):
     parser.addoption("--rocjitsu-report-dir")
+    parser.addoption(
+        "--rocjitsu-durations",
+        help="JSON of test id to seconds from an earlier run, used to order tests",
+    )
+
+
+# Every xdist worker collects separately, so this runs in each of them and must
+# produce the same order; it runs last to order only the selected tests.
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config, items):
+    path = config.getoption("--rocjitsu-durations")
+    if path:
+        durations = json.loads(Path(path).read_text())
+        items[:] = longest_paired_with_shortest(items, durations)
 
 
 def pytest_configure(config):

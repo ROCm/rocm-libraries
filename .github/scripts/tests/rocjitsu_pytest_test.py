@@ -21,7 +21,7 @@ class TestRocjitsuPytest(unittest.TestCase):
         self.reports = self.root / "reports"
         self.scripts = Path(__file__).parents[1]
 
-    def run_pytest(self, source, *, timeout=20, workers=0):
+    def run_pytest(self, source, *, timeout=20, workers=0, extra=()):
         test = self.root / "test_example.py"
         test.write_text(source)
         self.reports.mkdir(exist_ok=True)
@@ -48,6 +48,7 @@ class TestRocjitsuPytest(unittest.TestCase):
             "-p",
             "no:cacheprovider",
             "-q",
+            *extra,
             str(test),
         ]
         if workers:
@@ -134,6 +135,27 @@ def test_hang():
         self.assertFalse(
             Path(f"/proc/{pid}").exists(), "timed-out client was not reaped"
         )
+
+    def test_durations_pair_longest_with_shortest(self):
+        durations = self.root / "durations.json"
+        durations.write_text(
+            json.dumps({"test_run[a]": 1, "test_run[b]": 3, "test_run[c]": 5})
+        )
+        result, execution, progress = self.run_pytest(
+            """
+import pytest
+from pathlib import Path
+@pytest.mark.parametrize('name', 'abcdz')
+def test_run(name):
+    with Path(__file__).with_suffix('.order').open('a') as order:
+        order.write(name)
+""",
+            extra=["--rocjitsu-durations", str(durations)],
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(progress["passed"], 5)
+        # Unrecorded d and z tie with the longest, c; ties keep node id order.
+        self.assertEqual((self.root / "test_example.order").read_text(), "cadbz")
 
     def test_all_skipped_is_not_success(self):
         result, execution, progress = self.run_pytest(

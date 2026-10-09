@@ -1,9 +1,14 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Print per-test timing and outcome counts from the suite's JUnit XML."""
+"""Print per-test timing and outcome counts from the suite's JUnit XML.
+
+Also writes durations.json next to the report; copying it over
+rocjitsu_tensilelite_durations.json refreshes the order the suite runs in.
+"""
 
 import argparse
+import json
 from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
@@ -32,6 +37,10 @@ def main():
         for tc in ET.parse(junit).iter("testcase")
     ]
     tests.sort(key=lambda test: test[0], reverse=True)
+    durations = {name: round(seconds) for seconds, name, _ in tests}
+    (args.report_dir / "durations.json").write_text(
+        json.dumps(durations, indent=2, sort_keys=True) + "\n"
+    )
     total = sum(seconds for seconds, _, _ in tests)
     passed = sum(1 for _, _, status in tests if status == "PASSED")
     failed = sum(1 for _, _, status in tests if status == "FAILED")

@@ -3,6 +3,7 @@
 
 """Check the JUnit summary against pytest outcome semantics."""
 
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -32,6 +33,9 @@ class TestTensileliteReport(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+            durations = json.loads((Path(directory) / "durations.json").read_text())
+        self.assertEqual(durations["failed"], 2)
+        self.assertEqual(len(durations), 5)
         self.assertIn("5 tests, 1 passed, 2 failed, 2 skipped", result.stdout)
         self.assertIn("15s aggregate test time", result.stdout)
 
