@@ -243,14 +243,16 @@ Tests:
   denseld: [2]
   matrix: [rocsparse_matrix_random]
 
-# n = 262148 = 4 * 65537 selects COLS = 4 (65537 panels) and n = 524288 = 8 * 65536
-# selects COLS = 8 (65536 panels). Both are past the cap; the padded right-hand side
-# buffer is 0.5 GB and 1 GB respectively, which is why they sit in pre_checkin.
+# n = 262148 = 4 * 65537 selects COLS = 4 and n = 524296 = 8 * 65537 selects COLS = 8;
+# both ask for 65537 panels. The runtime accepts a grid.y of 65536 even though the
+# device reports 65535, so 65537 is the smallest panel count that is past the cap. The
+# padded right-hand side buffer is 0.5 GB and 1 GB respectively, which is why they sit
+# in pre_checkin.
 - name: gtsv
   category: pre_checkin
   function: gtsv
   precision: *single_precision
   M: [2]
-  N: [262148, 524288]
+  N: [262148, 524296]
   denseld: [2]
   matrix: [rocsparse_matrix_random]

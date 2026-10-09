@@ -138,7 +138,7 @@ namespace rocsparse
             {
                 if(rhs < n_remaining)
                 {
-                    B_modified[m * rhs + gid] = x[rhs];
+                    B_modified[static_cast<int64_t>(m) * rhs + gid] = x[rhs];
                 }
             }
         }
@@ -413,7 +413,7 @@ namespace rocsparse
         {
             if(rhs < n_remaining)
             {
-                const T d_mod = B_modified[m * rhs + gid];
+                const T d_mod = B_modified[static_cast<int64_t>(m) * rhs + gid];
 
                 // These are the solved x_interface values that affect this tile
                 const T x_interface_left  = B_spike[num_spikes * rhs + row_left];

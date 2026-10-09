@@ -311,14 +311,18 @@ Tests:
 # against the unfixed code and proves nothing. n = 524289 asks for 65537 blocks, the
 # smallest count the runtime actually rejects, since it accepts a grid.y of 65536 even
 # though the device reports 65535, so the last two blocks of right-hand sides are
-# reachable only through the new loop. denseld = m keeps this to about 2 GB of dense
-# right-hand sides plus an equally sized temporary buffer, which is why it sits in
-# pre_checkin. The harness residual check verifies all ldb * n entries numerically.
+# reachable only through the new loop. denseld = m keeps the dense right-hand sides at
+# 2 GB, but the routine also holds an equally sized temporary buffer, so the case needs
+# about 4.3 GB on the device and about 6.3 GB on the host (device_memory_gb and
+# host_memory_gb below). That is why it runs nightly rather than in pre_checkin. The
+# harness residual check verifies all ldb * n entries numerically.
 - name: gtsv_no_pivot
-  category: pre_checkin
+  category: nightly
   function: gtsv_no_pivot
   precision: *single_precision
   M: [1025]
   N: [524289]
   denseld: [1025]
+  device_memory_gb: 5
+  host_memory_gb: 7
   matrix: [rocsparse_matrix_random]
