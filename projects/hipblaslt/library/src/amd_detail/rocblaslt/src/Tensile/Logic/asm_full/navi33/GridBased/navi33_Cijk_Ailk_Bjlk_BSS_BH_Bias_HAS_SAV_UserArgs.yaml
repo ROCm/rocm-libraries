@@ -331,7 +331,7 @@ Solutions:
   MatrixInstM: 16
   MatrixInstN: 16
   MatrixInstruction: [16, 16, 16, 1]
-  MaxOccupancy: 40
+  MaxOccupancy: 9
   NoLdsWriteCode: false
   NoTailLoop: false
   NumElementsPerThread: 8
@@ -463,7 +463,7 @@ Solutions:
   MatrixInstM: 16
   MatrixInstN: 16
   MatrixInstruction: [16, 16, 16, 1]
-  MaxOccupancy: 40
+  MaxOccupancy: 9
   NoLdsWriteCode: false
   NoTailLoop: false
   NumElementsPerThread: 8
@@ -861,7 +861,7 @@ Solutions:
   MatrixInstM: 16
   MatrixInstN: 16
   MatrixInstruction: [16, 16, 16, 1]
-  MaxOccupancy: 40
+  MaxOccupancy: 5
   NoLdsWriteCode: false
   NoTailLoop: false
   NumElementsPerThread: 8
