@@ -129,7 +129,11 @@ public:
     }
 
     /// Indices into nodes(), with each producer before the nodes that read its results.
-    /// Ties keep authored order. Nodes in a dependency cycle come last, in authored order.
+    /// Each step takes the first unplaced node, in authored order, whose producers are all
+    /// placed. When a dependency cycle leaves no node ready, the step takes the first
+    /// unplaced node and the next step resumes the ready-first rule. A cyclic pattern
+    /// matches only a graph with the same cycle, and hipDNN graphs are acyclic, so it
+    /// declines every graph.
     const std::vector<size_t>& matchOrder() const noexcept
     {
         return _matchOrder;

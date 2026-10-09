@@ -1146,6 +1146,62 @@ packaging dormant.")
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_resolve_op_schema_registry()
+#   Declare HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY, the op-schema registry every root
+#   resolves UED graph patterns against, and fail configure if the file is missing.
+#
+#   The default is the registry that matches the hipDNN this provider builds against,
+#   since the runtime header the matcher runs on comes from that hipDNN. An installed
+#   hipDNN built with HIPDNN_ENABLE_KERNEL_INGESTOR (imported hipdnn_flatbuffers_sdk
+#   target) names its registry, under <prefix>/share/hipdnn_flatbuffers_sdk/, through
+#   its package config. An in-tree hipDNN, or a build without the target, uses the copy
+#   generated and committed beside the repository's graph schemas.
+#
+#   The default is recomputed on every configure. A cached value that equals the default
+#   the previous configure computed was never overridden, so it follows the new default
+#   when the build is reconfigured against a different hipDNN. Any other value was set
+#   by the user and is kept.
+# ---------------------------------------------------------------------------
+function(_hkp_resolve_op_schema_registry)
+    get_filename_component(_default
+        "${HKP_PKG_DIR}/../../../projects/hipdnn/flatbuffers_sdk/op_schema_registry.json"
+        ABSOLUTE)
+    if(TARGET hipdnn_flatbuffers_sdk)
+        get_target_property(_flatbuffers_sdk_imported hipdnn_flatbuffers_sdk IMPORTED)
+        if(_flatbuffers_sdk_imported)
+            set(_default "${HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY}")
+        else()
+            get_target_property(_flatbuffers_sdk_dir hipdnn_flatbuffers_sdk SOURCE_DIR)
+            set(_default "${_flatbuffers_sdk_dir}/op_schema_registry.json")
+        endif()
+    endif()
+
+    if(NOT DEFINED CACHE{HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}
+       OR "$CACHE{HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}" STREQUAL
+          "$CACHE{_HKP_OP_SCHEMA_REGISTRY_DEFAULT}")
+        set(HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY "${_default}"
+            CACHE FILEPATH
+            "The op-schema registry JSON that UED graph_match.nodes patterns resolve \
+against when descriptors are packed. Defaults to the registry of the hipDNN the \
+provider builds against."
+            FORCE)
+    endif()
+    set(_HKP_OP_SCHEMA_REGISTRY_DEFAULT "${_default}" CACHE INTERNAL
+        "The HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY default the last configure computed.")
+
+    if(NOT EXISTS "${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}")
+        message(FATAL_ERROR
+            "hkp: the op-schema registry does not exist: "
+            "'${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}'. Descriptor packaging "
+            "resolves UED graph patterns against it. Set "
+            "HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY to the op_schema_registry.json "
+            "of the hipDNN this provider builds against: an installed hipDNN built "
+            "with HIPDNN_ENABLE_KERNEL_INGESTOR ships it under "
+            "share/hipdnn_flatbuffers_sdk/.")
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # _hkp_disabled_families(<out_var>)
 #   The folders of HKP_DESCRIPTOR_FAMILIES whose option is OFF in this build. An entry
 #   that is not `<folder>=<option>`, or whose option is not defined, is a configure error.
@@ -1635,40 +1691,7 @@ function(hkp_add_packaging)
 
     _hkp_resolve_production_root(_source_root)
 
-    # The op-schema registry defaults to the one that matches the hipDNN this provider
-    # builds against, since the runtime header the matcher runs on comes from that
-    # hipDNN. An installed hipDNN built with HIPDNN_ENABLE_KERNEL_INGESTOR (imported
-    # hipdnn_flatbuffers_sdk target) names its registry, under
-    # <prefix>/share/hipdnn_flatbuffers_sdk/, through its package
-    # config. An in-tree hipDNN, or a build without the target, uses the copy generated
-    # and committed beside the repository's graph schemas.
-    get_filename_component(_default_op_schema_registry
-        "${HKP_PKG_DIR}/../../../projects/hipdnn/flatbuffers_sdk/op_schema_registry.json"
-        ABSOLUTE)
-    if(TARGET hipdnn_flatbuffers_sdk)
-        get_target_property(_flatbuffers_sdk_imported hipdnn_flatbuffers_sdk IMPORTED)
-        if(_flatbuffers_sdk_imported)
-            set(_default_op_schema_registry "${HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY}")
-        else()
-            get_target_property(_flatbuffers_sdk_dir hipdnn_flatbuffers_sdk SOURCE_DIR)
-            set(_default_op_schema_registry "${_flatbuffers_sdk_dir}/op_schema_registry.json")
-        endif()
-    endif()
-    set(HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY "${_default_op_schema_registry}"
-        CACHE FILEPATH
-        "The op-schema registry JSON that UED graph_match.nodes patterns resolve \
-against when descriptors are packed. Defaults to the registry of the hipDNN the \
-provider builds against.")
-    if(NOT EXISTS "${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}")
-        message(FATAL_ERROR
-            "hkp: the op-schema registry does not exist: "
-            "'${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}'. Descriptor packaging "
-            "resolves UED graph patterns against it. Set "
-            "HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY to the op_schema_registry.json "
-            "of the hipDNN this provider builds against: an installed hipDNN built "
-            "with HIPDNN_ENABLE_KERNEL_INGESTOR ships it under "
-            "share/hipdnn_flatbuffers_sdk/.")
-    endif()
+    _hkp_resolve_op_schema_registry()
 
     # One list for every root, so "every root is wired to rocKE identically" holds in
     # both modes rather than at six sites that have to agree.

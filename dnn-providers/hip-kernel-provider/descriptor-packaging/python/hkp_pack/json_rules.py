@@ -26,14 +26,32 @@ def _reject_duplicate_pairs(pairs):
     return dict(pairs)
 
 
-def loads_strict(text):
-    """Parse JSON text, rejecting a duplicate key in any object at any depth.
+class NonStandardLiteralError(ValueError):
+    """A JSON document uses NaN, Infinity or -Infinity, which JSON does not define."""
 
-    A plain parse keeps the last of two equal keys, so a document the runtime
-    refuses would pack silently. Raises DuplicateKeyError or
+    def __init__(self, literal):
+        super().__init__(f"non-standard literal '{literal}'")
+        self.literal = literal
+
+
+def _reject_constant(literal):
+    raise NonStandardLiteralError(literal)
+
+
+def loads_strict(text):
+    """Parse JSON text as the runtime loader does.
+
+    Rejects a duplicate key in any object at any depth, and the NaN, Infinity
+    and -Infinity literals. A plain parse keeps the last of two equal keys and
+    accepts those literals, so a document the runtime refuses would pack
+    silently. Raises DuplicateKeyError, NonStandardLiteralError or
     json.JSONDecodeError.
     """
-    return json.loads(text, object_pairs_hook=_reject_duplicate_pairs)
+    return json.loads(
+        text,
+        object_pairs_hook=_reject_duplicate_pairs,
+        parse_constant=_reject_constant,
+    )
 
 
 def is_extension_key(key):
@@ -49,4 +67,7 @@ def require_known_keys(doc, allowed, where):
     """
     for key in sorted(doc):
         if key not in allowed and not is_extension_key(key):
-            raise HkpPackError(f"{where} has unknown key '{key}'")
+            raise HkpPackError(
+                f"unknown key '{key}' in {where}; "
+                "extension keys must start with 'x-' or '_'"
+            )

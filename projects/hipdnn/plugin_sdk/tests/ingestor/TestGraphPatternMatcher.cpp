@@ -24,6 +24,7 @@ namespace
 {
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_flatbuffers_sdk::data_objects;
+using hipdnn_plugin_sdk::ingestor::testing::BINARY_POINTWISE_PATTERN;
 using hipdnn_plugin_sdk::ingestor::testing::compilePatternText;
 using hipdnn_plugin_sdk::ingestor::testing::convolutionBwdDataNode;
 using hipdnn_plugin_sdk::ingestor::testing::convolutionFwdNode;
@@ -34,10 +35,6 @@ using hipdnn_plugin_sdk::ingestor::testing::PatternGraphBuilder;
 using hipdnn_plugin_sdk::ingestor::testing::patternTensor;
 using hipdnn_plugin_sdk::ingestor::testing::PatternTestGraph;
 using hipdnn_plugin_sdk::ingestor::testing::pointwiseNode;
-
-/// The pattern equivalent of the native single-node binary pointwise matcher.
-const std::string BINARY_POINTWISE = R"([{"kind": "op", "id": "pointwise", "op": "pointwise",
-    "operands": {"in_0": "$input_a", "in_1": "$input_b"}, "results": {"out_0": "$output"}}])";
 
 const std::string OPTIONAL_SECOND_OPERAND = R"([{"kind": "op", "id": "pointwise",
     "op": "pointwise", "operands": {"in_0": "$input_a", "in_1": "$input_b?"},
@@ -132,7 +129,7 @@ flatbuffers::FlatBufferBuilder pointwiseGraphTaggedAs(NodeAttributes type)
 
 TEST(TestGraphPatternMatcher, SinglePointwisePublishesTheCanonicalTokenMap)
 {
-    const auto compiled = compilePatternText(BINARY_POINTWISE);
+    const auto compiled = compilePatternText(BINARY_POINTWISE_PATTERN);
     const auto graph = binaryPointwiseGraph(addAttributes()).build();
     const auto context = graph.context();
 
@@ -156,7 +153,7 @@ TEST(TestGraphPatternMatcher, PublishesOptionalAttributesOnlyWhenSet)
     auto attributes = addAttributes();
     attributes.relu_lower_clip = 0.5F;
     attributes.axis_tensor_uid = 7;
-    const auto bound = match(BINARY_POINTWISE, binaryPointwiseGraph(attributes));
+    const auto bound = match(BINARY_POINTWISE_PATTERN, binaryPointwiseGraph(attributes));
     ASSERT_TRUE(bound.has_value());
     EXPECT_EQ(std::get<double>(bound->at("pointwise.relu_lower_clip")), 0.5);
     EXPECT_EQ(tryGetBoundInt(*bound, "pointwise.axis_tensor_uid"), 7);
@@ -171,7 +168,7 @@ TEST(TestGraphPatternMatcher, DeclinesNonfiniteFloatAttribute)
     {
         auto attributes = addAttributes();
         attributes.swish_beta = value;
-        EXPECT_FALSE(match(BINARY_POINTWISE, binaryPointwiseGraph(attributes)).has_value());
+        EXPECT_FALSE(match(BINARY_POINTWISE_PATTERN, binaryPointwiseGraph(attributes)).has_value());
     }
 }
 
@@ -181,41 +178,41 @@ TEST(TestGraphPatternMatcher, DeclinesNodeCountMismatch)
     graph.tensor(1).tensor(2).tensor(3).tensor(4);
     graph.node(pointwiseNode(PointwiseMode::ADD, 1, 2, 3));
     graph.node(pointwiseNode(PointwiseMode::RELU_FWD, 3, std::nullopt, 4));
-    EXPECT_FALSE(match(BINARY_POINTWISE, graph).has_value());
+    EXPECT_FALSE(match(BINARY_POINTWISE_PATTERN, graph).has_value());
 }
 
 TEST(TestGraphPatternMatcher, DeclinesEmptyGraph)
 {
-    EXPECT_FALSE(match(BINARY_POINTWISE, PatternGraphBuilder{}).has_value());
+    EXPECT_FALSE(match(BINARY_POINTWISE_PATTERN, PatternGraphBuilder{}).has_value());
 }
 
 TEST(TestGraphPatternMatcher, DeclinesWrongOpType)
 {
     PatternGraphBuilder graph;
     graph.tensor(1).tensor(2).tensor(3).node(convolutionFwdNode(1, 2, 3));
-    EXPECT_FALSE(match(BINARY_POINTWISE, graph).has_value());
+    EXPECT_FALSE(match(BINARY_POINTWISE_PATTERN, graph).has_value());
 }
 
 TEST(TestGraphPatternMatcher, DeclinesMissingRequiredOperand)
 {
     PatternGraphBuilder graph;
     graph.tensor(1).tensor(3).node(pointwiseNode(PointwiseMode::ABS, 1, std::nullopt, 3));
-    EXPECT_FALSE(match(BINARY_POINTWISE, graph).has_value());
+    EXPECT_FALSE(match(BINARY_POINTWISE_PATTERN, graph).has_value());
 }
 
 TEST(TestGraphPatternMatcher, DeclinesEdgeNamingAnUnknownTensor)
 {
     PatternGraphBuilder graph;
     graph.tensor(1).tensor(3).node(pointwiseNode(PointwiseMode::ADD, 1, 9, 3));
-    EXPECT_FALSE(match(BINARY_POINTWISE, graph).has_value());
+    EXPECT_FALSE(match(BINARY_POINTWISE_PATTERN, graph).has_value());
 }
 
 TEST(TestGraphPatternMatcher, DeclinesGraphRepeatingATensorUid)
 {
     auto graph = binaryPointwiseGraph(addAttributes());
-    ASSERT_TRUE(match(BINARY_POINTWISE, graph).has_value());
+    ASSERT_TRUE(match(BINARY_POINTWISE_PATTERN, graph).has_value());
     graph.tensor(3);
-    EXPECT_FALSE(match(BINARY_POINTWISE, graph).has_value());
+    EXPECT_FALSE(match(BINARY_POINTWISE_PATTERN, graph).has_value());
 }
 
 TEST(TestGraphPatternMatcher, DeclinesTensorTwoNodesProduce)
@@ -231,7 +228,7 @@ TEST(TestGraphPatternMatcher, DeclinesTensorTwoNodesProduce)
 
 TEST(TestGraphPatternMatcher, DeclinesNodeTypeTheRegistryDoesNotDescribe)
 {
-    const auto compiled = compilePatternText(BINARY_POINTWISE);
+    const auto compiled = compilePatternText(BINARY_POINTWISE_PATTERN);
     const PatternTestGraph known(pointwiseGraphTaggedAs(NodeAttributes::PointwiseAttributes));
     ASSERT_TRUE(matchGraphPattern(*compiled, known.context()).has_value());
 
@@ -267,7 +264,7 @@ TEST(TestGraphPatternMatcher, DeclinesUnnamedOptionalOperandThatIsPresent)
     ternary.in_2_tensor_uid = 4;
     auto graph = binaryPointwiseGraph(ternary);
     graph.tensor(4);
-    EXPECT_FALSE(match(BINARY_POINTWISE, graph).has_value());
+    EXPECT_FALSE(match(BINARY_POINTWISE_PATTERN, graph).has_value());
 }
 
 TEST(TestGraphPatternMatcher, DeclinesUnnamedOptionalResultThatIsPresent)
@@ -297,7 +294,7 @@ TEST(TestGraphPatternMatcher, AliasedOperandsMatchDistinctVariables)
 {
     PatternGraphBuilder graph;
     graph.tensor(1).tensor(3).node(pointwiseNode(PointwiseMode::MUL, 1, 1, 3));
-    const auto bound = match(BINARY_POINTWISE, graph);
+    const auto bound = match(BINARY_POINTWISE_PATTERN, graph);
     ASSERT_TRUE(bound.has_value());
     EXPECT_EQ(tryGetBoundInt(*bound, "input_a"), 1);
     EXPECT_EQ(tryGetBoundInt(*bound, "input_b"), 1);

@@ -97,9 +97,11 @@ def test_ued_fixture_validity_matches_the_runtime(tmp_path, fixture):
 @pytest.mark.quick
 @pytest.mark.parametrize("fixture", _VALID_FIXTURES, ids=lambda path: path.stem)
 def test_valid_fixture_conforms_to_the_schema(fixture):
-    # The descriptor-packaging tests declare no dependencies beyond pytest, so
-    # a host without jsonschema skips this check.
-    jsonschema = pytest.importorskip("jsonschema")
+    # Imported here, not at module scope, so a host without jsonschema fails
+    # this test alone rather than the collection of the whole module. CI
+    # installs it from .github/requirements-hipdnn-superbuild-ci.txt.
+    import jsonschema
+
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     jsonschema.Draft7Validator.check_schema(schema)
     ued = json.loads(_ued_text(_read_case(fixture)))
@@ -152,6 +154,20 @@ def test_duplicate_json_key_names_the_key_and_the_file(tmp_path):
     root = _ued_root(tmp_path, duplicated, _NODES_UED["metadata"])
 
     with pytest.raises(HkpPackError, match="fixture.ued.json has duplicate key 'name'"):
+        load_flat_input(root)
+
+
+@pytest.mark.quick
+def test_nan_literal_names_the_literal_and_the_file(tmp_path):
+    # Under an extension key the value is otherwise ignored, so only the
+    # literal itself, which the runtime's parser refuses, can fail the file.
+    text = json.dumps({**_NODES_UED, "x-score": float("nan")})
+    assert "NaN" in text
+    root = _ued_root(tmp_path, text, _NODES_UED["metadata"])
+
+    with pytest.raises(
+        HkpPackError, match="fixture.ued.json has non-standard literal 'NaN'"
+    ):
         load_flat_input(root)
 
 

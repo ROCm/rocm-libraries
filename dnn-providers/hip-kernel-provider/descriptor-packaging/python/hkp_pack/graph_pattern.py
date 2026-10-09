@@ -21,7 +21,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import HkpPackError
-from .json_rules import DuplicateKeyError, loads_strict, require_known_keys
+from .json_rules import (
+    DuplicateKeyError,
+    NonStandardLiteralError,
+    loads_strict,
+    require_known_keys,
+)
 
 MAX_PATTERN_NODES = 32
 
@@ -111,7 +116,7 @@ def _load_op_schema_registry(path):
         raise HkpPackError(f"cannot read op-schema registry {path}: {exc}") from exc
     try:
         doc = loads_strict(text)
-    except (DuplicateKeyError, json.JSONDecodeError) as exc:
+    except (DuplicateKeyError, NonStandardLiteralError, json.JSONDecodeError) as exc:
         raise HkpPackError(f"malformed op-schema registry {path}: {exc}") from exc
     ops = doc.get("ops") if isinstance(doc, dict) else None
     if not isinstance(ops, dict):

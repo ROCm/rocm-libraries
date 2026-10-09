@@ -299,14 +299,23 @@ bool pointwiseSubMatches(const MatchContext& context, const BoundTokens& bound)
     return pointwiseOperationMatches(context, bound, data_objects::PointwiseMode::SUB);
 }
 
-/// Accepts only kernels compiled for the binding's dtype.
+/**
+ * @brief Kernel-scoped applicability: accepts only kernels compiled for the binding's
+ *        dtype, and only a binding the dispatch can serve.
+ *
+ * A KDP may list this as its only criterion, and a declarative `graph_match` can admit
+ * graphs the native one refuses. So it re-checks the dispatch preconditions: one node,
+ * three single-element operands of one dtype, a supported rank and layout. Without that
+ * check a multi-element tensor reaches a kernel that writes only element 0.
+ */
 bool pointwiseKernelMatches(const MatchContext& /*context*/,
                             const BoundTokens& bound,
                             const KernelDefinition& kernel)
 {
     const auto* dataType
         = tryGetBoundValue<std::string>(bound, tensorField(INPUT_A_TOKEN, DTYPE_FIELD));
-    return dataType != nullptr && kernel.getStringMetadata(std::string(DTYPE_FIELD)) == *dataType;
+    return dataType != nullptr && kernel.getStringMetadata(std::string(DTYPE_FIELD)) == *dataType
+           && isServableBinding(bound);
 }
 
 double pointwiseScore(const MatchContext& /*context*/,

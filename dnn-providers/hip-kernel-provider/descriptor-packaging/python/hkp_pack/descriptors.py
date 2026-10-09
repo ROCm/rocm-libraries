@@ -5,7 +5,12 @@ from pathlib import Path, PureWindowsPath
 
 from .errors import HkpPackError
 from .graph_pattern import validate_graph_pattern
-from .json_rules import DuplicateKeyError, loads_strict, require_known_keys
+from .json_rules import (
+    DuplicateKeyError,
+    NonStandardLiteralError,
+    loads_strict,
+    require_known_keys,
+)
 
 KDP_TYPE = "kdp"
 UKD_TYPE = "ukd"
@@ -119,6 +124,10 @@ def _read_json(path):
     except DuplicateKeyError as exc:
         raise HkpPackError(
             f"descriptor JSON in {path.name} has duplicate key '{exc.key}'"
+        ) from exc
+    except NonStandardLiteralError as exc:
+        raise HkpPackError(
+            f"descriptor JSON in {path.name} has non-standard literal '{exc.literal}'"
         ) from exc
     except json.JSONDecodeError as exc:
         raise HkpPackError(f"malformed descriptor JSON in {path.name}: {exc}") from exc

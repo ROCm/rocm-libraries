@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -122,61 +123,51 @@ TEST(TestConvFwdGraphMatcher, RejectsScalarAndVirtualStateOnEveryOperand)
     // The baseline must match, or the refusals below prove nothing.
     EXPECT_TRUE(matches(GraphFixture(transformGraph(buildConvFwdGraph(), unitShape)).context()));
 
-    for(size_t operand = 0; operand < 3; ++operand)
+    const std::array<const char*, 3> operandNames{"x", "w", "y"};
+    for(size_t operand = 0; operand < operandNames.size(); ++operand)
     {
-        for(int state = 0; state < 4; ++state)
+        for(const auto& state : UNSERVABLE_OPERAND_STATES)
         {
-            const GraphFixture fixture(transformGraph(buildConvFwdGraph(), [=](auto& graph) {
+            SCOPED_TRACE(std::string(operandNames[operand]) + " " + state.name);
+            const GraphFixture fixture(transformGraph(buildConvFwdGraph(), [&](auto& graph) {
                 unitShape(graph);
-                auto& tensor = *graph.tensors[operand];
-                tensor.virtual_ = state == 0;
-                tensor.is_runtime_pass_by_value = state == 1 || state == 3;
-                if(state >= 2)
-                {
-                    tensor.value.Set(data_objects::Float32Value(2.0f));
-                }
+                applyOperandState(*graph.tensors[operand], state);
             }));
-            EXPECT_FALSE(matches(fixture.context())) << operand << ":" << state;
+            EXPECT_FALSE(matches(fixture.context()));
         }
     }
 }
 
 TEST(TestConvFwdGraphMatcher, RejectsMalformedAndUnrepresentableTensorShapes)
 {
-    for(int state = 0; state < 6; ++state)
+    struct MalformedShapeCase
     {
-        const GraphFixture fixture(transformGraph(buildConvFwdGraph(), [=](auto& graph) {
-            auto& tensor = *graph.tensors[0];
-            switch(state)
-            {
-            case 0:
-                tensor.dims.clear();
-                break;
-            case 1:
-                tensor.strides.clear();
-                break;
-            case 2:
-                tensor.dims[2] = 0;
-                break;
-            case 3:
-                tensor.dims[2] = -1;
-                break;
-            case 4:
-                tensor.dims[0] = std::numeric_limits<int64_t>::max();
-                break;
-            case 5:
-                // Change x and y together so the batch sizes agree. Strides ignore the
-                // outermost extent, so the only fault is an extent too large for the
-                // kernel's int arguments.
-                tensor.dims[0] = static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
-                graph.tensors[2]->dims[0] = tensor.dims[0];
-                break;
-            default:
-                ADD_FAILURE() << "Unhandled tensor shape fixture state " << state;
-                break;
-            }
-        }));
-        EXPECT_FALSE(matches(fixture.context())) << state;
+        const char* name;
+        void (*mutate)(data_objects::GraphT&);
+    };
+    const std::array<MalformedShapeCase, 6> cases{{
+        {"EmptyDims", [](data_objects::GraphT& graph) { graph.tensors[0]->dims.clear(); }},
+        {"EmptyStrides", [](data_objects::GraphT& graph) { graph.tensors[0]->strides.clear(); }},
+        {"ZeroExtent", [](data_objects::GraphT& graph) { graph.tensors[0]->dims[2] = 0; }},
+        {"NegativeExtent", [](data_objects::GraphT& graph) { graph.tensors[0]->dims[2] = -1; }},
+        {"Int64MaxExtent",
+         [](data_objects::GraphT& graph) {
+             graph.tensors[0]->dims[0] = std::numeric_limits<int64_t>::max();
+         }},
+        {"ExtentPastIntMax",
+         // Change x and y together so the batch sizes agree. Strides ignore the outermost
+         // extent, so the only fault is an extent too large for the kernel's int arguments.
+         [](data_objects::GraphT& graph) {
+             const auto pastIntMax = static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
+             graph.tensors[0]->dims[0] = pastIntMax;
+             graph.tensors[2]->dims[0] = pastIntMax;
+         }},
+    }};
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.name);
+        const GraphFixture fixture(transformGraph(buildConvFwdGraph(), testCase.mutate));
+        EXPECT_FALSE(matches(fixture.context()));
     }
 }
 

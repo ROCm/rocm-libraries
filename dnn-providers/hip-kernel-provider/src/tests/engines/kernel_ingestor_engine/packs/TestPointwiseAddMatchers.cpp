@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <limits>
 #include <optional>
 #include <string>
@@ -60,7 +61,7 @@ TEST(TestPointwiseAddGraphMatcher, AcceptsTheUpperSupportedRank)
     EXPECT_TRUE(matches(fixture.context()));
 }
 
-TEST(TestPointwiseAddGraphMatcher, RetainsSingletonStrideAndDtypeAdmission)
+TEST(TestPointwiseAddGraphMatcher, AdmitsZeroSingletonStridesAndDefersDtypeToTheKernel)
 {
     const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::ADD,
                                                    data_objects::DataType::INT32,
@@ -77,20 +78,16 @@ TEST(TestPointwiseAddGraphMatcher, RejectsScalarAndVirtualStateOnEveryOperand)
     // The baseline must match, or the refusals below prove nothing.
     EXPECT_TRUE(matches(GraphFixture(buildPointwiseGraph()).context()));
 
-    for(size_t operand = 0; operand < 3; ++operand)
+    const std::array<const char*, 3> operandNames{"input_a", "input_b", "output"};
+    for(size_t operand = 0; operand < operandNames.size(); ++operand)
     {
-        for(int state = 0; state < 4; ++state)
+        for(const auto& state : UNSERVABLE_OPERAND_STATES)
         {
-            const GraphFixture fixture(transformGraph(buildPointwiseGraph(), [=](auto& graph) {
-                auto& tensor = *graph.tensors[operand];
-                tensor.virtual_ = state == 0;
-                tensor.is_runtime_pass_by_value = state == 1 || state == 3;
-                if(state >= 2)
-                {
-                    tensor.value.Set(data_objects::Float32Value(2.0f));
-                }
+            SCOPED_TRACE(std::string(operandNames[operand]) + " " + state.name);
+            const GraphFixture fixture(transformGraph(buildPointwiseGraph(), [&](auto& graph) {
+                applyOperandState(*graph.tensors[operand], state);
             }));
-            EXPECT_FALSE(matches(fixture.context())) << operand << ":" << state;
+            EXPECT_FALSE(matches(fixture.context()));
         }
     }
 }
@@ -104,7 +101,7 @@ TEST(TestPointwiseAddBinding, RejectsInvalidOptionalNodeScalarRatherThanOmitting
     EXPECT_FALSE(matches(fixture.context()));
 }
 
-TEST(TestPointwiseAddBinding, ResidentFactsRetainUidZeroAndSubtractionOrder)
+TEST(TestPointwiseAddBinding, BindsAZeroUidOperandInTheNodesOperandOrder)
 {
     const GraphFixture fixture(
         transformGraph(buildPointwiseGraph(data_objects::PointwiseMode::SUB), [](auto& graph) {
@@ -374,6 +371,24 @@ TEST(TestPointwiseAddKernelMatcher, IgnoresBlockSizeWhichTheGraphDoesNotConstrai
 
     EXPECT_TRUE(matchesKernel(POINTWISE_ADD, fixture.context(), makeKernel(64, "FLOAT")));
     EXPECT_TRUE(matchesKernel(POINTWISE_ADD, fixture.context(), makeKernel(256, "FLOAT")));
+}
+
+/// The kernel criterion can be a KDP's only criterion, under a declarative `graph_match`
+/// that admits graphs the native match refuses. It must decline those on its own.
+TEST(TestPointwiseAddKernelMatcher, DeclinesAPatternBindingTheDispatchCannotServe)
+{
+    const GraphFixture servable(buildPointwiseGraph());
+    const GraphFixture multiElement(buildPointwiseGraph(
+        data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1, 1, 2, 2}));
+    const auto servableBound = matchPattern(pointwisePattern(), servable.context());
+    const auto multiElementBound = matchPattern(pointwisePattern(), multiElement.context());
+    ASSERT_TRUE(servableBound.has_value());
+    ASSERT_TRUE(multiElementBound.has_value());
+
+    const auto kernelMatches = kernelMatcher(POINTWISE_ADD);
+    const auto kernel = makeKernel(64, "FLOAT");
+    EXPECT_TRUE(kernelMatches(servable.context(), *servableBound, kernel));
+    EXPECT_FALSE(kernelMatches(multiElement.context(), *multiElementBound, kernel));
 }
 
 // Score and binding

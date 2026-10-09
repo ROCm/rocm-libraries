@@ -131,6 +131,24 @@ def test_duplicate_id_across_folders_rejected(tmp_path, empty_arch_fixture):
 
 
 @pytest.mark.quick
+def test_kdp_duplicate_json_key_names_the_key_and_the_file(
+    tmp_path, empty_arch_fixture
+):
+    # Stricter than the runtime, which keeps the last occurrence in a KDP. Both
+    # values of the duplicated key are valid, so only the duplicate can fail.
+    root = tmp_path / "root"
+    folder = _nest(root, "hip", empty_arch_fixture)
+    kdp = folder / "solo.kdp.json"
+    text = kdp.read_text(encoding="utf-8")
+    duplicated = text.replace('"name": ', '"name": "Solo pack (first)", "name": ', 1)
+    assert duplicated != text
+    kdp.write_text(duplicated, encoding="utf-8")
+
+    with pytest.raises(HkpPackError, match="solo.kdp.json has duplicate key 'name'"):
+        load_flat_input(root)
+
+
+@pytest.mark.quick
 def test_a_hidden_folder_is_skipped_and_logged(tmp_path, empty_arch_fixture):
     """A dot-prefixed folder is passed over, and every file it holds is named.
 
@@ -1076,7 +1094,7 @@ def test_generic_descriptors_are_validated_against_the_loader_schema(
         ({"metadata": ""}, None, "field 'metadata' must be a nonempty string"),
         ({"heuristic": 7}, None, "field 'heuristic' must be a nonempty string"),
         ({"name": "test:engine\n"}, None, "must be scoped 'namespace:local'"),
-        ({"tensor_roots": ["input_a"]}, None, "has unknown key 'tensor_roots'"),
+        ({"tensor_roots": ["input_a"]}, None, "unknown key 'tensor_roots' in "),
         (
             {"graph_match": {"native": ""}},
             None,

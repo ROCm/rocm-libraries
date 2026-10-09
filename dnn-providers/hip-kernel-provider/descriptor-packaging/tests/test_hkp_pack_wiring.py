@@ -82,7 +82,7 @@ hkp_register_tests("" unused "")
             consumer_preamble("HkpPackWiring") + body, encoding="utf-8"
         )
 
-    def configure(self, *, python=None, success=True):
+    def configure(self, *definitions, python=None, success=True):
         proc = self.run(
             self.cmake,
             "-S",
@@ -93,6 +93,7 @@ hkp_register_tests("" unused "")
             "Ninja",
             f"-DCMAKE_MAKE_PROGRAM={self.make_program}",
             f"-DPython3_EXECUTABLE={python or self.python}",
+            *definitions,
             success=success,
         )
         return " ".join((proc.stdout + proc.stderr).split())
@@ -300,6 +301,31 @@ _hkp_wire_root(
     {keywords}
     EXCLUDE_FOLDERS {exclude})
 """
+
+
+def test_the_op_schema_registry_follows_its_default_until_overridden(consumer):
+    """An unset registry follows the default across reconfigures, as when the
+    build is pointed at a different hipDNN; an explicit value survives a later
+    change of the default."""
+    registries = {name: consumer.root / f"{name}.json" for name in "abcd"}
+    for path in registries.values():
+        path.write_text("{}", encoding="utf-8")
+    consumer._write(
+        f"""add_library(hipdnn_flatbuffers_sdk INTERFACE IMPORTED)
+set(HIPDNN_FLATBUFFERS_SDK_OP_SCHEMA_REGISTRY "${{HKP_TEST_DEFAULT}}")
+_hkp_resolve_op_schema_registry()
+{_report("registry", "${HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}")}
+"""
+    )
+
+    def registry(definition, name):
+        output = consumer.configure(f"-D{definition}={registries[name]}")
+        return Path(_reported(output, "registry"))
+
+    assert registry("HKP_TEST_DEFAULT", "a") == registries["a"]
+    assert registry("HKP_TEST_DEFAULT", "b") == registries["b"]
+    assert registry("HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY", "c") == registries["c"]
+    assert registry("HKP_TEST_DEFAULT", "d") == registries["c"]
 
 
 @pytest.mark.parametrize(

@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -317,6 +318,36 @@ inline void expectSameBinding(const hipdnn_plugin_sdk::ingestor::BoundTokens& na
     for(const auto& [name, value] : native)
     {
         EXPECT_TRUE(declarative.at(name) == value) << name;
+    }
+}
+
+/// An operand state no pack dispatches from: a virtual tensor has no buffer, and a
+/// pass-by-value or scalar-valued tensor carries a host value. Every pack refuses each of
+/// these on every operand.
+struct UnservableOperandState
+{
+    const char* name;
+    bool isVirtual;
+    bool isRuntimePassByValue;
+    bool hasScalarValue;
+};
+
+inline constexpr std::array<UnservableOperandState, 4> UNSERVABLE_OPERAND_STATES{{
+    {"Virtual", true, false, false},
+    {"RuntimePassByValue", false, true, false},
+    {"ScalarValue", false, false, true},
+    {"RuntimePassByValueScalar", false, true, true},
+}};
+
+/// Puts @p tensor in @p state.
+inline void applyOperandState(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensor,
+                              const UnservableOperandState& state)
+{
+    tensor.virtual_ = state.isVirtual;
+    tensor.is_runtime_pass_by_value = state.isRuntimePassByValue;
+    if(state.hasScalarValue)
+    {
+        tensor.value.Set(hipdnn_flatbuffers_sdk::data_objects::Float32Value(2.0f));
     }
 }
 

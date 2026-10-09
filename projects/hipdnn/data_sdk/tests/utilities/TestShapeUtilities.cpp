@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <limits>
+#include <string>
 
 using namespace hipdnn_data_sdk::utilities;
 
@@ -814,6 +815,7 @@ TEST(TestShapeUtils, IsTensorPackedIgnoresEverySingletonStride)
                                       std::numeric_limits<int64_t>::min(),
                                       std::numeric_limits<int64_t>::max()})
     {
+        SCOPED_TRACE("singleton stride: " + std::to_string(singletonStride));
         EXPECT_TRUE(isTensorPacked({2, 1, 3}, {3, singletonStride, 1}));
         EXPECT_TRUE(isTensorPacked({1, 2, 3}, {singletonStride, 1, 2}));
         EXPECT_TRUE(isTensorPacked({2, 3, 1}, {1, 2, singletonStride}));
@@ -827,6 +829,7 @@ TEST(TestShapeUtils, IsTensorPackedAcceptsDenseAxisPermutations)
     for(const auto& strides : std::vector<std::vector<int64_t>>{
             {12, 4, 1}, {12, 1, 3}, {4, 8, 1}, {1, 8, 2}, {3, 1, 6}, {1, 2, 6}})
     {
+        SCOPED_TRACE("strides: " + vecToString(strides));
         EXPECT_TRUE(isTensorPacked({2, 3, 4}, strides));
     }
 }
