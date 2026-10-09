@@ -1,9 +1,9 @@
 # Integration Test Bundles
 
-The test data for the cross-provider integration suite: graph JSON, template
-sweeps, metadata and support-claim sidecars, and DVC pointers to golden tensors.
-Every bundle here is discovered automatically and run against each provider's
-engine.
+This directory holds the test data for the cross-provider integration suite:
+graph JSON, template sweeps, metadata and support-claim sidecars, and DVC
+pointers to golden tensors. The harness discovers every bundle here
+automatically and runs it against the engine of each provider.
 
 ```
 {tier}/{Op}/{Layout}/{DataType}/{Name}/{Name}.json   single-graph bundle
@@ -16,4 +16,4 @@ engine.
   [Adding Tests and Updating Claims](../docs/adding-tests.md)
 - Running them: [Running the Tests](../docs/running-tests.md)
 
-DVC commands run from the repository root. `.bin` tensor data is never committed.
+Run DVC commands from the repository root. Never commit `.bin` tensor data.

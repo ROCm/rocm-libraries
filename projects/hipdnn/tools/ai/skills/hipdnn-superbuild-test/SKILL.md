@@ -56,7 +56,7 @@ Infer options from the user request:
    ```bash
    python3 <scripts>/discover_test_targets.py --build-dir <build-dir> --component <component> --scope <scope>
    ```
-   The helper prints `<component>:<target>` lines. It also handles the hip-kernel-provider path-qualified target naming. With `--scope external-integration` (or `all`) it emits **one `<component>:<target>` line and one `<component>:command:<cmdline>` line per registered external suite** — a provider may register several (hip-kernel-provider registers one per engine: `hip-kernel-provider-external-integration-check` for `HIP_MLOPS_ENGINE` and `hip-kernel-provider-asm-sdpa-external-integration-check` for `ASM_SDPA_ENGINE`), so do not assume a single line. Each command is the resolved cross-provider `hipdnn_integration_tests` invocation (with `--test-article`/`--test-engine`/`--test-config`) read from the generated `CTestTestfile.cmake`, with any baked-in `--gtest_filter` stripped so you can supply your own; the `--test-engine` value tells you which suite a line belongs to.
+   The helper prints `<component>:<target>` lines. It also handles the hip-kernel-provider path-qualified target naming. With `--scope external-integration` (or `all`) it emits **one `<component>:<target>` line and one `<component>:command:<cmdline>` line for each registered external suite**. A provider can register several suites. For example, hip-kernel-provider registers one suite for each engine: `hip-kernel-provider-external-integration-check` for `HIP_MLOPS_ENGINE` and `hip-kernel-provider-asm-sdpa-external-integration-check` for `ASM_SDPA_ENGINE`. Do not assume a single line. Each command is the resolved cross-provider `hipdnn_integration_tests` invocation (with `--test-article`/`--test-engine`/`--test-config`) read from the generated `CTestTestfile.cmake`, with any baked-in `--gtest_filter` removed so that you can supply your own. The `--test-engine` value shows which suite a line belongs to.
    If the helper reports that Ninja target discovery failed, treat that as an invalid or stale build directory and stop with the helper's diagnostic. If discovery succeeds but no targets match, report that the requested component or scope is not present in the existing superbuild.
 
    For an ingestor engine the discovery component is **`hip-kernel`**, not
@@ -101,11 +101,12 @@ Infer options from the user request:
      python3 <scripts>/cmake_run.py --build-dir <build-dir> --binary <hipdnn_integration_tests> -- <--test-article ... --test-engine ... --test-config ...> --gtest_filter=<filter> > <log> 2>&1
      ```
    - **Before reporting the result, load the `hipdnn-integration-testing`
-     skill.** This suite is the one place where exit code 0 is routinely
-     meaningless; that skill applies the suite's own documentation to the
-     output, including the signals it prints that never fail a run.
+     skill.** This suite is the only place where exit code 0 is often
+     meaningless. That skill applies the suite's own documentation to the
+     output. This includes the signals that the suite prints but that never
+     fail a run.
 
-9. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested. For `external-integration` runs, report the `Passed:`/`Skipped:`/`Failed:` counts from the binary's "TEST COVERAGE SUMMARY" — never the exit code alone; a 100%-skipped run is green and is not evidence the engine still works.
+9. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested. For `external-integration` runs, report the `Passed:`/`Skipped:`/`Failed:` counts from the binary's "TEST COVERAGE SUMMARY". Never report only the exit code. A run that skips 100% of tests is green, but it does not show that the engine still works.
 
 ## Direct Binary Mapping
 

@@ -4,18 +4,19 @@ A **support claim** is a promise, checked into git next to a bundle, that a name
 engine supports that graph on a given arch and platform. `--enforce-support-claims`
 turns a broken promise into a test failure instead of a silent skip.
 
-This document is for harness maintainers. It covers what a claim asserts, how one
-graph's claims are checked, and the lifecycle inside `TestBody()` that decides
-when a claim is checked and when it is published. For the sidecar format see
-[File Formats](file-formats.md#support-claim-sidecars--namesupportjson-and-supportjson);
-for running with claims and reading the summary as a developer see
-[Running the Tests](running-tests.md#support-claim-summary); for updating claims
-see [Adding Tests](adding-tests.md#updating-support-claims).
+This document is for harness maintainers. It covers what a claim asserts and how
+the harness checks the claims of one graph. It also covers the lifecycle inside
+`TestBody()`, which decides when a claim is checked and when it is published.
+For the sidecar format, see
+[File Formats](file-formats.md#support-claim-sidecars--namesupportjson-and-supportjson).
+For running with claims and reading the summary as a developer, see
+[Running the Tests](running-tests.md#support-claim-summary). To update claims, see
+[Adding Tests](adding-tests.md#updating-support-claims).
 
 Every CTest lane names `--test-engine`, so it inherits the enforcing default.
-There is no build option that flips the registered lanes and no environment
-variable that changes the mode; the default is pinned by the
-`TestClaimModeResolution` truth table, so turning it off fails a unit test.
+No build option changes the registered lanes. No environment variable changes the
+mode. The `TestClaimModeResolution` truth table pins the default, so turning it
+off fails a unit test.
 
 ---
 
@@ -41,7 +42,7 @@ Sidecars are excluded from graph discovery, so they can never register as a test
 **Arch and platform come from the running machine, not the bundle.** The sidecar is
 a matrix; a run picks one cell. `arch` is the base token — `gfx90a:sramecc+:xnack-`
 matches a `gfx90a` claim. `platform` is `linux` or `windows`. A sweep sidecar keys
-each claim group by `cases[].id`, so a case named in no group is simply unclaimed.
+each claim group by `cases[].id`. A case named in no group is unclaimed.
 
 ## One lane, one engine
 
@@ -258,11 +259,11 @@ run has no evidence either way about their claims.
 
 The summary is one JSON document under a header line naming the claim mode. It is
 meant to be read by a person in a CI log and parsed by a tool that updates sidecars,
-so every list is sorted by bundle and two runs over the same tree print the same
-document. Keys are present with zeros and empty lists, except the three
-subtraction keys noted under [the coverage ladder](#the-coverage-ladder), which
-appear only when `counters_consistent` is true. No summary is printed at all when
-the run found no graph with a sidecar and recorded no verdict.
+so every list is sorted by bundle. Two runs over the same tree print the same
+document. Keys are present with zeros and empty lists. The exception is the three
+subtraction keys noted under [the coverage ladder](#the-coverage-ladder). These
+keys appear only when `counters_consistent` is true. The harness prints no summary
+when the run found no graph with a sidecar and recorded no verdict.
 
 ```text
 ==== SUPPORT CLAIM SUMMARY (ENFORCING) ====
@@ -391,15 +392,15 @@ cannot see.
 
 ## Running it
 
-How to run with claims, the hard-stop messages and troubleshooting are in
-[Running the Tests](running-tests.md#hard-stops); the golden-data binary is
-described there too. Two invariants belong here:
+[Running the Tests](running-tests.md#hard-stops) describes how to run with claims,
+the hard-stop messages, and troubleshooting. It also describes the golden-data
+binary. Two invariants belong here:
 
 - `--write-support-claims` records the support a run observed and never removes a
   claim. Retracting a claim is a deliberate, reviewed change.
-- `FATAL: … not one of them was ever queried` is never caused by a filter that
-  selected only unclaimed graphs: the count behind it is seeded by the tests that
-  ran, not by what registration discovered.
+- A filter that selects only unclaimed graphs never causes
+  `FATAL: … not one of them was ever queried`. The tests that ran seed the count
+  behind it. Registration discovery does not.
 
 ## Scope: two harnesses, never both — and now two binaries
 

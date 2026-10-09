@@ -44,14 +44,14 @@ graph can round-trip perfectly on disk yet fail to run — Hop D is what makes
 
 Hops B–D (`place_bundles.py`, `verify_migration.py`, `diff_coverage.py`) exist
 to migrate a whole suite in bulk with a byte- and behavior-level proof. For
-**one** test, capture it and import each graph with `import_graph.py`; the
-commands, and the metadata and support-sidecar steps a finished bundle needs,
-are in [Adding Tests — From an existing C++ graph test](../docs/adding-tests.md#from-an-existing-c-graph-test).
+**one** test, capture it and import each graph with `import_graph.py`. The
+commands, and the metadata and support-sidecar steps that a finished bundle
+needs, are in [Adding Tests — From an existing C++ graph test](../docs/adding-tests.md#from-an-existing-c-graph-test).
 
 Use the full pipeline below instead when migrating many tests/suites at
 once and you want the Hop C/D byte- and behavior-level proof that nothing
-was lost. The pipeline writes graphs and case metadata only: every bundle it
-places still needs a support sidecar (see
+was lost. The pipeline writes only graphs and case metadata. Every bundle that
+it places still needs a support sidecar (see
 [Updating support claims](../docs/adding-tests.md#updating-support-claims)).
 
 ## How to Run
@@ -143,8 +143,8 @@ python3 migration-scripts/import_graph.py \
 ```
 
 Dedup-aware placement. Default: skip exact duplicates. `--strict` exits
-non-zero on dup (CI mode). `--force` appends regardless. Behavior and output
-are described in
+non-zero on dup (CI mode). `--force` appends regardless. For behavior and
+output, see
 [Adding Tests — From a graph you already have](../docs/adding-tests.md#from-a-graph-you-already-have).
 
 ## Searching and Running Bundles
@@ -213,8 +213,8 @@ Use `find_case.py --id abc123 --detail` to see what a hashed case contains.
 
 ### Adding new test cases
 
-New tests are added as bundle cases with `import_graph.py` — no C++ needed, and
-no hand-authored cases. See
+Add new tests as bundle cases with `import_graph.py`. C++ is not needed. You
+do not need to write cases by hand. See
 [Adding Tests](../docs/adding-tests.md#add-a-bundle).
 
 The migration pipeline (`run_capture_pipeline.sh`) is a one-time

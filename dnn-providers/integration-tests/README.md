@@ -1,22 +1,24 @@
 # Integration Tests
 
 Integration tests validate hipDNN provider plugins (engine libraries such as
-`libmiopen_plugin.so` or `libhipblaslt_plugin.so`) by building a graph, running
-it through the plugin's engine, and comparing the result against a reference.
+`libmiopen_plugin.so` or `libhipblaslt_plugin.so`). Each test builds a graph,
+runs it through the engine of the plugin, and compares the result against a
+reference.
 
 This directory builds one binary, `hipdnn_integration_tests`. Each provider
 (miopen-provider, hipblaslt-provider, hip-kernel-provider, …) runs it against
 its own plugin, so **one set of graph tests runs against every engine**. The
-tests are data — bundles under `integration-test-bundles/` — rather than code;
-C++ tests remain only for what a bundle cannot express.
+tests are data (bundles under `integration-test-bundles/`), not code. C++ tests
+exist only for what a bundle cannot express.
 
-**Documentation: start at [`docs/README.md`](docs/README.md).** It covers the
-file formats, running the tests and reading their output, and adding tests and
-support claims, and lists what each message a run prints asks of you.
+**Documentation: start at [`docs/README.md`](docs/README.md).** It describes
+the file formats, how to run the tests and read their output, and how to add
+tests and support claims. It also lists what each message from a run asks you
+to do.
 
 ## Quick start
 
-From the repository root of a superbuild built in `build/`:
+Run these commands from the repository root of a superbuild built in `build/`:
 
 ```bash
 # One provider's quick tier
@@ -26,8 +28,9 @@ ctest --test-dir build/dnn-providers/miopen-provider -L quick -V
 cmake --build build --target miopen-provider-external-integration-check
 ```
 
-Read the `TEST COVERAGE SUMMARY` and `SUPPORT CLAIM SUMMARY` it prints, not just
-the exit code — see [Reading the output](docs/running-tests.md#reading-the-output).
+Read the `TEST COVERAGE SUMMARY` and `SUPPORT CLAIM SUMMARY` that the run
+prints. Do not read only the exit code. See
+[Reading the output](docs/running-tests.md#reading-the-output).
 
 ## Layout
 
