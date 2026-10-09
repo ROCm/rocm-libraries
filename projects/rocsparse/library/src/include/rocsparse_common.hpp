@@ -2843,11 +2843,13 @@ namespace rocsparse
         __builtin_amdgcn_s_waitcnt(0);
     }
 
-    // Orders the reads of the results of the rows the caller has waited for with spin_loop after
-    // the done flag loads. Results have to be read with load_done_row_data. With non-coherent XCD
-    // L2s the results are read with device scope atomics, so only the compiler has to keep them
-    // after the flag loads; a workgroup scope fence does that and emits no cache maintenance
-    // (outside threadgroup split mode, which rocSPARSE does not use).
+    // Orders the reads of the results of the rows the caller has waited for after the done flag
+    // loads. The caller must have seen each done flag set with a relaxed device scope atomic load,
+    // either through spin_loop with __MEMORY_SCOPE_DEVICE or its own loop, and has to read the
+    // results with load_done_row_data. With non-coherent XCD L2s the results are read with device
+    // scope atomics, so only the compiler has to keep them after the flag loads; a workgroup scope
+    // fence does that and emits no cache maintenance (outside threadgroup split mode, which
+    // rocSPARSE does not use).
     __device__ __forceinline__ void acquire_done_rows()
     {
         if constexpr(has_noncoherent_xcd_l2)
