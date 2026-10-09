@@ -101,11 +101,12 @@ def test_a_collection_reads_back_as_the_records_it_wrote(tmp_path):
     assert "extra" not in manifest["contributions"][0]["columns"]["None"]
     assert "extra" in manifest["contributions"][1]["columns"]["None"]
     rows = store.read_rows(dataset)
-    assert {r["contribution_id"] for r in rows} == {"a", "b"}
+    ids = {c["label"]: c["contribution_id"] for c in manifest["contributions"]}
+    assert {r["contribution_id"] for r in rows} == {ids["a"], ids["b"]}
     assert all(r["purpose"] == "training" and r["source"] is None for r in rows)
     # Missing reads back as None, as the JSON held it, not NaN.
     assert (
-        next(r for r in rows if r["contribution_id"] == "a")["numerically_valid"]
+        next(r for r in rows if r["contribution_id"] == ids["a"])["numerically_valid"]
         is None
     )
 
@@ -135,11 +136,11 @@ def test_a_retry_after_a_write_interrupted_between_the_two_files_adds_no_rows_tw
         store.add(dataset, *contribution)
     monkeypatch.undo()
 
-    assert store.add(dataset, *contribution)["added"] is True
+    result = store.add(dataset, *contribution)
+    assert result["added"] is True
     assert len(store.read_rows(dataset)) == 3
     recorded = store.read_manifest(dataset)["contributions"]
-    identity = contribution[0]["contribution_id"]
-    assert [c["contribution_id"] for c in recorded] == [identity]
+    assert [c["contribution_id"] for c in recorded] == [result["contribution_id"]]
     assert store.add(dataset, *contribution)["added"] is False
 
 
@@ -187,9 +188,7 @@ def test_knob_addressing_that_contradicts_the_dataset_is_refused_and_nothing_is_
     assert (
         dataset / store.DATA_FILE
     ).read_bytes() == before, "all of the call or none of it"
-    assert [
-        c["contribution_id"] for c in store.read_manifest(dataset)["contributions"]
-    ] == ["a"]
+    assert [c["label"] for c in store.read_manifest(dataset)["contributions"]] == ["a"]
 
 
 def test_a_purpose_outside_the_three_is_refused(tmp_path):
@@ -226,7 +225,7 @@ def test_published_csv_converts_with_the_binding_the_caller_states(tmp_path):
         arch="gfx942",
         selector_revision="miopen/abc",
         collected_at="2026-10-02T00:00:00+00:00",
-        contribution_id="perfdb-1",
+        label="perfdb-1",
         expand_descriptor=["kernel.descriptor"],
         scope_by="kernel.solver_id",
     )
@@ -338,13 +337,13 @@ def test_add_and_export_round_trip_on_the_command_line(tmp_path):
     assert missing.returncode == 1 and "no contribution" in missing.stderr
 
 
-def test_one_contribution_id_cannot_name_several_collections(tmp_path, capsys):
+def test_one_label_cannot_name_several_collections(tmp_path, capsys):
     with pytest.raises(SystemExit):
         store.main(
             [
                 "--into",
                 str(tmp_path / "ds"),
-                "--contribution-id",
+                "--label",
                 "x",
                 "--collection",
                 str(_collection(tmp_path, "a")),
@@ -352,6 +351,95 @@ def test_one_contribution_id_cannot_name_several_collections(tmp_path, capsys):
             ]
         )
     assert "give one --collection" in capsys.readouterr().err
+
+
+def test_the_same_measurements_under_another_name_are_added_once(tmp_path):
+    dataset = tmp_path / "ds"
+    collection = _collection(tmp_path, "a")
+    first = store.add(dataset, *store.from_collection(collection))
+    again = store.add(dataset, *store.from_collection(collection, label="renamed"))
+    assert again == {**first, "added": False, "rows": 0, "label": "renamed"}
+    assert len(store.read_rows(dataset)) == 3
+
+
+def test_new_measurements_under_a_reused_name_are_stored_not_dropped(tmp_path):
+    dataset = tmp_path / "ds"
+    store.add(dataset, *store.from_collection(_collection(tmp_path, "a")))
+    (tmp_path / "retry").mkdir()
+    later = _collection(tmp_path / "retry", "a", at="2026-10-02T00:00:00+00:00")
+    rows = json.loads((later / "corpus.json").read_text())
+    rows[0]["avgTimeMs"] = 9.0
+    (later / "corpus.json").write_text(json.dumps(rows))
+    assert store.add(dataset, *store.from_collection(later))["added"] is True
+    assert [c["label"] for c in store.read_manifest(dataset)["contributions"]] == [
+        "a",
+        "a",
+    ]
+    assert len(store.read_rows(dataset)) == 6
+
+
+def test_replace_swaps_a_contribution_in_one_write_and_records_it(tmp_path):
+    dataset = tmp_path / "ds"
+    old = store.add(dataset, *store.from_collection(_collection(tmp_path, "a")))
+    (tmp_path / "fixed").mkdir()
+    fixed = _collection(
+        tmp_path / "fixed",
+        "a",
+        rows=[
+            {
+                "benchmark": "g",
+                "device": "d0",
+                "arch": "gfx942",
+                "kernel": "k0",
+                "knob_settings": "{}",
+                "avgTimeMs": 4.0,
+            }
+        ],
+    )
+    new = store.add_many(dataset, [store.from_collection(fixed)], replace=["a"])[0]
+    manifest = store.read_manifest(dataset)
+    assert [c["contribution_id"] for c in manifest["contributions"]] == [
+        new["contribution_id"]
+    ]
+    assert {r["contribution_id"] for r in store.read_rows(dataset)} == {
+        new["contribution_id"]
+    }
+    (event,) = manifest["history"]
+    assert event["action"] == "replace"
+    assert event["contribution_id"] == old["contribution_id"]
+    assert event["replaced_by"] == [new["contribution_id"]]
+
+
+def test_remove_drops_rows_and_entry_and_an_unknown_name_writes_nothing(tmp_path):
+    dataset = tmp_path / "ds"
+    store.add(dataset, *store.from_collection(_collection(tmp_path, "a")))
+    kept = store.add(dataset, *store.from_collection(_collection(tmp_path, "b")))
+    before = (dataset / store.DATA_FILE).read_bytes()
+    with pytest.raises(store.DatasetError, match="no contribution"):
+        store.remove(dataset, ["a", "absent"])
+    assert (dataset / store.DATA_FILE).read_bytes() == before
+
+    (removed,) = store.remove(dataset, ["a"])
+    assert removed["label"] == "a"
+    manifest = store.read_manifest(dataset)
+    assert [c["label"] for c in manifest["contributions"]] == ["b"]
+    assert {r["contribution_id"] for r in store.read_rows(dataset)} == {
+        kept["contribution_id"]
+    }
+    assert manifest["history"][0]["action"] == "remove"
+    assert manifest["history"][0]["entry"]["label"] == "a"
+
+
+def test_retag_changes_the_purpose_and_keeps_the_measurements(tmp_path):
+    dataset = tmp_path / "ds"
+    added = store.add(dataset, *store.from_collection(_collection(tmp_path, "a")))
+    assert store.retag(dataset, ["a"], purpose="holdout") == [added["contribution_id"]]
+    (entry,) = store.read_manifest(dataset)["contributions"]
+    assert entry["purpose"] == "holdout"
+    assert entry["contribution_id"] == added["contribution_id"]
+    assert {r["purpose"] for r in store.read_rows(dataset)} == {"holdout"}
+    assert store.export_rows(dataset, purposes=["training"]) == []
+    assert len(store.export_rows(dataset, purposes=["holdout"])) == 3
 
 
 def test_rows_that_disagree_on_a_column_type_are_refused_whole(tmp_path):

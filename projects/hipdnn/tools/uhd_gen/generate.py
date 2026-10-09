@@ -150,8 +150,8 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
         "--contribution",
         nargs="+",
         metavar="ID",
-        help="With --dataset: train on these contributions only (default: every training "
-        "contribution)",
+        help="With --dataset: train on these contributions only, by id or label (default: "
+        "every training contribution)",
     )
     # A published dataset (§8.3 CSV rows, e.g. the MIOpen perf DB) has no engine binding or
     # UED, so these state what the binding would decide, as `train` takes them.
@@ -437,12 +437,13 @@ def dataset_contributions(
         key=lambda c: (c["collected_at"], c["contribution_id"]),
     )
     if only is not None:
-        unknown = sorted(set(only) - {c["contribution_id"] for c in chosen})
+        from .dataset.store import select
+
+        chosen, unknown = select(chosen, only)
         if unknown:
             raise ValueError(
                 f"{directory} holds no {'/'.join(purposes)} contribution {unknown}"
             )
-        chosen = [c for c in chosen if c["contribution_id"] in set(only)]
     if not chosen:
         raise ValueError(f"{directory} holds no {'/'.join(purposes)} contribution")
     return directory, chosen
@@ -564,6 +565,7 @@ def load_dataset(
         "collections": [
             {
                 "contribution_id": c["contribution_id"],
+                "label": c.get("label"),
                 # Where it was converted from: a collection's directory, for lineage.
                 "path": (c.get("origin") or {}).get("path"),
                 "origin": c.get("origin"),

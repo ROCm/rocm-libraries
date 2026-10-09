@@ -788,7 +788,7 @@ def test_a_run_can_train_on_some_contributions_of_a_dataset(world, evaluator):
     manifest = json.loads(
         (output / "generation_manifest.json").read_text(encoding="utf-8")
     )
-    assert [c["contribution_id"] for c in manifest["collections"]] == ["first"]
+    assert [c["label"] for c in manifest["collections"]] == ["first"]
     assert manifest["superseded_rows"] == 0, "the newer contribution was not read"
     refused = world["root"] / "absent"
     assert (

@@ -55,7 +55,7 @@ def add_size_arguments(parser: argparse.ArgumentParser) -> None:
         "--contribution",
         nargs="+",
         metavar="ID",
-        help="Size from these contributions of the dataset only",
+        help="Size from these contributions of the dataset only, by id or label",
     )
     parser.add_argument(
         "--corpus-manifest",
@@ -326,8 +326,10 @@ def _write_subset(
     _, chosen = dataset_contributions(dataset, role=ROLE, only=only)
     template = chosen[-1]
     entry = {
-        **{k: v for k, v in template.items() if k != "columns"},
-        "contribution_id": f"subset-{destination.name}",
+        **{
+            k: v for k, v in template.items() if k not in ("columns", "contribution_id")
+        },
+        "label": f"subset-{destination.name}",
         "sources": [metric],
         "row_counts": {str(metric): len(rows)},
         "graphs": [],
