@@ -573,7 +573,10 @@ gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 **Consequence for rocKE.** The gfx942 catalog declares
 `mfma_f32_16x16x8_xf32` and `mfma_f32_32x32x4_xf32`, with logical TF32 A/B and
 FP32 C/D. Both Python and C++ lowerers support them and reject these atoms on
-other targets. gfx950/gfx1250 have no native XF32 instruction; gfx950's catalog
+other targets, deciding from the target's MMA catalog: a target whose catalog
+does not list the atom raises "no MMA instruction found for
+'<op_id>' on '<target>'", so a target that gains the atom in its catalog needs no
+code change. gfx950/gfx1250 have no native XF32 instruction; gfx950's catalog
 carries two emulated atoms, `mfma_f32_16x16x32_xf32` and
 `mfma_f32_32x32x16_xf32`, which take the same logical TF32 operands and expand into
 three BF16 MFMAs. This atom support does not add production GEMM/convolution

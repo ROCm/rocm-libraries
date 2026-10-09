@@ -74,6 +74,7 @@ from .mma_operand import (
     mma_operand_needs_reinterpret,
     mma_operand_value,
 )
+from .tf32 import tf32_mma_target_error, tf32_op_error
 
 
 # Datalayout / triple. Copied verbatim from clang's output for the same
@@ -2333,8 +2334,6 @@ class _Lowerer:
     # ----- per-op lowerings -----
 
     def lower_op(self, op: Op) -> None:
-        from .tf32 import tf32_op_error
-
         error = tf32_op_error(op)
         if error:
             raise ValueError(error)
@@ -3756,10 +3755,9 @@ class _Lowerer:
         self._backend.emit_wmma(self, op)
 
     def _op_tile_mma(self, op: Op) -> None:
-        from .tf32 import TF32_MMA
-
-        if op.attrs.get("op_id") in TF32_MMA and self._backend.arch.gfx != "gfx942":
-            raise ValueError("XF32 MMA requires gfx942")
+        error = tf32_mma_target_error(op.attrs.get("op_id"), self._backend.arch)
+        if error:
+            raise ValueError(error)
         # Target-neutral MMA: the ISA backend maps ``op.attrs["op_id"]`` to the
         # matching MFMA (CDNA) or WMMA (RDNA) emission. CDNA backends reuse the
         # existing ``_op_tile_<op_id>`` handler verbatim, so the output is
@@ -3993,8 +3991,9 @@ class _Lowerer:
         self._emit_xf32(op, "mfma.f32.32x32x4.xf32", 16)
 
     def _emit_xf32(self, op: Op, intrinsic: str, count: int) -> None:
-        if self._backend.arch.gfx != "gfx942":
-            raise ValueError("XF32 MMA requires gfx942")
+        error = tf32_mma_target_error(_mma_op_id(op), self._backend.arch)
+        if error:
+            raise ValueError(error)
         a, b, c = op.operands
         self._need(intrinsic)
         a_cast = self._fresh("mfma_a_i16")

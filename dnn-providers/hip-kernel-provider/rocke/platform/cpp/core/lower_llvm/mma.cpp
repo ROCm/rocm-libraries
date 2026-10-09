@@ -500,8 +500,9 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
             rocke_ll_operand(L, op->operands[4]));
         return;
     }
-    if(rocke_tf32_mma_count(op_id) && strcmp(L->backend->gfx, "gfx942") != 0)
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "XF32 MMA requires gfx942");
+    char tf32_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_tf32_mma_target_error(op_id, L->backend->gfx, tf32_error, sizeof tf32_error))
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
 
     /* An emulated atom is expanded here, before ISA dispatch, so the expansion
      * is written once rather than per ISA family. Native atoms -- every atom
