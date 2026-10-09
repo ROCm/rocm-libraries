@@ -14,6 +14,7 @@
  */
 #include <string.h>
 
+#include "rocke/error.hpp"
 #include "rocke/ir_internal.h"
 
 /* ------------------------------------------------------------ arith constants */
@@ -573,6 +574,34 @@ rocke_value_t* rocke_b_trunc(rocke_ir_builder_t* b, rocke_value_t* v, const rock
     return rocke_i_op1(b, ROCKE_OP_ARITH_TRUNC, operands, 1, target, NULL, "tr");
 }
 
+/* A bitcast keeps every bit of its operand, so a source and target of different
+ * widths is always a mistake; refusing it here names both types instead of
+ * leaving clang to reject the lowered IR ("invalid cast opcode"). */
+void rocke_i_check_bitcast_width(const char* verb,
+                                 const rocke_type_t* source,
+                                 const rocke_type_t* target,
+                                 const char* hint)
+{
+    if(source->kind == ROCKE_TYPE_PTR || target->kind == ROCKE_TYPE_PTR)
+        throw ckc::TypeError(
+            ckc::format_error("%s of %s to %s: a bitcast does not convert pointers",
+                              verb,
+                              source->name,
+                              target->name));
+    const int source_bits = rocke_i_type_bits(source);
+    const int target_bits = rocke_i_type_bits(target);
+    if(source_bits != target_bits)
+        throw ckc::ValueError(
+            ckc::format_error("%s of %s (%d bits) to %s (%d bits) changes the bit "
+                              "width -- a bitcast keeps every bit; %s",
+                              verb,
+                              source->name,
+                              source_bits,
+                              target->name,
+                              target_bits,
+                              hint));
+}
+
 rocke_value_t* rocke_b_bitcast(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target)
 {
     rocke_value_t* operands[1];
@@ -583,6 +612,8 @@ rocke_value_t* rocke_b_bitcast(rocke_ir_builder_t* b, rocke_value_t* v, const ro
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "bitcast NULL value");
     if(!target)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "bitcast NULL target");
+    rocke_i_check_bitcast_width(
+        "bitcast", v->type, target, "convert the value to change its width");
     operands[0] = v;
     at = rocke_i_attrs(b);
     rocke_attr_set_str(b, &at, "target", target->name);

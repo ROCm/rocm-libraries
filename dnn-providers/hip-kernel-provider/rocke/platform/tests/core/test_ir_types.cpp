@@ -24,6 +24,12 @@
  *   --smem-vector <load|store> <elem> <n>
  *       build one LDS vector access of n elem values; print "ok", or
  *       "error: <message>" when the builder refuses it.
+ *
+ *   --bitcast <case>
+ *       build the bitcast named <case> (a row of k_bitcast_cases, mirrored in
+ *       tests/core/test_bitcast_width.py); print "ok", or
+ *       "error: <Python exception class>: <message>" when the builder refuses
+ *       it, since a refusal is a TypeError or a ValueError.
  */
 #include "rocke/ir.h"
 
@@ -32,7 +38,9 @@
 #include <string.h>
 #include <string>
 
+#include "rocke/dtypes_internal.h"
 #include "rocke/error.hpp"
+#include "rocke/ir_internal.h"
 
 #define CHECK(x)                                                       \
     do                                                                 \
@@ -416,6 +424,191 @@ static int test_smem_vector_elements()
     return 0;
 }
 
+/* The Python exception class a refusal raises, for the --bitcast report. */
+static const char* python_exception_class(rocke_status_t code)
+{
+    switch(code)
+    {
+    case ROCKE_ERR_TYPE:
+        return "TypeError";
+    case ROCKE_ERR_VALUE:
+        return "ValueError";
+    default:
+        return "unexpected status";
+    }
+}
+
+/* One bitcast: the builder (`vec_bitcast` or `bitcast`), the source value and
+ * the target type. The rows match _BITCAST_CASES in test_bitcast_width.py. */
+struct bitcast_case
+{
+    const char* name;
+    bool vector_builder;
+    rocke_value_t* (*source)(rocke_ir_builder_t* b);
+    const rocke_type_t* (*target)(rocke_ir_builder_t* b);
+};
+
+static rocke_value_t* param_of(rocke_ir_builder_t* b, const rocke_type_t* type)
+{
+    return rocke_b_param(b, "X", type, NULL);
+}
+
+static const bitcast_case k_bitcast_cases[] = {
+    {"f32_as_i32",
+     false,
+     [](rocke_ir_builder_t* b) { return param_of(b, rocke_f32()); },
+     [](rocke_ir_builder_t*) { return rocke_i32(); }},
+    {"f64_as_i32x2",
+     false,
+     [](rocke_ir_builder_t* b) { return param_of(b, rocke_f64()); },
+     [](rocke_ir_builder_t* b) { return rocke_vector_type(b, rocke_i32(), 2); }},
+    {"i32x4_as_f16x8",
+     true,
+     [](rocke_ir_builder_t* b) { return param_of(b, rocke_vector_type(b, rocke_i32(), 4)); },
+     [](rocke_ir_builder_t* b) { return rocke_vector_type(b, rocke_f16(), 8); }},
+    {"f32_as_i64",
+     false,
+     [](rocke_ir_builder_t* b) { return param_of(b, rocke_f32()); },
+     [](rocke_ir_builder_t*) { return rocke_i64(); }},
+    {"f16x8_as_i32x8",
+     true,
+     [](rocke_ir_builder_t* b) { return param_of(b, rocke_vector_type(b, rocke_f16(), 8)); },
+     [](rocke_ir_builder_t* b) { return rocke_vector_type(b, rocke_i32(), 8); }},
+    {"pointer_as_i64",
+     false,
+     [](rocke_ir_builder_t* b) { return param_of(b, rocke_ptr_type(b, rocke_f32(), "global")); },
+     [](rocke_ir_builder_t*) { return rocke_i64(); }},
+    {"i64_as_pointer",
+     false,
+     [](rocke_ir_builder_t* b) { return param_of(b, rocke_i64()); },
+     [](rocke_ir_builder_t* b) { return rocke_ptr_type(b, rocke_f32(), "global"); }},
+    {"lds_tile_as_i32",
+     false,
+     [](rocke_ir_builder_t* b) {
+         const int shape[] = {16, 16};
+         return rocke_b_smem_alloc(b, rocke_f32(), shape, 2, "tile");
+     },
+     [](rocke_ir_builder_t*) { return rocke_i32(); }},
+};
+
+static const bitcast_case* find_bitcast_case(const char* name)
+{
+    for(const bitcast_case& c : k_bitcast_cases)
+        if(strcmp(c.name, name) == 0)
+            return &c;
+    return NULL;
+}
+
+/* Build the source and target of `c`, then the bitcast itself; only the cast
+ * is measured. */
+static build_outcome build_bitcast(const bitcast_case& c, rocke_status_t* code)
+{
+    build_outcome outcome = {false, "", 0};
+    *code = ROCKE_OK;
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "bitcast_case") != ROCKE_OK)
+    {
+        outcome.error = "builder init failed";
+        return outcome;
+    }
+    int ops_before = -1; /* set once the source and target are built */
+    try
+    {
+        rocke_value_t* source = c.source(&b);
+        const rocke_type_t* target = c.target(&b);
+        ops_before = b.kernel->body->num_ops;
+        if(c.vector_builder)
+            rocke_b_vec_bitcast(&b, source, target);
+        else
+            rocke_b_bitcast(&b, source, target);
+        outcome.accepted = true;
+    }
+    catch(const ckc::Error& error)
+    {
+        outcome.error = error.what();
+        *code = error.code();
+    }
+    outcome.ops_added = ops_before < 0 ? -1 : b.kernel->body->num_ops - ops_before;
+    rocke_ir_builder_free(&b);
+    return outcome;
+}
+
+static int print_bitcast(const char* name)
+{
+    const bitcast_case* c = find_bitcast_case(name);
+    CHECK(c != NULL);
+    rocke_status_t code;
+    const build_outcome outcome = build_bitcast(*c, &code);
+    if(outcome.accepted)
+        printf("ok\n");
+    else
+        printf("error: %s: %s\n", python_exception_class(code), outcome.error.c_str());
+    return 0;
+}
+
+/* Equal-width casts build one op; a width change, a pointer or an LDS
+ * allocation is refused with core/ir.py's text before any op is built. */
+static int test_bitcast_width()
+{
+    for(const char* name : {"f32_as_i32", "f64_as_i32x2", "i32x4_as_f16x8"})
+    {
+        rocke_status_t code;
+        const build_outcome built = build_bitcast(*find_bitcast_case(name), &code);
+        CHECK(built.accepted);
+        CHECK(built.ops_added == 1);
+    }
+    const struct
+    {
+        const char* name;
+        rocke_status_t code;
+        const char* error;
+    } refused[] = {
+        {"f32_as_i64",
+         ROCKE_ERR_VALUE,
+         "bitcast of f32 (32 bits) to i64 (64 bits) changes the bit width -- a bitcast "
+         "keeps every bit; convert the value to change its width"},
+        {"f16x8_as_i32x8",
+         ROCKE_ERR_VALUE,
+         "vec_bitcast of vec<f16x8> (128 bits) to vec<i32x8> (256 bits) changes the bit "
+         "width -- a bitcast keeps every bit; slice or concatenate the vector first"},
+        {"pointer_as_i64",
+         ROCKE_ERR_TYPE,
+         "bitcast of ptr<f32,global> to i64: a bitcast does not convert pointers"},
+        {"lds_tile_as_i32",
+         ROCKE_ERR_TYPE,
+         "smem<f32, [16x16]> is an LDS allocation, not a value with a bit width"},
+    };
+    for(const auto& r : refused)
+    {
+        rocke_status_t code;
+        const build_outcome outcome = build_bitcast(*find_bitcast_case(r.name), &code);
+        CHECK(!outcome.accepted);
+        CHECK(code == r.code);
+        CHECK(outcome.error == r.error);
+        CHECK(outcome.ops_added == 0);
+    }
+    return 0;
+}
+
+/* A scalar's width is its format's width; an unknown format is refused with
+ * core/dtypes.py's text, naming the spelling that was passed. */
+static int test_scalar_widths()
+{
+    CHECK(rocke_i_type_bits(rocke_f64()) == 64);
+    CHECK(rocke_i_type_bits(rocke_fp6e2m3()) == 6);
+    CHECK(rocke_require_dtype_info("half") == rocke_dtype_info("f16"));
+    try
+    {
+        rocke_require_dtype_info("custom_format");
+        CHECK(false);
+    }
+    catch(const ckc::ValueError& error)
+    {
+        CHECK(strcmp(error.what(), "unknown dtype 'custom_format'") == 0);
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc == 3 && strcmp(argv[1], "--unsigned") == 0)
@@ -424,10 +617,14 @@ int main(int argc, char** argv)
         return print_packed_only_value(argv[2], argv[3]);
     if(argc == 5 && strcmp(argv[1], "--smem-vector") == 0)
         return print_smem_vector_access(argv[2], argv[3], argv[4]);
+    if(argc == 3 && strcmp(argv[1], "--bitcast") == 0)
+        return print_bitcast(argv[2]);
     CHECK(argc == 1);
     CHECK(test_unsigned_ops() == 0);
     CHECK(test_packed_only_values() == 0);
     CHECK(test_smem_vector_elements() == 0);
+    CHECK(test_bitcast_width() == 0);
+    CHECK(test_scalar_widths() == 0);
     printf("rocke_ir_types: ok\n");
     return 0;
 }

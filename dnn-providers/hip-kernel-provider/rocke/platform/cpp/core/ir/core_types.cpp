@@ -22,6 +22,8 @@
 
 #include "rocke/arena.h"
 #include "rocke/dtypes.h"
+#include "rocke/dtypes_internal.h"
+#include "rocke/error.hpp"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 
@@ -249,6 +251,32 @@ const rocke_type_t* rocke_smem_type(
     if(!t->name)
         return (const rocke_type_t*)rocke_i_set_err(b, ROCKE_ERR_OOM, "smem_type: OOM");
     return t;
+}
+
+/* Pointer widths by address space, as the AMDGPU data layout states them (p3 is
+ * 32 bits; global, constant and flat pointers are 64). Mirrors _POINTER_BITS. */
+static int rocke_i_pointer_bits(const char* space)
+{
+    return space && strcmp(space, "lds") == 0 ? 32 : 64;
+}
+
+/* Mirrors core/ir.py::type_bits. A scalar's width comes from its format
+ * (k_dtype_info in dtypes.cpp, the one home of format widths). */
+int rocke_i_type_bits(const rocke_type_t* t)
+{
+    switch(t->kind)
+    {
+    case ROCKE_TYPE_VECTOR:
+        return t->count * rocke_i_type_bits(t->elem);
+    case ROCKE_TYPE_PTR:
+        return rocke_i_pointer_bits(t->space);
+    case ROCKE_TYPE_SMEM:
+        throw ckc::TypeError(
+            ckc::format_error("%s is an LDS allocation, not a value with a bit width", t->name));
+    case ROCKE_TYPE_SCALAR:
+        break;
+    }
+    return rocke_require_dtype_info(t->name)->encoded_bits;
 }
 
 /* Structural equality == Python frozen-dataclass __eq__: canonical name encodes
