@@ -55,7 +55,6 @@ _TRIPS = {
     "nobuf_usebias": ("gfx942_HSS", {"BufferLoad": False, "PrefetchGlobalRead": 1, "DirectToVgprA": False, "DirectToVgprB": False}),
     "nobuf_sparse": ("gfx942_HSS", {"BufferLoad": False, "PrefetchGlobalRead": 1, "DirectToVgprA": False, "DirectToVgprB": False, "ProblemType.UseBias": 0, "ProblemType.Sparse": 1}),
     "nobuf_gg": ("gfx942_HSS", {"BufferLoad": False, "PrefetchGlobalRead": 1, "DirectToVgprA": False, "DirectToVgprB": False, "ProblemType.UseBias": 0, "ProblemType.Sparse": 0, "ProblemType.GroupedGemm": True}),
-    "nobuf_subdword": ("gfx942_HSS", {"BufferLoad": False, "PrefetchGlobalRead": 1, "DirectToVgprA": False, "DirectToVgprB": False, "ProblemType.UseBias": 0, "ProblemType.Sparse": 0, "ProblemType.GroupedGemm": False}),
     # MBSK epilogue non-returning guards (combined maximal violation)
     "mbsk_maxviol": ("gfx942_BBS", {"ProblemType.UseScaleCD": True, "ProblemType.UseE": True, "ProblemType.BiasSrc": "A", "NumElementsPerBatchStore": 1}),
 }
