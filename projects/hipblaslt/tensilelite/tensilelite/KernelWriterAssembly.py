@@ -120,6 +120,28 @@ def _enableLdsTr6Rearrange(kernel, tP, tail):
   return (tP["bpe"] == 0.75 and kernel[f"enableLDSTr{tP['tensorChar']}"]
           and (not tail or hasTdm))
 
+def _tdmSparseMetadataKOffset(writer, kernel):
+  """Advance the TDM metadata descriptor to this work item's first K iteration.
+
+  Metadata has its own descriptor and compressed per-iteration increment, so
+  the A/B K-offset does not move it.
+  """
+  mod = Module("TDM StreamK metadata K-offset")
+  if not kernel.get("enableTDMMetadata"):
+    return mod
+  inc = sgpr("GlobalReadIncsMetadata")
+  with writer.allocTmpSgpr(2, tag="tdmSparseMetadataKOffset") as tmp:
+    lo = tmp.idx
+    mod.add(SMulHIU32(dst=sgpr(lo + 1), src0=sgpr("StreamKLocalStart"), src1=inc,
+                      comment="StreamK metadata K-offset high word"))
+    mod.add(SMulI32(dst=sgpr(lo), src0=sgpr("StreamKLocalStart"), src1=inc,
+                    comment="StreamK metadata K-offset = localStart * metadata increment"))
+    mod.add(SAddU32(dst=sgpr("tdmMetadataGroup0+2"), src0=sgpr("tdmMetadataGroup0+2"),
+                    src1=sgpr(lo), comment="Apply StreamK K-offset to TDM metadata"))
+    mod.add(SAddCU32(dst=sgpr("tdmMetadataGroup0+3"), src0=sgpr("tdmMetadataGroup0+3"),
+                     src1=sgpr(lo + 1), comment="Apply metadata K-offset high word and address carry"))
+  return mod
+
 from math import ceil, floor, log, prod
 from contextlib import contextmanager
 from copy import deepcopy
@@ -20998,6 +21020,7 @@ class KernelWriterAssembly(KernelWriter):
                            comment=f"Apply StreamK K-offset to TDM {group0}"))
           mod.add(SAddCU32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=sgpr(tmpSgpr+1),
                             comment="Apply K-offset high word and address carry"))
+      mod.add(_tdmSparseMetadataKOffset(self, kernel))
       return mod
 
     with self.allocTmpSgpr(2, tag="tdmApplyTileOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
@@ -21012,6 +21035,8 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SAddCU32(dst=sgpr(f"{group0Name}+3"), src0=sgpr(f"{group0Name}+3"), src1=sgpr(tmpSgpr+1),
                         comment="Apply K-offset high word and address carry"))
 
+    if not (tcA.startswith("MX") or tcB.startswith("MX")):
+      mod.add(_tdmSparseMetadataKOffset(self, kernel))
     return mod
 
   def tdmApplyTileTailOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
