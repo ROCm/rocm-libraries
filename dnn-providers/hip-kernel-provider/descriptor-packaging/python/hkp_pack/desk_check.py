@@ -11,7 +11,7 @@ from __future__ import annotations
 import collections
 from pathlib import Path
 
-from . import agreement, descriptor_context
+from . import agreement, descriptor_context, provenance_sidecar
 from .errors import HkpPackError
 from .kpack_resolver import load_kpack
 
@@ -107,10 +107,32 @@ def _selected(kdp_path: Path, matches: list):
     return matches[0]
 
 
-def _resolve(kdp_path: Path) -> tuple[dict, list[descriptor_context.Entry]]:
+def _index(
+    kdp_path: Path, *, provenance_root=None, descriptor_root=None
+) -> descriptor_context.Index:
+    """The descriptor index over a KDP's own (resolved) directory.
+
+    `provenance_root` mirrors `descriptor_root`, which defaults to that directory
+    and must contain it.
+    """
+    if provenance_root is not None:
+        root = Path(descriptor_root).resolve() if descriptor_root else kdp_path.parent
+        provenance_root = provenance_sidecar.sidecar_path(
+            kdp_path, provenance_root, root
+        ).parent
+    return descriptor_context.Index(
+        str(kdp_path.parent), provenance_root=provenance_root
+    )
+
+
+def _resolve(
+    kdp_path: Path, *, provenance_root=None, descriptor_root=None
+) -> tuple[dict, list[descriptor_context.Entry]]:
     """One `.kdp.json`'s own document and its resolved entries."""
     kdp_path = Path(kdp_path).resolve()
-    index = descriptor_context.Index(str(kdp_path.parent))
+    index = _index(
+        kdp_path, provenance_root=provenance_root, descriptor_root=descriptor_root
+    )
     kdp = _selected(
         kdp_path, [d for d in index.of_type("kdp") if Path(d.path) == kdp_path]
     )
@@ -166,13 +188,17 @@ def metadata_identity_fields(kernels: list[dict]) -> tuple[str, ...]:
     return tuple(fields)
 
 
-def load_variant_set(kdp_path: Path) -> tuple[list[dict], tuple[str, ...] | None]:
+def load_variant_set(
+    kdp_path: Path, *, provenance_root=None, descriptor_root=None
+) -> tuple[list[dict], tuple[str, ...] | None]:
     """A `.kdp.json`'s kernel descriptors plus the matcher fields it declares.
 
     Both come from one walk of the descriptor tree: a shipped shard's KDP runs to
     megabytes.
     """
-    kdp_doc, entries = _resolve(kdp_path)
+    kdp_doc, entries = _resolve(
+        kdp_path, provenance_root=provenance_root, descriptor_root=descriptor_root
+    )
     return (
         [entry.ukd for entry in entries],
         declared_matcher_fields(kdp_doc, entries),
@@ -212,7 +238,11 @@ def _payload(
 
 
 def compiled_agreement(
-    kdp_path: Path, kpack_python_dir=None
+    kdp_path: Path,
+    kpack_python_dir=None,
+    *,
+    provenance_root=None,
+    descriptor_root=None,
 ) -> tuple[list[str], list[str], int]:
     """Compiled-specialization agreement over one shipped KDP.
 
@@ -233,7 +263,9 @@ def compiled_agreement(
     `origin_kind` is bound only by a digest inside the record being dropped.
     """
     kdp_path = Path(kdp_path).resolve()
-    index = descriptor_context.Index(str(kdp_path.parent))
+    index = _index(
+        kdp_path, provenance_root=provenance_root, descriptor_root=descriptor_root
+    )
     schemas = index.schemas()
     bundles = descriptor_context.resolve_bundles(index)
     bundle = _selected(kdp_path, [b for b in bundles if Path(b.kdp_path) == kdp_path])

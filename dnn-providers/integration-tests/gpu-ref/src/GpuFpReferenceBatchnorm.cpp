@@ -7,10 +7,10 @@
 
 #include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefLaunch.hpp>
 
 #include <cstdint>
 #include <hip/hip_runtime.h>
-#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -25,54 +25,15 @@ namespace
 // Shared argument and stride structs — single definition used by both host and device (HipRTC).
 #include <GpuRefBatchnormArgs.h> // NOLINT(misc-include-cleaner)
 
-void launchKernel(hipFunction_t function,
-                  std::array<unsigned int, 3> localSize,
-                  std::array<unsigned int, 3> gridSize,
-                  void* argsPtr,
-                  size_t argsSize)
-{
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                      argsPtr,
-                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                      &argsSize,
-                      HIP_LAUNCH_PARAM_END};
-
-    detail::throwOnHipError(hipModuleLaunchKernel(function,
-                                                  gridSize[0],
-                                                  gridSize[1],
-                                                  gridSize[2],
-                                                  localSize[0],
-                                                  localSize[1],
-                                                  localSize[2],
-                                                  0,
-                                                  nullptr,
-                                                  nullptr,
-                                                  config),
-                            "hipModuleLaunchKernel failed");
-
-    detail::throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize failed");
-}
-
-inline unsigned int checkedNarrowToUInt(int64_t value)
-{
-    if(value < static_cast<int64_t>(std::numeric_limits<unsigned int>::min())
-       || value > static_cast<int64_t>(std::numeric_limits<unsigned int>::max()))
-    {
-        throw std::runtime_error(" value " + std::to_string(value) + " exceeds unsigned int range");
-    }
-    return static_cast<unsigned int>(value);
-}
-
-std::pair<std::array<unsigned int, 3>, std::array<unsigned int, 3>>
+std::pair<std::array<int64_t, 3>, std::array<int64_t, 3>>
     calculateGrid(int64_t c, int64_t inCstride, int64_t n, bool isLayoutNhwc)
 {
-    std::array<unsigned int, 3> localSize;
-    std::array<unsigned int, 3> gridSize;
+    std::array<int64_t, 3> localSize;
+    std::array<int64_t, 3> gridSize;
     const unsigned int maxLocalsize = 256;
-    const unsigned int cUint = checkedNarrowToUInt(c);
-    const unsigned int cStrideUint = checkedNarrowToUInt(inCstride);
-    const unsigned int nUint = checkedNarrowToUInt(n);
+    const unsigned int cUint = detail::checkedNarrowToUInt(c, "channel count");
+    const unsigned int cStrideUint = detail::checkedNarrowToUInt(inCstride, "channel stride");
+    const unsigned int nUint = detail::checkedNarrowToUInt(n, "batch size");
 
     if(isLayoutNhwc)
     {
@@ -104,8 +65,8 @@ std::pair<std::array<unsigned int, 3>, std::array<unsigned int, 3>>
 
     if(activeThreadsXy < maxActiveThreads)
     {
-        gridSize[2]
-            = std::min(static_cast<unsigned int>(maxActiveThreads / activeThreadsXy), nUint);
+        gridSize[2] = std::min(static_cast<int64_t>(maxActiveThreads / activeThreadsXy),
+                               static_cast<int64_t>(nUint));
     }
     else
     {
@@ -132,7 +93,7 @@ bool isChannelLastLayout(const std::vector<int64_t>& strides)
 struct BatchnormLaunchGeometry
 {
     int64_t c, hw, batchSize, cStride, hwStride, batchStride;
-    std::array<unsigned int, 3> localSize, gridSize;
+    std::array<int64_t, 3> localSize, gridSize;
 };
 
 BatchnormLaunchGeometry computeFwdInfGeometry(const std::vector<int64_t>& dims,
@@ -214,7 +175,8 @@ void GpuFpReferenceBatchnorm::launchFwdInf(const void* inputPtr,
     args.common.batchStride = static_cast<long long>(geometry.batchStride);
     args.invVar = invVarPtr;
 
-    launchKernel(kernel.function(), geometry.localSize, geometry.gridSize, &args, sizeof(args));
+    detail::launchKernel(
+        kernel.function(), geometry.gridSize, geometry.localSize, &args, sizeof(args));
 }
 
 void GpuFpReferenceBatchnorm::launchFwdInfWithVar(const void* inputPtr,
@@ -248,7 +210,8 @@ void GpuFpReferenceBatchnorm::launchFwdInfWithVar(const void* inputPtr,
     args.estVar = estVarPtr;
     args.epsilon = epsilon;
 
-    launchKernel(kernel.function(), geometry.localSize, geometry.gridSize, &args, sizeof(args));
+    detail::launchKernel(
+        kernel.function(), geometry.gridSize, geometry.localSize, &args, sizeof(args));
 }
 
 void GpuFpReferenceBatchnorm::launchFwdTrain(const void* inputPtr,
@@ -321,8 +284,7 @@ void GpuFpReferenceBatchnorm::launchFwdTrain(const void* inputPtr,
     args.c = static_cast<long long>(c);
     args.hw = static_cast<long long>(h) * static_cast<long long>(w);
 
-    launchKernel(
-        kernel.function(), {BLOCK_SIZE, 1, 1}, {checkedNarrowToUInt(c), 1, 1}, &args, sizeof(args));
+    detail::launchKernel1d(kernel.function(), c, BLOCK_SIZE, &args, sizeof(args));
 }
 
 } // namespace hipdnn_gpu_ref

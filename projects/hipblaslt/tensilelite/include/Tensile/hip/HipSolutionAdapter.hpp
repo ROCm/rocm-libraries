@@ -43,7 +43,17 @@ namespace TensileLite
         class TENSILELITEHOST_EXPORT SolutionAdapter : public TensileLite::SolutionAdapter
         {
         public:
+            // Keep file-module operations together so load/recovery behavior can
+            // be tested without a GPU or process-wide HIP symbol interposition.
+            struct ModuleApi
+            {
+                decltype(&hipModuleLoad)   load         = hipModuleLoad;
+                decltype(&hipModuleUnload) unload       = hipModuleUnload;
+                decltype(&hipGetLastError) getLastError = hipGetLastError;
+            };
+
             SolutionAdapter();
+            explicit SolutionAdapter(ModuleApi moduleApi);
             SolutionAdapter(bool debug);
             SolutionAdapter(bool debug, std::string const& name);
             ~SolutionAdapter();
@@ -54,6 +64,10 @@ namespace TensileLite
             }
 
             void codeObjectDir(std::string codeObjectDir);
+
+            // Record the normalized helper-code-object location before a
+            // primary code-object load can need module-reload recovery.
+            void setLazyLoadingContext(std::string architecture, std::string codeObjectDir);
 
             hipError_t loadCodeObjectFile(std::string const& path);
 
@@ -110,8 +124,10 @@ namespace TensileLite
             int numRotationModules();
 
         private:
+            hipError_t loadCodeObjectFileOnce(std::string const& path);
             hipError_t getKernel(hipFunction_t& rv, std::string const& name);
 
+            ModuleApi  m_moduleApi;
             std::mutex m_access;
 
             std::vector<hipModule_t>                       m_modules;
@@ -150,4 +166,3 @@ namespace TensileLite
         std::ostream& operator<<(std::ostream& stream, std::shared_ptr<SolutionAdapter> const& ptr);
     } // namespace hip
 } // namespace TensileLite
-

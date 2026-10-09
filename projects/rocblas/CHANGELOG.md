@@ -5,6 +5,14 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.8.0
 
+### Removed
+
+* The `ROCBLAS_USE_HIPBLASLT_BATCHED` environment variable, deprecated in `rocBLAS 5.6.0`, is removed and is now ignored. Batched GEMM is controlled by the same environment variable as all other GEMM, so a batched-only override is no longer required. Use `ROCBLAS_USE_HIPBLASLT=0` to select the Tensile backend for all GEMM, including batched.
+
+### Resolved issues
+
+* Fix incorrect results and out-of-bounds reads from Level 1 ILP64 `dot` and `dotc`, including batched, strided-batched, and `_ex` forms, when a negative increment is wide enough to take the 64-bit increment path and `n` fits the single-block reduction. That path shifted by `(n - 1)` before calling the launcher, which applies the same walk, and the `y` shift tested `incx` rather than `incy`. The offsets are now passed through unshifted.
+
 ## rocBLAS 5.7.0 for ROCm 10.1.0
 
 ### Added
@@ -15,7 +23,7 @@ rocBLAS documentation is available at
 ### Optimized
 
 * Improved the performance of Level 3 `gemm` for the problem sizes where `m == 1` or `n == 1` and `batch_count == 1` by using `gemv` kernels, previously applied only in `gemm_ex`. On gfx11 the per-precision heuristics guarding this path are also bypassed, except for the `1x1` case.
-* Improved the performance of Level 2 `gemv` non-transposed (`TransA == N`) for the problem sizes where `m` is small and `n` is large by splitting the reduction across the grid, as the transposed case already does.
+* Improved the performance of Level 2 `gemv` non-transposed (`TransA == N`) for the problem sizes where `m` is small and `n` is large by splitting the reduction across the grid, as the transposed case already does. The split is now selected from the launch shape rather than a fixed output-length crossover: it applies when the output grid has at most 8 tiles and the column split produces at least 2 parallel blocks, or when the output length is at or below the crossover.
 
 ### Resolved issues
 

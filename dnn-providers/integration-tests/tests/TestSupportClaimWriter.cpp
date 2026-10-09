@@ -146,10 +146,39 @@ TEST(TestSupportClaimWriter, EmptyObservationsLeaveExistingSidecarUntouched)
 }
 
 // ---------------------------------------------------------------------------
-// Resolved decline erases platform, collapsing empty arch and engine
+// A decline never retracts a checked-in claim
 // ---------------------------------------------------------------------------
 
-TEST(TestSupportClaimWriter, DeclineErasesPlatformAndCollapsesEmptyKeys)
+TEST(TestSupportClaimWriter, DeclineLeavesCheckedInClaimIntact)
+{
+    const ScopedDirectory dir = claimScratchDirectory("test_writer_");
+    const auto sidecarPath = dir.path() / "Small.support.json";
+
+    nlohmann::json existingJson;
+    existingJson["version"] = 1;
+    existingJson["claims"]["MIOPEN_ENGINE"]["gfx942"] = nlohmann::json::array({"linux"});
+    // Binary, because the writer compares bytes: a text-mode seed carries CRLF on
+    // Windows and never matches.
+    std::ofstream(sidecarPath, std::ios::binary) << dumpCanonical(existingJson);
+
+    const auto bundlePath = dir.path() / "Small.json";
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", false),
+    };
+
+    const auto summary = writeObservedSupportClaims(observations);
+
+    auto json = nlohmann::json::parse(readFile(sidecarPath));
+    const auto claims = parseSupportClaimsJson(json);
+    EXPECT_TRUE(claims.isClaimed("MIOPEN_ENGINE", "gfx942", "linux"));
+
+    // The claim is the engine's promise, not a log of the last run: a decline
+    // rewrites nothing, so the file does not even take an mtime bump.
+    EXPECT_EQ(summary.filesWritten, 0u);
+    EXPECT_EQ(summary.filesUnchanged, 1u);
+}
+
+TEST(TestSupportClaimWriter, DeclineIsInertWhileSiblingSupportIsRecorded)
 {
     const ScopedDirectory dir = claimScratchDirectory("test_writer_");
     const auto sidecarPath = dir.path() / "Small.support.json";
@@ -162,36 +191,14 @@ TEST(TestSupportClaimWriter, DeclineErasesPlatformAndCollapsesEmptyKeys)
     const auto bundlePath = dir.path() / "Small.json";
     const std::vector<ObservedGraphSupport> observations = {
         singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", false),
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "windows", true),
     };
 
     writeObservedSupportClaims(observations);
 
     auto json = nlohmann::json::parse(readFile(sidecarPath));
     const auto claims = parseSupportClaimsJson(json);
-    EXPECT_FALSE(claims.isClaimed("MIOPEN_ENGINE", "gfx942", "linux"));
-    EXPECT_TRUE(claims.claims.find("MIOPEN_ENGINE") == claims.claims.end());
-}
-
-TEST(TestSupportClaimWriter, DeclineErasesOnlyTargetedPlatform)
-{
-    const ScopedDirectory dir = claimScratchDirectory("test_writer_");
-    const auto sidecarPath = dir.path() / "Small.support.json";
-
-    nlohmann::json existingJson;
-    existingJson["version"] = 1;
-    existingJson["claims"]["MIOPEN_ENGINE"]["gfx942"] = nlohmann::json::array({"linux", "windows"});
-    std::ofstream(sidecarPath) << dumpCanonical(existingJson);
-
-    const auto bundlePath = dir.path() / "Small.json";
-    const std::vector<ObservedGraphSupport> observations = {
-        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", false),
-    };
-
-    writeObservedSupportClaims(observations);
-
-    auto json = nlohmann::json::parse(readFile(sidecarPath));
-    const auto claims = parseSupportClaimsJson(json);
-    EXPECT_FALSE(claims.isClaimed("MIOPEN_ENGINE", "gfx942", "linux"));
+    EXPECT_TRUE(claims.isClaimed("MIOPEN_ENGINE", "gfx942", "linux"));
     EXPECT_TRUE(claims.isClaimed("MIOPEN_ENGINE", "gfx942", "windows"));
 }
 
@@ -277,12 +284,12 @@ TEST(TestSupportClaimWriter, SweepGroupsCasesWithIdenticalSupport)
 // Sweep: changed support moves case to different group
 // ---------------------------------------------------------------------------
 
-TEST(TestSupportClaimWriter, SweepChangedSupportMovesCaseToCorrectGroup)
+TEST(TestSupportClaimWriter, SweepWidenedSupportSplitsCaseIntoItsOwnGroup)
 {
     const ScopedDirectory dir = claimScratchDirectory("test_writer_");
     const auto sidecarPath = dir.path() / "support.json";
 
-    // Pre-existing: case_a and case_b in one group, both supported
+    // Pre-existing: case_a and case_b share one group, both supported
     nlohmann::json existingJson;
     existingJson["version"] = 1;
     nlohmann::json group;
@@ -293,8 +300,8 @@ TEST(TestSupportClaimWriter, SweepChangedSupportMovesCaseToCorrectGroup)
 
     const auto sweepPath = dir.path() / "sweep.json";
     const std::vector<ObservedGraphSupport> observations = {
-        // case_b loses support on gfx942/linux
-        sweepCaseObservation(sweepPath, "case_b", "MIOPEN_ENGINE", "gfx942", "linux", false),
+        // case_b picks up a platform case_a does not have
+        sweepCaseObservation(sweepPath, "case_b", "MIOPEN_ENGINE", "gfx942", "windows", true),
     };
 
     writeObservedSupportClaims(observations);
@@ -302,13 +309,16 @@ TEST(TestSupportClaimWriter, SweepChangedSupportMovesCaseToCorrectGroup)
     auto json = nlohmann::json::parse(readFile(sidecarPath));
     const auto claims = parseSweepSupportClaimsJson(json);
     EXPECT_TRUE(claims.isClaimed("case_a", "MIOPEN_ENGINE", "gfx942", "linux"));
-    EXPECT_FALSE(claims.isClaimed("case_b", "MIOPEN_ENGINE", "gfx942", "linux"));
+    EXPECT_TRUE(claims.isClaimed("case_b", "MIOPEN_ENGINE", "gfx942", "linux"));
+    EXPECT_TRUE(claims.isClaimed("case_b", "MIOPEN_ENGINE", "gfx942", "windows"));
+    EXPECT_FALSE(claims.isClaimed("case_a", "MIOPEN_ENGINE", "gfx942", "windows"));
 
-    // case_a should be alone in its group now
+    // The footprints diverged, so the shared group re-splits. Groups are ordered
+    // by their first case id.
     const auto& engineGroups = json["claims"]["MIOPEN_ENGINE"];
-    ASSERT_EQ(engineGroups.size(), 1u);
-    EXPECT_EQ(engineGroups[0]["cases"].size(), 1u);
-    EXPECT_EQ(engineGroups[0]["cases"][0], "case_a");
+    ASSERT_EQ(engineGroups.size(), 2u);
+    EXPECT_EQ(engineGroups[0]["cases"], nlohmann::json::array({"case_a"}));
+    EXPECT_EQ(engineGroups[1]["cases"], nlohmann::json::array({"case_b"}));
 }
 
 // ---------------------------------------------------------------------------

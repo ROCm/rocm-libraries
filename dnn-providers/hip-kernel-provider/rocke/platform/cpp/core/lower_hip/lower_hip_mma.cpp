@@ -30,6 +30,7 @@
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
+#include "rocke/tf32_internal.h"
 #include "rocke/wmma_scale_internal.h"
 
 #include <stdio.h> /* snprintf */
@@ -133,6 +134,36 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     if(!op_id)
     {
         return rocke_h_fail(lw, ROCKE_ERR_KEY, "tile.mma: missing 'op_id' attr");
+    }
+    int tf32_count = rocke_tf32_mma_count(op_id);
+    if(tf32_count)
+    {
+        if(strcmp(lw->arch.gfx, "gfx942") != 0)
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "XF32 MMA requires gfx942");
+        rocke_h_emitf(lw,
+                      "f32x%d %s = __builtin_amdgcn_%s(__builtin_bit_cast(f32x2, %s), "
+                      "__builtin_bit_cast(f32x2, %s), %s, 0, 0, 0);",
+                      tf32_count,
+                      rocke_h_name(lw, op->results[0]),
+                      op_id,
+                      rocke_h_name(lw, op->operands[0]),
+                      rocke_h_name(lw, op->operands[1]),
+                      rocke_h_name(lw, op->operands[2]));
+        return ROCKE_OK;
+    }
+    /* Ordinary FP32 controls use catalog IDs that have no legacy opcode. */
+    if(strcmp(op_id, "mfma_f32_16x16x4_f32") == 0 || strcmp(op_id, "mfma_f32_32x32x2_f32") == 0)
+    {
+        bool small = strcmp(op_id, "mfma_f32_16x16x4_f32") == 0;
+        rocke_h_emitf(lw,
+                      "f32x%d %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
+                      small ? 4 : 16,
+                      rocke_h_name(lw, op->results[0]),
+                      small ? "mfma_f32_16x16x4f32" : "mfma_f32_32x32x2f32",
+                      rocke_h_name(lw, op->operands[0]),
+                      rocke_h_name(lw, op->operands[1]),
+                      rocke_h_name(lw, op->operands[2]));
+        return ROCKE_OK;
     }
     if(rocke_gfx1250_scaled_wmma(op_id))
     {

@@ -19,6 +19,7 @@ Documentation for rocWMMA is available at
 
 ### Resolved issues
 
+* Fixed the installed CMake package to discover its HIP and OpenMP dependencies, including LLVM's `OpenMP::omp` target when exported.
 * Improved HIP RTC regression test portability when deployed outside the default path
 
 ## rocWMMA 2.2.0 for ROCm 7.2.0

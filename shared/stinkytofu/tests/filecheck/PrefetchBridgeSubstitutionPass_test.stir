@@ -1,0 +1,90 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --PrefetchBridgeSubstitutionPass --print-output
+#
+# Only the LAST global_prefetch_b8 of a group is rewritten: FLAT takes an ordinal in both
+# order FIFOs, and TEX order puts it behind the rest of the group, so proving it drained
+# proves the whole group drained. Rewriting the others buys nothing and spends an LDS
+# FIFO entry each.
+#
+# It is rewritten when at least vmVsrcBridge (11) LDS ops separate it from the write that
+# overwrites the address -- the consumer whose wait it has to discharge.
+#
+# The null saddr moves with the opcode: GLOBAL spells it "off", FLAT omits it. Same
+# encoding, different syntax -- keeping "off" would fail to assemble.
+
+#--- One group of two. 11 ds_loads reach the consumer, so the LAST prefetch is rewritten
+#--- and loses its "off" operand. The first is left alone: the anchor covers it.
+# CHECK-LABEL: @anchors_last_of_group_only
+# CHECK: "st.global_prefetch_b8"(v[0:1], off)
+# CHECK: "st.flat_prefetch_b8"(v[2:3])
+# CHECK-NOT: "st.flat_prefetch_b8"(v[2:3], off)
+st.func @anchors_last_of_group_only() {
+^entry:
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[2:3], off) { issueCycles = 1, latencyCycles = 1 }
+  v20 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v21 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v22 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v23 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v24 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v25 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v26 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v27 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v28 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v29 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v30 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Only 2 ds_loads before the overwrite: below the threshold, so nothing is rewritten
+#--- and no LDS FIFO entry is spent.
+# CHECK-LABEL: @declines_when_too_close
+# CHECK-NOT: flat_prefetch_b8
+st.func @declines_when_too_close() {
+^entry:
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[2:3], off) { issueCycles = 1, latencyCycles = 1 }
+  v20 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v21 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Two groups on the same addresses, with the second skippable. At the consumer, v0's
+#--- last reader is the first group's prefetch on the skip path and the second group's on
+#--- the fall-through. Both groups must be anchored -- an unanchored path leaves the join
+#--- with nothing to rely on -- so BOTH v[2:3] prefetches are rewritten, and neither
+#--- v[0:1] is: the anchor already covers it.
+# CHECK-LABEL: @anchors_every_group_reaching_the_consumer
+# CHECK: "st.global_prefetch_b8"(v[0:1], off)
+# CHECK: "st.flat_prefetch_b8"(v[2:3])
+# CHECK: "st.global_prefetch_b8"(v[0:1], off)
+# CHECK: "st.flat_prefetch_b8"(v[2:3])
+st.func @anchors_every_group_reaching_the_consumer() {
+^entry:
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[2:3], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"("label_join", SCC0)
+  Successors: ^second, ^label_join
+^second:
+  v0 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
+  "st.global_prefetch_b8"(v[2:3], off) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^label_join
+^label_join:
+  v20 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v21 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v22 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v23 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v24 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v25 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v26 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v27 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v28 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v29 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v30 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v31 = "st.ds_load_b32"(v40) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_mov_b32"(v41) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

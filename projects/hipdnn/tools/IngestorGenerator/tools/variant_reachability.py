@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # Import solely for the shared descriptor package's path bootstrap.
 import verify_variant_sets  # noqa: E402, F401
 
-from hkp_pack import descriptor_context  # noqa: E402
+from hkp_pack import descriptor_context, provenance_sidecar  # noqa: E402
 
 
 class ReachabilityError(RuntimeError):
@@ -46,13 +46,16 @@ def _load_profile(path: str) -> dict:
     return loaded
 
 
-def load_bundle(kdp_path: str, tree: str | None = None) -> tuple[dict, list[dict]]:
+def load_bundle(
+    kdp_path: str, tree: str | None = None, *, provenance_root: str | None = None
+) -> tuple[dict, list[dict]]:
     """(name -> KMD default_value, kernelDescriptors) for one *.kdp.json.
 
     The schema is reached by reference through the id chain the documents
     declare, resolved across `tree` by `hkp_pack.descriptor_context`. Its
     defaults make "wrote the default explicitly" and "left it absent" the same
-    variant at runtime -- see `_resolved_metadata`.
+    variant at runtime -- see `_resolved_metadata`. `provenance_root` is as for
+    `descriptor_context.Index`.
     """
     kdp = Path(kdp_path)
     if not kdp.name.endswith(".kdp.json"):
@@ -60,7 +63,7 @@ def load_bundle(kdp_path: str, tree: str | None = None) -> tuple[dict, list[dict
     root = Path(tree) if tree else kdp.parent
     try:
         bundles = descriptor_context.resolve_bundles(
-            descriptor_context.Index(str(root))
+            descriptor_context.Index(str(root), provenance_root=provenance_root)
         )
     except descriptor_context.DescriptorContextError as exc:
         raise ReachabilityError(str(exc))
@@ -256,6 +259,13 @@ def main(argv=None) -> int:
         "explicitly when the generics live above it.",
     )
     parser.add_argument(
+        "--provenance-root",
+        help="Where a packed tree's provenance sidecars live when they are not "
+        "beside its descriptors, as in an installed production tree. It mirrors "
+        "--tree (or the --kdp file's directory). The --kdp file's directory must "
+        f"hold {provenance_sidecar.PACKED_MARKER}.",
+    )
+    parser.add_argument(
         "--shapes",
         required=True,
         help="JSON list of request-field mappings, the same corpus format "
@@ -291,6 +301,12 @@ def main(argv=None) -> int:
         "UNREACHABLE findings; still reports them.",
     )
     args = parser.parse_args(argv)
+    kdp_dir = Path(args.kdp).resolve().parent
+    if args.provenance_root and not provenance_sidecar.is_packed(kdp_dir):
+        parser.error(
+            f"--provenance-root relocates a packed tree's sidecars, but {kdp_dir} "
+            f"holds no {provenance_sidecar.PACKED_MARKER}"
+        )
 
     try:
         profile = _load_profile(args.profile) if args.profile else {}
@@ -307,7 +323,9 @@ def main(argv=None) -> int:
         if score is not None and ("field" not in score or "prefer" not in score):
             raise ReachabilityError("score needs both 'field' and 'prefer'")
 
-        defaults, descriptors = load_bundle(args.kdp, args.tree)
+        defaults, descriptors = load_bundle(
+            args.kdp, args.tree, provenance_root=args.provenance_root
+        )
         shapes = json.loads(Path(args.shapes).read_text())
         if not isinstance(shapes, list):
             raise ReachabilityError("--shapes must be a JSON list of field mappings.")

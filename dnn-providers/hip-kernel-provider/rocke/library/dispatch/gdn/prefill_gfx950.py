@@ -1,0 +1,329 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""gfx950 candidates and tuned ``value_splits`` selection for GDN prefill.
+
+The two split halves of the chunkwise KDA kernel, run in GDN mode:
+
+* ``chunk_prep`` -- the state-independent per-chunk tile builder, with the raw
+  token-major GDN gate fused in (``gate_kind="gdn"``, ``kv_group`` GQA gather,
+  q/k L2-norm + softplus gate + beta sigmoid all fused).
+* ``chunk_scan`` -- the serial state scan over the materialized tiles, whose
+  ``value_splits`` fans the value dimension across workgroups to manufacture
+  parallelism at low ``BH``.
+
+Both are selected by an explicit ``algorithm`` pin; there is no fused GDN
+kernel, so ``auto`` does not resolve here (see :mod:`.prefill_common`).
+
+Tuned ``value_splits`` table
+----------------------------
+Measured on gfx950 (correctness-gated vs the fp64 oracle): the
+serial scan is parallelism-starved at small ``BH`` and ``value_splits`` fills
+the GPU. The optimum is per-``BH``; each split also fixes the scan tile's block
+size (and the ``vs=8`` atom), because the scan block must cover the split V
+extent. Raw prep always keeps the 256-thread builder regardless of the split.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+from typing import Tuple
+
+from kernels.gfx950.kda_chunkwise import (
+    KDA_DTYPES,
+    KdaChunkPrepSpec,
+    KdaChunkScanSpec,
+    KdaTileSpec,
+    build_kda_chunk_prep,
+    build_kda_chunk_scan,
+    is_valid_scan_spec,
+    is_valid_spec,
+    kda_chunk_prep_grid,
+    kda_chunk_prep_signature,
+    kda_chunk_scan_grid,
+    kda_chunk_scan_signature,
+)
+from rocke.dispatch.core import (
+    Capability,
+    CandidateRegistry,
+    KernelCandidate,
+    OperatorRequest,
+)
+
+from .common import normalize_dtype
+from .prefill_common import (
+    FAMILY_PREFILL,
+    GDN_PREFILL_ABI_VERSION,
+    GdnPrefillRequest,
+    prefill_request_errors,
+    prefill_selector_matches,
+)
+
+ARCH = "gfx950"
+
+# (max_batch_heads, value_splits). BH = batch * num_v_heads. The final band is
+# open-ended (value_splits=1, natural parallelism fills the GPU). Measured
+# anchors: BH<=64 -> value_splits=8, BH<=128 -> 2. Ratios in the internal perf repo.
+# Snapshot: regenerate with
+# ``python -m benchmarks.gfx950.gdn.sweep_prefill_value_splits`` after any
+# kernel, compiler, or shape change -- a baked table drifts otherwise.
+_VALUE_SPLIT_BANDS = (
+    (64, 8),
+    (128, 2),
+)
+_DEFAULT_VALUE_SPLITS = 1
+
+# Each value_splits fixes the scan tile: the scan block must cover the split V
+# extent, and vs=8 additionally needs the M16 scan atom. Mirrors the builder's
+# ``aligned_split_specs``. Raw prep overrides block_size back to 256. Only the
+# splits the bands actually select (8/2/1) are listed; the builder also defines
+# vs=4, but no band picks it here so it is intentionally absent.
+_SPLIT_TILE = {
+    8: dict(block_size=64, scan_atom_m=16),
+    2: dict(block_size=128),
+    1: dict(block_size=256),
+}
+
+
+def value_splits_for(batch_heads: int) -> int:
+    """Tuned ``value_splits`` for ``BH = batch * num_v_heads``."""
+    for max_bh, splits in _VALUE_SPLIT_BANDS:
+        if batch_heads <= max_bh:
+            return splits
+    return _DEFAULT_VALUE_SPLITS
+
+
+def _scan_tile(req: GdnPrefillRequest, value_splits: int) -> KdaTileSpec:
+    tile = _SPLIT_TILE.get(value_splits)
+    if tile is None:
+        # Reached only by retuning _VALUE_SPLIT_BANDS onto a split with no tile
+        # entry -- the sweep measures vs=4, which the builder defines but no
+        # band selects, so this is a real path for whoever re-runs the tuner.
+        # A bare KeyError here would read as a dispatcher bug; name the repair
+        # instead. The entry is deliberately NOT pre-added: a split the bands
+        # never select has never been through the on-device numeric gate
+        # (test_gdn_prefill_dispatched_value_splits covers 8/2/1), so adding one
+        # and verifying it belong to the same change.
+        raise ValueError(
+            f"value_splits={value_splits} has no _SPLIT_TILE entry (have "
+            f"{sorted(_SPLIT_TILE)}). Copy its geometry from the builder's "
+            f"aligned_split_specs and add an on-device numeric case for it "
+            f"before shipping a table that selects it."
+        )
+    return KdaTileSpec(chunk=req.effective_chunk_size, **tile)
+
+
+def _scan_spec(req: OperatorRequest) -> KdaChunkScanSpec:
+    assert isinstance(req, GdnPrefillRequest)
+    value_splits = value_splits_for(req.batch_heads)
+    return KdaChunkScanSpec(
+        head_k=int(req.head_k_dim),
+        head_v=int(req.head_v_dim),
+        dtype=normalize_dtype(req.dtype),
+        tile=_scan_tile(req, value_splits),
+        value_splits=value_splits,
+        token_major_io=True,
+        has_initial_state=bool(req.has_initial_state),
+        store_final_state=bool(req.store_final_state),
+    )
+
+
+def _prep_spec(req: OperatorRequest) -> KdaChunkPrepSpec:
+    assert isinstance(req, GdnPrefillRequest)
+    # The raw GDN prep is derived from the scan's tile, but keeps the 256-thread
+    # builder (block_size=256) even when the scan uses a narrow block for a
+    # value split -- exactly the builder's ``prep_spec_of(scan, raw=True)``.
+    scan = _scan_spec(req)
+    prep_tile = dataclasses.replace(scan.tile, block_size=256)
+    return KdaChunkPrepSpec(
+        head_k=int(req.head_k_dim),
+        head_v=int(req.head_v_dim),
+        dtype=normalize_dtype(req.dtype),
+        tile=prep_tile,
+        raw_inputs=True,
+        fuse_qk_l2norm=True,
+        fuse_gate=True,
+        fuse_beta_sigmoid=True,
+        has_dt_bias=True,
+        lower_bound=-5.0,
+        gate_kind="gdn",
+        kv_group=int(req.kv_group),
+    )
+
+
+def _prep_validator(spec: KdaChunkPrepSpec, req: GdnPrefillRequest) -> Tuple[bool, str]:
+    """A prep is selectable only if the scan that consumes it is too.
+
+    The mirror of ``_scan_validator``. Without this the chaining runs one way
+    only: a request whose scan half cannot build still gets a valid prep
+    DispatchResult, and because the documented call order is prep-then-scan the
+    caller launches the first half -- writing a full workspace of per-chunk
+    tiles -- before the second dispatch tells them the pair was never viable.
+    Probed case: ``head_v_dim=64`` admits as prep and fails as scan with "v
+    slice (8) must divide scan atom n (16)".
+
+    The coupling is deliberate: the split path is a PAIR, and neither half is
+    independently meaningful. A scan-only knob added later will therefore start
+    refusing prep requests that used to pass -- that is the intent, not a
+    regression.
+    """
+    ok, why = is_valid_spec(spec, arch=req.arch)
+    if not ok:
+        return ok, why
+    ok, why = is_valid_scan_spec(_scan_spec(req), arch=req.arch)
+    if not ok:
+        return False, f"prep builds but its scan half does not: {why}"
+    return True, "ok"
+
+
+def _scan_validator(spec: KdaChunkScanSpec, req: GdnPrefillRequest) -> Tuple[bool, str]:
+    """A scan is selectable only if the tile builder that feeds it is too.
+
+    The scan validates the state partition and the staging copies; the raw prep
+    additionally validates the fused gate/L2/sigmoid path, whose rules the scan
+    has no equivalent of -- ``head_k=32`` passes here and fails there, because
+    ``fuse_qk_l2norm`` reduces a fixed 128-element row. A scan reads tiles it
+    does not produce, so admitting one whose prep cannot build hands the caller
+    half a split path and moves the failure to whoever launched the two halves
+    in order, well past the gate whose job was to name the reason.
+
+    Chaining matches the family's other composite validators --
+    ``dispatch/kda/gfx950.py``'s scan gate and ``is_valid_fused_spec`` -- but
+    those reach the prep through ``spec.prep``, and that derivation is *not*
+    usable here: it reconstructs a plain KDA prep with every GDN flag off
+    (``gate_kind='kda'``, ``fuse_qk_l2norm=False``, ``kv_group=1``), so the
+    GDN-only rules never fire on it. We validate the prep spec this dispatcher
+    would actually build for the same request instead, which is why the
+    validator takes the request rather than the spec alone.
+    """
+    ok, why = is_valid_scan_spec(spec, arch=req.arch)
+    if not ok:
+        return False, why
+    ok, why = is_valid_spec(_prep_spec(req), arch=req.arch)
+    if not ok:
+        return False, f"tile builder for this scan is unbuildable: {why}"
+    return True, "ok"
+
+
+def _prep_grid(spec: KdaChunkPrepSpec, req: OperatorRequest):
+    assert isinstance(req, GdnPrefillRequest)
+    # One workgroup per (batch, value head, chunk).
+    return kda_chunk_prep_grid(spec, req.workgroups * req.num_chunks)
+
+
+def _scan_grid(spec: KdaChunkScanSpec, req: OperatorRequest):
+    assert isinstance(req, GdnPrefillRequest)
+    # One recurrence stream per (batch, value head); the grid helper fans each
+    # out by ``spec.value_splits``.
+    return kda_chunk_scan_grid(spec, req.workgroups)
+
+
+def _capability() -> Capability:
+    # Both state flags describe the problem; the scan half applies them and the
+    # prep half is state-independent, so both candidates declare them (see KDA).
+    return Capability(
+        arches=(ARCH,),
+        dtypes=KDA_DTYPES,
+        supports_features=frozenset({"initial_state", "final_state"}),
+    )
+
+
+_SPLIT_ONLY = (
+    "GDN prefill is a two-phase split path; pin algorithm='chunk_prep' then "
+    "'chunk_scan'. There is no fused GDN kernel -- the fused path is packed-only "
+    "and cannot emit the in-kernel GDN gate."
+)
+
+
+def _make_candidate(
+    *,
+    name: str,
+    algorithm: str,
+    spec_id: str,
+    priority: int,
+    spec_for,
+    validator,
+    builder,
+    grid_for,
+    signature_for,
+) -> KernelCandidate:
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = prefill_request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, GdnPrefillRequest)
+        if req.arch != ARCH:
+            return False, f"candidate arch {ARCH} != request arch {req.arch!r}"
+        # Opt-in by algorithm: there is no fused default, so a bare "auto"
+        # request matches neither half rather than silently picking one.
+        if req.algorithm.strip().lower() not in (algorithm, ""):
+            if req.spec_id.strip().lower() != spec_id:
+                return False, _SPLIT_ONLY
+        ok, why = prefill_selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        # Validators take the request, not just their own spec: the scan half
+        # has to check the prep spec this dispatcher would build alongside it.
+        return validator(spec_for(req), req)
+
+    def select(req: OperatorRequest):
+        ok, why = candidate.admits(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        return spec_for(req)
+
+    candidate = KernelCandidate(
+        name=name,
+        family=FAMILY_PREFILL,
+        algorithm=algorithm,
+        spec_id=spec_id,
+        abi_version=GDN_PREFILL_ABI_VERSION,
+        priority=priority,
+        capability=_capability(),
+        _supports=support,
+        select_spec=select,
+        build=builder,
+        grid=grid_for,
+        block=lambda spec: (spec.tile.block_size, 1, 1),
+        signature=signature_for,
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+    )
+    return candidate
+
+
+def _prep_candidate() -> KernelCandidate:
+    """Split path phase 1: the raw GDN per-chunk tile builder."""
+    return _make_candidate(
+        name="gdn_prefill_gfx950_chunk_prep",
+        algorithm="chunk_prep",
+        spec_id="gfx950_gdn_chunk_prep",
+        priority=10,
+        spec_for=_prep_spec,
+        validator=_prep_validator,
+        builder=build_kda_chunk_prep,
+        grid_for=_prep_grid,
+        signature_for=kda_chunk_prep_signature,
+    )
+
+
+def _scan_candidate() -> KernelCandidate:
+    """Split path phase 2: the serial state scan, ``value_splits``-tuned."""
+    return _make_candidate(
+        name="gdn_prefill_gfx950_chunk_scan",
+        algorithm="chunk_scan",
+        spec_id="gfx950_gdn_chunk_scan",
+        priority=20,
+        spec_for=_scan_spec,
+        validator=_scan_validator,
+        builder=build_kda_chunk_scan,
+        grid_for=_scan_grid,
+        signature_for=kda_chunk_scan_signature,
+    )
+
+
+def candidates() -> Tuple[KernelCandidate, ...]:
+    return (_prep_candidate(), _scan_candidate())
+
+
+def register(registry: CandidateRegistry) -> None:
+    registry.extend(candidates())

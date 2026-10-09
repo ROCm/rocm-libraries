@@ -105,6 +105,12 @@ typedef enum rocke_scalar_kind
     ROCKE_SCALAR_F32,
     ROCKE_SCALAR_FP8E4M3,
     ROCKE_SCALAR_BF8E5M2,
+    ROCKE_SCALAR_FP4E2M1,
+    ROCKE_SCALAR_FP6E2M3,
+    ROCKE_SCALAR_FP6E3M2,
+    ROCKE_SCALAR_E8M0,
+    ROCKE_SCALAR_E5M3,
+    ROCKE_SCALAR_TF32,
     ROCKE_SCALAR__COUNT
 } rocke_scalar_kind_t;
 
@@ -560,6 +566,41 @@ typedef struct rocke_inline_asm_opts
     bool convergent_set;
 } rocke_inline_asm_opts_t;
 
+/* Temporal hint for vector global memory ops (Python rocke.core.ir.TemporalHint).
+ * It states intent; the backend picks the cache bits per arch. */
+typedef enum rocke_temporal_hint
+{
+    ROCKE_TEMPORAL_DEFAULT = 0, /* existing cache policy; IR unchanged          */
+    ROCKE_TEMPORAL_STREAMING = 1 /* read/written once: lowers to LLVM !nontemporal */
+} rocke_temporal_hint_t;
+
+/* Options for vector global memory ops (rocke_b_global_load_vN_ex,
+ * rocke_b_global_store_vN_ex, and the io helpers' _ex forms).
+ *
+ * opts == NULL means all defaults. Otherwise initialize with
+ * ROCKE_MEM_OPTS_INIT, which records sizeof(rocke_mem_opts_t) as the caller's
+ * compiler saw it, then set the fields you need:
+ *
+ *     rocke_mem_opts_t o = ROCKE_MEM_OPTS_INIT;
+ *     o.temporal_hint = ROCKE_TEMPORAL_STREAMING;
+ *
+ * Extension contract: new fields are only appended, and every field's 0 value
+ * means "default". The library reads a field only when it lies inside
+ * struct_size and uses the default otherwise, so a caller built against an
+ * older, shorter struct keeps working with a newer library. struct_size == 0
+ * (e.g. `= {}` without the macro) is rejected with ROCKE_ERR_VALUE rather than
+ * silently ignoring the caller's settings. */
+typedef struct rocke_mem_opts
+{
+    uint32_t struct_size; /* sizeof(rocke_mem_opts_t) at the caller's compile time */
+    rocke_temporal_hint_t temporal_hint;
+} rocke_mem_opts_t;
+
+#define ROCKE_MEM_OPTS_INIT                                        \
+    {                                                              \
+        (uint32_t)sizeof(rocke_mem_opts_t), ROCKE_TEMPORAL_DEFAULT \
+    }
+
 /* ============================== TYPE SYSTEM ============================== */
 
 /* Interned scalar singletons (Python module-level I1, F32, ...). Always valid;
@@ -572,8 +613,17 @@ const rocke_type_t* rocke_i64(void);
 const rocke_type_t* rocke_bf16(void);
 const rocke_type_t* rocke_f16(void);
 const rocke_type_t* rocke_f32(void);
+const rocke_type_t* rocke_tf32(void);
 const rocke_type_t* rocke_fp8e4m3(void);
 const rocke_type_t* rocke_bf8e5m2(void);
+const rocke_type_t* rocke_fp4e2m1(void);
+const rocke_type_t* rocke_fp6e2m3(void);
+const rocke_type_t* rocke_fp6e3m2(void);
+const rocke_type_t* rocke_e8m0(void);
+const rocke_type_t* rocke_e5m3(void);
+
+/* Logical dtype resolver; NULL for unknown or unrepresented encodings. */
+const rocke_type_t* rocke_dtype_to_ir_type(const char* dtype);
 
 /* Look up a scalar singleton by canonical name ("i32",...); NULL if unknown. */
 const rocke_type_t* rocke_scalar_by_name(const char* name);
@@ -772,6 +822,8 @@ rocke_value_t* rocke_b_cvt_scalef32_pk_f32_fp8x4(rocke_ir_builder_t* b,
 rocke_value_t* rocke_b_cvt_scalef32_pk_f32_bf8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* v,
                                                  rocke_value_t* scale);
+/* Explicit RNE conversion; bitcast preserves raw FP32 payloads instead. */
+rocke_value_t* rocke_b_cvt_f32_to_tf32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_fp8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_bf8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_i8_sat(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -879,6 +931,21 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       const rocke_type_t* dtype,
                                       int n,
                                       int align /* <=0 => default */);
+/* Like rocke_b_global_load_vN with options; opts == NULL means all defaults,
+ * and the plain rocke_b_global_load_vN forwards here with NULL.
+ * ROCKE_TEMPORAL_STREAMING records the `nontemporal=True` attr (lowered to
+ * LLVM `!nontemporal`); on gfx942 / gfx950 the backend sets only `nt`, i.e.
+ * ROCKE_CACHE_STREAM, NOT ROCKE_NON_TEMPORAL (which also sets SC0). Lowering a
+ * streaming op for any other target fails with ROCKE_ERR_VALUE. An
+ * out-of-range temporal_hint puts the builder in its error state
+ * (ROCKE_ERR_VALUE). */
+rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
+                                         rocke_value_t* ptr,
+                                         rocke_value_t* idx,
+                                         const rocke_type_t* dtype,
+                                         int n,
+                                         int align,
+                                         const rocke_mem_opts_t* opts);
 rocke_value_t* rocke_b_global_load_vN_f16(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, int n, int align);
 
@@ -1332,6 +1399,16 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
                              rocke_value_t* value,
                              int n,
                              int align /* <=0 => default */);
+/* Like rocke_b_global_store_vN with options (NULL = all defaults); the plain
+ * form forwards here with NULL. temporal_hint as for rocke_b_global_load_vN_ex
+ * (gfx942 / gfx950: `nt` only; other targets fail at lowering). */
+void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
+                                rocke_value_t* ptr,
+                                rocke_value_t* idx,
+                                rocke_value_t* value,
+                                int n,
+                                int align,
+                                const rocke_mem_opts_t* opts);
 void rocke_b_global_store_vN_f16(rocke_ir_builder_t* b,
                                  rocke_value_t* ptr,
                                  rocke_value_t* idx,

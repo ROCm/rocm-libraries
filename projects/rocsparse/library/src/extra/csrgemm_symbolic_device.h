@@ -39,7 +39,8 @@ namespace rocsparse
               typename I,
               typename J>
     ROCSPARSE_DEVICE_ILF void
-        csrgemm_symbolic_fill_block_per_row_multipass_device(J n,
+        csrgemm_symbolic_fill_block_per_row_multipass_device(J block_id,
+                                                             J n,
                                                              const J* __restrict__ offset_,
                                                              const J* __restrict__ perm,
                                                              const I* __restrict__ csr_row_ptr_A,
@@ -66,8 +67,9 @@ namespace rocsparse
         // Wavefront id
         int wid = hipThreadIdx_x / WFSIZE;
 
-        // Each block processes a row (apply permutation)
-        J row = perm[hipBlockIdx_x + *offset_];
+        // Each block processes a row (apply permutation; block_id supplied by the grid-stride
+        // loop in the kernel wrapper so a grid clamped by get_grid_size_x still covers all rows)
+        J row = perm[block_id + *offset_];
 
         // Row entry marker and value accumulator
         __shared__ bool table[CHUNKSIZE];
@@ -331,7 +333,10 @@ namespace rocsparse
                                              J* __restrict__ group_size,
                                              uint32_t shared_mem_optin)
     {
-        J row = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        // The induction variable must stay 64-bit: the increment that exits the loop
+        // below overshoots m by up to hipGridDim_x * BLOCKSIZE, which can be outside
+        // the range of J even when m itself is not.
+        int64_t row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         // Shared memory for block reduction
         __shared__ J sdata[BLOCKSIZE * GROUPS];
@@ -345,7 +350,7 @@ namespace rocsparse
         __threadfence_block();
 
         // Loop over rows
-        for(; row < m; row += hipGridDim_x * BLOCKSIZE)
+        for(; row < m; row += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
             I nprod = int_prod[row];
 
@@ -385,7 +390,10 @@ namespace rocsparse
                                              int* __restrict__ workspace,
                                              uint32_t shared_mem_optin)
     {
-        J row = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        // The induction variable must stay 64-bit: the increment that exits the loop
+        // below overshoots m by up to hipGridDim_x * BLOCKSIZE, which can be outside
+        // the range of J even when m itself is not.
+        int64_t row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         // Shared memory for block reduction
         __shared__ J sdata[BLOCKSIZE * GROUPS];
@@ -399,7 +407,7 @@ namespace rocsparse
         __threadfence_block();
 
         // Loop over rows
-        for(; row < m; row += hipGridDim_x * BLOCKSIZE)
+        for(; row < m; row += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
             I nnz = csr_row_ptr[row + 1] - csr_row_ptr[row];
 
@@ -465,13 +473,17 @@ namespace rocsparse
     {
         static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
                       "BLOCKSIZE must be a power of two.");
-        J row = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+
+        // The induction variable must stay 64-bit: the increment that exits the loop
+        // below overshoots m by up to hipGridDim_x * BLOCKSIZE, which can be outside
+        // the range of J even when m itself is not.
+        int64_t row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         // Initialize local maximum
         J local_max = 0;
 
         // Loop over rows
-        for(; row < m; row += hipGridDim_x * BLOCKSIZE)
+        for(; row < m; row += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
             // Determine local maximum
             local_max = rocsparse::max(local_max, J(csr_row_ptr[row + 1] - csr_row_ptr[row]));
@@ -571,7 +583,8 @@ namespace rocsparse
               typename I,
               typename J>
     ROCSPARSE_DEVICE_ILF void
-        csrgemm_symbolic_fill_wf_per_row_device(J m,
+        csrgemm_symbolic_fill_wf_per_row_device(J block_offset,
+                                                J m,
                                                 J nk,
                                                 const J* __restrict__ offset,
                                                 const J* __restrict__ perm,
@@ -600,8 +613,9 @@ namespace rocsparse
         // Wavefront id
         int wid = hipThreadIdx_x / WFSIZE;
 
-        // Each (sub)wavefront processes a row
-        J row = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
+        // Each (sub)wavefront processes a row (block_offset supplied by the grid-stride
+        // loop in the kernel wrapper so a grid clamped by get_grid_size_x still covers all rows)
+        J row = block_offset + wid;
 
         // Hash table in shared memory
         __shared__ J stable[BLOCKSIZE / WFSIZE * HASHSIZE];
@@ -732,7 +746,8 @@ namespace rocsparse
               typename I,
               typename J>
     ROCSPARSE_DEVICE_ILF void
-        csrgemm_symbolic_fill_block_per_row_device(J nk,
+        csrgemm_symbolic_fill_block_per_row_device(J block_id,
+                                                   J nk,
                                                    const J* __restrict__ offset_,
                                                    const J* __restrict__ perm,
                                                    const I* __restrict__ csr_row_ptr_A,
@@ -773,8 +788,9 @@ namespace rocsparse
         // Wait for all threads to finish initialization
         __syncthreads();
 
-        // Each block processes a row (apply permutation)
-        J row = perm[hipBlockIdx_x + *offset_];
+        // Each block processes a row (apply permutation; block_id supplied by the grid-stride
+        // loop in the kernel wrapper so a grid clamped by get_grid_size_x still covers all rows)
+        J row = perm[block_id + *offset_];
 
         // alpha * A * B part
         if(mul == true)

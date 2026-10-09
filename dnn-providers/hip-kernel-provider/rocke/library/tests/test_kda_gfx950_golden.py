@@ -29,7 +29,6 @@ _TESTS = Path(__file__).resolve().parent
 _LIBRARY = _TESTS.parent
 _PLATFORM_PYTHON = _LIBRARY.parent / "platform" / "python"
 _GOLDEN = _TESTS / "golden" / "kda_gfx950_ir_sha256.json"
-_FLAVORS = ("llvm20", "llvm22", "llvm23")
 _ARCH = "gfx950"
 
 # The library path must precede tests/ so tests/dispatch cannot shadow the real
@@ -87,6 +86,31 @@ def _cases() -> dict[str, Callable]:
             fuse_gate=True,
             fuse_beta_sigmoid=True,
             has_dt_bias=True,
+        ),
+        build_kda_chunk_prep,
+    )
+    add(
+        "kda_gfx950/split_c32_prep_gdn",
+        KdaChunkPrepSpec(
+            raw_inputs=True,
+            fuse_qk_l2norm=True,
+            fuse_gate=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+            gate_kind="gdn",
+        ),
+        build_kda_chunk_prep,
+    )
+    add(
+        "kda_gfx950/split_c32_prep_gdn_g2",
+        KdaChunkPrepSpec(
+            raw_inputs=True,
+            fuse_qk_l2norm=True,
+            fuse_gate=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+            gate_kind="gdn",
+            kv_group=2,
         ),
         build_kda_chunk_prep,
     )
@@ -171,12 +195,6 @@ def _cases() -> dict[str, Callable]:
     return cases
 
 
-def _current_flavor() -> str:
-    from rocke.core.lower_llvm import _resolve_llvm_flavor
-
-    return _resolve_llvm_flavor()
-
-
 def _sha_for(build: Callable, flavor: str) -> tuple[str, int]:
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -185,24 +203,30 @@ def _sha_for(build: Callable, flavor: str) -> tuple[str, int]:
     return hashlib.sha256(data).hexdigest(), len(data)
 
 
+def _run(flavor: str) -> dict:
+    """One flavor's golden sub-document. A build error propagates, so a fixture
+    can never be blessed with a case that fails to lower."""
+    return {
+        "cases": {
+            cid: {"sha256": sha, "bytes": nbytes}
+            for cid, build in _cases().items()
+            for sha, nbytes in [_sha_for(build, flavor)]
+        }
+    }
+
+
 def _build_doc() -> dict:
-    cases = _cases()
+    from rocke.core.ir_golden import GOLDEN_FLAVORS
+
     return {
         "schema": "kda_gfx950.ir_golden_sha256/v1",
-        "flavors": {
-            flavor: {
-                "cases": {
-                    cid: {"sha256": sha, "bytes": nbytes}
-                    for cid, build in cases.items()
-                    for sha, nbytes in [_sha_for(build, flavor)]
-                }
-            }
-            for flavor in _FLAVORS
-        },
+        "flavors": {flavor: _run(flavor) for flavor in GOLDEN_FLAVORS},
     }
 
 
 def test_kda_gfx950_ir_matches_golden():
+    from rocke.core.ir_golden import check_golden
+
     assert _GOLDEN.exists(), (
         "missing gfx950 KDA golden fixture; generate it with "
         f"`python {Path(__file__).name} --write`"
@@ -210,28 +234,9 @@ def test_kda_gfx950_ir_matches_golden():
     golden = json.loads(_GOLDEN.read_text())
     assert golden.get("schema") == "kda_gfx950.ir_golden_sha256/v1"
 
-    flavor = _current_flavor()
-    assert flavor in golden.get("flavors", {}), (
-        f"no gfx950 KDA golden recorded for LLVM flavor {flavor!r}; "
-        "review and re-bless the fixture"
-    )
-
-    cases = _cases()
-    recorded = golden["flavors"][flavor]["cases"]
-    assert set(recorded) == set(cases), (
-        "gfx950 KDA golden case set drifted: "
-        f"recorded={sorted(recorded)}, current={sorted(cases)}"
-    )
-
-    drift = []
-    for cid, build in cases.items():
-        want = recorded[cid]["sha256"]
-        got, nbytes = _sha_for(build, flavor)
-        if got != want:
-            drift.append(
-                f"{cid}: {want} -> {got} "
-                f"({recorded[cid]['bytes']} -> {nbytes} bytes)"
-            )
+    # Every flavor in LLVM_FLAVORS, from any host, so a datalayout or intrinsic
+    # change for a flavor this host does not run still fails here.
+    drift = check_golden(_GOLDEN, _run)
     assert not drift, "gfx950 KDA LLVM IR drift vs golden:\n  " + "\n  ".join(drift)
 
 

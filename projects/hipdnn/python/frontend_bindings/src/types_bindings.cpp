@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 
 namespace nb = nanobind;
@@ -194,6 +195,18 @@ void typesBindings(nb::module_& m)
         .def("get_code", &Error::get_code)
         .def("is_good", &Error::is_good)
         .def("is_bad", &Error::is_bad);
+
+    // Timing method and per-attempt timeout are independent of execution success.
+    nb::enum_<TimingQuality>(m, "TimingQuality")
+        .value("DEVICE_ONLY", TimingQuality::DEVICE_ONLY)
+        .value("UNSTALLED", TimingQuality::UNSTALLED)
+        .value("INVALID", TimingQuality::INVALID);
+
+    nb::class_<ExecutionTiming>(m, "ExecutionTiming")
+        .def(nb::init<>())
+        .def_ro("elapsed_ms", &ExecutionTiming::elapsedMs)
+        .def_ro("quality", &ExecutionTiming::quality)
+        .def_ro("timed_out", &ExecutionTiming::timedOut);
 
     // Bind PluginLoadingMode enum
     nb::enum_<hipdnnPluginLoadingMode_ext_t>(m, "PluginLoadingMode")

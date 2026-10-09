@@ -89,7 +89,7 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype, causal, group, stats
     Key difference from the compile-time variant (generate_sdpa_fwd_golden.py):
       - scale_tensor_uid points at the runtime scale tensor (no baked fallback)
       - attn_scale_value = null (forces the CPU reference to read from variantPack)
-    A provider that falls back to a compile-time default (e.g. 1/sqrt(headDim))
+    A provider that falls back to a compile-time default (e.g. 1.0 or 1/sqrt(headDim))
     instead of reading the runtime tensor produces output that diverges from the
     CPU reference.
     """
@@ -414,8 +414,8 @@ def main():
         help=(
             "Detection value for the runtime scale tensor, recorded in "
             "meta.json's 'inputs' field for the harness to inject. Default=2.0 "
-            "is far from the typical compile-time default of 1/sqrt(D_qk) to "
-            "enable detection of incorrect handling."
+            "is far from 1.0 (the value for an unset scale) and from 1/sqrt(D_qk) "
+            "to enable detection of incorrect handling."
         ),
     )
     parser.add_argument(

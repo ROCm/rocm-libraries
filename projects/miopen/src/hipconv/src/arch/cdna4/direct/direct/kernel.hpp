@@ -10,7 +10,7 @@
 #include "mathutil.h"
 #include "launch_params.h"
 #include "types.h"
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <array>
@@ -624,7 +624,7 @@ __launch_bounds__(cfg.tiles() * arch::wave_size, 2) __global__
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
-                 const hipconv::Conv2dParams& par,
+                 const hipconv::ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -633,7 +633,7 @@ void launch_impl(const LaunchParams& lp,
 {
     using dtype = ToType<cfg.type>;
     const auto [gc, gk, h, w, p, q, pad_h, pad_w] =
-        [](const hipconv::Conv2dParams& par) -> std::array<int, 8> {
+        [](const hipconv::ConvParams& par) -> std::array<int, 8> {
         if(par.direction == hipconv::Direction::Dgrad)
         {
             return {par.filters_per_group(),
@@ -701,7 +701,7 @@ public:
         return false;
     }
 
-    bool is_applicable(const hipconv::Conv2dParams& par) const override
+    bool is_applicable(const hipconv::ConvParams& par) const override
     {
         // Exclude kernel if we are not 16 byte aligned
         if(par.channels_per_group() * sizeof_data_type(par.input_type) % 16 != 0)
@@ -711,7 +711,7 @@ public:
         return DirectConvKernel::is_applicable(par);
     }
 
-    bool is_valid_config(const hipconv::Conv2dParams& par) const override
+    bool is_valid_config(const hipconv::ConvParams& par) const override
     {
         const auto [p, q, h, w, gk, gc] = problem_shape(par);
 
@@ -741,7 +741,7 @@ public:
         return true;
     }
 
-    auto get_weighted_throughput_index(const hipconv::Conv2dParams& par) const -> float override
+    auto get_weighted_throughput_index(const hipconv::ConvParams& par) const -> float override
     {
         const auto [p, q, h, w, gk, gc] = problem_shape(par);
 
@@ -752,9 +752,9 @@ public:
                throughput_factor(q, cfg_.tile_size_w) * throughput_factor(gk, cfg_.tile_size_k);
     }
 
-    LaunchParams get_launch_params(const hipconv::Conv2dParams& par) const override
+    LaunchParams get_launch_params(const hipconv::ConvParams& par) const override
     {
-        auto [gk, p, q] = [](const hipconv::Conv2dParams& par) -> std::array<int, 3> {
+        auto [gk, p, q] = [](const hipconv::ConvParams& par) -> std::array<int, 3> {
             if(par.direction == hipconv::Direction::Dgrad)
             {
                 return {par.channels_per_group(), par.h, par.w};
@@ -774,7 +774,7 @@ public:
     }
 
 private:
-    static auto problem_shape(const hipconv::Conv2dParams& par) -> std::array<int, 6>
+    static auto problem_shape(const hipconv::ConvParams& par) -> std::array<int, 6>
     {
         const bool is_dgrad = par.direction == hipconv::Direction::Dgrad;
         const auto gc       = par.channels_per_group();

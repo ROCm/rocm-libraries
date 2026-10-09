@@ -13,7 +13,9 @@ import itertools
 import posixpath
 import re
 import warnings as _warnings
+from collections.abc import Hashable
 from pathlib import Path, PureWindowsPath
+from typing import Any
 
 import yaml
 
@@ -54,6 +56,63 @@ class ConfigError(Exception):
     pass
 
 
+#: Stands in for every ``<<`` key while explicit keys are compared, so two merge
+#: declarations collide with each other and never with an authored ``"<<"`` string.
+_MERGE_KEY = object()
+
+
+class _DuplicateKeySafeLoader(yaml.SafeLoader):
+    """``SafeLoader`` that refuses a mapping declaring the same key twice.
+
+    Stock construction keeps the last of two equal keys and drops the first
+    without a word, so a key repeated while editing a long config silently
+    replaces the value the author sees first. Each mapping node's own authored
+    keys, ``<<`` included, are compared once, before ``SafeLoader.flatten_mapping``
+    splices merged keys into it: an explicit key overriding a merged one, and
+    precedence within one ``<<`` sequence, stay stock behaviour. Keys are built
+    by the stock constructor, so two spellings YAML resolves to one value (``0x10``
+    and ``16``) collide, and ``"off"`` and ``off`` (a string and ``False``) do not.
+    """
+
+    def __init__(self, stream):
+        super().__init__(stream)
+        # A merge source reached through several aliases is one node, already
+        # flattened after its first visit; comparing it again would treat its
+        # inherited keys as authored ones.
+        self._keys_compared = set()
+
+    def flatten_mapping(self, node):
+        if node not in self._keys_compared:
+            self._keys_compared.add(node)
+            self._reject_repeated_keys(node)
+        super().flatten_mapping(node)
+
+    def _reject_repeated_keys(self, node) -> None:
+        first_seen = {}
+        for key_node, _ in node.value:
+            if key_node.tag == "tag:yaml.org,2002:merge":
+                key, shown = _MERGE_KEY, "<<"
+            elif key_node.tag == "tag:yaml.org,2002:value":
+                # Stock flattening retags a plain ``=`` key as a string before
+                # construction; no constructor exists for the value tag itself.
+                key = shown = self.construct_scalar(key_node)
+            else:
+                key = shown = self.construct_object(key_node)
+            if not isinstance(key, Hashable):
+                # Stock construction reports the unhashable key itself.
+                continue
+            first, first_shown = first_seen.setdefault(key, (key_node, shown))
+            if first is not key_node:
+                raise yaml.constructor.ConstructorError(
+                    f"while constructing a mapping, key {first_shown!r} is first "
+                    f"declared",
+                    first.start_mark,
+                    f"found duplicate key {shown!r}; YAML would silently keep only "
+                    f"this later value",
+                    key_node.start_mark,
+                )
+
+
 #: Private, never authored: an expanded kernel dict carries the
 #: ``(where, mapping)`` of the authored ``kernel_source`` it was built from, so
 #: the closed per-kind vocabulary is applied to the author's keys and reported
@@ -75,15 +134,27 @@ def _unique_arch(raw_arch, where: str) -> list[str]:
     return list(dict.fromkeys(_require_sequence(raw_arch, where, what="arch ids")))
 
 
-def load_config(path: Path) -> IngestorConfig:
-    """Load and validate a YAML config file, returning an ``IngestorConfig``.
+def read_yaml(path: Path) -> Any:
+    """Parse one YAML file and return the document unvalidated.
 
-    A ``.gz`` path is decompressed transparently. Raises ``ConfigError`` on any
-    structural problem or failed pre-mint check; no UUID is minted here.
+    An empty file returns ``None``. A ``.gz`` path is decompressed transparently.
+    Input that is not safe YAML, or a mapping declaring one key twice, raises the
+    parser's ``yaml.YAMLError`` carrying the source marks.
     """
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt") as f:
-        raw = yaml.safe_load(f)
+        # _DuplicateKeySafeLoader subclasses yaml.SafeLoader; safe_load takes no Loader.
+        return yaml.load(f, Loader=_DuplicateKeySafeLoader)  # nosec B506
+
+
+def load_config(path: Path) -> IngestorConfig:
+    """Load and validate a YAML config file, returning an ``IngestorConfig``.
+
+    Parses with ``read_yaml``, so its ``yaml.YAMLError`` propagates. Raises
+    ``ConfigError`` on any structural problem or failed pre-mint check; no UUID
+    is minted here.
+    """
+    raw = read_yaml(path)
 
     if not isinstance(raw, dict):
         raise ConfigError(f"{path}: YAML document must be a top-level mapping.")
@@ -236,6 +307,8 @@ def load_config(path: Path) -> IngestorConfig:
                         build=dict(ks_raw.get("build", {})),
                         builder=ks_raw.get("builder", ""),
                         spec=dict(ks_raw.get("spec", {})),
+                        file=ks_raw.get("file", ""),
+                        symbol=ks_raw.get("symbol", ""),
                     ),
                     metadata=dict(kernel_raw.get("metadata", {})),
                     priority=kernel_raw.get("priority", 0),
@@ -906,6 +979,7 @@ _REQUIRED_KERNEL_SOURCE_FIELDS: dict = {
     KERNEL_SOURCE_KIND_EMBEDDED: ("source_file", "entry_point"),
     KERNEL_SOURCE_KIND_HIP: ("source", "entry"),
     KERNEL_SOURCE_KIND_ROCKE: ("source", "builder", "spec"),
+    KERNEL_SOURCE_KIND_HSACO: ("file", "symbol"),
 }
 #: The fields a kind owns but may omit -- ``KernelSource.as_document`` writes them
 #: for that kind, and nothing requires them.
@@ -1456,7 +1530,7 @@ def _check_kernel_source_kind_implemented(config: IngestorConfig) -> None:
         if kind_source in emittable:
             continue
 
-        if kind_source in (KERNEL_SOURCE_KIND_HSACO_FILE, KERNEL_SOURCE_KIND_HSACO):
+        if kind_source == KERNEL_SOURCE_KIND_HSACO_FILE:
             raise ConfigError(
                 f"{where} is '{kind_source}', which no adapter implements on "
                 f"either path. The runtime needs supportsSourceKind() on "
@@ -1468,11 +1542,12 @@ def _check_kernel_source_kind_implemented(config: IngestorConfig) -> None:
                 f"{where} is 'kpack', which is a PRODUCED kind, never an "
                 f"authored one. hkp_pack writes it -- stamping library, "
                 f"toc_key, symbol and sha256 from the artifact it actually "
-                f"built -- when it lowers a 'hip' or 'rocke' descriptor. "
+                f"built -- when it lowers a 'hip', 'rocke' or 'hsaco' descriptor. "
                 f"Authoring those four by hand would be a second source of "
                 f"truth that silently disagrees with the archive. Author "
-                f"'{KERNEL_SOURCE_KIND_ROCKE}' or '{KERNEL_SOURCE_KIND_HIP}' "
-                f"under dialect '{DIALECT_PACKAGED}' instead."
+                f"'{KERNEL_SOURCE_KIND_ROCKE}', '{KERNEL_SOURCE_KIND_HIP}' or "
+                f"'{KERNEL_SOURCE_KIND_HSACO}' under dialect '{DIALECT_PACKAGED}' "
+                f"instead."
             )
         if kind_source == KERNEL_SOURCE_KIND_ROCKE_BUILDER:
             raise ConfigError(
@@ -1524,6 +1599,14 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
                     )
             if ks.kind == KERNEL_SOURCE_KIND_ROCKE and not isinstance(ks.spec, dict):
                 raise ConfigError(f"{where}: 'spec' must be a mapping.")
+            if ks.kind == KERNEL_SOURCE_KIND_HSACO and not (kernel.arch or pack.arch):
+                raise ConfigError(
+                    f"{where} is kind 'hsaco' but neither the kernel nor its pack "
+                    f"states an 'arch'. A prebuilt code object targets specific "
+                    f"processors, so it must list the arch(es) it runs on (a "
+                    f"generic-target object lists every arch it runs on); without "
+                    f"one it would enter every arch shard."
+                )
 
 
 def _check_specialization_declaration(config: IngestorConfig) -> None:
@@ -1537,7 +1620,7 @@ def _check_specialization_declaration(config: IngestorConfig) -> None:
     The partition over ``kmd_fields`` is exhaustive and disjoint: each field is
     either consumed by the builder (``metadata_fields``, with a binding) or
     matcher-only. A ``rocke`` kernel's spec keys reached the compiler, so they
-    cannot be matcher-only; direct-load and ``hip`` state
+    cannot be matcher-only; direct-load, ``hip`` and ``hsaco`` state
     ``metadata_fields: []`` explicitly. Presence is enforced at emission.
     """
     declaration = config.specialization
@@ -1661,8 +1744,9 @@ def _check_specialization_declaration(config: IngestorConfig) -> None:
         raise ConfigError(
             f"'specialization.metadata_fields' names {sorted(checked)}, but no "
             f"kernel in this config is built from a compiled specialization "
-            f"(kinds: {sorted(kinds)}). The direct-load and "
-            f"'{KERNEL_SOURCE_KIND_HIP}' paths hydrate no builder object, so there "
+            f"(kinds: {sorted(kinds)}). The direct-load, "
+            f"'{KERNEL_SOURCE_KIND_HIP}' and '{KERNEL_SOURCE_KIND_HSACO}' paths "
+            f"hydrate no builder object, so there "
             f"is nothing for a binding to read back and no agreement to check. "
             f"Declare 'metadata_fields: []' and list every field under "
             f"'matcher_only_fields'."

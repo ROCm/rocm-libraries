@@ -71,7 +71,10 @@ target_include_directories(rocke_engine PRIVATE "${ROCKE_INCLUDE_DIR}")
 
 # Link the engine archive whole, plus libm. The engine is C++; its symbols are
 # exposed via extern "C" headers, so the archive links cleanly here.
-target_link_libraries(rocke_engine PRIVATE "${_ROCKE_BINDING_LINK_TARGET}")
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+target_link_libraries(rocke_engine PRIVATE "${_ROCKE_BINDING_LINK_TARGET}"
+                      ${CMAKE_DL_LIBS} Threads::Threads)
 if(UNIX)
   target_link_libraries(rocke_engine PRIVATE m)
 endif()

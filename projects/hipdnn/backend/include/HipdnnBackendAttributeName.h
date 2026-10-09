@@ -1463,11 +1463,48 @@ typedef enum
     /** @brief Trigger: record stop event on the stream (HIPDNN_TYPE_BOOLEAN, write-only) */
     HIPDNN_ATTR_PROFILING_STOP_EXT = 60402,
 
-    /** @brief Elapsed time in milliseconds between start and stop events (HIPDNN_TYPE_FLOAT, read-only) */
+    /** @brief Elapsed time in milliseconds between start and stop events. Zero is a
+     *  valid back-to-back-event span; a finite negative value is a raw
+     *  invalid-measurement sentinel a caller must check for (never thrown, never
+     *  ranked as a real timing). STALL_TIMED_OUT_EXT true takes precedence and marks
+     *  the value invalid regardless of sign (HIPDNN_TYPE_FLOAT, read-only) */
     HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT = 60403,
 
     /** @brief Trigger: call hipDeviceSynchronize before benchmarking (HIPDNN_TYPE_BOOLEAN, write-only) */
     HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT = 60404,
+
+    /** @brief Introduced in hipdnn_backend 0.4.0: the five stall-gate profiling
+     *  attributes below (60405-60409). */
+    /** @brief Trigger: stall the stream so the measured span excludes host submission.
+     *  Must be set before PROFILING_START_EXT: arming after start is a lifecycle error,
+     *  since the delay it exists to exclude has already elapsed
+     *  (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_STALL_ARM_EXT = 60405,
+
+    /** @brief Trigger: release the stall so the queued work runs (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT = 60406,
+
+    /** @brief True when a stall watchdog timeout, not the caller, released the stall.
+     *  The elapsed time is then invalid for this measurement; later arm attempts are
+     *  unaffected (HIPDNN_TYPE_BOOLEAN, read-only) */
+    HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT = 60407,
+
+    /** @brief Latched result of the most recent STALL_ARM_EXT attempt: true only when
+     *  arm() actually stalled the stream for this measurement. Not the current armed
+     *  state -- it stays readable after STALL_RELEASE_EXT and finalize() (both of which
+     *  always release the gate). False when STALL_ARM_EXT was never set or the device
+     *  does not support stalling (a HIP call failure during arming is a backend error,
+     *  not a decline). Read after finalize() (HIPDNN_TYPE_BOOLEAN, read-only) */
+    HIPDNN_ATTR_PROFILING_STALL_USED_EXT = 60408,
+
+    /** @brief Trigger: reuse this context for another measurement. The only attribute
+     *  accepted once finalized; also valid on a fresh or partially executed descriptor.
+     *  Releases the gate, drains any outstanding stream work not already covered by a
+     *  prior successful finalize(), and clears the finalized/start/stop/elapsed/
+     *  stall-used/timed-out state. The handle, stream, events, and gate are retained;
+     *  rebinding to a different handle/stream requires a new descriptor
+     *  (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_RESET_EXT = 60409,
 
     /** @} */
 

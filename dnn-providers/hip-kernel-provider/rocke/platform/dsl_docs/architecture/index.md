@@ -36,6 +36,8 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
 - [`multi_arch_data_layout.md`](multi_arch_data_layout.md) — current architecture
   facts plus forward design for matrix catalogs, layout maps, ISA backends, and
   family policy.
+- [`adding_an_arch.md`](adding_an_arch.md) — route map for enabling a new gfx
+  target: which files it touches, in what order, and which gates prove it.
 
 ## Code-generation controls
 

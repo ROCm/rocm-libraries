@@ -18,7 +18,6 @@
 namespace hip_kernel_provider
 {
 
-using namespace core::utils;
 using namespace compilation;
 
 namespace batchnorm
@@ -65,7 +64,7 @@ public:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* nextRunningMean() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* nextRunningVariance() const;
 
-    const std::optional<ActivationParams>& optActivation() const;
+    const std::optional<core::utils::ActivationParams>& optActivation() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* activationOut() const;
 
 private:
@@ -87,7 +86,7 @@ private:
     std::optional<hipdnn_plugin_sdk::ScalarOperand> _momentum;
     bool _hasRunningStats{false};
 
-    std::optional<ActivationParams> _optActivation;
+    std::optional<core::utils::ActivationParams> _optActivation;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
 

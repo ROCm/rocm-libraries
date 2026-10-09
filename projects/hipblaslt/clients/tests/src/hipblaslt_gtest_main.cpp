@@ -30,6 +30,15 @@
 #include "hipblaslt_test.hpp"
 #include "test_cleanup.hpp"
 #include "utility.hpp"
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+namespace hipblaslt_bench
+{
+    int run_rank_child();
+}
+#endif
+
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -183,14 +192,6 @@ static void hipblaslt_set_listener()
     listeners.Append(listener);
 }
 
-static int hipblaslt_version()
-{
-    int                    version;
-    hipblaslt_local_handle handle;
-    hipblasLtGetVersion(handle, &version);
-    return version;
-}
-
 static void hipblaslt_print_usage_warning()
 {
     std::string warning(
@@ -232,6 +233,19 @@ static void hipblaslt_print_args(const std::string& args)
     hipblaslt_cout.flush();
 }
 
+// Spawned by a test that re-launches this binary, which passes the role as the
+// first argument. The process plays that role and exits without reaching
+// Google Test.
+static void hipblaslt_gtest_run_child(int argc, char** argv)
+{
+    if(argc < 2 || argv[1] == nullptr)
+        return;
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    if(!strcmp(argv[1], "--a2a-rank-child"))
+        std::exit(hipblaslt_bench::run_rank_child());
+#endif
+}
+
 // Device Query
 static void hipblaslt_set_test_device()
 {
@@ -251,6 +265,8 @@ static void hipblaslt_set_test_device()
  *****************/
 int main(int argc, char** argv)
 {
+    hipblaslt_gtest_run_child(argc, argv);
+
     std::string args = hipblaslt_capture_args(argc, argv);
 
     hipblaslt_gtest_check_host_side_fill_kernel_flags(argc, argv);

@@ -48,6 +48,8 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
     {
         cmd.push_back(o);
     }
+    // Assemble only: linking writes a.out into the working directory, which may be read-only.
+    cmd.insert(cmd.end(), {"-c", "-o", nullDevicePath()});
     cmd.push_back("-");
     std::vector<char*> args(cmd.size());
     std::transform(cmd.begin(), cmd.end(), args.begin(), [](auto& str) { return &str[0]; });
@@ -391,6 +393,17 @@ inline std::map<std::string, int>
                           assemblerPath,
                           "buffer_atomic_add_f32 v0, v1, s[0:3], null offen offset:0",
                           isDebug);
+    // Packed 2xBF16 atomic add (gfx950 / gfx1250+). gfx950 takes the literal 0
+    // soffset form, gfx1250 requires null, so probe both as HasAtomicAdd does.
+    rv["HasAtomicPkAddBF16"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "buffer_atomic_pk_add_bf16 v0, v1, s[0:3], 0 offen offset:0",
+                       isDebug)
+          || tryAssembler(isaVersion,
+                          assemblerPath,
+                          "buffer_atomic_pk_add_bf16 v0, v1, s[0:3], null offen offset:0",
+                          isDebug);
     rv["HasGLCModifier"]
         = tryAssembler(isaVersion,
                        assemblerPath,
@@ -591,6 +604,12 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["VOP3ByteSel"]        = isaVersion[0] == 12;
     rv["HasFP8_OCP"]         = isaVersion[0] == 12;
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
+    // Bit position of DISABLE_XDL_ARB_STALL within SCHED_MODE (HWREG 26).
+    // -1 where the field does not exist; 0 would alias DEP_MODE's LSB.
+    int arbStallBit = -1;
+    if(checkInList(isaVersion, {{12, 5, 0}}))
+        arbStallBit = 2;
+    rv["WmmaArbStallBitOffset"] = arbStallBit;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
     rv["MaxSgprPreload"]     = checkInList(isaVersion, {{12, 5, 0}}) ? 32 : 16;
     rv["SgprPreloadPad"]     = checkInList(isaVersion, {{9, 5, 0}}) || checkInList(isaVersion, {{9, 0, 10}}) || (isaVersion[0] == 9 && isaVersion[1] == 4);

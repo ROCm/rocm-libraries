@@ -1,0 +1,75 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# Sparse config that keeps StaggerU enabled, for ROCM-31230 codegen coverage.
+#
+# Goal: reach the sparse-metadata arm of calculateStagger, which widens
+# GlobalReadIncsMetadata to 64 bits and is gated by:
+#   kernel["ProblemType"]["Sparse"]
+#   and (DirectToVgprSparseMetadata or enableTDMMetadata)
+#
+# The sibling sparse_dtvsm.yaml sets StaggerU: [0], which compiles the stagger
+# path out entirely, so it cannot cover this. The only meaningful difference here
+# is StaggerU, kept non-zero so calculateStagger emits the metadata widening.
+#
+# No shipped solution declares Sparse >= 1 on any architecture, so this arm is
+# reachable from generated code but not from the tuned libraries. That is why it
+# needs a designed config rather than a tuned kernel.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # HHS (f16 in / f16 out / f32 compute) NN, Sparse=1 (2:4 sparse A),
+  # DirectToVgprSparseMetadata=1, StaggerU non-zero.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
+      ForkParameters:
+        # SMFMA [16,16,32,1] is a valid gfx942 sparse half-half shape.
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  1, 1,  2, 2]
+        - DirectToVgprSparseMetadata: [True]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - ExpandPointerSwap: [False]
+        - StaggerU: [32]
+        - WorkGroupMapping: [8]
+        - 1LDSBuffer: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]

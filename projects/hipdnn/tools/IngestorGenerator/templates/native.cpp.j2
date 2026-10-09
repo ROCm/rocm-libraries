@@ -155,7 +155,16 @@ public:
                                               const BoundTokens& /*bound*/,
                                               const KernelDefinition& /*kernel*/) const override
     {
+{% if config.is_packaged %}
+        // TODO - FILL THIS OUT. hkp_pack compiles this dialect's hip/rocke kernels to KPACK,
+        // so load them with the buildIngestorKernelCode overload that takes no compiler and
+        // no compile options. It refuses an embedded_source kernel, which a packaged tree can
+        // still carry: hkp_pack ships that kind as authored. packs/Gfx950AttentionDenseNative.cpp
+        // does this. Do not copy prepare() from packs/PointwiseNative.cpp: that pack also
+        // compiles from source, so it supplies both.
+{% else %}
         // TODO - FILL THIS OUT
+{% endif %}
         return std::make_unique<Prepared{{ config.native_class_name }}>();
     }
 

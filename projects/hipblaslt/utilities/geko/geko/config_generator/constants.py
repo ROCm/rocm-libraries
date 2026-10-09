@@ -228,11 +228,27 @@ ONLY_INCLUDE_MIs_GFX942 = {
 
 }
 
+# commenting out other data types so that if and when required it fails and
+# we confirm exact MIs needed for each data type.
+ONLY_INCLUDE_MIs_MI45X = {
+    'H': [[16, 16, 32, 1]],
+    'B': [[16, 16, 32, 1]],
+    # 'X': [[16, 16, 32, 1]],
+    # 'X1': [[16, 16, 32, 1]],
+    # 'S': [[16, 16, 4, 1]],
+    # 'I8': [[16, 16, 32, 1], [16, 16, 64, 1]],
+    # 'F8': [[16, 16, 64, 1], [16, 16, 128, 1], [32, 16, 128, 1]],
+    # 'F8B8': [[16, 16, 64, 1], [16, 16, 128, 1], [32, 16, 128, 1]],
+    # 'B8F8': [[16, 16, 64, 1], [16, 16, 128, 1], [32, 16, 128, 1]],
+    # 'F4': [[16, 16, 128, 1], [32, 16, 128, 1]],
+}
+
 from geko.constants import SUPPORTED_ARCH
 
 # Tensile LibraryLogic ``DeviceNames`` as emitted in YAML (asm_full conventions).
 LIBRARY_LOGIC_DEVICE_NAMES_GFX950 = '["Device 75a0"]'
 LIBRARY_LOGIC_DEVICE_NAMES_GFX942 = '["Device 0049", "Device 0050"]'
+LIBRARY_LOGIC_DEVICE_NAMES_GFX1250 = '["Device 73f0"]'
 
 # Shared Tensile LibraryLogic fields (ScheduleName / ArchitectureName / DeviceNames) per silicon family.
 _LIBRARY_LOGIC_FIELDS_GFX950 = {
@@ -245,17 +261,25 @@ _LIBRARY_LOGIC_FIELDS_GFX942 = {
     "ArchitectureName": '"gfx942"',
     "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX942,
 }
+_LIBRARY_LOGIC_FIELDS_GFX1250 = {
+    "ScheduleName": '"gfx1250"',
+    "ArchitectureName": '"gfx1250"',
+    "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX1250,
+}
 
-# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, Tensile LibraryLogic fields
-# (keys align with geko.constants.SUPPORTED_ARCH).
+# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, Tensile LibraryLogic fields, MX scale value,
+# MX block size (keys align with geko.constants.SUPPORTED_ARCH).
+# mx_scale: hipblaslt scaleA/scaleB value for MX block scaling (0 = MX not supported on this arch).
+# mx_block_size: MXBlockA/MXBlockB size (None = MX not supported on this arch).
 _ARCH_SPECS = {
-    "gfx950": (256, 8, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950),
-    "gfx950_128cu": (128, 4, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950),
-    "gfx942": (304, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_80cu": (80, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_38cu": (38, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_20cu": (20, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_228cu": (228, 6, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
+    "gfx950": (256, 8, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950, 1001, 32),
+    "gfx950_128cu": (128, 4, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950, 1001, 32),
+    "gfx942": (304, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0, None),
+    "gfx942_80cu": (80, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0, None),
+    "gfx942_38cu": (38, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0, None),
+    "gfx942_20cu": (20, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0, None),
+    "gfx942_228cu": (228, 6, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0, None),
+    "gfx1250": (256, 8, ONLY_INCLUDE_MIs_MI45X, _LIBRARY_LOGIC_FIELDS_GFX1250, 3, 32),
 }
 
 HARDWARE_MAP = {
@@ -264,8 +288,10 @@ HARDWARE_MAP = {
         "XCC": xcc,
         "ONLY_INCLUDE_MIs": mis,
         "LibraryLogic": ll,
+        "mx_scale": mx_scale,
+        "mx_block_size": mx_block_size,
     }
-    for arch, (cus, xcc, mis, ll) in _ARCH_SPECS.items()
+    for arch, (cus, xcc, mis, ll, mx_scale, mx_block_size) in _ARCH_SPECS.items()
 }
 
 assert set(SUPPORTED_ARCH) == set(_ARCH_SPECS), (
@@ -288,8 +314,6 @@ MAX_MT0 = 1024
 MIN_MT1 = 4
 MAX_MT1 = 1024
 
-MAX_MT_AREA = 1024 * 1024 # Used by setupMTTuning.py. TODO - This should not be here.
-
 # <<< Controls for number of MIs in the config file
 # these params are only for MI_FILTER = 2
 # tip: lowering this number keeps more MI in the config 
@@ -310,7 +334,7 @@ MAX_NUM_KERNELS_PER_CONFIG = 180_000_000
 
 
 VALID_BACKENDS = ("ductile", "tensile")
-VALID_SEARCH_SPACES = ("heuristic", "generic")
+VALID_SEARCH_SPACES = ("heuristic", "generic", "subtile")
 
 
 # Ductile validation profile: caps elements validated after the last generation.
@@ -328,6 +352,7 @@ REQUIRED_CONFIG_FIELDS = ["TRANSA", "TRANSB", "DataType", "DestDataType", "Compu
 # User YAML overrides via ``setdefault`` in ``load_input_config._prepare_config``.
 # To add or change per-ARCH optional defaults, edit ``CONFIG_DEFAULTS_BY_ARCH`` below.
 _CONFIG_OPTIONAL_COMMON = {
+    "MX": False,
     "StreamK": True,
     "search_space": None,
     "MACROTILE_OPT": False,
@@ -349,7 +374,8 @@ ENV_UPDATABLE_KEYS = {
 }
 
 _CMS_DEFAULTS_GFX950 = {"CMS": True, "CMS_PRIORITY": False}
-_CMS_DEFAULTS_GFX942_FAMILY = {"CMS": False, "CMS_PRIORITY": False}
+_CMS_DEFAULTS_GFX942_FAMILY = {"CMS": False, "CMS_PRIORITY": False, "StreamK": False}
+_CMS_DEFAULTS_GFX1250 = {"CMS": False, "CMS_PRIORITY": False}
 
 CONFIG_DEFAULTS_BY_ARCH = {
     "gfx950": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX950},
@@ -359,6 +385,7 @@ CONFIG_DEFAULTS_BY_ARCH = {
     "gfx942_38cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
     "gfx942_20cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
     "gfx942_228cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
+    "gfx1250": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
 }
 
 assert set(CONFIG_DEFAULTS_BY_ARCH) == set(SUPPORTED_ARCH), (

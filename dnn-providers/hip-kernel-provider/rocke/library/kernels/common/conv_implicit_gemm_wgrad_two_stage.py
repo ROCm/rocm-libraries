@@ -1,25 +1,37 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Two-stage deterministic backward-weight convolution launcher.
+"""Two-stage backward-weight convolution launcher.
 
 Assembles a :class:`~rocke.runtime.launcher.PipelineLauncher` from:
 
 * **Stage 1** — an implicit-GEMM wgrad kernel (``two_stage=True``) that
-  writes f32 partial sums into a workspace buffer instead of
-  atomic-adding into ``dW``.
-* **Stage 2** — a workspace-reduce kernel that sums the f32 workspace
-  slices in a fixed sequential order and writes the result as ``dtype_d``
-  to ``dW``.
+  f32-atomic-adds its partial sums into a scratch buffer instead of
+  16-bit-atomic-adding into ``dW``.
+* **Stage 2** — a fold/cast kernel that sums the scratch's ``ws_replicas``
+  slabs per group, converts to ``dtype_d``, and writes ``dW``.
+
+This is the route split-K takes when the packed ``<2 x dtype>`` atomic that
+writes a 16-bit ``dW`` directly cannot address the problem -- it needs an even
+``wg_N = Y*X*cpg``, while ``atomicrmw fadd f32`` has no alignment constraint.
+The reduction over ``split_k`` is done by the hardware atomics; what is left
+for Stage 2 is the fold over the ``R = ws_replicas`` slabs those atomics were
+spread across, which is a compile-time-unrolled ``R`` loads / ``R-1`` adds /
+convert / store per element.  ``R`` is independent of ``split_k``, so Stage 2's
+cost does not scale with the split degree.
 
 Both stages are submitted on the same HIP stream, so HIP's in-order
 execution guarantees Stage 2 begins only after Stage 1 has completed —
 no explicit ``hipStreamSynchronize`` is needed between them.
 
-Grouped convolutions (``groups > 1``) are fully supported.  Stage 1 uses
-grid ``z = groups * split_k`` so each (group, slice) pair gets its own
-workspace slab.  Stage 2 uses grid ``z = groups`` (``block_id_z`` = group
-index) and reduces all groups in a single launch.
+**The caller must zero the scratch before every Stage 1 launch.** Stage 1
+accumulates into it; stale content is added to the result.
+
+Grouped convolutions (``groups > 1``) are fully supported.  Stage 1 uses grid
+``z = groups * split_k`` and decodes the group from it, so every slice of a
+group lands on one of that group's ``R`` scratch slabs (picked by ``z % R``)
+and never on another group's.  Stage 2 uses grid ``z = groups`` and folds and
+casts all groups in one launch.
 
 Usage::
 
@@ -28,13 +40,16 @@ Usage::
     pipeline, ws_nbytes = build_implicit_gemm_conv_wgrad_two_stage(spec, arch=arch)
 
     ws = DeviceMem(ws_nbytes)
+    ws.memset(0)                      # REQUIRED: Stage 1 accumulates
 
-    s1_vals = {"A": dY_ptr, "B": X_ptr, "D": dW_ptr,
-               "A_bytes": dY_nb, "B_bytes": X_nb, "D_bytes": dW_nb,
-               "ws_ptr": ws.ptr(), "ws_bytes": ws_nbytes}
+    # The AOT argument block (problem extents, magic numbers, ks/ks_count)
+    # plus the workspace pair; split_k is the degree to launch at.
+    s1_vals = wgrad_stage1_launch_values(
+        spec, dY_ptr=dY_ptr, X_ptr=X_ptr, dW_ptr=dW_ptr,
+        dY_bytes=dY_nb, X_bytes=X_nb, dW_bytes=dW_nb,
+        ws_ptr=ws.ptr(), ws_bytes=ws_nbytes, split_k=4)
     s2_vals = {"ws_ptr": ws.ptr(), "dw_ptr": dw_ptr,
                "wg_M": spec.wg_M, "wg_N": spec.wg_N,
-               "split_k": spec.split_k,
                "ws_bytes": ws_nbytes, "dw_bytes": dw_nb,
                "groups": spec.problem.groups}
 
@@ -44,7 +59,7 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import replace as dc_replace
-from typing import Tuple
+from typing import Optional, Tuple
 
 
 from kernels.common.conv_implicit_gemm_wgrad import (
@@ -62,60 +77,104 @@ from kernels.common.conv_wgrad_workspace_reduce import (
 )
 
 
-def wgrad_two_stage_workspace_nbytes(spec: WgradConvSpec) -> int:
-    """Return workspace bytes required for the two-stage deterministic path.
+def wgrad_workspace_nbytes(problem, ws_replicas: int) -> int:
+    """Two-stage scratch bytes for ``problem`` at ``ws_replicas`` slabs per
+    group: ``groups * R * wg_M * wg_N * 4``. The spec-free form of
+    :func:`wgrad_two_stage_workspace_nbytes`, for hosts that launch a cached
+    binary and know its replica count but have no spec."""
+    if ws_replicas < 1:
+        raise ValueError(f"ws_replicas must be >= 1 (got {ws_replicas})")
+    return problem.groups * ws_replicas * _wg_M(problem) * _wg_N(problem) * 4
 
-    Always f32 (4 bytes per element), shape ``[groups * split_k, wg_M, wg_N]``
-    where ``wg_M = kpg`` and ``wg_N = Y*X*cpg`` are the per-group GEMM dimensions.
-    ``blockIdx.z = group*split_k + k_id`` indexes directly into this flat array,
-    giving each (group, split-K slice) pair a unique workspace region.
+
+def wgrad_two_stage_workspace_nbytes(spec: WgradConvSpec) -> int:
+    """Return scratch bytes required for the two-stage path.
+
+    Always f32 (4 bytes per element), shape ``[groups * R, wg_M, wg_N]`` where
+    ``R = spec.ws_replicas`` and ``wg_M = kpg`` / ``wg_N = Y*X*cpg`` are the
+    per-group GEMM dimensions.
+
+    There is **no** ``split_k`` factor: a group's K-slices atomic-add on top of
+    each other across its ``R`` slabs, so the scratch is ``R`` copies of ``dW``
+    and does not grow with the reduction degree. ``R`` trades scratch footprint
+    against L2 atomic contention -- see the ``ws_replicas`` field docs on
+    :class:`WgradConvSpec`.
+
+    The caller must zero this buffer before each Stage 1 launch -- Stage 1
+    accumulates into it rather than overwriting it.
     """
-    return spec.problem.groups * spec.split_k * spec.wg_M * spec.wg_N * 4
+    return wgrad_workspace_nbytes(spec.problem, spec.ws_replicas)
 
 
 def _wgrad_stage1_signature(spec: WgradConvSpec) -> list:
-    """Signature for the Stage 1 wgrad kernel (two_stage=True).
+    """Launch signature for the Stage 1 wgrad kernel (``two_stage=True``).
 
-    Extends the standard conv ABI (A/B/D + byte sizes) with two extra
-    parameters for the workspace: ``ws_ptr`` and ``ws_bytes``.
+    The Stage 1 kernel is an ordinary AOT wgrad kernel with the two-stage
+    workspace pair appended, so the signature is the shared wgrad AOT one
+    built with ``two_stage=True`` -- deriving it here rather than restating
+    the argument list is what keeps it from drifting out of step with the
+    builder (kernargs pack positionally, so a stale copy corrupts silently).
 
     A (dY), B (X), and D (dW) each carry their own element type so that
     mixed-dtype configurations (e.g. bf16 inputs with fp32 output) are
     described correctly.
     """
-    _dtype_map = {
-        "fp16": "f16",
-        "bf16": "bf16",
-        "fp32": "f32",
-        "f16": "f16",
-        "f32": "f32",
-    }
+    from kernels.common.conv_abi import conv_args_signature
 
-    def _ir(dt: str) -> str:
-        return _dtype_map.get(dt, dt)
+    return conv_args_signature(
+        spec.data.dtype_a,
+        direction="wgrad",
+        dtype_b=spec.data.dtype_b,
+        dtype_d=spec.data.dtype_d,
+        is_3d=spec.problem.is_3d,
+        two_stage=True,
+    )
 
-    return [
-        {
-            "name": "A",
-            "type": f"ptr<{_ir(spec.data.dtype_a)}, global>",
-            "size_bytes": 8,
-        },
-        {
-            "name": "B",
-            "type": f"ptr<{_ir(spec.data.dtype_b)}, global>",
-            "size_bytes": 8,
-        },
-        {
-            "name": "D",
-            "type": f"ptr<{_ir(spec.data.dtype_d)}, global>",
-            "size_bytes": 8,
-        },
-        {"name": "A_bytes", "type": "i32", "size_bytes": 4},
-        {"name": "B_bytes", "type": "i32", "size_bytes": 4},
-        {"name": "D_bytes", "type": "i32", "size_bytes": 4},
-        {"name": "ws_ptr", "type": "ptr<f32, global>", "size_bytes": 8},
-        {"name": "ws_bytes", "type": "i32", "size_bytes": 4},
-    ]
+
+def wgrad_stage1_launch_values(
+    spec: WgradConvSpec,
+    *,
+    dY_ptr: int,
+    X_ptr: int,
+    dW_ptr: int,
+    dY_bytes: int,
+    X_bytes: int,
+    dW_bytes: int,
+    ws_ptr: int,
+    ws_bytes: int,
+    split_k: Optional[int] = None,
+) -> dict:
+    """Host-side ``values`` dict for a Stage 1 launch.
+
+    Mirrors :func:`_wgrad_stage1_signature`: the shared wgrad AOT arguments
+    plus the workspace pair.
+
+    ``split_k`` is the degree to launch at (any value > 1 -- the kernel takes
+    it as a kernarg); it defaults to the spec's.
+    """
+    if split_k is None:
+        split_k = spec.split_k
+    if split_k <= 1:
+        raise ValueError(f"two-stage Stage 1 needs split_k > 1 (got {split_k})")
+    from kernels.common.conv_args import ConvArgs
+
+    return ConvArgs.from_problem(
+        spec.problem,
+        direction="wgrad",
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+    ).to_launch_values(
+        dY_ptr,
+        X_ptr,
+        dW_ptr,
+        dY_bytes,
+        X_bytes,
+        dW_bytes,
+        split_k=split_k,
+        ws_ptr=ws_ptr,
+        ws_bytes=ws_bytes,
+    )
 
 
 def build_implicit_gemm_conv_wgrad_two_stage(
@@ -123,7 +182,7 @@ def build_implicit_gemm_conv_wgrad_two_stage(
     *,
     arch: str = "gfx950",
 ) -> tuple:
-    """Build a two-stage deterministic wgrad pipeline.
+    """Build a two-stage wgrad pipeline (f32 scratch atomics + cast).
 
     Args:
         spec:   A :class:`WgradConvSpec` with ``split_k > 1``.  The
@@ -136,16 +195,21 @@ def build_implicit_gemm_conv_wgrad_two_stage(
         ``workspace_nbytes`` is the size (bytes) of the f32 scratch buffer the
         caller must allocate before each pipeline call.
 
-        The workspace has shape ``[split_k, wg_M, wg_N]`` (f32).  Stage 1
-        writes every element within ``[0, wg_M) × [0, wg_N)`` via plain
-        stores (no atomics); OOB positions are skipped by a per-element
-        ``scf_if`` guard.  Stage 2 wraps its entire reduction loop in the
-        same OOB guard, so out-of-bounds threads perform no workspace loads
-        at all.  Zero-initialising the workspace is therefore not required
-        for correctness::
+        The scratch has shape ``[groups * R, wg_M, wg_N]`` (f32), where
+        ``R = spec.ws_replicas``: ``R`` copies of the per-group ``dW`` slab,
+        with no ``split_k`` factor.  Stage 1 f32-atomic-adds every element
+        within ``[0, wg_M) × [0, wg_N)`` of its slab; OOB positions are skipped
+        by a per-element ``scf_if`` guard.  Stage 2 folds the ``R`` slabs.
+        Size it with :func:`wgrad_two_stage_workspace_nbytes` -- the returned
+        ``workspace_nbytes`` is exactly that value.
+
+        **The scratch must be zeroed before each pipeline call.** Stage 1
+        accumulates into it, so whatever is already there is added to the
+        result -- including the previous call's output::
 
             pipeline, ws_nbytes = build_implicit_gemm_conv_wgrad_two_stage(spec, arch=arch)
             ws = DeviceMem(ws_nbytes)
+            ws.memset(0)
             pipeline((s1_vals, s2_vals), (s1_cfg, s2_cfg), stream=stream)
 
         Both stages are submitted on the same HIP stream. HIP same-stream FIFO
@@ -178,7 +242,7 @@ def build_implicit_gemm_conv_wgrad_two_stage(
     if spec.split_k <= 1:
         raise ValueError(
             f"build_implicit_gemm_conv_wgrad_two_stage requires split_k > 1 "
-            f"(or split_k=-1 for auto-selection); got split_k={spec.split_k}"
+            f"or -1 (auto-selection); got split_k={spec.split_k}"
         )
 
     # Lazy imports: keep module import-time safe for static IR tests running
@@ -198,11 +262,13 @@ def build_implicit_gemm_conv_wgrad_two_stage(
         cache_key=("conv_wgrad_two_stage_s1", s1_spec.kernel_name()),
     )
 
-    # ---- Stage 2: workspace → dW (sequential reduce, all groups in one launch) -
+    # ---- Stage 2: scratch → dW (fold the R replicas + cast, all groups in one launch) -
     s2_spec = WgradReduceSpec(
         problem=spec.problem,
         dtype_d=spec.data.dtype_d,
         groups=spec.problem.groups,
+        # Must match Stage 1 or the fold covers the wrong number of slabs.
+        ws_replicas=s1_spec.ws_replicas,
     )
     s2_kernel = build_conv_wgrad_workspace_reduce(s2_spec, arch=arch)
     s2_artifact = compile_kernel(s2_kernel, arch=arch, capture_ir_text=False)

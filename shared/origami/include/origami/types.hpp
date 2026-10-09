@@ -457,6 +457,8 @@ struct tensile_params_t {
   int workgroup_mapping_xcc_group     = 0;
   bool global_split_u_coalesced       = false;
   bool global_split_u_wgm_round_robin = false;
+  bool one_lds_buffer = false;
+  bool source_swap = false;
 
   constexpr bool operator==(const tensile_params_t& o) const noexcept {
     return depth_u == o.depth_u && global_split_u == o.global_split_u &&
@@ -471,7 +473,8 @@ struct tensile_params_t {
            swizzle_b == o.swizzle_b && workgroup_mapping_xcc == o.workgroup_mapping_xcc &&
            workgroup_mapping_xcc_group == o.workgroup_mapping_xcc_group &&
            global_split_u_coalesced == o.global_split_u_coalesced &&
-           global_split_u_wgm_round_robin == o.global_split_u_wgm_round_robin;
+           global_split_u_wgm_round_robin == o.global_split_u_wgm_round_robin &&
+           one_lds_buffer == o.one_lds_buffer && source_swap == o.source_swap;
   }
 
   std::size_t hash() const {
@@ -495,7 +498,9 @@ struct tensile_params_t {
                               workgroup_mapping_xcc,
                               workgroup_mapping_xcc_group,
                               global_split_u_coalesced,
-                              global_split_u_wgm_round_robin);
+                              global_split_u_wgm_round_robin,
+                              one_lds_buffer,
+                              source_swap);
   }
 };
 
@@ -509,6 +514,16 @@ using backend_params_t = std::variant<std::monostate, tensile_params_t>;
  * Holds the geometric tile sizes along with occupancy,
  * work-group mapping (WGM), and cache-control hints.
  */
+struct operand_traffic_t {
+  double a_tile_bytes = 0.0;
+  double b_tile_bytes = 0.0;
+  double a_iter_bytes = 0.0;
+  double b_iter_bytes = 0.0;
+  double k_iters      = 1.0;
+  double a_cl_share   = 1.0;
+  double b_cl_share   = 1.0;
+};
+
 struct config_t {
   /// Macro tile and matrix-instruction shape.
   dim3_t mt{0, 0, 0};
@@ -531,6 +546,9 @@ struct config_t {
 
   /// Whether operand B is accessed with cache-flags.
   int cache_hints_b = 0;
+
+  /// Whether output D is accessed with cache-flags (streaming/non-temporal).
+  int cache_hints_d = 0;
 
   /// Workspace size parameters.
   std::size_t workspace_size            = 0;
@@ -568,6 +586,9 @@ struct config_t {
   /// LDS load vector width for matrix B (elements per LDS read)
   int vector_width_b = 1;
 
+  /// cluster dimensions
+  dim3_t cluster_dim{1, 1, 1};
+
   /// Backend-specific parameters (type should match target).
   /// Use tensile() accessor to get/set Tensile-specific params.
   backend_params_t backend{};
@@ -589,11 +610,12 @@ struct config_t {
   bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
            subtile == o.subtile && cache_hints_a == o.cache_hints_a &&
-           cache_hints_b == o.cache_hints_b && stream_k == o.stream_k &&
+           cache_hints_b == o.cache_hints_b && cache_hints_d == o.cache_hints_d &&
+           stream_k == o.stream_k &&
            workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
            prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
            grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
-           vector_width_b == o.vector_width_b && backend == o.backend;
+           vector_width_b == o.vector_width_b && cluster_dim == o.cluster_dim && backend == o.backend;
   }
 
   std::size_t hash() const {
@@ -607,6 +629,7 @@ struct config_t {
                                           subtile,
                                           cache_hints_a,
                                           cache_hints_b,
+                                          cache_hints_d,
                                           stream_k,
                                           workgroup_mapping,
                                           static_cast<std::uint32_t>(reduction_strategy),
@@ -616,7 +639,10 @@ struct config_t {
                                           grvw_b,
                                           gwvw_d,
                                           vector_width_a,
-                                          vector_width_b);
+                                          vector_width_b,
+                                          cluster_dim.m,
+                                          cluster_dim.n,
+                                          cluster_dim.k);
     // Hash backend-specific parameters if present. The visitor pattern allows
     // automatic handling of any backend type that provides a hash() method,
     // while std::monostate (no backend params) is a no-op.
@@ -635,7 +661,7 @@ struct config_t {
   }
 
   bool is_valid() const {
-    return mt.m > 0 && mt.n > 0 && mt.k > 0 && mi.m > 0 && mi.n > 0 && mi.k > 0 && occupancy > 0;
+    return mt.m > 0 && mt.n > 0 && mt.k > 0 && mi.m > 0 && mi.n > 0 && mi.k > 0 && occupancy > 0 && cluster_dim.m > 0 && cluster_dim.n > 0 && cluster_dim.k > 0;
   }
 };
 

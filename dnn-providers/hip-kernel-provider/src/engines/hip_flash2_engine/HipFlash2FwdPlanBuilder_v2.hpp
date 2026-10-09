@@ -12,6 +12,7 @@
 #pragma once
 
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 #include <vector>
@@ -23,6 +24,13 @@
 
 namespace hip_flash2_engine
 {
+
+/// The softmax scale for @p attrs: attn_scale_value, or 1.0 (no scaling, cuDNN's
+/// default) when it is unset.
+inline float attnScaleFor(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+{
+    return attrs.attn_scale_value().value_or(1.0f);
+}
 
 /**
  * @brief Plan builder for Flash-Attention 2 V7 forward pass.

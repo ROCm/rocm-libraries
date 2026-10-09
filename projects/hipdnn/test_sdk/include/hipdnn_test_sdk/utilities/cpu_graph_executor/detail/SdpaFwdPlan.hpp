@@ -142,7 +142,7 @@ public:
         }
 
         // Runtime attention scale: resolve the folded scale operand (runtime tensor
-        // or baked attn_scale_value) to a scalar; nullopt => reference default 1/sqrt(D).
+        // or baked attn_scale_value) to a scalar; nullopt => 1.0, no scaling (cuDNN's default).
         std::optional<float> effectiveScale;
         if(_params.scaleTensor.has_value())
         {

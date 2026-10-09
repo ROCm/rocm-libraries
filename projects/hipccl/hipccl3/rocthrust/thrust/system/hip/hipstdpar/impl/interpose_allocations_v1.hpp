@@ -1,0 +1,362 @@
+/*
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+/*! \file thrust/system/hip/interpose_allocations.hpp
+ *  \brief Interposed allocations/deallocations implementation detail header for HIPSTDPAR.
+ */
+
+#pragma once
+
+#if defined(__HIPSTDPAR__)
+#if defined(__HIPSTDPAR_INTERPOSE_ALLOC_V1__)
+#include <hip/hip_runtime.h>
+
+#if __has_include(<pthread.h>) && __has_include(<sys/resource.h>)
+    #include <pthread.h>
+    #include <sys/resource.h>
+    #define __HIPSTDPAR_INTERPOSE_ALLOC_HAS_STACK_ACCESS__
+#endif
+#if __has_include(<sys/mman.h>)
+    #include <sys/mman.h>
+#endif
+#if __has_include(<sys/unistd.h>)
+    #include <sys/unistd.h>
+#endif
+
+#include <algorithm>
+#include <cerrno>
+#include <climits>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <iostream>
+#include <memory>
+#include <new>
+#include <stdexcept>
+#include <utility>
+
+#if __has_include(<malloc.h>)
+    #include <malloc.h>
+    #define __HIPSTDPAR_HAS_MALLOC_USABLE_SIZE__
+#endif
+
+extern "C" {
+    __attribute__((weak)) void __hipstdpar_hidden_free(void*);
+    __attribute__((weak)) void* __hipstdpar_hidden_memalign(::std::size_t,
+                                                            ::std::size_t);
+    #if defined(_POSIX_MAPPED_FILES)
+        #define __HIPSTDPAR_INTERPOSE_ALLOC_CAN_MMAP__
+        __attribute__((weak))
+        void* __hipstdpar_hidden_mmap(
+            void*, ::std::size_t, int, int, int, ::off_t) noexcept;
+        __attribute__((weak))
+        int __hipstdpar_hidden_munmap(void*, ::std::size_t) noexcept;
+    #endif // _POSIX_MAPPED_FILES
+}
+
+namespace hipstd
+{
+inline const bool __initialised{hipInit(0) == hipSuccess};
+
+// Clears a HIP failure that the interposer handles itself, unless an error was
+// already pending before its HIP calls, as captured by hipPeekAtLastError in
+// pending. The next hipGetLastError, which rocPRIM calls after every kernel
+// launch, then reports an error exactly when it would have without them.
+inline hipError_t __consume_error(hipError_t e, hipError_t pending) noexcept
+{
+    if (e != hipSuccess && pending == hipSuccess)
+        static_cast<void>(hipGetLastError());
+    return e;
+}
+
+#if defined(__HIPSTDPAR_INTERPOSE_ALLOC_HAS_STACK_ACCESS__)
+    class Stack_accessor final {
+        // DATA
+        ::std::uint64_t* ps_{};
+        ::std::size_t n_{};
+        ::std::int32_t d_{};
+
+        // IMPLEMENTATION - ACCESSORS
+        bool touch_stack_() const
+        {   // Due to how the kernel manages memory, we have to pre-access.
+            ::std::uint64_t r{1};
+            for (auto i = 0u; i != n_ / sizeof(*ps_); ++i) r += ps_[i];
+            return r;
+        }
+    public:
+        // CREATORS
+        Stack_accessor()
+        {
+            pthread_attr_t t{};
+            if (pthread_getattr_np(pthread_self(), &t)) {
+                throw ::std::runtime_error("Failed to get thread attributes.");
+            }
+            if (pthread_attr_getstack(&t, reinterpret_cast<void**>(&ps_), &n_)) {
+                throw ::std::runtime_error(
+                    "Failed to get thread stack attributes.");
+            }
+            if (!ps_ || n_ == 0)
+                return;
+            if (hipGetDevice(&d_) != hipSuccess) {
+                throw ::std::runtime_error(
+                    "Failed to retrieve accelerator for HIPSTDPAR");
+            }
+            if (rlimit l{}; getrlimit(RLIMIT_STACK, &l)) {
+                throw ::std::runtime_error("Failed to query stack limits.");
+            }
+            else if (l.rlim_cur == RLIM_INFINITY) { // Unlimited stack, cap it.
+                n_ = PTHREAD_STACK_MIN;
+            }
+            if (touch_stack_() &&
+                hipMemAdvise(ps_, n_, hipMemAdviseSetAccessedBy, d_) != hipSuccess) {
+                throw ::std::runtime_error(
+                    "Failed to make thread stack accessible.");
+            }
+        }
+        ~Stack_accessor()
+        {
+            if (!ps_ || n_ == 0) return;
+            if (hipMemAdvise(ps_, n_, hipMemAdviseUnsetAccessedBy, d_) != hipSuccess) {
+                ::std::cerr << "Failed to unset thread stack accessibility." <<
+                    ::std::endl;
+            }
+        }
+    };
+    inline Stack_accessor __main_stack_accessor{};
+    inline thread_local Stack_accessor __thread_stack_accessor{};
+#endif // __HIPSTDPAR_INTERPOSE_ALLOC_HAS_STACK_ACCESS__
+} // Namespace hipstd.
+
+extern "C" {
+    inline __attribute__((used)) void* __hipstdpar_aligned_alloc(std::size_t a,
+                                                                 std::size_t n)
+    {
+        // memalign and aligned_alloc are both routed here; alignment checks are
+        // left to libc memalign, which accepts values aligned_alloc rejects.
+        auto r = __hipstdpar_hidden_memalign(a, n);
+
+        // hipMemAdvise rejects zero-length ranges; nothing to advise.
+        if (!r || !hipstd::__initialised || n == 0) return r;
+
+        const auto pending = hipPeekAtLastError();
+        hipDevice_t d{};
+        if (hipstd::__consume_error(hipGetDevice(&d), pending) != hipSuccess ||
+            hipstd::__consume_error(hipMemAdvise(
+                r, n, hipMemAdviseSetAccessedBy, d), pending) != hipSuccess) {
+            __hipstdpar_hidden_free(r);
+            errno = ENOMEM;
+            return nullptr;
+        }
+
+        return r;
+    }
+
+    inline __attribute__((used)) void* __hipstdpar_malloc(std::size_t n)
+    {
+        return __hipstdpar_aligned_alloc(alignof(std::max_align_t), n);
+    }
+
+    inline __attribute__((used)) void* __hipstdpar_calloc(std::size_t n,
+                                                          std::size_t sz)
+    {
+        std::size_t bytes{};
+        if (__builtin_mul_overflow(n, sz, &bytes)) {
+            errno = ENOMEM;
+            return nullptr;
+        }
+
+        auto p = __hipstdpar_malloc(bytes);
+
+        return p ? ::std::memset(p, 0, bytes) : nullptr;
+    }
+
+    inline __attribute__((used))
+    int __hipstdpar_posix_aligned_alloc(void** p, std::size_t a, std::size_t n)
+    {
+        if (!p || a < sizeof(void*) || (a & (a - 1)) != 0) return EINVAL;
+
+        const auto saved_errno = errno;
+        auto allocation = __hipstdpar_aligned_alloc(a, n);
+        errno = saved_errno;
+        if (!allocation) return ENOMEM;
+
+        *p = allocation;
+        return 0;
+    }
+
+    inline __attribute__((used)) void __hipstdpar_free(void* p)
+    {
+        if (!p) return;
+
+        if (hipstd::__initialised) {
+            const auto pending = hipPeekAtLastError();
+            hipDevice_t d{};
+            if (hipstd::__consume_error(hipGetDevice(&d), pending) == hipSuccess)
+                static_cast<void>(hipstd::__consume_error(hipMemAdvise(
+                    p, UINT64_MAX, hipMemAdviseUnsetAccessedBy, d), pending));
+        }
+        return __hipstdpar_hidden_free(p);
+    }
+
+    inline __attribute__((used)) void* __hipstdpar_realloc(void* p,
+                                                           std::size_t n)
+    {
+        if (!p) return __hipstdpar_malloc(n);
+
+        if (n == 0) {
+            __hipstdpar_free(p);
+            return nullptr;
+        }
+
+        auto q = __hipstdpar_malloc(n);
+        if (!q) return nullptr;
+
+        std::size_t old = n;
+        #if defined(__HIPSTDPAR_HAS_MALLOC_USABLE_SIZE__)
+            old = malloc_usable_size(p);
+        #endif
+        std::memcpy(q, p, std::min(old, n));
+        __hipstdpar_free(p);
+
+        return q;
+    }
+
+    inline __attribute__((used))
+    void* __hipstdpar_realloc_array(void* p, std::size_t n, std::size_t sz)
+    {
+        // Checked before reallocating: a wrapped product of zero would be
+        // taken as a request to free p, leaving the caller with a dangling
+        // pointer.
+        std::size_t bytes{};
+        if (__builtin_mul_overflow(n, sz, &bytes)) {
+            errno = ENOMEM;
+            return nullptr;
+        }
+
+        return __hipstdpar_realloc(p, bytes);
+    }
+
+    inline __attribute__((used))
+    void* __hipstdpar_operator_new_aligned(std::size_t n, std::size_t a)
+    {
+        const auto allocation_size = n == 0 ? 1 : n;
+        while (true) {
+            if (auto p = __hipstdpar_aligned_alloc(a, allocation_size)) return p;
+
+            if (auto handler = std::get_new_handler()) handler();
+            else throw std::bad_alloc{};
+        }
+    }
+
+    inline __attribute__((used)) void* __hipstdpar_operator_new(std::size_t n)
+    {
+        return __hipstdpar_operator_new_aligned(n, alignof(std::max_align_t));
+    }
+
+    inline __attribute__((used)) void* __hipstdpar_operator_new_nothrow(
+        std::size_t n, std::nothrow_t) noexcept
+    {
+        try {
+            return __hipstdpar_operator_new(n);
+        }
+        catch (...) {
+            return nullptr;
+        }
+    }
+
+    inline __attribute__((used)) void* __hipstdpar_operator_new_aligned_nothrow(
+        std::size_t n, std::size_t a, std::nothrow_t) noexcept
+    {
+        try {
+            return __hipstdpar_operator_new_aligned(n, a);
+        }
+        catch (...) {
+            return nullptr;
+        }
+    }
+
+    inline __attribute__((used)) void __hipstdpar_operator_delete_aligned_sized(
+        void* p, std::size_t, std::size_t) noexcept
+    {
+        return __hipstdpar_free(p);
+    }
+
+    inline __attribute__((used))
+    void __hipstdpar_operator_delete(void* p) noexcept
+    {
+        return __hipstdpar_free(p);
+    }
+
+    inline __attribute__((used))
+    void __hipstdpar_operator_delete_aligned(void* p, std::size_t) noexcept
+    {
+        return __hipstdpar_free(p);
+    }
+
+    inline __attribute__((used))
+    void __hipstdpar_operator_delete_sized(void* p, std::size_t n) noexcept
+    {
+        return __hipstdpar_operator_delete_aligned_sized(
+            p, n, alignof(std::max_align_t));
+    }
+
+    #if defined(__HIPSTDPAR_INTERPOSE_ALLOC_CAN_MMAP__)
+        inline __attribute__((used))
+        void* __hipstdpar_mmap(void* p, std::size_t n, int prot, int f, int fd,
+                               off_t dx) noexcept
+        {
+            auto r = __hipstdpar_hidden_mmap(p, n, prot, f, fd, dx);
+            if (r == MAP_FAILED || !hipstd::__initialised) return r;
+
+            const auto pending = hipPeekAtLastError();
+            hipDevice_t d{};
+            if (hipstd::__consume_error(hipGetDevice(&d), pending) != hipSuccess ||
+                hipstd::__consume_error(hipMemAdvise(
+                    r, n, hipMemAdviseSetAccessedBy, d), pending) != hipSuccess) {
+                // MAP_FIXED has already replaced whatever was mapped there;
+                // unmapping would leave a hole inside a range the caller owns.
+                // MAP_FIXED_NOREPLACE overrides it and only maps a free range.
+                bool replaced = f & MAP_FIXED;
+                #if defined(MAP_FIXED_NOREPLACE)
+                    if (f & MAP_FIXED_NOREPLACE) replaced = false;
+                #endif
+                if (!replaced) __hipstdpar_hidden_munmap(r, n);
+                errno = ENOMEM;
+                return MAP_FAILED;
+            }
+
+            return r;
+        }
+
+        inline __attribute__((used))
+        int __hipstdpar_munmap(void* p, std::size_t n) noexcept
+        {
+            if (hipstd::__initialised) {
+                const auto pending = hipPeekAtLastError();
+                hipDevice_t d{};
+                if (hipstd::__consume_error(hipGetDevice(&d), pending) == hipSuccess)
+                    static_cast<void>(hipstd::__consume_error(hipMemAdvise(
+                        p, n, hipMemAdviseUnsetAccessedBy, d), pending));
+            }
+            return __hipstdpar_hidden_munmap(p, n);
+        }
+    #endif // __HIPSTDPAR_INTERPOSE_ALLOC_CAN_MMAP__
+} // extern "C"
+#  else // __HIPSTDPAR_INTERPOSE_ALLOC_V1__
+#    error "__HIPSTDPAR_INTERPOSE_ALLOC_V1__ should be defined. Please use the '--hipstdpar-interpose-alloc' compile option."
+#  endif // __HIPSTDPAR_INTERPOSE_ALLOC_V1__
+
+#else // __HIPSTDPAR__
+#    error "__HIPSTDPAR__ should be defined. Please use the '--hipstdpar' compile option."
+#endif // __HIPSTDPAR__

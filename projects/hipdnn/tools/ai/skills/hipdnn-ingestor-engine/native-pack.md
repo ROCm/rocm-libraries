@@ -46,10 +46,11 @@ UIDs/scalars, workspace and required module/program lifetimes; nothing may retai
 transient `MatchContext` or `BoundTokens` references. A runnable kernel is a view, so
 keep its compiled program alive too.
 
-Use `buildIngestorKernelCode` for source loading and path bounds. Embedded source uses
-real compile options. KPACK loads library/toc-key/symbol relative to descriptor origin
-within `treeRoot`. A layout-neutral stand-in is valid only on a path proven not to
-consume those compile options, never as an embedded-source workaround.
+Use `buildIngestorKernelCode` for source loading and path bounds. A pack that may compile
+from source passes the compiler and real compile options. A pack whose kernels are all
+KPACK calls the overload that takes neither, which refuses an `embedded_source` kernel;
+never fabricate a tensor to construct compile options. KPACK loads
+library/toc-key/symbol relative to descriptor origin within `treeRoot`.
 
 A KPACK load is **digest-checked before the driver sees the bytes**: the descriptor's
 `sha256` is the digest of the decompressed code object, 64 lowercase hex, and the loader

@@ -292,6 +292,8 @@ namespace rocalution
             this->FSAI_L_.ConvertTo(this->precond_mat_format_, this->format_block_dim_);
             this->FSAI_LT_.ConvertTo(this->precond_mat_format_, this->format_block_dim_);
         }
+
+        log_debug(this, "FSAI::Build()", this->build_, " #*# end");
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
@@ -312,8 +314,6 @@ namespace rocalution
 
             this->build_ = false;
         }
-
-        log_debug(this, "FSAI::Build()", this->build_, " #*# end");
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
@@ -669,7 +669,7 @@ namespace rocalution
     {
         log_debug(this, "TNS::MoveToAcceleratorLocalData_()", this->build_);
 
-        this->TNS_.MoveToHost();
+        this->TNS_.MoveToAccelerator();
         this->L_.MoveToAccelerator();
         this->LT_.MoveToAccelerator();
         this->Dinv_.MoveToAccelerator();

@@ -98,7 +98,7 @@ namespace rocsparse
                 }
 
                 // Spin loop until dependency has been resolved
-                (void)rocsparse::spin_loop<SLEEP>(&done_array[bsr_col], __HIP_MEMORY_SCOPE_AGENT);
+                rocsparse::spin_loop<SLEEP>(&done_array[bsr_col], __MEMORY_SCOPE_DEVICE);
 
                 // Make sure dependencies are visible in global memory
                 __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
@@ -256,7 +256,7 @@ namespace rocsparse
         if(lid == 0)
         {
             // First lane writes "we are done" flag
-            __hip_atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 
             if(pivot)
             {

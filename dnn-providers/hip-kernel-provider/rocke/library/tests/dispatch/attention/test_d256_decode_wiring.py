@@ -170,6 +170,12 @@ class TestD256DecodeRouting(unittest.TestCase):
         self.assertEqual(r.candidate.spec_id, "d256_decode")
         self.assertEqual(r.spec.path, "3d")
 
+    def test_bottom_right_preserves_d256_decode_selection(self):
+        with _PinnedArch("gfx950"):
+            result = dispatch_attention(_gfx950_d256_decode(mask_type=2, num_cus=120))
+        self.assertEqual(result.candidate.spec_id, "d256_decode")
+        self.assertEqual(result.spec.path, "3d")
+
     def test_spec_records_correct_dims(self):
         with _PinnedArch("gfx950"):
             r = dispatch_attention(

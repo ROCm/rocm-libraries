@@ -164,12 +164,19 @@ TEST(TestLayernormBwdPlan, GetWorkspaceSizeWithoutOptionalTensorsReturnsNonzero)
 {
     SKIP_IF_NO_DEVICES(); // getWorkspaceSize requires a device
 
-    auto [fbb, plan] = createPlanFromGraph({150528, 50176, 224, 1},
-                                           {2, 3, 224, 224},
-                                           hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                           false);
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
+    const std::vector<int64_t> dims{2, 3, 224, 224};
+    auto [fbbWithStats, planWithStats] = createPlanFromGraph(
+        strides, dims, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, true);
+    auto [fbbWithoutStats, planWithoutStats] = createPlanFromGraph(
+        strides, dims, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, false);
     const Handle handle;
-    EXPECT_EQ(plan.getWorkspaceSize(handle), 16u);
+
+    // Both graphs describe the same shape, so they share whatever parallel reduction buffer this
+    // device's multiprocessor count calls for. Their difference is the fallback mean/rstd
+    // workspace on its own: `sizeof(float) * 2 * outerSize * stride` = `4 * 2 * 2 * 1` = `16`
+    EXPECT_EQ(planWithoutStats.getWorkspaceSize(handle) - planWithStats.getWorkspaceSize(handle),
+              16u);
 }
 
 TEST(TestLayernormBwdPlan, IsMoveConstructible)

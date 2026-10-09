@@ -6,13 +6,15 @@
 Every case runs the real `tools/*.py` entry point as a subprocess from an unrelated
 cwd, because the defects guarded against are wiring defects. The staged
 `bin/rocminfo`, `bin/python3` and `bin/hipdnn_list_engines` are CONTROL-FLOW
-FIXTURES emitting the field names the `dnn_benchmarking` result schema defines
-(`reporting/suite_results.py`): no case establishes that a kernel ran or that a
-number is correct.
+FIXTURES emitting rows in the shape the real `dnn-benchmark` writes (dnn-benchmarking
+73fff8a): an ingestor engine labelled `engine_<signed hex ID>` and a validation row
+with no `role`. `TestRealBenchmarkRows` replays rows copied from a real run. No case
+establishes that a kernel ran or that a number is correct.
 """
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
@@ -29,8 +31,23 @@ _PROBE = _TOOLS / "device_probe.py"
 _AUDIT = _TOOLS / "field_audit.py"
 
 _ENGINE_NAME = "test:Engine"
-_ENGINE_ID = 0x1A2B
+#: The real hipkernel:Gfx950AttentionDense ID. Its top bit is set, so the signed label
+#: the benchmark prints differs from the unsigned spelling discovery prints.
+_ENGINE_ID = 0x89C9139111D7C3A5
 _ARCH = "gfx942"
+
+#: Real dnn-benchmark output; its `_provenance` key says where it came from.
+_REAL_ROWS = (
+    Path(__file__).parent / "fixtures" / "dnn_benchmark" / "real_validate_pytorch.json"
+)
+
+
+def _sweep_module():
+    """`tools/sweep.py` as a module, for cases that evaluate a result in process."""
+    if str(_TOOLS) not in sys.path:
+        sys.path.insert(0, str(_TOOLS))
+    return importlib.import_module("sweep")
+
 
 #: CONTROL-FLOW FIXTURE for `rocminfo`: one agent line in the shape the token scan
 #: reads.
@@ -83,8 +100,21 @@ if log and not scenario.get("skip_provenance"):
 elif log:
     Path(log).write_text("info: no plugin was loaded\\n")
 
+# How the rows spell the plugin they came from: the loaded file, the engines directory
+# the benchmark was handed, or a path from some other tree.
+reported_plugin = {
+    "file": plugin_dir / "engine.so",
+    "directory": plugin_dir,
+    "sibling_file": plugin_dir.parent / (plugin_dir.name + "-foreign") / "engine.so",
+    "sibling_directory": plugin_dir.parent / (plugin_dir.name + "-foreign"),
+    "nested": plugin_dir / "nested" / "engine.so",
+}[scenario.get("plugin_path", "file")]
+
 stats = {"mean_ms": 1.5, "median_ms": 1.5, "std_ms": 0.0, "min_ms": 1.4,
          "max_ms": 1.6, "p95_ms": 1.6, "p99_ms": 1.6, "total_ms": 3.0}
+# dnn-benchmark labels a row with the registered name when its bindings resolve one,
+# else `engine_{id:#x}` of the signed ID it was handed; ingestor engines get the latter.
+label = "{engine}" if scenario.get("label") == "ued" else f"engine_{engine_id:#x}"
 served_limit = scenario.get("served", len(graphs))
 results = []
 passed = failed = skipped = errored = 0
@@ -92,10 +122,10 @@ for index, path in enumerate(graphs):
     name = json.loads(Path(path).read_text())["name"]
     rows = []
     if index < served_limit:
-        row = {"provider": "{engine}", "engine_id": engine_id,
-               "engine_name": "{engine}", "engine_version": "1.0",
+        row = {"provider": label, "engine_id": engine_id,
+               "engine_name": label, "engine_version": "1.0",
                "started_at": "2026-01-01T00:00:00+00:00", "status": "success",
-               "plugin_path": str(plugin_dir / "engine.so"),
+               "plugin_path": str(reported_plugin),
                "cpu_build_time_ms": 2.0, "host_stats": stats,
                "elapsed_time_ms": 9.0}
         timing = scenario.get("timing", "ok")
@@ -117,29 +147,35 @@ for index, path in enumerate(graphs):
             passed += 1
         rows.append(row)
     else:
-        rows.append({"provider": "{engine}", "engine_id": engine_id,
-                     "engine_name": "{engine}", "engine_version": "1.0",
+        rows.append({"provider": label, "engine_id": engine_id,
+                     "engine_name": label, "engine_version": "1.0",
                      "started_at": "2026-01-01T00:00:00+00:00",
                      "status": "skipped",
                      "skip_reason": "head_size unsupported by this variant set"})
         skipped += 1
-    if validating:
-        reference = {"provider": "pytorch", "engine_id": 0,
-                     "engine_name": "pytorch", "engine_version": "2.0",
-                     "started_at": "2026-01-01T00:00:00+00:00",
-                     "role": "reference", "status": "success",
-                     "gpu_kernel_stats": stats, "host_stats": stats,
-                     "elapsed_time_ms": 9.0, "cpu_build_time_ms": 1.0,
-                     "correctness": {"passed": False, "execution_success": True,
-                                     "tolerance_match": None, "rtol": 0.01,
-                                     "atol": 0.01}}
-        if scenario.get("reference") == "skipped":
-            reference = {"provider": "pytorch", "engine_id": 0,
-                         "engine_name": "pytorch", "engine_version": "2.0",
-                         "started_at": "2026-01-01T00:00:00+00:00",
-                         "role": "reference", "status": "skipped",
-                         "skip_reason": "torch is not available"}
-        rows.append(reference)
+    # The real validation row carries no `role` (dnn-benchmark never sets it);
+    # `reference_role` stages the explicit spelling the schema allows.
+    reference = scenario.get("reference", "ok")
+    if validating and reference != "absent":
+        row = {"provider": "pytorch", "engine_id": 0,
+               "engine_name": "pytorch", "engine_version": "2.0",
+               "started_at": "2026-01-01T00:00:00+00:00", "status": "success",
+               "gpu_kernel_stats": stats, "host_stats": stats,
+               "elapsed_time_ms": 9.0, "cpu_build_time_ms": 1.0,
+               "correctness": {"passed": False, "execution_success": True,
+                               "tolerance_match": None, "rtol": 1e-05,
+                               "atol": 1e-06, "error_message":
+                               "Reference provider timing row; no comparison performed"}}
+        if reference == "skipped":
+            row = {"provider": "pytorch", "engine_id": 0,
+                   "engine_name": "pytorch", "engine_version": "2.0",
+                   "started_at": "2026-01-01T00:00:00+00:00", "status": "skipped",
+                   "skip_reason": "torch is not available"}
+        if reference == "other_provider":
+            row.update(provider="cpu", engine_name="cpu")
+        if scenario.get("reference_role"):
+            row["role"] = "reference"
+        rows.append(row)
     results.append({"graph_name": name, "graph_path": path, "results": rows})
 
 document = {
@@ -537,6 +573,84 @@ class TestGatesFailIndependently:
 
 
 @_needs_posix_exec
+class TestPluginAttribution:
+    """An engine row is this arm's evidence only when its plugin_path names the arm's
+    engines directory or a plugin directly inside it. The file spelling is the default
+    scenario, covered by `test_a_clean_timing_sweep_completes`."""
+
+    def test_a_row_naming_the_engines_directory_is_attributed(self, sweep):
+        """Some benchmarks echo back the directory they were handed rather than the
+        plugin they loaded; that is the same arm."""
+        sweep.scenario(plugin_path="directory")
+        result = sweep.run()
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert all(sweep.gates(result).values())
+
+    def test_an_install_tree_whose_lib_is_a_symlink_is_this_arm(self, sweep):
+        """The loader logs, and the rows report, the path through the symlink; both
+        gates compare the engines directory it resolves to."""
+        real_lib = sweep.root.parent / "real-lib"
+        (sweep.install / "lib").rename(real_lib)
+        (sweep.install / "lib").symlink_to(real_lib, target_is_directory=True)
+        result = sweep.run()
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert all(sweep.gates(result).values())
+
+    @pytest.mark.parametrize(
+        "spelling", ["sibling_file", "sibling_directory", "nested"]
+    )
+    def test_a_row_from_another_tree_is_not_attributed(self, sweep, spelling):
+        """A sibling sharing the engines directory's name as a prefix, and a plugin
+        nested below it, are not this arm: every row is unattributed, so nothing is
+        served."""
+        sweep.scenario(plugin_path=spelling)
+        result = sweep.run()
+        assert result.returncode == 1
+        gates = sweep.gates(result)
+        assert {name for name, value in gates.items() if not value} == {
+            "served",
+            "outcomes",
+        }
+
+
+@_needs_posix_exec
+class TestEngineIdentity:
+    """`engine_name` may be any label dnn-benchmark gives the discovered engine, and the
+    rows are attributed whichever of those labels they carry."""
+
+    @pytest.mark.parametrize(
+        "engine_name",
+        [
+            _ENGINE_NAME,
+            f"engine_{_ENGINE_ID:#x}",
+            f"engine_{_ENGINE_ID - (1 << 64):#x}",
+        ],
+        ids=["ued", "unsigned", "signed"],
+    )
+    def test_every_label_of_the_installed_engine_is_accepted(self, sweep, engine_name):
+        config = json.loads(sweep.config_path.read_text())
+        config["engine_name"] = engine_name
+        sweep.config_path.write_text(json.dumps(config))
+        result = sweep.run()
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert all(sweep.gates(result).values())
+
+    def test_rows_carrying_the_registered_name_are_attributed(self, sweep):
+        """When the bindings resolve a name the rows carry it, not the hex label."""
+        sweep.scenario(label="ued")
+        result = sweep.run()
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_another_engines_label_is_refused_and_the_accepted_ones_named(self, sweep):
+        config = json.loads(sweep.config_path.read_text())
+        config["engine_name"] = "engine_0x1a2b"
+        sweep.config_path.write_text(json.dumps(config))
+        result = sweep.run()
+        assert result.returncode == 1
+        assert "engine_-0x7636ec6eee283c5b" in result.stderr
+
+
+@_needs_posix_exec
 class TestCorrectnessEvidenceIsRequiredNotOptional:
     def test_a_tolerance_mismatch_fails_the_correctness_phase(self, tmp_path):
         staged = Sweep(tmp_path, correctness=True)
@@ -563,6 +677,37 @@ class TestCorrectnessEvidenceIsRequiredNotOptional:
         assert result.returncode == 1
         gates = staged.gates(result, "correctness")
         assert gates["reference"] is False
+
+    def test_an_explicit_reference_role_still_counts(self, tmp_path):
+        """The schema's explicit spelling of the default fixture's unlabelled row."""
+        staged = Sweep(tmp_path, correctness=True)
+        staged.scenario(reference_role=True)
+        result = staged.run()
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "SWEEP_DONE" in result.stdout
+
+    def test_a_run_without_a_reference_row_fails_the_reference_gate(self, tmp_path):
+        """Engine rows claiming tolerance_match with no reference row in the document
+        attest a comparison nobody can show was made."""
+        staged = Sweep(tmp_path, correctness=True)
+        staged.scenario(reference="absent")
+        result = staged.run()
+        assert result.returncode == 1
+        gates = staged.gates(result, "correctness")
+        assert {name for name, value in gates.items() if not value} == {"reference"}
+
+    @pytest.mark.parametrize("explicit", [False, True])
+    def test_a_reference_from_another_provider_fails_the_reference_gate(
+        self, tmp_path, explicit
+    ):
+        """`correctness.reference` names the provider; another provider's row, with or
+        without `role: reference`, is not that comparison."""
+        staged = Sweep(tmp_path, correctness=True)
+        staged.scenario(reference="other_provider", reference_role=explicit)
+        result = staged.run()
+        assert result.returncode == 1
+        gates = staged.gates(result, "correctness")
+        assert {name for name, value in gates.items() if not value} == {"reference"}
 
     def test_a_timing_only_run_never_claims_validation(self, sweep):
         result = sweep.run()
@@ -734,3 +879,171 @@ class TestTheDriverRefusesAnUnsafeConfig:
         assert result.returncode == 2, result.stdout + result.stderr
         assert "SWEEP ERROR" in result.stderr
         assert "SWEEP_INCOMPLETE" not in result.stderr
+
+
+class TestRealBenchmarkRows:
+    """Rows copied from a real dnn-benchmark run (fixtures/dnn_benchmark), evaluated in
+    process so they run on every platform. Their plugin_path names the device host's
+    tree, so each case re-roots it to the staged arm; nothing else is edited unless the
+    case says so."""
+
+    ENGINE = "hipkernel:Gfx950AttentionDense"
+    ENGINE_ID = 0x89C9139111D7C3A5
+
+    def evaluate(self, tmp_path, kind="correctness", edit=None, **config):
+        doc = json.loads(_REAL_ROWS.read_text())
+        install = tmp_path / "arm"
+        engines = install / "lib" / "hipdnn_plugins" / "engines"
+        engines.mkdir(parents=True)
+        (install / "pack.kdp.json").write_text(json.dumps({"kernelDescriptors": [{}]}))
+        log = tmp_path / "hipdnn.log"
+        log.write_text(f"info: load plugin from [{engines / 'libhipkernel.so'}]\n")
+        for graph in doc["graphs"]:
+            for row in graph["results"]:
+                if "plugin_path" in row:
+                    row["plugin_path"] = str(engines)
+            if edit:
+                graph["results"] = edit(graph["results"])
+        result = tmp_path / "result.json"
+        result.write_text(json.dumps(doc))
+        settings = {
+            "engine_name": self.ENGINE,
+            "engine_ued_name": self.ENGINE,
+            "min_served": len(doc["graphs"]),
+            "arch": "gfx950",
+            "correctness": {"reference": "pytorch"},
+        }
+        settings.update(config)
+        return _sweep_module().evaluate_phase(
+            settings,
+            {"install_tree": str(install), "expected_descriptors": 1},
+            [{"graph_name": g["graph_name"]} for g in doc["graphs"]],
+            self.ENGINE_ID,
+            kind,
+            result,
+            log,
+            0,
+        )
+
+    @staticmethod
+    def failed(outcome):
+        return {name for name, value in outcome["gates"].items() if not value}
+
+    @pytest.mark.parametrize("kind", ["timing", "correctness"])
+    def test_the_signed_label_attributes_the_rows(self, tmp_path, kind):
+        """The rows say `engine_-0x7636ec6eee283c5b`; discovery says the UED name and
+        0x89C9139111D7C3A5."""
+        outcome = self.evaluate(tmp_path, kind)
+        assert {e["outcome"] for e in outcome["ledger"]} == {"served"}
+        assert self.failed(outcome) <= {"reference"}
+
+    def test_the_real_reference_row_passes_the_reference_gate(self, tmp_path):
+        outcome = self.evaluate(tmp_path)
+        assert outcome["success"], outcome["gates"]
+
+    def test_an_explicit_reference_role_still_passes(self, tmp_path):
+        def label(rows):
+            return [
+                dict(r, role="reference") if r["provider"] == "pytorch" else r
+                for r in rows
+            ]
+
+        assert self.evaluate(tmp_path, edit=label)["success"]
+
+    def test_a_run_with_no_reference_row_fails(self, tmp_path):
+        def drop(rows):
+            return [r for r in rows if r["provider"] != "pytorch"]
+
+        assert self.failed(self.evaluate(tmp_path, edit=drop)) == {"reference"}
+
+    def test_a_reference_from_another_provider_fails(self, tmp_path):
+        outcome = self.evaluate(tmp_path, correctness={"reference": "cpu"})
+        assert self.failed(outcome) == {"reference"}
+
+    def test_an_unlabelled_provider_row_with_an_engine_id_is_not_the_reference(
+        self, tmp_path
+    ):
+        """engine_id 0 is what marks the validation row; a nonzero ID is an engine."""
+
+        def renumber(rows):
+            return [
+                dict(r, engine_id=7) if r["provider"] == "pytorch" else r for r in rows
+            ]
+
+        assert self.failed(self.evaluate(tmp_path, edit=renumber)) == {"reference"}
+
+    def test_a_failed_comparison_against_the_real_reference_fails(self, tmp_path):
+        """The gate still compares against the reference: the engine row's own result
+        has to match it."""
+
+        def mismatch(rows):
+            return [
+                (
+                    dict(r, correctness=dict(r["correctness"], tolerance_match=False))
+                    if r["provider"] != "pytorch"
+                    else r
+                )
+                for r in rows
+            ]
+
+        assert self.failed(self.evaluate(tmp_path, edit=mismatch)) == {"correctness"}
+
+
+class TestCorpusGraphIdentity:
+    """Graphs are keyed by a unique identity: the graph's own name, or its
+    corpus-relative path when several files in the corpus share that name."""
+
+    @staticmethod
+    def stage(root, graphs):
+        for relative, name in graphs.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(dict(_graph(0), name=name)))
+
+    def inventory(self, root, count):
+        corpus = {"name": "c", "path": str(root), "expected_graphs": count}
+        return _sweep_module().corpus_inventory(corpus, "none")
+
+    def test_two_sources_sharing_a_graph_name_are_two_graphs(self, tmp_path):
+        """942:S6-10: hipkittens and pytorch both ship
+        bf16_b16_hq16_kv16_sq2048_skv2048_d128_noncausal."""
+        shared = "bf16_b16_hq16_kv16_sq2048_skv2048_d128_noncausal"
+        self.stage(
+            tmp_path,
+            {
+                "hipkittens/a.json": shared,
+                "pytorch/a.json": shared,
+                "pytorch/b.json": "unique_graph",
+            },
+        )
+        inventory = self.inventory(tmp_path, 3)
+        assert {g["graph_name"]: g["source_name"] for g in inventory} == {
+            "hipkittens/a.json": shared,
+            "pytorch/a.json": shared,
+            "unique_graph": "unique_graph",
+        }
+
+    def test_graphs_that_cannot_be_told_apart_are_refused(self, tmp_path):
+        """A name equal to another graph's fallback key leaves two graphs one key."""
+        self.stage(
+            tmp_path,
+            {"x/g.json": "dup", "y/g.json": "dup", "z.json": "x/g.json"},
+        )
+        with pytest.raises(_sweep_module().ConfigError, match="cannot be told apart"):
+            self.inventory(tmp_path, 3)
+
+    @_needs_posix_exec
+    def test_a_sweep_measures_both_graphs_of_a_shared_name(self, sweep):
+        """End to end: the benchmark reports the key staging wrote, so each graph's
+        row is attributed to its own source."""
+        for source in ("hipkittens", "pytorch"):
+            (sweep.corpus / source).mkdir()
+            (sweep.corpus / source / "a.json").write_text(json.dumps(_graph(7)))
+        config = json.loads(sweep.config_path.read_text())
+        config["corpora"][0]["expected_graphs"] = 5
+        sweep.config_path.write_text(json.dumps(config))
+        result = sweep.run()
+        assert result.returncode == 0, result.stdout + result.stderr
+        ledger = json.loads((sweep.root / "results" / "outcomes.json").read_text())
+        served = {e["graph_name"] for e in ledger if e["outcome"] == "served"}
+        assert {"hipkittens/a.json", "pytorch/a.json"} <= served

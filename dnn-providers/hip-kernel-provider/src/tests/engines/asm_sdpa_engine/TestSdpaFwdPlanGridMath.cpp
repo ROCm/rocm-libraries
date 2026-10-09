@@ -46,6 +46,23 @@ SdpaFwdParams makeHd192x128Params()
     return p;
 }
 
+// hd192x128 / gfx950 variant — blockDim=256 but no grid swap.
+SdpaFwdParams makeHd192x128Gfx950Params()
+{
+    SdpaFwdParams p{};
+    p.batchSize = 2U;
+    p.numHeadsQ = 16U;
+    p.numHeadsKv = 16U;
+    p.seqLenQ = 2048U;
+    p.seqLenKv = 2048U;
+    p.headDimQk = 192U;
+    p.headDimV = 128U;
+    p.tileSizeQo = 128U;
+    p.archString = "gfx950";
+    p.maskType = MaskType::NO_MASK;
+    return p;
+}
+
 } // namespace
 
 // =============================================================================
@@ -236,4 +253,32 @@ TEST(TestSdpaFwdPlanTuneOpt, Hd192x128Gfx942AlwaysReturns0)
     auto p = makeHd192x128Params();
     auto lp = computeFwdLaunchParams(p);
     EXPECT_EQ(lp.tuneOpt, 0U);
+}
+
+TEST(TestSdpaFwdPlanTuneOpt, Hd192x128Gfx950KeepsDefault5)
+{
+    auto p = makeHd192x128Gfx950Params();
+    auto lp = computeFwdLaunchParams(p);
+    EXPECT_EQ(lp.tuneOpt, 5U);
+}
+
+// =============================================================================
+// gfx950 hd192x128 tests — blockDimX=256 but no grid swap
+// =============================================================================
+
+TEST(TestSdpaFwdPlanGridMath, Hd192x128Gfx950Uses256BlockDim)
+{
+    auto p = makeHd192x128Gfx950Params();
+    auto lp = computeFwdLaunchParams(p);
+    EXPECT_EQ(lp.blockDimX, 256U);
+}
+
+TEST(TestSdpaFwdPlanGridMath, Hd192x128Gfx950DoesNotSwapGridDimXY)
+{
+    auto p = makeHd192x128Gfx950Params();
+    // 2048/128 = 16 tiles, no swap → X=tiles, Y=numHeadsQ
+    auto lp = computeFwdLaunchParams(p);
+    EXPECT_EQ(lp.gridDimX, 16U); // tiles (not swapped)
+    EXPECT_EQ(lp.gridDimY, 16U); // numHeadsQ
+    EXPECT_EQ(lp.gridDimZ, 2U);
 }

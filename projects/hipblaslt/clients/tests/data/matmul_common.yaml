@@ -59,7 +59,7 @@ Definitions:
     - { M: 24000, N: 256, K: 256, lda: 24000, ldb: 256, ldc: 24020, ldd: 24020 }
 
   - &grid_limit_matrix_size_real
-    - { M: 2, N: 2097152, K:1 }
+    - { M: 2, N: 2097152, K: 1 }
     - { M: 64, N: 1048576, K: 1 }
     - { M: 256, N: 1048576, K: 1 }
     - { M: 1024, N: 524288, K: 1 }
@@ -68,7 +68,7 @@ Definitions:
     - { M: 4096, N: 131072, K: 1 }
 
   - &grid_limit_matrix_size_double
-    - { M: 2, N: 1048576, K:1 }
+    - { M: 2, N: 1048576, K: 1 }
     - { M: 3, N: 2, K: 1, lda: 4, ldb: 5, ldc: 6, ldd: 6}
     - { M: 64, N: 1048576, K: 1 }
     - { M: 256, N: 1048576, K: 1 }
@@ -102,6 +102,53 @@ Definitions:
   # path. K is kept small so the CPU reference / unit_check stays inexpensive.
   - &size_t_output_overflow
     - { M: 2048, N: 2048, K: 256, lda: 2048, ldb: 2048, ldc: 1049100, ldd: 1049100 }
+
+  # Oversized A leading dimension driving the unroll-increment overflow ROCM-31230.
+  # GlobalReadIncsA is a signed 32-bit SGPR holding lda * DepthU * bpe, the bytes one
+  # unroll iteration advances the A global-read pointer. At lda = 2^26 the kernel the
+  # heuristic selects here (MT256x128x8, DepthU 8) makes that 2^26 * 8 * 4 = 2^31
+  # exactly, so bit 31 is set and the signed widen in calculateStagger sign-extends it.
+  # lda = 2^26 - 1 is the largest value that stays below the boundary and is the
+  # passing case the ticket reports.
+  #
+  # Unlike the cases above, this one cannot keep its allocation small: the A span is
+  # (K-1)*lda + M elements whatever M is, so A is 8.6 GiB. M only needs to be large
+  # enough for a second workgroup in dimension 0, since the selected kernel takes its
+  # stagger input from WorkGroup0 and a single workgroup zeroes it; M = 2048 clears
+  # that (MT0 = 256) and N = 1 keeps B, C and D negligible.
+  - &size_t_stagger_incs_overflow
+    - { M: 2048, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 2048, ldd: 2048 }
+
+  ###########################################################################
+  # fast_check shapes (see clients/common/include/fast_check.hpp).
+  ###########################################################################
+
+  # Small shapes for comparing fast_check with unit_check on the same result. Every
+  # leading dimension is padded, and K stays at or below 256 so unit_check's 16-bit
+  # integer_exact limit still allows both checks.
+  - &fast_check_crosscheck_sizes
+    - { M: 131, N: 67, K: 200, lda: 263, ldb: 211, ldc: 140, ldd: 151 }
+    - { M: 1031, N: 517, K: 256, lda: 1040, ldb: 1033, ldc: 1031, ldd: 1100 }
+
+  # No dimension is a multiple of any common macro-tile size (16 through 256), so
+  # every kernel runs partial tiles in M, N and K. A host reference GEMM for the
+  # first shape costs about 1.1e12 multiply-adds; fast_check costs about 3e8.
+  - &fast_check_large_sizes
+    - { M: 16385, N: 16383, K: 4097 }
+    - { M: 8191, N: 8193, K: 8195 }
+
+  # The same M and N for 16-bit outputs, with K small enough that almost every
+  # result stays below 256, the largest integer range bf16 holds exactly; the few
+  # larger results are checked one at a time.
+  - &fast_check_large_16bit_sizes
+    - { M: 16385, N: 16383, K: 129 }
+    - { M: 8191, N: 8193, K: 257 }
+
+  # The output element index crosses 2^32: (N-1)*ldd = 2048*2097155 = 4,294,973,440,
+  # above 2^32 = 4,294,967,296. C and D each hold 4.3e9 elements. lda and ldb cover
+  # both transposes.
+  - &fast_check_output_index_2_32
+    - { M: 1000, N: 2049, K: 64, lda: 1000, ldb: 2049, ldc: 2097155, ldd: 2097155 }
 
 
   - &deepbench_sizes

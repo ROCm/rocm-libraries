@@ -12,6 +12,7 @@ pytest.importorskip("ml_dtypes")
 from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import (
     check_result,
     decode_e8m0,
+    decode_fp6,
     make_case_inputs,
     reference_result,
 )
@@ -38,6 +39,30 @@ def test_reference_matches_hand_computed_group_scales():
         wrong = reference_result(a, b, wrong_sa, wrong_sb, 2, native=True)
         with pytest.raises(AssertionError, match="bad="):
             check_result(wrong, expected, exact=True)
+
+
+@pytest.mark.parametrize(
+    "dtype_c,expected",
+    [("bf16", 1.0), ("fp16", 1.0 + 2**-10), ("f16", 1.0 + 2**-10)],
+)
+def test_reference_rounds_to_selected_output_type(dtype_c, expected):
+    a = np.array([[1.0, 2**-10]], dtype=np.float32)
+    b = np.ones((1, 2), dtype=np.float32)
+    scale = np.array([[127]], dtype=np.uint8)
+    got = reference_result(a, b, scale, scale, 2, native=True, dtype_c=dtype_c)
+    np.testing.assert_array_equal(got, [[expected]])
+    wrong_output_type = np.array(
+        [[1.0 + 2**-10 if dtype_c == "bf16" else 1.0]], dtype=np.float32
+    )
+    with pytest.raises(AssertionError, match="bad=1/1"):
+        check_result(wrong_output_type, got, exact=True)
+
+
+def test_reference_rejects_unsupported_output_type():
+    value = np.ones((1, 1), dtype=np.float32)
+    scale = np.array([[127]], dtype=np.uint8)
+    with pytest.raises(ValueError, match="output"):
+        reference_result(value, value, scale, scale, 1, native=True, dtype_c="fp32")
 
 
 @pytest.mark.parametrize("path,bk", [("wmma_scale", 32), ("wmma_scale16", 16)])
@@ -98,6 +123,55 @@ def test_neutral_and_one_operand_scale_fixtures(case):
     _, _, sa, sb = make_case_inputs(spec, case)
     assert bool(np.all(sa == 127)) == (case in ("neutral", "b-only"))
     assert bool(np.all(sb == 127)) == (case in ("neutral", "a-only"))
+
+
+@pytest.mark.parametrize("dtype", ["fp6", "bf6"])
+@pytest.mark.parametrize("path,bk", [("wmma_scale", 32), ("wmma_scale16", 16)])
+@pytest.mark.parametrize("k", [128, 256])
+@pytest.mark.parametrize("output_dtype", ["bf16", "fp16"])
+def test_fp6_isolated_groups_detect_neighbor_scales(dtype, path, bk, k, output_dtype):
+    spec = BlockScaledGemmSpec(
+        name="fp6_groups",
+        M=32,
+        N=48,
+        K=k,
+        dtype_a=dtype,
+        dtype_b=dtype,
+        dtype_c=output_dtype,
+        matrix_path=path,
+        block_k=bk,
+        scale_dtype="e8m0",
+    )
+    a, b, _, _ = make_case_inputs(spec, "mixed")
+    a_values, b_values = decode_fp6(a, dtype), decode_fp6(b, dtype)
+    for group in range(k // bk):
+        ga, gb, sa, sb = make_case_inputs(spec, f"group-{group}")
+        sl = slice(group * bk, (group + 1) * bk)
+        outside = (np.arange(k) // bk) != group
+        for packed, original in ((ga, a_values), (gb, b_values)):
+            values = decode_fp6(packed, dtype)
+            np.testing.assert_array_equal(values[:, sl], original[:, sl])
+            assert not np.any(values[:, outside])
+        kwargs = dict(native=True, dtype_a=dtype, dtype_b=dtype, dtype_c=output_dtype)
+        expected = reference_result(ga, gb, sa, sb, bk, **kwargs)
+        assert np.isfinite(expected).all() and np.any(expected)
+        neighbor = (group + 1) % (k // bk)
+        wrong_sa, wrong_sb = sa.copy(), sb.copy()
+        wrong_sa[:, group] = sa[:, neighbor]
+        wrong_sb[group, :] = sb[neighbor, :]
+        for scales in ((wrong_sa, sb), (sa, wrong_sb)):
+            wrong = reference_result(ga, gb, *scales, bk, **kwargs)
+            with pytest.raises(AssertionError, match="bad="):
+                check_result(wrong, expected, exact=True)
+
+
+@pytest.mark.parametrize("exact", [False, True])
+def test_comparison_treats_zero_signs_as_equal(exact):
+    positive = np.array([[0.0]], dtype=np.float32)
+    negative = np.array([[-0.0]], dtype=np.float32)
+    assert not np.signbit(positive).any() and np.signbit(negative).all()
+    check_result(positive, negative, exact=exact)
+    check_result(negative, positive, exact=exact)
 
 
 @pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf])

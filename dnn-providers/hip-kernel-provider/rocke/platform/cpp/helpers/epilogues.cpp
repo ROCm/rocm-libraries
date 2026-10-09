@@ -950,15 +950,21 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
         rocke_value_t* col_v = rocke_b_mod(b, vec_idx, c_tile_n_div_vec);
         rocke_value_t* col = (sv > 1) ? rocke_b_mul(b, col_v, rocke_b_const_i32(b, sv)) : col_v;
         rocke_value_t* m_val = rocke_b_add(b, grid->block_m_off, row);
-        rocke_value_t* m_ok = (bounds_m != NULL) ? rocke_b_cmp_lt(b, m_val, bounds_m) : NULL;
 
+        /* Python re-evaluates m_ok per element / pair (after the n coords) and
+         * builds every LDS column with an add, the "+0" included; mirror that
+         * order exactly -- the emitted IR is byte-compared. */
         if(_fp32_out)
         {
             int s;
             for(s = 0; s < sv; ++s)
             {
-                rocke_value_t* n_val = rocke_b_add(
-                    b, rocke_b_add(b, grid->block_n_off, col), rocke_b_const_i32(b, s));
+                /* Bind the inner add first: C++ leaves argument evaluation order
+                 * unspecified, and Python emits it before the constant. */
+                rocke_value_t* n_base = rocke_b_add(b, grid->block_n_off, col);
+                rocke_value_t* n_val = rocke_b_add(b, n_base, rocke_b_const_i32(b, s));
+                rocke_value_t* m_ok
+                    = (bounds_m != NULL) ? rocke_b_cmp_lt(b, m_val, bounds_m) : NULL;
                 rocke_value_t* n_ok
                     = (bounds_n != NULL) ? rocke_b_cmp_lt(b, n_val, bounds_n) : NULL;
                 rocke_value_t* ok = NULL;
@@ -969,25 +975,22 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                 else
                     ok = n_ok;
 
+                /* Python emits the LDS read and the address inside the if. */
+                if(ok != NULL)
                 {
-                    rocke_value_t* smem_col
-                        = (s > 0) ? rocke_b_add(b, col, rocke_b_const_i32(b, s)) : col;
+                    rocke_if_t if_op = rocke_b_scf_if(b, ok);
+                    rocke_b_region_enter(b, if_op.then_region);
+                }
+                {
+                    rocke_value_t* smem_col = rocke_b_add(b, col, rocke_b_const_i32(b, s));
                     rocke_value_t* smem_idx[2] = {row, smem_col};
                     rocke_value_t* vf32 = rocke_b_smem_load_vN_f32(b, c_smem, smem_idx, 2, 1);
                     rocke_value_t* v = rocke_b_vec_extract(b, vf32, 0);
                     rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_val);
-                    if(ok != NULL)
-                    {
-                        rocke_if_t if_op = rocke_b_scf_if(b, ok);
-                        rocke_b_region_enter(b, if_op.then_region);
-                        rocke_b_global_atomic_add(b, dw_ptr, c_off, v, NULL);
-                        rocke_b_region_leave(b);
-                    }
-                    else
-                    {
-                        rocke_b_global_atomic_add(b, dw_ptr, c_off, v, NULL);
-                    }
+                    rocke_b_global_atomic_add(b, dw_ptr, c_off, v, NULL);
                 }
+                if(ok != NULL)
+                    rocke_b_region_leave(b);
             }
         }
         else
@@ -996,9 +999,11 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
             int p;
             for(p = 0; p < sv / 2; ++p)
             {
-                rocke_value_t* n_even = rocke_b_add(
-                    b, rocke_b_add(b, grid->block_n_off, col), rocke_b_const_i32(b, 2 * p));
+                rocke_value_t* n_base = rocke_b_add(b, grid->block_n_off, col);
+                rocke_value_t* n_even = rocke_b_add(b, n_base, rocke_b_const_i32(b, 2 * p));
                 rocke_value_t* n_odd = rocke_b_add(b, n_even, rocke_b_const_i32(b, 1));
+                rocke_value_t* m_ok
+                    = (bounds_m != NULL) ? rocke_b_cmp_lt(b, m_val, bounds_m) : NULL;
                 rocke_value_t* n_ok
                     = (bounds_n != NULL) ? rocke_b_cmp_lt(b, n_odd, bounds_n) : NULL;
                 rocke_value_t* ok = NULL;
@@ -1010,8 +1015,7 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                     ok = n_ok;
 
                 {
-                    rocke_value_t* sce
-                        = (2 * p > 0) ? rocke_b_add(b, col, rocke_b_const_i32(b, 2 * p)) : col;
+                    rocke_value_t* sce = rocke_b_add(b, col, rocke_b_const_i32(b, 2 * p));
                     rocke_value_t* sco = rocke_b_add(b, col, rocke_b_const_i32(b, 2 * p + 1));
                     rocke_value_t* c_off_even = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_even);
                     rocke_value_t* smem_idx_e[2];

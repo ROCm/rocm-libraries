@@ -2,11 +2,13 @@
 // SPDX-License-Identifier:  MIT
 
 #include <hip/hip_runtime.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceResampleFwd.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/IntegrationGraphVerificationHarness.hpp"
@@ -16,6 +18,7 @@ using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_integration_tests;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 namespace
 {
@@ -100,24 +103,6 @@ std::vector<ResampleBwdTestCase> getResampleBwdTestCases()
     return testCases;
 }
 
-template <typename T>
-constexpr float getTolerance()
-{
-    if constexpr(std::is_same_v<T, float>)
-    {
-        return 1e-5f;
-    }
-    else if constexpr(std::is_same_v<T, half>)
-    {
-        return 1e-3f;
-    }
-    else
-    {
-        static_assert(std::is_same_v<T, bfloat16>);
-        return 1e-2f;
-    }
-}
-
 template <typename DyDataType, typename DxDataType, typename ComputeDataType>
 class ResampleBackward : public IntegrationGraphVerificationHarness<DyDataType, ResampleBwdTestCase>
 {
@@ -166,7 +151,7 @@ protected:
         auto dxTensorAttr = graphObj.resample_bwd(dyTensorAttr, resampleAttrs, indexTensorAttr);
         dxTensorAttr->set_output(true);
         dxTensorAttr->set_data_type(dxDataType);
-        this->registerValidator(dxTensorAttr, getTolerance<DxDataType>());
+        this->registerValidator(dxTensorAttr, resample::getTolerance<DxDataType>());
 
         auto validateResult = graphObj.validate();
         if(validateResult.is_bad())
@@ -255,7 +240,10 @@ protected:
             Tensor<float> xScratch(dxTensorAttr->get_dim(), dxTensorAttr->get_stride());
             Tensor<float> yScratch(dyDims, dyStrides);
             Tensor<int32_t> indexScratch(dyDims, dyStrides);
-            xScratch.fillWithRandomValues(-1.0f, 1.0f, getGlobalTestSeed());
+            fillWithRandomValues(xScratch, -1.0f, 1.0f, getGlobalTestSeed());
+
+            // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+            xScratch.memory().hostData();
 
             CpuFpReferenceResampleFwd::forward<float, float, float, int32_t>(
                 xScratch,

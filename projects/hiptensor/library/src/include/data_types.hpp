@@ -100,16 +100,16 @@ struct hiptensorHandle
     }
     hiptensor::PlanCache* getPlanCache()
     {
-        return planCache;
+        return planCache.get();
     }
-    void setPlanCache(hiptensor::PlanCache* pt_PlanCache)
+    void setPlanCache(std::unique_ptr<hiptensor::PlanCache> pt_PlanCache)
     {
-        planCache = pt_PlanCache;
+        planCache = std::move(pt_PlanCache);
     }
 
 private:
-    hiptensor::HipDevice  mDevice;
-    hiptensor::PlanCache* planCache = nullptr;
+    hiptensor::HipDevice                  mDevice;
+    std::unique_ptr<hiptensor::PlanCache> planCache;
 };
 
 struct hiptensorPlan

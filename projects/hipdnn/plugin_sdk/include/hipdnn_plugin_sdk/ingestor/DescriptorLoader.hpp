@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cstdint>
 #include <deque>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -19,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -37,6 +39,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/detail/TopLevelArraySax.hpp>
 
 /**
  * @file DescriptorLoader.hpp
@@ -92,8 +95,8 @@
  *    bare base id: a device reports feature suffixes and matching stops at ':', so a
  *    partial target id (`gfx942:xnack-`) would match nothing while reading as deliberate.
  *  - RFC 0020 §10.1 and §11 make any unknown field a hard rejection
- *    (`additionalProperties: false`); a key prefixed `x-` or `_`, plus the packager's
- *    `provenance` block, is warned about and ignored instead, so a descriptor may carry
+ *    (`additionalProperties: false`); a key prefixed `x-` or `_`, plus an unprefixed
+ *    `provenance`, is warned about and ignored instead, so a descriptor may carry
  *    tracking data. Every other unknown key is still the hard rejection the RFC asks
  *    for, including a leftover `schema`.
  *
@@ -122,10 +125,11 @@ template <typename T>
 struct CatalogEntry
 {
     T descriptor;
-    /// Kept so a second file claiming the same id can be compared by content: parsed JSON
-    /// ignores key order/whitespace, unlike adding operator== to all seven struct types.
-    nlohmann::json source;
-    std::filesystem::path path; ///< first file that defined this id
+    /// First file that defined this id. A second file claiming the id is compared against
+    /// this one by re-parsing it: parsed JSON ignores key order/whitespace, unlike adding
+    /// operator== to all seven struct types, and keeping every file's DOM alive until the
+    /// catalog dies cost more than every parse put together.
+    std::filesystem::path path;
     /// The root this file was found under. Stamped by settleCatalog when the root's pass
     /// finishes, since that is the one place that already knows both the root and which
     /// entries it contributed -- the seven FileType insert rows do not see the root.
@@ -178,16 +182,31 @@ inline constexpr std::string_view SUFFIX_UDD = ".udd.json";
 inline constexpr std::string_view SUFFIX_KDP = ".kdp.json";
 inline constexpr std::string_view SUFFIX_UKD = ".ukd.json";
 
+struct PackScan;
+
+/// A descriptor file as the walk read it. For every type but the KDP, @c document is the
+/// whole file. For the KDP it is the header only -- each `kernelDescriptors` array is
+/// empty -- and @c pack holds what the single pass over @c text already parsed.
+struct DescriptorFile
+{
+    const nlohmann::json& document;
+    std::string_view text;
+    PackScan* pack; ///< the KDP's scan; null for every other type
+    const std::filesystem::path& path;
+};
+
 /// One row per descriptor file type: the suffix that selects it, the `major.minor` this
 /// build accepts per RFC 0017 §4 (per type, not a build-wide pair, so one type reaching
-/// 1.1 can't widen what the others accept), and the parse-and-insert function. FILE_TYPES
-/// itself is assembled further down, once the parse functions its rows name exist.
+/// 1.1 can't widen what the others accept), whether the walk builds only its header, and
+/// the parse-and-insert function. FILE_TYPES itself is assembled further down, once the
+/// parse functions its rows name exist.
 struct FileType
 {
     std::string_view suffix;
     int major;
     int minor;
-    void (*insert)(DescriptorCatalog&, const nlohmann::json&, const std::filesystem::path&);
+    bool headerOnly;
+    void (*insert)(DescriptorCatalog&, const DescriptorFile&);
 };
 
 /// Every parse violation leaves through here, so the caller catches one type. The message
@@ -207,8 +226,10 @@ inline void requireObject(const nlohmann::json& value, const std::string& where)
 }
 
 /// Extension data has to look like extension data: a key starting `x-` or `_`, plus
-/// `provenance`, the one unprefixed block the descriptor packager emits. Those warn and
-/// are ignored, so a descriptor can carry tracking fields the loader has no use for.
+/// `provenance`, the one unprefixed block. The packager keeps it inline only on a KDP
+/// header (a packed UKD's lives in the provenance sidecar), but unpacked and authored
+/// trees carry it on any descriptor. Those warn and are ignored, so a descriptor can
+/// carry tracking fields the loader has no use for.
 ///
 /// Anything else the struct does not spell fails the file, because the alternative is
 /// silent damage. A UED spelling `heuristik` has no heuristic key, and absence is legal:
@@ -1024,8 +1045,12 @@ inline DescriptorId
     }
 }
 
-inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root,
-                                                      const std::string& where)
+/// Everything a KDP declares except its kernels. The header rules run against the whole
+/// document root, `kernelDescriptors` included -- the key must be present and an array --
+/// but its elements are left to addPackKernelEntry(), so a header whose kernels array is
+/// empty, as the scan builds it, reads the same as the full document.
+inline KernelDescriptorPack parseKernelDescriptorPackHeader(const nlohmann::json& root,
+                                                            const std::string& where)
 {
     requireKnownKeys(
         root,
@@ -1049,40 +1074,231 @@ inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root
         pack.matcherIds.push_back(requireUuidEntry(matcherId, "matchers", where));
     }
 
-    const auto& kernels = requireKey(root, "kernelDescriptors", where);
-    if(!kernels.is_array())
+    if(!requireKey(root, "kernelDescriptors", where).is_array())
     {
         fail("key 'kernelDescriptors' in " + where + " must be an array");
     }
-    for(const auto& entry : kernels)
+    return pack;
+}
+
+/// One element of a KDP's `kernelDescriptors`, in document order.
+inline void addPackKernelEntry(KernelDescriptorPack& pack,
+                               const nlohmann::json& entry,
+                               const std::string& where)
+{
+    // A string references a standalone `.ukd.json` by id, resolved once the whole tree
+    // is read; an object is the kernel itself. Anything else fails as a malformed
+    // entry, since only these two spellings name a kernel.
+    if(entry.is_string())
     {
-        // A string references a standalone `.ukd.json` by id, resolved once the whole tree
-        // is read; an object is the kernel itself. Anything else fails as a malformed
-        // entry, since only these two spellings name a kernel.
-        if(entry.is_string())
+        pack.kernelIds.push_back(requireUuidEntry(entry, "kernelDescriptors", where));
+        return;
+    }
+    auto kernel = parseInlineKernelDescriptor(entry, where);
+    if(!kernel)
+    {
+        return;
+    }
+    // Checked here rather than at resolution, because an inline kernel has exactly
+    // one parent and it is already parsed: a kernel reaching past its pack is a
+    // property of this file alone, so it fails the file instead of every pack that
+    // might bind it.
+    if(!archCovers(pack.arch, kernel->arch))
+    {
+        fail("kernel '" + kernel->name + "' in " + where + " declares arch "
+             + describeArch(kernel->arch) + ", which reaches past the pack's "
+             + describeArch(pack.arch));
+    }
+    pack.kernels.push_back(std::move(*kernel));
+}
+
+/// RFC 0017 §4's version accept rule without its warning, for deciding early whether a
+/// header is worth acting on. The walk still runs versionIsSupported() on the finished
+/// document, which is what reports a rejected version.
+inline bool versionAccepted(const nlohmann::json& document, int major, int minor)
+{
+    const auto it = document.find("version");
+    if(it == document.end() || !it->is_string())
+    {
+        return false;
+    }
+    try
+    {
+        const auto version = parseDescriptorVersion(it->get<std::string>(), {});
+        return version.major == major && version.minor <= minor;
+    }
+    catch(const std::exception&)
+    {
+        return false;
+    }
+}
+
+/// What one pass over a KDP's text learned. When the pack's only `kernelDescriptors` is its
+/// last top-level key -- the layout the packer writes -- and the header before it passes
+/// the version rule, the header was validated as the kernels began and the kernels were
+/// parsed as they streamed past, so @c pack or @c headerError is set and the text is not
+/// read again. Otherwise, unless the walk's own version check declines the file first, the
+/// loader validates the finished header and reads the kernels in a second pass.
+///
+/// Parsing during the scan logs as it goes. The WARNs a streamed header and its kernels
+/// emit (extension keys, kernels skipped for their version) are logged before the rest of
+/// the text is lexed, so they can precede a syntax error that then fails the file; and a
+/// layout that falls back to the second pass parses that header and those kernels again,
+/// logging the same WARNs a second time.
+struct PackScan
+{
+    /// Top-level `kernelDescriptors` arrays in the text; with a repeated key a DOM keeps
+    /// the last value, so a second pass reads the last one.
+    size_t kernelArrays = 0;
+    /// A top-level key followed the first kernels array, so the header the kernels were
+    /// parsed against was not the whole header.
+    bool keysAfterKernels = false;
+    std::optional<KernelDescriptorPack> pack;
+    std::exception_ptr headerError;
+    std::exception_ptr kernelError; ///< the first kernel entry that failed, if any
+};
+
+/// The single pass's TopLevelArraySax handler. Only the first kernels array streams, and
+/// only when the header so far passes the version rule; a version this build rejects is
+/// left to the walk's own check, which reports it only for well-formed text. The first
+/// failure, header or kernel, is kept rather than thrown, so a later syntax error still wins.
+class PackScanHandler
+{
+public:
+    PackScanHandler(const nlohmann::json& header,
+                    PackScan& scan,
+                    const std::string& where,
+                    int major,
+                    int minor)
+        : _header(header)
+        , _scan(scan)
+        , _where(where)
+        , _major(major)
+        , _minor(minor)
+    {
+    }
+
+    /// The header so far is the whole header whenever the kernels are the last key, which
+    /// parseKernelDescriptorPack() confirms before using what this parsed.
+    bool openArray(size_t ordinal)
+    {
+        if(ordinal != 1 || !versionAccepted(_header, _major, _minor))
         {
-            pack.kernelIds.push_back(requireUuidEntry(entry, "kernelDescriptors", where));
+            return false;
         }
-        else
+        try
         {
-            auto kernel = parseInlineKernelDescriptor(entry, where);
-            if(!kernel)
-            {
-                continue;
-            }
-            // Checked here rather than at resolution, because an inline kernel has exactly
-            // one parent and it is already parsed: a kernel reaching past its pack is a
-            // property of this file alone, so it fails the file instead of every pack that
-            // might bind it.
-            if(!archCovers(pack.arch, kernel->arch))
-            {
-                fail("kernel '" + kernel->name + "' in " + where + " declares arch "
-                     + describeArch(kernel->arch) + ", which reaches past the pack's "
-                     + describeArch(pack.arch));
-            }
-            pack.kernels.push_back(std::move(*kernel));
+            _scan.pack = parseKernelDescriptorPackHeader(_header, _where);
+            return true;
+        }
+        catch(const std::exception&)
+        {
+            _scan.headerError = std::current_exception();
+            return false;
         }
     }
+
+    bool element(const nlohmann::json& entry)
+    {
+        try
+        {
+            addPackKernelEntry(*_scan.pack, entry, _where);
+            return true;
+        }
+        catch(const std::exception&)
+        {
+            // A DOM walk stops at the first bad entry; the rest are lexed, not parsed.
+            _scan.kernelError = std::current_exception();
+            return false;
+        }
+    }
+
+private:
+    const nlohmann::json& _header;
+    PackScan& _scan;
+    const std::string& _where;
+    int _major;
+    int _minor;
+};
+
+/// One pass over a KDP's text. @p header receives the document with each top-level
+/// `kernelDescriptors` array left empty, which is all the header rules read, and the
+/// kernels of the first array are parsed one small document at a time as they stream
+/// past (see PackScanHandler). Throws what a DOM parse of @p text would on a syntax
+/// error; what the scan learned lands in @p scan.
+inline void scanKernelDescriptorPack(std::string_view text,
+                                     nlohmann::json& header,
+                                     PackScan& scan,
+                                     const std::string& where,
+                                     int major,
+                                     int minor)
+{
+    PackScanHandler handler(header, scan, where, major, minor);
+    TopLevelArraySax<PackScanHandler> sax("kernelDescriptors", &header, handler);
+    nlohmann::json::sax_parse(text,
+                              &sax,
+                              nlohmann::json::input_format_t::json,
+                              /*strict=*/true,
+                              /*ignore_comments=*/true);
+    scan.kernelArrays = sax.arrays();
+    scan.keysAfterKernels = sax.keysAfterArray();
+}
+
+/// The second pass's TopLevelArraySax handler, for the layouts the single pass cannot
+/// finish -- a key after the kernels, a repeated `kernelDescriptors`. It streams the last
+/// kernels array, the one a DOM keeps, into @c pack; an exception from a kernel ends the
+/// walk there, as it ends a loop over the DOM array.
+struct PackKernelsHandler
+{
+    KernelDescriptorPack& pack;
+    const std::string& where;
+    size_t lastArray;
+
+    bool openArray(size_t ordinal) const
+    {
+        return ordinal == lastArray;
+    }
+    bool element(const nlohmann::json& entry)
+    {
+        addPackKernelEntry(pack, entry, where);
+        return true;
+    }
+};
+
+/// A KDP from its scan. In the packer's layout -- one `kernelDescriptors`, the last key --
+/// the header and kernels were already parsed during the scan, and their first failure is
+/// raised here, header before kernel, as a single DOM walk raised it. Any other layout
+/// validates the finished header and reads the kernels in a second pass over @p text,
+/// which has already proven well formed.
+inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& header,
+                                                      std::string_view text,
+                                                      PackScan& scan,
+                                                      const std::string& where)
+{
+    if(scan.kernelArrays == 1 && !scan.keysAfterKernels)
+    {
+        if(scan.headerError)
+        {
+            std::rethrow_exception(scan.headerError);
+        }
+        if(scan.pack)
+        {
+            if(scan.kernelError)
+            {
+                std::rethrow_exception(scan.kernelError);
+            }
+            return std::move(*scan.pack);
+        }
+    }
+
+    auto pack = parseKernelDescriptorPackHeader(header, where);
+    PackKernelsHandler handler{pack, where, scan.kernelArrays};
+    TopLevelArraySax<PackKernelsHandler> sax("kernelDescriptors", nullptr, handler);
+    nlohmann::json::sax_parse(text,
+                              &sax,
+                              nlohmann::json::input_format_t::json,
+                              /*strict=*/true,
+                              /*ignore_comments=*/true);
     return pack;
 }
 
@@ -1127,22 +1343,65 @@ inline std::string keyDescription(const ArchKey& key)
     return text + "]";
 }
 
+/// @p path parsed whole, read the way the walk reads it, or nullopt if it no longer opens
+/// or parses. The failure is logged here, naming its cause, so the caller's verdict about
+/// the collision is never mistaken for a statement about the file's contents.
+inline std::optional<nlohmann::json> reparseDescriptorFile(const std::filesystem::path& path)
+{
+    try
+    {
+        std::ifstream file(path, std::ios::binary);
+        if(!file.is_open())
+        {
+            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: failed to re-open "
+                                    << path << " to compare it with a file sharing its id");
+            return std::nullopt;
+        }
+        return nlohmann::json::parse(file,
+                                     nullptr,
+                                     /*allow_exceptions=*/true,
+                                     /*ignore_comments=*/true);
+    }
+    catch(const std::exception& error)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: failed to re-read "
+                                << path
+                                << " to compare it with a file sharing its id: " << error.what());
+        return std::nullopt;
+    }
+}
+
+/// Whether two descriptor files parse to the same document, or nullopt when either could
+/// not be re-read.
+inline std::optional<bool> filesParseEqual(const std::filesystem::path& first,
+                                           const std::filesystem::path& second)
+{
+    const auto lhs = reparseDescriptorFile(first);
+    if(!lhs)
+    {
+        return std::nullopt;
+    }
+    const auto rhs = reparseDescriptorFile(second);
+    if(!rhs)
+    {
+        return std::nullopt;
+    }
+    return *lhs == *rhs;
+}
+
 /// Inserts a freshly parsed descriptor, resolving a repeated key against what is already
 /// held: identical content is a duplicate shard and is dropped, differing content from a
 /// later root is refused, and differing content from the same root poisons the entry so
 /// neither definition is used.
 template <typename Map, typename T>
-inline void insertCatalogEntry(Map& map,
-                               T descriptor,
-                               const nlohmann::json& source,
-                               const std::filesystem::path& path)
+inline void insertCatalogEntry(Map& map, T descriptor, const std::filesystem::path& path)
 {
     auto key = catalogKey(descriptor);
     const auto description = keyDescription(key);
     const std::string name = descriptor.name;
 
     auto [it, inserted] = map.try_emplace(
-        std::move(key), CatalogEntry<T>{std::move(descriptor), source, path, {}, false, false});
+        std::move(key), CatalogEntry<T>{std::move(descriptor), path, {}, false, false});
     if(inserted)
     {
         HIPDNN_PLUGIN_LOG_INFO("descriptor loader: loaded " << path << " " << description
@@ -1154,8 +1413,14 @@ inline void insertCatalogEntry(Map& map,
     // real collision would fail a duplicate shard over a formatting choice -- e.g. a
     // per-arch layout shipping one shared UED. RFC 0020 §10.2.1's drop-all rule exists
     // because keep-the-first leaves which definition won up to load order; with
-    // identical content there is no second definition to choose between.
-    if(it->second.source == source)
+    // identical content there is no second definition to choose between. Both files are
+    // re-read rather than any DOM being retained -- a pack's is never whole in memory.
+    // The per-arch layout repeats every generic descriptor (UED, KMD, UMD, UDD, UHD) in
+    // each arch shard, so this runs once per generic per shard after the first; those
+    // are small files. A file that can no longer be re-read cannot prove the two equal,
+    // so it is treated as a disagreement, under a diagnostic that says so.
+    const auto same = filesParseEqual(it->second.path, path);
+    if(same.value_or(false))
     {
         HIPDNN_PLUGIN_LOG_INFO("descriptor loader: duplicate identical descriptor "
                                << path << " " << description << " name='" << name
@@ -1173,12 +1438,16 @@ inline void insertCatalogEntry(Map& map,
         HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
                                 << path << " redefines " << description << " name='" << name
                                 << "' already loaded from " << it->second.path
-                                << " under an earlier root; ignoring the redefinition");
+                                << " under an earlier root"
+                                << (same ? "" : ", and the two could not be compared")
+                                << "; ignoring the redefinition");
         return;
     }
     HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
                             << path << " and " << it->second.path << " both define " << description
-                            << " name='" << name << "' with different contents; ignoring both");
+                            << " name='" << name << "'"
+                            << (same ? " with different contents" : ", and could not be compared")
+                            << "; ignoring both");
     // Never cleared by a later file: once two files disagree about what an id means,
     // no third file can decide which of them was right. A later root does not repair it
     // either -- the refusal above keeps the poisoned entry, since the disagreement is
@@ -1392,44 +1661,60 @@ inline constexpr std::array FILE_TYPES{
     FileType{SUFFIX_KMD,
              1,
              0,
-             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.schemas, parseMetadataSchema(d, p.string()), d, p);
+             false,
+             [](DescriptorCatalog& c, const DescriptorFile& f) {
+                 insertCatalogEntry(
+                     c.schemas, parseMetadataSchema(f.document, f.path.string()), f.path);
              }},
     FileType{SUFFIX_UHD,
              1,
              0,
-             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.heuristics, parseHeuristicDescriptor(d, p.string()), d, p);
+             false,
+             [](DescriptorCatalog& c, const DescriptorFile& f) {
+                 insertCatalogEntry(
+                     c.heuristics, parseHeuristicDescriptor(f.document, f.path.string()), f.path);
              }},
     FileType{SUFFIX_UED,
              1,
              0,
-             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.engines, parseEngineDescriptor(d, p.string()), d, p);
+             false,
+             [](DescriptorCatalog& c, const DescriptorFile& f) {
+                 insertCatalogEntry(
+                     c.engines, parseEngineDescriptor(f.document, f.path.string()), f.path);
              }},
     FileType{SUFFIX_UMD,
              1,
              0,
-             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.matchers, parseMatchDescriptor(d, p.string()), d, p);
+             false,
+             [](DescriptorCatalog& c, const DescriptorFile& f) {
+                 insertCatalogEntry(
+                     c.matchers, parseMatchDescriptor(f.document, f.path.string()), f.path);
              }},
     FileType{SUFFIX_UDD,
              1,
              0,
-             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.dispatches, parseDispatchDescriptor(d, p.string()), d, p);
+             false,
+             [](DescriptorCatalog& c, const DescriptorFile& f) {
+                 insertCatalogEntry(
+                     c.dispatches, parseDispatchDescriptor(f.document, f.path.string()), f.path);
              }},
     FileType{SUFFIX_KDP,
              1,
              0,
-             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.packs, parseKernelDescriptorPack(d, p.string()), d, p);
+             true,
+             [](DescriptorCatalog& c, const DescriptorFile& f) {
+                 insertCatalogEntry(
+                     c.packs,
+                     parseKernelDescriptorPack(f.document, f.text, *f.pack, f.path.string()),
+                     f.path);
              }},
     FileType{SUFFIX_UKD,
              UKD_VERSION_MAJOR,
              UKD_VERSION_MINOR,
-             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(c.kernels, parseKernelDescriptor(d, p.string()), d, p);
+             false,
+             [](DescriptorCatalog& c, const DescriptorFile& f) {
+                 insertCatalogEntry(
+                     c.kernels, parseKernelDescriptor(f.document, f.path.string()), f.path);
              }},
 };
 static_assert(FILE_TYPES.size() == 7, "one row per descriptor file type");
@@ -1611,6 +1896,8 @@ inline void
     for(const auto& [path, fileType] : files)
     {
         nlohmann::json document;
+        std::string text;
+        PackScan scan;
         try
         {
             std::ifstream file(path, std::ios::binary);
@@ -1625,10 +1912,30 @@ inline void
             // parse_error.101. Only the parser ever sees the comments --
             // `insertCatalogEntry` compares the parsed documents, so a comment cannot
             // make two copies of one descriptor look like a collision.
-            document = nlohmann::json::parse(file,
-                                             nullptr,
-                                             /*allow_exceptions=*/true,
-                                             /*ignore_comments=*/true);
+            if(fileType->headerOnly)
+            {
+                // Read whole, in one read sized up front: a layout the single pass cannot
+                // finish is lexed again. A stream that cannot report its size leaves the
+                // text empty, which fails as an empty input.
+                file.seekg(0, std::ios::end);
+                const std::streamoff size = file.tellg();
+                if(size > 0)
+                {
+                    text.resize(static_cast<size_t>(size));
+                    file.seekg(0, std::ios::beg);
+                    file.read(text.data(), static_cast<std::streamsize>(size));
+                    text.resize(static_cast<size_t>(file.gcount()));
+                }
+                scanKernelDescriptorPack(
+                    text, document, scan, path.string(), fileType->major, fileType->minor);
+            }
+            else
+            {
+                document = nlohmann::json::parse(file,
+                                                 nullptr,
+                                                 /*allow_exceptions=*/true,
+                                                 /*ignore_comments=*/true);
+            }
         }
         catch(const std::exception& parseError)
         {
@@ -1648,7 +1955,9 @@ inline void
             {
                 continue;
             }
-            fileType->insert(catalog, document, path);
+            fileType->insert(
+                catalog,
+                DescriptorFile{document, text, fileType->headerOnly ? &scan : nullptr, path});
         }
         catch(const std::exception& formatError)
         {
@@ -1702,8 +2011,12 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
  * are deduplicated and sorted by id, so a DescriptorSet is a deterministic function of the
  * file contents rather than of hash-map or filesystem order. Container::copyEngineIds and
  * the container constructor both walk the resulting vector and must agree index for index.
+ *
+ * Takes @p catalog by value and moves each pack's kernels into its set rather than copying
+ * them: they are the bulk of a large tree, and a pack belongs to exactly one engine. Pass
+ * an rvalue; an lvalue caller pays for the copy it asked for.
  */
-inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog& catalog)
+inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalog)
 {
     std::vector<const CatalogEntry<EngineDescriptor>*> engineEntries;
     engineEntries.reserve(catalog.engines.size());
@@ -1806,8 +2119,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
 
         // The whole entry, not just its descriptor: the file a pack came from is what its
         // inline kernels resolve their relative paths against.
-        std::vector<const CatalogEntry<KernelDescriptorPack>*> packEntries;
-        for(const auto& [key, entry] : catalog.packs)
+        std::vector<CatalogEntry<KernelDescriptorPack>*> packEntries;
+        for(auto& [key, entry] : catalog.packs)
         {
             if(!entry.conflicted && entry.descriptor.engineId == engine.id)
             {
@@ -1828,7 +2141,7 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         std::map<DescriptorId, MatchDescriptor> matchers;
         std::map<DescriptorId, DispatchDescriptor> dispatches;
 
-        for(const auto* packEntry : packEntries)
+        for(auto* packEntry : packEntries)
         {
             // Failure granularity is the pack: a pack whose cross-references dangle or
             // whose kernels contradict the KMD is dropped while the engine keeps its other
@@ -1838,7 +2151,11 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             // wants only the colliding kernel dropped; the upgrade is making that
             // constructor log and drop rather than throw, in one place, so hand-built packs
             // get the same behavior.
+            // The kernels move; the rest of the pack is copied, because the orphan and
+            // unreferenced-kernel diagnostics below still read ids and arch from the catalog.
+            auto kernels = std::move(packEntry->descriptor.kernels);
             KernelDescriptorPack pack = packEntry->descriptor;
+            pack.kernels = std::move(kernels);
             // An inline kernel is defined by the pack's own file. Referenced kernels are
             // stamped with their own file below. treeRoot comes from the catalog entry
             // rather than the path, since only the loader knows which root it walked.
@@ -1904,16 +2221,15 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             // the failure at pack granularity, where every other malformed pack lands.
             if(reason.empty())
             {
-                std::vector<DescriptorId> seen;
+                std::unordered_set<DescriptorId, DescriptorIdHash> seen;
                 seen.reserve(pack.kernels.size());
                 for(const auto& kernel : pack.kernels)
                 {
-                    if(std::find(seen.begin(), seen.end(), kernel.id) != seen.end())
+                    if(!seen.insert(kernel.id).second)
                     {
                         reason = "names kernel " + toString(kernel.id) + " more than once";
                         break;
                     }
-                    seen.push_back(kernel.id);
                 }
             }
 
@@ -2048,6 +2364,16 @@ inline std::deque<std::string>& registeredEngineNames()
 
 } // namespace detail
 
+/// A descriptor set that passed validation, with the state manager validation built for it.
+/// Held as one value so the two cannot be paired wrongly: a caller constructing an engine
+/// from the set need not build the state manager a second time.
+template <typename THandle>
+struct ValidatedSet
+{
+    DescriptorSet set;
+    std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager; ///< Never null.
+};
+
 /**
  * @brief Every descriptor set under @p roots that this provider can actually construct.
  *
@@ -2056,14 +2382,20 @@ inline std::deque<std::string>& registeredEngineNames()
  * already-registered engine holds, and a state manager built from it constructs without
  * throwing, so an engine this returns is one the provider can advertise and then serve.
  *
+ * A summary line reports how many sets survived and how many validation dropped. The line
+ * is an error if validation drops a set.
+ *
  * @warning Native symbols must already be registered when this is called; a set naming an
  *          unregistered symbol is dropped.
+ *
+ * @return Each surviving set with the state manager validation built for it.
  */
 template <typename THandle>
-inline std::vector<DescriptorSet>
+inline std::vector<ValidatedSet<THandle>>
     loadValidatedDescriptorSets(const std::vector<std::filesystem::path>& roots)
 {
-    std::vector<DescriptorSet> validated;
+    std::vector<ValidatedSet<THandle>> validated;
+    size_t dropped = 0;
 
     for(auto& set : resolveDescriptorSets(loadDescriptorCatalog(roots)))
     {
@@ -2149,24 +2481,24 @@ inline std::vector<DescriptorSet>
         }
         if(!resolvable)
         {
+            ++dropped;
             continue;
         }
 
+        std::unique_ptr<KernelIngestorStateManager<THandle>> built;
         try
         {
-            // Built only to prove the set validates, then thrown away: Container::copyEngineIds
-            // is static and would otherwise advertise an id for a set that fails to
-            // construct. Extracting validateAndIndexPacks() into a shared predicate would
-            // remove this discarded second walk, and with it the duplicate warning an
-            // engine shipping no heuristic gets: once here, once at real construction.
-            auto probe = makeStateManager<THandle>(set, set.engine.graphMatchNativeSymbol);
-            static_cast<void>(probe);
+            // Built to prove the set validates -- Container::copyEngineIds is static and
+            // would otherwise advertise an id for a set that fails to construct -- and
+            // returned with the set, so an engine constructed from it is not built twice.
+            built = makeStateManager<THandle>(set, set.engine.graphMatchNativeSymbol);
         }
         catch(const std::exception& error)
         {
             HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
                                     << set.engine.name << "' does not validate: " << error.what()
                                     << "; dropping it");
+            ++dropped;
             continue;
         }
 
@@ -2190,7 +2522,7 @@ inline std::vector<DescriptorSet>
                                    << "' was not registered for diagnostics: " << error.what());
         }
 
-        validated.push_back(std::move(set));
+        validated.push_back(ValidatedSet<THandle>{std::move(set), std::move(built)});
     }
 
     std::string from;
@@ -2198,15 +2530,26 @@ inline std::vector<DescriptorSet>
     {
         from += (from.empty() ? "" : ", ") + root.string();
     }
-    HIPDNN_PLUGIN_LOG_INFO("descriptor loader: " << validated.size()
-                                                 << " descriptor-backed engine(s) loaded from "
-                                                 << from);
+    if(dropped == 0)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("descriptor loader: "
+                               << validated.size() << " descriptor-backed engine(s) loaded from "
+                               << from << "; " << dropped << " dropped during validation");
+    }
+    else
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
+                                << dropped << " descriptor set(s) dropped during validation; "
+                                << validated.size() << " descriptor-backed engine(s) loaded from "
+                                << from);
+    }
     return validated;
 }
 
 /// @brief The one-root form: every constructible descriptor set under @p root.
 template <typename THandle>
-inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const std::filesystem::path& root)
+inline std::vector<ValidatedSet<THandle>>
+    loadValidatedDescriptorSets(const std::filesystem::path& root)
 {
     return loadValidatedDescriptorSets<THandle>(std::vector<std::filesystem::path>{root});
 }

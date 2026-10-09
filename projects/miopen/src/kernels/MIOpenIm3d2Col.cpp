@@ -24,6 +24,9 @@
  *
  *******************************************************************************/
 
+#include "float_types.h"
+#include "miopen_cstdint.hpp"
+
 #ifndef MIOPEN_USE_FP32
 #define MIOPEN_USE_FP32 0
 #endif
@@ -57,27 +60,111 @@ typedef short data_t;
 typedef float data_t;
 #endif
 
+#if(LAYOUT_NHWC == 1)
 extern "C" __global__ void Im3d2Col(data_t* const __restrict im,
-                                    const unsigned im_offset,
-                                    const unsigned im_c_size,
-                                    const unsigned im_d_size,
-                                    const unsigned im_h_size,
-                                    const unsigned im_w_size,
-                                    const unsigned wei_d_size,
-                                    const unsigned wei_h_size,
-                                    const unsigned wei_w_size,
-                                    const unsigned out_d_size,
-                                    const unsigned out_h_size,
-                                    const unsigned out_w_size,
-                                    const unsigned pad_d_size,
-                                    const unsigned pad_h_size,
-                                    const unsigned pad_w_size,
-                                    const unsigned stride_d_size,
-                                    const unsigned stride_h_size,
-                                    const unsigned stride_w_size,
-                                    const unsigned dilation_d_size,
-                                    const unsigned dilation_h_size,
-                                    const unsigned dilation_w_size,
+                                    const uint64_t im_offset,
+                                    const uint64_t im_c_size,
+                                    const uint64_t im_d_size,
+                                    const uint64_t im_h_size,
+                                    const uint64_t im_w_size,
+                                    const uint64_t wei_d_size,
+                                    const uint64_t wei_h_size,
+                                    const uint64_t wei_w_size,
+                                    const uint64_t out_d_size,
+                                    const uint64_t out_h_size,
+                                    const uint64_t out_w_size,
+                                    const uint64_t pad_d_size,
+                                    const uint64_t pad_h_size,
+                                    const uint64_t pad_w_size,
+                                    const uint64_t stride_d_size,
+                                    const uint64_t stride_h_size,
+                                    const uint64_t stride_w_size,
+                                    const uint64_t dilation_d_size,
+                                    const uint64_t dilation_h_size,
+                                    const uint64_t dilation_w_size,
+                                    data_t* __restrict col)
+{
+    const uint64_t num_groups         = GROUPS;
+    const uint64_t channels_per_group = im_c_size / num_groups;
+    const uint64_t inner_size = (uint64_t)wei_d_size * wei_h_size * wei_w_size * channels_per_group;
+    const uint64_t col_group_size = (uint64_t)out_d_size * out_h_size * out_w_size * inner_size;
+    const uint64_t col_size       = col_group_size * num_groups;
+
+    const uint64_t gtid        = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const uint64_t global_size = (uint64_t)blockDim.x * gridDim.x;
+
+    for(uint64_t tid = gtid; tid < col_size; tid += global_size)
+    {
+        const uint64_t group_id     = tid / col_group_size;
+        const uint64_t tid_in_group = tid - group_id * col_group_size;
+
+        // "col" matrix row and colome id
+        const uint64_t col_i = tid_in_group / inner_size;
+        const uint64_t col_j = tid_in_group - col_i * inner_size;
+
+        // output tensor out_d, out_h, out_w id
+        const uint64_t out_hw = (uint64_t)out_h_size * out_w_size;
+        const uint64_t out_d  = col_i / out_hw;
+        uint64_t tmp          = col_i - out_d * out_hw;
+        const uint64_t out_h  = tmp / out_w_size;
+        const uint64_t out_w  = tmp - out_h * out_w_size;
+
+        // weight tensor wei_d, wei_h, wei_w, wei_c
+        const uint64_t wei_hwc = (uint64_t)wei_h_size * wei_w_size * channels_per_group;
+        const uint64_t wei_d   = col_j / wei_hwc;
+        tmp                    = col_j - wei_d * wei_hwc;
+        const uint64_t wei_wc  = (uint64_t)wei_w_size * channels_per_group;
+        const uint64_t wei_h   = tmp / wei_wc;
+        tmp -= wei_h * (wei_w_size * channels_per_group);
+        const uint64_t wei_w          = tmp / channels_per_group;
+        const uint64_t wei_c_in_group = tmp - wei_w * channels_per_group;
+
+        const uint64_t wei_c = wei_c_in_group + group_id * channels_per_group;
+
+        // input tensor im_d, im_h, im_w id
+        const int64_t im_d = (int64_t)stride_d_size * (int64_t)out_d +
+                             (int64_t)dilation_d_size * (int64_t)wei_d - (int64_t)pad_d_size;
+        const int64_t im_h = (int64_t)stride_h_size * (int64_t)out_h +
+                             (int64_t)dilation_h_size * (int64_t)wei_h - (int64_t)pad_h_size;
+        const int64_t im_w = (int64_t)stride_w_size * (int64_t)out_w +
+                             (int64_t)dilation_w_size * (int64_t)wei_w - (int64_t)pad_w_size;
+
+        const uint64_t im_idx = im_offset + (uint64_t)im_d * im_h_size * im_w_size * im_c_size +
+                                (uint64_t)im_h * im_w_size * im_c_size +
+                                (uint64_t)im_w * im_c_size + wei_c;
+
+        // NdHWC Memory Access
+        data_t value = (im_d >= 0 && im_d < im_d_size && im_h >= 0 && im_h < im_h_size &&
+                        im_w >= 0 && im_w < im_w_size && wei_c < im_c_size)
+                           ? im[im_idx]
+                           : 0;
+
+        col[tid] = value;
+    }
+}
+
+#else
+extern "C" __global__ void Im3d2Col(data_t* const __restrict im,
+                                    const uint64_t im_offset,
+                                    const uint64_t im_c_size,
+                                    const uint64_t im_d_size,
+                                    const uint64_t im_h_size,
+                                    const uint64_t im_w_size,
+                                    const uint64_t wei_d_size,
+                                    const uint64_t wei_h_size,
+                                    const uint64_t wei_w_size,
+                                    const uint64_t out_d_size,
+                                    const uint64_t out_h_size,
+                                    const uint64_t out_w_size,
+                                    const uint64_t pad_d_size,
+                                    const uint64_t pad_h_size,
+                                    const uint64_t pad_w_size,
+                                    const uint64_t stride_d_size,
+                                    const uint64_t stride_h_size,
+                                    const uint64_t stride_w_size,
+                                    const uint64_t dilation_d_size,
+                                    const uint64_t dilation_h_size,
+                                    const uint64_t dilation_w_size,
                                     data_t* __restrict col)
 {
     // Use size_t to prevent overflow for large tensors (>4GB elements)
@@ -125,3 +212,5 @@ extern "C" __global__ void Im3d2Col(data_t* const __restrict im,
         col[tid] = value;
     }
 }
+
+#endif

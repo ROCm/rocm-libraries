@@ -191,18 +191,26 @@ def _provider_sos() -> list:
 
 def _torch_backend_path(torch) -> str:
     site = os.path.dirname(os.path.dirname(torch.__file__))
-    pattern = os.environ.get(
-        "HIPDNN_TORCH_BACKEND_GLOB",
-        os.path.join(site, "_rocm_sdk_libraries_*", "lib", "libhipdnn_backend.so"),
+    override = os.environ.get("HIPDNN_TORCH_BACKEND_GLOB")
+    # Multi-arch SDK wheels install `_rocm_sdk_libraries`; the older per-arch
+    # wheels installed `_rocm_sdk_libraries_<arch>`.
+    patterns = (
+        [override]
+        if override
+        else [
+            os.path.join(site, name, "lib", "libhipdnn_backend.so")
+            for name in ("_rocm_sdk_libraries", "_rocm_sdk_libraries_*")
+        ]
     )
-    hits = glob.glob(pattern)
-    if not hits:
-        raise BootstrapError(
-            f"Could not find torch's bundled libhipdnn_backend.so (looked for "
-            f"{pattern!r}). Is this a ROCm build of torch? Override the search "
-            "with HIPDNN_TORCH_BACKEND_GLOB."
-        )
-    return hits[0]
+    for pattern in patterns:
+        hits = glob.glob(pattern)
+        if hits:
+            return hits[0]
+    raise BootstrapError(
+        f"Could not find torch's bundled libhipdnn_backend.so (looked for "
+        f"{' or '.join(repr(p) for p in patterns)}). Is this a ROCm build of torch? "
+        "Override the search with HIPDNN_TORCH_BACKEND_GLOB."
+    )
 
 
 _dll_dir_cookies = (

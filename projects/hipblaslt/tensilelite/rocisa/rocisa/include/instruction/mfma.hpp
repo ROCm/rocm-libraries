@@ -155,16 +155,20 @@ namespace rocisa
             return std::make_shared<MFMAInstruction>(*this);
         }
 
-        // Workaround for gfx1250: low-precision WMMA must use _scale instruction with scale=0
-        // to avoid Base layer issue where VOP3PX2/VOP3PX3 instructions may not execute atomically
+        // Workaround for gfx1250 V0/strict silicon: low-precision WMMA must use the
+        // _scale instruction with scale=0 to avoid a Base layer issue where
+        // VOP3PX2/VOP3PX3 instructions may not execute atomically. This is NOT needed
+        // on the base gfx1250 build, so it is gated on a per-build toggle set only for
+        // gfx1250-strict / gfx1250v0 (see rocIsa::setForceScaledWMMA, driven from
+        // StinkyTofuArchName in KernelWriter) rather than on the shared ISA (12,5,0),
+        // which cannot tell the steppings apart.
         bool forceScaledWMMA() const
         {
             bool        isWMMA      = !capOrDefault(getAsmCaps(), "HasMFMA");
-            auto        isaVersion  = rocIsa::getInstance().getKernel().isaVersion;
             std::string instTypeStr = typeConvert(instType);
             // Affected instructions: v_wmma_f32_16x16x128_f8f6f4, v_wmma_f32_32x16x128_f4
             bool isLowPrecision = (instTypeStr == "f8f6f4") || (instTypeStr == "f4");
-            return isWMMA && (isaVersion == std::array<int, 3>{12, 5, 0}) && isLowPrecision;
+            return isWMMA && rocIsa::getInstance().getForceScaledWMMA() && isLowPrecision;
         }
 
         std::string typeConvert(InstType iType) const

@@ -6,9 +6,9 @@
 Torch-reference-only correctness + latency harness for the gfx942 narrow /
 wide (flash-regime) tiled attention kernel
 (``kernels.gfx942.attention_tiled_2d``). It is the gfx942 sibling of
-``examples/gfx950/attention/parity_unified_attention.py``, but with **no**
-Triton/AITER dependency: the oracle is a fp32 torch reference, so the example
-runs on any box with torch + a gfx942 GPU.
+``builders/gfx950/attention/prefill/parity_unified_attention.py``, but with
+**no** Triton/AITER dependency: the oracle is a fp32 torch reference, so the
+harness runs on any box with torch + a gfx942 GPU.
 
 The harness:
 
@@ -33,16 +33,16 @@ The harness:
   5. Reports per shape: correctness PASS/FAIL (tol ~2e-2 fp16 / ~4e-2 bf16),
      latency (us), and achieved TFLOPS.
 
-Run (needs torch + a gfx942 GPU):
+Run from the ``rocke/platform/`` root (needs torch + a gfx942 GPU):
 
-    PYTHONPATH=python .venv/bin/python \\
-        python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
+    PYTHONPATH=python:../library python -m \\
+        builders.gfx942.attention.prefill.parity_unified_attention \\
         --scenario default
 
     # force the L4 (WG=64) fallback instead of the default wide4:
-    HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=python .venv/bin/python \\
-        python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
-        --scenario Fp16_Prefill_GQA_S2048_D128
+    HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=python:../library python -m \\
+        builders.gfx942.attention.prefill.parity_unified_attention \\
+        --scenario fmha_gqa_4to1_prefill_2k_b1
 """
 
 from __future__ import annotations

@@ -53,6 +53,8 @@ _UNIFIED_CAPABILITY = Capability(
         ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
         ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
     ),
+    # Unified kernels already shift the causal diagonal by the runtime
+    # difference between each sequence's KV and query lengths.
     supports_features=ATTENTION_FEATURES,
 )
 
@@ -179,7 +181,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
                 ShapeRange("hdim_q", allowed=(256,)),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            supports_features=frozenset({"causal"}),
+            supports_features=frozenset({"causal", "causal_bottom_right"}),
         ),
         _supports=support,
         select_spec=select,
@@ -191,8 +193,10 @@ def _make_d256_decode_candidate() -> KernelCandidate:
     return candidate
 
 
-def register(registry: CandidateRegistry) -> None:
-    registry.extend(
+def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
+    """Route-only: these candidates name a path and have no builder."""
+    del execution
+    route.extend(
         (
             # 2d and 3d are mutually exclusive per problem (select_path returns
             # one), so priority only orders the two when both could match --
@@ -201,4 +205,4 @@ def register(registry: CandidateRegistry) -> None:
             _make_candidate(path="3d", priority=10),
         )
     )
-    registry.register(_make_d256_decode_candidate())
+    route.register(_make_d256_decode_candidate())

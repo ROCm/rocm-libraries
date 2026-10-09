@@ -1,5 +1,8 @@
 # rocThrust
 
+> [!IMPORTANT]
+> This project location is being retired. rocThrust is now developed as part of the unified [hipCCL](../hipccl) project - see [`projects/hipccl/hipccl3/rocthrust`](../hipccl/hipccl3/rocthrust) for the actively-maintained copy. This location will no longer be actively maintained after ROCm 10.2.
+
 > [!NOTE]
 > The published rocThrust documentation is available [here](https://rocm.docs.amd.com/projects/rocThrust/en/latest/) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 

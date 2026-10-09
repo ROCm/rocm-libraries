@@ -30,8 +30,6 @@
  */
 
 #pragma once
-#ifndef _ROCBLASLT_FUNCTIONS_H_
-#define _ROCBLASLT_FUNCTIONS_H_
 
 #include "rocblaslt-types.h"
 #include <vector>
@@ -259,5 +257,3 @@ std::string rocblaslt_get_solution_name_from_algo(rocblaslt_handle             h
                                                   const rocblaslt_matmul_algo& algo);
 
 #endif
-
-#endif /* _ROCBLASLT_FUNCTIONS_H_ */

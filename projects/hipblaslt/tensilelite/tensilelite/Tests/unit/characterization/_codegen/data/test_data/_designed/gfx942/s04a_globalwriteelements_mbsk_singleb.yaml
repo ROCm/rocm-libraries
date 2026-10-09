@@ -1,0 +1,57 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S04a — AdaptiveGemmGSUA=1 label-wiring arms in globalWriteElements.
+#
+# Targets (KernelWriterAssembly.py, AdaptiveGemmGSUA==1 else-branch @16062):
+#   16083  MultipleBuffer arm: `if DataType.isDouble()` guard line
+#   16088  MultipleBufferSingleKernel arm: modes = ["MBSK","MB"]
+#   16091  SingleBuffer arm: modes = ["SB"]
+#   16116  loop: globalWriteMode == "MBSK" -> module.add(labelMBSK)
+#   16119  loop: globalWriteMode == "MB"   -> module.add(labelMB)
+#   16142  loop tail restore under AdaptiveGemmGSUA==1
+#
+# Strategy: one config, ForkParameters over all three GSU algorithms with
+# AdaptiveGemmGSUA=1 + GlobalSplitU>0 (=> noGSUBranch False). Half datatype
+# (MBSK rejects double). isDouble() line 16083 still executes on the MB arm.
+#
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 1, 1]
+        - DepthU: [16]
+        - GlobalSplitU: [2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel", "SingleBuffer"]
+        - AdaptiveGemmGSUA: [1]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [0]
+        - PrefetchGlobalRead: [0]
+        - TransposeLDS: [0]
+        - StoreVectorWidth: [-1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

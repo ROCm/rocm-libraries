@@ -27,6 +27,7 @@ from pathlib import Path
 
 from rocke.core.arch import ArchTarget
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
+from rocke.helpers.manifest import gemm_args_signature
 from rocke.instances.common.gemm_universal import (
     DataSpec,
     TileSpec,
@@ -53,6 +54,30 @@ def _pick_atom(target: ArchTarget, dtype: str, want):
     if op is None:
         raise SystemExit(f"no f16/bf16 16x16 {family} atom for {dtype} on {target.gfx}")
     return (op.m, op.n, op.k)
+
+
+def build_manifest(artifact, *, tile, spec, dtype, shape, wave_size, atom):
+    """Assemble the GEMM manifest for a compiled universal-GEMM artifact.
+
+    Split out of ``main`` so the dtype propagation is testable without a GPU.
+    ``make_gemm_manifest`` falls back to ``gemm_args_signature()`` -- which
+    defaults to fp16 -- when ``args_signature`` is omitted, and the manifest
+    runner reads the ``A`` pointer type back out to choose its reference dtype
+    (``manifest_runner.gemm._gemm_is_bf16``). Dropping the kwarg below would
+    therefore not fail loudly; it would decode a bf16 kernel's output as fp16.
+    """
+    wtm, wtn, wtk = atom
+    atom_family = "wmma" if wave_size == 32 else "mfma"
+    return make_gemm_manifest(
+        artifact=artifact,
+        block_m=tile.tile_m,
+        block_n=tile.tile_n,
+        block_k=tile.tile_k,
+        threads_per_block=spec.block_size,
+        default_shape=shape,
+        atoms=[f"{atom_family}_f32_{wtm}x{wtn}x{wtk}_{dtype}"],
+        args_signature=gemm_args_signature(dtype=dtype),
+    )
 
 
 def main() -> int:
@@ -152,15 +177,14 @@ def main() -> int:
 
     out = Path(args.output_dir or f"/tmp/ugemm_verify_{args.arch}")
     out.mkdir(parents=True, exist_ok=True)
-    atom_family = "wmma" if target.wave_size == 32 else "mfma"
-    manifest = make_gemm_manifest(
-        artifact=art,
-        block_m=tile.tile_m,
-        block_n=tile.tile_n,
-        block_k=tile.tile_k,
-        threads_per_block=spec.block_size,
-        default_shape=(args.m, args.n, args.k),
-        atoms=[f"{atom_family}_f32_{wtm}x{wtn}x{wtk}_{args.dtype}"],
+    manifest = build_manifest(
+        art,
+        tile=tile,
+        spec=spec,
+        dtype=args.dtype,
+        shape=(args.m, args.n, args.k),
+        wave_size=target.wave_size,
+        atom=(wtm, wtn, wtk),
     )
     write_artifact(art, out, manifest)
 

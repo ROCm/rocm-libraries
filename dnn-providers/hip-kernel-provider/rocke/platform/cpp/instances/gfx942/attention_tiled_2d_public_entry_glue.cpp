@@ -580,6 +580,9 @@ static rocke_status_t
             hkv_buf,
             s->dtype ? s->dtype : "",
             kv_buf,
+            /* Python emits "fnuz" under the *same* condition as the kv part,
+             * not under a format test, so it keys off kv_buf being non-empty. */
+            kv_buf[0] ? "fnuz" : "",
             s->use_sinks ? "sinks" : "",
             sw_buf,
             s->has_softcap ? "softcap" : "",

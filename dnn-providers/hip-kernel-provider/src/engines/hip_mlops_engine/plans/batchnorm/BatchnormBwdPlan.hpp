@@ -26,7 +26,6 @@
 namespace hip_kernel_provider
 {
 
-using namespace core::utils;
 using namespace compilation;
 
 namespace batchnorm
@@ -68,7 +67,7 @@ public:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* savedMean() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* savedInvVariance() const;
 
-    const std::optional<ActivationParams>& optActivation() const;
+    const std::optional<core::utils::ActivationParams>& optActivation() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* bias() const;
 
 private:
@@ -82,7 +81,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _savedMean = nullptr;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _savedInvVariance = nullptr;
 
-    std::optional<ActivationParams> _optActivation;
+    std::optional<core::utils::ActivationParams> _optActivation;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias = nullptr;
 };
 

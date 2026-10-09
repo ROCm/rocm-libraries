@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 from geko.config_generator.constants import dataSize
@@ -324,6 +325,10 @@ class GFX950GAParams(BaseOptimizationParams):
         return self._make_param("StoreSyncOpt", [0, 1, 4])
 
     @param
+    def store_vector_width(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("StoreVectorWidth", [-1, 1, 2, 4, 8])
+
+    @param
     def work_group_mapping(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param(
             "WorkGroupMapping",
@@ -404,10 +409,6 @@ class GFX950GAParams(BaseOptimizationParams):
     @param
     def transpose_lds(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param("TransposeLDS", [-1, 0, 1, 2])
-
-    @param
-    def adaptive_gemm(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("AdaptiveGemm", [0, 1])
 
     @param
     def tailloop_in_nll(self, ctx: SizeContext) -> ForkParameter:
@@ -514,4 +515,139 @@ class GFX950GAParams(BaseOptimizationParams):
             _entry(-40, True, False),
             _entry(-40, False, True),
             _entry(0, False, False),
+        ]
+
+
+class GFX950SubtileParams(BaseOptimizationParams):
+    """GFX950 subtile profile — UseSubtileImpl=1 variants.
+
+    Flat parameter set for subtile macro-tile tuning. MI filtering
+    (16x16 base, LSU=1) is handled by GFX950SubtilePostProcessor.
+    """
+
+    @param
+    def use_subtile_impl(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("UseSubtileImpl", [True])
+
+    @param
+    def depth_u(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("DepthU", [64, 128, 256, 512])
+
+    @param
+    def global_read_vector_width_a(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("GlobalReadVectorWidthA", [8])
+
+    @param
+    def global_read_vector_width_b(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("GlobalReadVectorWidthB", [8])
+
+    @param
+    def wave_separate_global_read_a(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("WaveSeparateGlobalReadA", [0])
+
+    @param
+    def wave_separate_global_read_b(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("WaveSeparateGlobalReadB", [0])
+
+    @param
+    def work_group_mapping(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("WorkGroupMapping", [0])
+
+    @param
+    def vector_width_a(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("VectorWidthA", [1])
+
+    @param
+    def vector_width_b(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("VectorWidthB", [1])
+
+    @param
+    def source_swap(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("SourceSwap", [False])
+
+    @param
+    def work_group_mapping_xcc(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("WorkGroupMappingXCC", [-1])
+
+    @param
+    def prefetch_global_read(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("PrefetchGlobalRead", [0, 1, 2])
+
+    @param
+    def stream_k(self, ctx: SizeContext) -> ForkParameter:
+        if not self.config.get("StreamK", False):
+            warnings.warn(
+                "StreamK is disabled but subtile requires StreamK=3; forcing StreamK=3.",
+                stacklevel=2,
+            )
+        return self._make_param("StreamK", [3])
+
+    @param
+    def stream_k_xcc_mapping(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("StreamKXCCMapping", [0])
+
+    @param
+    def direct_to_vgpr_a(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("DirectToVgprA", [False])
+
+    @param
+    def direct_to_vgpr_b(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("DirectToVgprB", [False])
+
+    @param
+    def mi_arch_vgpr(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("MIArchVgpr", [True])
+
+    @param
+    def prefetch_local_read(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("PrefetchLocalRead", [1])
+
+    @param
+    def global_split_u_algorithm(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("GlobalSplitUAlgorithm", ["MultipleBuffer"])
+
+    @param
+    def local_read_vector_width(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("LocalReadVectorWidth", [-1])
+
+    @param
+    def use_custom_main_loop_schedule(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("UseCustomMainLoopSchedule", [0])
+
+    @param
+    def non_temporal_a(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("NonTemporalA", [0, 4])
+
+    @param
+    def non_temporal_b(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("NonTemporalB", [0, 4])
+
+    @param
+    def non_temporal_c(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("NonTemporalC", [0, 4])
+
+    @param
+    def non_temporal_d(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("NonTemporalD", [0, 4])
+
+    @group
+    def dtl_usfgro_group(self, ctx: SizeContext) -> GroupDimension:
+        return [
+            {
+                "DirectToLds": self._make_param("DirectToLds", [0]),
+                "UseSgprForGRO": self._make_param("UseSgprForGRO", [0]),
+            },
+        ]
+
+    @group
+    def clr_ldstri_group(self, ctx: SizeContext) -> Optional[GroupDimension]:
+        """CLR + LDSTrInst group for non-TN layouts.
+        For TN, layout uses the flat defaults (ClusterLocalRead/LDSTrInst not forked)."""
+        if self._gt.transA == "T" and self._gt.transB == "N":
+            return None
+        return [
+            {
+                "ClusterLocalRead": self._make_param("ClusterLocalRead", [0]),
+                "LDSTrInst": self._make_param("LDSTrInst", [True]),
+            },
         ]

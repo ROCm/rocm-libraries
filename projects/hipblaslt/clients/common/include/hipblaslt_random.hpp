@@ -305,20 +305,6 @@ inline T random_nan_generator()
     return T(hipblaslt_nan_rng{});
 }
 
-/*! \brief  generate a random Inf number */
-template <typename T>
-inline T random_inf_generator()
-{
-    return T(hipblaslt_inf_rng{});
-}
-
-/*! \brief  generate a random Inf number */
-template <typename T>
-inline T random_zero_generator()
-{
-    return T(hipblaslt_zero_rng{});
-}
-
 /*! \brief  generate a random number in range [1,2,3,4,5,6,7,8,9,10] */
 template <typename T>
 inline T random_generator()
@@ -468,21 +454,6 @@ template <>
 inline hip_bfloat16 random_low_precision_generator()
 {
     return hip_bfloat16(std::uniform_real_distribution<float>(-6.0, 6.0)(t_hipblaslt_rng));
-}
-
-/*! \brief  generate a random ASCII string of up to length n */
-inline std::string random_string(size_t n)
-{
-    std::string str;
-    if(n)
-    {
-        size_t len = std::uniform_int_distribution<size_t>(1, n)(t_hipblaslt_rng);
-        str.reserve(len);
-        for(size_t i = 0; i < len; ++i)
-            str.push_back(static_cast<char>(
-                std::uniform_int_distribution<unsigned short>(0x20, 0x7E)(t_hipblaslt_rng)));
-    }
-    return str;
 }
 
 /* ============================================================================================ */

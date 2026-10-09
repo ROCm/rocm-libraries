@@ -235,6 +235,14 @@ public:
         Instance().restore(dm);
     }
 
+    // Release only idle buffers returned to the pool; live allocations remain owned by callers.
+    static void ReleaseCached()
+    {
+        std::lock_guard<std::mutex> lock(Instance().m_mutex);
+        Instance().m_pool.clear();
+        Instance().m_pool_managed.clear();
+    }
+
 private:
     std::vector<M> m_pool, m_pool_managed;
     std::mutex m_mutex;
@@ -390,33 +398,6 @@ public:
         return d;
     }
 
-    void device_vector_check(T* d)
-    {
-#ifdef GOOGLE_TEST
-        if(m_guard_len > 0)
-        {
-            T* host = new T[m_pad];
-
-            // Copy device memory after allocated memory to host
-            EXPECT_EQ(hipMemcpy(host, d + this->m_size, m_guard_len, hipMemcpyDeviceToHost),
-                      hipSuccess);
-
-            // Make sure no corruption has occurred
-            EXPECT_EQ(memcmp(host, m_guard, m_guard_len), 0);
-
-            // Point to m_guard before allocated memory
-            d -= m_pad;
-
-            // Copy device memory after allocated memory to host
-            EXPECT_EQ(hipMemcpy(host, d, m_guard_len, hipMemcpyDeviceToHost), hipSuccess);
-
-            // Make sure no corruption has occurred
-            EXPECT_EQ(memcmp(host, m_guard, m_guard_len), 0);
-
-            delete[] host;
-        }
-#endif
-    }
 
     void device_vector_teardown(T* d)
     {
@@ -532,36 +513,6 @@ public:
         return d;
     }
 
-    void device_vector_check(char* d)
-    {
-#ifdef GOOGLE_TEST
-        if(m_guard_len > 0)
-        {
-            char* host = new char[m_pad * realDataTypeSize(m_dtype)];
-
-            // Copy device memory after allocated memory to host
-            EXPECT_EQ(hipMemcpy(host,
-                                d + this->m_size * realDataTypeSize(m_dtype),
-                                m_guard_len,
-                                hipMemcpyDeviceToHost),
-                      hipSuccess);
-
-            // Make sure no corruption has occurred
-            EXPECT_EQ(memcmp(host, m_guard_type, m_guard_len), 0);
-
-            // Point to m_guard before allocated memory
-            d -= m_pad * realDataTypeSize(m_dtype);
-
-            // Copy device memory after allocated memory to host
-            EXPECT_EQ(hipMemcpy(host, d, m_guard_len, hipMemcpyDeviceToHost), hipSuccess);
-
-            // Make sure no corruption has occurred
-            EXPECT_EQ(memcmp(host, m_guard_type, m_guard_len), 0);
-
-            delete[] host;
-        }
-#endif
-    }
 
     void device_vector_teardown(char* d)
     {

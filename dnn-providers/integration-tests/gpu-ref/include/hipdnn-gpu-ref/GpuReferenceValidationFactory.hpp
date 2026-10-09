@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <hipdnn-gpu-ref/GpuFpReferenceRmsValidation.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceValidation.hpp>
 #include <hipdnn-gpu-ref/GpuIntReferenceValidation.hpp>
 #include <hipdnn_data_sdk/types.hpp>
@@ -22,6 +23,12 @@ std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
     createGpuAllCloseValidator(hipdnn_frontend::DataType dataType,
                                float absoluteTolerance = std::numeric_limits<float>::epsilon(),
                                float relativeTolerance = std::numeric_limits<float>::epsilon());
+
+// Factory function to create a GPU relative-RMS validator for the given data type.
+// Mirrors createRmsValidator() from CpuFpReferenceMiopenRmsValidation.hpp, including
+// its data types: FLOAT, HALF, BFLOAT16 and DOUBLE. Throws std::runtime_error otherwise.
+std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
+    createGpuRmsValidator(hipdnn_frontend::DataType dataType, float relativeTolerance);
 
 // Templated factory function to create a GPU allClose validator.
 template <typename T>

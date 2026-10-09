@@ -10,7 +10,8 @@ All paths below are relative to the `rocke/platform/` root (with `PYTHONPATH=pyt
 tests/test_rocke.py                  # unit suite: IR/lowering/transforms (most no-GPU; ~20 harness/timer tests need a GPU)
 tests/run_all.py                      # the cross-platform entrypoint (guard + byte-identity gate + pytest + ctest)
 python/rocke/examples/               # Python-owned example generators
-python/rocke/examples/gfx950/attention/parity_unified_attention.py   # attention parity harness
+../library/builders/gfx950/attention/prefill/parity_unified_attention.py   # attention parity harness (Triton/AITER vs rocKE)
+../library/builders/gfx942/attention/prefill/parity_unified_attention.py   # attention parity harness (torch reference)
 python/rocke/examples/common/ck_tile_parity.py               # small-op parity harness
 tests/instances/differential/run_diff.py    # C++ vs Python engine byte-identity (cross-engine parity)
 ```
@@ -131,27 +132,39 @@ Runs every shipped small-op against a torch reference with per-op tolerance gate
 
 ## Attention Parity
 
+The attention parity harnesses live in the library, one per arch, and run as
+modules:
+
 ```bash
+# gfx950: Triton (AITER) vs rocKE
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" \
-  python \
-  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+PYTHONPATH=python:../library \
+  python -m \
+  builders.gfx950.attention.prefill.parity_unified_attention \
   --attempts 10 --warmup 5 \
   --paths auto,2d,3d \
   --set default \
   --report "${OUT_DIR:-$(mktemp -d)}"/parity.json
+
+# gfx942: rocKE vs a fp32 torch reference (no AITER)
+PYTHONPATH=python:../library \
+  python -m \
+  builders.gfx942.attention.prefill.parity_unified_attention \
+  --scenario default
 ```
 
-Requires AITER for the Triton baseline and the reference attention path. Set
-`AITER_PATH` to that checkout before running the harness. The harness:
+The gfx950 harness needs AITER only for the Triton baseline lanes. Set
+`AITER_PATH` to that checkout before running it (the harness adds it to
+`sys.path`), or pass `--skip-triton` to run only the rocKE lanes. The gfx950
+harness:
 
 1. Builds AITER unified-attention inputs (paged KV, GQA).
 2. Runs Triton with the matching kernel path.
-3. Runs CK DSL via `run_unified_attention_torch(..., backend=...)`.
-4. Compares both to AITER's `ref_paged_attn`.
+3. Runs rocKE via `run_unified_attention_torch(..., backend=...)`.
+4. Compares both to `ref_paged_attn`, the harness's copy of AITER's reference.
 5. Times each lane on a single HIP queue, the same timer for both backends.
 
-The harness writes a JSON report. Use the `--scenario` filter for targeted reruns. See `examples/gfx950/attention/README.md` for the canonical 5-run methodology.
+The harness writes a JSON report. Use the `--scenario` filter for targeted reruns. See `library/builders/gfx950/attention/README.md` for the canonical 5-run methodology.
 
 ## Benchmark + Sweep
 

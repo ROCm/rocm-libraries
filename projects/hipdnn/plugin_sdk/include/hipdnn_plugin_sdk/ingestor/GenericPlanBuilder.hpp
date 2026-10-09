@@ -201,8 +201,8 @@ public:
             {
                 // Walks the ranked list instead of committing to its front: constructing
                 // a GenericPlan runs prepare()/workspaceBytes() and throws on a null
-                // prepare (GenericPlan.hpp:33-41), and a cache hit must not be stricter
-                // than an empty cache.
+                // prepare (GenericPlan::GenericPlan), and a cache hit must not be
+                // stricter than an empty cache.
                 for(size_t rank = 0; rank < ranked->size(); ++rank)
                 {
                     std::string failure;

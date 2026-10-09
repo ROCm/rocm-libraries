@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,10 +38,15 @@ namespace rocalution
         PMIS   = 1
     } CoarseningStrategy;
 
+    /*! \brief List of Ruge-Stueben AMG interpolation operators.
+     *  \details
+     *  The matrix-matrix variants are built from sparse matrix-matrix products. */
     typedef enum _interpolation_type
     {
-        Direct = 0,
-        ExtPI  = 1
+        Direct  = 0, /**< Direct interpolation */
+        ExtPI   = 1, /**< Extended+i interpolation */
+        MMExtPI = 2, /**< Extended+i interpolation */
+        MMExtPE = 3 /**< Extended+e interpolation, needs no reverse couplings */
     } InterpolationType;
 
     typedef enum _lumping_strategy
@@ -88,6 +93,14 @@ namespace rocalution
         ROCALUTION_EXPORT
         void SetCoarsestLevel(int coarse_size);
 
+        /** \brief Set the maximal number of levels (including the finest level) for
+         *  hierarchy creation. Coarsening stops when either the coarsest level size or
+         *  the maximal number of levels is reached. The coarsest operator is then
+         *  handled by the coarse grid solver, which can itself be another AMG solver.
+         */
+        ROCALUTION_EXPORT
+        void SetMaxLevels(int max_levels);
+
         /** \brief Set flag to pass smoothers manually for each level */
         ROCALUTION_EXPORT
         void SetManualSmoothers(bool sm_manual);
@@ -127,6 +140,9 @@ namespace rocalution
 
         /** \brief Maximal coarse grid size */
         int coarse_size_;
+
+        /** \brief Maximal number of levels */
+        int max_levels_;
 
         /** \brief Smoother is set manually or not */
         bool set_sm_;

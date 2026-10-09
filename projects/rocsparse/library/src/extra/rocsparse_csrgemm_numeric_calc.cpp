@@ -30,6 +30,7 @@
 #include "csrgemm_numeric_device.h"
 
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -38,6 +39,7 @@ namespace rocsparse
               uint32_t WFSIZE,
               uint32_t HASHSIZE,
               uint32_t HASHVAL,
+              bool     GRID_STRIDE,
               typename I,
               typename J,
               typename T>
@@ -70,31 +72,44 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
-        rocsparse::csrgemm_numeric_fill_wf_per_row_device<BLOCKSIZE, WFSIZE, HASHSIZE, HASHVAL>(
-            m,
-            nk,
-            offset,
-            perm,
-            alpha,
-            csr_row_ptr_A,
-            csr_col_ind_A,
-            csr_val_A,
-            csr_row_ptr_B,
-            csr_col_ind_B,
-            csr_val_B,
-            beta,
-            csr_row_ptr_D,
-            csr_col_ind_D,
-            csr_val_D,
-            csr_row_ptr_C,
-            csr_col_ind_C,
-            csr_val_C,
-            idx_base_A,
-            idx_base_B,
-            idx_base_C,
-            idx_base_D,
-            mul,
-            add);
+        // Grid-stride over the (sub)wavefront rows so a grid clamped by get_grid_size_x
+        // covers all rows
+        for(int64_t block_offset = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WFSIZE);
+            block_offset < m;
+            block_offset += static_cast<int64_t>(hipGridDim_x) * (BLOCKSIZE / WFSIZE))
+        {
+            rocsparse::csrgemm_numeric_fill_wf_per_row_device<BLOCKSIZE, WFSIZE, HASHSIZE, HASHVAL>(
+                static_cast<J>(block_offset),
+                m,
+                nk,
+                offset,
+                perm,
+                alpha,
+                csr_row_ptr_A,
+                csr_col_ind_A,
+                csr_val_A,
+                csr_row_ptr_B,
+                csr_col_ind_B,
+                csr_val_B,
+                beta,
+                csr_row_ptr_D,
+                csr_col_ind_D,
+                csr_val_D,
+                csr_row_ptr_C,
+                csr_col_ind_C,
+                csr_val_C,
+                idx_base_A,
+                idx_base_B,
+                idx_base_C,
+                idx_base_D,
+                mul,
+                add);
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
+        }
     }
 
     template <uint32_t HASHSIZE, typename J, typename T>
@@ -108,11 +123,13 @@ namespace rocsparse
               uint32_t HASHSIZE,
               uint32_t HASHVAL,
               uint32_t WARPSIZE,
+              bool     GRID_STRIDE,
               typename I,
               typename J,
               typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrgemm_numeric_fill_block_per_row_kernel(J nk,
+    void csrgemm_numeric_fill_block_per_row_kernel(J size,
+                                                   J nk,
                                                    const J* __restrict__ offset,
                                                    const J* __restrict__ perm,
                                                    ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
@@ -139,44 +156,61 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
-        rocsparse::csrgemm_numeric_fill_block_per_row_device<BLOCKSIZE,
-                                                             WFSIZE,
-                                                             HASHSIZE,
-                                                             HASHVAL,
-                                                             WARPSIZE>(nk,
-                                                                       offset,
-                                                                       perm,
-                                                                       alpha,
-                                                                       csr_row_ptr_A,
-                                                                       csr_col_ind_A,
-                                                                       csr_val_A,
-                                                                       csr_row_ptr_B,
-                                                                       csr_col_ind_B,
-                                                                       csr_val_B,
-                                                                       beta,
-                                                                       csr_row_ptr_D,
-                                                                       csr_col_ind_D,
-                                                                       csr_val_D,
-                                                                       csr_row_ptr_C,
-                                                                       csr_col_ind_C,
-                                                                       csr_val_C,
-                                                                       idx_base_A,
-                                                                       idx_base_B,
-                                                                       idx_base_C,
-                                                                       idx_base_D,
-                                                                       mul,
-                                                                       add);
+        // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
+        for(int64_t block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
+        {
+            rocsparse::csrgemm_numeric_fill_block_per_row_device<BLOCKSIZE,
+                                                                 WFSIZE,
+                                                                 HASHSIZE,
+                                                                 HASHVAL,
+                                                                 WARPSIZE>(static_cast<J>(block_id),
+                                                                           nk,
+                                                                           offset,
+                                                                           perm,
+                                                                           alpha,
+                                                                           csr_row_ptr_A,
+                                                                           csr_col_ind_A,
+                                                                           csr_val_A,
+                                                                           csr_row_ptr_B,
+                                                                           csr_col_ind_B,
+                                                                           csr_val_B,
+                                                                           beta,
+                                                                           csr_row_ptr_D,
+                                                                           csr_col_ind_D,
+                                                                           csr_val_D,
+                                                                           csr_row_ptr_C,
+                                                                           csr_col_ind_C,
+                                                                           csr_val_C,
+                                                                           idx_base_A,
+                                                                           idx_base_B,
+                                                                           idx_base_C,
+                                                                           idx_base_D,
+                                                                           mul,
+                                                                           add);
+
+            if constexpr(GRID_STRIDE)
+            {
+                // The next row re-initialises the shared hash table read above
+                __syncthreads();
+            }
+            else
+            {
+                break;
+            }
+        }
     }
 
     template <uint32_t BLOCKSIZE,
               uint32_t WFSIZE,
               uint32_t CHUNKSIZE,
               uint32_t WARPSIZE,
+              bool     GRID_STRIDE,
               typename I,
               typename J,
               typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgemm_numeric_fill_block_per_row_multipass_kernel(
+        J size,
         J n,
         const J* __restrict__ offset,
         const J* __restrict__ perm,
@@ -206,33 +240,44 @@ namespace rocsparse
 
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
-        rocsparse::csrgemm_numeric_fill_block_per_row_multipass_device<BLOCKSIZE,
-                                                                       WFSIZE,
-                                                                       CHUNKSIZE,
-                                                                       WARPSIZE>(n,
-                                                                                 offset,
-                                                                                 perm,
-                                                                                 alpha,
-                                                                                 csr_row_ptr_A,
-                                                                                 csr_col_ind_A,
-                                                                                 csr_val_A,
-                                                                                 csr_row_ptr_B,
-                                                                                 csr_col_ind_B,
-                                                                                 csr_val_B,
-                                                                                 beta,
-                                                                                 csr_row_ptr_D,
-                                                                                 csr_col_ind_D,
-                                                                                 csr_val_D,
-                                                                                 csr_row_ptr_C,
-                                                                                 csr_col_ind_C,
-                                                                                 csr_val_C,
-                                                                                 workspace_B,
-                                                                                 idx_base_A,
-                                                                                 idx_base_B,
-                                                                                 idx_base_C,
-                                                                                 idx_base_D,
-                                                                                 mul,
-                                                                                 add);
+        // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
+        for(int64_t block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
+        {
+            rocsparse::csrgemm_numeric_fill_block_per_row_multipass_device<BLOCKSIZE,
+                                                                           WFSIZE,
+                                                                           CHUNKSIZE,
+                                                                           WARPSIZE>(
+                static_cast<J>(block_id),
+                n,
+                offset,
+                perm,
+                alpha,
+                csr_row_ptr_A,
+                csr_col_ind_A,
+                csr_val_A,
+                csr_row_ptr_B,
+                csr_col_ind_B,
+                csr_val_B,
+                beta,
+                csr_row_ptr_D,
+                csr_col_ind_D,
+                csr_val_D,
+                csr_row_ptr_C,
+                csr_col_ind_C,
+                csr_val_C,
+                workspace_B,
+                idx_base_A,
+                idx_base_B,
+                idx_base_C,
+                idx_base_D,
+                mul,
+                add);
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
+        }
     }
 
     template <uint32_t CSRGEMM_HASHSIZE,
@@ -284,6 +329,21 @@ namespace rocsparse
                                                                                   CSRGEMM_HASHSIZE,
                                                                                   CSRGEMM_FLL_HASH,
                                                                                   CSRGEMM_WARPSIZE,
+                                                                                  true,
+                                                                                  I,
+                                                                                  J,
+                                                                                  T>,
+                hipFuncAttributeMaxDynamicSharedMemorySize,
+                csrgemm_numeric_fill_block_per_row_kernel_shared_memory_size<CSRGEMM_HASHSIZE,
+                                                                             J,
+                                                                             T>()));
+            RETURN_IF_HIP_ERROR(hipFuncSetAttribute(
+                (const void*)rocsparse::csrgemm_numeric_fill_block_per_row_kernel<CSRGEMM_DIM,
+                                                                                  CSRGEMM_SUB,
+                                                                                  CSRGEMM_HASHSIZE,
+                                                                                  CSRGEMM_FLL_HASH,
+                                                                                  CSRGEMM_WARPSIZE,
+                                                                                  false,
                                                                                   I,
                                                                                   J,
                                                                                   T>,
@@ -292,42 +352,53 @@ namespace rocsparse
                                                                              J,
                                                                              T>()));
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::csrgemm_numeric_fill_block_per_row_kernel<CSRGEMM_DIM,
-                                                                      CSRGEMM_SUB,
-                                                                      CSRGEMM_HASHSIZE,
-                                                                      CSRGEMM_FLL_HASH,
-                                                                      CSRGEMM_WARPSIZE>),
-                dim3(group_size),
-                dim3(CSRGEMM_DIM),
-                (csrgemm_numeric_fill_block_per_row_kernel_shared_memory_size<CSRGEMM_HASHSIZE,
-                                                                              J,
-                                                                              T>()),
-                handle->stream,
-                rocsparse::max(k, n),
-                group_offset,
-                perm,
-                ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
-                csr_row_ptr_A,
-                csr_col_ind_A,
-                csr_val_A,
-                csr_row_ptr_B,
-                csr_col_ind_B,
-                csr_val_B,
-                ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
-                csr_row_ptr_D,
-                csr_col_ind_D,
-                csr_val_D,
-                csr_row_ptr_C,
-                csr_col_ind_C,
-                csr_val_C,
-                base_A,
-                base_B,
-                base_C,
-                base_D,
-                mul,
-                add,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                handle,
+                group_size,
+                CSRGEMM_DIM,
+                [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                        (rocsparse::csrgemm_numeric_fill_block_per_row_kernel<
+                            CSRGEMM_DIM,
+                            CSRGEMM_SUB,
+                            CSRGEMM_HASHSIZE,
+                            CSRGEMM_FLL_HASH,
+                            CSRGEMM_WARPSIZE,
+                            decltype(grid_stride)::value>),
+                        dim3(grid),
+                        dim3(CSRGEMM_DIM),
+                        (csrgemm_numeric_fill_block_per_row_kernel_shared_memory_size<
+                            CSRGEMM_HASHSIZE,
+                            J,
+                            T>()),
+                        handle->stream,
+                        group_size,
+                        rocsparse::max(k, n),
+                        group_offset,
+                        perm,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
+                        csr_row_ptr_A,
+                        csr_col_ind_A,
+                        csr_val_A,
+                        csr_row_ptr_B,
+                        csr_col_ind_B,
+                        csr_val_B,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
+                        csr_row_ptr_D,
+                        csr_col_ind_D,
+                        csr_val_D,
+                        csr_row_ptr_C,
+                        csr_col_ind_C,
+                        csr_val_C,
+                        base_A,
+                        base_B,
+                        base_C,
+                        base_D,
+                        mul,
+                        add,
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                    return rocsparse_status_success;
+                }));
 #undef CSRGEMM_SUB
 #undef CSRGEMM_DIM
         }
@@ -354,79 +425,97 @@ namespace rocsparse
 
             if(handle->wavefront_size == 32)
             {
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::csrgemm_numeric_fill_block_per_row_multipass_kernel<
-                        CSRGEMM_DIM,
-                        CSRGEMM_SUB,
-                        CSRGEMM_CHUNKSIZE,
-                        32>),
-                    dim3(group_size),
-                    dim3(CSRGEMM_DIM),
-                    0,
-                    handle->stream,
-                    n,
-                    group_offset,
-                    perm,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
-                    csr_row_ptr_A,
-                    csr_col_ind_A,
-                    csr_val_A,
-                    csr_row_ptr_B,
-                    csr_col_ind_B,
-                    csr_val_B,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
-                    csr_row_ptr_D,
-                    csr_col_ind_D,
-                    csr_val_D,
-                    csr_row_ptr_C,
-                    csr_col_ind_C,
-                    csr_val_C,
-                    workspace_B,
-                    base_A,
-                    base_B,
-                    base_C,
-                    base_D,
-                    mul,
-                    add,
-                    handle->pointer_mode == rocsparse_pointer_mode_host);
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                    handle,
+                    group_size,
+                    CSRGEMM_DIM,
+                    [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                            (rocsparse::csrgemm_numeric_fill_block_per_row_multipass_kernel<
+                                CSRGEMM_DIM,
+                                CSRGEMM_SUB,
+                                CSRGEMM_CHUNKSIZE,
+                                32,
+                                decltype(grid_stride)::value>),
+                            dim3(grid),
+                            dim3(CSRGEMM_DIM),
+                            0,
+                            handle->stream,
+                            group_size,
+                            n,
+                            group_offset,
+                            perm,
+                            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
+                            csr_row_ptr_A,
+                            csr_col_ind_A,
+                            csr_val_A,
+                            csr_row_ptr_B,
+                            csr_col_ind_B,
+                            csr_val_B,
+                            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
+                            csr_row_ptr_D,
+                            csr_col_ind_D,
+                            csr_val_D,
+                            csr_row_ptr_C,
+                            csr_col_ind_C,
+                            csr_val_C,
+                            workspace_B,
+                            base_A,
+                            base_B,
+                            base_C,
+                            base_D,
+                            mul,
+                            add,
+                            handle->pointer_mode == rocsparse_pointer_mode_host);
+                        return rocsparse_status_success;
+                    }));
             }
             else
             {
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::csrgemm_numeric_fill_block_per_row_multipass_kernel<
-                        CSRGEMM_DIM,
-                        CSRGEMM_SUB,
-                        CSRGEMM_CHUNKSIZE,
-                        64>),
-                    dim3(group_size),
-                    dim3(CSRGEMM_DIM),
-                    0,
-                    handle->stream,
-                    n,
-                    group_offset,
-                    perm,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
-                    csr_row_ptr_A,
-                    csr_col_ind_A,
-                    csr_val_A,
-                    csr_row_ptr_B,
-                    csr_col_ind_B,
-                    csr_val_B,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
-                    csr_row_ptr_D,
-                    csr_col_ind_D,
-                    csr_val_D,
-                    csr_row_ptr_C,
-                    csr_col_ind_C,
-                    csr_val_C,
-                    workspace_B,
-                    base_A,
-                    base_B,
-                    base_C,
-                    base_D,
-                    mul,
-                    add,
-                    handle->pointer_mode == rocsparse_pointer_mode_host);
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                    handle,
+                    group_size,
+                    CSRGEMM_DIM,
+                    [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                            (rocsparse::csrgemm_numeric_fill_block_per_row_multipass_kernel<
+                                CSRGEMM_DIM,
+                                CSRGEMM_SUB,
+                                CSRGEMM_CHUNKSIZE,
+                                64,
+                                decltype(grid_stride)::value>),
+                            dim3(grid),
+                            dim3(CSRGEMM_DIM),
+                            0,
+                            handle->stream,
+                            group_size,
+                            n,
+                            group_offset,
+                            perm,
+                            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
+                            csr_row_ptr_A,
+                            csr_col_ind_A,
+                            csr_val_A,
+                            csr_row_ptr_B,
+                            csr_col_ind_B,
+                            csr_val_B,
+                            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
+                            csr_row_ptr_D,
+                            csr_col_ind_D,
+                            csr_val_D,
+                            csr_row_ptr_C,
+                            csr_col_ind_C,
+                            csr_val_C,
+                            workspace_B,
+                            base_A,
+                            base_B,
+                            base_C,
+                            base_D,
+                            mul,
+                            add,
+                            handle->pointer_mode == rocsparse_pointer_mode_host);
+                        return rocsparse_status_success;
+                    }));
             }
             if(mul)
             {
@@ -515,18 +604,20 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
     rocsparse_index_base base_D
         = info_C->csrgemm_info->add ? descr_D->base : rocsparse_index_base_zero;
 
-#define CSRGEMM_NUMERIC_FILL_BLOCK_PER_ROW(                                                       \
-    GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)                  \
+#define CSRGEMM_NUMERIC_FILL_BLOCK_PER_ROW_IMPL(                                                  \
+    GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE, GS)              \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                           \
         (rocsparse::csrgemm_numeric_fill_block_per_row_kernel<CSRGEMM_DIM,                        \
                                                               CSRGEMM_SUB,                        \
                                                               CSRGEMM_HASHSIZE,                   \
                                                               CSRGEMM_FLL_HASH,                   \
-                                                              CSRGEMM_WARPSIZE>),                 \
-        dim3(h_group_size[GROUP_SIZE_ID]),                                                        \
+                                                              CSRGEMM_WARPSIZE,                   \
+                                                              GS>),                               \
+        dim3(rocsparse::get_grid_size_x(handle, h_group_size[GROUP_SIZE_ID], CSRGEMM_DIM)),       \
         dim3(CSRGEMM_DIM),                                                                        \
         (csrgemm_numeric_fill_block_per_row_kernel_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()), \
         stream,                                                                                   \
+        h_group_size[GROUP_SIZE_ID],                                                              \
         rocsparse::max(k, n),                                                                     \
         &d_group_offset[GROUP_SIZE_ID],                                                           \
         d_perm,                                                                                   \
@@ -550,7 +641,22 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
         base_D,                                                                                   \
         info_C->csrgemm_info->mul,                                                                \
         info_C->csrgemm_info->add,                                                                \
-        handle->pointer_mode == rocsparse_pointer_mode_host);
+        handle->pointer_mode == rocsparse_pointer_mode_host)
+
+// Dispatch the straight-line variant unless the clamp binds (AISPARSE-677).
+#define CSRGEMM_NUMERIC_FILL_BLOCK_PER_ROW(                                                      \
+    GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)                 \
+    if(rocsparse::get_grid_size_x(handle, h_group_size[GROUP_SIZE_ID], CSRGEMM_DIM)              \
+       < static_cast<int64_t>(h_group_size[GROUP_SIZE_ID]))                                      \
+    {                                                                                            \
+        CSRGEMM_NUMERIC_FILL_BLOCK_PER_ROW_IMPL(                                                 \
+            GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE, true);  \
+    }                                                                                            \
+    else                                                                                         \
+    {                                                                                            \
+        CSRGEMM_NUMERIC_FILL_BLOCK_PER_ROW_IMPL(                                                 \
+            GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE, false); \
+    }
 
 #define CSRGEMM_NUMERIC_LAUNCHER(GROUP_SIZE_ID, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE) \
     RETURN_IF_ROCSPARSE_ERROR(                                                      \
@@ -592,40 +698,49 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
 #define CSRGEMM_DIM 256
 #define CSRGEMM_SUB 8
 #define CSRGEMM_HASHSIZE 16
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrgemm_numeric_fill_wf_per_row_kernel<CSRGEMM_DIM,
-                                                               CSRGEMM_SUB,
-                                                               CSRGEMM_HASHSIZE,
-                                                               CSRGEMM_FLL_HASH>),
-            dim3((h_group_size[0] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1),
-            dim3(CSRGEMM_DIM),
-            0,
-            stream,
-            h_group_size[0],
-            rocsparse::max(k, n),
-            &d_group_offset[0],
-            d_perm,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
-            csr_row_ptr_A,
-            csr_col_ind_A,
-            csr_val_A,
-            csr_row_ptr_B,
-            csr_col_ind_B,
-            csr_val_B,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
-            csr_row_ptr_D,
-            csr_col_ind_D,
-            csr_val_D,
-            csr_row_ptr_C,
-            csr_col_ind_C,
-            csr_val_C,
-            base_A,
-            base_B,
-            descr_C->base,
-            base_D,
-            info_C->csrgemm_info->mul,
-            info_C->csrgemm_info->add,
-            handle->pointer_mode == rocsparse_pointer_mode_host);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+            handle,
+            (h_group_size[0] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1,
+            CSRGEMM_DIM,
+            [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::csrgemm_numeric_fill_wf_per_row_kernel<
+                        CSRGEMM_DIM,
+                        CSRGEMM_SUB,
+                        CSRGEMM_HASHSIZE,
+                        CSRGEMM_FLL_HASH,
+                        decltype(grid_stride)::value>),
+                    dim3(grid),
+                    dim3(CSRGEMM_DIM),
+                    0,
+                    stream,
+                    h_group_size[0],
+                    rocsparse::max(k, n),
+                    &d_group_offset[0],
+                    d_perm,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
+                    csr_row_ptr_A,
+                    csr_col_ind_A,
+                    csr_val_A,
+                    csr_row_ptr_B,
+                    csr_col_ind_B,
+                    csr_val_B,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
+                    csr_row_ptr_D,
+                    csr_col_ind_D,
+                    csr_val_D,
+                    csr_row_ptr_C,
+                    csr_col_ind_C,
+                    csr_val_C,
+                    base_A,
+                    base_B,
+                    descr_C->base,
+                    base_D,
+                    info_C->csrgemm_info->mul,
+                    info_C->csrgemm_info->add,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
+                return rocsparse_status_success;
+            }));
 #undef CSRGEMM_HASHSIZE
 #undef CSRGEMM_SUB
 #undef CSRGEMM_DIM
@@ -637,40 +752,49 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
 #define CSRGEMM_DIM 256
 #define CSRGEMM_SUB 16
 #define CSRGEMM_HASHSIZE 32
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrgemm_numeric_fill_wf_per_row_kernel<CSRGEMM_DIM,
-                                                               CSRGEMM_SUB,
-                                                               CSRGEMM_HASHSIZE,
-                                                               CSRGEMM_FLL_HASH>),
-            dim3((h_group_size[1] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1),
-            dim3(CSRGEMM_DIM),
-            0,
-            stream,
-            h_group_size[1],
-            rocsparse::max(k, n),
-            &d_group_offset[1],
-            d_perm,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
-            csr_row_ptr_A,
-            csr_col_ind_A,
-            csr_val_A,
-            csr_row_ptr_B,
-            csr_col_ind_B,
-            csr_val_B,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
-            csr_row_ptr_D,
-            csr_col_ind_D,
-            csr_val_D,
-            csr_row_ptr_C,
-            csr_col_ind_C,
-            csr_val_C,
-            base_A,
-            base_B,
-            descr_C->base,
-            base_D,
-            info_C->csrgemm_info->mul,
-            info_C->csrgemm_info->add,
-            handle->pointer_mode == rocsparse_pointer_mode_host);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+            handle,
+            (h_group_size[1] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1,
+            CSRGEMM_DIM,
+            [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::csrgemm_numeric_fill_wf_per_row_kernel<
+                        CSRGEMM_DIM,
+                        CSRGEMM_SUB,
+                        CSRGEMM_HASHSIZE,
+                        CSRGEMM_FLL_HASH,
+                        decltype(grid_stride)::value>),
+                    dim3(grid),
+                    dim3(CSRGEMM_DIM),
+                    0,
+                    stream,
+                    h_group_size[1],
+                    rocsparse::max(k, n),
+                    &d_group_offset[1],
+                    d_perm,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
+                    csr_row_ptr_A,
+                    csr_col_ind_A,
+                    csr_val_A,
+                    csr_row_ptr_B,
+                    csr_col_ind_B,
+                    csr_val_B,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
+                    csr_row_ptr_D,
+                    csr_col_ind_D,
+                    csr_val_D,
+                    csr_row_ptr_C,
+                    csr_col_ind_C,
+                    csr_val_C,
+                    base_A,
+                    base_B,
+                    descr_C->base,
+                    base_D,
+                    info_C->csrgemm_info->mul,
+                    info_C->csrgemm_info->add,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
+                return rocsparse_status_success;
+            }));
 #undef CSRGEMM_HASHSIZE
 #undef CSRGEMM_SUB
 #undef CSRGEMM_DIM
@@ -829,77 +953,97 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
 
         if(handle->wavefront_size == 32)
         {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::csrgemm_numeric_fill_block_per_row_multipass_kernel<CSRGEMM_DIM,
-                                                                                CSRGEMM_SUB,
-                                                                                CSRGEMM_CHUNKSIZE,
-                                                                                32>),
-                dim3(h_group_size[10]),
-                dim3(CSRGEMM_DIM),
-                0,
-                stream,
-                n,
-                &d_group_offset[10],
-                d_perm,
-                ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
-                csr_row_ptr_A,
-                csr_col_ind_A,
-                csr_val_A,
-                csr_row_ptr_B,
-                csr_col_ind_B,
-                csr_val_B,
-                ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
-                csr_row_ptr_D,
-                csr_col_ind_D,
-                csr_val_D,
-                csr_row_ptr_C,
-                csr_col_ind_C,
-                csr_val_C,
-                workspace_B,
-                base_A,
-                base_B,
-                descr_C->base,
-                base_D,
-                info_C->csrgemm_info->mul,
-                info_C->csrgemm_info->add,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                handle,
+                h_group_size[10],
+                CSRGEMM_DIM,
+                [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                        (rocsparse::csrgemm_numeric_fill_block_per_row_multipass_kernel<
+                            CSRGEMM_DIM,
+                            CSRGEMM_SUB,
+                            CSRGEMM_CHUNKSIZE,
+                            32,
+                            decltype(grid_stride)::value>),
+                        dim3(grid),
+                        dim3(CSRGEMM_DIM),
+                        0,
+                        stream,
+                        h_group_size[10],
+                        n,
+                        &d_group_offset[10],
+                        d_perm,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
+                        csr_row_ptr_A,
+                        csr_col_ind_A,
+                        csr_val_A,
+                        csr_row_ptr_B,
+                        csr_col_ind_B,
+                        csr_val_B,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
+                        csr_row_ptr_D,
+                        csr_col_ind_D,
+                        csr_val_D,
+                        csr_row_ptr_C,
+                        csr_col_ind_C,
+                        csr_val_C,
+                        workspace_B,
+                        base_A,
+                        base_B,
+                        descr_C->base,
+                        base_D,
+                        info_C->csrgemm_info->mul,
+                        info_C->csrgemm_info->add,
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                    return rocsparse_status_success;
+                }));
         }
         else
         {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::csrgemm_numeric_fill_block_per_row_multipass_kernel<CSRGEMM_DIM,
-                                                                                CSRGEMM_SUB,
-                                                                                CSRGEMM_CHUNKSIZE,
-                                                                                64>),
-                dim3(h_group_size[10]),
-                dim3(CSRGEMM_DIM),
-                0,
-                stream,
-                n,
-                &d_group_offset[10],
-                d_perm,
-                ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
-                csr_row_ptr_A,
-                csr_col_ind_A,
-                csr_val_A,
-                csr_row_ptr_B,
-                csr_col_ind_B,
-                csr_val_B,
-                ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
-                csr_row_ptr_D,
-                csr_col_ind_D,
-                csr_val_D,
-                csr_row_ptr_C,
-                csr_col_ind_C,
-                csr_val_C,
-                workspace_B,
-                base_A,
-                base_B,
-                descr_C->base,
-                base_D,
-                info_C->csrgemm_info->mul,
-                info_C->csrgemm_info->add,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                handle,
+                h_group_size[10],
+                CSRGEMM_DIM,
+                [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                        (rocsparse::csrgemm_numeric_fill_block_per_row_multipass_kernel<
+                            CSRGEMM_DIM,
+                            CSRGEMM_SUB,
+                            CSRGEMM_CHUNKSIZE,
+                            64,
+                            decltype(grid_stride)::value>),
+                        dim3(grid),
+                        dim3(CSRGEMM_DIM),
+                        0,
+                        stream,
+                        h_group_size[10],
+                        n,
+                        &d_group_offset[10],
+                        d_perm,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
+                        csr_row_ptr_A,
+                        csr_col_ind_A,
+                        csr_val_A,
+                        csr_row_ptr_B,
+                        csr_col_ind_B,
+                        csr_val_B,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
+                        csr_row_ptr_D,
+                        csr_col_ind_D,
+                        csr_val_D,
+                        csr_row_ptr_C,
+                        csr_col_ind_C,
+                        csr_val_C,
+                        workspace_B,
+                        base_A,
+                        base_B,
+                        descr_C->base,
+                        base_D,
+                        info_C->csrgemm_info->mul,
+                        info_C->csrgemm_info->add,
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                    return rocsparse_status_success;
+                }));
         }
 
         if(info_C->csrgemm_info->mul)

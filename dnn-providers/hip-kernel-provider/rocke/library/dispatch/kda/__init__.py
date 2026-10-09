@@ -63,18 +63,31 @@ def _kernel_id(req: KdaRequest, candidate: KernelCandidate, spec: Any) -> Kernel
     return make_kernel_id(req, candidate, spec, op="kda")
 
 
+def registered_kda_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, Any], ...]:
+    """Every registered KDA candidate that can launch ``req``.
+
+    Probes opt-in split-path halves and expands each candidate's
+    ``sweep_space``. Production :func:`dispatch_kda` still returns fused
+    unless the request names a split half.
+    """
+    if _request_errors(req):
+        return ()
+    return KDA_REGISTRY.combos(req)
+
+
 def kda_sweep_space(req: OperatorRequest) -> Sequence[Any]:
     if _request_errors(req):
         return ()
-    specs = []
-    seen = set()
-    for candidate in KDA_REGISTRY.supported(req):
-        spec = candidate.select_spec(req)
-        h = stable_json_hash(asdict(spec), n=16)
-        if h not in seen:
-            seen.add(h)
-            specs.append(spec)
-    return tuple(specs)
+    return KDA_REGISTRY.sweep_space(req)
+
+
+def dispatch_kda_all(req: KdaRequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible KDA kernel for ``req``, including opt-in split halves."""
+    if _request_errors(req):
+        return ()
+    return KDA_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 def priority_ranker(
@@ -129,7 +142,9 @@ __all__ = [
     "KDA_REGISTRY",
     "KdaRequest",
     "dispatch_kda",
+    "dispatch_kda_all",
     "kda_candidates",
     "kda_sweep_space",
     "priority_ranker",
+    "registered_kda_combos",
 ]

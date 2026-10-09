@@ -10,8 +10,10 @@ from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.dispatch import (
     GemmRequest,
     dispatch_gemm_fp16,
+    dispatch_gemm_fp16_all,
     gemm_fp16_candidates,
     gemm_fp16_sweep_space,
+    registered_gemm_fp16_combos,
 )
 from rocke.dispatch.gemm import build_kernel
 from rocke.dispatch.gemm.support import (
@@ -169,6 +171,15 @@ class TestGemmFp16Dispatch(unittest.TestCase):
             for spec in specs:
                 ok, why = is_valid_spec(spec, arch=arch)
                 self.assertTrue(ok, f"{arch}: {why}")
+
+    def test_dispatch_all_enumerates_every_eligible_variant(self):
+        req = GemmRequest(M=512, N=512, K=512, arch="gfx950")
+        winner = dispatch_gemm_fp16(req)
+        results = dispatch_gemm_fp16_all(req)
+        self.assertGreater(len(results), 1)
+        self.assertEqual(results[0].candidate.name, winner.candidate.name)
+        self.assertEqual(len(results), len(gemm_fp16_sweep_space(req)))
+        self.assertEqual(len(results), len(registered_gemm_fp16_combos(req)))
 
     def test_selected_kernel_lowers_to_llvm(self):
         req = GemmRequest(M=128, N=128, K=64, arch="gfx950")

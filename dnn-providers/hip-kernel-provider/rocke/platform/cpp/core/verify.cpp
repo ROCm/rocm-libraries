@@ -23,6 +23,7 @@
  */
 
 #include "rocke/verify.h"
+#include "rocke/tf32_internal.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -321,6 +322,9 @@ static void check_op(verifier_t* v, const rocke_op_t* op);
 
 static void check_contract(verifier_t* v, const rocke_op_t* op)
 {
+    const char* tf32_error = rocke_tf32_op_error(op);
+    if(tf32_error)
+        v_errf(v, op, "%s", tf32_error);
     rocke_opcode_t o = op->opcode;
     const char* name = op->name;
     if(is_binary_same_type(o))
@@ -367,6 +371,10 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    name,
                    tn(op->results[0]->type),
                    tn(op->operands[0]->type));
+        }
+        if(o == ROCKE_OP_MATH_TANH && strcmp(tn(op->operands[0]->type), "f32") != 0)
+        {
+            v_errf(v, op, "math.tanh requires f32 operand, got %s", tn(op->operands[0]->type));
         }
     }
     else if(is_cmp(o))

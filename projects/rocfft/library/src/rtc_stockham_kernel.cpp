@@ -100,6 +100,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
             pp_params.pp_factors_other.assign(kernel->pp_params.pp_factors_other.begin(),
                                               kernel->pp_params.pp_factors_other.end());
             pp_params.parent_length.assign(node.length.begin(), node.length.end());
+            pp_params.node_length = pp_params.parent_length;
         }
 
         break;
@@ -172,6 +173,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         specs2d->wgs_is_derived = true;
 
     bool unit_stride = node.inStride.front() == 1 && node.outStride.front() == 1;
+
+    specs->transform_type = node.GetRootPlanTransformType();
 
     auto ppType = PartialPassType::PPT_NONE;
     if(node.isPartialPassEnabled())
@@ -249,7 +252,8 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
     RTCKernelArgs kargs = make_launch_args();
 
     // twiddles
-    if(data.node->scheme == CS_KERNEL_STOCKHAM_PP)
+    if(data.node->scheme == CS_KERNEL_STOCKHAM_PP
+       || data.node->scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
     {
         kargs.append_ptr(data.node->twiddles_pp);
         kargs.append_ptr(data.node->twiddles_off_dim);

@@ -46,6 +46,7 @@ ConfigMatcher::ConfigMatcher(const Config& cfg)
     bool_field("k_divisible", cfg.k_divisible, /*default=*/true);
     bool_field("single_c", cfg.single_c, /*default=*/false);
     bool_field("large_tensor", cfg.large_tensor, /*default=*/false);
+    int_field("elem_bytes", cfg.elem_bytes, /*default=*/2);
 }
 
 } // namespace hipconv::cdna4::direct_l1

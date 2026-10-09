@@ -783,6 +783,21 @@ class UnifiedAttention2DTiledSpec:
                 "kv_cache_policy must be one of 'all', 'global', 'stream', 'nt' "
                 f"(got {self.kv_cache_policy!r})"
             )
+        if self.use_k_hbm_direct:
+            if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
+                raise ValueError(
+                    "use_k_hbm_direct requires transposed-x8 "
+                    "(use_mfma_32x32x8 + use_transposed_qk_32x32); "
+                    "the 16x16 QK loop always reads K_lds"
+                )
+            if self.use_k_sliced_ring:
+                raise ValueError(
+                    "use_k_hbm_direct is mutually exclusive with use_k_sliced_ring"
+                )
+            if self.use_global_load_lds_k:
+                raise ValueError(
+                    "use_k_hbm_direct is mutually exclusive with use_global_load_lds_k"
+                )
         if self.use_global_load_lds_k and self.kv_storage_dtype is not None:
             raise ValueError("use_global_load_lds_k v1 supports bf16/fp16 KV only")
         if self.use_mfma32_skip_legacy_qreg and not self.use_mfma_32x32:
@@ -972,6 +987,7 @@ class UnifiedAttention2DTiledSpec:
             f"h{self.num_query_heads}kv{self.num_kv_heads}",
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
+            "fnuz" if self.kv_storage_dtype else "",
             "" if not self.use_sinks else "sinks",
             f"sw{self.sliding_window}" if self.sliding_window > 0 else "",
             "softcap" if self.has_softcap else "",

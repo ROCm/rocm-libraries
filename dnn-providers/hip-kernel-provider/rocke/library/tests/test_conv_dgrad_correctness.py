@@ -786,7 +786,8 @@ def _dgrad_run_inprocess(spec, dtype, seed=0):
     import torch
 
     from rocke import compile_kernel
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_abi import conv_args_signature
     from kernels.common.conv_implicit_gemm_dgrad import (
         build_implicit_gemm_conv_dgrad,
         pack_sub_gemm_buffer,
@@ -819,24 +820,24 @@ def _dgrad_run_inprocess(spec, dtype, seed=0):
     sg_d = rt.alloc(ctypes.sizeof(raw))
     rt.memcpy_h2d(sg_d, raw, ctypes.sizeof(raw))
 
-    sig = conv_args_signature(dtype) + [
-        {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
-        {"name": "num_sub_gemms", "type": "i32", "size_bytes": 4},
-    ]
+    # The tilde record buffer is part of the dgrad ABI, not an extension.
+    sig = conv_args_signature(dtype, direction="dgrad")
     launcher = KernelLauncher(
         hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=sig
     )
     launcher(
-        {
-            "A": dY_d,
-            "B": W_d,
-            "D": dX_d,
-            "A_bytes": dY.nbytes,
-            "B_bytes": W.nbytes,
-            "D_bytes": dX.nbytes,
-            "sub_gemm_buf": sg_d,
-            "num_sub_gemms": len(sub_gemms),
-        },
+        ConvArgs.from_problem(
+            p, direction="dgrad", tile_m=spec.tile_m, tile_n=spec.tile_n
+        ).to_launch_values(
+            int(dY_d),
+            int(W_d),
+            int(dX_d),
+            dY.nbytes,
+            W.nbytes,
+            dX.nbytes,
+            sub_gemm_buf=int(sg_d),
+            num_sub_gemms=len(sub_gemms),
+        ),
         config=LaunchConfig(
             grid=(sub_gemms[-1].block_end, p.groups, spec.split_k),
             block=(spec.launch_block_size, 1, 1),

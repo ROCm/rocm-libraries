@@ -292,18 +292,6 @@ def _format_dep_str(alu_type: int, cnt: int) -> str:
     return f"{name}_DEP_{cnt}"
 
 
-def _make_delay_alu_inst(instid0type: int, instid0cnt: int) -> _inst.Instruction:
-    """Create an SDelayAlu instruction with the proper formatted immediate."""
-    dep_str = _format_dep_str(instid0type, instid0cnt)
-    from .instruction import SDelayAlu as _SDelayAlu  # noqa: WPS433
-
-    # The SDelayAlu class stores a raw integer. We need the instruction to
-    # render as "s_delay_alu instid0(VALU_DEP_N)" in toString().
-    # Override: build a minimal Instruction that renders correctly.
-    inst = _SDelayAluFormatted(instid0type, instid0cnt)
-    return inst
-
-
 class _SDelayAluFormatted(_inst.Instruction):
     """SDelayAlu with human-readable encoding matching native rocisa output."""
 
@@ -373,20 +361,6 @@ class _SDelayAluFormatted(_inst.Instruction):
             dup.setInstID1(self.instskipCnt, self.instid1type, self.instid1cnt)
         memo[id(self)] = dup
         return dup
-
-
-def _is_valu_writes_sgpr(inst: _inst.Instruction) -> bool:
-    """True if inst is a VALU that writes an SGPR (e.g. v_cmp_*, v_readfirstlane)."""
-    pre = inst.preStr()
-    if not pre.startswith("v_"):
-        return False
-    try:
-        for p in inst.getDstParams():
-            if isinstance(p, RegisterContainer) and p.regType == "s":
-                return True
-    except (NotImplementedError, AttributeError):
-        pass
-    return False
 
 
 def _insert_delay_alu_recursive(module: _code.Module) -> None:

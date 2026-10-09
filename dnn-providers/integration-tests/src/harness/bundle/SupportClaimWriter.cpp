@@ -61,7 +61,7 @@ std::string observationDefect(const ObservedGraphSupport& observation)
 // Returns the reason this whole sidecar must be left alone, or "" to proceed.
 // One bad observation condemns the file rather than itself: the write is an
 // overlay onto checked-in claims, so applying the good half of a set we do not
-// trust can erase a claim that is still true.
+// trust can author a claim that is not true.
 std::string sidecarDefect(const std::vector<ObservedGraphSupport>& observations)
 {
     const bool isSweep = observations.front().claimLocator.isSweep();
@@ -134,45 +134,22 @@ public:
         return result;
     }
 
+    /// Records support. A decline is not recorded: it leaves the checked-in claim
+    /// exactly as it is.
+    ///
+    /// A regression and a deliberate withdrawal reach this function as the same
+    /// observation, and nothing here can tell them apart. Retracting a claim is
+    /// therefore a reviewed edit, never a side effect of a sweep. The enforcing run
+    /// is what surfaces the disagreement, as CLAIM_BROKEN.
     void apply(const ObservedGraphSupport& observation)
     {
+        if(!observation.engineIsSupported)
+        {
+            return;
+        }
+
         const CaseId& caseId = observation.claimLocator.caseId;
-
-        if(observation.engineIsSupported)
-        {
-            _cells[observation.engineName][caseId][observation.arch].insert(observation.platform);
-            return;
-        }
-
-        auto engineIt = _cells.find(observation.engineName);
-        if(engineIt == _cells.end())
-        {
-            return;
-        }
-        auto caseIt = engineIt->second.find(caseId);
-        if(caseIt == engineIt->second.end())
-        {
-            return;
-        }
-        auto archIt = caseIt->second.find(observation.arch);
-        if(archIt == caseIt->second.end())
-        {
-            return;
-        }
-
-        archIt->second.erase(observation.platform);
-        if(archIt->second.empty())
-        {
-            caseIt->second.erase(archIt);
-        }
-        if(caseIt->second.empty())
-        {
-            engineIt->second.erase(caseIt);
-        }
-        if(engineIt->second.empty())
-        {
-            _cells.erase(engineIt);
-        }
+        _cells[observation.engineName][caseId][observation.arch].insert(observation.platform);
     }
 
     std::string serialize(bool isSweep) const

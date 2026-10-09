@@ -8,6 +8,7 @@
 
 #include "harness/gpu-graph-executor/detail/GpuBatchnormFwdInfPlan.hpp"
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -18,6 +19,7 @@ using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 namespace
 {
@@ -230,17 +232,21 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     constexpr float MEAN_RANGE = 0.5f;
     constexpr float SCALE_BIAS_RANGE = 1.0f;
 
-    xTensor.fillWithRandomValues(static_cast<IOType>(-1), static_cast<IOType>(1), seed++);
-    scaleTensor.fillWithRandomValues(static_cast<ScaleBiasType>(-SCALE_BIAS_RANGE),
-                                     static_cast<ScaleBiasType>(SCALE_BIAS_RANGE),
-                                     seed++);
-    biasTensor.fillWithRandomValues(static_cast<ScaleBiasType>(-SCALE_BIAS_RANGE),
-                                    static_cast<ScaleBiasType>(SCALE_BIAS_RANGE),
-                                    seed++);
-    meanTensor.fillWithRandomValues(
-        static_cast<MeanVarType>(-MEAN_RANGE), static_cast<MeanVarType>(MEAN_RANGE), seed++);
-    invVarianceTensor.fillWithRandomValues(
-        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.f), seed++);
+    fillWithRandomValues(xTensor, static_cast<IOType>(-1), static_cast<IOType>(1), seed++);
+    fillWithRandomValues(scaleTensor,
+                         static_cast<ScaleBiasType>(-SCALE_BIAS_RANGE),
+                         static_cast<ScaleBiasType>(SCALE_BIAS_RANGE),
+                         seed++);
+    fillWithRandomValues(biasTensor,
+                         static_cast<ScaleBiasType>(-SCALE_BIAS_RANGE),
+                         static_cast<ScaleBiasType>(SCALE_BIAS_RANGE),
+                         seed++);
+    fillWithRandomValues(meanTensor,
+                         static_cast<MeanVarType>(-MEAN_RANGE),
+                         static_cast<MeanVarType>(MEAN_RANGE),
+                         seed++);
+    fillWithRandomValues(
+        invVarianceTensor, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.f), seed++);
 
     // Run the GPU reference executor
     std::unordered_map<int64_t, void*> gpuVariantPack;

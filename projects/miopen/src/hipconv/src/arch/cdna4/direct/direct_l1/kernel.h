@@ -53,7 +53,7 @@ constexpr int MAX_KW = 5;
 // Matches direction and filter, then applies the family-partitioning gates
 // (unfold / K256-vs-K128 overcompute / K-divisibility) that make exactly one enabled config
 // claim each problem so dispatch never ties.
-inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
+inline bool is_valid_config(const ConvParams& par, const Config& cfg)
 {
     if(par.direction != cfg.direction)
     {
@@ -65,6 +65,18 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
         return false;
     }
 
+    // A config's tile is sized for one element width, so the widths must agree. This
+    // alone partitions the tf32 configs from the 16-bit ones.
+    if(static_cast<int>(sizeof_data_type(par.input_type)) != cfg.elem_bytes)
+    {
+        return false;
+    }
+
+    // tf32 has no unfold, K256, or K96 sibling, so the gates below that cede a shape to
+    // one of those are skipped for it: taking them would leave the shape unserved,
+    // since no 16-bit tile can claim it either.
+    const bool is_tf32 = (cfg.elem_bytes == 4);
+
     // Batch-unfold gating on direction-mapped output width.
     //
     // Unfold tiles (unfold_n > 1) pack narrow images and serve out_w <= w_unfold
@@ -74,7 +86,11 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
     const bool is_dgrad_dir        = (cfg.direction == Direction::Dgrad);
     const int out_w                = is_dgrad_dir ? par.w : par.q;
     const bool filter_has_unfold   = (cfg.kw == cfg.kh) && (cfg.kh >= 2 && cfg.kh <= 5);
-    if(cfg.unfold_n > 1)
+    if(is_tf32)
+    {
+        // No tf32 unfold tile exists, so the standard tf32 tile serves every width.
+    }
+    else if(cfg.unfold_n > 1)
     {
         if(out_w > cfg.w_unfold())
         {
@@ -98,6 +114,7 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
     //
     // Pick the configuration that performs less overcompute.
     // Choose K(128) in a tie because of its greater arithmetic intensity.
+    if(!is_tf32)
     {
         const bool filter_has_k256 =
             ((cfg.kw == cfg.kh) && (cfg.kh == 2 || cfg.kh == 3)) || (cfg.kh == 3 && cfg.kw == 1);
@@ -141,22 +158,24 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
     const int reduction_chan = is_dgrad ? par.filters_per_group() : par.channels_per_group();
     const int output_chan    = is_dgrad ? par.channels_per_group() : par.filters_per_group();
 
-    // Reduction channels must be even.
+    // Reduction channels must be even at 2 bytes.
     //
     // The per-pixel base is 2*count bytes and CDNA4 dwordx4 loads are Dword-aligned.
-    // (A non-multiple of 8 over-reads harmlessly into zero-filled weights.)
-    if((reduction_chan % 2 != 0))
+    // (A non-multiple of 8 over-reads harmlessly into zero-filled weights.) tf32's
+    // 4-byte element is Dword-aligned at every count.
+    if(!is_tf32 && (reduction_chan % 2 != 0))
     {
         return false;
     }
 
-    // The weights formatter does not support an odd number of input channels.
+    // The weights formatter does not support an odd number of input channels at 2 bytes.
     //
     // It loads over the conv C axis at dword (2-fp16) granularity, so an odd C puts the
     // last channel in a dword straddling the buffer's num_records, which the bounds
-    // check drops whole (zeroing it). Fprop's C is the reduction (even above); dgrad
-    // reduces over K, leaving C otherwise unchecked.
-    if((par.channels_per_group() % 2 != 0))
+    // check drops whole (zeroing it). A tf32 dword is one channel, so nothing straddles.
+    // Fprop's C is the reduction (even above); dgrad reduces over K, leaving C
+    // otherwise unchecked.
+    if(!is_tf32 && (par.channels_per_group() % 2 != 0))
     {
         return false;
     }
@@ -198,6 +217,10 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
         }
         // K96/K64 cede K > 96 to the block_k=128 tile (every filter has one).
         //
+        // tf32 obeys the same threshold: above it the exact tile needs more blocks, and
+        // each one re-reads the input tile the halved block_k amortizes over half the
+        // channels -- which costs tf32 double, its input tile being twice the bytes.
+        //
         // single_c is exempt (tiny C no K128 config covers).
         if(!cfg.single_c && cfg.block_k() < 128 && output_chan > wide_k128_min_output)
         {
@@ -205,7 +228,7 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
         }
         // K128 unfold cedes multiples of 256 to the K256 unfold (3x3 only).
         const bool filter_has_k256_unfold = (cfg.kh == 3 && cfg.kw == 3);
-        if(cfg.unfold_n > 1 && cfg.block_k() == 128 && filter_has_k256_unfold &&
+        if(!is_tf32 && cfg.unfold_n > 1 && cfg.block_k() == 128 && filter_has_k256_unfold &&
            output_chan % 256 == 0)
         {
             return false;
@@ -256,12 +279,14 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
         // Any count is servable (padded + writer-guarded), but cede counts a faster
         // divisible tile covers. The padded K128 above threshold does not cede (it
         // beats exact K96/K64), so it keeps K > 96 not divisible by 128.
+        //
+        // tf32 has a K64 tile but no K96 one, so an output of 96 stays here.
         bool covered = (output_chan % 128 == 0);
         const bool k128_above_thresh =
             (cfg.block_k() == 128) && (output_chan > wide_k128_min_output);
         if(!k128_above_thresh)
         {
-            covered = covered || (output_chan % 96 == 0);
+            covered = covered || (!is_tf32 && output_chan % 96 == 0);
             covered = covered || (output_chan % 64 == 0);
         }
         if(covered)
@@ -338,9 +363,10 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
 // K_padded x C_padded x Kh x Kw per group (K rounded to block_k, C to 64),
 // packed contiguously across groups. Computed at runtime since Kwg is not
 // compile-time here.
-inline size_t custom_weights_tensor_size(const Config& cfg, const Conv2dParams& par)
+inline size_t custom_weights_tensor_size(const Config& cfg, const ConvParams& par)
 {
-    constexpr int elem_size = 2; // sizeof(f16)
+    // Bytes per logical weight: one 2-byte element, or tf32's two bf16 planes.
+    const int elem_size = cfg.elem_bytes;
     // Per-group, direction-mapped counts (dgrad swaps output/reduction).
     const bool is_dgrad      = (cfg.direction == hipconv::Direction::Dgrad);
     const int output_chan    = is_dgrad ? par.channels_per_group() : par.filters_per_group();
@@ -361,7 +387,7 @@ inline size_t custom_weights_tensor_size(const Config& cfg, const Conv2dParams& 
 //
 // Self-formatting makes the transpose cost part of the timed launch; hipMalloc's
 // >= 256-B alignment covers the dwordx4 loads.
-inline size_t get_workspace_size(const Config& cfg, const Conv2dParams& par)
+inline size_t get_workspace_size(const Config& cfg, const ConvParams& par)
 {
     return custom_weights_tensor_size(cfg, par);
 }
@@ -376,7 +402,7 @@ struct BlockCounts
 };
 
 // Output-tile block counts along each axis (direction-mapped).
-inline BlockCounts get_block_counts(const Config& cfg, const Conv2dParams& par)
+inline BlockCounts get_block_counts(const Config& cfg, const ConvParams& par)
 {
     const bool is_dgrad    = (cfg.direction == Direction::Dgrad);
     const int output_per_g = is_dgrad ? par.channels_per_group() : par.filters_per_group();
@@ -403,7 +429,7 @@ inline BlockCounts get_block_counts(const Config& cfg, const Conv2dParams& par)
 // extent key on kparts*per_xcd_blocks, not the raw block_k count. Padding is enabled
 // only for k_divisible=false configs (their writer already guards pad blocks); a
 // k_divisible=true config gets padded == raw, so its buffer is unchanged.
-inline KPartition get_k_partition(const Config& cfg, const Conv2dParams& par)
+inline KPartition get_k_partition(const Config& cfg, const ConvParams& par)
 {
     const int blocks_k = get_block_counts(cfg, par).k_per_g;
     return plan_k_partition(blocks_k,
@@ -416,7 +442,7 @@ inline KPartition get_k_partition(const Config& cfg, const Conv2dParams& par)
 //
 // kparts*per_xcd_blocks blocks of block_k channels each; equals the plain block_k
 // rounding when no padding applies.
-inline int padded_output_channels(const Config& cfg, const Conv2dParams& par)
+inline int padded_output_channels(const Config& cfg, const ConvParams& par)
 {
     const KPartition kp = get_k_partition(cfg, par);
     return kp.kparts * kp.per_xcd_blocks * cfg.block_k();
@@ -445,55 +471,62 @@ __device__ void schedule_barrier()
 }
 
 template <Config cfg, DataType DT>
-__device__ void conv2d_direct_l1_impl(const ToType<DT>* __restrict__ in,
-                                      const ToType<DT>* __restrict__ wei,
-                                      double alpha,
-                                      double beta,
-                                      ToType<DT>* __restrict__ out,
-                                      int N,
-                                      int groups,
-                                      int c_per_group,
-                                      int k_per_group,
-                                      int hi,
-                                      int wi,
-                                      int ho,
-                                      int wo,
-                                      int fy,
-                                      int fx,
-                                      int sy,
-                                      int sx,
-                                      int dy,
-                                      int dx,
-                                      int py,
-                                      int px,
-                                      int per_xcd,
-                                      int kparts,
-                                      int xgroups,
-                                      int blocks_p,
-                                      int blocks_q,
-                                      int n_blocks,
-                                      MagicDiv magic_per_xcd,
-                                      MagicDiv magic_p,
-                                      MagicDiv magic_q,
-                                      MagicDiv magic_n)
+__device__ void
+conv2d_direct_l1_impl(const ToType<DT>* __restrict__ in,
+                      const direct_transpose_weights::ToSplitType<DT>* __restrict__ wei,
+                      double alpha,
+                      double beta,
+                      ToType<DT>* __restrict__ out,
+                      int N,
+                      int groups,
+                      int c_per_group,
+                      int k_per_group,
+                      int hi,
+                      int wi,
+                      int ho,
+                      int wo,
+                      int fy,
+                      int fx,
+                      int sy,
+                      int sx,
+                      int dy,
+                      int dx,
+                      int py,
+                      int px,
+                      int per_xcd,
+                      int kparts,
+                      int xgroups,
+                      int blocks_p,
+                      int blocks_q,
+                      int n_blocks,
+                      MagicDiv magic_per_xcd,
+                      MagicDiv magic_p,
+                      MagicDiv magic_q,
+                      MagicDiv magic_n)
 {
     // Waves tiling one K-partition's P x Q plane; the K axis splits across waves_k.
     constexpr int waves_per_kpart = cfg.waves_p * cfg.waves_q;
 
-    using datatypex8_t   = std::conditional_t<DT == DataType::bf16, bf16x8_t, fp16x8_t>;
-    using InLoaderGlobal = InputLoader<cfg, ToType<DT>>;
-    using InLoaderLds    = InputLoaderLds<cfg, ToType<DT>>;
-    using WgtsLoader     = WeightsLoader<cfg, ToType<DT>>;
+    // LDS and the formatted weights are bf16 even for tf32; only `in` and `out` are fp32.
+    using LdsType        = direct_transpose_weights::ToSplitType<DT>;
+    using InLoaderGlobal = InputLoader<cfg, LdsType>;
+    using InLoaderLds    = InputLoaderLds<cfg, LdsType>;
+    using WgtsLoader     = WeightsLoader<cfg, LdsType>;
+    // One MFMA operand tile row: a plain x8 vector, or the bf16 pair for tf32.
+    using datatypex8_t = typename InLoaderLds::datatypex8_t;
+
+    static_assert(std::is_same_v<datatypex8_t, typename WgtsLoader::datatypex8_t>,
+                  "the input and weights loaders must agree on the mma operand type");
 
     // Fires when block_p is too large for this filter; reduce wave_p.
     //
     // True even without the round-overlap pad (see input_lds_layout.h overlap_safe).
-    static_assert(InLoaderGlobal::lds_size * static_cast<int>(sizeof(ToType<DT>)) <=
-                      LDS_BYTES_PER_CU,
+    // tf32 counts double here: its buffer carries both bf16 planes.
+    static_assert(InLoaderGlobal::lds_size * static_cast<int>(sizeof(LdsType)) <= LDS_BYTES_PER_CU,
                   "direct_l1 input LDS tile exceeds the 160 KiB per-CU budget "
                   "even without the round-overlap pad. Reduce wave_p (block_p) "
                   "for this filter size.");
-    __shared__ ToType<DT> input_lds[InLoaderGlobal::lds_size];
+    __shared__ LdsType input_lds[InLoaderGlobal::lds_size];
 
     // Full per-pixel channel count; in_base selects the group's interior slice.
     const int C = groups * c_per_group;
@@ -620,8 +653,8 @@ __device__ void conv2d_direct_l1_impl(const ToType<DT>* __restrict__ in,
         const int block_w = block_q - px;
         const int block_c = 0;
 
-        const int group_c_base    = g_idx * c_per_group;
-        const ToType<DT>* in_base = in + static_cast<size_t>(group_c_base);
+        const int group_c_base                        = g_idx * c_per_group;
+        const typename InLoaderGlobal::src_t* in_base = in + static_cast<size_t>(group_c_base);
 
         InLoaderGlobal input_loader_global(
             input_pars, block_n, block_h, block_w, block_c, input_lds, in_base, group_c_base);
@@ -632,9 +665,10 @@ __device__ void conv2d_direct_l1_impl(const ToType<DT>* __restrict__ in,
         //
         // Each group's formatted weights are contiguous, so the group offset is a
         // base shift.
+        // Scaled by the loader's plane count: tf32 stores two bf16 tiles per operand.
         const size_t wei_group_stride =
-            static_cast<size_t>(Kq) * Kwg_total * C_padded * cfg.kh * cfg.kw;
-        const ToType<DT>* wei_base = wei + static_cast<size_t>(g_idx) * wei_group_stride;
+            static_cast<size_t>(WgtsLoader::planes) * Kq * Kwg_total * C_padded * cfg.kh * cfg.kw;
+        const LdsType* wei_base = wei + static_cast<size_t>(g_idx) * wei_group_stride;
         WgtsLoader weights_loader(K_share, C_padded, k_idx, wei_base, wave_k_idx);
 
         constexpr int wave_input_reg_h = cfg.wave_p + cfg.kh - 1;
@@ -656,6 +690,21 @@ __device__ void conv2d_direct_l1_impl(const ToType<DT>* __restrict__ in,
         const auto wave_h_base = wave_compute_idx.p();            // LDS row
         const auto wave_w_base = wave_compute_idx.lds_col_base(); // LDS col
 
+        // Register staging for the tf32 split; empty on the 16-bit DMA path.
+        //
+        // Step S fetches into stage[S & 1] and splits stage[(S-1) & 1], so a step's
+        // loads get a whole mma phase to land. Fully drained at every iteration tail,
+        // so nothing stays live into the writer.
+        typename InLoaderGlobal::Stage stage[2];
+
+        // Split and store step S's staged fetch into LDS buffer buf (no-op unless tf32).
+        // Idle waves fetched nothing and own no columns, so they sit out.
+        auto split_step = [&]<int S>(int buf) {
+            if constexpr(InLoaderGlobal::is_tf32)
+                if(loads_input)
+                    input_loader_global.template convert_and_store<S>(buf, stage[S & 1]);
+        };
+
         // Cold-start the first tile into toc.
         //
         // Rounds > 0 inherit toc from the prior round's cross-round prefetch and
@@ -664,9 +713,22 @@ __device__ void conv2d_direct_l1_impl(const ToType<DT>* __restrict__ in,
         // prefetch and writer staging use disjoint tic bytes, so no barrier is needed.
         if(round == 0)
         {
-            static_for<InLoaderGlobal::num_load_steps>(
-                [&]<int S>() { input_loader_global.template load<S>(toc); });
+            static_for<InLoaderGlobal::num_load_steps>([&]<int S>() {
+                input_loader_global.template load<S>(toc, stage[S & 1]);
+                // Split one step behind, so the drain below leaves S in flight.
+                //
+                // tf32-only: the DMA path has nothing to split, and the drain would
+                // then serialize its prefetch issue for no one's benefit.
+                if constexpr(S > 0 && InLoaderGlobal::is_tf32)
+                {
+                    if(loads_input)
+                        wait_vmcnt<InLoaderGlobal::template loads_for_step<S>()>();
+                    split_step.template operator()<S - 1>(toc);
+                }
+            });
             wait_vmcnt_all();
+            split_step.template operator()<InLoaderGlobal::num_load_steps - 1>(toc);
+            // __syncthreads drains lgkmcnt, so the splits land before the first read.
             __syncthreads();
         }
         else if constexpr(!InLoaderGlobal::LdsLayout::overlap_safe)
@@ -749,15 +811,19 @@ __device__ void conv2d_direct_l1_impl(const ToType<DT>* __restrict__ in,
             weights_loader.load_step(weights_reg);
             // Prefetch and NextPrefetch share the loader; only one is ever set.
             if constexpr(Prefetch)
-                input_loader_global.template load<Step>(tic);
+                input_loader_global.template load<Step>(tic, stage[Step & 1]);
             if constexpr(NextPrefetch)
                 if(next_valid)
-                    input_loader_global.template load<Step>(tic);
+                    input_loader_global.template load<Step>(tic, stage[Step & 1]);
             input_load_lds.load_step(toc, wave_h_base, wave_w_base, Kw, C32Half, input_reg);
             // Partial drain leaves this step's prefetch in flight to overlap compute.
             //
             // NextPrefetch included, else the last iteration exposes its full latency.
             // Idle waves have nothing in flight, so drain fully.
+            //
+            // On the tf32 path the count is only a scheduling hint (the compiler waits
+            // on the register dependencies itself); it stays load-bearing for the DMA
+            // path, whose LDS destination it cannot see.
             if constexpr(Prefetch || NextPrefetch)
             {
                 if(loads_input)
@@ -770,6 +836,14 @@ __device__ void conv2d_direct_l1_impl(const ToType<DT>* __restrict__ in,
                 wait_vmcnt_all();
             }
             wait_lgkmcnt_all();
+            // tf32: split the PREVIOUS step's staged fetch into the two LDS planes.
+            //
+            // After the operand drain, so these ds_writes do not lengthen the wait the
+            // mma is already taking; one step behind the fetch, so the vmcnt drain above
+            // has already retired it.
+            if constexpr((Prefetch || NextPrefetch) && Step > 0)
+                if(Prefetch || next_valid)
+                    split_step.template operator()<Step - 1>(tic);
             schedule_barrier<1>();
             if constexpr(ZeroAcc)
                 mma_zeroacc();
@@ -806,6 +880,21 @@ __device__ void conv2d_direct_l1_impl(const ToType<DT>* __restrict__ in,
             // mfma, collapsing the last step's prefetch into an iteration-boundary bubble.
             __builtin_amdgcn_sched_barrier(0);
             wait_vmcnt_all();
+
+            // tf32: the last step's staged fetch has no following step to ride on, so
+            // split it here. Its rows are the ragged remainder, so the exposed latency
+            // is cheaper than the staging registers a compressed schedule would need.
+            if constexpr((decltype(Prefetch)::value || decltype(NextPrefetch)::value) &&
+                         InLoaderGlobal::is_tf32)
+            {
+                if(decltype(Prefetch)::value || next_valid)
+                    split_step.template operator()<num_steps - 1>(tic);
+
+                // Land the splits before the buffer swap: s_barrier does not drain LDS,
+                // and these are the only LDS writes outliving the per-step wait.
+                wait_lgkmcnt_all();
+            }
+
             if constexpr(Prefetch)
             {
                 schedule_barrier<0>(); // inter-iteration phase-swap barrier
@@ -902,21 +991,26 @@ __device__ void conv2d_direct_l1_impl(const ToType<DT>* __restrict__ in,
         // Staging reuses the top of the dead (tic) LDS half.
         //
         // The next round's step-0 prefetch (bottom rows) then overlaps the writer
-        // drain with no barrier; tic_pad keeps them disjoint. The narrow fallback
-        // ignores the pointer.
+        // drain with no barrier; tic_pad keeps them disjoint. A config that does not
+        // stage reserves no bytes, so it gets nullptr rather than a pointer one past
+        // the tile end.
         constexpr int lds_half       = InLoaderGlobal::lds_size / 2;
         constexpr int stage_lds_fp16 = OutWriter::stage_lds_fp16;
         static_assert(stage_lds_fp16 <= lds_half,
                       "output staging buffer exceeds one input LDS half-tile");
         // This config's stage must fit the MAX-size pad the layout reserves.
         //
-        // Smaller stages use the top sub-region.
+        // Smaller stages use the top sub-region; both sides are zero when the writer
+        // takes the narrow register store (every tf32 config).
         static_assert(InLoaderGlobal::LdsLayout::writer_stage_uint4 * 8 >= stage_lds_fp16,
                       "InputLdsLayout::writer_stage_uint4 smaller than "
                       "OutputWriter::stage_lds_fp16 (staging would overflow the pad)");
         OutWriter writer(output_pars,
                          out,
-                         input_lds + tic * lds_half + (lds_half - stage_lds_fp16),
+                         OutWriter::stages_output
+                             ? reinterpret_cast<ToType<DT>*>(input_lds + tic * lds_half +
+                                                             (lds_half - stage_lds_fp16))
+                             : nullptr,
                          block_n,
                          block_p,
                          block_q,
@@ -936,38 +1030,38 @@ __device__ void conv2d_direct_l1_impl(const ToType<DT>* __restrict__ in,
 }
 
 template <Config cfg, DataType DT>
-__global__ __launch_bounds__(cfg.num_threads(),
-                             1) void conv2d_direct_l1_cdna4(const ToType<DT>* __restrict__ in,
-                                                            const ToType<DT>* __restrict__ wei,
-                                                            double alpha,
-                                                            double beta,
-                                                            ToType<DT>* __restrict__ out,
-                                                            int N,
-                                                            int groups,
-                                                            int c_per_group,
-                                                            int k_per_group,
-                                                            int hi,
-                                                            int wi,
-                                                            int ho,
-                                                            int wo,
-                                                            int fy,
-                                                            int fx,
-                                                            int sy,
-                                                            int sx,
-                                                            int dy,
-                                                            int dx,
-                                                            int py,
-                                                            int px,
-                                                            int per_xcd,
-                                                            int kparts,
-                                                            int xgroups,
-                                                            int blocks_p,
-                                                            int blocks_q,
-                                                            int n_blocks,
-                                                            MagicDiv magic_per_xcd,
-                                                            MagicDiv magic_p,
-                                                            MagicDiv magic_q,
-                                                            MagicDiv magic_n)
+__global__ __launch_bounds__(cfg.num_threads(), 1) void conv2d_direct_l1_cdna4(
+    const ToType<DT>* __restrict__ in,
+    const direct_transpose_weights::ToSplitType<DT>* __restrict__ wei,
+    double alpha,
+    double beta,
+    ToType<DT>* __restrict__ out,
+    int N,
+    int groups,
+    int c_per_group,
+    int k_per_group,
+    int hi,
+    int wi,
+    int ho,
+    int wo,
+    int fy,
+    int fx,
+    int sy,
+    int sx,
+    int dy,
+    int dx,
+    int py,
+    int px,
+    int per_xcd,
+    int kparts,
+    int xgroups,
+    int blocks_p,
+    int blocks_q,
+    int n_blocks,
+    MagicDiv magic_per_xcd,
+    MagicDiv magic_p,
+    MagicDiv magic_q,
+    MagicDiv magic_n)
 {
     if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_f16) &&
        __builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_bf16))
@@ -1013,7 +1107,7 @@ __global__ __launch_bounds__(cfg.num_threads(),
 // ConvKernel.
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
-                 const Conv2dParams& par,
+                 const ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -1023,6 +1117,8 @@ void launch_impl(const LaunchParams& lp,
     // Format the weights and launch the kernel for one element type.
     auto typed_launch = [&]<DataType DT>() {
         using dtype = ToType<DT>;
+        // The workspace holds the formatted weights, which are bf16 for tf32.
+        using wtype = direct_transpose_weights::ToSplitType<DT>;
         auto view   = SizeView<cfg.direction>(par);
 
         const auto bc = get_block_counts(cfg, par);
@@ -1060,7 +1156,7 @@ void launch_impl(const LaunchParams& lp,
         //
         // The transpose finishes before the conv reads them. All groups format via a
         // blockIdx.y axis.
-        auto* formatted       = reinterpret_cast<dtype*>(workspace);
+        auto* formatted       = reinterpret_cast<wtype*>(workspace);
         constexpr int Kwg     = cfg.wave_k();
         constexpr int waves_k = cfg.waves_k;
         if constexpr(cfg.direction == Direction::Dgrad)
@@ -1082,7 +1178,7 @@ void launch_impl(const LaunchParams& lp,
                 par.groups,
                 stream,
                 padded_out_chan);
-        const dtype* conv_wei = formatted;
+        const wtype* conv_wei = formatted;
 
         // c_per_group is the MFMA reduction count, k_per_group the output count.
         //
@@ -1125,7 +1221,10 @@ void launch_impl(const LaunchParams& lp,
                 magic_q,
                 magic_n);
     };
-    if(par.input_type == DataType::bf16)
+    // A config is sized for one element width, so the 4-byte one instantiates once.
+    if constexpr(cfg.elem_bytes == 4)
+        typed_launch.template operator()<DataType::tf32>();
+    else if(par.input_type == DataType::bf16)
         typed_launch.template operator()<DataType::bf16>();
     else
         typed_launch.template operator()<DataType::fp16>();
@@ -1155,11 +1254,15 @@ public:
         return false;
     }
 
-    bool is_applicable(const Conv2dParams& par) const override
+    bool is_applicable(const ConvParams& par) const override
     {
-        if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
-            return false;
-        if(par.input_type != par.weight_type || par.input_type != par.output_type)
+        // tf32 takes tf32 operands and an fp32 result; the 16-bit families are same-type.
+        const bool ok_16bit =
+            (par.input_type == DataType::fp16 || par.input_type == DataType::bf16) &&
+            par.weight_type == par.input_type && par.output_type == par.input_type;
+        const bool ok_tf32 = par.input_type == DataType::tf32 &&
+                             par.weight_type == DataType::tf32 && par.output_type == DataType::fp32;
+        if(!ok_16bit && !ok_tf32)
             return false;
         if(par.order != TensorOrder::NHWC)
             return false;
@@ -1174,17 +1277,17 @@ public:
         return true;
     }
 
-    bool is_valid_config(const Conv2dParams& par) const override
+    bool is_valid_config(const ConvParams& par) const override
     {
         return direct_l1::is_valid_config(par, cfg_);
     }
 
-    LaunchParams get_launch_params(const Conv2dParams&) const override
+    LaunchParams get_launch_params(const ConvParams&) const override
     {
         return direct_l1::get_launch_params(cfg_);
     }
 
-    size_t get_workspace_size(const Conv2dParams& par) const override
+    size_t get_workspace_size(const ConvParams& par) const override
     {
         return direct_l1::get_workspace_size(cfg_, par);
     }

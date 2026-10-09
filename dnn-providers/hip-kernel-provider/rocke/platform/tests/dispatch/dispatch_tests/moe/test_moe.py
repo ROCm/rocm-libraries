@@ -11,7 +11,9 @@ from rocke.dispatch.families.moe import (
     MOE_REGISTRY,
     MoeRequest,
     dispatch_moe,
+    dispatch_moe_all,
     moe_candidates,
+    moe_sweep_space,
 )
 
 # Every (arch, dtype) the family claims to dispatch.
@@ -86,6 +88,15 @@ class TestMoeDispatch(unittest.TestCase):
         req = _moe(dtype="fp8")
         supported = [c for c in moe_candidates() if c.admits(req)[0]]
         self.assertEqual([c.spec_id for c in supported], ["mega_fp8"])
+
+    def test_sweep_space_is_the_eligible_engines(self):
+        req = _moe(dtype="fp16")
+        specs = moe_sweep_space(req)
+        results = dispatch_moe_all(req)
+        self.assertEqual(len(specs), 1)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].candidate.spec_id, "mega_f16")
+        self.assertEqual(results[0].candidate.name, dispatch_moe(req).candidate.name)
 
     def test_unique_candidate_names(self):
         names = [c.name for c in moe_candidates()]

@@ -6,7 +6,8 @@
   <run name="FFM-quick">{TEST_BASE_OPTIONS} --yaml rocblas_smoke.yaml </run>
 </test>
 <test sets="ctest_ffm-full">
-  <run name="FFM-full">{TEST_BASE_OPTIONS} --yaml rocblas_extras.yaml --gtest_filter=*regression*</run>
+  <run name="FFM-full-smoke">{TEST_BASE_OPTIONS} --yaml rocblas_smoke.yaml </run>
+  <run name="FFM-full-regression">{TEST_BASE_OPTIONS} --yaml rocblas_extras.yaml --gtest_filter=*regression*</run>
 </test>
 <test sets="ctest_quick">
   <run name="ctest quick">{TEST_BASE_OPTIONS} --yaml rocblas_smoke.yaml</run>

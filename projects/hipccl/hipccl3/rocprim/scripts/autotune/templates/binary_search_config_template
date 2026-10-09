@@ -1,0 +1,25 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_BINARY_SEARCH_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+transform_config_params{ { {{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }} } }
+{%- endmacro %}
+
+{% macro config_picker() -%}
+template<class Target, class value_type, class output_type> constexpr auto binary_search_config_picker()
+{%- endmacro %}
+
+{% macro enable_if(benchmark_of_target) -%}
+{{ benchmark_of_target.get_enable_if("transform_config_params") }}
+{%- endmacro %}
+
+{% macro default_case() -%}
+return binary_search_config_params_base<value_type, output_type>();
+{%- endmacro %}
+
+{% macro fallback_config(fallback_target) -%}
+    return binary_search_config_picker<comp_target<{{ fallback_target.target.as_str() }}>, value_type, output_type>();
+{%- endmacro %}

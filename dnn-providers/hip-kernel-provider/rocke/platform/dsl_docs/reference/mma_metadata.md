@@ -128,3 +128,15 @@ Existing `wmma_scale*_f32_*` and dotted `wmma.scaled.*` IDs are retired, as are
 the dedicated scaled builder wrappers; serialized IR using those IDs must be regenerated.
 Use `tile.mma` with a resolved catalog atom. Other MMA operation IDs retain
 their existing spelling.
+
+## Logical TF32 operands
+
+On gfx942, `tf32` (`xf32` alias) selects `mfma_f32_16x16x8_xf32` or
+`mfma_f32_32x32x4_xf32`. Both take two logical TF32 A/B elements per lane;
+C/D are FP32 with four or sixteen elements. FP32 queries retain the ordinary
+FP32 atoms. The logical type uses one I32 storage word per element and is
+bitcast to the intrinsic's float-vector ABI during lowering.
+
+See the [TF32 numerical example](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
+for the distinction between raw FP32 payloads and explicit RNE preparation,
+and for a reproducible comparison through both engines.

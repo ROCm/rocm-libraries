@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 
+#include "rocsparse_grid.hpp"
 #include "rocsparse_sddmm_ell_kernel.hpp"
 
 #include "../conversion/rocsparse_ell2dense.hpp"
@@ -277,7 +278,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, T, I, J, A, B, C>
 
 #define LAUNCH(K_)                                                                       \
     int64_t num_blocks_x = (nnz - 1) / (NB / K_) + 1;                                    \
-    dim3    blocks(num_blocks_x, get_batch_grid_size(batch_count));                      \
+    dim3    blocks(num_blocks_x, get_grid_size_y(handle, batch_count));                  \
     dim3    threads(NB);                                                                 \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_ell_kernel<NB, K_, T>),         \
                                        blocks,                                           \

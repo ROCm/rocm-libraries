@@ -435,17 +435,17 @@ def _resolve_flavor(requested: str) -> str:
     """The flavor to lower at. 'auto' asks the loaded comgr what it can accept.
 
     comgr rejects IR from the wrong LLVM generation, so on a device run the
-    flavor is not a free choice -- it is dictated by the installed ROCm.
+    flavor is not a free choice -- it is dictated by the loaded compiler.
     """
     if requested != "auto":
         return requested
     try:
-        from rocke.core.lower_llvm import _flavor_for_rocm
-        from rocke.runtime.comgr import resolved_lib_rocm_version
+        from rocke.core.lower_llvm import _flavor_for_llvm
+        from rocke.runtime.comgr import loaded_compiler_info
 
-        ver = resolved_lib_rocm_version()
-        if ver is not None:
-            return _flavor_for_rocm(*ver)
+        info = loaded_compiler_info()
+        if info is not None and info.llvm_version is not None:
+            return _flavor_for_llvm(info.llvm_version[0])
     except Exception:  # noqa: BLE001 - fall through to the documented default
         pass
     return os.environ.get("ROCKE_LLVM_FLAVOR", "llvm20")

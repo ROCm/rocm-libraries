@@ -227,10 +227,8 @@ void set_generic_descriptor_layout(RpptGenericDescPtr srcDescriptorPtrND,
             }
         }
     } else if (nDim == 3) {
-        if (toggle) {
-            srcDescriptorPtrND->layout = RpptLayout::NHWC;
-            dstDescriptorPtrND->layout = RpptLayout::NCHW;
-        }
+        srcDescriptorPtrND->layout = RpptLayout::NHWC;
+        dstDescriptorPtrND->layout = toggle ? RpptLayout::NCHW : RpptLayout::NHWC;
     } else {
         srcDescriptorPtrND->layout = RpptLayout::NDHWC;
         dstDescriptorPtrND->layout = RpptLayout::NDHWC;

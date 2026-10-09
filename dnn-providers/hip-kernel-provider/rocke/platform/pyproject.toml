@@ -29,6 +29,8 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-subtests>=0.11",
+    # Independent low-bit numerical reference types:
+    "ml_dtypes>=0.6.0",
     "pybind11>=3.0",
     # heuristics test suite (rocke/heuristics/tests):
     "pandas",

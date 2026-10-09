@@ -153,19 +153,55 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases())));
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormQuickTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormBfp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases())));
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormQuickTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormFp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases())));
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormQuickTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormFp32,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormStandardTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormStandardTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormFp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormStandardTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormFp32,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormComprehensiveTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormComprehensiveTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormFp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormComprehensiveTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
@@ -201,13 +237,37 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormMixedFp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases())));
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormQuickTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormMixedBfp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases())));
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormQuickTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormMixedFp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormStandardTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormMixedBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormStandardTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormMixedFp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormComprehensiveTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormMixedBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormComprehensiveTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
@@ -248,19 +308,55 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNorm3dFp32,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dTestCases())));
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dQuickTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNorm3dBfp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dTestCases())));
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dQuickTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNorm3dFp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dTestCases())));
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dQuickTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNorm3dFp32,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dStandardTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNorm3dBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dStandardTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNorm3dFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dStandardTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNorm3dFp32,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dComprehensiveTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNorm3dBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dComprehensiveTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNorm3dFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dComprehensiveTestCases())));
 
 using IntegrationGpuRMSNorm3dMixedFp16 = IntegrationGpuRMSNormMixedFp16;
 using IntegrationGpuRMSNorm3dMixedBfp16 = IntegrationGpuRMSNormMixedBfp16;
@@ -281,10 +377,34 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNorm3dMixedFp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dTestCases())));
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dQuickTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNorm3dMixedBfp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dTestCases())));
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dQuickTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNorm3dMixedFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dStandardTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNorm3dMixedBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dStandardTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNorm3dMixedFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dComprehensiveTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNorm3dMixedBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dComprehensiveTestCases())));

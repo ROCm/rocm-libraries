@@ -248,18 +248,30 @@ def _kernel_id(req: NormRequest, candidate: KernelCandidate, spec) -> KernelId:
     )
 
 
+def registered_norm_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, object], ...]:
+    """Every registered norm candidate that can launch ``req``.
+
+    Probes opt-in variants and expands each candidate's ``sweep_space``.
+    Production :func:`dispatch_norm` is unchanged.
+    """
+    if _request_errors(req):
+        return ()
+    return NORM_REGISTRY.combos(req)
+
+
 def norm_sweep_space(req: OperatorRequest) -> Sequence[object]:
     if _request_errors(req):
         return ()
-    specs = []
-    seen = set()
-    for candidate in NORM_REGISTRY.supported(req):
-        spec = candidate.select_spec(req)
-        h = stable_json_hash(asdict(spec), n=16)
-        if h not in seen:
-            seen.add(h)
-            specs.append(spec)
-    return tuple(specs)
+    return NORM_REGISTRY.sweep_space(req)
+
+
+def dispatch_norm_all(req: NormRequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible norm2d kernel for ``req``, including opt-in variants."""
+    if _request_errors(req):
+        return ()
+    return NORM_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 def dispatch_norm(req: NormRequest, *, ranker: Ranker | None = None) -> DispatchResult:

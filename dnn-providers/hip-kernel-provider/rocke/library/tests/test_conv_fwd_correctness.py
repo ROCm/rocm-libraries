@@ -228,8 +228,12 @@ def _run_one(
     dtype: str,
     pipeline: str,
     epilogue: str,
+    **spec_extra,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one conv kernel.
+
+    ``spec_extra`` adds boolean K-loop knobs (``async_dma``, ``unroll_k``) to
+    the spec; they are tagged into the test kernel's name.
 
     Returns ``(passed, reason)`` where ``reason`` is non-empty on skip or failure.
     """
@@ -238,7 +242,8 @@ def _run_one(
     from rocke import compile_kernel
     from builders.common.conv_reference import conv_reference, conv_reference_gfx1250
     from rocke.core.arch import ArchTarget
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_abi import conv_args_signature
     from kernels.common.conv_implicit_gemm import (
         ConvDataSpec,
         ConvProblem,
@@ -284,7 +289,10 @@ def _run_one(
     _num_load_waves = 1 if pipeline == "wavelet" else 4
     spec = ImplicitGemmConvSpec(
         problem=problem,
-        name=f"test_conv_fwd_{shape.id}_{dtype}_{pipeline}_{epilogue}",
+        name=(
+            f"test_conv_fwd_{shape.id}_{dtype}_{pipeline}_{epilogue}"
+            + "".join(f"_{k}" for k, v in sorted(spec_extra.items()) if v)
+        ),
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
         tile_m=tile_m,
         tile_n=tile_n,
@@ -302,6 +310,7 @@ def _run_one(
         epilogue=epilogue,
         groups=shape.groups,
         num_load_waves=_num_load_waves,
+        **spec_extra,
     )
 
     ok, reason = is_valid_spec_for_problem(spec, problem, arch)
@@ -311,7 +320,9 @@ def _run_one(
     try:
         kernel = build_implicit_gemm_conv(spec, arch=arch)
     except ValueError as e:
-        return True, f"skip (build error): {e}"
+        # The validator admitted this spec, so a build error is a bug, not a
+        # configuration the arch lacks -- fail rather than skip.
+        return False, f"build error for a spec the validator admitted: {e}"
 
     try:
         artifact = compile_kernel(kernel, arch=arch)
@@ -346,7 +357,7 @@ def _run_one(
     rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
     rt.memset(D_dev, 0, D_t.nbytes)
 
-    sig = conv_args_signature(dtype)
+    sig = conv_args_signature(dtype, is_3d=problem.is_3d)
     try:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -364,14 +375,16 @@ def _run_one(
     grid = (gx, gy, problem.groups)
     block = (spec.launch_block_size, 1, 1)
 
-    values = {
-        "A": A_dev,
-        "B": B_dev,
-        "D": D_dev,
-        "A_bytes": A_t.nbytes,
-        "B_bytes": B_t.nbytes,
-        "D_bytes": D_t.nbytes,
-    }
+    values = ConvArgs.from_problem(
+        problem, tile_m=spec.tile_m, tile_n=spec.tile_n
+    ).to_launch_values(
+        int(A_dev),
+        int(B_dev),
+        int(D_dev),
+        A_t.nbytes,
+        B_t.nbytes,
+        D_t.nbytes,
+    )
     launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
     D_cpu = torch.empty_like(D_t)
@@ -450,6 +463,48 @@ class TestConvFwdCorrectness(unittest.TestCase):
         if _IS_MFMA:
             self.skipTest("wavelet is WMMA/gfx1250 only")
         self._sweep_pipeline("wavelet")
+
+
+@unittest.skipIf(_skip_reason(), _skip_reason())
+class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):
+    """async_dma / unroll_k with an odd K-tile count.
+
+    Both loops compute two tiles per step over a runtime extent, so the last
+    step's second tile lies past K_gemm and must read as zero. tile_k = 32:
+    C=32 gives K_gemm = 3*3*32 = 288 = 9 full tiles; C=16 gives 144 = 5 tiles,
+    the last one partial.
+    """
+
+    _CASES = (
+        _Shape("odd9_N2H8W8C32K32", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1),
+        _Shape("odd5_N2H8W8C16K32", N=2, Hi=8, Wi=8, C=16, K=32, Y=3, X=3, pH=1, pW=1),
+    )
+
+    def _sweep(self, **knobs) -> None:
+        # Both loops are MFMA-only (WMMA conv rejects async_dma and unroll_k).
+        # On MFMA every case must build and run: a skip (an invalid spec)
+        # is a failure, not a quiet pass.
+        if not _IS_MFMA:
+            self.skipTest(f"{knobs} fwd is MFMA-only; running on {GPU_ARCH}")
+        for shape in self._CASES:
+            for dtype in _DTYPES:
+                for epilogue in _EPILOGUES:
+                    with self.subTest(shape=shape.id, dtype=dtype, epilogue=epilogue):
+                        ok, why = _run_one(
+                            GPU_ARCH, shape, dtype, "mem", epilogue, **knobs
+                        )
+                        label = f"{shape.id} {dtype} {epilogue}"
+                        self.assertTrue(ok, f"{label}: {why}")
+                        self.assertFalse(
+                            why.startswith("skip"),
+                            f"{label}: case was skipped rather than run: {why}",
+                        )
+
+    def test_async_dma_odd_tiles(self):
+        self._sweep(async_dma=True)
+
+    def test_unroll_k_odd_tiles(self):
+        self._sweep(unroll_k=True)
 
 
 if __name__ == "__main__":

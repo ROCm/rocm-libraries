@@ -8,5 +8,6 @@ pytest>=7.0
 # rocm_kpack is a real dependency of ONE test class and is deliberately absent above:
 # it ships in the rocm-kpack checkout, not on PyPI. Supply it by pointing
 # HIPKERNELPROVIDER_ROCM_KPACK_DIR at that checkout's `python` directory -- see
-# "Setup" in README.md. Unset, tests/test_verify_variant_sets.py's
-# TestRealArchiveSelectedConsumer skips; it never fails for want of this.
+# "Setup" in README.md. With it unset and rocm_kpack not importable,
+# tests/test_verify_variant_sets.py's TestRealArchiveSelectedConsumer skips; it never
+# fails for want of this.

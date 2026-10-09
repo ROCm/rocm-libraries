@@ -61,7 +61,7 @@ namespace rocwmma
             // Size of workgroup, normalized to wave count.
             template <bool IsConst          = (TBlockX > 0u && TBlockY > 0u),
                       enable_if_t<IsConst>* = nullptr>
-            ROCWMMA_DEVICE constexpr static inline WorkgroupDimT workgroupDim();
+            ROCWMMA_HOST_DEVICE constexpr static inline WorkgroupDimT workgroupDim();
 
             template <bool IsConst           = (TBlockX > 0u && TBlockY > 0u),
                       enable_if_t<!IsConst>* = nullptr>

@@ -110,10 +110,21 @@ void Arguments::init()
     // bytes
     devices = 0;
 
+    a2a_world  = 1;
+    a2a_extent = 0;
+
     norm_check     = 0;
     allclose_check = 0;
     unit_check     = 1;
     ulp_check      = 0;
+    fast_check     = 0;
+    placement[0]   = 0;
+    placement_offset = 0;
+    fast_check_repeat = 1;
+    fast_check_inject = -1;
+    requires_streamk  = 0;
+    integer_exact_pattern[0] = 0;
+    allow_no_solution        = 0;
     timing         = 0;
 
     transA = '*';

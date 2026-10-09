@@ -261,9 +261,8 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
             // we only reduce the block count to 1 so safe to ignore extra workspace allocated in caller
             int32_t n = n_64;
 
-            // in case of negative inc shift pointer to end of data for negative indexing tid*inc
-            int64_t shiftx = incx_64 < 0 ? offsetx - (incx_64) * (n - 1) : offsetx;
-            int64_t shifty = incx_64 < 0 ? offsety - (incx_64) * (n - 1) : offsety;
+            // The launcher walks (n - 1) for a negative increment. This path is one
+            // chunk (n == n_64), so pass offsetx and offsety unshifted.
 
             static constexpr int NB_OB  = 1024;
             static constexpr int WIN_OB = 32; // 32K max n threshold, assert guard below
@@ -294,11 +293,11 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
                         = rocblas_internal_dot_launcher<int64_t, NB, CONJ, T, U, V>(handle,
                                                                                     n,
                                                                                     x_ptr,
-                                                                                    shiftx,
+                                                                                    offsetx,
                                                                                     (incx_64),
                                                                                     stridex,
                                                                                     y_ptr,
-                                                                                    shifty,
+                                                                                    offsety,
                                                                                     (incy_64),
                                                                                     stridey,
                                                                                     batch_count,

@@ -1,0 +1,4 @@
+interface:
+  display_name: "LDS Conflict Expert"
+  short_description: "Predict and analyze LDS access conflicts"
+  default_prompt: "Use $lds-bank-conflict-expert to predict and analyze this LDS access pattern."

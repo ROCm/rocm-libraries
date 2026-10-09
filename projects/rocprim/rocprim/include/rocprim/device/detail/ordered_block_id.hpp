@@ -300,7 +300,7 @@ hipError_t check_if_using_atomic_block_id(hipStream_t stream, bool& enable)
         target_arch arch;
         ROCPRIM_RETURN_ON_ERROR(rocprim::detail::get_device_arch(device_id, arch));
 
-        needs_hotfix = (arch == target_arch::gfx942) || (arch == target_arch::gfx950);
+        needs_hotfix = (arch == target_arch::gfx942) || (arch == target_arch::gfx950) || (arch == target_arch::gfx1250);
     }
 
     switch(data.option)

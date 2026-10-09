@@ -256,8 +256,10 @@ struct KernelSource
     std::string library;
     /// KPACK: the archive's own key for this code object. Opaque -- the hip packager
     /// content-addresses it on (source, build) and the rocKE producer uses a different
-    /// scheme entirely, so nothing here may parse it. Not unique per kernel: two kernels
-    /// differing only by entry point share one key, one blob, and one loaded module.
+    /// scheme entirely, so nothing here may parse it. An authored hsaco's key hashes the
+    /// normalized root-relative file path, so one file serving several symbols is one entry.
+    /// Not unique per kernel: two kernels differing only by entry point share one key, one
+    /// blob, and one loaded module.
     std::string tocKey;
     /// KPACK: the undecorated extern "C" name to resolve inside the loaded module. The
     /// only field that separates two kernels sharing a tocKey.

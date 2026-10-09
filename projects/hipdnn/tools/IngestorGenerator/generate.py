@@ -8,6 +8,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import yaml
+
 from codegen.config_loader import ConfigError, load_config
 from codegen.generator import IngestorGenerator
 
@@ -77,7 +79,7 @@ def main() -> None:
 
     try:
         config = load_config(args.config)
-    except ConfigError as e:
+    except (ConfigError, yaml.YAMLError) as e:
         print(f"Config error: {e}", file=sys.stderr)
         sys.exit(1)
 

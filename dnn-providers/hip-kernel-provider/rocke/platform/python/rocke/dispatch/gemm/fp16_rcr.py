@@ -303,19 +303,31 @@ def build_kernel(result: DispatchResult):
     return result.build()
 
 
+def registered_gemm_fp16_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, UniversalGemmSpec], ...]:
+    """Every registered FP16 RCR candidate that can launch ``req``.
+
+    Probes opt-in variants and expands each candidate's ``sweep_space``.
+    Production :func:`dispatch_gemm_fp16` is unchanged.
+    """
+    if _request_errors(req):
+        return ()
+    return GEMM_FP16_REGISTRY.combos(req)
+
+
 def gemm_fp16_sweep_space(req: OperatorRequest) -> Sequence[UniversalGemmSpec]:
     """Bounded sweep space from all registered FP16 RCR candidates."""
     if _request_errors(req):
         return ()
-    specs: list[UniversalGemmSpec] = []
-    seen = set()
-    for candidate in GEMM_FP16_REGISTRY.supported(req):
-        spec = candidate.select_spec(req)
-        spec_hash = stable_json_hash(asdict(spec), n=16)
-        if spec_hash not in seen:
-            seen.add(spec_hash)
-            specs.append(spec)
-    return tuple(specs)
+    return GEMM_FP16_REGISTRY.sweep_space(req)
+
+
+def dispatch_gemm_fp16_all(req: GemmRequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible FP16 RCR kernel for ``req``, including opt-in variants."""
+    if _request_errors(req):
+        return ()
+    return GEMM_FP16_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 def dispatch_gemm_fp16(

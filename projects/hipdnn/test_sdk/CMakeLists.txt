@@ -31,6 +31,46 @@ target_link_libraries(
 
 set(HIP_DNN_TEST_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/test_sdk")
 
+# SKIP_IF_ASAN() -- named here on purpose. An audit for tests held back by a known ASAN error greps
+# for that token; the suppression list in src/AsanDefaultSuppressions.cpp is the other place such an
+# error can be parked, and this is the wiring that puts it into every test executable.
+#
+# src/AsanDefaultSuppressions.cpp defines __asan_default_suppressions(), which supplies the
+# suppression text from inside the binary and so needs no file, no install rule and no path that
+# survives relocation.
+#
+# It is attached INTERFACE so it compiles into each consuming executable. The symbol must end up in
+# the executable itself: a definition inside a shared library, or inside a plain static archive, is
+# not picked up. It must also appear exactly once per link, so only these two targets carry it and
+# nothing else may add it -- a second definition is a duplicate-symbol link error, and a link that
+# resolves two weak definitions silently keeps only one.
+#
+# The source is installed and named again under INSTALL_INTERFACE so consumers that resolve this
+# package with find_package() -- a plugin or application built against an installed hipDNN -- compile
+# it as well. CMake rewrites that path relative to the importing prefix, so a relocated install tree
+# still resolves it.
+#
+# The gate is the producing build's, so a hipDNN installed without ASAN exports nothing here.
+set(HIP_DNN_TEST_SDK_INSTALL_SRC_DIR "${CMAKE_INSTALL_DATADIR}/hipdnn/test_sdk")
+
+if(BUILD_ADDRESS_SANITIZER
+   OR THEROCK_SANITIZER STREQUAL "ASAN"
+   OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"
+)
+    foreach(_hipdnn_test_sdk_target hipdnn_test_sdk hipdnn_test_sdk_dynamic)
+        target_sources(
+            ${_hipdnn_test_sdk_target}
+            INTERFACE
+                $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/AsanDefaultSuppressions.cpp>
+                $<INSTALL_INTERFACE:${HIP_DNN_TEST_SDK_INSTALL_SRC_DIR}/AsanDefaultSuppressions.cpp>
+        )
+    endforeach()
+
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/AsanDefaultSuppressions.cpp
+            DESTINATION ${HIP_DNN_TEST_SDK_INSTALL_SRC_DIR} COMPONENT Development
+    )
+endif()
+
 foreach(_hipdnn_test_sdk_target hipdnn_test_sdk hipdnn_test_sdk_dynamic)
     target_include_directories(
         ${_hipdnn_test_sdk_target}

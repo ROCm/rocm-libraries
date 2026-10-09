@@ -288,10 +288,10 @@ TEST(TestPackedDescriptorLoad, LibraryResolvesFromTheDescriptorThatDeclaredIt)
 /// descriptor cannot exercise this, and silently proving nothing is the failure mode this
 /// whole file exists to end.
 ///
-/// buildIngestorKernelCode() cannot be called here -- it needs a device, a compiler and a
-/// real archive open. The containment rule is reproduced instead, reading the same two
-/// loader-populated fields the guard reads, so a change to either field's meaning fails
-/// here rather than only on hardware.
+/// buildIngestorKernelCode() cannot be called here -- it needs a device and a real archive
+/// open. The containment rule is reproduced instead, reading the same two loader-populated
+/// fields the guard reads, so a change to either field's meaning fails here rather than
+/// only on hardware.
 TEST(TestPackedDescriptorLoad, PackedKernelsSatisfyTheRuntimeContainmentGuard)
 {
     REQUIRE_PACKED_SHARDS(shards);

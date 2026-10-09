@@ -289,8 +289,10 @@ from cheapest to most expensive:
    — MoE / Block-scale / MX and non-attention extended kernels.
    FMHA / sage / sparse attention coverage moved to the library:
    `PYTHONPATH=rocke/library python3 -m builders.common.parity_fmha_extended --arch <arch>`
-6. `python python/rocke/examples/gfx950/attention/parity_unified_attention.py`
-   — attention parity (Triton + ref vs CK DSL paths).
+6. `PYTHONPATH=python:../library python -m builders.gfx950.attention.prefill.parity_unified_attention`
+   — attention parity (Triton + ref vs rocKE paths). The gfx942 sibling
+   `builders.gfx942.attention.prefill.parity_unified_attention` checks
+   against a torch reference only.
 7. `python python/rocke/examples/common/hip_lowering_parity.py` — production
    LLVM lowering vs HIP-debug lowering audit (non-attention specs).
    Attention lowering audit:
@@ -299,7 +301,7 @@ from cheapest to most expensive:
 References do not have to be torch. The conv and GEMM bake-offs use
 NumPy fp32 accumulation in `run_manifest.py`. Attention has a
 deliberate per-shape `ref_paged_attn` in
-`examples/gfx950/attention/parity_unified_attention.py`.
+`library/builders/gfx950/attention/prefill/parity_unified_attention.py`.
 
 ### 2.2 Performance Baselines
 
@@ -1849,10 +1851,10 @@ matches → zero re-pack. See §17.4 for the quantitative reduction.
 | Knob | Spec | Values | Effect |
 |---|---|---|---|
 | `pipeline` | GEMM `TraitSpec` | `"mem"` / `"compv3"` / `"compv4"` | `mem` = single-buffer; `compv4` = double-buffered async DMA + MFMA overlap. Compv3 / compv4 trade LDS for latency hiding |
-| `pipeline` | conv_implicit_gemm, conv_implicit_gemm_wgrad | `"mem"` / `"compv3"` / `"compv4"` / `"wavelet"` / `"basic"` | The GEMM names above plus `"basic"` = CK `pipeline_basic`: a single LDS buffer, with the global read of tile `k+1` issued before the `sync` + MFMA of tile `k` and the matching LDS write deferred past the second `sync`, so VMEM latency overlaps MFMA compute and tile `k+1` waits in VGPRs rather than in a second LDS tile. Statically unrolls the K loop — bounded by `_MAX_UNROLLED_K_ITERS` on wgrad and by the parallel `_MAX_BASIC_K_ITERS` in `conv_implicit_gemm.py` on forward conv — is mutually exclusive with `async_dma`, and needs a compile-time trip count, so on wgrad it rejects `split_k=0` |
+| `pipeline` | conv_implicit_gemm, conv_implicit_gemm_wgrad | `"mem"` / `"compv3"` / `"compv4"` / `"wavelet"` / `"basic"` | The GEMM names above plus `"basic"` = same runtime `scf.for` K-loop as `"mem"` (load → sync → MFMA → sync per tile); it is mutually exclusive with `async_dma` but otherwise imposes no K-trip-count limit |
 | `scheduler` | GEMM `TraitSpec` | `"intrawave"` / `"interwave"` | Where the scheduler injects waits. Intrawave keeps producers and consumers in one wave; interwave splits them |
 | `async_dma` | conv_implicit_gemm, conv_implicit_gemm_wgrad, conv_implicit_gemm_dgrad | False / True | Enable direct global → LDS DMA (`raw_ptr_buffer_load_lds`). It **pins the schedule**: forward conv and wgrad both build `SchedulePolicy.for_pipeline("async_dma")` (interwave, `s_setprio 1`) and ignore `spec.pipeline` on that leg, which is why the sweep pins the pipeline to `"mem"` there instead of compiling one body under five kernel names. Incompatible with `pipeline="basic"` (all conv families) and with `pipeline="wavelet"` (forward conv, dgrad). A **swept axis**, not a run-level flag — unlike `lds_k_outer` it is not deducible from `(arch, spec)`: it removes the register staging of the tile, but it also forces the LDS pad to 0 (the intrinsic writes a packed lane-contiguous tile) and coarsens the load-width ladder to the chunk widths the intrinsic accepts, and both terms are functions of tile width and channel run, which are themselves sweep axes. On wgrad it *requires* `lds_k_outer=True`; on dgrad it is *rejected* under `lds_k_outer` (the tilde builder has no direct global→LDS path). Python-unrolls the K loop, so it is bounded by `_MAX_UNROLLED_K_ITERS` |
-| `_MAX_UNROLLED_K_ITERS` | `instances/common/conv_implicit_gemm_wgrad.py` module constant (mirrored as `ROCKE_MAX_UNROLLED_K_ITERS` in the C engine) | 128 | Cap on `ceil((wg_K_padded / split_k) / tile_k)` for **both** statically-unrolled wgrad loops — `pipeline="basic"` **and** `async_dma`. A build-practicality bound, not a hardware one: over the cap `is_valid_wgrad_spec` rejects the spec, so raise `split_k` or `tile_k` rather than raising the constant. It previously guarded `basic` only, leaving async uncapped — a deep reduction at a low split-K degree then unrolled five figures of load+MFMA bodies into one kernel and exhausted host memory during the IR build instead of failing validation. Forward conv keeps its own parallel `_MAX_BASIC_K_ITERS = 128` in `conv_implicit_gemm.py`, which still guards `pipeline="basic"` only |
+| `_MAX_UNROLLED_K_ITERS` | `instances/common/conv_implicit_gemm_wgrad.py` module constant (mirrored as `ROCKE_MAX_UNROLLED_K_ITERS` in the C engine) | 128 | Cap on `ceil((wg_K_padded / split_k) / tile_k)` for the statically-unrolled wgrad `async_dma` loop. A build-practicality bound, not a hardware one: over the cap `is_valid_wgrad_spec` rejects the spec, so raise `split_k` or `tile_k` rather than raising the constant. `pipeline="basic"` no longer applies — it uses a runtime `scf.for` loop and is not bounded by this constant |
 | `unroll_k` | conv_implicit_gemm | False | Python-time unroll of the K loop. Bigger code, fewer waits |
 | `use_early_v_schedule` | Attention 2D | False | Issue current-V async copy before QK so V overlaps QK + softmax (§8.1, §17.4). Use only on no-SW prefill |
 | `prefetch distance` (implicit) | `pipeline` choice | — | More stages ⇒ better latency hiding but more LDS |
@@ -3276,7 +3278,7 @@ export PYTHONPATH=python
 ### 19.2 The single validation block
 
 ```bash
-cd <composablekernel-checkout>
+cd <rocke>/platform
 export PYTHONPATH=python:../library
 
 PYTHONDONTWRITEBYTECODE=1 python tests/test_rocke.py
@@ -3291,8 +3293,7 @@ python python/rocke/examples/common/distribution_2d_add_demo.py --H 64 --W 128
 python python/rocke/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" python \
-  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+python -m builders.gfx950.attention.prefill.parity_unified_attention \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```
 

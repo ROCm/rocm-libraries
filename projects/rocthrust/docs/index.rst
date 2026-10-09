@@ -34,6 +34,7 @@ The rocThrust project is located in https://github.com/ROCm/rocm-libraries/tree/
 
   .. grid-item-card:: Reference
 
+    * `Benchmarking with Primbench <https://rocm.docs.amd.com/projects/primbench/en/latest>`_
     * :ref:`rocthrust-data-type-support`
     * :ref:`bitwise-repro`
     * :ref:`atomic-path`

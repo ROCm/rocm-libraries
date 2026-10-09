@@ -13,6 +13,7 @@ Control StinkyTofu behavior through Tensile's `GlobalParameters` system -- eithe
 | `StinkyTofuDebugPass` | comma-separated pass names | `""` | PASS_DEBUG logging |
 | `StinkyTofuVerifyEach` | `0`, `1` | `0` | Verify StinkyTofu ASM IR after every pass |
 | `StinkyTofuEnableRemarks` | `0`, `1` | `0` | Emit optimization remarks to stderr |
+| `StinkyTofuTimePasses` | `0`, `1` | `0` | Report per-pass wall time to stderr |
 
 ---
 
@@ -112,6 +113,32 @@ analysis: LoopRegionRemark:   BB 'loopWithPrefetch_body': 2 s_nop instructions (
 
 ---
 
+## `StinkyTofuTimePasses`
+
+Prints one report per kernel to stderr after its pipeline finishes, so slow kernel generation can be attributed to individual passes. `stinkytofu-opt --time-passes` produces the same report.
+
+| Column | What it means |
+|--------|---------------|
+| **self** | Seconds spent in the pass itself, excluding nested passes. Sums to the pipeline wall time. |
+| **total** | Seconds including nested passes. For an adaptor (`ScopeAdaptor(...)`, `MainOnlyAdaptor`) this is the whole bucket it wraps. |
+| **self%** | Share of the pipeline wall time, by self. |
+| **runs** | How many times the pass ran. Passes such as `CFG Builder` run once per scope. |
+
+Rows are ordered by descending self time, so the pass to look at is the first one:
+
+```
+===== StinkyTofu pass timing: Cijk_Alik_Bljk_HHS_BH_MT128x128 =====
+   self(s)   total(s)   self%   runs  pass
+    9.8021     9.8021    62.1      1  StinkyDAGSchedulerPass
+    3.1044     3.1044    19.7      1  StinkyWaitCntInsertionPass
+    0.9130    14.2140     5.8      3  MainOnlyAdaptor
+   15.7902  total
+```
+
+A pass that only appears as an adaptor name (e.g. `InsertVgprMsbPass`, wrapped by `createFunctionToModuleAdaptor`) is timed through its adaptor entry, so its self time is the pass's own cost.
+
+---
+
 ## Usage
 
 ### Via CLI
@@ -123,6 +150,7 @@ Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 StinkyTo
 Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 'StinkyTofuPrintAfterPass="CFG Builder, StinkyDAGSchedulerPass"'
 Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 'StinkyTofuDebugPass="StinkyDAGSchedulerPass"'
 Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 StinkyTofuEnableRemarks=1
+Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 StinkyTofuTimePasses=1
 ```
 
 ### Via YAML

@@ -18,6 +18,7 @@ from rocke.helpers import (  # noqa: E402
     make_conv_manifest,
     write_artifact,
 )
+from kernels.common.conv_abi import conv_manifest_args_signature  # noqa: E402
 from kernels.common.conv_implicit_gemm import (  # noqa: E402
     ConvProblem,
     ImplicitGemmConvSpec,
@@ -108,6 +109,7 @@ def profile_config(name, pipeline, async_dma):
             cpg=p.C,
             kpg=p.K,
             conv_layout="implicit_gemm",
+            args_signature=conv_manifest_args_signature(conv_layout="implicit_gemm"),
             grid_order="NM",
             warmup_iters=5,
             timed_iters=10,  # Fewer iterations for profiling

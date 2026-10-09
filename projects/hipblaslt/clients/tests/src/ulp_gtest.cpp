@@ -14,6 +14,7 @@
 #include "ulp.hpp"
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace

@@ -1,0 +1,41 @@
+name: "Setup ROCm (Linux)"
+description: "Install ROCm SDK on Linux via TheRock artifacts"
+
+inputs:
+  amdgpu_family:
+    description: "GPU family for ROCm install (e.g. gfx94X-dcgpu)"
+    required: true
+  extra_args:
+    description: "Additional arguments to pass to install_rocm_from_artifacts.py"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Load CI environment
+      id: ci-env
+      uses: ./.github/actions/ci-env
+
+    - name: Checkout TheRock
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        repository: ROCm/TheRock
+        ref: ${{ steps.ci-env.outputs.therock-ref }}
+        path: TheRock
+        sparse-checkout: build_tools
+
+    - name: Install ROCm dependencies
+      shell: bash
+      run: pip install boto3
+
+    - name: Install ROCm
+      shell: bash
+      run: |
+        python3 TheRock/build_tools/install_rocm_from_artifacts.py \
+          --latest-release \
+          --amdgpu-family ${{ inputs.amdgpu_family }} \
+          --output-dir /opt/rocm \
+          --base-only \
+          ${{ inputs.extra_args }}
+        echo "ROCM_PATH=/opt/rocm" >> "$GITHUB_ENV"

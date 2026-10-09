@@ -99,6 +99,34 @@ struct CompareDAGNodeByOriginalOrder {
     }
 };
 
+/// Keep each prefetch, and the VALU chain computing its address, ahead of the next matrix
+/// instruction. Neither carries a counter, so without this edge the shortening budget defers
+/// them from window to window until the segment ends; the DAG scheduler places them on
+/// purpose (PrefetchLeadWmmas, address VALU well ahead to hide va_vdst), and this keeps the
+/// repair from moving them away.
+inline void addPrefetchPinEdges(RegionDAG& dag,
+                                const std::vector<StinkyInstruction*>& instructions) {
+    std::vector<bool> pinned(instructions.size(), false);
+    for (unsigned i = instructions.size(); i-- > 0;) {
+        const StinkyInstruction& inst = *instructions[i];
+        if (inst.getHwInstDesc() == nullptr) continue;
+        if (isGlobalPrefetch(inst)) {
+            pinned[i] = true;
+        } else if (isVectorALU(inst)) {
+            for (unsigned succ : dag.graph[i])
+                if (pinned[succ]) pinned[i] = true;
+        }
+        if (!pinned[i]) continue;
+        for (unsigned j = i + 1; j < instructions.size(); ++j) {
+            if (instructions[j]->getHwInstDesc() != nullptr &&
+                isMatrixInstruction(*instructions[j])) {
+                addEdgeById(&dag.nodes[i], &dag.nodes[j], dag.graph);
+                break;
+            }
+        }
+    }
+}
+
 using OrderedReadyNodeSet = std::set<DAGNode*, CompareDAGNodeByOriginalOrder>;
 
 /// Build-time toggle for the order in which a window's budgeted slots are filled.

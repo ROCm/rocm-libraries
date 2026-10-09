@@ -44,8 +44,10 @@ bind to until phase 6 moves the routing policy up.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from typing import Tuple
+from dataclasses import asdict, dataclass, fields, is_dataclass, replace
+from enum import IntEnum
+from operator import index
+from typing import Any, Tuple
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
@@ -60,9 +62,37 @@ from kernels.common.attention_unified import (
 )
 from rocke.core.arch import ArchTarget
 from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_matches
+from rocke.dispatch.tuning.identity import jsonable, normalize_knobs
 
 FAMILY = "attention_unified"
 ATTENTION_ABI_VERSION = "hipkg-attention-unified/v1"
+
+
+class AttentionMaskType(IntEnum):
+    """Attention-mask ordinals matching ``plan_utils::MaskType``.
+
+    These are mask kinds, not hipDNN ``DiagonalAlignment`` ordinals.
+    """
+
+    NO_MASK = 0
+    TOP_LEFT_CAUSAL = 1
+    BOTTOM_RIGHT_CAUSAL = 2
+    SLIDING_WINDOW = 3
+
+
+_ATTENTION_MASK_ORDINALS = tuple(mask_type.value for mask_type in AttentionMaskType)
+
+
+def _parse_attention_mask_type(value: object) -> AttentionMaskType:
+    """Return a validated mask enum without truncating or parsing strings."""
+    try:
+        ordinal = index(value)
+        return AttentionMaskType(ordinal)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "mask_type must be an exact integer ordinal in "
+            f"{_ATTENTION_MASK_ORDINALS}, got {value!r}"
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -77,7 +107,7 @@ class AttentionRequest(OperatorRequest):
     hdim_q: int
     hdim_v: int
     arch: str
-    mask_type: int = 0  # 0=none, 1=causal/top-left, ...
+    mask_type: AttentionMaskType | int = AttentionMaskType.NO_MASK
     use_sinks: bool = False
     sliding_window: int = 0
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
@@ -91,24 +121,27 @@ class AttentionRequest(OperatorRequest):
     dtype: str = "fp16"
     algorithm: str = "auto"
     spec_id: str = "auto"
+    # Concrete configuration of the candidate ``spec_id`` names (unified tuning
+    # or dense). "auto" selects that candidate's default spec; sweep APIs
+    # enumerate every feasible value and persist this id with the result.
+    tuning_id: str = "auto"
+    # The knob overrides that id stands for, as recorded next to it. When set,
+    # the candidate rebuilds the spec from them directly (and checks it against
+    # tuning_id unless that is "auto") instead of searching its space.
+    tuning_knobs: Tuple[Tuple[str, object], ...] = ()
     use_fp8: bool = False
     fp8_fnuz: bool = False
-    # --- standalone attention_dense knobs (only consumed by the opt-in
-    #     ``attention_dense`` candidate; ignored by the unified 2D/3D paths).
-    #     Defaults deliver the best qualified persistent prefill path for large Sq:
-    #     ``dense_persistent="auto"`` turns on the grid-stride variant once there
-    #     is enough work to fill the persistent grid, and ``persist_decode="auto"``
-    #     resolves through the selected architecture's concrete dense spec.
-    #     gfx950 may select one-/two-phase GQA pairing and wide DMA; gfx942
-    #     supports only qb-major/hkv-major ordering. ---
-    dense_persistent: str = "auto"  # "auto" | "on" | "off"
-    dense_num_persistent: int = 256
-    # Common: auto/qb_major/hkv_major; gfx950 also supports gqa_pair variants.
-    dense_persist_decode: str = "auto"
+
+    def __post_init__(self):
+        # Callers rebuild pins from stored JSON; a bad value fails here, with
+        # its name, rather than as an unhashable key inside a cache.
+        object.__setattr__(self, "tuning_knobs", normalize_knobs(self.tuning_knobs))
 
     def normalized(self) -> dict:
         d = asdict(self)
         d["dtype"] = self.dtype.lower()
+        # IntEnum and raw-int callers describe the same request/cache identity.
+        d["mask_type"] = _parse_attention_mask_type(self.mask_type).value
         return d
 
     def dims(self) -> dict[str, int]:
@@ -125,8 +158,18 @@ class AttentionRequest(OperatorRequest):
 
     def features(self) -> frozenset[str]:
         active = set()
-        if int(self.mask_type) != 0:
+        try:
+            mask_type = _parse_attention_mask_type(self.mask_type)
+        except ValueError:
+            # Let _request_errors report the invalid ordinal. In particular, do
+            # not silently classify an arbitrary nonzero value as causal.
+            mask_type = None
+        if mask_type is not None and mask_type != AttentionMaskType.NO_MASK:
             active.add("causal")
+        if mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and int(
+            self.seqlen_q
+        ) != int(self.seqlen_k):
+            active.add("causal_bottom_right")
         if int(self.sliding_window) > 0:
             active.add("sliding_window")
         if bool(self.use_sinks):
@@ -147,7 +190,9 @@ ATTENTION_DIM_VOCABULARY = (
     "kv_block_size",
 )
 
-ATTENTION_FEATURES = frozenset({"causal", "sliding_window", "sinks", "fp8"})
+ATTENTION_FEATURES = frozenset(
+    {"causal", "causal_bottom_right", "sliding_window", "sinks", "fp8"}
+)
 
 
 def _request_errors(req: OperatorRequest) -> list[str]:
@@ -163,6 +208,10 @@ def _request_errors(req: OperatorRequest) -> list[str]:
         errors.append("only hdim_q == hdim_v is supported")
     if int(req.nhead_q) % int(req.nhead_k):
         errors.append("nhead_q must be divisible by nhead_k (GQA grouping)")
+    try:
+        _parse_attention_mask_type(req.mask_type)
+    except ValueError as exc:
+        errors.append(str(exc))
     try:
         ArchTarget.from_gfx(req.arch)
     except KeyError as e:
@@ -253,7 +302,9 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
     return 120
 
 
-def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
+def _problem_with_num_cus(
+    req: AttentionRequest, num_cus: int
+) -> UnifiedAttentionProblem:
     # total_q = batch * seqlen_q (the flattened query rows). num_seqs = batch.
     return UnifiedAttentionProblem(
         total_q=int(req.batch) * int(req.seqlen_q),
@@ -269,10 +320,27 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
         use_sinks=bool(req.use_sinks),
         use_fp8=bool(req.use_fp8),
         fp8_fnuz=bool(req.fp8_fnuz),
-        num_cus=_resolve_num_cus(req),
+        num_cus=int(num_cus),
         target_ctas=int(req.target_ctas),
         clamp_arch=req.arch.lower(),
     )
+
+
+def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
+    """The production-routing problem, including the live-device CU policy."""
+    return _problem_with_num_cus(req, _resolve_num_cus(req))
+
+
+def _tuning_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
+    """Problem input for an explicit tuning candidate.
+
+    A tuning candidate already fixes path and geometry, so it does not consume
+    the live-device CU heuristic used by production routing. Keep its base a
+    pure function of the request: honor an explicit ``num_cus`` and otherwise
+    use the deterministic cross-compile fallback.
+    """
+    num_cus = int(req.num_cus)
+    return _problem_with_num_cus(req, num_cus if num_cus > 0 else 120)
 
 
 # Shared pin-selector: identical across families, so it lives in the dispatch
@@ -323,3 +391,174 @@ class AttentionSpec:
         if self.use_fp8:
             parts.append("fp8fnuz" if self.fp8_fnuz else "fp8")
         return kernel_name_join(*parts)
+
+
+def _dense_kernel_module(arch: str):
+    if arch == "gfx950":
+        from kernels.gfx950 import attention_dense
+    elif arch == "gfx942":
+        from kernels.gfx942 import attention_dense
+    else:
+        raise ValueError(f"no dense attention kernel for arch {arch!r}")
+    return attention_dense
+
+
+@dataclass(frozen=True)
+class AttentionTuningSpec:
+    """Concrete dispatcher-owned spec for every executable tuned candidate.
+
+    Generic production candidates intentionally return :class:`AttentionSpec`
+    and defer geometry. A unified tuning candidate or a dense candidate returns
+    this wrapper instead: the exact arch spec, builder choice, compile backend,
+    and optional 3D reduce spec are serializable and therefore participate in
+    dispatch/cache identity. ``path`` is ``"2d"`` / ``"3d"`` for the unified
+    tiled kernels and ``"dense"`` for the standalone dense kernel.
+
+    It is also the whole launch contract the runtime needs:
+    ``run_unified_attention_torch(tuning_spec=...)`` compiles :meth:`build`
+    under :meth:`cache_key` and launches with :meth:`launch_grid` /
+    :meth:`launch_block`, so the runtime never decodes ``builder_kind``. The
+    dense runner reads ``kernel_spec`` directly. ``allow_unsupported`` skips the
+    unified runtime's problem-shape support check.
+
+    Two identities, for two consumers. ``tuning_id`` / ``config_key`` name the
+    configuration -- ``variant_id`` plus the canonical ``knobs`` -- and are the
+    same on every problem (see :mod:`.identity`). :meth:`identity` names the
+    compiled kernel(s), problem and runtime addressing included, and is what
+    ``KernelId.spec_hash`` hashes. Neither covers ``candidate_name`` or
+    ``allow_unsupported``.
+    """
+
+    path: str
+    arch: str
+    builder_kind: str
+    compile_backend: str
+    candidate_name: str
+    tuning_id: str
+    kernel_spec: Any
+    fp8_fnuz: bool = False
+    num_kv_blocks: int = 0
+    reduce_spec: Any = None
+    variant_id: str = ""
+    config_key: str = ""
+    knobs: Tuple[Tuple[str, object], ...] = ()
+    allow_unsupported: bool = False
+
+    def identity(self) -> dict:
+        """Explicit payload of the compiled kernel(s): :meth:`cache_key`, with
+        classes named by qualified name so it serializes stably."""
+        return {"v": 1, "path": self.path, "kernel": jsonable(self.cache_key())}
+
+    def kernel_name(self) -> str:
+        return self.kernel_spec.kernel_name()
+
+    def cache_key(self) -> Tuple:
+        """Field-complete launcher-cache identity of the kernel(s) built."""
+        if self.path == "dense":
+            from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+            return attention_dense_cache_key(self.kernel_spec, arch=self.arch)
+
+        def items(spec):
+            if spec is None:
+                return None
+            if not is_dataclass(spec):
+                raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
+            return tuple((f.name, repr(getattr(spec, f.name))) for f in fields(spec))
+
+        return (
+            "explicit",
+            self.arch,
+            self.builder_kind,
+            self.compile_backend,
+            items(self.kernel_spec),
+            items(self.reduce_spec),
+        )
+
+    def build(self, arch: str | None = None):
+        """IR for this spec: one kernel for 2D, ``(segment, reduce)`` for 3D."""
+        from .tuning_specs import (
+            build_explicit_attention_2d,
+            build_explicit_attention_3d,
+        )
+
+        arch = arch or self.arch
+        if self.path == "dense":
+            return _dense_kernel_module(self.arch).build_attention_dense(
+                self.kernel_spec, arch=arch
+            )
+        if self.path == "3d":
+            return build_explicit_attention_3d(
+                self.kernel_spec, self.reduce_spec, arch=arch
+            )
+        if self.builder_kind == "gfx942_4warp_gqa":
+            from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
+
+            return build_gfx942_4warp_gqa(self.kernel_spec, arch=arch)
+        return build_explicit_attention_2d(self.kernel_spec, arch=arch)
+
+    def launch_grid(
+        self, problem: UnifiedAttentionProblem | None = None
+    ) -> Tuple[int, int, int]:
+        ks = self.kernel_spec
+        if self.path == "dense":
+            # The dense spec bakes (or declares) its whole problem shape.
+            return tuple(_dense_kernel_module(self.arch).attention_dense_grid(ks))
+        if self.path == "3d":
+            block_q = max(1, 16 // problem.num_queries_per_kv)
+            qblocks = problem.total_q // block_q + problem.num_seqs
+            return (int(qblocks), int(problem.num_kv_heads), int(ks.num_segments))
+        if self.builder_kind == "gfx942_4warp_gqa":
+            from kernels.common.attention_unified import gfx942_4warp_launch_grid
+
+            return gfx942_4warp_launch_grid(problem)
+        block_m = int(ks.block_m)
+        block_q = (
+            block_m // problem.num_queries_per_kv
+            if problem.num_queries_per_kv <= block_m
+            else 1
+        )
+        qblocks = int(problem.total_q // block_q + problem.num_seqs)
+        if bool(getattr(ks, "use_q_major_grid", False)):
+            return (qblocks, int(problem.num_kv_heads), 1)
+        return (int(problem.num_kv_heads), qblocks, 1)
+
+    def launch_block(self) -> Tuple[int, int, int]:
+        if self.path == "dense":
+            return tuple(
+                _dense_kernel_module(self.arch).attention_dense_block(self.kernel_spec)
+            )
+        if self.path == "3d":
+            return (64, 1, 1)
+        if self.builder_kind == "gfx942_4warp_gqa":
+            return (256, 1, 1)
+        return (64 * int(self.kernel_spec.num_warps), 1, 1)
+
+    def with_num_kv_blocks(self, num_kv_blocks: int) -> "AttentionTuningSpec":
+        """Specialize i32/i64 paged addressing once the physical cache is known.
+
+        Addressing width is a runtime specialization, not a configuration: it
+        changes :meth:`identity` (a different binary) but never ``tuning_id``,
+        so an id recorded after binding still replays from the request.
+        """
+        count = int(num_kv_blocks)
+        if count < 0:
+            raise ValueError("num_kv_blocks must be non-negative")
+        if self.path == "dense":
+            return self  # contiguous K/V: nothing to retarget
+        kernel_spec = self.kernel_spec
+        if not hasattr(kernel_spec, "use_i64_kv_addr"):
+            return replace(self, num_kv_blocks=count)
+        elem_bytes = 1 if kernel_spec.kv_storage_dtype == "fp8e4m3" else 2
+        block_stride = (
+            int(kernel_spec.block_size)
+            * int(kernel_spec.num_kv_heads)
+            * int(kernel_spec.head_size)
+            * elem_bytes
+        )
+        use_i64 = count > 0 and count * block_stride > 0x8000_0000
+        return replace(
+            self,
+            kernel_spec=replace(kernel_spec, use_i64_kv_addr=use_i64),
+            num_kv_blocks=count,
+        )

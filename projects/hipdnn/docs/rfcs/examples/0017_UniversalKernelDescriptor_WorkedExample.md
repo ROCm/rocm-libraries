@@ -539,10 +539,10 @@ a runtime one supplied through the variant pack is the launcher's business, not 
 so a runtime scale costs this pack nothing: the same kernarg is filled from a different place. This
 is the field-reference fallback form of `value_or_default`, distinct from the literal one §3 uses.
 
-The pack could accept more. The SDPA convention's implicit default (`1/sqrt(head_size)`, matching
-what both `asm_sdpa_engine`'s `SdpaFwdPlanBuilder::buildPlan` and `attention_unified`'s dispatch
-code compute) is expressible, since `rsqrt` is a defined operator. Requiring the scale to be
-stated is a choice this pack makes, not a language limit.
+The pack could accept more. hipDNN reads an unset `attn_scale_value` as 1.0 (no scaling), as
+cuDNN does, and every SDPA engine and reference applies that default; `value_or_default` with a
+literal 1.0 expresses it. Requiring the scale to be stated is a choice this pack makes, not a
+language limit.
 
 ## 6. The Engine, Metadata, and Two Kernel Packs
 

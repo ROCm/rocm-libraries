@@ -1,0 +1,135 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Opt-in lane for MIOpen built with MIOPEN_ENABLE_HIPDNN_WRAPPER=ON. Every other
+# MIOpen build here leaves it OFF, the shipping configuration, so nothing on the
+# default path exercises the wrapper's own gates.
+#
+# Kept out of component-ci-miopen.yml deliberately: that workflow is staying lean
+# while MIOpen CI moves to TheRock, and this lane is scaffolding that exists only
+# until the flag defaults on, so a separate file is removed in one move.
+#
+# Manual dispatch only. Automated flag-on coverage belongs to TheRock, which builds
+# the wrapper when a run sets THEROCK_FLAG_MIOPEN_ENABLE_HIPDNN_WRAPPER=ON and then
+# runs the parity harness and the wrapper ABI check against the resulting artifact.
+# This lane remains the home of the one check that cannot move there: the installed
+# header rename check needs a staged include tree, which the test job never fetches.
+#
+# The parity harness is only checked for registration here. Executing it needs a GPU,
+# which no runner here has, so the doubled runs happen wherever MIOpen's ctest suite
+# is run on hardware rather than being duplicated as a bespoke step.
+
+name: "MIOpen: hipDNN wrapper flag-on"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A second dispatch of the same ref supersedes the first; this is an expensive build
+# to leave running for an answer nobody is waiting on.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flag-on:
+    name: MIOpen wrapper flag-on checks
+    runs-on: azure-linux-scale-rocm
+    # A full release build plus miopen_gtest; well past this means a hang, not a slow build.
+    timeout-minutes: 180
+    container:
+      image: rocm/miopen-dev:multiarch_dev_20260910
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            dnn-providers/miopen-provider
+            projects/miopen
+            shared/ctest
+
+      - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
+
+      # MIOPEN_TEST_GFX94X names the target explicitly instead of letting the test tree probe
+      # for a GPU. This runner has none, and a probe that concludes so sets MIOPEN_NO_GPU,
+      # which drops the parity harness the count assertion below requires.
+      - name: Configure build
+        run: |
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          export CXXFLAGS=-Werror
+          rm -rf projects/miopen/install
+          mkdir projects/miopen/install
+          cmake -S projects/miopen -B build \
+            -DMIOPEN_ENABLE_HIPDNN_WRAPPER=ON \
+            -DMIOPEN_INSTALL_CXX_HEADERS=ON \
+            -DCMAKE_BUILD_TYPE=release \
+            -DBUILD_DEV=OFF \
+            -DMIOPEN_TEST_DISCRETE=OFF \
+            -DMIOPEN_USE_MLIR=ON \
+            -DMIOPEN_GPU_SYNC=OFF \
+            -DMIOPEN_TEST_FLAGS=' --disable-verification-cache ' \
+            -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DGPU_TARGETS="gfx942" \
+            -DMIOPEN_TEST_GFX94X=ON
+
+      # The scripts behind the wrapper gates, including the GPU-label lookup that
+      # depends on the shared test-category parser's output format. The entry only
+      # exists with the wrapper on, so nothing else runs it. Needs no build, so it
+      # goes before one and fails in seconds.
+      - name: Wrapper script self-tests
+        run: |
+          ctest --test-dir build -R '^test_forwarding_parity_scripts$' --no-tests=error --output-on-failure
+
+      - name: Build
+        run: cmake --build build --target install --target miopen_gtest -j$(nproc)
+
+      # The flag-on counterpart of the default build's public ABI gate. Beyond the
+      # symbol set and SONAME it asserts that the two halves were built together
+      # and that the wrapper stubs everything the implementation renamed: a missing
+      # stub links fine and fails only when a caller reaches that entry point.
+      # Runs through the same wrapper_abi_check ctest entry TheRock's test job uses,
+      # rather than a bespoke glob-and-invoke here, so the two paths cannot drift apart.
+      # --no-tests=error: ctest exits 0 when -R matches nothing, so a renamed or
+      # unregistered entry would otherwise pass having checked nothing.
+      - name: Wrapper ABI check
+        run: |
+          ctest --test-dir build -R '^wrapper_abi_check$' --no-tests=error --output-on-failure
+
+      # The rename is a compile-time trick, so a staged header spelling an entry
+      # point by its private name would hand that name to consumers as public API.
+      - name: Installed header rename check
+        run: |
+          python3 projects/miopen/script/check_public_abi.py check-installed-headers \
+            projects/miopen/install/include
+
+      # The mirror image of the default build's zero-count assertion: with the
+      # wrapper on, the parity harness has to be there.
+      - name: Forwarding parity harness is registered
+        run: |
+          # Capture before parsing: piping into sed would make sed's exit status
+          # the step's, so a ctest that failed outright would be read as a
+          # well-formed empty result. An assignment from a command substitution
+          # carries that command's status, so -e stops here instead.
+          listing=$(ctest --test-dir build -N -L forwarding_parity)
+          count=$(printf '%s\n' "$listing" | sed -n 's/^Total Tests: //p')
+          echo "forwarding_parity tests registered: ${count:-<unparsed>}"
+          test -n "$count" && test "$count" -gt 0 || {
+            echo "expected forwarding_parity tests with MIOPEN_ENABLE_HIPDNN_WRAPPER=ON"
+            printf '%s\n' "$listing"
+            exit 1
+          }

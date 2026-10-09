@@ -32,4 +32,9 @@ package-dir = { "" = "." }
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["kernels*", "builders*", "dispatch*"]
+include = ["kernels*", "builders*", "dispatch*", "benchmarks*"]
+
+[project.scripts]
+rocke-attention-combo-sweep = "benchmarks.common.attention_combo_sweep:main"
+rocke-dense-prefill-table-sweep = "benchmarks.gfx950.attention.prefill.dense_prefill_table_sweep:main"
+rocke-decode-table-sweep = "benchmarks.gfx950.attention.decode.decode_table_sweep:main"

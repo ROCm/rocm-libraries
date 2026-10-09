@@ -313,6 +313,11 @@ public:
             name_list << delim << "solution_index";
             value_list << delim << solution_index;
 
+            // Replay resolves solution_index and uses it only if it still
+            // names this kernel.
+            name_list << delim << "kernel_name";
+            value_list << delim << kernel_name;
+
             const char*   tuningEnv  = getenv("HIPBLASLT_TUNING_FILE");
             std::string   tuningPath = tuningEnv;
             std::ofstream file(tuningPath, std::ios::app);

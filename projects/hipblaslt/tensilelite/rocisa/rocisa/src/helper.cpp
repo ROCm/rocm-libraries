@@ -225,6 +225,13 @@ std::string demangle(const char* name)
     return result;
 }
 
+std::string nullDevicePath()
+{
+    // Not plain "NUL": LLVM turns a relative path under a long working directory
+    // into a \\?\ path, where NUL is an ordinary file name.
+    return "\\\\.\\NUL";
+}
+
 #else
 // POSIX implementation.
 #include <sys/wait.h>
@@ -288,6 +295,11 @@ std::string demangle(const char* name)
     result                = (status == 0) ? demangled : name;
     free(demangled);
     return result;
+}
+
+std::string nullDevicePath()
+{
+    return "/dev/null";
 }
 
 #endif // POSIX

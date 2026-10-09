@@ -7,8 +7,12 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities::batchnorm;
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 using namespace gpu_batchnorm_ref_test;
 using namespace gpu_batchnorm_fwd_train_ref_test;
+
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
 
 // --- Valid configurations ---
 
@@ -353,7 +357,7 @@ TEST(TestGpuBatchnormFwdTrainRefMixedPrecision, UpcastX)
 {
     SKIP_IF_NO_DEVICES();
 
-    using XDataType = bfloat16;
+    using XDataType = BFloat16Type;
     using ScaleBiasType = float;
     using MeanVarType = float;
     using YDataType = float;
@@ -368,9 +372,9 @@ TEST(TestGpuBatchnormFwdTrainRefMixedPrecision, DowncastX)
     SKIP_IF_NO_DEVICES();
 
     using XDataType = float;
-    using ScaleBiasType = half;
-    using MeanVarType = half;
-    using YDataType = half;
+    using ScaleBiasType = HalfType;
+    using MeanVarType = HalfType;
+    using YDataType = HalfType;
     using ComputeDataType = float;
 
     runGpuVsCpuBatchnormFwdTrain<XDataType, YDataType, ScaleBiasType, MeanVarType, ComputeDataType>(
@@ -381,9 +385,9 @@ TEST(TestGpuBatchnormFwdTrainRefMixedPrecision, UpcastY)
 {
     SKIP_IF_NO_DEVICES();
 
-    using XDataType = half;
-    using ScaleBiasType = half;
-    using MeanVarType = half;
+    using XDataType = HalfType;
+    using ScaleBiasType = HalfType;
+    using MeanVarType = HalfType;
     using YDataType = float;
     using ComputeDataType = float;
 
@@ -398,7 +402,7 @@ TEST(TestGpuBatchnormFwdTrainRefMixedPrecision, DowncastY)
     using XDataType = float;
     using ScaleBiasType = float;
     using MeanVarType = float;
-    using YDataType = bfloat16;
+    using YDataType = BFloat16Type;
     using ComputeDataType = float;
 
     runGpuVsCpuBatchnormFwdTrain<XDataType, YDataType, ScaleBiasType, MeanVarType, ComputeDataType>(
@@ -409,10 +413,10 @@ TEST(TestGpuBatchnormFwdTrainRefMixedPrecision, UpcastAffine)
 {
     SKIP_IF_NO_DEVICES();
 
-    using XDataType = bfloat16;
+    using XDataType = BFloat16Type;
     using ScaleBiasType = float;
     using MeanVarType = float;
-    using YDataType = half;
+    using YDataType = HalfType;
     using ComputeDataType = float;
 
     runGpuVsCpuBatchnormFwdTrain<XDataType, YDataType, ScaleBiasType, MeanVarType, ComputeDataType>(
@@ -424,8 +428,8 @@ TEST(TestGpuBatchnormFwdTrainRefMixedPrecision, DowncastAffine)
     SKIP_IF_NO_DEVICES();
 
     using XDataType = float;
-    using ScaleBiasType = half;
-    using MeanVarType = bfloat16;
+    using ScaleBiasType = HalfType;
+    using MeanVarType = BFloat16Type;
     using YDataType = float;
     using ComputeDataType = float;
 
@@ -436,14 +440,14 @@ TEST(TestGpuBatchnormFwdTrainRefMixedPrecision, DowncastAffine)
 // --- Test suite instantiations ---
 
 using TestGpuBatchnormFwdTrainRef3DFp32 = BatchnormFwdTrainTestSuite<float>;
-using TestGpuBatchnormFwdTrainRef3DFp16 = BatchnormFwdTrainTestSuite<half>;
-using TestGpuBatchnormFwdTrainRef3DBfp16 = BatchnormFwdTrainTestSuite<bfloat16>;
+using TestGpuBatchnormFwdTrainRef3DFp16 = BatchnormFwdTrainTestSuite<HalfType>;
+using TestGpuBatchnormFwdTrainRef3DBfp16 = BatchnormFwdTrainTestSuite<BFloat16Type>;
 using TestGpuBatchnormFwdTrainRef4DFp32 = BatchnormFwdTrainTestSuite<float>;
-using TestGpuBatchnormFwdTrainRef4DFp16 = BatchnormFwdTrainTestSuite<half>;
-using TestGpuBatchnormFwdTrainRef4DBfp16 = BatchnormFwdTrainTestSuite<bfloat16>;
+using TestGpuBatchnormFwdTrainRef4DFp16 = BatchnormFwdTrainTestSuite<HalfType>;
+using TestGpuBatchnormFwdTrainRef4DBfp16 = BatchnormFwdTrainTestSuite<BFloat16Type>;
 using TestGpuBatchnormFwdTrainRef5DFp32 = BatchnormFwdTrainTestSuite<float>;
-using TestGpuBatchnormFwdTrainRef5DFp16 = BatchnormFwdTrainTestSuite<half>;
-using TestGpuBatchnormFwdTrainRef5DBfp16 = BatchnormFwdTrainTestSuite<bfloat16>;
+using TestGpuBatchnormFwdTrainRef5DFp16 = BatchnormFwdTrainTestSuite<HalfType>;
+using TestGpuBatchnormFwdTrainRef5DBfp16 = BatchnormFwdTrainTestSuite<BFloat16Type>;
 
 TEST_P(TestGpuBatchnormFwdTrainRef3DFp32, MatchesCpuRef)
 {

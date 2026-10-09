@@ -84,7 +84,7 @@ endif()
     )
 
     # On Windows, stage the shadowed ROCm DLLs before the tool is built so a partial build plus a
-    # manual ctest doesn't load the stale System32 amd_comgr.dll. add_hipdnn_test() does this for
+    # manual ctest doesn't load the stale System32 ROCm DLLs. add_hipdnn_test() does this for
     # gtest binaries; mirror it here.
     if(TARGET stage_shadowed_rocm_dlls)
         add_dependencies(hipdnn_list_engines stage_shadowed_rocm_dlls)
@@ -220,7 +220,7 @@ endif()
         )
 
         # On Windows, stage the shadowed ROCm DLLs before the tool is built so a partial
-        # build plus a manual ctest does not load the stale System32 amd_comgr.dll.
+        # build plus a manual ctest does not load the stale System32 ROCm DLLs.
         if(TARGET stage_shadowed_rocm_dlls)
             add_dependencies(hipdnn_validate_descriptors stage_shadowed_rocm_dlls)
         endif()

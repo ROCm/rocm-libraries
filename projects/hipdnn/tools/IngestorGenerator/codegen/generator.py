@@ -15,6 +15,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from .models import (
+    KERNEL_SOURCE_KIND_HSACO,
     KERNEL_SOURCE_KIND_KPACK,
     IngestorConfig,
     KernelSpec,
@@ -218,14 +219,21 @@ def _check_metadata_resolved(
     binary was built from the builder dataclass's default. Mandatory fields are
     left to the config loader.
     """
+    # A prebuilt hsaco object has no spec to pin a knob in; only metadata decides.
+    prebuilt = kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO
     unresolved = sorted(k for k, v in metadata.items() if v == UNSET_SENTINEL)
     if unresolved:
+        remedy = (
+            "Write the resolved value in metadata"
+            if prebuilt
+            else "Pin the knob in kernel_source.spec, or write the resolved value in "
+            "metadata"
+        )
         raise ValueError(
             f"kernel {kernel.name!r} ships the unset sentinel "
             f"({UNSET_SENTINEL}) for {unresolved}: metadata must state the value the "
-            f"kernel was BUILT with. Pin the knob in kernel_source.spec, or write the "
-            f"resolved value in metadata -- the descriptor cannot say 'undecided' "
-            f"about a binary that already decided."
+            f"kernel was BUILT with. {remedy} -- the descriptor cannot say "
+            f"'undecided' about a binary that already decided."
         )
 
     spec = kernel.kernel_source.spec or {}
@@ -235,15 +243,34 @@ def _check_metadata_resolved(
         if not f.is_mandatory and f.name not in metadata and spec.get(f.name) is None
     )
     if undeclared:
+        where = (
+            "its metadata"
+            if prebuilt
+            else "neither its metadata nor its kernel_source.spec"
+        )
+        remedy = (
+            "Write the resolved value in metadata"
+            if prebuilt
+            else "Pin the knob in kernel_source.spec if the binary should carry it, "
+            "or write the resolved value in metadata"
+        )
+        if prebuilt:
+            tail = (
+                f"so nothing here decides the value. The loader will substitute the "
+                f"KMD default_value as the catalog key, which need not match what "
+                f"the prebuilt object was built with, and the disagreement is "
+                f"silent. {remedy}."
+            )
+        else:
+            tail = (
+                f"so nothing here decides the value. The loader will substitute the "
+                f"KMD default_value as the catalog key while the kernel is compiled "
+                f"from the builder's own default -- two independent defaults that "
+                f"are not required to agree, and whose disagreement is silent. "
+                f"{remedy} if the builder's default is what you mean."
+            )
         raise ValueError(
-            f"kernel {kernel.name!r} states {undeclared} in neither its metadata nor "
-            f"its kernel_source.spec, so nothing here decides the value. The loader "
-            f"will substitute the KMD default_value as the catalog key while the "
-            f"kernel is compiled from the builder's own default -- two independent "
-            f"defaults that are not required to agree, and whose disagreement is "
-            f"silent. Pin the knob in kernel_source.spec if the binary should carry "
-            f"it, or write the resolved value in metadata if the builder's default "
-            f"is what you mean."
+            f"kernel {kernel.name!r} states {undeclared} in {where}, {tail}"
         )
 
 
@@ -503,7 +530,11 @@ def build_kdp(
             "metadata": metadata,
             "priority": kernel.priority,
         }
-        if kernel.arch:
+        # hkp_pack validates the kernel's own arch for hsaco and rejects a
+        # wildcard, so the inherited pack arch is stated on the descriptor.
+        if kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO:
+            entry["arch"] = arch
+        elif kernel.arch:
             entry["arch"] = list(kernel.arch)
         kernel_descriptors.append(entry)
     if duplicates:

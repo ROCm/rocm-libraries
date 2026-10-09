@@ -472,6 +472,16 @@ int rocke_arch_max_vector_load_dwords(const rocke_arch_target_t* t, const char* 
     return t->memory.buffer_load_max_dwords;
 }
 
+int rocke_arch_async_lds_max_dwords(const rocke_arch_target_t* t)
+{
+    /* Python: ArchTarget.async_lds_max_dwords. Every buffer_load_lds emitter
+     * must clamp to this -- the backend does not diagnose an over-wide one,
+     * it aborts the whole process. */
+    if(!t)
+        return 0;
+    return t->memory.async_lds_max_dwords;
+}
+
 int rocke_arch_max_threads_per_block(const rocke_arch_target_t* t)
 {
     if(!t)
@@ -488,6 +498,61 @@ const char* const* rocke_known_arches(int* count)
     if(count)
         *count = rocke_ati_arch_registry_len;
     return rocke_ati_known_arches;
+}
+
+/* Reproduce str(KeyError(_build_target message)) for an unknown gfx target:
+ *
+ *   Python _build_target: raise KeyError(
+ *     f"unknown gfx target {gfx!r}; known: {sorted(specs)}. "
+ *     f"Add a row to {_DATA_FILE.name}.")
+ *
+ * str(KeyError(msg)) == repr(msg); the single quotes make Python DOUBLE-quote
+ * the whole message. sorted(specs) renders as ['gfx...', 'gfx...']. */
+void rocke_set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx)
+{
+    int count = 0;
+    const char* const* arches;
+    int i;
+    size_t pos = 0;
+    int wrote;
+
+    if(out == NULL || out_cap == 0)
+    {
+        return;
+    }
+
+    arches = rocke_known_arches(&count);
+
+    wrote = snprintf(out + pos, out_cap - pos, "\"unknown gfx target '%s'; known: [", gfx);
+    if(wrote < 0)
+    {
+        out[0] = '\0';
+        return;
+    }
+    pos += (size_t)wrote;
+    if(pos >= out_cap)
+    {
+        out[out_cap - 1] = '\0';
+        return;
+    }
+
+    for(i = 0; i < count; ++i)
+    {
+        wrote = snprintf(out + pos, out_cap - pos, "%s'%s'", (i == 0) ? "" : ", ", arches[i]);
+        if(wrote < 0)
+        {
+            out[out_cap - 1] = '\0';
+            return;
+        }
+        pos += (size_t)wrote;
+        if(pos >= out_cap)
+        {
+            out[out_cap - 1] = '\0';
+            return;
+        }
+    }
+
+    snprintf(out + pos, out_cap - pos, "]. Add a row to arch_specs.json.\"");
 }
 
 /* Return the final gfx component without discarding profile or feature suffixes. */

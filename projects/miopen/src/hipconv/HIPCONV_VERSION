@@ -1,12 +1,9 @@
-EMU version: v0.2.8-0-g4bec0aad
-EMU commit: 4bec0aad76eb76d0650c80be8a4502466e4c1f21
-Snapshot date: 2026-09-08
+EMU version: v0.3.2-0-ga6c85d2a
+EMU commit: a6c85d2a8592b918d9c79f94b4d3bf6473021fb3
+Snapshot date: 2026-10-02
 Arches: cdna3,cdna4,cdna5
-Out-of-snapshot patch: src/arch/cdna4/direct/direct_wgrad/epilogue.h carries hipconv
-  e1777ac9 (AMD-ROCm-Core-Perf-Team/hipconv#231), a cross-lane ordering fix taken ahead of
-  the next sync. Any snapshot from hipconv main at or after that commit supersedes it;
-  do not publish an earlier revision over this tree.
 Files:
+  ./CHANGELOG.md
   ./.clang-format
   ./cmake/autoshard.cpp.in
   ./cmake/GpuArch.cmake
@@ -14,7 +11,7 @@ Files:
   ./cmake/libautoshard.hpp
   ./CMakeLists.txt
   ./HIPCONV_VERSION
-  ./include/hipconv/conv2d_params.hpp
+  ./include/hipconv/conv_params.hpp
   ./include/hipconv/export.hpp
   ./include/hipconv/hipconv.hpp
   ./include/hipconv/tolerance.hpp
@@ -32,6 +29,10 @@ Files:
   ./src/arch/cdna4/depthwise/depthwise_1d_toeplitz/kernel.h
   ./src/arch/cdna4/depthwise/depthwise_2d_toeplitz/config_table.h
   ./src/arch/cdna4/depthwise/depthwise_2d_toeplitz/kernel.h
+  ./src/arch/cdna4/depthwise/depthwise_wgrad_hankel/config_desc.cpp
+  ./src/arch/cdna4/depthwise/depthwise_wgrad_hankel/config_desc.h
+  ./src/arch/cdna4/depthwise/depthwise_wgrad_hankel/config_table.h
+  ./src/arch/cdna4/depthwise/depthwise_wgrad_hankel/kernel.h
   ./src/arch/cdna4/direct_backend.cpp
   ./src/arch/cdna4/direct/direct/config.hpp
   ./src/arch/cdna4/direct/direct/config_matcher.cpp
@@ -71,6 +72,11 @@ Files:
   ./src/arch/cdna4/direct/direct_wgrad/row_loader.h
   ./src/arch/cdna4/direct/direct_wgrad/row_schedule.h
   ./src/arch/cdna4/direct/direct_wgrad/workgroup_tiles.h
+  ./src/arch/cdna4/direct/patch_embed/config_desc.cpp
+  ./src/arch/cdna4/direct/patch_embed/config_desc.h
+  ./src/arch/cdna4/direct/patch_embed/config.h
+  ./src/arch/cdna4/direct/patch_embed/config_table.h
+  ./src/arch/cdna4/direct/patch_embed/kernel.h
   ./src/arch/cdna4/grouped_backend.cpp
   ./src/arch/cdna4/grouped/grouped_16c.cpp
   ./src/arch/cdna4/grouped/grouped_16c_wgrad_fp16bf16.cpp
@@ -90,6 +96,20 @@ Files:
   ./src/arch/cdna5/bunnies_mi400.hpp
   ./src/arch/cdna5/CMakeLists.txt
   ./src/arch/cdna5/depthwise_backend.cpp
+  ./src/arch/cdna5/depthwise/depthwise_1d_toeplitz/config_matcher.cpp
+  ./src/arch/cdna5/depthwise/depthwise_1d_toeplitz/config_matcher.hpp
+  ./src/arch/cdna5/depthwise/depthwise_1d_toeplitz/config_table.h
+  ./src/arch/cdna5/depthwise/depthwise_1d_toeplitz/kernel.h
+  ./src/arch/cdna5/depthwise/depthwise_wgrad_hankel/config_matcher.cpp
+  ./src/arch/cdna5/depthwise/depthwise_wgrad_hankel/config_matcher.hpp
+  ./src/arch/cdna5/depthwise/depthwise_wgrad_hankel/config_table.h
+  ./src/arch/cdna5/depthwise/depthwise_wgrad_hankel/delta_issuer.h
+  ./src/arch/cdna5/depthwise/depthwise_wgrad_hankel/input_issuer.h
+  ./src/arch/cdna5/depthwise/depthwise_wgrad_hankel/kernel.h
+  ./src/arch/cdna5/depthwise/depthwise_wgrad_hankel/lds.h
+  ./src/arch/cdna5/depthwise/depthwise_wgrad_hankel/reduction.cpp
+  ./src/arch/cdna5/depthwise/depthwise_wgrad_hankel/reduction.hpp
+  ./src/arch/cdna5/depthwise/depthwise_wgrad_hankel/wave.h
   ./src/arch/cdna5/direct_backend.cpp
   ./src/arch/cdna5/direct/config.hpp
   ./src/arch/cdna5/direct/config_matcher.cpp
@@ -109,15 +129,21 @@ Files:
   ./src/arch_registry.cpp.in
   ./src/arch_registry.h
   ./src/bunnies.hpp
-  ./src/conv2d_params.cpp
   ./src/conv_kernel.cpp
   ./src/conv_kernel.h
   ./src/conv_kernel_table.h
+  ./src/conv_params.cpp
   ./src/depthwise_algorithm_stub.h
   ./src/depthwise_conv_kernel.h
   ./src/detail.h
   ./src/direct_algorithm_stub.h
   ./src/direct_conv_kernel.h
+  ./src/explicit_gemm/explicit_gemm_algorithm.cpp
+  ./src/explicit_gemm/hipblaslt_matmul.cpp
+  ./src/explicit_gemm/hipblaslt_matmul.hpp
+  ./src/explicit_gemm/patch_embed/patch_embed.cpp
+  ./src/explicit_gemm/patch_embed/patch_embed.hpp
+  ./src/explicit_gemm/pointwise/pointwise_kernel.cpp
   ./src/grouped_algorithm_stub.h
   ./src/grouped_conv_kernel.h
   ./src/hip_util.h
@@ -131,13 +157,11 @@ Files:
   ./src/matrix_layout_print.h
   ./src/memory.h
   ./src/packed_ops.h
+  ./src/patch_embed_conv_kernel.h
   ./src/pointwise_conv_kernel.h
-  ./src/pointwise/hipblaslt_matmul.cpp
-  ./src/pointwise/hipblaslt_matmul.hpp
-  ./src/pointwise/pointwise_conv.cpp
-  ./src/pointwise/pointwise_fp16bf16.cpp
   ./src/registry.cpp
   ./src/swizzle.h
+  ./src/tensor_view.hpp
   ./src/tolerance.cpp
   ./src/tolerance.h
   ./src/transpose_lds_layout.h

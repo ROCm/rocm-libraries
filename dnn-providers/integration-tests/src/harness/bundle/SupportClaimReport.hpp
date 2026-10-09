@@ -5,9 +5,16 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <filesystem>
 #include <iosfwd>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
+#include "harness/bundle/HarnessPolicy.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -20,6 +27,21 @@ struct SupportClaimCoverage
 {
     size_t graphsFound = 0; // seeded by registration
     size_t graphsWithClaims = 0; // seeded by registration
+    // Of the claim-bearing graphs, how many survived --gtest_filter. Bumped in SetUp(),
+    // the earliest hook GTest runs after the filter has already chosen this test, so
+    // the gap below it is the filter's doing and the gap above it is not. Registration
+    // cannot supply this: GTest only applies the filter inside RUN_ALL_TESTS(), so
+    // graphsWithClaims counts every bundle on disk whether or not this run was ever
+    // going to touch one.
+    size_t graphsSelectedWithClaims = 0;
+    // Of the selected graphs, how many reached a test body. The difference against
+    // graphsSelectedWithClaims is exactly the bundles SetUp() skipped -- arch guard,
+    // TOML skip-list, no device -- which is why the two are separate counters rather
+    // than one bumped somewhere in between. Both are bumped from shouldObserveClaims(),
+    // the same predicate registration seeds graphsWithClaims from, so the four nest and
+    // countersAreConsistent() below can say so. A plugin that failed to load needs no
+    // special handling here: main() exits non-zero on it before a body runs.
+    size_t graphsReachedBody = 0;
     // Bumped once per graph whose sidecar was read, from SupportObservation::sidecar
     // — never from the verdict count. A sidecar naming only engines this build does
     // not load leaves no verdicts and must still count.
@@ -48,15 +70,27 @@ struct CoverageUpdate
     bool queried = false; ///< bump graphsQueried
     bool noApplicableClaim = false; ///< bump graphsWithNoApplicableClaim
     bool notOpened = false; ///< bump graphsNotOpened
-    /// A sidecar exists and enforcement is on, but the query never happened. The
-    /// run-level guard only fires when *no* graph anywhere was queried, so a partial
-    /// gap needs its own signal; this one fails the individual test.
+    /// A sidecar exists and this run was meant to read it, but the query never
+    /// happened. The run-level guard only fires when *no* graph anywhere was queried,
+    /// so a partial gap needs its own signal.
     bool missedQuery = false;
 };
 
-// `enforcementExpected` is the harness's shouldEnforceClaims(): a sidecar exists,
-// enforcement is on, and an engine was named to decide against.
-CoverageUpdate coverageFor(const SupportObservation& observation, bool enforcementExpected);
+// Everything here derives from `observation`, so nothing here survives the read
+// throwing. graphsReachedBody deliberately does not: it is true before the read and
+// is published straight to the reporter, ahead of it.
+//
+// `observationExpected` is the caller's shouldObserveClaims(): this graph's claims
+// were this run's business, so a sidecar that went unread is a gap rather than a
+// bundle the run was never going to look at.
+CoverageUpdate coverageFor(const SupportObservation& observation, bool observationExpected);
+
+/// The complaint owed for a coverage gap, or nullopt when there is none. Takes no
+/// severity, and none is owed to the claim mode: a missed query is the harness failing
+/// to do the one thing it was asked to, not a claim that came out badly, so it goes red
+/// whether or not this run enforces.
+std::optional<HarnessComplaint> missedQueryComplaint(const CoverageUpdate& update,
+                                                     std::string_view bundlePath);
 
 class SupportClaimVerdicts
 {
@@ -114,10 +148,74 @@ private:
 };
 
 // Enforcement that passed having queried nothing is a lie, not a pass (RFC 0015 §7.2).
+// Scoped to the claim-bearing graphs whose bodies actually ran: a suite filtered onto
+// bundles that carry no claims enforced nothing because there was nothing to enforce,
+// and a bundle SetUp() skipped never got as far as a query it could have made. Neither
+// is enforcement failing to look, which is the only thing this guard is about.
 bool verifiedNothing(const SupportClaimCoverage& coverage);
 
+// Whether the counters still nest. Every number above is a subset of the one before
+// it, so the ladder can only ever descend:
+//
+//     found >= withClaims >= selected >= ran >= queried + notOpened
+//
+// (queried and notOpened are disjoint halves of the bodies that ran: the sidecar was
+// read, or the graph never opened so it could not be. A shortfall against their sum
+// is the harness losing a query it owed, which the summary reports separately -- the
+// invariant here is only that the sum cannot exceed the bodies it is drawn from.)
+//
+// Holds for a single pass only. found and withClaims are counted once at registration,
+// the rest once per test execution, so --gtest_repeat breaks the ladder with nothing
+// wrong.
+//
+// Nothing asserts this today; the relations live in the field comments above and in
+// the arithmetic buildSupportClaimSummary() does on them. That is the fragile part:
+// a new skip path added to SetUp() without a counter to match, or two bumps keyed on
+// different predicates, silently rewrites every attribution line downstream and no
+// test notices. Checked rather than described, because the failure mode is a
+// confident wrong answer rather than a crash.
+//
+// Deliberately not a hard assert: a summary is a diagnostic, and aborting the run
+// that produced it helps nobody. The summary says so and leaves out the attributions
+// instead, since those are the numbers the broken ladder would corrupt.
+bool countersAreConsistent(const SupportClaimCoverage& coverage);
+
+// Who, where and on what the run was, for the summary's "run" block. Passed in rather
+// than read from TestConfig so the summary can be built without a singleton.
+struct SupportClaimRunContext
+{
+    std::string engine; // empty when --test-engine was not given
+    std::string arch; // base token, the same one the verdicts carry
+    std::string platform;
+    // The bundle data root. Bundle paths under it are reported relative to its
+    // parent, so they read the same on every machine; empty reports them as recorded.
+    std::filesystem::path bundleRoot;
+};
+
+// A verdict's bundle path as the summary reports it: the "#caseId" suffix dropped
+// (the case gets its own field), and a path under `bundleRoot` rewritten as
+// "<root folder>/<path below it>". A path outside the root comes back unchanged
+// rather than as a "../" chain nobody can follow.
+std::string reportBundlePath(std::string_view recordedPath,
+                             std::string_view caseId,
+                             const std::filesystem::path& bundleRoot);
+
+// The summary as JSON: the counters, the verdict tallies, what went unenforced and
+// why, and every verdict someone has to act on. nullopt when the run touched no
+// claims at all, so a lane with no sidecars prints nothing.
+//
+// Lists are sorted, so two runs over the same tree produce the same document.
+std::optional<nlohmann::json> buildSupportClaimSummary(const SupportClaimCoverage& coverage,
+                                                       const SupportClaimVerdicts& verdicts,
+                                                       ClaimMode claims,
+                                                       const SupportClaimRunContext& run);
+
+// A one-line header naming the claim mode, then buildSupportClaimSummary() indented
+// under a "support_claim_summary" key.
 void printSupportClaimSummary(const SupportClaimCoverage& coverage,
                               const SupportClaimVerdicts& verdicts,
+                              ClaimMode claims,
+                              const SupportClaimRunContext& run,
                               std::ostream& os);
 
 } // namespace hipdnn_integration_tests::bundle

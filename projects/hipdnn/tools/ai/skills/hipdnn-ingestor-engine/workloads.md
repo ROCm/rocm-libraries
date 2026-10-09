@@ -31,6 +31,9 @@ occurrences**. Inspect real dims/strides, attributes and UID topology, not filen
 Distinguish unsupported, malformed/unrepresentable and missing-variant outcomes, and
 never reduce the denominator to successful timing rows.
 
+Counts and outcomes are bound to the identities in [RUNBOOK.md](RUNBOOK.md#8-handoff)'s
+*Handoff* cover sheet.
+
 ## Applicability and reference contract
 
 rocKE profiles scope the candidate registry to the actual kernel family/algorithm and

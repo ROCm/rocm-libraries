@@ -3,9 +3,10 @@
 
 #include <gtest/gtest.h>
 
-#include "EpsilonTestUtils.hpp"
+#include "ScalarTestUtils.hpp"
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
 #include <cstdint>
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -21,6 +22,8 @@ using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_integration_tests::test_utils;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
+
 namespace
 {
 
@@ -62,7 +65,8 @@ flatbuffers::FlatBufferBuilder
                                                    meanVarianceDataType,
                                                    &channelOnlyStrides,
                                                    &channelOnlyDims));
-    tensors.push_back(createEpsilonTensorAttributes(builder, epsilonUid, epsilon, epsilonDataType));
+    tensors.push_back(
+        createScalarTensorAttributes(builder, epsilonUid, epsilon, epsilonDataType, "epsilon"));
 
     auto attrs = CreateBatchnormInferenceAttributesVarianceExt(
         builder, xUid, meanUid, varianceUid, scaleUid, biasUid, yUid, epsilonUid);
@@ -347,17 +351,21 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     constexpr float MEAN_RANGE = 0.5f;
     constexpr float SCALE_BIAS_RANGE = 1.0f;
     unsigned int seed = 42;
-    xTensor.fillWithRandomValues(static_cast<IOType>(-1), static_cast<IOType>(1), seed++);
-    scaleTensor.fillWithRandomValues(static_cast<ScaleBiasType>(-SCALE_BIAS_RANGE),
-                                     static_cast<ScaleBiasType>(SCALE_BIAS_RANGE),
-                                     seed++);
-    biasTensor.fillWithRandomValues(static_cast<ScaleBiasType>(-SCALE_BIAS_RANGE),
-                                    static_cast<ScaleBiasType>(SCALE_BIAS_RANGE),
-                                    seed++);
-    meanTensor.fillWithRandomValues(
-        static_cast<MeanVarType>(-MEAN_RANGE), static_cast<MeanVarType>(MEAN_RANGE), seed++);
-    varianceTensor.fillWithRandomValues(
-        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.f), seed++);
+    fillWithRandomValues(xTensor, static_cast<IOType>(-1), static_cast<IOType>(1), seed++);
+    fillWithRandomValues(scaleTensor,
+                         static_cast<ScaleBiasType>(-SCALE_BIAS_RANGE),
+                         static_cast<ScaleBiasType>(SCALE_BIAS_RANGE),
+                         seed++);
+    fillWithRandomValues(biasTensor,
+                         static_cast<ScaleBiasType>(-SCALE_BIAS_RANGE),
+                         static_cast<ScaleBiasType>(SCALE_BIAS_RANGE),
+                         seed++);
+    fillWithRandomValues(meanTensor,
+                         static_cast<MeanVarType>(-MEAN_RANGE),
+                         static_cast<MeanVarType>(MEAN_RANGE),
+                         seed++);
+    fillWithRandomValues(
+        varianceTensor, static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.f), seed++);
     epsilonTensor.fillWithValue(static_cast<ComputeType>(BATCHNORM_DEFAULT_EPSILON));
 
     // Run the GPU reference executor
