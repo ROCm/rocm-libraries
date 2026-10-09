@@ -1757,7 +1757,7 @@ def cases():
     #   - dw_unmerged_cshuffle pins the Gm=1 cshuffle store width: it derives
     #     from kpg (_vec(1) = 1 here) rather than a fixed 8, which failed the
     #     whole-vector bound and dropped every output. Python twin of parity
-    #     config 27.
+    #     config 28.
     #   - gm4/gm8/gm32 vary the shift and mask width (log2 Gm) of the merged
     #     k decode that feeds both the A channel and the B-load diagonal.
     #   - gm64 is Gm == groups: one merged group, but the grouped decode stays

@@ -575,7 +575,7 @@ Separately, and not a substitute for the above:
 - Byte-identity is GREEN for all four convolution families at both LLVM flavors.
   Merged groups is implemented in **both** engines, and the forward parity
   emitters (`conv_implicit_gemm_emit.{py,c}`) build eight depthwise configs
-  (indices 20–27: 21–26 merged, 20 and 27 the unmerged default/cshuffle
+  (indices 21–28: 22–27 merged, 21 and 28 the unmerged default/cshuffle
   controls), so the gate byte-compares merged Python-vs-C++ emission directly
   rather than only proving the default path is undisturbed. The parity
   emitters compare the two engines against each other; they have no golden.
@@ -804,8 +804,8 @@ python3 tools/run_checks.py --op conv
 Read the `-rs` skip list. `_assert_case_ran` makes an all-skipped merged sweep
 a hard failure, but only for those cases.
 
-Byte-identity, both flavors — must be GREEN. `conv_implicit_gemm` reports 28
-configs (0–27); 20–27 are the depthwise ones (21–26 merged, 20 and 27 the
+Byte-identity, both flavors — must be GREEN. `conv_implicit_gemm` reports 29
+configs (0–28); 21–28 are the depthwise ones (22–27 merged, 21 and 28 the
 unmerged default/cshuffle controls):
 
 ```bash
@@ -824,7 +824,7 @@ ROCKE_LLVM_FLAVOR=llvm22 python3 tools/check_byte_identity.py
 | Shape-dependent degree (`_fwd_merge_pick` centring the sweep window; AOT cache carrying every admissible degree) rather than a constant | **Keep** | The winning degree spreads across five values over 35 shapes, and every flat choice regresses some shape below unmerged |
 | Closed-form cost model (8 fitted constants) in place of the three-cap rule | **Keep** | On a 128-shape held-out split of a 428-configuration measured corpus it realises 0.9692 of each shape's own optimum against 0.9232 for the cap rule, and leaves 23 shapes more than 5% short against 43 |
 | No `_FWD_MERGE_MAX` ceiling | **Keep** | A hard `Gm <= 32` cap on top of the model does not help (0.9682 TEST / 0.9743 ALL, against 0.9692 / 0.9777 without it). The model declines 64 where 64 should be declined, so the ceiling only costs the shapes that want it |
-| `group_merge` default of 1 | **Keep** | The field emits no merge-specific IR at 1: parity configs 20 (default) and 27 (cshuffle) are the unmerged depthwise controls and byte-compare Python vs C++, and golden cases `dw_unmerged` / `dw_unmerged_cshuffle` pin them. The one Gm=1 IR change in this PR (cshuffle store width derived from kpg) is independent of the field |
+| `group_merge` default of 1 | **Keep** | The field emits no merge-specific IR at 1: parity configs 21 (default) and 28 (cshuffle) are the unmerged depthwise controls and byte-compare Python vs C++, and golden cases `dw_unmerged` / `dw_unmerged_cshuffle` pin them. The one Gm=1 IR change in this PR (cshuffle store width derived from kpg) is independent of the field |
 | Merge + `async_dma` | **Defer** | `AsyncTileLoader`'s predicate is chunk-granular and cannot express a per-element diagonal |
 | Merge + pointwise (`Y == X == 1`) | **Defer** | The flat fast path builds `valid` from scratch with no slot for the diagonal. Highest-value follow-up: this is where merging should pay most |
 | Merge + WMMA / `wave_size != 64` | **Defer** | Separate fragment mapping; gated off rather than guessed |

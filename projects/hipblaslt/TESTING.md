@@ -182,7 +182,8 @@ reference, and TheRock superbuild is the third option if you need the whole stac
 | TensileLite kernel-generation behavior | `tox -e unit` (includes the characterization goldens) | No |
 | Anything, before pushing | `pre-commit run --all-files` | No |
 
-The four client test tiers (`quick`, `standard`, `comprehensive`, `full`) are defined in
+The five client test tiers (`quick`, `standard`, `comprehensive`, `full`, and `stress`, which
+holds only the large-memory size-threshold and address-overflow cases) are defined in
 [`clients/tests/test_categories.yaml`](clients/tests/test_categories.yaml). When hipBLASLt is built
 inside rocm-libraries, those tiers are registered as CTest labels and a relocatable
 `CTestTestfile.cmake` is installed to `bin/hipblaslt/`, so the tiers can be run with `ctest` from
@@ -321,6 +322,7 @@ kernels on CPU and hands an artifact to a GPU stage for the run phase.
 | `standard` | smoke + quick + pre_checkin | ~30 min | 3600 s |
 | `comprehensive` | standard + nightly | ~2 h | 7200 s |
 | `full` | comprehensive + HMM (needs a managed-memory capable host) | up to 24 h | 86400 s |
+| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case); for large-memory runners or a weekly run. The fast_check cases among them skip in a run with no gtest filter, such as TheRock's | ~10 min on gfx90a for the fast_check cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
 
 All tiers exclude `*known_bug*`. There are currently no multi-GPU tests.
 
@@ -336,6 +338,34 @@ and epilogue fusion, and those reproduce at small sizes far more cheaply. Large 
 address-arithmetic overflow and workspace behavior specifically, and are used sparingly for that
 reason. There is real redundancy in the datatype sweeps, where many numerical variants exercise the
 same code path, and pruning that is a standing opportunity rather than an active project.
+
+**Exact checks at large sizes (`fast_check`).** For large shapes, `fast_check: 1` replaces the CPU
+reference with an exact probe check of every element of D (see
+[`clients/common/include/fast_check.hpp`](clients/common/include/fast_check.hpp)). It needs
+`initialization: integer_exact`, which today covers only A, B and C:
+
+| Operand | integer_exact values |
+| --- | --- |
+| A, C | {0, 1, 2}; `ternary`: {-1, 0, 1}; `sparse_k`: each row of A is zero except at 17 K indices, which move from row to row |
+| B | {-2, ..., 2}, signs in a checkerboard; `ternary`: {-1, 0, 1} |
+| bias, scaleAlpha vector | not covered: the generic integer fill, 1 to 10 |
+| scaleA, scaleB, scaleC, scaleD, scaleE | not covered: the generic integer fill, 1 to 10 (0.1 to 1.0 with `norm_check`, and for fp8 outputs; fast_check refuses those) |
+| E (output), amaxD, bias gradient | outputs, checked exactly: E like D, relu and clamp through E, amaxD against the verified result, a bias gradient against exact sums of A or B |
+
+Before any kernel runs, fast_check bounds every partial sum and every result from the actual inputs
+and refuses a case that would reach the range the compute type holds exactly (2^24 for f32, 2^11 for
+f16, 2^31 for int32). At large K, D's type is the tighter limit: integers are exact up to 256 in
+bf16, 2048 in f16, 16 in fp8 e4m3 and 8 in e5m2, and an int8 D saturates at 127. fast_check models
+the rounding into D, but each result outside D's exact range costs a K-length dot product on the
+host, so the large-K cases pick the pattern by output type:
+
+| Output | Standard pattern | Large K (28672 to 32768) |
+| --- | --- | --- |
+| f32, int32 | exact; typical results stay far below the accumulator limit | standard |
+| f16 | exact below K of about 256; rounding modelled above | `ternary` or `sparse_k` |
+| bf16 | exact below K of about 32; rounding modelled above | `sparse_k` (every result at most 140) |
+| fp8 | rounding modelled at any K; fp8 outputs are always checked on the host | `sparse_k` |
+| int8 | saturates; each saturated result is recomputed | `sparse_k` |
 
 **Pre-flight layout validation.** Before the GTest binary runs, the TheRock lane walks the installed
 tree and validates its physical layout. This exists because the runtime's kernel-library probe has

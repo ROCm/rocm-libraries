@@ -157,7 +157,7 @@ as described in the notes.
   implemented in **both** engines — `group_merge` is a field on the C-ABI spec
   struct (`rocke_implicit_gemm_conv_spec`), is carried across the pybind
   boundary, and the fwd parity emitters build eight depthwise configs
-  (`conv_implicit_gemm_emit.{py,c}` indices 20–27: 21–26 merged, 20 and 27 the
+  (`conv_implicit_gemm_emit.{py,c}` indices 21–28: 22–27 merged, 21 and 28 the
   unmerged default/cshuffle controls) spanning both epilogues, the 1-wide
   cshuffle store, `unroll_k`, and degrees with `groups/Gm > 1` as well as
   `Gm == groups` (one merged group; the grouped decode stays engaged). Byte-identity is therefore a
