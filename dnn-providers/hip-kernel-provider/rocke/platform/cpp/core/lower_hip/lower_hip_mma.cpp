@@ -187,8 +187,9 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     int tf32_count = rocke_tf32_mma_count(op_id);
     if(tf32_count)
     {
-        if(strcmp(lw->arch.gfx, "gfx942") != 0)
-            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "XF32 MMA requires gfx942");
+        char tf32_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_tf32_mma_target_error(op_id, lw->arch.gfx, tf32_error, sizeof tf32_error))
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", tf32_error);
         rocke_h_emitf(lw,
                       "f32x%d %s = __builtin_amdgcn_%s(__builtin_bit_cast(f32x2, %s), "
                       "__builtin_bit_cast(f32x2, %s), %s, 0, 0, 0);",

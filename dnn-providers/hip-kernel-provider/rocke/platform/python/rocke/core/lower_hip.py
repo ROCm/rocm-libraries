@@ -44,6 +44,7 @@ from .mma_operand import (
     mma_operand_needs_reinterpret,
     mma_operand_value,
 )
+from .tf32 import TF32_MMA, tf32_mma_target_error, tf32_op_error
 
 
 # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
@@ -403,8 +404,6 @@ class _Lowerer:
         self._indent -= 1
 
     def lower_op(self, op: Op) -> None:
-        from .tf32 import tf32_op_error
-
         error = tf32_op_error(op)
         if error:
             raise ValueError(error)
@@ -675,8 +674,6 @@ class _Lowerer:
         This keeps the HIP emission identical to the legacy ISA-named path while
         the IRBuilder helpers route through :meth:`IRBuilder.mma`.
         """
-        from .tf32 import TF32_MMA
-
         op_id = op.attrs["op_id"]
         from .arch.mfma_scale import (
             gfx950_scaled_mfma,
@@ -699,8 +696,9 @@ class _Lowerer:
             )
             return
         if op_id in TF32_MMA:
-            if self.arch.gfx != "gfx942":
-                raise ValueError("XF32 MMA requires gfx942")
+            error = tf32_mma_target_error(op_id, self.arch)
+            if error:
+                raise ValueError(error)
             a, b, c = op.operands
             self._emit(
                 f"f32x{TF32_MMA[op_id]} {_name(op.result)} = __builtin_amdgcn_{op_id}("
