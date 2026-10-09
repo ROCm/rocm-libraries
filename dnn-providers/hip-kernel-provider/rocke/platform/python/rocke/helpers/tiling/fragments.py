@@ -11,6 +11,11 @@ This is the REGISTER side of the surface, the counterpart to
 to an element `dtype` and holds the SSA `value` with the registers; `value` is its only mutable
 field, and every write to it is checked against the layout and dtype. The IR verbs in
 :mod:`rocke.helpers.tiling.emit` fill / load / store the `Fragment`.
+
+Terminology: a *register* here is one logical vector slot holding one element of the fragment's
+`dtype` (``register_count`` slots per lane), not a physical 32-bit VGPR. LLVM packs the slots into
+VGPRs: a gfx90a MFMA A operand of ``vec<f16x4>`` occupies two 32-bit registers, and a 64-bit
+element occupies two. Sub-byte formats, which LLVM cannot pack, are not supported here.
 """
 
 from __future__ import annotations
