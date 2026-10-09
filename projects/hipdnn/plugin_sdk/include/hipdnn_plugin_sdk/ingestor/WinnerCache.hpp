@@ -144,7 +144,7 @@ inline std::vector<const KernelDefinition*>
     firstIndex.reserve(kernels.size());
     for(size_t index = 0; index < kernels.size(); ++index)
     {
-        const auto& kernel = kernels[index];
+        const auto& kernel = detail::kernelOf(kernels[index]);
         // emplace keeps the first index on a repeat, matching find_if's first hit.
         firstIndex.emplace(
             detail::RecordedKernelKey{kernel.kernelId, kernel.packId, kernel.dispatchId}, index);
@@ -165,6 +165,63 @@ inline std::vector<const KernelDefinition*>
     return ordered;
 }
 
+template <typename Entry>
+std::optional<std::vector<Entry>> orderIfFullyCoveredImpl(const WinnerRecord& record,
+                                                          const std::vector<Entry>& kernels)
+{
+    if(!recordCoversImpl(record, kernels))
+    {
+        return std::nullopt;
+    }
+    auto ordered = orderByRecordImpl(record, kernels);
+    if(ordered.size() != kernels.size())
+    {
+        return std::nullopt;
+    }
+    return ordered;
+}
+
+} // namespace detail
+
+/// Does @p record carry a measurement for every kernel in @p kernels? One-directional:
+/// entries in @p record absent from @p kernels do not fail coverage. Production
+/// decisions go through `orderIfFullyCovered` below, not this directly.
+///
+/// Linear in `record.size() + kernels.size()`: the record's ids are hashed once rather
+/// than scanned per kernel, since a record can cover tens of thousands of candidates.
+inline bool recordCovers(const WinnerRecord& record, const std::vector<KernelDefinition>& kernels)
+{
+    return detail::recordCoversImpl(record, kernels);
+}
+
+/// recordCovers() over a catalog view.
+inline bool recordCoversView(const WinnerRecord& record,
+                             const std::vector<const KernelDefinition*>& kernels)
+{
+    return detail::recordCoversImpl(record, kernels);
+}
+
+/// Reorders @p kernels into @p record's ranked order, dropping any kernel the record
+/// does not carry and any entry whose `packId`/`dispatchId` no longer agree (distinct
+/// from `recordCovers`'s coverage check). An empty result means the caller falls back.
+///
+/// Each record entry resolves to the FIRST kernel in @p kernels carrying its triple, and
+/// an entry repeated in the record repeats its kernel, exactly as a linear scan per entry
+/// would; the kernels are indexed once so the whole call is linear rather than quadratic.
+inline std::vector<KernelDefinition> orderByRecord(const WinnerRecord& record,
+                                                   const std::vector<KernelDefinition>& kernels)
+{
+    return detail::orderByRecordImpl(record, kernels);
+}
+
+/// orderByRecord() over a catalog view: the same order, as pointers.
+inline std::vector<const KernelDefinition*>
+    orderByRecordView(const WinnerRecord& record,
+                      const std::vector<const KernelDefinition*>& kernels)
+{
+    return detail::orderByRecordImpl(record, kernels);
+}
+
 /// Returns @p record's order over @p kernels only when the record both covers every
 /// kernel and orders every one of them; nullopt otherwise. The two can diverge --
 /// `recordCovers` matches by `kernelId` alone, `orderByRecord` requires the full
@@ -174,16 +231,15 @@ inline std::optional<std::vector<const KernelDefinition*>>
     orderIfFullyCovered(const WinnerRecord& record,
                         const std::vector<const KernelDefinition*>& kernels)
 {
-    if(!recordCovers(record, kernels))
-    {
-        return std::nullopt;
-    }
-    auto ordered = orderByRecord(record, kernels);
-    if(ordered.size() != kernels.size())
-    {
-        return std::nullopt;
-    }
-    return ordered;
+    return detail::orderIfFullyCoveredImpl(record, kernels);
+}
+
+/// orderIfFullyCovered() over a catalog view.
+inline std::optional<std::vector<const KernelDefinition*>>
+    orderIfFullyCoveredView(const WinnerRecord& record,
+                            const std::vector<const KernelDefinition*>& kernels)
+{
+    return detail::orderIfFullyCoveredImpl(record, kernels);
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

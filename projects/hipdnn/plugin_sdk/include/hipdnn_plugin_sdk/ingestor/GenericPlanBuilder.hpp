@@ -141,7 +141,7 @@ public:
             {
                 return false;
             }
-            return !_stateManager.unsortedDefinitions(contextFor(handle, opGraph)).empty();
+            return !_stateManager.catalogView(contextFor(handle, opGraph))->entries.empty();
         }
         catch(const std::exception& error)
         {
@@ -310,8 +310,8 @@ public:
                                const TSettings& executionSettings) const override
     {
         const auto context = contextFor(handle, opGraph);
-        const auto catalog = _stateManager.unsortedCatalog(context);
-        if(catalog.entries.empty())
+        const auto catalog = _stateManager.catalogView(context);
+        if(catalog->entries.empty())
         {
             throwNoApplicableKernel();
         }
@@ -321,7 +321,7 @@ public:
         if(filtered.empty())
         {
             throwUnsatisfiableKnobFilter(executionSettings.ingestorSettings.knobFilter,
-                                         catalog.entries.size());
+                                         catalog->entries.size());
         }
 
         size_t maxBytes = 0;
@@ -588,7 +588,8 @@ public:
     {
         using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-        const auto ranked = _stateManager.sortedDefinitions(contextFor(handle, opGraph));
+        const auto catalog = _stateManager.sortedCatalogView(contextFor(handle, opGraph));
+        const auto& ranked = catalog->entries;
         std::vector<KnobT> knobs;
         if(ranked.empty())
         {
@@ -1259,7 +1260,7 @@ private:
     /// Keeps the first @p limit of the ranked @p candidates. Runs before the winner-record
     /// lookup, so coverage is judged against the shortlist a benchmark under the same
     /// limit measured, not against the whole catalog.
-    void applyCandidateLimit(std::vector<KernelDefinition>& candidates,
+    void applyCandidateLimit(std::vector<const KernelDefinition*>& candidates,
                              const std::optional<size_t>& limit) const
     {
         if(!limit.has_value() || candidates.size() <= *limit)

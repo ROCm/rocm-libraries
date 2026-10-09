@@ -56,6 +56,8 @@ struct ResolvedMatcher
     MatchDescriptor descriptor;
     GraphCriterionFn graphFn = nullptr;
     KernelMatcherFn kernelFn = nullptr;
+    /// A kernel-scoped matcher's optional KernelPrepareFn, registered under its symbol.
+    KernelPrepareFn prepareFn = nullptr;
 };
 
 /// A kernel-scoped matcher's CandidateFilterFn, resolved once with the matcher, and the
@@ -217,7 +219,7 @@ public:
         {
             const auto id = matcher.id;
             const auto description = describeDescriptor("matcher", matcher.name, matcher.id);
-            ResolvedMatcher resolved{std::move(matcher), nullptr, nullptr};
+            ResolvedMatcher resolved{std::move(matcher), nullptr, nullptr, nullptr};
             if(resolved.descriptor.scope == MatchScope::GRAPH)
             {
                 resolved.graphFn
@@ -227,6 +229,8 @@ public:
             {
                 resolved.kernelFn
                     = KernelMatcherRegistry::resolve(resolved.descriptor.matchSymbol, description);
+                resolved.prepareFn
+                    = KernelPrepareRegistry::tryResolve(resolved.descriptor.matchSymbol);
             }
 
             if(const auto [it, inserted] = _matchers.emplace(id, std::move(resolved)); !inserted)
@@ -253,6 +257,7 @@ public:
         }
 
         validateAndIndexPacks();
+        prepareDefinitions();
         resolveCandidateFilters();
     }
 
@@ -1040,7 +1045,7 @@ private:
                                      ? "no device resolved"
                                      : "resolved device reports no gcnArchName";
             HIPDNN_PLUGIN_LOG_INFO("ingestor: " << reason << "; no kernel applies");
-            return Catalog{};
+            return std::make_shared<const CatalogView>();
         }
 
         return catalogFor(context, cacheKey(context));
@@ -1056,8 +1061,6 @@ private:
             {
                 HIPDNN_PLUGIN_LOG_TRACE("ingestor: catalog cache hit for device "
                                         << context.deviceId);
-                // get() already returned a copy; moving out of that local avoids a
-                // second one on the hot path.
                 return std::move(*cached);
             }
         }
@@ -1067,7 +1070,8 @@ private:
                 "ingestor: graph supplies no content key, so its catalog cannot be cached");
         }
 
-        Catalog catalog = buildCatalog(context);
+        std::shared_ptr<const CatalogView> catalog
+            = std::make_shared<const CatalogView>(buildCatalog(context));
 
         if(key.has_value())
         {
@@ -1172,6 +1176,9 @@ private:
                 continue;
             }
 
+            // The pack's kernel-scoped matchers, resolved once per pack rather than looked
+            // up per kernel.
+            const auto kernelFns = kernelMatcherFns(pack);
             size_t admitted = 0;
             for(const auto& precomputed : _definitions[packIndex])
             {
@@ -1357,24 +1364,18 @@ private:
         return true;
     }
 
-    bool kernelLevelMatchersPass(const KernelDescriptorPack& pack,
-                                 const MatchContext& context,
-                                 const BoundTokens& bound,
-                                 const KernelDefinition& kernel) const
+    std::vector<KernelMatcherFn> kernelMatcherFns(const KernelDescriptorPack& pack) const
     {
+        std::vector<KernelMatcherFn> kernelFns;
         for(const auto& matcherId : pack.matcherIds)
         {
             const auto& matcher = _matchers.at(matcherId);
-            if(matcher.descriptor.scope != MatchScope::KERNEL)
+            if(matcher.descriptor.scope == MatchScope::KERNEL)
             {
-                continue;
-            }
-            if(!matcher.kernelFn(context, bound, kernel))
-            {
-                return false;
+                kernelFns.push_back(matcher.kernelFn);
             }
         }
-        return true;
+        return kernelFns;
     }
 
     /// Loads the on-disk shard covering @p gcnArchName into `_winnerCache` once, tracked
