@@ -118,3 +118,19 @@ def test_scale_formats_gemm_cli_normalizes_matrix_names(monkeypatch, dtype, oper
     assert example.main(argv) == 0
     assert len(calls) == 1
     assert getattr(calls[0], f"dtype_{operand}") == normalize_dtype(dtype)
+
+
+@pytest.mark.parametrize("axis", ["m", "n"])
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_scale_formats_gemm_cli_rejects_invalid_spec_before_verify(
+    monkeypatch, capsys, axis, value
+):
+    from rocke.examples.gfx1250.gemm import scale_formats_gemm as example
+
+    monkeypatch.setattr(example, "verify", lambda *args: pytest.fail("must not verify"))
+    with pytest.raises(SystemExit) as exc:
+        example.main([f"--{axis}", value])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "M/N/K must be positive" in err
+    assert "Traceback" not in err
