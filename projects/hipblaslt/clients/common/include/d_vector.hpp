@@ -44,6 +44,24 @@
 #define MEM_MAX_GUARD_PAD 8192
 #define MAX_DTYPE_SIZE sizeof(double)
 
+#ifdef GOOGLE_TEST
+// Guard copies used to go through the legacy null stream. Concurrent workers
+// each call this during device_vector_setup, and sharing that stream corrupts
+// the HIP runtime heap. A pooled stream is private to the worker.
+inline void hipblaslt_copy_guard(void* dst, const void* src, size_t bytes, hipMemcpyKind kind)
+{
+    if(t_hipblaslt_test_stream)
+    {
+        EXPECT_EQ(hipMemcpyAsync(dst, src, bytes, kind, t_hipblaslt_test_stream), hipSuccess);
+        EXPECT_EQ(hipStreamSynchronize(t_hipblaslt_test_stream), hipSuccess);
+    }
+    else
+    {
+        EXPECT_EQ(hipMemcpy(dst, src, bytes, kind), hipSuccess);
+    }
+}
+#endif
+
 /* ============================================================================================ */
 /*! \brief  (abstract class) wrapper around a pointer to hip device or pinned host memory, including allocation size in bytes */
 class hip_memory
@@ -381,14 +399,13 @@ public:
             if(m_guard_len > 0)
             {
                 // Copy m_guard to device memory before allocated memory
-                EXPECT_EQ(hipMemcpy(d, m_guard, m_guard_len, hipMemcpyHostToDevice), hipSuccess);
+                hipblaslt_copy_guard(d, m_guard, m_guard_len, hipMemcpyHostToDevice);
 
                 // Point to allocated block
                 d += m_pad;
 
                 // Copy m_guard to device memory after allocated memory
-                EXPECT_EQ(hipMemcpy(d + m_size, m_guard, m_guard_len, hipMemcpyHostToDevice),
-                          hipSuccess);
+                hipblaslt_copy_guard(d + m_size, m_guard, m_guard_len, hipMemcpyHostToDevice);
             }
         }
 #endif
@@ -406,8 +423,7 @@ public:
                 T* host = new T[m_pad];
 
                 // Copy device memory after allocated memory to host
-                EXPECT_EQ(hipMemcpy(host, d + this->m_size, m_guard_len, hipMemcpyDeviceToHost),
-                          hipSuccess);
+                hipblaslt_copy_guard(host, d + this->m_size, m_guard_len, hipMemcpyDeviceToHost);
 
                 // Make sure no corruption has occurred
                 EXPECT_EQ(memcmp(host, m_guard, m_guard_len), 0);
@@ -416,7 +432,7 @@ public:
                 d -= m_pad;
 
                 // Copy device memory after allocated memory to host
-                EXPECT_EQ(hipMemcpy(host, d, m_guard_len, hipMemcpyDeviceToHost), hipSuccess);
+                hipblaslt_copy_guard(host, d, m_guard_len, hipMemcpyDeviceToHost);
 
                 // Make sure no corruption has occurred
                 EXPECT_EQ(memcmp(host, m_guard, m_guard_len), 0);
@@ -486,18 +502,16 @@ public:
             if(m_guard_len > 0)
             {
                 // Copy m_guard to device memory before allocated memory
-                EXPECT_EQ(hipMemcpy(d, m_guard_type, m_guard_len, hipMemcpyHostToDevice),
-                          hipSuccess);
+                hipblaslt_copy_guard(d, m_guard_type, m_guard_len, hipMemcpyHostToDevice);
 
                 // Point to allocated block
                 d += m_pad * realDataTypeSize(m_dtype);
 
                 // Copy m_guard to device memory after allocated memory
-                EXPECT_EQ(hipMemcpy(d + this->m_size * realDataTypeSize(m_dtype),
-                                    m_guard_type,
-                                    m_guard_len,
-                                    hipMemcpyHostToDevice),
-                          hipSuccess);
+                hipblaslt_copy_guard(d + this->m_size * realDataTypeSize(m_dtype),
+                                     m_guard_type,
+                                     m_guard_len,
+                                     hipMemcpyHostToDevice);
             }
         }
 #endif
@@ -515,11 +529,10 @@ public:
                 char* host = new char[m_pad * realDataTypeSize(m_dtype)];
 
                 // Copy device memory after allocated memory to host
-                EXPECT_EQ(hipMemcpy(host,
-                                    d + this->m_size * realDataTypeSize(m_dtype),
-                                    m_guard_len,
-                                    hipMemcpyDeviceToHost),
-                          hipSuccess);
+                hipblaslt_copy_guard(host,
+                                     d + this->m_size * realDataTypeSize(m_dtype),
+                                     m_guard_len,
+                                     hipMemcpyDeviceToHost);
 
                 // Make sure no corruption has occurred
                 EXPECT_EQ(memcmp(host, m_guard_type, m_guard_len), 0);
@@ -528,7 +541,7 @@ public:
                 d -= m_pad * realDataTypeSize(m_dtype);
 
                 // Copy device memory after allocated memory to host
-                EXPECT_EQ(hipMemcpy(host, d, m_guard_len, hipMemcpyDeviceToHost), hipSuccess);
+                hipblaslt_copy_guard(host, d, m_guard_len, hipMemcpyDeviceToHost);
 
                 // Make sure no corruption has occurred
                 EXPECT_EQ(memcmp(host, m_guard_type, m_guard_len), 0);

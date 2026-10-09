@@ -38,6 +38,9 @@
 #include <pthread.h>
 #include <unistd.h>
 #endif
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 /*********************************************
  * thread pool functions
@@ -310,7 +313,15 @@ void launch_test_on_threads(std::function<void()> test,
 
     for(size_t i = 0; i < numThreads; ++i)
         g_thread_pool.submit(
-            [=] { launch_test_on_streams(test, numStreams, numDevices, i); },
+            [=] {
+#ifdef _OPENMP
+                // The pool already has one pthread per core. A default OpenMP
+                // team from each worker adds another full team, and those
+                // teams race the host allocator.
+                omp_set_num_threads(1);
+#endif
+                launch_test_on_streams(test, numStreams, numDevices, i);
+            },
             std::move(promise[i]));
 
     for(size_t i = 0; i < numThreads; ++i)
