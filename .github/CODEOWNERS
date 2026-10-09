@@ -85,6 +85,7 @@
 /projects/rpp/                                      @ROCm/rpp-reviewers
 /shared/origami/                                    @ROCm/origami-reviewers
 /shared/mxdatagenerator/                            @ROCm/rocroller-developers
+/shared/hostnumerics/                               @newling
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
 /shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
@@ -102,6 +103,10 @@
 
 /projects/rocblas/**/*.cmake                        @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
 /projects/rocblas/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
+
+/shared/hostnumerics/**/*.cmake                     @ROCm/rocm-math-lib-build-infra
+/shared/hostnumerics/**/*.cmake.in                  @ROCm/rocm-math-lib-build-infra
+/shared/hostnumerics/**/CMakeLists.txt              @ROCm/rocm-math-lib-build-infra
 
 /shared/mxdatagenerator/**/*.cmake                  @ROCm/rocm-math-lib-build-infra
 /shared/mxdatagenerator/**/CMakeLists.txt           @ROCm/rocm-math-lib-build-infra
