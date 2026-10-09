@@ -288,6 +288,43 @@ class SmemType(Type):
         object.__setattr__(self, "exclusive", exclusive)
 
 
+# Pointer widths by address space, as the AMDGPU data layout states them
+# (p3 is 32 bits; global, constant and flat pointers are 64).
+_POINTER_BITS = {"lds": 32}
+_DEFAULT_POINTER_BITS = 64
+
+
+def type_bits(t: Type) -> int:
+    """The number of bits a value of IR type ``t`` occupies.
+
+    A scalar's width comes from its format (``dtype_info``); a vector's is its
+    element width times its count; a pointer's comes from its address space.
+    An LDS allocation is memory, not a value, and raises ``TypeError``.
+    """
+    if isinstance(t, VectorType):
+        return t.count * type_bits(t.elem)
+    if isinstance(t, PtrType):
+        return _POINTER_BITS.get(t.space, _DEFAULT_POINTER_BITS)
+    if isinstance(t, SmemType):
+        raise TypeError(f"{t.name} is an LDS allocation, not a value with a bit width")
+    return dtype_info(t.name).encoded_bits
+
+
+def _check_bitcast_width(verb: str, source: Type, target: Type, hint: str) -> None:
+    if isinstance(source, PtrType) or isinstance(target, PtrType):
+        raise TypeError(
+            f"{verb} of {source.name} to {target.name}: a bitcast does not convert "
+            "pointers"
+        )
+    source_bits, target_bits = type_bits(source), type_bits(target)
+    if source_bits != target_bits:
+        raise ValueError(
+            f"{verb} of {source.name} ({source_bits} bits) to {target.name} "
+            f"({target_bits} bits) changes the bit width -- a bitcast keeps every "
+            f"bit; {hint}"
+        )
+
+
 # ----------------------------- Values / Ops ------------------------------
 
 
@@ -2530,8 +2567,11 @@ class IRBuilder:
         `buffer_load_dwordxN`) and `<2N x f16>` (the form the MFMA wants),
         or `<N x i32>` (raw 32-bit dwords) and `<N x float>`. The LLVM
         lowering emits an `addrspacecast`-less `bitcast`; the gfx
-        backend folds it away.
+        backend folds it away. A target of a different bit width raises.
         """
+        _check_bitcast_width(
+            "vec_bitcast", v.type, target, "slice or concatenate the vector first"
+        )
         return self._op(
             "vector.bitcast",
             [v],
@@ -3226,7 +3266,10 @@ class IRBuilder:
         return self._op("tile.lane_id", [], [I32], result_name_hint="lane").result
 
     def bitcast(self, v: Value, target: Type) -> Value:
-        """Bitcast a scalar to another type of the same size."""
+        """Bitcast a scalar to a type of the same bit width; another width raises."""
+        _check_bitcast_width(
+            "bitcast", v.type, target, "convert the value to change its width"
+        )
         return self._op(
             "arith.bitcast",
             [v],
