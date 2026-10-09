@@ -584,9 +584,11 @@ scheduled to gain.
 ## 6. Python-engine-only support
 
 rocKE's two engines must emit the same LLVM IR (byte identity). The items below
-exist in the Python engine only; the C++ engine rejects them, and the default
-dispatch falls back to the Python engine for a kernel that uses them. Each line
-names the C++ files a mirror must change.
+exist in the Python engine only, or behave differently in the C++ engine. Where
+the C++ engine rejects a kernel that uses one, the default dispatch falls back to
+the Python engine; the bitcast check and the register-packing arithmetic are
+exceptions, described in their rows. Each line names the C++ files a mirror must
+change.
 
 | Item | Python engine | C++ files to mirror |
 |---|---|---|
@@ -597,3 +599,4 @@ names the C++ files a mirror must change.
 | `I4` logical type | `core/ir.py` | `cpp/include/rocke/ir.h`, `cpp/core/ir/core_types.cpp`, `cpp/core/dtypes.cpp` |
 | `iu8` / `iu4` as spellings of `i8` / `i4`; gfx1151 and gfx11-generic integer WMMA rows record `i8` / `i4` operands (the C++ engine still treats `iu8` / `iu4` as their own dtypes and finds no op for an `i8` / `i4` query) | `core/dtypes.py`, `core/arch/data/arch_specs.json` | `cpp/core/dtypes.cpp`, `cpp/core/arch/data.cpp` (embedded catalog rows) |
 | `bitcast` / `vec_bitcast` refuse a cast that changes the bit width (`type_bits` in `core/ir.py`); the C++ builder still emits it, and clang rejects it | `core/ir.py` | `cpp/core/ir/ir_arith.cpp` (`rocke_b_bitcast`), `cpp/core/ir/ir_mem.cpp` (`rocke_b_vec_bitcast`) |
+| `register_packing` / `packed_word_range`: how sub-byte elements pack into 32-bit registers (host-side arithmetic; no kernel calls it yet) | `core/storage.py` | `cpp/include/rocke/storage.h`, `cpp/core/storage.cpp` |
