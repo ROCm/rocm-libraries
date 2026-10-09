@@ -108,12 +108,14 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     variant. Which config gets which lever, and why, is the table in
     ``builders/gfx942/attention/prefill/README.md``.
 
-    The non-persistent body reads ``batch``, ``seqlen_q``, and ``seqlen_kv`` from
-    kernel params (``Gfx942AttentionDenseSpec.runtime_shape``). ``signature`` is
-    ``attention_dense_signature``, which appends those three i32s, and
-    ``bind_torch`` launches through ``run_attention_dense_torch``, which packs
-    them. The persistent grid declares no shape params and keeps batch in the
-    kernel name.
+    When ``Gfx942AttentionDenseSpec.runtime_shape`` holds (default and persistent
+    grids, sliding window included), the body reads ``batch``, ``seqlen_q``,
+    ``seqlen_kv``, ``num_query_heads``, and ``num_kv_heads`` from kernel params
+    (``spec.runtime_param_fields``). On the persistent grid the work decode's
+    fast-division magic/shift pairs follow them (``spec.runtime_kernarg_fields``).
+    ``signature`` is ``attention_dense_signature``, which appends those i32s after
+    ``scale``, and ``bind_torch`` launches through ``run_attention_dense_torch``,
+    which packs them via ``attention_dense_runtime_args``.
     """
 
     return make_dense_candidate(
