@@ -21,11 +21,11 @@ on:
       amdgpu_families:
         type: string
         required: true
-      # Per-PR runs leave out configs marked emu_full, which cannot finish
-      # within their timeout there; full runs include them with a longer one.
+      # Full runs include configs marked emu_full and give every test up to
+      # 3 hours; false leaves them out for a ~35-minute run with 45-minute tests.
       full_suite:
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -54,7 +54,7 @@ jobs:
       SCRIPTS_DIR: ${{ github.workspace }}/rocm-libraries/.github/scripts
       REPORT_DIR: ${{ github.workspace }}/rocjitsu-tensilelite-reports
       FULL_SUITE: ${{ inputs.full_suite }}
-      PER_TEST_TIMEOUT: ${{ inputs.full_suite && '7200' || '2700' }}
+      PER_TEST_TIMEOUT: ${{ inputs.full_suite && '10800' || '2700' }}
       # Leave time within the 345-minute step for cleanup and report generation.
       SUITE_TIMEOUT_SECONDS: "19800"
       # Oldest rocm-systems commit this lane passes with (it has #13122, the
