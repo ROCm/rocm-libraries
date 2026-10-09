@@ -591,8 +591,9 @@ try
          value<int>(&scaleAFormat)->default_value(0),
          "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8. "
          "w4a16 group scales (require --a_type i4_r), numbered as hipblasLtMatmulMatrixScale_t: "
-         "1006 = VEC32, 1007 = VEC64, 1008 = VEC128, 1009 = VEC32_ZP, 1010 = VEC64_ZP, "
-         "1011 = VEC128_ZP. The scale element type is --b_type.")
+         "bf16 scales: 1006 = VEC32, 1007 = VEC64, 1008 = VEC128, 1009 = VEC32_ZP, "
+         "1010 = VEC64_ZP, 1011 = VEC128_ZP; fp16 scales: 1012..1017 in the same "
+         "order. The named scale type must match --b_type.")
 
         ("int4_encoding",
          value<std::string>(&int4_encoding)->default_value("signed"),
@@ -1165,7 +1166,7 @@ try
         if(s == 1001)
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
         // w4a16 group scales; numbered as hipblasLtMatmulMatrixScale_t.
-        if(s >= 1006 && s <= 1011)
+        if(s >= 1006 && s <= 1017)
             return static_cast<hipblaslt_scaling_format>(s);
         return hipblaslt_scaling_format::none;
     };
@@ -1241,7 +1242,7 @@ try
         const bool int4A = (arg.a_type == HIP_R_4I);
         if(int4A != isW4A16Scaling(arg.scaleA))
             throw std::invalid_argument(
-                "w4a16 needs --a_type i4_r together with --scaleA 1006..1011; got --a_type "s
+                "w4a16 needs --a_type i4_r together with --scaleA 1006..1017; got --a_type "s
                 + hip_datatype_to_string(arg.a_type) + " --scaleA "
                 + std::to_string(static_cast<int>(arg.scaleA)));
         if(int4A)

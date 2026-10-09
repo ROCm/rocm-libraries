@@ -2854,14 +2854,14 @@ Tests:
     # Unsigned weights selected by the descriptor encoding attribute.
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1011, int4_encoding: 1, scale_type: f32_r}
     # fp16 activations, which carry an fp16 scale.
-    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1008, scale_type: f32_r}
-    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1009, int4_encoding: 1, scale_type: f32_r}
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1014, scale_type: f32_r}
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1015, int4_encoding: 1, scale_type: f32_r}
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1006, int4_encoding: 1, scale_type: f32_r}
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1007, int4_encoding: 1, scale_type: f32_r}
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1008, int4_encoding: 1, scale_type: f32_r}
-    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1009, int4_encoding: 0, scale_type: f32_r}
-    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1010, int4_encoding: 0, scale_type: f32_r}
-    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1011, int4_encoding: 0, scale_type: f32_r}
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1015, int4_encoding: 0, scale_type: f32_r}
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1016, int4_encoding: 0, scale_type: f32_r}
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1017, int4_encoding: 0, scale_type: f32_r}
   matrix_size:
     - { M: 512, N: 256, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
     # Odd M exercises the ragged last row pair of the zero-point packing.
@@ -2886,13 +2886,13 @@ Tests:
     matmul:
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1008, scale_type: f32_r}
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1011, int4_encoding: 1, scale_type: f32_r}
-    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1009, int4_encoding: 1, scale_type: f32_r}
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1015, int4_encoding: 1, scale_type: f32_r}
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1006, int4_encoding: 1, scale_type: f32_r}
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1007, int4_encoding: 1, scale_type: f32_r}
     - { a_type: i4_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1008, int4_encoding: 1, scale_type: f32_r}
-    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1009, int4_encoding: 0, scale_type: f32_r}
-    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1010, int4_encoding: 0, scale_type: f32_r}
-    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1011, int4_encoding: 0, scale_type: f32_r}
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1015, int4_encoding: 0, scale_type: f32_r}
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1016, int4_encoding: 0, scale_type: f32_r}
+    - { a_type: i4_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1017, int4_encoding: 0, scale_type: f32_r}
   matrix_size:
     - { M: 512, N: 256, K: 1024, lda: 1024, ldb: 1024, ldc: 512, ldd: 512 }
   use_ext: [1]

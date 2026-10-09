@@ -23,11 +23,18 @@ typedef enum class _hipblaslt_scaling_format
     // --scaleA takes the same number the API does. Unlike the MX formats above
     // these are ordinary signed 16-bit floats consumed in the main loop, so
     // isBlockScaling() (which gates the MX data generator) stays false for them.
-    // The scale element type is B's, so it is not part of the mode.
-    Block_32                = 1006,
-    Block_64                = 1007,
-    Block_128               = 1008,
-    Block_32_ZP             = 1009,
-    Block_64_ZP             = 1010,
-    Block_128_ZP            = 1011,
+    // The scale element type is named by the mode and must equal B's type;
+    // the library rejects a mismatch.
+    Block_32_BF16           = 1006,
+    Block_64_BF16           = 1007,
+    Block_128_BF16          = 1008,
+    Block_32_BF16_ZP        = 1009,
+    Block_64_BF16_ZP        = 1010,
+    Block_128_BF16_ZP       = 1011,
+    Block_32_F16            = 1012,
+    Block_64_F16            = 1013,
+    Block_128_F16           = 1014,
+    Block_32_F16_ZP         = 1015,
+    Block_64_F16_ZP         = 1016,
+    Block_128_F16_ZP        = 1017,
 } hipblaslt_scaling_format;

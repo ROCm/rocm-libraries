@@ -655,14 +655,20 @@ namespace
     {
         switch(fmt)
         {
-        case RocblasltContractionProblem::ScalingFormat::Block_32:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
             return 32;
-        case RocblasltContractionProblem::ScalingFormat::Block_64:
-        case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
             return 64;
-        case RocblasltContractionProblem::ScalingFormat::Block_128:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             return 128;
         default:
             return 0;
@@ -686,9 +692,12 @@ namespace
     {
         switch(fmt)
         {
-        case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             return true;
         default:
             return false;
@@ -2214,12 +2223,18 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Scalar:
         case RocblasltContractionProblem::ScalingFormat::Vector:
         // Block scales use the ordinary scaleA pointer.
-        case RocblasltContractionProblem::ScalingFormat::Block_32:
-        case RocblasltContractionProblem::ScalingFormat::Block_64:
-        case RocblasltContractionProblem::ScalingFormat::Block_128:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
@@ -2249,12 +2264,18 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Scalar:
         case RocblasltContractionProblem::ScalingFormat::Vector:
         // Block scales use the ordinary scaleA pointer.
-        case RocblasltContractionProblem::ScalingFormat::Block_32:
-        case RocblasltContractionProblem::ScalingFormat::Block_64:
-        case RocblasltContractionProblem::ScalingFormat::Block_128:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
@@ -2501,12 +2522,18 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Scalar:
         case RocblasltContractionProblem::ScalingFormat::Vector:
         // Block scales use the ordinary scaleA pointer.
-        case RocblasltContractionProblem::ScalingFormat::Block_32:
-        case RocblasltContractionProblem::ScalingFormat::Block_64:
-        case RocblasltContractionProblem::ScalingFormat::Block_128:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
@@ -2535,12 +2562,18 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Scalar:
         case RocblasltContractionProblem::ScalingFormat::Vector:
         // Block scales use the ordinary scaleA pointer.
-        case RocblasltContractionProblem::ScalingFormat::Block_32:
-        case RocblasltContractionProblem::ScalingFormat::Block_64:
-        case RocblasltContractionProblem::ScalingFormat::Block_128:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:

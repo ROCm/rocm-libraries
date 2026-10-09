@@ -113,8 +113,8 @@ int main()
 
     // Mode before pointer: a pointer set while the mode is None defaults to Scalar.
     hipblasLtMatmulMatrixScale_t scaleMode = (groupSize == 32)
-                                                 ? HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_EXT
-                                                 : HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_EXT;
+                                                 ? HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT
+                                                 : HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16BF_EXT;
     CHECK_LT(hipblasLtMatmulDescSetAttribute(
         desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scaleMode, sizeof(scaleMode)));
     CHECK_LT(hipblasLtMatmulDescSetAttribute(

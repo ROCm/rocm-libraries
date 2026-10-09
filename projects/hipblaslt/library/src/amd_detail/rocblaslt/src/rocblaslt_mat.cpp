@@ -1011,6 +1011,17 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
                                      batch_stride_c,
                                      batch_stride_d);
 
+    // This path never reaches rocblaslt_matmul_valid_args, so the w4a16 checks
+    // have to be applied here too; otherwise an int4 A with a null scale
+    // pointer selects a kernel and launches.
+    if(status == rocblaslt_status_continue)
+        status = validateW4A16Args(
+            type_a,
+            type_b,
+            static_cast<RocblasltContractionProblem::ScalingFormat>(rocEpilogue.scaling_a_type),
+            inputs.scaleA,
+            b);
+
     void *      bias = nullptr, *scaleAlphaVec = nullptr, *E = nullptr;
     int64_t     lde = 0, batch_stride_e = 0;
     hipDataType bias_type = HIPBLASLT_DATATYPE_INVALID;
@@ -1339,6 +1350,15 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                 scaleAlphaVec,
                 gradient);
         }
+        // As in the single-GEMM ext path: rocblaslt_matmul_valid_args is never
+        // reached here, so the w4a16 checks have to be repeated.
+        if(validArgs == rocblaslt_status_continue)
+            validArgs = validateW4A16Args(type_a,
+                                          type_b,
+                                          static_cast<RocblasltContractionProblem::ScalingFormat>(
+                                              rocEpilogue[iIdx].scaling_a_type),
+                                          inputs[i].scaleA,
+                                          b[i]);
         if(validArgs != rocblaslt_status_continue)
             return validArgs;
 

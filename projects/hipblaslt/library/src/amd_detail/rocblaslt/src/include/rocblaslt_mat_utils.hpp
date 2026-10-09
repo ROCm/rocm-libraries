@@ -35,16 +35,104 @@ inline bool isW4A16ScaleFormat(RocblasltContractionProblem::ScalingFormat format
     using Format = RocblasltContractionProblem::ScalingFormat;
     switch(format)
     {
-    case Format::Block_32:
-    case Format::Block_64:
-    case Format::Block_128:
-    case Format::Block_32_ZP:
-    case Format::Block_64_ZP:
-    case Format::Block_128_ZP:
+    case Format::Block_32_BF16:
+    case Format::Block_64_BF16:
+    case Format::Block_128_BF16:
+    case Format::Block_32_BF16_ZP:
+    case Format::Block_64_BF16_ZP:
+    case Format::Block_128_BF16_ZP:
+    case Format::Block_32_F16:
+    case Format::Block_64_F16:
+    case Format::Block_128_F16:
+    case Format::Block_32_F16_ZP:
+    case Format::Block_64_F16_ZP:
+    case Format::Block_128_F16_ZP:
         return true;
     default:
         return false;
     }
+}
+
+/// Scale element type named by a w4a16 mode, or HIPBLASLT_DATATYPE_INVALID when
+/// `format` is not one. The kernels only implement scales of B's type, so this
+/// exists to be checked against B rather than to select a code path.
+inline hipDataType w4a16ScaleType(RocblasltContractionProblem::ScalingFormat format)
+{
+    using Format = RocblasltContractionProblem::ScalingFormat;
+    switch(format)
+    {
+    case Format::Block_32_BF16:
+    case Format::Block_64_BF16:
+    case Format::Block_128_BF16:
+    case Format::Block_32_BF16_ZP:
+    case Format::Block_64_BF16_ZP:
+    case Format::Block_128_BF16_ZP:
+        return HIP_R_16BF;
+    case Format::Block_32_F16:
+    case Format::Block_64_F16:
+    case Format::Block_128_F16:
+    case Format::Block_32_F16_ZP:
+    case Format::Block_64_F16_ZP:
+    case Format::Block_128_F16_ZP:
+        return HIP_R_16F;
+    default:
+        return HIPBLASLT_DATATYPE_INVALID;
+    }
+}
+
+/// w4a16 argument checks, shared by the descriptor path
+/// (rocblaslt_matmul_valid_args) and the C++ ext setProblem path, which builds
+/// its problem without going through that function. Kept operating on plain
+/// values rather than on a matmul descriptor so both can call it.
+///
+/// Returns rocblaslt_status_continue when the problem is not w4a16 or is a
+/// well-formed one.
+inline rocblaslt_status
+    validateW4A16Args(hipDataType                                typeA,
+                      hipDataType                                typeB,
+                      RocblasltContractionProblem::ScalingFormat scaleAType,
+                      const void*                                scaleA,
+                      int64_t                                    numBatchesA)
+{
+    // int4 A and a group A-scale only make sense together.
+    const bool int4A       = (typeA == HIP_R_4I);
+    const bool blockScaleA = isW4A16ScaleFormat(scaleAType);
+    if(int4A != blockScaleA)
+    {
+        log_error(__func__,
+                  "w4a16 requires HIP_R_4I matrix A together with a "
+                  "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC{32,64,128}[_ZP]_EXT A scale mode; "
+                  "got a_type=",
+                  static_cast<int>(typeA),
+                  " scaleAType=",
+                  rocblaslt_scaling_format_to_string(scaleAType));
+        return rocblaslt_status_invalid_value;
+    }
+    if(int4A && scaleA == nullptr)
+    {
+        log_error(__func__, "w4a16 requires a non-null A scale pointer");
+        return rocblaslt_status_invalid_pointer;
+    }
+    // The mode names its scale type; only scales of B's type are implemented,
+    // so the two must agree rather than the mode's being advisory.
+    if(int4A && w4a16ScaleType(scaleAType) != typeB)
+    {
+        log_error(__func__,
+                  "w4a16 A scale mode names scale type ",
+                  static_cast<int>(w4a16ScaleType(scaleAType)),
+                  " but matrix B is type ",
+                  static_cast<int>(typeB),
+                  "; the scale type must equal B's");
+        return rocblaslt_status_invalid_value;
+    }
+    // The scale tensor has no batch dimension.
+    if(int4A && numBatchesA > 1)
+    {
+        log_error(
+            __func__, "w4a16 does not support batch_count > 1 yet (got ", numBatchesA, ")");
+        return rocblaslt_status_not_implemented;
+    }
+    return rocblaslt_status_continue;
 }
 
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
@@ -465,34 +553,13 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
         }
     }
 
-    // w4a16: int4 A and a block A-scale only make sense together.
-    {
-        const bool int4A       = (matA->type == HIP_R_4I);
-        const bool blockScaleA = isW4A16ScaleFormat(matmul_descr->scaleAType);
-        if(int4A != blockScaleA)
-        {
-            log_error(__func__,
-                      "w4a16 requires HIP_R_4I matrix A together with a "
-                      "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC{32,64,128}[_ZP]_EXT A scale mode; "
-                      "got a_type=",
-                      static_cast<int>(matA->type),
-                      " scaleAType=",
-                      rocblaslt_scaling_format_to_string(matmul_descr->scaleAType));
-            return rocblaslt_status_invalid_value;
-        }
-        if(int4A && matmul_descr->scaleA == nullptr)
-        {
-            log_error(__func__, "w4a16 requires a non-null A scale pointer");
-            return rocblaslt_status_invalid_pointer;
-        }
-        // The scale tensor has no batch dimension.
-        if(int4A && num_batches_a > 1)
-        {
-            log_error(__func__, "w4a16 does not support batch_count > 1 yet (got ",
-                      num_batches_a, ")");
-            return rocblaslt_status_not_implemented;
-        }
-    }
+    if(auto status = validateW4A16Args(matA->type,
+                             matB->type,
+                             matmul_descr->scaleAType,
+                             matmul_descr->scaleA,
+                             num_batches_a);
+       status != rocblaslt_status_continue)
+        return status;
 
     auto matmul_status = validateMatmulArgs(m,
                                             n,

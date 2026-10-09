@@ -17,7 +17,7 @@
 
 namespace
 {
-    /// As documented on HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_ZP_EXT.
+    /// As documented on HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT.
     constexpr size_t c_documentedAlignment = 256;
 
     struct Shape
