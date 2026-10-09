@@ -167,6 +167,45 @@ def test_tail_k_offset(base, index, increment, pair, group, mode):
     assert _get_address(result, group) == _IMAGE_TYPE | (base + index * increment)
 
 
+def test_sparse_metadata_receives_its_own_k_offset():
+    """Metadata uses GlobalReadIncsMetadata, not the shared A/B increment."""
+    registers = {
+        str(sgpr("StreamKLocalStart")): 5,
+        str(sgpr("tdmABIncs")): 128,
+        str(sgpr("GlobalReadIncsMetadata")): 64,
+    }
+    _set_address(registers, "tdmAGroup0", 0x1000)
+    _set_address(registers, "tdmMetadataGroup0", 0x8000)
+    kernel = _kernel()
+    kernel["enableTDMMetadata"] = True
+    kernel["ProblemType"] = {**kernel["ProblemType"], "Sparse": 1}
+    module = _Writer().tdmApplyTileKOffsetWaveSeparated(
+        kernel, {"tensorChar": "A"}, {"tensorChar": "B"}
+    )
+    result = _execute(module, registers)
+    assert _get_address(result, "tdmAGroup0") == _IMAGE_TYPE | (0x1000 + 5 * 128)
+    assert _get_address(result, "tdmMetadataGroup0") == _IMAGE_TYPE | (0x8000 + 5 * 64)
+
+
+def test_scale_k_offset_does_not_move_sparse_metadata():
+    registers = {
+        str(sgpr("StreamKLocalStart")): 5,
+        str(sgpr("tdmMXSAMXSBIncs")): 32,
+        str(sgpr("GlobalReadIncsMetadata")): 64,
+    }
+    _set_address(registers, "tdmMXSAGroup0", 0x1000)
+    _set_address(registers, "tdmMetadataGroup0", 0x8000)
+    kernel = _kernel()
+    kernel["enableTDMMetadata"] = True
+    kernel["ProblemType"] = {**kernel["ProblemType"], "Sparse": 1}
+    module = _Writer().tdmApplyTileKOffsetWaveSeparated(
+        kernel, {"tensorChar": "MXSA"}, {"tensorChar": "MXSB"}
+    )
+    result = _execute(module, registers)
+    assert _get_address(result, "tdmMXSAGroup0") == _IMAGE_TYPE | (0x1000 + 5 * 32)
+    assert _get_address(result, "tdmMetadataGroup0") == _IMAGE_TYPE | 0x8000
+
+
 @pytest.mark.parametrize("fuse", [0, 1, 2, 3])
 @pytest.mark.parametrize("pair", [("A", "B"), ("MXSA", "MXSB")])
 def test_data_parallel_initial_offset_needs_no_streamk_registers(fuse, pair):
