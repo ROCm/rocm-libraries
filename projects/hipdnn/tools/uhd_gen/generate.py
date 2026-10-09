@@ -20,7 +20,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import addressing
-from .catalog import DeterministicCatalogError, candidate_density
+from .catalog import CatalogDensity, DeterministicCatalogError, candidate_density
 from .correctness import (
     REASON,
     VERDICT,
@@ -1525,9 +1525,226 @@ def _generate_published(
     return 0
 
 
+def _check_generate_arguments(
+    args: argparse.Namespace, immediate: bool, output: Path, tree: Path
+) -> None:
+    """Refuse a `generate` request that cannot be honoured, before anything is measured."""
+    if not 0 <= args.max_graph_failures < 1:
+        raise ValueError("--max-graph-failures must be a fraction in [0, 1)")
+    if output.exists():
+        raise ValueError(
+            "--output-dir must not exist; generation never overwrites a previous run"
+        )
+    if tree == output or tree in output.parents:
+        raise ValueError("--output-dir must be outside the shipping descriptor tree")
+    if args.eval_benchmarks and args.recall:
+        raise ValueError(
+            "--eval-benchmarks holds graphs out; --recall trains on every one of them"
+        )
+    if not args.recall and not args.eval_benchmarks and not 0 < args.eval_fraction < 1:
+        raise ValueError(
+            "generate requires a true problem holdout: 0 < --eval-fraction < 1 "
+            "(or --recall for an engine whose shape space is closed)"
+        )
+    if args.shard and not args.collect_only:
+        raise ValueError("--shard slices a collection; it needs --collect-only")
+    if args.collect_only and args.dataset:
+        raise ValueError(
+            "--collect-only measures --graphs; it cannot also read --dataset"
+        )
+    if args.dataset and (args.knob or args.device or args.workspace_limit is not None):
+        raise ValueError(
+            "--knob, --device and --workspace-limit shape a measurement, and a "
+            "--dataset run measures nothing"
+        )
+    if immediate:
+        if args.knob or args.dim_tile:
+            raise ValueError(
+                "L1 generation cannot use kernel knobs or dimension/tile candidate features"
+            )
+        if not tree.is_dir():
+            raise ValueError(
+                "--descriptor-tree must be an existing descriptor root (it may be empty)"
+            )
+
+
+def _usable_rows(
+    frames: dict, immediate: bool, engine: str | None
+) -> tuple[dict, CatalogDensity | None]:
+    """Each source's rows that may label training, and a catalog's candidate density.
+
+    A deterministic catalog is refused here, naming the cause, rather than after training
+    on the "no evaluable candidate ranking" symptom.
+    """
+    # §13.2 label gate: ran (`succeeded`), measured (`is_valid`), and not known wrong.
+    # A null (undecidable) verdict passes. Excluded rows stay in the corpus files with
+    # their timings suppressed. An immediate row is always `is_valid`.
+    usable = {}
+    for source, frame in frames.items():
+        keep = ~known_wrong(frame)
+        if not immediate:
+            keep &= frame["is_valid"] & frame["succeeded"].eq(True)
+        usable[source] = frame[keep].copy()
+    if any(candidates.empty for candidates in usable.values()):
+        raise ValueError("the benchmark produced no successful valid timings")
+    # Such an engine wants the L1 role, and the preserved stage keeps its measurements for
+    # that run.
+    density = None
+    if not immediate:
+        density = candidate_density(usable[None])
+        if density.deterministic:
+            raise DeterministicCatalogError(density.diagnosis(engine))
+        thin = density.near_deterministic_warning()
+        if thin:
+            logger.warning("%s", thin)
+    return usable, density
+
+
+def _split_for_training(
+    args: argparse.Namespace,
+    rows: dict,
+    frames: dict,
+    usable: dict,
+    sources: list,
+    grouping,
+    stage: Path,
+    staged,
+) -> tuple[set | None, dict, dict]:
+    """The graphs held out, each source's evaluation corpus when they are named, and each
+    source's training rows. `--recall` holds nothing out; `--eval-benchmarks` holds out
+    exactly the graphs it lists; otherwise a seeded fraction of problems is drawn.
+    """
+    held = _eval_benchmarks(args.eval_benchmarks) if args.eval_benchmarks else None
+    eval_corpora = {}
+    if held is not None:
+        measured = set(frames[sources[0]][BENCHMARK_COLUMN].astype(str)) & held
+        if not measured:
+            raise ValueError(
+                f"none of the {len(held)} --eval-benchmarks graphs was measured in this "
+                "corpus; there is nothing to evaluate on"
+            )
+        # The graphs scored are exactly the ones named, every row of them on every device:
+        # evaluate scores the whole of this file rather than drawing its own split.
+        for source in sources:
+            eval_corpora[source] = stage / f"{staged('eval_corpus', source)}.json"
+            _write_json(
+                eval_corpora[source],
+                _absent_as_null(
+                    [
+                        row
+                        for row in rows[source]
+                        if str(row.get(BENCHMARK_COLUMN)) in held
+                    ]
+                ),
+            )
+    train_frames = {}
+    for source in sources:
+        candidates = usable[source]
+        if args.recall:
+            # A closed shape space: holding shapes out would hide ones the model will
+            # certainly meet.
+            train_frames[source] = candidates
+        elif held is not None:
+            train_frames[source] = candidates[
+                ~candidates[BENCHMARK_COLUMN].astype(str).isin(held)
+            ]
+        else:
+            split = split_problems(
+                problem_keys(frames[source], grouping),
+                args.eval_fraction,
+                args.seed,
+            )
+            train_frames[source] = candidates[
+                ~problem_keys(candidates, grouping).isin(split.eval_problems)
+            ]
+        if len(set(problem_keys(train_frames[source], grouping))) < 5:
+            raise ValueError(
+                "generation needs at least five training graph/device groups plus held-out problems"
+            )
+    return held, eval_corpora, train_frames
+
+
+def _feature_signature(
+    args: argparse.Namespace,
+    train_frame: pd.DataFrame,
+    published: set,
+    kmd_fields: list | None,
+    knobs: list,
+    immediate: bool,
+) -> tuple[list, list, list]:
+    """The one feature recipe every metric shares: authored (`--feature-signature`,
+    `--features`) or proposed from the training rows, checked against what the engine
+    publishes. Returns it, the proposals omitted, and the KMD fields withheld."""
+    pairs = []
+    for pair in args.dim_tile:
+        parts = pair.split("=", 1)
+        if len(parts) != 2:
+            raise ValueError("--dim-tile requires DIMENSION=KERNEL_FIELD")
+        pairs.append(tuple(part.removeprefix("$") for part in parts))
+    if args.feature_signature:
+        authored = json.loads(Path(args.feature_signature).read_text(encoding="utf-8"))
+    elif args.features:
+        authored = build_features_signature(args.features)
+    else:
+        authored = None
+    signature, omitted = feature_recipe(
+        train_frame, published, authored, kmd_fields, knobs, pairs
+    )
+    withheld = withheld_kernel_fields(kmd_fields or [], knobs, published)
+    if immediate:
+        # Leakage only; whether each entry evaluates on the published features is
+        # the shared evaluator's check during training.
+        validate_signature(signature)
+    unknown = {ref[1:] for ref in signature_references(signature)} - published
+    if unknown:
+        raise ValueError(
+            f"features are not published by this engine: {sorted(unknown)}"
+        )
+    return signature, omitted, withheld
+
+
+def _promote_all(
+    args: argparse.Namespace,
+    published_models: list,
+    tree: Path,
+    arch: str,
+    output: Path,
+) -> None:
+    """Install each published model into `tree`, in order."""
+    from .promote import add_promote_arguments, run_promote
+
+    parser = argparse.ArgumentParser()
+    add_promote_arguments(parser)
+    # Sequentially, each against the role map the previous one wrote; promotion
+    # replaces only its own metric's UHD.
+    for model_dir, corpus, identity in published_models:
+        promote_args = [
+            "--model-dir",
+            str(model_dir),
+            "--descriptor-tree",
+            str(tree),
+            "--role",
+            args.role,
+            "--arch",
+            arch,
+            "--corpus",
+            str(corpus),
+        ]
+        if args.engine:
+            promote_args.extend(["--engine", args.engine])
+        if identity:
+            promote_args.extend(["--uhd-id", identity])
+        if args.feature_evaluator:
+            promote_args.extend(["--feature-evaluator", args.feature_evaluator])
+        if run_promote(parser.parse_args(promote_args)):
+            raise ValueError(
+                f"promotion failed; validated model and reproducible collection remain at {output}"
+            )
+
+
 def run_generate(args: argparse.Namespace) -> int:
     from .__main__ import install_hint
-    from .promote import PromoteError, build_plan, run_promote, add_promote_arguments
+    from .promote import PromoteError, build_plan
 
     stage = None
     immediate = args.role == ROLE
@@ -1540,53 +1757,9 @@ def run_generate(args: argparse.Namespace) -> int:
     single = len(metrics) == 1
     try:
         uhd_ids = _requested_uhd_ids(args.uhd_ids, metrics)
-        if not 0 <= args.max_graph_failures < 1:
-            raise ValueError("--max-graph-failures must be a fraction in [0, 1)")
         output = Path(args.output_dir).resolve()
         tree = Path(args.descriptor_tree).resolve()
-        if output.exists():
-            raise ValueError(
-                "--output-dir must not exist; generation never overwrites a previous run"
-            )
-        if tree == output or tree in output.parents:
-            raise ValueError(
-                "--output-dir must be outside the shipping descriptor tree"
-            )
-        if args.eval_benchmarks and args.recall:
-            raise ValueError(
-                "--eval-benchmarks holds graphs out; --recall trains on every one of them"
-            )
-        if (
-            not args.recall
-            and not args.eval_benchmarks
-            and not 0 < args.eval_fraction < 1
-        ):
-            raise ValueError(
-                "generate requires a true problem holdout: 0 < --eval-fraction < 1 "
-                "(or --recall for an engine whose shape space is closed)"
-            )
-        if args.shard and not args.collect_only:
-            raise ValueError("--shard slices a collection; it needs --collect-only")
-        if args.collect_only and args.dataset:
-            raise ValueError(
-                "--collect-only measures --graphs; it cannot also read --dataset"
-            )
-        if args.dataset and (
-            args.knob or args.device or args.workspace_limit is not None
-        ):
-            raise ValueError(
-                "--knob, --device and --workspace-limit shape a measurement, and a "
-                "--dataset run measures nothing"
-            )
-        if immediate:
-            if args.knob or args.dim_tile:
-                raise ValueError(
-                    "L1 generation cannot use kernel knobs or dimension/tile candidate features"
-                )
-            if not tree.is_dir():
-                raise ValueError(
-                    "--descriptor-tree must be an existing descriptor root (it may be empty)"
-                )
+        _check_generate_arguments(args, immediate, output, tree)
         # One catalog sweep feeds every metric's label (RFC 0019 §13.4); an immediate
         # run's kernel choice follows the metric, so each metric is measured separately.
         sources = metrics if immediate else [None]
@@ -1731,28 +1904,7 @@ def run_generate(args: argparse.Namespace) -> int:
             _write_json(corpora[source], _absent_as_null(rows[source]))
             frames[source] = frame
         _write_json(stage / "provenance.json", provenance)
-        # §13.2 label gate: ran (`succeeded`), measured (`is_valid`), and not known wrong.
-        # A null (undecidable) verdict passes. Excluded rows stay in the corpus files with
-        # their timings suppressed. An immediate row is always `is_valid`.
-        usable = {}
-        for source, frame in frames.items():
-            keep = ~known_wrong(frame)
-            if not immediate:
-                keep &= frame["is_valid"] & frame["succeeded"].eq(True)
-            usable[source] = frame[keep].copy()
-        if any(candidates.empty for candidates in usable.values()):
-            raise ValueError("the benchmark produced no successful valid timings")
-        # Refuse a deterministic catalog now, naming the cause, rather than failing after
-        # training on the "no evaluable candidate ranking" symptom; such an engine wants
-        # the L1 role, and the preserved stage keeps its measurements for that run.
-        density = None
-        if not immediate:
-            density = candidate_density(usable[None])
-            if density.deterministic:
-                raise DeterministicCatalogError(density.diagnosis(args.engine))
-            thin = density.near_deterministic_warning()
-            if thin:
-                logger.warning("%s", thin)
+        usable, density = _usable_rows(frames, immediate, args.engine)
         # (declared metric, target, calibrated, timing statistic, source) per UHD emitted.
         # L1 is always calibrated, and every calibrated label comes from `avgTimeMs`.
         labels = []
@@ -1777,82 +1929,14 @@ def run_generate(args: argparse.Namespace) -> int:
                     )
                 )
         grouping = resolve_grouping(frames[sources[0]])
-        held = _eval_benchmarks(args.eval_benchmarks) if args.eval_benchmarks else None
-        eval_corpora = {}
-        if held is not None:
-            measured = set(frames[sources[0]][BENCHMARK_COLUMN].astype(str)) & held
-            if not measured:
-                raise ValueError(
-                    f"none of the {len(held)} --eval-benchmarks graphs was measured in this "
-                    "corpus; there is nothing to evaluate on"
-                )
-            # The graphs scored are exactly the ones named, every row of them on every device:
-            # evaluate scores the whole of this file rather than drawing its own split.
-            for source in sources:
-                eval_corpora[source] = stage / f"{staged('eval_corpus', source)}.json"
-                _write_json(
-                    eval_corpora[source],
-                    _absent_as_null(
-                        [
-                            row
-                            for row in rows[source]
-                            if str(row.get(BENCHMARK_COLUMN)) in held
-                        ]
-                    ),
-                )
-        train_frames = {}
-        for source in sources:
-            candidates = usable[source]
-            if args.recall:
-                # A closed shape space: holding shapes out would hide ones the model will
-                # certainly meet.
-                train_frames[source] = candidates
-            elif held is not None:
-                train_frames[source] = candidates[
-                    ~candidates[BENCHMARK_COLUMN].astype(str).isin(held)
-                ]
-            else:
-                split = split_problems(
-                    problem_keys(frames[source], grouping),
-                    args.eval_fraction,
-                    args.seed,
-                )
-                train_frames[source] = candidates[
-                    ~problem_keys(candidates, grouping).isin(split.eval_problems)
-                ]
-            if len(set(problem_keys(train_frames[source], grouping))) < 5:
-                raise ValueError(
-                    "generation needs at least five training graph/device groups plus held-out problems"
-                )
+        held, eval_corpora, train_frames = _split_for_training(
+            args, rows, frames, usable, sources, grouping, stage, staged
+        )
         # The first source proposes and checks the one feature recipe every metric shares.
         train_frame = train_frames[sources[0]]
-        pairs = []
-        for pair in args.dim_tile:
-            parts = pair.split("=", 1)
-            if len(parts) != 2:
-                raise ValueError("--dim-tile requires DIMENSION=KERNEL_FIELD")
-            pairs.append(tuple(part.removeprefix("$") for part in parts))
-        if args.feature_signature:
-            authored = json.loads(
-                Path(args.feature_signature).read_text(encoding="utf-8")
-            )
-        elif args.features:
-            authored = build_features_signature(args.features)
-        else:
-            authored = None
-        signature, omitted = feature_recipe(
-            train_frame, published, authored, kmd_fields, knobs, pairs
+        signature, omitted, withheld = _feature_signature(
+            args, train_frame, published, kmd_fields, knobs, immediate
         )
-        withheld = withheld_kernel_fields(kmd_fields or [], knobs, published)
-        if immediate:
-            # Leakage only; whether each entry evaluates on the published features is
-            # the shared evaluator's check during training.
-            validate_signature(signature)
-        unknown = {ref[1:] for ref in signature_references(signature)} - published
-        if unknown:
-            raise ValueError(
-                f"features are not published by this engine: {sorted(unknown)}"
-            )
         coverage = device_field_coverage(train_frame)
         enforce_device_coverage(signature, coverage)
         arches = sorted(usable[sources[0]]["arch"].unique())
@@ -2068,33 +2152,7 @@ def run_generate(args: argparse.Namespace) -> int:
         stage.rename(output)
         stage = None
         if not args.no_promote:
-            parser = argparse.ArgumentParser()
-            add_promote_arguments(parser)
-            # Sequentially, each against the role map the previous one wrote; promotion
-            # replaces only its own metric's UHD.
-            for model_dir, corpus, identity in published_models:
-                promote_args = [
-                    "--model-dir",
-                    str(model_dir),
-                    "--descriptor-tree",
-                    str(tree),
-                    "--role",
-                    args.role,
-                    "--arch",
-                    args.arch or arches[0],
-                    "--corpus",
-                    str(corpus),
-                ]
-                if args.engine:
-                    promote_args.extend(["--engine", args.engine])
-                if identity:
-                    promote_args.extend(["--uhd-id", identity])
-                if args.feature_evaluator:
-                    promote_args.extend(["--feature-evaluator", args.feature_evaluator])
-                if run_promote(parser.parse_args(promote_args)):
-                    raise ValueError(
-                        f"promotion failed; validated model and reproducible collection remain at {output}"
-                    )
+            _promote_all(args, published_models, tree, args.arch or arches[0], output)
         for model_dir, _, identity in published_models:
             print(
                 f"Generated {'installable' if args.no_promote else 'installed'} UHD: {model_dir}"
