@@ -178,7 +178,7 @@ namespace hiptensor
         auto op = operators[0];
         EXPECT_TRUE((op == HIPTENSOR_OP_IDENTITY) || (op == HIPTENSOR_OP_NEG));
 
-        EXPECT_EQ(dataTypes.size(), 2); // HIPTENSOR_R_16F or HIPTENSOR_R_32F
+        EXPECT_EQ(dataTypes.size(), 2); // HIPTENSOR_R_16F, HIPTENSOR_R_32F or HIPTENSOR_R_64F
         auto abDataType = dataTypes[0];
         EXPECT_TRUE((abDataType == HIPTENSOR_R_16F) || (abDataType == HIPTENSOR_R_32F)
                     || (abDataType == HIPTENSOR_R_64F));
