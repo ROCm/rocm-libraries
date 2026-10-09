@@ -15,9 +15,12 @@ import json
 import math
 import os
 from pathlib import Path
+import re
+import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -79,6 +82,113 @@ class Progress:
         self.save()
 
 
+STALL_SAMPLE_SECONDS = 5
+
+
+def descendants(pid):
+    """Return the processes below pid, found through /proc parent links."""
+    children = {}
+    for stat in Path("/proc").glob("[0-9]*/stat"):
+        with contextlib.suppress(OSError):
+            ppid = int(stat.read_text().rpartition(")")[2].split()[1])
+            children.setdefault(ppid, []).append(int(stat.parent.name))
+    found, pending = [], [pid]
+    while pending:
+        for child in children.get(pending.pop(), []):
+            found.append(child)
+            pending.append(child)
+    return found
+
+
+def cpu_seconds(stat):
+    fields = stat.read_text().rpartition(")")[2].split()
+    return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
+
+
+def describe_process(pid):
+    """Per-thread state, wait channel and CPU use over a short sample.
+
+    Threads blocked near 0% point at a deadlock; threads near 100% at a spin.
+    """
+    proc = Path(f"/proc/{pid}")
+    tasks = sorted(proc.glob("task/*"), key=lambda task: int(task.name))
+    before = {}
+    for task in tasks:
+        with contextlib.suppress(OSError):
+            before[task] = cpu_seconds(task / "stat")
+    time.sleep(STALL_SAMPLE_SECONDS)
+    command = (
+        (proc / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+    )
+    lines = [f"pid {pid}: {command}"]
+    for task, start in before.items():
+        with contextlib.suppress(OSError):
+            busy = 100 * (cpu_seconds(task / "stat") - start) / STALL_SAMPLE_SECONDS
+            state = (task / "stat").read_text().rpartition(")")[2].split()[0]
+            wchan = (task / "wchan").read_text() or "-"
+            comm = (task / "comm").read_text().strip()
+            lines.append(
+                f"  tid {task.name} {comm}: state {state} cpu {busy:.0f}% wchan {wchan}"
+            )
+    return lines
+
+
+def native_stacks(pid):
+    command = ["gdb", "-p", str(pid), "-batch", "-nx", "-ex", "thread apply all bt"]
+    attempts = [command]
+    # Without CAP_SYS_PTRACE, Yama only lets ancestors attach; CI has sudo.
+    if os.geteuid() != 0 and shutil.which("sudo"):
+        attempts.append(["sudo", "-n", *command])
+    if not shutil.which("gdb"):
+        return "gdb not found"
+    outputs = []
+    for attempt in attempts:
+        try:
+            result = subprocess.run(
+                attempt, capture_output=True, text=True, timeout=120
+            )
+        except subprocess.TimeoutExpired:
+            outputs.append(f"{attempt[0]} timed out")
+            continue
+        outputs.append(result.stdout + result.stderr)
+        if "Thread " in result.stdout:
+            break
+    return "\n".join(outputs)
+
+
+def record_stall(nodeid, directory):
+    """Save what a still-running test's processes are doing before its timeout."""
+    directory.mkdir(parents=True, exist_ok=True)
+    name = re.sub(r"[^\w.-]+", "_", nodeid)[-150:]
+    lines = [f"{nodeid} still running; worker pid {os.getpid()}"]
+    for pid in descendants(os.getpid()):
+        try:
+            lines += describe_process(pid)
+            # Shell wrappers are single-threaded; the emulating client is not.
+            if len(list(Path(f"/proc/{pid}/task").iterdir())) > 1:
+                lines.append(native_stacks(pid))
+        except OSError as error:
+            lines.append(f"pid {pid}: {error}")
+    (directory / f"{name}.txt").write_text("\n".join(lines) + "\n")
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item):
+    after = item.config.getoption("--rocjitsu-stall-dump-after")
+    directory = item.config.getoption("--rocjitsu-report-dir")
+    if not after or not directory:
+        return (yield)
+    timer = threading.Timer(
+        float(after), record_stall, (item.nodeid, Path(directory) / "stalls")
+    )
+    timer.daemon = True
+    timer.start()
+    try:
+        return (yield)
+    finally:
+        timer.cancel()
+
+
 def duration_key(nodeid):
     """Drop the file path so recorded durations survive a different rootdir."""
     return nodeid.rpartition("::")[2]
@@ -114,6 +224,11 @@ def pytest_addoption(parser):
     parser.addoption(
         "--rocjitsu-durations",
         help="JSON of test id to seconds from an earlier run, used to order tests",
+    )
+    parser.addoption(
+        "--rocjitsu-stall-dump-after",
+        help="seconds after which a running test's process states and stacks "
+        "are saved under the report directory's stalls/",
     )
 
 

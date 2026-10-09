@@ -217,6 +217,7 @@ jobs:
 
           echo "target=${target} profile=${profile} config=${config} markers='${markers}'"
           echo "host_cores=${cores} xdist_workers=${workers} cpu_thread_budget=${budget} omp_thread_limit=${budget}"
+          grep MemTotal /proc/meminfo
           "${ROCM_PATH}/bin/mirage" --version
           echo "rocjitsu library: ${rocjitsu_lib}"
           grep -a -oE 'git (revision|commit): [^[:cntrl:]]+' "${rocjitsu_lib}" | sort -u || true
@@ -227,11 +228,19 @@ jobs:
           print("\n".join(sorted(f"{d.metadata['Name']}=={d.version}" for d in distributions())))
           PY
 
+      # Stall reports include native stacks when gdb is available.
+      - name: Install gdb
+        continue-on-error: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gdb
+
       - name: Run rocjitsu tensilelite tests
         id: tests
         # The suite supervisor stops earlier, leaving time to reap and report.
         # Recorded durations start the longest tests first; refresh them from
-        # a run's uploaded durations.json.
+        # a run's uploaded durations.json. Tests still running 5 minutes before
+        # their timeout leave process states and stacks in stalls/.
         timeout-minutes: 345
         run: |
           set -o pipefail
@@ -243,6 +252,7 @@ jobs:
             python -m pytest "${TENSILELITE_ROOT}/Tensile/Tests/common/test_config.py" \
               -p rocjitsu_pytest --rocjitsu-report-dir="${REPORT_DIR}" \
               --rocjitsu-durations="${SCRIPTS_DIR}/rocjitsu_tensilelite_durations.json" \
+              --rocjitsu-stall-dump-after="$(( PER_TEST_TIMEOUT - 300 ))" \
               -m "${ROCJITSU_MARKERS}" --gpu-targets="${ROCJITSU_TARGET}" \
               -v -s -n "${PYTEST_WORKERS}" --client-lock-scope=worker \
               --timeout="${PER_TEST_TIMEOUT}" \

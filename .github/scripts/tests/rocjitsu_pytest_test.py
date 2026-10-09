@@ -157,6 +157,28 @@ def test_run(name):
         # Unrecorded d and z tie with the longest, c; ties keep node id order.
         self.assertEqual((self.root / "test_example.order").read_text(), "cadbz")
 
+    def test_records_processes_of_a_long_running_test(self):
+        result, execution, progress = self.run_pytest(
+            """
+import subprocess, sys, time
+from pathlib import Path
+def test_slow():
+    child = subprocess.Popen([sys.executable, '-c',
+        'import threading, time; threading.Thread(target=time.sleep, args=(30,)).start(); time.sleep(30)'])
+    Path(__file__).with_suffix('.pid').write_text(str(child.pid))
+    time.sleep(10)
+    child.kill()
+""",
+            extra=["--rocjitsu-stall-dump-after", "1"],
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        pid = (self.root / "test_example.pid").read_text()
+        (stall,) = (self.reports / "stalls").iterdir()
+        text = stall.read_text()
+        self.assertIn("test_slow still running", text)
+        self.assertIn(f"pid {pid}: ", text)
+        self.assertRegex(text, r"tid \d+ python\S*: state S cpu 0% wchan")
+
     def test_all_skipped_is_not_success(self):
         result, execution, progress = self.run_pytest(
             "import pytest\ndef test_skip(): pytest.skip('unsupported')\n"
