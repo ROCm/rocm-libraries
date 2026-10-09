@@ -4,7 +4,7 @@
 """The subtile tail-loop K mask must match the K layout the local read loads.
 
 The tail loop reads a full MatrixInstK slice per MMA tile and zeroes, per lane,
-the bf16 elements at K >= the remaining K.  Which K each VGPR half holds is set
+the bf16/fp16 elements at K >= the remaining K.  Which K each VGPR half holds is set
 by the local read (_computeLROffset + emitSingleDsRead), so this test runs both
 the production LR offset code and the production mask code through a small
 per-lane interpreter and checks, for every remainder, that the mask keeps
@@ -109,19 +109,20 @@ class _Lanes:
 
 # ── Harness ─────────────────────────────────────────────────────────────────
 
-def _bf16_dtype():
+def _16bit_dtype(name):
     dtype = MagicMock()
     dtype.numBytes.return_value = 2
-    dtype.isBFloat16.return_value = True
+    dtype.isBFloat16.return_value = name == "bf16"
+    dtype.isHalf.return_value = name == "fp16"
     dtype.is8bitFloat.return_value = False
     return dtype
 
 
-def _make_emitter(wave, abGeometry, dGeometry):
+def _make_emitter(wave, abGeometry, dGeometry, dtypeName):
     from rocisa.register import RegisterPool
     from rocisa.enum import RegisterType
 
-    dtype = _bf16_dtype()
+    dtype = _16bit_dtype(dtypeName)
     kernel = {
         "MacroTile0": 16, "MacroTile1": 16, "MacroTileA": 16, "MacroTileB": 16,
         "DepthU": DEPTH_U, "_DepthUA": DEPTH_U, "_DepthUB": DEPTH_U,
@@ -189,8 +190,13 @@ def _loaded_k(writer, tileInfo, wave, subIterK):
     return layout
 
 
+@pytest.fixture(params=["bf16", "fp16"])
+def dtypeName(request):
+    return request.param
+
+
 @pytest.fixture(params=CASES)
-def case(request):
+def case(request, dtypeName):
     target, wave, abGeometry, dGeometry = request.param
     from gpu_test_helpers import init_rocisa
     from rocisa import rocIsa
@@ -199,7 +205,7 @@ def case(request):
         init_rocisa(target=target, wavesize=wave)
         if target == "gfx1250" and not rocIsa.getInstance().getAsmCaps().get("s_add_u64", 0):
             pytest.skip("assembler does not support gfx1250 instructions")
-        yield (wave,) + _make_emitter(wave, abGeometry, dGeometry)
+        yield (wave,) + _make_emitter(wave, abGeometry, dGeometry, dtypeName)
 
 
 def test_tail_kmask_keeps_exactly_the_loaded_k_below_remainder(case):

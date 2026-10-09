@@ -421,8 +421,12 @@ class InstructionEmitter:
         dividerFortidInK = MI_M
         return numMIInUnroll, dividerFortidInK
 
-    def _bf16_read_layout(self):
-        """K layout of a BF16 A/B tile as the local read leaves it in VGPRs.
+    def _is16bit(self):
+        dtype = self.kernel["ProblemType"]["DataTypeA"]
+        return dtype.isBFloat16() or dtype.isHalf()
+
+    def _b16_read_layout(self):
+        """K layout of a 16-bit (BF16/FP16) A/B tile as the local read leaves it in VGPRs.
 
         Returns (kPerRead, readStrideK, regsPerRead): each ds_read gives a
         lane kPerRead contiguous K in regsPerRead VGPRs, lane group g's
@@ -431,9 +435,9 @@ class InstructionEmitter:
         """
         layout = lrReadLayoutTLU0(self.tileInfoA)
         assert layout == lrReadLayoutTLU0(self.tileInfoB), \
-            "BF16 K-mask assumes A and B share one local-read K layout"
+            "16-bit K-mask assumes A and B share one local-read K layout"
         regsPerRead, _, colsPerRead = layout
-        kPerRead = regsPerRead * 2  # BF16: 2 K-elements packed per 32-bit vgpr
+        kPerRead = regsPerRead * 2  # 2 16-bit K-elements packed per 32-bit vgpr
         return kPerRead, colsPerRead * kPerRead, regsPerRead
 
     def emit_mask_k_init(self):
@@ -442,16 +446,16 @@ class InstructionEmitter:
         Only two vgprs survive past this routine and into emit_mask_k:
           * self._tail_vDiff           — rem - laneK_0 (for subIterK=n the
             effective diff is diff - n*MatrixInstK, folded into cmp constants)
-          * self._tail_boundaryMask[4] — BF16 only; precomputed boundary masks
+          * self._tail_boundaryMask[4] — 16-bit only; precomputed boundary masks
             indexed by vgpr within one local read, derived from d = rem % 8
 
         """
         numMIInUnroll, dividerFortidInK = self._mfma_K_constants()
         writer = self.writer
         module = Module()
-        isBF16 = self.kernel["ProblemType"]["DataTypeA"].isBFloat16()
-        # BF16 masks each local read separately, so laneK_0 steps by one read.
-        laneKStride = self._bf16_read_layout()[0] if isBF16 else numMIInUnroll
+        is16bit = self._is16bit()
+        # 16-bit masks each local read separately, so laneK_0 steps by one read.
+        laneKStride = self._b16_read_layout()[0] if is16bit else numMIInUnroll
 
         # Compute K per lane (laneKStride, dividerFortidInK are power of 2)
         waveSize = self.kernel["WavefrontSize"]
@@ -483,7 +487,7 @@ class InstructionEmitter:
 
         self._tail_boundaryMask = None
         laneSGPRCount = writer.states.laneSGPRCount
-        if isBF16:
+        if is16bit:
             halfMaskVgpr = writer.vgprPool.checkOut(1, "tail_halfMask")
             module.add(VMovB32(
                 dst=vgpr(halfMaskVgpr), src="0x0000FFFF",
@@ -497,7 +501,7 @@ class InstructionEmitter:
             # every subIterK has effective_diff ≡ rem (mod laneKStride). So
             # all boundary reads share the same mask pattern (one per vgpr
             # of a read: laneKStride // kStride masks).
-            kStride = 2  # BF16: 2 K-elements packed per 32-bit vgpr
+            kStride = 2  # 2 16-bit K-elements packed per 32-bit vgpr
             assert laneKStride % kStride == 0, \
                 f"laneKStride ({laneKStride}) must be a multiple of kStride ({kStride})"
             numBoundaryMasks = laneKStride // kStride
@@ -546,12 +550,12 @@ class InstructionEmitter:
         effective per-lane diff is diff - n*MatrixInstK, folded into the
         cmp immediates (no per-call sub).
 
-        BF16 (kStride=2 K positions per vgpr) builds a per-vgpr 3-state mask
-        for each local read of the tile from the precomputed boundary masks
-        (full / boundary[i] / zero).
-        Non-BF16 (e.g. FP4) builds a single 2-state mask shared across all
+        16-bit BF16/FP16 (kStride=2 K positions per vgpr) builds a per-vgpr
+        3-state mask for each local read of the tile from the precomputed
+        boundary masks (full / boundary[i] / zero).
+        Other types (e.g. FP4) build a single 2-state mask shared across all
         vgprs, assuming rem aligns to the per-lane K stride (true for
-        rem=32 with FP4 MIK=128). A boundary inside a non-BF16 vgpr would
+        rem=32 with FP4 MIK=128). A boundary inside a non-16-bit vgpr would
         need per-byte/nibble handling.
         """
         assert self._tail_vDiff is not None, \
@@ -563,8 +567,8 @@ class InstructionEmitter:
         kBaseConst = subIterK * kernel["MatrixInstK"]
 
         laneSGPRCount = writer.states.laneSGPRCount
-        isBF16 = kernel["ProblemType"]["DataTypeA"].isBFloat16()
-        kStride = 2  # BF16: 2 elements packed per 32-bit vgpr (low=K0, high=K1)
+        is16bit = self._is16bit()
+        kStride = 2  # 16-bit: 2 elements packed per 32-bit vgpr (low=K0, high=K1)
 
         module = Module()
 
@@ -602,14 +606,14 @@ class InstructionEmitter:
                             comment=comment))
 
             kOffsets = [i * kStride for i in range(vgprPerInUnroll)]
-            if isBF16:
+            if is16bit:
                 # 3-way per (lane, read, subIterK), 2 cmps shared across the
                 # vgprs i of one read r:
                 #   sFull = effective_diff >= kPerRead → -1
                 #   sZero = effective_diff <= 0        → 0
                 #   else                               → boundary[i % regsPerRead]
                 # with effective_diff = diff - n*MatrixInstK - r*readStrideK.
-                kPerRead, readStrideK, regsPerRead = self._bf16_read_layout()
+                kPerRead, readStrideK, regsPerRead = self._b16_read_layout()
                 assert vgprPerInUnroll % regsPerRead == 0, \
                     f"tile vgprs ({vgprPerInUnroll}) must be whole local reads of {regsPerRead}"
                 numReads = vgprPerInUnroll // regsPerRead
@@ -678,13 +682,13 @@ class InstructionEmitter:
                                 dst=vgpr(v), src0=vgpr(v), src1=vgpr(maskVgprs[i]),
                                 comment=f"mask {label}[{i}] (K=[{kOffsets[i]},{kOffsets[i]+kStride-1}])"))
 
-            # Scale-mask reuse (non-BF16 hasScale only): AND the scale
+            # Scale-mask reuse (non-16-bit hasScale only): AND the scale
             # vgprs with the data mask we just built. Redundant when
             # host zero-padding leaves OOB scale bytes at 0x00 (0x00
             # AND 0 = 0x00) but kept to stay explicit under any input
             # pattern.
             scaleStride = self.config.lrSA.k if self.hasScale else 0
-            if (not isBF16) and self.hasScale \
+            if (not is16bit) and self.hasScale \
                     and (self.vgprTilesSA or self.vgprTilesSB) \
                     and scaleStride > 0 and (subIterK % scaleStride == 0):
                 for tensor, tilesList in (('SA', self.vgprTilesSA),

@@ -65,8 +65,9 @@ def _mock_dtype(num_bytes=2):
     mock.numBytes.return_value = num_bytes
     mock.numRegisters.return_value = num_bytes / 4
     # Treat the default 2-byte mock as BF16 (only consumer is the Subtile tail
-    # mask path, which dispatches on isBFloat16); 0.5-byte (fp4) returns False.
+    # mask path, which dispatches on isBFloat16 / isHalf); 0.5-byte (fp4) returns False.
     mock.isBFloat16.return_value = (num_bytes == 2)
+    mock.isHalf.return_value = False
     # 8-bit float (MXFP8) is exactly the 1-byte mock; fp4 (0.5) and bf16 (2)
     # are not. Without this, MagicMock's auto-attribute makes is8bitFloat()
     # truthy for every dtype and the data-K-mask 8-bit-float skip misfires.
