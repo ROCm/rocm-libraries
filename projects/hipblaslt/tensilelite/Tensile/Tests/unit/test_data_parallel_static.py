@@ -126,6 +126,9 @@ class _SKWriter:
     def isPersistentConstantsToVgprEnabled(self, kernel):
         return False
 
+    def readbackStreamKConst(self, kernel, dst, name):
+        return Module("readback %s" % name)
+
     def cmpNamedArgTypeEq(self, module, value, comment=""):
         kw_module.KernelWriter.cmpNamedArgTypeEq(self, module, value, comment)
 

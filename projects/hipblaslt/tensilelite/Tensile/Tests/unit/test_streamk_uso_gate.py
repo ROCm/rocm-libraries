@@ -107,6 +107,13 @@ class _Pool:
 def _writer(inVgprs):
     """Minimal stand-in for KernelWriterAssembly for StreamK helper codegen."""
     pool = _Pool()
+
+    def readback(kernel, dst, name):
+        module = Module("readback %s" % name)
+        if inVgprs:
+            module.add(VReadfirstlaneB32(dst=sgpr(dst), src=vgpr(_SK_CONST_VGPRS[name])))
+        return module
+
     return SimpleNamespace(
         # gfx1250 hands back a scratch index; everyone else the named SGPR.
         acquirePersistentConstSgpr=lambda k, name: pool.checkOut(1, name) if inVgprs else name,

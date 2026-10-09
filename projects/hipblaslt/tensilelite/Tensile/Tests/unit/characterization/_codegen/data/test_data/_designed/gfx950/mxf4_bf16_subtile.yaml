@@ -1,0 +1,148 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# DESIGNED gfx950 MXF4 subtile config — PostLoopStoreInNll / block-scheduling
+# characterization.
+#
+# Covers the scope gate isMxf4SubtilePath() (Tensile/Common/Utilities.py), which
+# is MXF4 in / bf16 out on UseSubtileImpl. Every optimization on this path hangs
+# off that predicate, and before this config nothing in the unit suite reached
+# it: the only other gfx950 MXF4 config (Tests/common/streamk/gfx950/
+# sk_mxf4gemm_pap.yaml) is DestDataType: S, so plsinSubtileTypes() is False for
+# it and the whole feature surface emitted untested.
+#
+# The two problem groups are a matched pair and must stay that way:
+#
+#   index 0  DestDataType: B  — in scope.  isMxf4SubtilePath() is True, so
+#            PostLoopStoreInNll resolves to 1 and the fused store is built.
+#   index 1  DestDataType: S  — out of scope, identical in every other respect.
+#            isMxf4SubtilePath() is False, so PLSIN is forced off and the
+#            kernels must be generated exactly as they are without this work.
+#
+# Holding everything but the destination type fixed is what makes the pair a
+# scoping control rather than two unrelated configs: any optimization that
+# leaks out of the gate shows up as a difference between them.
+#
+# Solution parameters mirror the shipped tuned gfx950 MXF4 logic
+# (Logic/asm_full/gfx950/gfx950/Origami/Origami_ntb4/
+# gfx950_Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_HAS_SAB_SAV_UserArgs.yaml)
+# so the characterized kernels are the ones that actually ship.
+#
+# MatrixInstruction shapes, both DepthU 256 / MI 16x16x128:
+#   [..., 8, 8, 2, 2]  MT256x256 — the only tile plsinBlockSchedTile() admits,
+#                      so this is the shape that exercises the partitioned K
+#                      reduction, the staged fused store and the NGLL/NLL merge.
+#   [..., 4, 4, 2, 2]  MT128x128 — PLSIN-eligible but *not* block-scheduled,
+#                      which pins the boundary of plsinBlockSchedTile()'s
+#                      MT256x256 equality.
+#
+# CPU-only. No GPU, no compile, no hardware access.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  Device: 0
+  MXScaleFormat: 1
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # [0] MXF4 -> BF16 : in scope for isMxf4SubtilePath()
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: B
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]   # MT256x256 — block-scheduled
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]   # MT128x128 — PLSIN, not block-scheduled
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - LocalReadVectorWidth: [32]
+        - GlobalReadVectorWidthA: [32]
+        - GlobalReadVectorWidthB: [32]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - StoreVectorWidth: [4]
+        - SourceSwap: [True]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - StreamK: [3]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 2048, 1, 256]
+
+  ########################################
+  # [1] MXF4 -> FP32 : scoping control, out of scope for isMxf4SubtilePath()
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]   # MT256x256 — must stay unoptimized
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]   # MT128x128 — must stay unoptimized
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - LocalReadVectorWidth: [32]
+        - GlobalReadVectorWidthA: [32]
+        - GlobalReadVectorWidthB: [32]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - StoreVectorWidth: [4]
+        - SourceSwap: [True]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - StreamK: [3]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 2048, 1, 256]

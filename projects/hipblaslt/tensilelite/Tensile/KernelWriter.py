@@ -66,7 +66,7 @@ from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2, clusterEnabled, \
-  swizzleGeometry
+  swizzleGeometry, isMxf4SubtilePath
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
@@ -165,6 +165,8 @@ class ABMatrixInfo(MatrixInfo):
   gRDtlSwizzlePerpBlockSize: int    = -1
   gRDtlSwizzleParaBlockSize: int    = -1
   startVgprGL2PrefetchAddr: int = -1
+
+
 
 # States
 @dataclass(frozen=True)
@@ -334,6 +336,10 @@ class StateValues:
   totalAgprs: int                        = 0
   maxLimitAgprs: int                     = 0
   totalMixedAgprs: int                   = 0
+  # [lo, hi) arch-vgpr ranges holding D accumulator tiles that did not fit in the
+  # agpr file (subtile kernels with MIWaveTile0*MIWaveTile1 > agprs/4).  These are
+  # live from the MFMA loop through the epilogue, so no store path may use them.
+  subtileSpilledDRanges: list            = field(default_factory=list)
   totalVgprs: int                        = 0
   totalSgprs: int                        = 0
   lastValuAB: int                        = 0
@@ -448,6 +454,62 @@ class StateValues:
   WGMTransformLevels: int                = -1
   tailloopInNll: bool                    = False
   tailloopInNllmaxUnit: int              = 0
+  postLoopStoreInNll: bool               = False
+  postLoopStoreInjected: bool            = False
+  postLoopSrdDHoisted: bool              = False
+  # PostLoopStoreInNll (PLSIN) store/init-weave state (B2). Declared here so the
+  # fused-store weave communicates through typed StateValues fields instead of
+  # dynamically-attached, stringly-typed getattr-with-default attributes. All
+  # default to the "not weaving" value, so a non-PLSIN kernel is unaffected.
+  subtileFusedWeave: bool                = False   # inside the fused-NLL weave store
+  subtileFusedFullTileStore: bool        = False   # fused store is the full-tile (no-edge) arm
+  subtileWeaveLookahead: int             = 4       # store-pairs ahead a pair's MFMAs are issued
+  subtileWeavePairCounter: int           = 0       # next store-pair index being emitted
+  subtileMBlockSize: int                 = 0       # OOB-guard M block size (MatrixInstM)
+  # writePartials builds its deferred block while vgprValuC is 0 and names its
+  # staging registers with absolute indices, so it pins the base for the block's
+  # duration.  Set when that pin is emitted; cleared once the base is restored.
+  deferredPartialsValuCPinned: bool       = False
+  # 16bit-subtile store lane offsets materialized once per store by
+  # emitSubtileStoreLaneMath instead of in every write batch's preamble.
+  subtileHoistedLaneGroupDelta: bool     = False   # vgprLaneGroupDelta is live from the hoist
+  subtileHoistedPermAddr: bool           = False   # vgprPermAddr holds the permlane16 row delta
+  subtileWeaveMfmaGroups: Optional[dict] = None    # {pair: [terminal mfma insts]} being woven
+  subtileWeaveMfmaGroupsMaster: Optional[dict] = None  # pristine master re-copied per store type
+  subtileWeaveEmitted: Optional[set]     = None    # store-pairs whose MFMAs are already emitted
+  subtileWeaveCaptureInstances: Optional[list] = None  # generated activation/store-path captures
+  subtileWeaveCaptureCurrent: Optional[dict] = None     # capture receiving the current store path
+  subtileHoistedStoreInit: Optional[list] = None   # split store-init units hoisted into the loop
+  subtileHoistedWriteIndices: Optional[dict] = None  # coord VGPRs hoisted from NGLL
+  subtileRecomputeCoords: bool           = False   # recompute store coords INTO existing (hoisted) VGPRs (numIter<PGR)
+  subtileFusedLendVgprs: Optional[list]  = None    # [(base,size)] VGPRs lent to the fused store
+  subtileStoreStages: int                = 0       # PLSIN staged store: compute partitions to stage across
+  subtileStoreStagesM: int               = 1       # of those, how many split M (1 = N-only split)
+  subtileStoreTt1PerStage: int           = 0       # element-space N groups per stage (0 = not staging)
+  subtileStoreTt0PerStage: int           = 0       # element-space M groups per stage
+  subtileStagedStoreSeam: Optional[int]  = None    # index of the store body within the fused-store module
+  subtileStoreStageHighWater: int        = 0       # highest stage opened so far (survives per-batch writer rebuild)
+  subtilePairPackSlot: int               = 0       # rotating index into the paired-store pack ring
+  # Paired-store dwordx4 base hoist: which addrDVgpr / N group vgprAddrScratch currently
+  # holds.  Lives on the writer state so it survives the per-batch rebuild of
+  # GlobalWriteBatch -- as an instance field it reset every batch and the base was
+  # recomputed once per batch from unchanged inputs.  subtileHoistedAddrArm pins the
+  # owning store arm: one StoreState is built per arm (edge/beta/activation) and arms
+  # are runtime-exclusive branches, so a base produced in one must never be reused in
+  # another -- only the emit order makes them look sequential.  It is the arm counter
+  # rather than the StoreState itself because that object reaches the writer (and its
+  # register pools) and must not be retained here.
+  subtileHoistedAddrDVgpr: int           = -1
+  # Rows the fused store has already passed, when it addresses them absolutely
+  # rather than by advancing SrdD. See GlobalWriteBatch._subtileStoreSoffset.
+  subtileAbsRowAddr: bool                = False
+  subtileHoistedAddrBlockN: int          = -1
+  subtileHoistedAddrArm: int             = -1
+  subtileStoreArmId: int                 = 0       # bumped per StoreState (store arm)
+  subtileFusedStoreNoActivation: bool    = False   # fused arm emits only the no-activation store body
+  subtileM32ValidBlocksSgpr: Optional[int] = None  # SubtileMGuard SGPR
+  subtileN16ValidBlocksSgpr: Optional[int] = None  # SubtileNGuard SGPR
+  # (subtileTotalMOffsetSgpr is declared with the other KWA SGPR fields above)
   staggerUCode: bool                     = 0
   waveIdxReleasedAfterStagger: bool      = False
   # Wave-separated TDM packs loop-invariant WaveIdx bits into ArgType[8+] before
@@ -580,6 +642,21 @@ class ExternClasses:
 ################################################################################
 class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCMeta):
   #__metaclass__=abc.ABCMeta
+
+  ##############################################################################
+  # Spilled D accumulator guard
+  ##############################################################################
+  def assertNotSpilledDTile(self, lo, numRegs, what):
+    """Fail generation if [lo, lo+numRegs) overlaps a D accumulator tile that
+    spilled into the arch vgpr pool.  Those registers are live from the MFMA
+    loop through the epilogue, so a store path that targets them silently
+    corrupts one 16x16 output block per wave."""
+    hi = lo + numRegs
+    for (a, b) in self.states.subtileSpilledDRanges:
+      if not (hi <= a or lo >= b):
+        raise RuntimeError(
+            "Kernel %s: %s targets v[%u:%u), which overlaps spilled D accumulator "
+            "tile v[%u:%u)." % (self.states.kernelName, what, lo, hi, a, b))
 
   ##############################################################################
   # Init
@@ -4800,6 +4877,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       localReadsMXSA = Module()
       localReadsMXSB = Module()
       localReadsB = Module()
+      localReadsMXSB = Module()
       localReadsM = Module()
       localReadsSecondHalf = Module()
 
@@ -4824,6 +4902,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         doReadMXSB = 1 if u == 0 else 0
         doReadB = 1 if u == 0 else 0
         doReadM = 1 if u == 0 else 0
+        doReadMXSA = 1 if u == 0 else 0
+        doReadMXSB = 1 if u == 0 else 0
 
       # reads for next loop
       doNext = uNext > localWriteEndIter
@@ -4833,6 +4913,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       doReadMXSB = doReadMXSB or (hasLiveLdsData and doNext)
       doReadMXSB = doReadMXSB and kernel["ProblemType"]["MXBlockB"]
       doReadB = doReadB or (hasLiveLdsData and doNext)
+      doReadMXSB = doReadMXSB or (hasLiveLdsData and doNext)
+      doReadMXSB = doReadMXSB and kernel["ProblemType"]["MXBlockB"]
       doReadM = doReadM or (hasLiveLdsData and doNext)
       doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
       rapIdxA = self.rapResidentBufferIdx(kernel, "A", u + pflr, plrIdx)
@@ -4866,6 +4948,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         doReadMXSA = doReadMXSA and iui*self.states.numReadsIterCoalescedMXSA < kernel["InnerUnroll"]
         doReadMXSB = doReadMXSB and iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]
         doReadB = doReadB and iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]
+        doReadMXSB = doReadMXSB and iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]
         doReadM = doReadM and iui*self.states.numReadsIterCoalescedMetadata < kernel["InnerUnroll"]
         if doReadA:
           emittedReadsA.addComment1("local read a")
@@ -4947,6 +5030,21 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           localReadsM.add(localReadCodeM)
           pack[plrIdxM].add(packPreM)
           pack[plrIdxM].add(packCodeM)
+        if doReadMXSB:
+          localReads.addComment1("local read mxsb")
+          bufferIdx = plrIdx*self.states.numIterPerCoalescedReadMXSB
+          if self.states.packDTVB or self.states.convDTVB:
+            # DTV + pack or input conversion case, offset bufferIdx for local read packing instructions
+            bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadMXSB + vregSetIdxLR * kernel["LoopIters"]
+          localReadCodeMXSB, packCodeMXSB, packPreMXSB = self.localReadDo(kernel, bufferIdx, iui*self.states.numReadsIterCoalescedMXSB, 0, tensorParametersB["MX"])
+          localReads.add(localReadCodeMXSB)
+          localReadsMXSB.add(localReadCodeMXSB)
+          pack[packStoreIdx*self.states.numIterPerCoalescedReadMXSB].add(packPreMXSB)
+          pack[packStoreIdx*self.states.numIterPerCoalescedReadMXSB].add(packCodeMXSB)
+          if kernel["UseCustomMainLoopSchedule"]:
+            LRCodeAAllIters[uIdx].add(localReadCodeMXSB)
+            PackCodeAAllIters[uIdx].add(packPreMXSB)
+            PackCodeAAllIters[uIdx].add(packCodeMXSB)
         if doReadB:
           emittedReadsB.addComment1("local read b")
           bufferIdx = plrIdx*self.states.numIterPerCoalescedReadB
@@ -5265,6 +5363,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.vgprPool.checkIn(lane4)
     return module
 
+
   ##############################################################################
   # GSU bit-mask helper (introduced for AdaptiveGemmNTAB)
   ##############################################################################
@@ -5458,12 +5557,40 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB))
     if not hasTDM:
       module.add(graTileAssignment(self, kernel))
-    module.add(lraTileAssignment(self, kernel))
-    module.add(localReadDTLInitCommonSwapVgpr(self, kernel))
+
+    # Pre-loop scheduling (Change A): the A/B and scale LDS read-address setup
+    # (lraTileAssignment -> v9/v14, the DTL swap-vgpr init that READS v9/v14, and
+    # lraTileAssignmentScaleSwizzled -> v19/v22 + scale swaps) is pure loop-invariant
+    # VALU whose only consumers are the post-barrier ds_reads and the main-loop LR
+    # swaps. For any subtile kernel that prefetches (PGR>=1, no TDM) we DEFER these
+    # three modules into the preloop so ~750 cycles of address math overlaps the
+    # in-flight prefetch buffer_loads instead of sitting on the pre-main-loop critical
+    # path. The functions are still CALLED here, in the same order, so vgpr/sgpr-pool
+    # checkout/checkin bookkeeping is byte-identical -- only the emission position of the
+    # returned modules moves. localReadDTLInitCommonSwapVgpr consumes v9/v14 so it must
+    # travel WITH lraTileAssignment; graTileAssignmentScaleSwizzled computes GR offsets
+    # (feeds the prefetch) and stays inline. On the fast path (K>=DepthU) lraDeferred
+    # lands between initC and wait_gr as overlapping filler. On the NoTailLoop path
+    # (no split) it lands before wait_gr. The slow path (K<DepthU) gets its own copy:
+    # the tail loop reads LDS through these address registers. TDM / PGR==0 kernels
+    # emit inline as before.
+    _deferLra = (isMxf4SubtilePath(kernel)
+                 and kernel["PrefetchGlobalRead"] >= 1
+                 and not hasTDM)
+    self._deferredPreloopLraModules = None
+    _lraModule     = lraTileAssignment(self, kernel)
+    _lraSwapModule = localReadDTLInitCommonSwapVgpr(self, kernel)
+    if not _deferLra:
+      module.add(_lraModule)
+      module.add(_lraSwapModule)
 
     if not hasTDM:
       module.add(graTileAssignmentScaleSwizzled(self, kernel))
-    module.add(lraTileAssignmentScaleSwizzled(self, kernel))
+    _lraScaleModule = lraTileAssignmentScaleSwizzled(self, kernel)
+    if _deferLra:
+      self._deferredPreloopLraModules = [_lraModule, _lraSwapModule, _lraScaleModule]
+    else:
+      module.add(_lraScaleModule)
 
     module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
@@ -5485,6 +5612,51 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     if self.do["executeToPrefetchEnd"]:
       module.add(self.functionEnd(kernel, addLabel=False))
+
+    # PostLoopStoreInNll: compute the loop-invariant tail guard SGPR before the
+    # main loop. calculateLoopNumIter(-1) only materializes the tail counter AFTER
+    # emitMainAndExitLoops, but the fused-store front guard (emitted at the top of
+    # the NLL, inside mainLoop) needs "does a tail run?" available up front. DepthU
+    # is a power of two for every eligible (fp4 + UseSubtileImpl) config, so
+    # (SizesSum % DepthU) reduces to a single AND: the result is 0 iff the NLL is
+    # terminal (no tail). Beta is tested directly from the persistent sgprBeta at
+    # the guard site (it stays live through the main loop), so no snapshot is made
+    # here. The write-index VGPRs stay drain-anchored and are materialized in the
+    # NLL builder (see emitMainAndExitLoops); the existing post-loop
+    # notLocalSplitUGlobalWriteIndices call is kept intact for the fallback arm.
+    # PostLoopStoreInNll SGPR-defer: no persistent pre-loop flags. The former
+    # PostLoopHasTail (no-tail bit) is recomputed transiently inside the shared
+    # emitFusedStoreGuard, and the former PostLoopStored (did-fuse dedup bit) is
+    # eliminated -- the post-loop dedup re-evaluates the same guard instead of
+    # carrying a bit across endSummation (see post-loop code below). Both flags being
+    # persistent added +2 to the store-path SGPR peak (MT256x256 fp4 hit 104 > 102).
+
+      # Step 4b (SGPR-defer): SrdD's value is NO LONGER hoisted before the main loop.
+      # Hoisting required SrdD to be main-loop-resident (4 SGPRs across the loop),
+      # overflowing MT256x256 fp4. Instead SrdD is computed lazily on each path that
+      # needs it: the PLAIN / SkipToEnd post-loop store computes it after endSummation's
+      # reclaim (globalWriteWorkGroupInit channels=None, baseline behavior), and the
+      # FUSED NLL store defines a transient SrdD from the drain-era pool
+      # (buildSubtileFusedStore). postLoopSrdDHoisted stays False so the post-loop init
+      # emits the full C+D SRD compute.
+
+    # PostLoopStoreInNll: precompute the structural fused-store predicate into the
+    # persistent PostLoopFusedStore SGPR BEFORE the main loop. Alpha==1.0 and a null
+    # ScaleAlphaVec pointer are part of that predicate; the fused epilogue stores
+    # ValuC without a scalar or vector multiply.
+    #
+    # PLSIN guard-hoist (subtile fused-store path ONLY): when this kernel prefetches
+    # global reads (PGR>=1), DEFER the fold into the preloop global-read shadow
+    # (LogicalScheduler.emitMainAndExitLoops injects it right after the MT0 buffer_load
+    # issue, before the wait_gr drain) so its loop-invariant SALU/VALU executes while
+    # the prefetch loads are in flight instead of sitting on the pre-main-loop critical
+    # path. PGR==0 (no shadow) and non-fused-store-eligible kernels emit here unchanged
+    # -- computePostLoopFusedStore returns an empty module for the latter, so the
+    # non-subtile / non-eligible code path is byte-identical.
+    _plsinDeferFold = (self._plsinFusedFlagEligible(kernel)
+                       and kernel["PrefetchGlobalRead"] >= 1)
+    if not _plsinDeferFold:
+      module.add(self.computePostLoopFusedStore(kernel))
 
     module.add(mainLoop(self, kernel))
 
@@ -5542,15 +5714,63 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(self.endSummation(kernel, tensorParametersA, tensorParametersB))
       if isPersistent(kernel):
         module.add(Component.TileProcessingStrategy.find(self).skipPhantomTileStore(self, kernel))
-      if not self.states.doShadowInit:
-        self.removeSgprVarFromPool("SrdD")
-        self.removeSgprVarFromPool("SrdC")
-        module.add(self.globalWriteWorkGroupInit(kernel))
 
       ####################################
       # NOT LocalSplitU
       ####################################
 
+
+
+      # 4d-3a dedup (flag-free): re-evaluate the SAME fused-store guard. A WG whose
+      # FUSED NLL already stored D re-passes the guard here and branches over the
+      # whole post-loop store; any WG that took the PLAIN arm / K<DepthU SkipToEnd
+      # fast-exit fails the guard (has-tail, or non-full-tile, or beta!=0) and falls
+      # through to store normally. This replaces the persistent PostLoopStored flag
+      # (all guard inputs are loop-invariant and still live post-endSummation). When
+      # the feature is off, no guard/branch is emitted (byte-identical).
+      #
+      # Tail-reduction: the guard is emitted BEFORE the post-loop store-init (SrdC/SrdD
+      # address math) so a fused full-tile owner branches over BOTH the store-init AND
+      # the store body. Previously the store-init ran ahead of the guard, so a fused
+      # owner paid the full ~SrdC/SrdD recompute in the exposed post-store tail even
+      # though its store body was skipped. The store-init's SrdC/SrdD values are only
+      # consumed by the (also-skipped) store body, so skipping the init for a fused
+      # owner is runtime-safe; non-fused waves fall through doPostLoopStoreLabel and run
+      # the full init + store unchanged.
+      postLoopStoreDedupLabel = None
+      if self.states.postLoopStoreInNll:
+        postLoopStoreDedupLabel = Label("SkipPostLoopStore", "")
+        doPostLoopStoreLabel = Label("DoPostLoopStore", "")
+        # Guard branches target the adjacent doPostLoopStoreLabel -> short is fine.
+        module.add(self.emitFusedStoreGuard(kernel, doPostLoopStoreLabel))
+        # The skip jump spans the post-loop store-init + store body. That span is
+        # tile-dependent and, measured, sits well inside the short-branch window
+        # (85 KB / 15350 instructions of a 128 KB / 16384 budget on MT256x64, the
+        # largest tile carrying the fused store), so it must not be hard-coded to
+        # the 32-bit form: doing so took a 3-SGPR temp at the pool's high-water
+        # mark, pushing 31 kernels past MaxSgpr. Leave a placeholder and let
+        # updateBranchPlaceHolder choose from the measured distance once the body
+        # has been emitted -- if it does pick the long form, the temp is allocated
+        # there instead, after the store temps have been checked back in.
+        dedupBranch = Module("postLoopStoreDedup_placeholder")
+        dedupBranch.addComment1("FUSED NLL already stored D -> skip redundant post-loop store-init + store")
+        module.add(dedupBranch)
+        module.add(doPostLoopStoreLabel)
+
+      # Post-loop store-init (SrdC/SrdD address math). Emitted AFTER the dedup guard so
+      # a fused owner skips it (see tail-reduction note above). For non-PostLoopStoreInNll
+      # builds no guard was emitted, so this runs inline exactly as before.
+      # Step 4b-2: if SrdD's value was already hoisted before the main loop, the
+      # post-loop copy must compute only SrdC (channels=["C"]) — SrdD is already
+      # valid and re-emitting its SRD-init would duplicate the D labels. When the
+      # hoist did not run (non-fused, doShadowInit, or SrdD pre-defined) fall back
+      # to the full C+D init (channels=None), byte-identical to the legacy path.
+      if not self.states.doShadowInit:
+        self.removeSgprVarFromPool("SrdD")
+        self.removeSgprVarFromPool("SrdC")
+        module.add(self.buildSubtileStoreInitModule(
+          kernel,
+          channels=["C"] if self.states.postLoopSrdDHoisted else None))
 
       # global write indices
       module.addComment1("not-LocalSplitU: global write indices")
@@ -5560,6 +5780,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       #module.addComment1("not-LocalSplitU: global write")
       storeModule, deferredGSU0 = self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB)
       module.add(storeModule)
+      if postLoopStoreDedupLabel is not None:
+        module.add(postLoopStoreDedupLabel)
+        # module now ends at the branch target, so the placeholder-to-end
+        # instruction count that updateBranchPlaceHolder measures is the real span.
+        self.updateBranchPlaceHolder(module, ["postLoopStoreDedup_placeholder"],
+                                     [postLoopStoreDedupLabel.label], ["SBranch"])
 
       if not (kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None):
         self.vgprPool.checkIn(self.states.c.startVgprValu)
@@ -5603,6 +5829,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if hasDeferredPartials:
         module.appendModule(self.states.deferredPartialsModule)
         self.states.deferredPartialsModule = None
+        # writePartials pins vgprValuC to 0 for the duration of its block.
+        if self.states.deferredPartialsValuCPinned:
+          module.add(RegSet("v", "vgprValuC", self.states.c.startVgprValu))
+          self.states.deferredPartialsValuCPinned = False
       if hasDeferredGSU0:
         module.appendModule(deferredGSU0)
       if hasDeferredActivation:
@@ -5915,6 +6145,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                   # no packPre scheduling support for M
                   pack[plrIdx].add(packPreM)
                   pack[plrIdx].add(packCodeM)
+              if kernel["ProblemType"]["MXBlockB"]:
+                if iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]:
+                  module.addComment1("local read prefetch mxsb")
+                  localReadCodeMXSB, packCodeMXSB, packPreMXSB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMXSB, iui*self.states.numReadsIterCoalescedMXSB, espi, tensorParametersB["MX"])
+                  module.add(localReadCodeMXSB)
+                  pack[plrIdx].add(packPreMXSB)
+                  pack[plrIdx].add(packCodeMXSB)
               if iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]:
                 prefetchReadsB.addComment1("local read prefetch b")
                 localReadCodeB, packCodeB, packPreB = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadB, iui*self.states.numReadsIterCoalescedB, espi, tensorParametersB)
@@ -5951,6 +6188,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               if not kernel["ForceUnrollSubIter"] and (iui*self.states.numReadsIterCoalescedB < kernel["InnerUnroll"]):
                 module.addComment1("local read inc b")
                 module.add(self.localReadInc(kernel, iui, tensorParametersB))
+              if not kernel["ForceUnrollSubIter"] and kernel["ProblemType"]["MXBlockB"]:
+                if iui*self.states.numReadsIterCoalescedMXSB < kernel["InnerUnroll"]:
+                  module.addComment1("local read inc mxsb")
+                  module.add(self.localReadInc(kernel, iui, tensorParametersB["MX"]))
           # Gather A, B conversion code based on scheduling order
           packPrePrefetchItems = []
           self._interleavePackAB(kernel, packPrePrefetchA.flatitems(), packPrePrefetchB.flatitems(), packPrePrefetchItems, prefetch=True)
@@ -7371,8 +7612,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.exclasses.activation.setAlt(kernel["ActivationAlt"])
 
     self.states.asmCaps  = ti.getAsmCaps()
-    self.states.archCaps = ti.getArchCaps()
+    self.states.archCaps = dict(ti.getArchCaps())
     self.states.regCaps  = ti.getRegCaps()
+    # gfx1250-only caps are absent from older rocisa builds. gfx950 does not
+    # implement XNACK replay; default False so TensileCreateLibrary can run.
+    self.states.archCaps.setdefault("EnableXnackReplay", False)
+    self.states.archCaps.setdefault("RequiresXCntForVolatileVMEM", False)
 
     # rocisa keys caps by ISA, so both gfx1250 ASIC revisions share one entry;
     # the build's arch name is the only signal here (empty for v1). Rebuild the
@@ -7393,6 +7638,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     #exit(1)
 
     self.states.tailloopInNll = kernel["TailloopInNll"]
+    # PostLoopStoreInNll: fuse the fp4+UseSubtileImpl paired dwordx4 store into the
+    # NLL. Solution-level gating already narrowed this to eligible configs; here we
+    # just snapshot it and reset the per-kernel "already injected" flag.
+    self.states.postLoopStoreInNll = kernel["PostLoopStoreInNll"]
+    self.states.postLoopStoreInjected = False
+    # Step 4b-2: set True once SrdD's value is computed before the main loop, so
+    # the post-loop store-init emits only the C channel (D already done) instead
+    # of the full C+D init. Reset per kernel; only the pre-main-loop D-hoist below
+    # flips it on.
+    self.states.postLoopSrdDHoisted = False
     hasMx = kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]
     usesTDM = kernel["enableTDMA"] or kernel["enableTDMB"]
     usesDTL = kernel["DirectToLdsA"] or kernel["DirectToLdsB"]
@@ -7562,6 +7817,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       not (kernel["UseF32XEmulation"] and (isMfmaXf32 or isCMS or self.states.asmCaps["HasWMMA_V3"]))
     if not kernel["UnrollMajorLDSA"] and not forceLrvwTile1A:
       self.states.lrvwTileA = kernel["VectorWidthA"]
+      if kernel["ProblemType"]["MXBlockA"]:
+        self.states.lrvwTileMXSA = kernel["VectorWidthA"]
     else:
       self.states.lrvwTileA = 1
     forceLrvwTile1B = kernel["ProblemType"]["MacDataTypeB"].numBytes() >= 4 and \
@@ -7569,6 +7826,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       not (kernel["UseF32XEmulation"] and (isMfmaXf32 or isCMS or self.states.asmCaps["HasWMMA_V3"]))
     if not kernel["UnrollMajorLDSB"] and not forceLrvwTile1B:
       self.states.lrvwTileB = kernel["VectorWidthB"]
+      if kernel["ProblemType"]["MXBlockB"]:
+        self.states.lrvwTileMXSB = kernel["VectorWidthB"]
     else:
       if kernel["ProblemType"]["MXBlockB"]:
         self.states.lrvwTileMXSB = 1
@@ -7660,6 +7919,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.states.numReadsIterCoalescedMXSA  = 1
     self.states.numIterPerCoalescedReadMXSA = max(1, self.states.numReadsIterCoalescedMXSA // kernel["InnerUnroll"])
     self.states.numReadsIterCoalescedMXSB  = 1
+    self.states.numIterPerCoalescedReadMXSB = max(1, self.states.numReadsIterCoalescedMXSB // kernel["InnerUnroll"])
+
+    self.states.numReadsIterCoalescedMXSA  = 1
+    self.states.numReadsIterCoalescedMXSB  = 1
+    self.states.numIterPerCoalescedReadMXSA = max(1, self.states.numReadsIterCoalescedMXSA // kernel["InnerUnroll"])
     self.states.numIterPerCoalescedReadMXSB = max(1, self.states.numReadsIterCoalescedMXSB // kernel["InnerUnroll"])
 
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
@@ -9547,9 +9811,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         vgprIdx += numVgprsEmuB # for vgpr 32XEmulation B
 
       if isPersistent(kernel) and self.isPersistentConstantsToVgprEnabled(kernel):
-        numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, PersistentWorkGroupIndex
-        if hasStaticAssignment(kernel):
-          numSKConsts += 2  # skGrid, skTiles
+        numSKConsts = len(self.persistentConstVgprNames(kernel))
         self.states.startVgprPersistentConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts
@@ -9609,9 +9871,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       #vgprIdx += self.states.c.numVgprValu
       if isPersistent(kernel) and self.isPersistentConstantsToVgprEnabled(kernel):
-        numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, PersistentWorkGroupIndex
-        if hasStaticAssignment(kernel):
-          numSKConsts += 2  # skGrid, skTiles
+        numSKConsts = len(self.persistentConstVgprNames(kernel))
         self.states.startVgprPersistentConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts
@@ -9656,9 +9916,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     numSgprAddressD = self.states.rpga # til end
     numSgprAddressC = self.states.rpga # til end
     numSgprAddressA = self.states.rpga # til read offsets
-    numSgprAddressB = self.states.rpga # til read offsets
     if kernel["ProblemType"]["MXBlockA"]:
       numSgprAddressMXSA = self.states.rpga
+    numSgprAddressB = self.states.rpga # til read offsets
     if kernel["ProblemType"]["MXBlockB"]:
       numSgprAddressMXSB = self.states.rpga
     numSgprAddressWS = self.states.rpga
@@ -9676,9 +9936,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.states.c.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
     self.states.gate.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
     self.states.a.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsA"])
-    self.states.b.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsB"])
     if kernel["ProblemType"]["MXBlockA"]:
       self.states.mxsa.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsMXSA"])
+    self.states.b.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsB"])
     if kernel["ProblemType"]["MXBlockB"]:
       self.states.mxsb.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsMXSB"])
     if not kernel["ProblemType"]["UseInitialStridesCD"]:
@@ -9688,9 +9948,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.states.gate.numSgprStrides -= 1
     if not kernel["ProblemType"]["UseInitialStridesAB"]:
       self.states.a.numSgprStrides -= 1
-      self.states.b.numSgprStrides -= 1
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.mxsa.numSgprStrides -= 1
+      self.states.b.numSgprStrides -= 1
       if kernel["ProblemType"]["MXBlockB"]:
         self.states.mxsb.numSgprStrides -= 1
     if kernel["ProblemType"]["Sparse"]:
@@ -9834,13 +10094,44 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     self.defineSgpr("OrigLoopCounter", 1)
 
+    # PostLoopStoreInNll: persistent "this tile fuses the store" predicate, precomputed
+    # per-tile before the main loop (see computePostLoopFusedStore). It ANDs every
+    # fused-store structural sub-guard (no-tail, beta==0, full-tile M/N, StreamK
+    # owner, Alpha==1.0, null ScaleAlphaVec) into one bit so all three guard sites
+    # collapse to a single flag compare. The fused epilogue does not apply alpha.
+    # Defined here (before the nonPostLoopSgpr snapshot below) so it survives
+    # endSummation and is live at all guard sites. Only defined when the optimization is
+    # eligible so non-PLSIN / non-fp32-compute kernels are unaffected.
+    if kernel["PostLoopStoreInNll"] and kernel["ProblemType"]["ComputeDataType"].isSingle():
+      self.defineSgpr("PostLoopFusedStore", 1)
+
+
     if self.debugConfig.debugKernel:
       self.defineSgpr("AddressDbg", self.states.numSgprAddressDbg)
       self.defineSgpr("DebugKernelItems", 1)
 
     # the sgprs overlap with wg ids
     # TODO: For subtileimpl, consider shadowInit param as well
-    if self.states.doShadowInit and kernel["BufferStore"]:
+    # PostLoopStoreInNll (fp4 subtile weave) reserves SrdD here too — even though
+    # subtile kernels never set doShadowInit — so SrdD gets a stable index in the
+    # common allocator *before* the deferred loop places SrdWS. This is what
+    # prevents the SrdD/SrdWS register-pool collision on StreamK (the old bespoke
+    # mid-loop SrdD define grabbed the parked SrdWS registers). The value of SrdD
+    # is still computed early (before the main loop) in the kernel body. SrdC is
+    # NOT reserved early for the PLSIN path: it is only needed by the post-loop
+    # beta/C path and is defined in endSummation, so it stays free as a main-loop
+    # temp (parking it through the whole loop would let a temp grab its registers).
+    # PostLoopStoreInNll (fp4 subtile weave) SGPR-defer: SrdD is intentionally NOT
+    # reserved early here. Reserving it early made it main-loop-resident (survives
+    # via nonPostLoopSgpr), costing 4 SGPRs across the whole loop and overflowing
+    # MT256x256 fp4. Baseline defines SrdD only *after* endSummation's reclaim, so
+    # it never costs main-loop SGPRs. We mirror that: the PLAIN / SkipToEnd post-loop
+    # store computes SrdD after the reclaim (globalWriteWorkGroupInit channels=None),
+    # and the FUSED NLL store defines a *transient* SrdD from the drain-era pool
+    # (buildSubtileFusedStore). Only doShadowInit (never set for subtile) reserves
+    # SrdD/SrdC early.
+    earlyStoreSrd = self.states.doShadowInit
+    if earlyStoreSrd and kernel["BufferStore"]:
       self.defineSgpr("SrdD", 4, 4)
       self.defineSgpr("SrdC", 4, 4)
 
@@ -10036,7 +10327,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     elif not kernel["UseSubtileImpl"] and (kernel["StoreSwapAddr"]):
       if kernel["LocalWriteUseSgprA"]:
         self.defineSgpr("SwapA", 1)
-      if kernel["LocalWriteUseSgprB"]:
+      if kernel["LocalWriteUseSgprB"] or kernel["UseSubtileImpl"]:
         self.defineSgpr("SwapB", 1)
       if kernel["ProblemType"]["MXBlockA"] and kernel["LocalWriteUseSgprMXSA"]:
           self.defineSgpr("SwapMXSA", 1)
@@ -10271,7 +10562,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if self.states.lrvwTileMXSA > 1:
           if self.states.asmCaps["HasWMMA_V3"]:
             mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockA"]
-            numMXSA = numMXSA // int(tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
+            # Keep the tiles-per-read ratio exact: a read narrower than one MX
+            # unit covers a fraction of a tile and needs proportionally more reads.
+            tilePerReadMXSA = tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4 / mxUnit
+            numMXSA = int(numMXSA / tilePerReadMXSA)
           else:
             numMXSA = numMXSA // kernel["VectorWidthA"]
 
@@ -10309,7 +10603,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if self.states.lrvwTileMXSB > 1:
           if self.states.asmCaps["HasWMMA_V3"]:
             mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockB"]
-            numMXSB = numMXSB // int(tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
+            # Keep the tiles-per-read ratio exact: a read narrower than one MX
+            # unit covers a fraction of a tile and needs proportionally more reads.
+            tilePerReadMXSB = tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4 / mxUnit
+            numMXSB = int(numMXSB / tilePerReadMXSB)
           else:
             numMXSB = numMXSB // kernel["VectorWidthB"]
 
@@ -10655,6 +10952,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         else self.states.tileChar1
 
     tP["isA"] = (cM == "A")                                      # is this tensor A
+    tP["isMXSA"] = (cM == "MXSA")                                # is this tensor A
     tP["isB"] = (cM == "B")                                      # is this tensor B
     tP["isMXSA"] = (cM == "MXSA")                                # is this tensor MXSA
     tP["isMXSB"] = (cM == "MXSB")                                # is this tensor MXSB
