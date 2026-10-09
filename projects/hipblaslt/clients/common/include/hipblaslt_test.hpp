@@ -197,6 +197,33 @@ bool match_test_category(const Arguments& arg, const char* category);
         }                                                                           \
     } while(0)
 
+// fast_check cases in the stress and sdc_hunt categories need tens of GiB or run for many
+// minutes. A run with no gtest filter (TheRock runs hipblaslt-test unfiltered) skips them; a
+// filter that selects them, such as the ctest tier patterns, runs them.
+inline bool hipblaslt_category_needs_a_filter(const char* category)
+{
+    return !strcmp(category, "stress") || !strcmp(category, "sdc_hunt");
+}
+
+inline bool hipblaslt_gtest_filter_given()
+{
+    const std::string filter   = ::testing::GTEST_FLAG(filter);
+    const std::string positive = filter.substr(0, filter.find('-'));
+    return !positive.empty() && positive != "*";
+}
+
+#define SKIP_UNLESS_SELECTED_BY_FILTER()                                                    \
+    do                                                                                      \
+    {                                                                                       \
+        const auto& _sf_arg = GetParam();                                                   \
+        if(_sf_arg.fast_check && hipblaslt_category_needs_a_filter(_sf_arg.category)        \
+           && !hipblaslt_gtest_filter_given())                                              \
+            GTEST_SKIP() << "the " << _sf_arg.category                                      \
+                         << " fast_check cases run only when a gtest filter selects them, " \
+                            "for example --gtest_filter=*"                                  \
+                         << _sf_arg.category << "*";                                        \
+    } while(0)
+
 // The tests are instantiated by filtering through the RocBlasLt_Data stream
 // The filter is by category and by the type_filter() and function_filter()
 // functions in the testclass

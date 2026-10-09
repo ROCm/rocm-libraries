@@ -214,7 +214,22 @@ struct ConvParams
         {
             return false;
         }
-        return true;
+        return !output_is_empty();
+    }
+
+    // True when, on some used axis, the dilated filter is wider than the padded input.
+    //
+    // Computed without division, so it is defined for any stride. compute_output_size
+    // cannot detect this case: its division truncates toward zero, so it reports an
+    // extent of 1 for an overhang shorter than the stride.
+    bool output_is_empty() const
+    {
+        auto overhangs = [](long long x, long long kx, long long pad, long long dilation) {
+            return dilation * (kx - 1) + 1 > x + 2 * pad;
+        };
+        return overhangs(w, kw, pad_w, dilation_w) ||
+               (dims >= 2 && overhangs(h, kh, pad_h, dilation_h)) ||
+               (dims >= 3 && overhangs(d, kd, pad_d, dilation_d));
     }
 
     // The conv2d layer this one is equivalent to, or a copy when there is none.

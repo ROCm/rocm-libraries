@@ -34,6 +34,7 @@
 // 4-quadrant wave / padded staging rationale.
 
 #include "conv_kernel_table.h"
+#include "kv_descriptor.h"
 #include "grouped_conv_kernel.h"
 #include "matrix_layout.h"
 #include "swizzle.h"
@@ -668,6 +669,18 @@ public:
         launch.grid       = dim3(blocks_c, blocks_q, divup(par.n, cfg_.wave_n));
         launch.block_size = dim3(cfg_.block_size(), 1, 1);
         return launch;
+    }
+
+    KVDescriptor config_descriptor() const override
+    {
+        KVDescriptor d;
+        d.int_field("group_size", GROUP_SIZE);
+        d.int_field("groups_per_wg", cfg_.groups_per_wg);
+        d.int_field("wave_q32", cfg_.wave_q32, /*default=*/1);
+        d.int_field("wave_n", cfg_.wave_n, /*default=*/1);
+        d.int_field("kh", cfg_.kh, /*default=*/3);
+        d.int_field("kw", cfg_.kw, /*default=*/3);
+        return d;
     }
 
 protected:

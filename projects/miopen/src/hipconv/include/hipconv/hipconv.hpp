@@ -40,6 +40,18 @@ using ArchHandle = const ArchEntry*;
 // lifetime of the program.
 using ConvKernelHandle = ConvKernel*;
 
+// This build's hipconv version, as `git describe --tags` names it.
+//
+// "v0.4.0" at the tag, "v0.4.0-2-g1a2b3c4d" past it; "unknown" when neither a VERSION file
+// nor git provides one.
+HIPCONV_API std::string_view version();
+
+// The major and minor version of version(), e.g. "v0.4".
+//
+// "unknown" when no release tag precedes this build. For keying a stored config
+// description: within a minor version, a full description always selects the same config.
+HIPCONV_API std::string_view config_version();
+
 // Resolve a GFX arch name (e.g. "gfx950", "gfx950:sramecc+:xnack-") to a handle.
 // Returns nullopt if this build has no support for that architecture.
 HIPCONV_API std::optional<ArchHandle> resolve_arch(std::string_view name);
@@ -70,6 +82,10 @@ inline constexpr std::size_t MAX_RANKED_CONFIGS = 8;
 inline constexpr std::size_t ALL_RANKED_CONFIGS = std::numeric_limits<std::size_t>::max();
 
 // All valid kernels for the given params, best first. Empty if unsupported.
+//
+// Selection reads `par` and the architecture alone, so it needs neither a GPU nor the HIP
+// runtime. A kernel that launches through a runtime library can still be declined on the
+// current device by ConvLaunch::make or launch(); a caller then tries the next kernel.
 //
 // `par` is matched as written; no folding happens here. A caller with a conv1d
 // or conv3d layer passes ConvParams::unfolded() instead, which is what gets a
@@ -112,7 +128,9 @@ HIPCONV_API Algorithm algorithm(ConvKernelHandle kernel);
 //
 // E.g. "waves_k=2,wave_k16=4,kh=3,kw=3,direction=fprop", exactly a spec that
 // matches_descriptor() accepts. A family with no descriptor fields returns "".
-HIPCONV_API std::string describe_config(ConvKernelHandle kernel);
+// `full` renders every field; otherwise default values are omitted. Only the full
+// form is guaranteed to select this config alone through matches_descriptor().
+HIPCONV_API std::string describe_config(ConvKernelHandle kernel, bool full = false);
 
 // Does this kernel satisfy a descriptor constraint string?
 //
@@ -137,7 +155,9 @@ HIPCONV_API float get_weighted_throughput_index(ConvKernelHandle kernel, const C
 // Enqueue the kernel on the stream, returning the launch-time HIP status.
 //
 // hipSuccess means the launch was submitted; otherwise it is the launch error
-// (hipErrorInvalidValue if kernel is null). The kernel runs asynchronously, so
+// (hipErrorInvalidValue if kernel is null, hipErrorNotSupported if the runtime library the
+// kernel launches through has no algorithm for `par` on the current device, as for
+// ConvLaunch::make). The kernel runs asynchronously, so
 // an execution fault (e.g. an out-of-bounds access) surfaces at a later
 // synchronization, not here.
 HIPCONV_API hipconvError_t launch(ConvKernelHandle kernel,
@@ -176,7 +196,9 @@ public:
     // Build a ConvLaunch for `kernel` bound to `par`.
     //
     // Returns nullopt if the kernel does not support `par` (same predicate as
-    // is_applicable). Throws std::invalid_argument if `kernel` is null.
+    // is_applicable), or if the runtime library it launches through, such as hipBLASLt
+    // for the explicit-GEMM kernels, has no algorithm for `par` on the current device.
+    // Throws std::invalid_argument if `kernel` is null.
     static std::optional<ConvLaunch> make(ConvKernelHandle kernel, ConvParams par);
 
     ConvLaunch(ConvLaunch&&) noexcept;

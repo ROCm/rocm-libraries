@@ -1099,17 +1099,7 @@ public:
 
     std::string_view name() const override { return "depthwise_1d_toeplitz"; }
 
-    std::string describe_config() const override { return ConfigMatcher(cfg_).describe(); }
-
-    bool matches_descriptor(std::string_view spec, std::string* error) const override
-    {
-        ConfigMatcher matcher(cfg_);
-        if(matcher.match(spec))
-            return true;
-        if(error)
-            *error = matcher.error();
-        return false;
-    }
+    KVDescriptor config_descriptor() const override { return ConfigMatcher(cfg_); }
 
     void get_tolerance(const ConvParams& par, float& atol, float& rtol) const override
     {
