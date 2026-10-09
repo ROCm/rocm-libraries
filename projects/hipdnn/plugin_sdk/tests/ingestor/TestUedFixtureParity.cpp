@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -29,6 +28,7 @@
 #include <hipdnn_plugin_sdk/ingestor/GraphPattern.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 /**
  * @file TestUedFixtureParity.cpp
@@ -103,18 +103,6 @@ std::string uedText(const nlohmann::json& fixture)
     return text != fixture.end() ? text->get<std::string>() : fixture.at("ued").dump(2);
 }
 
-std::filesystem::path uniqueDirectory(const std::string& name)
-{
-    static const std::string s_session
-        = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
-    static unsigned s_counter = 0;
-    const auto path
-        = std::filesystem::temp_directory_path()
-          / ("ued_fixture_parity_" + name + "_" + s_session + "_" + std::to_string(s_counter++));
-    std::filesystem::remove_all(path);
-    return path;
-}
-
 std::set<std::string> keysOf(const nlohmann::json& object)
 {
     std::set<std::string> keys;
@@ -179,7 +167,8 @@ TEST_P(TestUedFixtureParity, RuntimeAgreesWithTheFixtureVerdict)
 
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(GetParam().name));
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir
+        = hipdnn_test_sdk::utilities::claimScratchDirectory("ued_fixture_parity");
     std::ofstream(dir.path() / "fixture.ued.json", std::ios::binary) << uedText(fixture);
 
     const auto catalog = loadDescriptorCatalog(dir.path());

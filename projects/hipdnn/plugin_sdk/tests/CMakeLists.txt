@@ -90,12 +90,14 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_ued_data_dir "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk")
     set(_ued_schema "${CMAKE_CURRENT_SOURCE_DIR}/../schemas/universal_engine_descriptor.schema.json")
     file(GLOB _ued_fixtures CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/ingestor/ued_fixtures/*.json")
+    # Copy the directory, not each file, so the command line does not grow with the corpus
+    # (cmd.exe limits it to 8191 characters on Windows).
     add_custom_command(
         OUTPUT "${_ued_data_dir}/test_fixtures/ued.stamp"
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${_ued_data_dir}/test_fixtures/ued"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ued_data_dir}/test_fixtures/ued"
-                "${_ued_data_dir}/schemas"
-        COMMAND ${CMAKE_COMMAND} -E copy ${_ued_fixtures} "${_ued_data_dir}/test_fixtures/ued"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ued_data_dir}/schemas"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/ingestor/ued_fixtures"
+                "${_ued_data_dir}/test_fixtures/ued"
         COMMAND ${CMAKE_COMMAND} -E copy "${_ued_schema}" "${_ued_data_dir}/schemas"
         COMMAND ${CMAKE_COMMAND} -E touch "${_ued_data_dir}/test_fixtures/ued.stamp"
         DEPENDS ${_ued_fixtures} "${_ued_schema}"
