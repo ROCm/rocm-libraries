@@ -37,10 +37,13 @@ arrays, so the gate needs nothing beyond rocke's own hard dependency. torch is
 not installed on every gfx950 node, and a numeric gate that skips on the one
 machine that can run it is not a gate.
 
-Exits non-zero if any check fails, so it doubles as a CI gate. On a host with
-no gfx950 device it prints ``SKIPPED`` and exits 0 -- the emulated atoms are
-gfx950-only, and a skip must not be mistaken for a pass. The test suite runs it
-through ``tests/core/test_xf32_bf16x3_device.py``.
+Exits non-zero if any check fails, so it doubles as a CI gate. It runs on HIP
+device 0, the one the launcher uses; on a mixed node, point it at the gfx950
+with ``HIP_VISIBLE_DEVICES=<index>``. If device 0 is not a gfx950 it prints
+``SKIPPED`` and exits 0 -- the emulated atoms are gfx950-only, and a skip must
+not be mistaken for a pass. The test suite runs it through
+``tests/core/test_xf32_bf16x3_device.py``, which finds a gfx950 at any index
+and sets that variable itself.
 
 The complementary host-side half (what the recipe is worth against fp32,
 TF32 and plain bf16, with no GPU) is ``tests/core/test_xf32_bf16x3_numerics.py``.

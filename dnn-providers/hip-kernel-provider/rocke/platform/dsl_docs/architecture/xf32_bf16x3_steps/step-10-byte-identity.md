@@ -8,7 +8,8 @@ step 10). Ticket AICK-2208.
 - [What this step had to establish](#what-this-step-had-to-establish)
 - [Results](#results)
 - [The one DRIFT is pre-existing](#the-one-drift-is-pre-existing)
-- [Why no golden needed re-blessing](#why-no-golden-needed-re-blessing)
+- [Why no existing golden needed re-blessing](#why-no-existing-golden-needed-re-blessing)
+  - [The parity family is blessed into the L5 anchor](#the-parity-family-is-blessed-into-the-l5-anchor)
 - [The gate does not tolerate concurrent runs](#the-gate-does-not-tolerate-concurrent-runs)
 - [Verification](#verification)
 
@@ -83,7 +84,7 @@ establishes is the narrower claim the change is responsible for — that the
 branch is byte-identical to its merge base in what it emits, and adds no new
 divergence.
 
-## Why no golden needed re-blessing
+## Why no existing golden needed re-blessing
 
 No golden kernel selects an emulated atom, so none of them changed:
 
@@ -99,10 +100,41 @@ No golden kernel selects an emulated atom, so none of them changed:
 The measurement above is what turns those three into a fact rather than an
 argument.
 
-The parity family added after review is a differential case, not a golden one:
-it compares the engines against each other and records nothing. It is not
-blessed into `run_diff.py`'s L5 anchor (`differential/golden/llvm_gfx_all.json`),
-whose `--check-golden` reports unblessed configs as informational.
+### The parity family is blessed into the L5 anchor
+
+The parity family added after review *is* also blessed, in both
+`differential/golden/llvm_gfx_all.json` keys:
+
+```json
+"ll":           { "xf32_bf16x3_mma": { "0": "c5ca733a...", "1": "7e8a5f48..." } }
+"ir_canonical": { "xf32_bf16x3_mma": { "0": "4826b0c2...", "1": "2098f5c3..." } }
+```
+
+The differential alone compares the two engines *against each other*, so a
+future change that moved both the same way — a term reordered in
+`_expand_emulated_mma` and mirrored into `cpp/core/`, which is exactly the
+edit the invariant asks for — stays GREEN while the emitted bytes change.
+`--check-golden` reports unblessed configs as informational, so without an
+entry that drift is silent. The anchor is the absolute half of the pair:
+the engines agree *and* they agree with what was reviewed.
+
+The shas are the Python reference emission at the default flavor, which is
+what every other family in the file records (the `ll` sha for these two
+configs differs under `llvm23`; the anchor carries no flavor axis). They were
+taken from a full `--check-golden` run, not a `--only` one — `--record-golden`
+replaces an entire key, so running it scoped would silently unbless every
+other family.
+
+**The rest of that file is stale, and was before this branch.** A full
+`--check-golden` on this tree reports 644 of 673 `ll` configs and 579 of 643
+`ir_canonical` configs changed, including families this branch does not
+touch. It is not a flavor mismatch: `add_rmsnorm2d_bf16[0]` emits
+`b64c6fef...` at llvm20, `edad2c15...` at llvm22 and `8335125c...` at llvm23,
+and the anchor holds `102bd96c...`. The same three shas come out of the merge
+base (`320f7a89`), so the drift predates this work — the file was last
+re-blessed in September. Re-blessing it is a
+tree-wide decision for its owners, not something to fold into this branch;
+the two entries above were merged in textually for that reason.
 
 ## The gate does not tolerate concurrent runs
 
@@ -135,4 +167,7 @@ which is the signal that should prompt a re-run rather than a bisect.
   `test_xf32_bf16x3_lowering.py::TestEngineParity` also runs rather than
   skipping, so the expansion is compared across the engines by both routes —
   the parity family through the archive and the pybind module in-process.
-- No golden re-blessed; none needed it.
+- No existing golden re-blessed; none needed it. `xf32_bf16x3_mma` added to
+  both anchor keys, its shas taken from and re-checked against a full
+  `--check-golden` run at the default flavor (that run's remaining
+  mismatches are the pre-existing staleness described above).

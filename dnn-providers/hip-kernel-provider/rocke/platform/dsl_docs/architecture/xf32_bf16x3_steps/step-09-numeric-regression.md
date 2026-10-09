@@ -148,12 +148,20 @@ even on a gfx950 host. After review it is run by
 which pytest — and so `run_all.py` and `run_checks.py` — discovers like any
 other test:
 
-- device 0 is probed in a subprocess, keeping HIP out of the pytest process;
+- every visible device is probed in a subprocess, keeping HIP out of the
+  pytest process, and the first gfx950 among them is handed to the harness
+  through the visibility env var. Probing device 0 alone would skip a node
+  whose gfx950 sits behind another card — which is a silent hole in the one
+  gate that touches silicon, not a conservative default;
 - on gfx950 the harness runs with `--require-device`, and anything but exit 0
   with `PASSED` fails the test;
-- off gfx950 it skips — the only reason it skips, now that the harness needs
-  nothing beyond numpy;
-- `ROCKE_REQUIRE_GFX950=1` turns that skip into a failure. That is the
+- it skips only on a *confirmed* absence — the probe ran and no visible device
+  is a gfx950. A probe that fails fails the test, because it establishes
+  nothing about what hardware is there; `get_device_count()` answers 0 rather
+  than raising when HIP is missing entirely, so a machine with no ROCm still
+  skips. Device absence is now the only reason it skips at all, the harness
+  needing nothing beyond numpy;
+- `ROCKE_REQUIRE_GFX950=1` turns even that skip into a failure. That is the
   spelling for a gfx950 validation node, mirroring `ROCKE_REQUIRE_GFX1250`.
 
 The harness originally allocated through torch, which would have skipped the
@@ -176,8 +184,13 @@ is exactly what the bitwise differential above measures.
 - `tests/core/test_xf32_bf16x3_device.py` under `ROCKE_REQUIRE_GFX950=1` on
   the same node — 1 passed.
 - Both injected faults rejected by the harness on-device (table above).
-- Earlier, on a gfx942 host — the harness prints `SKIPPED` (exit 0), `FAILED`
-  (exit 2) under `--require-device`, and the test skips with "needs HIP device
-  0 to be gfx950; found gfx942" and errors under `ROCKE_REQUIRE_GFX950=1`.
+- Earlier, on a gfx942 host — the harness prints `SKIPPED` (exit 0) and
+  `FAILED` (exit 2) under `--require-device`, and the test skips, erroring
+  under `ROCKE_REQUIRE_GFX950=1`.
+- The probe's own branches, driven with faked probe output on a host with no
+  device: a failing probe raises rather than skipping; a gfx950 at index 2
+  behind a gfx942 and a gfx1100 is found and selected; an existing
+  `HIP_VISIBLE_DEVICES=4,5,6` resolves to `6` rather than being re-indexed to
+  `2`; an empty device list takes the skip path.
 - No emission changed in this step, so the byte-identity result from
   [steps 5+6](step-05-bf16x3-lowering.md) still stands.
