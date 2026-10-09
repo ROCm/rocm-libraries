@@ -64,7 +64,7 @@ template <int LayoutNHWC,
           int UseFp32,
           int UseFpmix,
           int UseBfpmix,
-          int UseAMDGCN,
+          int UseGfx9Dpp,
           int NrnOpId>
 struct proto_config
 {
@@ -79,7 +79,7 @@ struct proto_config
     static_assert(UseBfpmix == 0 || UseBfpmix == 1, "UseBfpmix must be 0 or 1");
     static_assert((UseFp16 + UseFp32 + UseFpmix + UseBfpmix) == 1,
                   "only one of these configs can and must be chosen.");
-    static_assert(UseAMDGCN == 0 || UseAMDGCN == 1, "UseAMDGCN must be 0 or 1");
+    static_assert(UseGfx9Dpp == 0 || UseGfx9Dpp == 1, "UseGfx9Dpp must be 0 or 1");
     static_assert(NrnOpId >= 0 && NrnOpId <= 10,
                   "NrnOpId can only be interger between 0-10 (inclusive)");
 
@@ -90,8 +90,8 @@ struct proto_config
         UseFp16 ? type_strategy::fp16
                 : (UseFp32 ? type_strategy::fp32
                            : (UseFpmix ? type_strategy::fpmix : type_strategy::bfpmix));
-    static constexpr bool use_amdgcn = UseAMDGCN;
-    static constexpr auto neuron_op  = static_cast<neuron_op_type>(NrnOpId);
+    static constexpr bool use_gfx9_dpp = UseGfx9Dpp;
+    static constexpr auto neuron_op    = static_cast<neuron_op_type>(NrnOpId);
 };
 } // namespace detail
 
@@ -102,7 +102,7 @@ using config = detail::proto_config<MIO_LAYOUT_NHWC,
                                     MIOPEN_USE_FP32,
                                     MIOPEN_USE_FPMIX,
                                     MIOPEN_USE_BFPMIX,
-                                    MIOPEN_USE_AMDGCN,
+                                    MIOPEN_USE_GFX9_DPP,
                                     MIOPEN_NRN_OP_ID>;
 
 } // namespace miopen
@@ -241,16 +241,9 @@ struct proto_config
         input_type_strategy == type_strategy::fpmix ? false : static_cast<bool>(UseNodpp);
     static constexpr int variant      = Variant;
     static constexpr auto target_arch = Architecture::value;
-#ifdef __AMDGCN__
-    static constexpr bool use_amdgcn =
-        MiopenConfig::use_amdgcn &&
-        !(target_arch == architecture::gfx103x || target_arch == architecture::gfx110x ||
-          target_arch == architecture::gfx115x || target_arch == architecture::gfx120x ||
-          target_arch == architecture::gfx125x) &&
-        !(use_nodpp && (variant != 0));
-#else
-    static constexpr bool use_amdgcn = false;
-#endif
+    // GFX9-only: gated on __GFX9__ via MIOPEN_USE_GFX9_DPP, so unlisted newer targets are safe.
+    static constexpr bool use_gfx9_dpp =
+        MiopenConfig::use_gfx9_dpp && !(use_nodpp && (variant != 0));
     static constexpr unsigned int vec_size = vectorize ? VecSize : 1;
     static constexpr unsigned int vec_size_x =
         vectorize && MiopenConfig::layout_nhwc ? vec_size : 1;

@@ -37,8 +37,15 @@ The two scripts' entries have distinct identities, so one directory can hold
 both caches.
 
 The ``--top`` / ``--warmup`` / ``--iters`` / ``--jobs`` / ``--verify`` /
-``--dtype`` / ``--direction`` / ``--run-from-cache`` flags are forwarded to both
-scripts.  ``--dtype`` / ``--direction`` default to fp16 / fwd for explicit shapes;
+``--dtype`` / ``--direction`` / ``--run-from-cache`` / ``--early-stop`` /
+``--early-stop-after`` flags are forwarded to both scripts.
+
+Early stopping carries over from one script to the other: direct conv runs
+first and records each case's best time (a kernel that fails ``--verify`` is
+never recorded), and the implicit-GEMM sweep starts
+each case from that time instead of from nothing -- so from its first kernel it
+skips any that cannot come within ``--early-stop`` times the direct result.
+``--no-seed-from-direct`` turns that off.  ``--dtype`` / ``--direction`` default to fp16 / fwd for explicit shapes;
 with a MIOpenDriver command they are taken from the command unless given.
 
 Notes
@@ -57,6 +64,7 @@ import argparse
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).parent
@@ -65,56 +73,75 @@ _SCRIPT_DIR = Path(__file__).parent
 _BEST_RE = re.compile(r"Best:\s*([\d.]+)\s*TFLOPS\s*[—\-]\s*(.+)")
 
 
+def _tee(stream, sink, lines: list) -> None:
+    """Echo *stream* to *sink* line by line as it arrives, keeping a copy."""
+    for line in iter(stream.readline, ""):
+        sink.write(line)
+        sink.flush()
+        lines.append(line)
+    stream.close()
+
+
 def _run_script(
     script: Path, extra_args: list[str], timeout: "float | None" = None
 ) -> tuple[float | None, str, str]:
-    """Run *script* with *extra_args*; return (best_tflops, kernel_name, stdout)."""
-    cmd = [sys.executable, str(script)] + extra_args
+    """Run *script* with *extra_args*; return (best_tflops, kernel_name, output).
+
+    The script's stdout and stderr are echoed live, as it prints them; ``output``
+    is the captured stdout followed by stderr."""
+    import os
+    import signal
+    import threading
+
+    # -u: a Python child block-buffers a piped stdout, which would hold its
+    # progress back until it exits.
+    cmd = [sys.executable, "-u", str(script)] + extra_args
     print(f"\n{'='*72}", flush=True)
     print(f"Running: {script.name} {' '.join(extra_args)}", flush=True)
     print(f"{'='*72}", flush=True)
 
-    import os
-    import signal
-
+    out_lines: list = []
+    err_lines: list = []
     with subprocess.Popen(
         cmd,
         text=True,
+        bufsize=1,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=True,
     ) as popen:
+        readers = [
+            threading.Thread(
+                target=_tee, args=(popen.stdout, sys.stdout, out_lines), daemon=True
+            ),
+            threading.Thread(
+                target=_tee, args=(popen.stderr, sys.stderr, err_lines), daemon=True
+            ),
+        ]
+        for t in readers:
+            t.start()
         try:
-            raw_out, raw_err = popen.communicate(timeout=timeout)
+            popen.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(os.getpgid(popen.pid), signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            raw_out, raw_err = popen.communicate()
-            elapsed = timeout
+            popen.wait()
             print(
-                f"\n[timeout] {script.name} exceeded {elapsed:.0f}s limit — killed.",
+                f"\n[timeout] {script.name} exceeded {timeout:.0f}s limit — killed.",
                 file=sys.stderr,
                 flush=True,
             )
-            if raw_err:
-                print(raw_err, end="", file=sys.stderr, flush=True)
-            print(raw_out, end="", flush=True)
-            m = _BEST_RE.search(raw_out)
-            if m:
-                return float(m.group(1)), m.group(2).strip(), raw_out
-            return None, "", raw_out
+        for t in readers:
+            t.join()
 
-    # Echo output to the terminal so the user can see the sweep progress.
-    print(raw_out, end="", flush=True)
-    if raw_err:
-        print(raw_err, end="", file=sys.stderr, flush=True)
-
+    raw_out = "".join(out_lines)
+    output = raw_out + "".join(err_lines)
     m = _BEST_RE.search(raw_out)
     if m:
-        return float(m.group(1)), m.group(2).strip(), raw_out
-    return None, "", raw_out
+        return float(m.group(1)), m.group(2).strip(), output
+    return None, "", output
 
 
 def _cpg_valid_for_direct(C: int, K: int, groups: int) -> tuple[bool, str]:
@@ -185,6 +212,10 @@ def _build_mode_args(args) -> list[str]:
         a += ["--direction", args.direction]
     if args.run_from_cache is not None:
         a += ["--run-from-cache", args.run_from_cache]
+    if args.early_stop is not None:
+        a += ["--early-stop", str(args.early_stop)]
+    if args.early_stop_after is not None:
+        a += ["--early-stop-after", str(args.early_stop_after)]
     return a
 
 
@@ -225,9 +256,14 @@ def _build_miopen_args(args) -> list[str]:
     return a + _build_mode_args(args)
 
 
+# The line an EarlyStop prints when a seeded sweep skipped every kernel.
+_ALL_STOPPED_RE = re.compile(r"all \d+ early-stopped: .*")
+
+
 def _print_summary(
     direct: tuple[float | None, str],
     implicit: tuple[float | None, str],
+    implicit_note: str = "",
 ) -> None:
     direct_tflops, direct_name = direct
     implicit_tflops, implicit_name = implicit
@@ -236,14 +272,15 @@ def _print_summary(
     print("COMPARISON SUMMARY", flush=True)
     print(f"{'='*72}", flush=True)
 
-    def _fmt(label, tflops, name):
+    def _fmt(label, tflops, name, note=""):
         if tflops is None:
-            print(f"  {label:<20}  (no result — skipped or failed)", flush=True)
+            why = note or "skipped or failed"
+            print(f"  {label:<20}  (no result — {why})", flush=True)
         else:
             print(f"  {label:<20}  {tflops:7.1f} TFLOPS  {name}", flush=True)
 
     _fmt("direct-conv", direct_tflops, direct_name)
-    _fmt("implicit-GEMM", implicit_tflops, implicit_name)
+    _fmt("implicit-GEMM", implicit_tflops, implicit_name, implicit_note)
 
     if direct_tflops is not None and implicit_tflops is not None:
         ratio = direct_tflops / implicit_tflops
@@ -271,8 +308,8 @@ def main() -> int:
     parser.add_argument(
         "--top",
         type=int,
-        default=5,
-        help="top-N results to show per benchmark (default: 5)",
+        default=10,
+        help="top-N results to show per benchmark (default: 10)",
     )
     parser.add_argument(
         "--warmup", type=int, default=3, help="warmup iterations (default: 3)"
@@ -291,6 +328,26 @@ def main() -> int:
         "--verify",
         action="store_true",
         help="forward --verify to both benchmark scripts",
+    )
+    parser.add_argument(
+        "--early-stop",
+        type=float,
+        default=None,
+        metavar="FACTOR",
+        help="forwarded to both scripts (default: theirs)",
+    )
+    parser.add_argument(
+        "--early-stop-after",
+        type=int,
+        default=None,
+        metavar="N",
+        help="forwarded to both scripts (default: theirs)",
+    )
+    parser.add_argument(
+        "--no-seed-from-direct",
+        action="store_true",
+        help="do not start the implicit-GEMM early stopping from the direct-conv "
+        "best times",
     )
     parser.add_argument(
         "--dtype",
@@ -445,24 +502,38 @@ def main() -> int:
 
     direct_result: tuple[float | None, str] = (None, "")
     implicit_result: tuple[float | None, str] = (None, "")
+    implicit_note = ""
 
-    if not args.skip_direct:
-        tflops, name, _ = _run_script(
-            _SCRIPT_DIR / "benchmark_direct_conv.py",
-            direct_args,
-            # The JIT sweep compiles; a cache run only launches.
-            timeout=None if args.run_from_cache else 240,
-        )
-        direct_result = (tflops, name)
+    with tempfile.TemporaryDirectory() as tmp:
+        # Direct conv's best time per case, handed to the implicit-GEMM sweep
+        # as its starting early-stop bound.
+        seed_file = str(Path(tmp) / "direct_best.json")
+        seed = not args.skip_direct and not args.no_seed_from_direct
+        if seed:
+            direct_args += ["--early-stop-record", seed_file]
 
-    if not args.skip_implicit:
-        tflops, name, _ = _run_script(
-            _SCRIPT_DIR / "benchmark_implicit_gemm_conv.py",
-            implicit_args,
-        )
-        implicit_result = (tflops, name)
+        if not args.skip_direct:
+            tflops, name, _ = _run_script(
+                _SCRIPT_DIR / "benchmark_direct_conv.py",
+                direct_args,
+                # The JIT sweep compiles; a cache run only launches.
+                timeout=None if args.run_from_cache else 240,
+            )
+            direct_result = (tflops, name)
 
-    _print_summary(direct_result, implicit_result)
+        if not args.skip_implicit:
+            if seed and Path(seed_file).is_file():
+                implicit_args += ["--early-stop-seed", seed_file]
+            tflops, name, output = _run_script(
+                _SCRIPT_DIR / "benchmark_implicit_gemm_conv.py",
+                implicit_args,
+            )
+            implicit_result = (tflops, name)
+            m = _ALL_STOPPED_RE.search(output)
+            if tflops is None and m:
+                implicit_note = m.group(0)
+
+    _print_summary(direct_result, implicit_result, implicit_note)
     return 0
 
 

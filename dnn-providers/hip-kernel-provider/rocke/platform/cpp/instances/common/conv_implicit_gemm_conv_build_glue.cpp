@@ -50,6 +50,7 @@
 
 #include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_async_lds_max_dwords */
 #include "rocke/helper_rocke.helpers.grid.h" /* chiplet_aware_super_tile_dynamic */
 #include "rocke/instance_conv_abi.h"
 #include "rocke/instance_conv_implicit_gemm.h"
@@ -631,12 +632,28 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         /* contig_cols = cpg: the tile's col axis is the reduction index (y, x, c)
          * and only the inner c is stride-1, so a chunk wider than cpg -- or one
          * that does not divide it -- would straddle a filter position and fetch
-         * the wrong elements with no diagnostic. Mirrors the Python call. */
+         * the wrong elements with no diagnostic. Mirrors the Python call.
+         * max_dwords = the arch's own buffer_load_lds width cap (CDNA3 moves
+         * only a dword per lane; the b96/b128 forms are CDNA4). Over-wide is
+         * not diagnosed -- the backend aborts the process -- so the cap is
+         * applied here, exactly as async_tile_loaders(spec, arch) does. */
         const int cpg = rocke_conv_problem_cpg(&spec->problem);
-        rocke_status_t sa = rocke_async_tile_loader_from_tile(
-            ctx->block_m, ctx->block_k, ctx->threads, spec->wave_size, 4, cpg, &ctx->a_loader);
-        rocke_status_t sb = rocke_async_tile_loader_from_tile(
-            ctx->block_n, ctx->block_k, ctx->threads, spec->wave_size, 4, cpg, &ctx->b_loader);
+        const int max_dwords
+            = rocke_archtarget_async_lds_max_dwords(rocke_archtarget_from_gfx(ctx->arch));
+        rocke_status_t sa = rocke_async_tile_loader_from_tile(ctx->block_m,
+                                                              ctx->block_k,
+                                                              ctx->threads,
+                                                              spec->wave_size,
+                                                              max_dwords,
+                                                              cpg,
+                                                              &ctx->a_loader);
+        rocke_status_t sb = rocke_async_tile_loader_from_tile(ctx->block_n,
+                                                              ctx->block_k,
+                                                              ctx->threads,
+                                                              spec->wave_size,
+                                                              max_dwords,
+                                                              cpg,
+                                                              &ctx->b_loader);
         if(sa != ROCKE_OK || sb != ROCKE_OK)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: async tile loader from_tile failed");

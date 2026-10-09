@@ -7,7 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from . import agreement, toolchain
+from . import agreement, provenance_sidecar, toolchain
 from .hip_compile import (
     compile_hip_variant,
     hip_source_relpath,
@@ -18,6 +18,7 @@ from .rocke_compile import compile_rocke_variant, rocke_variant_key
 from .descriptors import (
     KPACK_DIR_NAME,
     arch_matches,
+    _selected_entries,
     kdp_survives,
     load_flat_input,
     reachable_generic_ids,
@@ -345,25 +346,6 @@ def _is_passthrough(ukd):
     return ukd["kernel_source"]["kind"] in _PASSTHROUGH_KINDS
 
 
-def _root_holds_compiling_source(flat):
-    """Whether the authored root holds a UKD that yields an archive entry.
-
-    The complement of _is_passthrough over both authoring forms -- a standalone
-    `<name>.ukd.json` and an inline entry of a KDP's kernelDescriptors -- so the
-    two spellings of the same distinction cannot drift. Only such a UKD contributes
-    a code object to the archive -- one a producer compiles, or a prebuilt hsaco
-    packed as-is -- so only a root holding one implies an archive.
-    """
-    for desc in flat.ukds():
-        if not _is_passthrough(desc.doc):
-            return True
-    for kdp in flat.kdps():
-        for entry in kdp.doc.get("kernelDescriptors", []):
-            if isinstance(entry, dict) and not _is_passthrough(entry):
-                return True
-    return False
-
-
 def _dest_at(base, rel_dir, name):
     """Destination for an authored file, preserving its subpath under base.
 
@@ -383,6 +365,31 @@ def _write_bytes_at(base, rel_dir, name, data):
 
 def _write_text_at(base, rel_dir, name, text):
     _dest_at(base, rel_dir, name).write_text(text, encoding="utf-8")
+
+
+def _compact_json(doc):
+    """`doc` as compact JSON, its key order kept.
+
+    A packed KDP keeps `kernelDescriptors` as its last key (pack_arch builds it
+    so): the runtime loader reads the header in the same single pass that
+    streams the kernels, and falls back to a second full parse when a header key
+    follows them. Sorting keys would put header keys after it: the load would
+    only be slower, nothing would fail.
+    """
+    return json.dumps(doc, separators=(",", ":")) + "\n"
+
+
+def _write_packed_at(base, rel_dir, name, doc):
+    """Write one packed descriptor compact, its UKDs' provenance to its sidecar,
+    and the packed marker into its directory.
+
+    `doc` is final here: detach digests each UKD exactly as it is written, so
+    nothing may change it between the two.
+    """
+    sidecar_name, data = provenance_sidecar.detach(name, doc)
+    _dest_at(base, rel_dir, sidecar_name).write_bytes(data)
+    _dest_at(base, rel_dir, provenance_sidecar.PACKED_MARKER).write_bytes(b"")
+    _write_text_at(base, rel_dir, name, _compact_json(doc))
 
 
 @dataclass(frozen=True)
@@ -406,30 +413,55 @@ class _VariantJob:
     requests: dict = field(default_factory=dict)
 
 
-def _selected_entries(doc, arch, ukd_by_id):
-    """Yield the entries of doc that ship for arch.
+def shipped_engines(flat, arches):
+    """The engine names each arch's shard would carry: `{arch: [name, ...]}`.
 
-    Yields `(entry_id, ukd_doc, sdesc)`: for a standalone-UKD id ref, the id
-    string, that UKD's doc, and its Descriptor; for an inline UKD, `None`, the
-    entry dict itself, and `None`. The Descriptor rather than its rel_dir,
-    because the walk needs its `path.name` for the error context and for the
-    shipped filename as well as its `rel_dir` for the variant key.
-
-    All three arch filters live here and nowhere else, so the prewarm and the
-    serial walk cannot select different variant sets. `ukd_by_id` arrives as a
-    parameter rather than being reached for through `flat`, which leaves the
-    generator no way to enumerate a standalone UKD no KDP references: an orphan
-    is legal input the walk never compiles.
+    What configure asks before wiring a pack. Uses the same survival rule as the
+    walk, over the same filtered input, so a root whose every arch maps to an
+    empty list is one the pack would skip, and an engine absent for an arch is one
+    that shard does not ship. A KDP whose engine names no UED contributes its Id.
     """
-    if not arch_matches(doc, arch):
-        return
-    for entry in doc["kernelDescriptors"]:
-        if isinstance(entry, str):
-            sdesc = ukd_by_id[entry]
-            if arch_matches(sdesc.doc, arch):
-                yield entry, sdesc.doc, sdesc
-        elif arch_matches(entry, arch):
-            yield None, entry, None
+    names = {d.id: d.doc.get("name", d.id) for d in flat.by_type("ued")}
+    return {
+        arch: sorted(
+            {
+                names.get(k.doc.get("engine"), k.doc.get("engine"))
+                for k in flat.kdps()
+                if kdp_survives(k.doc, flat, arch)
+            }
+        )
+        for arch in arches
+    }
+
+
+def offered_engines(flat):
+    """The engine names `flat` carries for at least one arch, sorted.
+
+    The answer is independent of the build's arches: it is what host-side gates
+    read, since the host must not depend on which arch content a build packs. A
+    KDP is offered iff it survives some arch named anywhere under `flat` (a KDP or
+    UKD `arch` list, inline or standalone) or the wildcard sentinel `"*"`, which
+    `arch_matches` accepts only for wildcards. Names are built as in
+    `shipped_engines`, and `shipped_engines(flat, arches)` values are always a
+    subset of this list.
+    """
+    candidates = {"*"}
+    ukd_docs = [d.doc for d in flat.ukds()]
+    for k in flat.kdps():
+        candidates.update(k.doc.get("arch") or ())
+        ukd_docs.extend(
+            e for e in k.doc.get("kernelDescriptors", []) if isinstance(e, dict)
+        )
+    for doc in ukd_docs:
+        candidates.update(doc.get("arch") or ())
+    names = {d.id: d.doc.get("name", d.id) for d in flat.by_type("ued")}
+    return sorted(
+        {
+            names.get(k.doc.get("engine"), k.doc.get("engine"))
+            for k in flat.kdps()
+            if any(kdp_survives(k.doc, flat, a) for a in sorted(candidates))
+        }
+    )
 
 
 def _agreement_inputs(flat, arch):
@@ -1020,7 +1052,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
             inter_arch_dir,
             kdp.rel_dir,
             kdp.path.name,
-            json.dumps(new_doc, indent=2) + "\n",
+            _compact_json(new_doc),
         )
         arch_kdps.append(
             ArchKDP(
@@ -1160,8 +1192,8 @@ def _rewrite_passthrough_ukd(passthrough, arch, source_label=None):
     build output. `rewritten` names the fields whose emitted value differs from
     the authored one. It holds nothing machine-specific and nothing
     time-varying, so two runs over one source tree write the same bytes. Nothing
-    at runtime reads it. It sits at the top level, because `kernel_source`
-    accepts only the keys the loader parses.
+    at runtime reads it. The caller moves it to the descriptor's provenance
+    sidecar, because `kernel_source` accepts only the keys the loader parses.
     """
     authored = passthrough.doc
     rel_dir = Path(passthrough.rel_dir).as_posix()
@@ -1228,14 +1260,16 @@ def pack_arch(
     Each distinct (source,build) variant .co staged by compile_intermediate is
     packed once under its own toc_key; an authored hsaco UKD is packed from its
     own file instead. Both are rewritten to kpack; inline compiled UKDs go
-    hsaco->kpack, stamping toc_key + sha256 +
-    signature and moving build into a sibling provenance block. Guarded against
-    toc_key collisions (distinct inputs mapping to one key).
+    hsaco->kpack, stamping toc_key + sha256 + signature and moving build into
+    provenance. Guarded against toc_key collisions (distinct inputs mapping to
+    one key).
 
     A UKD of a pass-through kind takes the shard arch, keeps its authored
-    kernel_source, and carries a provenance block naming its authored values. A
-    shard with no compiled variant holds no archive and no `kpack/` directory,
-    and its ArchResult carries kpack_path=None.
+    kernel_source, and gets a provenance block naming its authored values. No
+    packed UKD carries provenance inline: each descriptor file's UKD provenance
+    ships in a sidecar beside the file (see provenance_sidecar). A shard with no
+    compiled variant holds no archive and no `kpack/` directory, and its
+    ArchResult carries kpack_path=None.
 
     An hsaco UKD's bytes are read from its authored file and packed as-is.
     """
@@ -1394,12 +1428,7 @@ def pack_arch(
                     )
                 )
         out_doc["kernelDescriptors"] = out_kds
-        _write_text_at(
-            out_arch_dir,
-            kdp.rel_dir,
-            kdp.filename,
-            json.dumps(out_doc, indent=2) + "\n",
-        )
+        _write_packed_at(out_arch_dir, kdp.rel_dir, kdp.filename, out_doc)
 
     # A standalone UKD stays its own file in the shard, rewritten to kpack form
     # with this arch's kpack details. It is emitted only for arches whose
@@ -1416,23 +1445,13 @@ def pack_arch(
             rel_dir=ukd.rel_dir,
             group=group,
         )
-        _write_text_at(
-            out_arch_dir,
-            ukd.rel_dir,
-            ukd.filename,
-            json.dumps(out_doc, indent=2) + "\n",
-        )
+        _write_packed_at(out_arch_dir, ukd.rel_dir, ukd.filename, out_doc)
 
     # A pass-through standalone UKD is its own file. It takes this shard's arch,
     # matching the KDP that references it.
     for ukd in inter.passthrough_standalone_ukds.values():
         out_doc = _rewrite_passthrough_ukd(ukd, arch, source_label)
-        _write_text_at(
-            out_arch_dir,
-            ukd.rel_dir,
-            ukd.filename,
-            json.dumps(out_doc, indent=2) + "\n",
-        )
+        _write_packed_at(out_arch_dir, ukd.rel_dir, ukd.filename, out_doc)
 
     prune_result = prune(flat, arch)
     for generic in flat.generics():
@@ -1458,6 +1477,8 @@ def run_pipeline(
     rocke_wheel_stamp=None,
     group=GROUP_NAME,
     source_label=None,
+    exclude_folders=(),
+    disabled_kinds=(),
     log=print,
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
@@ -1470,10 +1491,15 @@ def run_pipeline(
     relative to the descriptor that named it. An hsaco UKD's `file` resolves the
     same way, and its prebuilt bytes are packed as-is into the same kpack. A UKD
     of a pass-through kind runs no producer and is emitted as authored, so a
-    root that holds only pass-through UKDs writes descriptors and no archive. An
-    arch with no surviving KDP is skipped cleanly (no folder, no kpack) and
-    logged with 'no kernels for <arch>, skipping'; every arch skipping is a
-    failure, not a pack. Empty arch list installs nothing (exit 0).
+    root that holds only pass-through UKDs writes descriptors and no archive. An arch with no
+    surviving KDP is skipped cleanly (no folder, no kpack) and logged with 'no
+    kernels for <arch>, skipping'; every arch skipping packs nothing, which is a
+    clean skip too. Empty arch list installs nothing (exit 0).
+
+    `exclude_folders` names top-level child folders of the root this build does
+    not pack, and `disabled_kinds` the kernel_source kinds it has no producer for;
+    both are pruned at load (load_flat_input) exactly as arch pruning prunes, so
+    nothing downstream sees them.
     """
     out_root = Path(out_root)
     results = {}
@@ -1481,7 +1507,12 @@ def run_pipeline(
         return results
 
     kpack_mod, comp = load_kpack(rocm_kpack_dir)
-    flat = load_flat_input(source_root, log=log)
+    flat = load_flat_input(
+        source_root,
+        log=log,
+        exclude_folders=exclude_folders,
+        disabled_kinds=disabled_kinds,
+    )
 
     if inter_root is None:
         raise HkpPackError(
@@ -1574,34 +1605,31 @@ def run_pipeline(
             "output was discarded."
         )
 
-    # The archive clause keys on what the root holds rather than on what survived
-    # pruning: a compiling UKD that prunes out of every requested arch is
-    # indistinguishable downstream from one whose archive went missing. Nothing
-    # downstream restates either clause -- the build edge's OUTPUT is a stamp its
-    # recipe touches unconditionally, and a staged tree holding nothing reads the
-    # same there as a root that is legitimately empty. Only the packer knows the
-    # kinds it walked and which arches pruned.
+    # Nothing surviving any arch is a root with nothing to pack for this build --
+    # arch-pruned, or all in disabled folders or kinds -- so it packs nothing and that
+    # is not an error. Configure asks shipped_engines() first and leaves such a root
+    # dormant rather than wiring it.
     arch_list = ", ".join(arches)
     if all(r.skipped for r in results.values()):
-        raise HkpPackError(
-            f"packing '{source_root}' produced nothing: no KDP survived arch "
-            f"pruning for any of the {len(arches)} requested arch(es) "
-            f"[{arch_list}], so every arch was skipped. A root wired to a pack "
-            "was wired to ship descriptors, so this is a failure and not a "
-            "clean skip. Check each KDP's 'arch' list against the requested "
-            "arches. Archives are a separate matter and are not always "
-            "required -- a root of only pass-through kinds legitimately packs "
-            "descriptors and no archive -- but descriptors always are."
-        )
+        log(f"packing '{source_root}': nothing to pack for [{arch_list}], skipping")
+        return results
 
-    if _root_holds_compiling_source(flat) and not any(
-        r.kpack_path for r in results.values()
-    ):
-        raise HkpPackError(
-            f"packing '{source_root}' wrote descriptors but no archive, while "
-            "the root holds at least one UKD of an archive-producing kind ('hip', "
-            f"'rocke' or 'hsaco'). Requested arch(es) [{arch_list}]; none produced "
-            "a kpack. Either those UKDs pruned out of every shard that shipped, "
-            "or their KDPs ship without them."
-        )
+    # An internal invariant no input reaches: a shard that shipped an archive-producing UKD
+    # always writes an archive. Only the packer knows which shards shipped and
+    # what each selected.
+    ukd_by_id = flat.ukd_by_id()
+    for arch, result in results.items():
+        if result.skipped or result.kpack_path is not None:
+            continue
+        for kdp in flat.kdps():
+            if not kdp_survives(kdp.doc, flat, arch):
+                continue
+            for sid, ukd, _sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
+                if not _is_passthrough(ukd):
+                    raise HkpPackError(
+                        f"packing '{source_root}' wrote descriptors but no "
+                        f"archive for {arch}, whose shard selected UKD "
+                        f"'{sid or ukd.get('id')}' of an archive-producing kind "
+                        "('hip', 'rocke' or 'hsaco')."
+                    )
     return results

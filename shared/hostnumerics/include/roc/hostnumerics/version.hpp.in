@@ -1,0 +1,12 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <string_view>
+
+namespace roc::hostnumerics {
+inline constexpr std::string_view version() noexcept {
+    return "@PROJECT_VERSION@";
+}
+}  // namespace roc::hostnumerics

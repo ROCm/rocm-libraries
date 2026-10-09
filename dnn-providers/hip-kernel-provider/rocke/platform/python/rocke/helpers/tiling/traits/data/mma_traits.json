@@ -1,0 +1,6671 @@
+{
+  "_meta": {
+    "source_of_truth": "intrinsic support matrix (MFMA/WMMA)",
+    "column_glossary": {
+      "ABK": "kABKPerLane",
+      "AKN": "kAKNumAccess",
+      "AR": "kARepeat",
+      "BKN": "kBKNumAccess",
+      "BR": "kBRepeat",
+      "CM": "kCMPerLane",
+      "CMN": "kCMNumAccess"
+    },
+    "note": "Generated table -- do not hand-edit; regenerate from the intrinsic support matrix."
+  },
+  "operations": [
+    {
+      "op_id": "mfma_f32_32x32x1f32",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x1f32",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f32",
+      "signature": "V32fffV32fIiIiIi",
+      "dims": {
+        "M": "32X",
+        "N": "32Y",
+        "K": "1",
+        "B": "2",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "1",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{BM}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{BM2M0}",
+      "layout_notes": "",
+      "note": "The entries with X and Y are the intrinsics with blocks. We generate two amdgcn_mma structs each for these, one with X = 1 and Y = B, and one vice versa. Note that the fragment size also depends on XY."
+    },
+    {
+      "op_id": "mfma_f32_16x16x1f32",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x1f32",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f32",
+      "signature": "V16fffV16fIiIiIi",
+      "dims": {
+        "M": "16X",
+        "N": "16Y",
+        "K": "1",
+        "B": "4",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "1",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{BM}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_4x4x1f32",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_4x4x1f32",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f32",
+      "signature": "V4fffV4fIiIiIi",
+      "dims": {
+        "M": "4X",
+        "N": "4Y",
+        "K": "1",
+        "B": "16",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "1",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{BM}",
+      "b_layout": "same",
+      "c_d_layout": "L{BN} V{M}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_32x32x2f32",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x2f32",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f32",
+      "signature": "V16fffV16fIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "2",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "1",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{KM}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "Alternate description possible to fit codebase",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_16x16x4f32",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x4f32",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f32",
+      "signature": "V4fffV4fIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "4",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "1",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{KM}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "Alternate description possible to fit codebase",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_32x32x4f16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x4f16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V32fV4hV4hV32fIiIiIi",
+      "dims": {
+        "M": "32X",
+        "N": "32Y",
+        "K": "4",
+        "B": "2",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{BM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{BM2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_16x16x4f16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x4f16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V16fV4hV4hV16fIiIiIi",
+      "dims": {
+        "M": "16X",
+        "N": "16Y",
+        "K": "4",
+        "B": "4",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{BM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_4x4x4f16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_4x4x4f16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V4fV4hV4hV4fIiIiIi",
+      "dims": {
+        "M": "4X",
+        "N": "4Y",
+        "K": "4",
+        "B": "16",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{BM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "L{BN} V{M}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_32x32x8f16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x8f16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V16fV4hV4hV16fIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "8",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_16x16x16f16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x16f16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V4fV4hV4hV4fIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_i32_32x32x4i8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_i32_32x32x4i8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "i32",
+      "input_dtype": "i8",
+      "signature": "V32iiiV32iIiIiIi",
+      "dims": {
+        "M": "32X",
+        "N": "32Y",
+        "K": "4",
+        "B": "2",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{BM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{BM2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_i32_16x16x4i8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_i32_16x16x4i8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "i32",
+      "input_dtype": "i8",
+      "signature": "V16iiiV16iIiIiIi",
+      "dims": {
+        "M": "16X",
+        "N": "16Y",
+        "K": "4",
+        "B": "4",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{BM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_i32_4x4x4i8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_i32_4x4x4i8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "i32",
+      "input_dtype": "i8",
+      "signature": "V4iiiV4iIiIiIi",
+      "dims": {
+        "M": "4X",
+        "N": "4Y",
+        "K": "4",
+        "B": "16",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{BM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "L{BN} V{M}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_i32_32x32x8i8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_i32_32x32x8i8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "i32",
+      "input_dtype": "i8",
+      "signature": "V16iiiV16iIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "8",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": "Note: In the ISA the K per block was doubled, not sure if the old instructions still exist"
+    },
+    {
+      "op_id": "mfma_i32_16x16x16i8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_i32_16x16x16i8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "i32",
+      "input_dtype": "i8",
+      "signature": "V4iiiV4iIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": "Note: The smaller K hardware instructions are definitely gone on CDNA3 and 4, LLVM may still use a workaround"
+    },
+    {
+      "op_id": "mfma_f32_32x32x2bf16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x2bf16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V32fV2sV2sV32fIiIiIi",
+      "dims": {
+        "M": "32X",
+        "N": "32Y",
+        "K": "2",
+        "B": "2",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "2",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a"
+      ],
+      "a_layout": "L{BM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{BM2M0}",
+      "layout_notes": "",
+      "note": "Note: The original bf16 instructions had only half the K size of f16. This was fixed in CDNA2 with the introduction of \u201c1k\u201d variants which has the expected k size. It\u2019s not clear to me how LLVM deals with this. The old builtins may still be available but not shown in the ISA doc. Also it\u2019s not clear if the assembly instruction name still contains 1K on modern gens."
+    },
+    {
+      "op_id": "mfma_f32_16x16x2bf16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x2bf16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V16fV2sV2sV16fIiIiIi",
+      "dims": {
+        "M": "16X",
+        "N": "16Y",
+        "K": "2",
+        "B": "4",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "2",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a"
+      ],
+      "a_layout": "L{BM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "",
+      "note": "Note: The smaller K hardware instructions are definitely gone on CDNA3 and 4, LLVM may still use a workaround"
+    },
+    {
+      "op_id": "mfma_f32_4x4x2bf16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_4x4x2bf16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V4fV2sV2sV4fIiIiIi",
+      "dims": {
+        "M": "4X",
+        "N": "4Y",
+        "K": "2",
+        "B": "16",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "2",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a"
+      ],
+      "a_layout": "L{BM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "L{BN} V{M}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_32x32x4bf16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x4bf16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V16fV2sV2sV16fIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "4",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "2",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a"
+      ],
+      "a_layout": "K{2} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_16x16x8bf16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x8bf16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V4fV2sV2sV4fIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "8",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "2",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx908",
+        "gfx90a"
+      ],
+      "a_layout": "K{2} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_32x32x4bf16_1k",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x4bf16_1k",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V32fV4sV4sV32fIiIiIi",
+      "dims": {
+        "M": "32X",
+        "N": "32Y",
+        "K": "4",
+        "B": "2",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{BM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{BM2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_16x16x4bf16_1k",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x4bf16_1k",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V16fV4sV4sV16fIiIiIi",
+      "dims": {
+        "M": "16X",
+        "N": "16Y",
+        "K": "4",
+        "B": "4",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{BM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_4x4x4bf16_1k",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_4x4x4bf16_1k",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V4fV4sV4sV4fIiIiIi",
+      "dims": {
+        "M": "4X",
+        "N": "4Y",
+        "K": "4",
+        "B": "16",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{BM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "L{BN} V{M}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_32x32x8bf16_1k",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x8bf16_1k",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V16fV4sV4sV16fIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "8",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_16x16x16bf16_1k",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x16bf16_1k",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V4fV4sV4sV4fIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "4",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f64_16x16x4f64",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f64_16x16x4f64",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f64",
+      "input_dtype": "f64",
+      "signature": "V4dddV4dIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "4",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "1",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{KM}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M0N} V{M1}*",
+      "layout_notes": "* To fit codebase, can also be described as M{4, 1} L{M1N} V{M2M0}",
+      "note": "Note: CBSZ and ABID are ignored, BLGP is used for NEG ABC"
+    },
+    {
+      "op_id": "mfma_f64_4x4x4f64",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f64_4x4x4f64",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f64",
+      "input_dtype": "f64",
+      "signature": "ddddIiIiIi",
+      "dims": {
+        "M": "4X",
+        "N": "4Y",
+        "K": "4",
+        "B": "4",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "1",
+        "AKN": "1",
+        "AR": "Y",
+        "BKN": "1",
+        "BR": "X",
+        "CM": "1",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx90a",
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "L{KBM}",
+      "b_layout": "same",
+      "c_d_layout": "L{MBN}*",
+      "layout_notes": "* To fit codebase, can also be described as M{1} L{M1BN} V{M0}",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_i32_16x16x32_i8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_i32_16x16x32_i8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "i32",
+      "input_dtype": "i8",
+      "signature": "V4iWiWiV4iIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_i32_32x32x16_i8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_i32_32x32x16_i8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "i32",
+      "input_dtype": "i8",
+      "signature": "V16iWiWiV16iIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_16x16x8_xf32",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x8_xf32",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "xf32",
+      "signature": "V4fV2fV2fV4fIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "8",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "2",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{2} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": "Note: Not clear if xf32 is still available in latest gen"
+    },
+    {
+      "op_id": "mfma_f32_32x32x4_xf32",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x4_xf32",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "xf32",
+      "signature": "V16fV2fV2fV16fIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "4",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "2",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{2} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": "Note: The XF32 hardware instructions are definitely gone on CDNA4, LLVM may still use a workaround"
+    },
+    {
+      "op_id": "mfma_f32_16x16x32_bf8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "V4fWiWiV4fIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_16x16x32_bf8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x32_bf8_fp8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf8f8",
+      "signature": "V4fWiWiV4fIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_16x16x32_fp8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x32_fp8_bf8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "fp8bf8",
+      "signature": "V4fWiWiV4fIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_16x16x32_fp8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "V4fWiWiV4fIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_32x32x16_bf8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "V16fWiWiV16fIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_32x32x16_bf8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x16_bf8_fp8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf8f8",
+      "signature": "V16fWiWiV16fIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_32x32x16_fp8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x16_fp8_bf8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "fp8bf8",
+      "signature": "V16fWiWiV16fIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_32x32x16_fp8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "V16fWiWiV16fIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_16x16x32_f16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x32_f16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V4fV8hV8hV4fIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_16x16x32_bf16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_16x16x32_bf16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V4fV8yV8yV4fIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_32x32x16_f16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x16_f16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V16fV8hV8hV16fIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_f32_32x32x16_bf16",
+      "llvm_builtin": "__builtin_amdgcn_mfma_f32_32x32x16_bf16",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V16fV8yV8yV16fIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_i32_16x16x64_i8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_i32_16x16x64_i8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "i32",
+      "input_dtype": "i8",
+      "signature": "V4iV4iV4iV4iIiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "K{16} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_i32_32x32x32_i8",
+      "llvm_builtin": "__builtin_amdgcn_mfma_i32_32x32x32_i8",
+      "family": "dense",
+      "wave_size": 64,
+      "output_dtype": "i32",
+      "input_dtype": "i8",
+      "signature": "V16iV4iV4iV16iIiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID, BLGP",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "K{16} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_16x16x32_f16",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x32_f16",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V4fV4hV8hV4fiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{4} L{KP1M} V{KP0}",
+      "b_layout": "K{8} L{K1N} V{K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{4} L{KP1M} V{SKP0}",
+      "note": "Note: Are these smaller K variants still supported on CDNA4? YES"
+    },
+    {
+      "op_id": "smfmac_f32_32x32x16_f16",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x16_f16",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V16fV4hV8hV16fiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{4} L{KP1M} V{KP0}",
+      "b_layout": "K{8} L{K1N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{4} L{KP1M} V{SKP0}",
+      "note": "Note: the \u201cidx\u201d input represents a matrix of index information for the sparsity of A."
+    },
+    {
+      "op_id": "smfmac_f32_16x16x32_bf16",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x32_bf16",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V4fV4sV8sV4fiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{4} L{KP1M} V{KP0}",
+      "b_layout": "K{8} L{K1N} V{K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{4} L{KP1M} V{SKP0}",
+      "note": "Note: the \u201cidx\u201d input itself is not dense, only part of it is used. The part in each VGPR that is used is specified by CBSZ and ABID"
+    },
+    {
+      "op_id": "smfmac_f32_32x32x16_bf16",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x16_bf16",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V16fV4sV8sV16fiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{4} L{KP1M} V{KP0}",
+      "b_layout": "K{8} L{K1N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{4} L{KP1M} V{SKP0}",
+      "note": "Note: The A matrix is packed 4:2 and hence has effectively half the K size, also called KP"
+    },
+    {
+      "op_id": "smfmac_i32_16x16x64_i8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_i32_16x16x64_i8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "i32",
+      "input_dtype": "i8",
+      "signature": "V4iV2iV4iV4iiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{8} L{KP1M} V{SKP0}",
+      "note": "Note: We interpret the \u201cindex matrix\u201d as having 2bit elements / items. Each element describes the true coordinates for a single packed coordinate"
+    },
+    {
+      "op_id": "smfmac_i32_32x32x32_i8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_i32_32x32x32_i8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "i32",
+      "input_dtype": "i8",
+      "signature": "V16iV2iV4iV16iiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{8} L{KP1M} V{SKP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_16x16x64_bf8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x64_bf8_bf8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "V4fV2iV4iV4fiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{8} L{KP1M} V{SKP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_16x16x64_bf8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x64_bf8_fp8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf8f8",
+      "signature": "V4fV2iV4iV4fiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{8} L{KP1M} V{SKP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_16x16x64_fp8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x64_fp8_bf8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "fp8bf8",
+      "signature": "V4fV2iV4iV4fiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{8} L{KP1M} V{SKP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_16x16x64_fp8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x64_fp8_fp8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "V4fV2iV4iV4fiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{8} L{KP1M} V{SKP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_32x32x32_bf8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x32_bf8_bf8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "V16fV2iV4iV16fiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{8} L{KP1M} V{SKP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_32x32x32_bf8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x32_bf8_fp8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf8f8",
+      "signature": "V16fV2iV4iV16fiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{8} L{KP1M} V{SKP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_32x32x32_fp8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x32_fp8_bf8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "fp8bf8",
+      "signature": "V16fV2iV4iV16fiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{8} L{KP1M} V{SKP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_32x32x32_fp8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x32_fp8_fp8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "V16fV2iV4iV16fiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx942",
+        "gfx950"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{8} L{KP1M} V{SKP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_16x16x64_f16",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x64_f16",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V4fV8hV16hV4fiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{4, 4} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{4, 8} L{K1N} V{K2K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{4, 4} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_32x32x32_f16",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x32_f16",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V16fV8hV16hV16fiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{2, 4} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 8} L{K1N} V{K2K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{2, 4} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_16x16x64_bf16",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x64_bf16",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V4fV8yV16yV4fiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{4, 4} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{4, 8} L{K1N} V{K2K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{4, 4} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_32x32x32_bf16",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x32_bf16",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V16fV8yV16yV16fiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{2, 4} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 8} L{K1N} V{K2K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{2, 4} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_i32_16x16x128_i8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_i32_16x16x128_i8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "i32",
+      "input_dtype": "i8",
+      "signature": "V4iV4iV8iV4iiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{4, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{4, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{4, 8} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_i32_32x32x64_i8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_i32_32x32x64_i8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "i32",
+      "input_dtype": "i8",
+      "signature": "V16iV4iV8iV16iiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{2, 8} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_16x16x128_bf8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x128_bf8_bf8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "V4fV4iV8iV4fiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{4, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{4, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{4, 8} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_16x16x128_bf8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x128_bf8_fp8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf8f8",
+      "signature": "V4fV4iV8iV4fiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{4, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{4, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{4, 8} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_16x16x128_fp8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x128_fp8_bf8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "fp8bf8",
+      "signature": "V4fV4iV8iV4fiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{4, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{4, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{4, 8} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_16x16x128_fp8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_16x16x128_fp8_fp8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "V4fV4iV8iV4fiIiIi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{4, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{4, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{4} L{M1N} V{BM0}",
+      "layout_notes": "KP{4, 8} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_32x32x64_bf8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x64_bf8_bf8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "V16fV4iV8iV16fiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{2, 8} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_32x32x64_bf8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x64_bf8_fp8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "bf8f8",
+      "signature": "V16fV4iV8iV16fiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{2, 8} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_32x32x64_fp8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x64_fp8_bf8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "fp8bf8",
+      "signature": "V16fV4iV8iV16fiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{2, 8} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "smfmac_f32_32x32x64_fp8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_smfmac_f32_32x32x64_fp8_fp8",
+      "family": "sparse",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "V16fV4iV8iV16fiIiIi",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, ABID",
+      "supported_targets": [
+        "gfx950"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "KP{2, 8} L{KP1M} V{SKP2KP0}",
+      "note": ""
+    },
+    {
+      "op_id": "mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "family": "scaled",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f4",
+      "signature": "V4fV8ZiV8ZiV4fIiIiIiiIii",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, BLGP, OpselA, scaleA, OpselB, scaleB",
+      "supported_targets": [],
+      "a_layout": "K{32} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "K{32} L{K1M} V{S}",
+      "note": "Note: This one builtin can map to the scale and non-scale hardware instructions, depending on scale values."
+    },
+    {
+      "op_id": "mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "family": "scaled",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f4",
+      "signature": "V16fV8ZiV8ZiV16fIiIiIiiIii",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, BLGP, OpselA, scaleA, OpselB, scaleB",
+      "supported_targets": [],
+      "a_layout": "K{32} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "K{32} L{K1M} V{S}",
+      "note": "Note: For scale operations CBSZ and BLGP indicate the data types"
+    },
+    {
+      "op_id": "mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "family": "scaled",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f6",
+      "signature": "V4fV8ZiV8ZiV4fIiIiIiiIii",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, BLGP, OpselA, scaleA, OpselB, scaleB",
+      "supported_targets": [],
+      "a_layout": "K{32} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "K{32} L{K1M} V{S}",
+      "note": "Note: This one builtin can map to the scale and non-scale hardware instructions, depending on scale values."
+    },
+    {
+      "op_id": "mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "family": "scaled",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f6",
+      "signature": "V16fV8ZiV8ZiV16fIiIiIiiIii",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, BLGP, OpselA, scaleA, OpselB, scaleB",
+      "supported_targets": [],
+      "a_layout": "K{32} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "K{32} L{K1M} V{S}",
+      "note": "Note: For scale operations CBSZ and BLGP indicate the data types"
+    },
+    {
+      "op_id": "mfma_scale_f32_16x16x128_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4",
+      "family": "scaled",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f8",
+      "signature": "V4fV8ZiV8ZiV4fIiIiIiiIii",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "2",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "4",
+        "CMN": "1"
+      },
+      "flags": "CBSZ, BLGP, OpselA, scaleA, OpselB, scaleB",
+      "supported_targets": [],
+      "a_layout": "K{4, 16} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M1N} V{M0}",
+      "layout_notes": "K{32} L{K1M} V{S}",
+      "note": "Note: This one builtin can map to the scale and non-scale hardware instructions, depending on scale values."
+    },
+    {
+      "op_id": "mfma_scale_f32_32x32x64_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4",
+      "family": "scaled",
+      "wave_size": 64,
+      "output_dtype": "f32",
+      "input_dtype": "f8",
+      "signature": "V16fV8ZiV8ZiV16fIiIiIiiIii",
+      "dims": {
+        "M": "32",
+        "N": "32",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "2",
+        "AR": "1",
+        "BKN": "2",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "4"
+      },
+      "flags": "CBSZ, BLGP, OpselA, scaleA, OpselB, scaleB",
+      "supported_targets": [],
+      "a_layout": "K{2, 16} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1N} V{M2M0}",
+      "layout_notes": "K{32} L{K1M} V{S}",
+      "note": "Note: For scale operations CBSZ and BLGP indicate the data types"
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_f16_w32",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_f16_w32",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V8fV16hV16hV8f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "2",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "2",
+        "BKN": "1",
+        "BR": "2",
+        "CM": "8",
+        "CMN": "8"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{2} L{M0N} V{M1}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_bf16_w32",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V8fV16sV16sV8f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "2",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "2",
+        "BKN": "1",
+        "BR": "2",
+        "CM": "8",
+        "CMN": "8"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{2} L{M0N} V{M1}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x16_f16_w32",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x16_f16_w32",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "f16",
+      "signature": "V16hV16hV16hV16hIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "2",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "2",
+        "BKN": "1",
+        "BR": "2",
+        "CM": "8",
+        "CMN": "8"
+      },
+      "flags": "dst_bits",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{2} L{M0N} V{M1S}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_bf16_16x16x16_bf16_w32",
+      "llvm_builtin": "__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "bf16",
+      "input_dtype": "bf16",
+      "signature": "V16sV16sV16sV16sIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "2",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "2",
+        "BKN": "1",
+        "BR": "2",
+        "CM": "8",
+        "CMN": "8"
+      },
+      "flags": "dst_bits",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{2} L{M0N} V{M1S}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x16_f16_tied_w32",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w32",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "f16",
+      "signature": "V16hV16hV16hV16hIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "2",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "2",
+        "BKN": "1",
+        "BR": "2",
+        "CM": "8",
+        "CMN": "8"
+      },
+      "flags": "dst_bits",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{2} L{M0N} V{M1S}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_bf16_16x16x16_bf16_tied_w32",
+      "llvm_builtin": "__builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w32",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "bf16",
+      "input_dtype": "bf16",
+      "signature": "V16sV16sV16sV16sIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "2",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "2",
+        "BKN": "1",
+        "BR": "2",
+        "CM": "8",
+        "CMN": "8"
+      },
+      "flags": "dst_bits",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{2} L{M0N} V{M1S}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_i32_16x16x16_iu8_w32",
+      "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x16_iu8_w32",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu8",
+      "signature": "V8iIbV4iIbV4iV8iIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "2",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "2",
+        "BKN": "1",
+        "BR": "2",
+        "CM": "8",
+        "CMN": "8"
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{2} L{M0N} V{M1}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_i32_16x16x16_iu4_w32",
+      "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu4",
+      "signature": "V8iIbV2iIbV2iV8iIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "2",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "2",
+        "BKN": "1",
+        "BR": "2",
+        "CM": "8",
+        "CMN": "8"
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{2} L{M0N} V{M1}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_f16_w32_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V8fV8hV8hV8f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{2, 4} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_bf16_w32_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V8fV8sV8sV8f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{2, 4} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x16_f16_w32_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x16_f16_w32_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "f16",
+      "signature": "V8hV8hV8hV8h",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{2, 4} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_bf16_16x16x16_bf16_w32_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "bf16",
+      "input_dtype": "bf16",
+      "signature": "V8sV8sV8sV8s",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{2, 4} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_i32_16x16x16_iu8_w32_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu8",
+      "signature": "V8iIbV2iIbV2iV8iIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_i32_16x16x16_iu4_w32_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu4",
+      "signature": "V8iIbiIbiV8iIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_fp8_fp8_w32_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "V8fV2iV2iV8f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_fp8_bf8_w32_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_fp8_bf8_w32_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8bf8",
+      "signature": "V8fV2iV2iV8f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_bf8_fp8_w32_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_bf8_fp8_w32_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8f8",
+      "signature": "V8fV2iV2iV8f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_bf8_bf8_w32_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "V8fV2iV2iV8f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "8",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_i32_16x16x32_iu4_w32_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu4",
+      "signature": "V8iIbV2iIbV2iV8iIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{16} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x4_f32",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x4_f32",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f32",
+      "signature": "_ExtVector<8, float>(_Constant bool, _ExtVector<2, float>, _Constant bool, _ExtVector<2, float>, _Constant short, _ExtVector<8, float>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "4",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "2",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x32_bf16",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x32_bf16",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "_ExtVector<8, float>(_Constant bool, _ExtVector<16, __bf16>, _Constant bool, _ExtVector<16, __bf16>, _Constant short, _ExtVector<8, float>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_bf16_16x16x32_bf16",
+      "llvm_builtin": "__builtin_amdgcn_wmma_bf16_16x16x32_bf16",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "bf16",
+      "input_dtype": "bf16",
+      "signature": "_ExtVector<8, __bf16>(_Constant bool, _ExtVector<16, __bf16>, _Constant bool, _ExtVector<16, __bf16>, _Constant short, _ExtVector<8, __bf16>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_bf16f32_16x16x32_bf16",
+      "llvm_builtin": "__builtin_amdgcn_wmma_bf16f32_16x16x32_bf16",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "bf16f32",
+      "input_dtype": "bf16",
+      "signature": "_ExtVector<8, __bf16>(_Constant bool, _ExtVector<16, __bf16>, _Constant bool, _ExtVector<16, __bf16>, _Constant short, _ExtVector<8, float>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x64_fp8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "_ExtVector<8, float>(_ExtVector<8, int>, _ExtVector<8, int>, _Constant short, _ExtVector<8, float>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x64_fp8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x64_fp8_bf8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "_ExtVector<8, float>(_ExtVector<8, int>, _ExtVector<8, int>, _Constant short, _ExtVector<8, float>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x64_bf8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x64_bf8_fp8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "_ExtVector<8, float>(_ExtVector<8, int>, _ExtVector<8, int>, _Constant short, _ExtVector<8, float>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x64_bf8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x64_bf8_bf8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "_ExtVector<8, float>(_ExtVector<8, int>, _ExtVector<8, int>, _Constant short, _ExtVector<8, float>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x64_fp8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x64_fp8_fp8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "fp8",
+      "signature": "_ExtVector<8, __fp16>(_ExtVector<8, int>, _ExtVector<8, int>, _Constant short, _ExtVector<8, __fp16>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x64_fp8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x64_fp8_bf8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "fp8",
+      "signature": "_ExtVector<8, __fp16>(_ExtVector<8, int>, _ExtVector<8, int>, _Constant short, _ExtVector<8, __fp16>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x64_bf8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x64_bf8_fp8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "bf8",
+      "signature": "_ExtVector<8, __fp16>(_ExtVector<8, int>, _ExtVector<8, int>, _Constant short, _ExtVector<8, __fp16>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x64_bf8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x64_bf8_bf8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "bf8",
+      "signature": "_ExtVector<8, __fp16>(_ExtVector<8, int>, _ExtVector<8, int>, _Constant short, _ExtVector<8, __fp16>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_i32_16x16x64_iu8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x64_iu8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu8",
+      "signature": "_ExtVector<8, int>(_Constant bool, _ExtVector<8, int>, _Constant bool, _ExtVector<8, int>, _ExtVector<8, int>, _Constant bool, _Constant bool, ...)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x128_fp8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x128_fp8_fp8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "fp8",
+      "signature": "_ExtVector<8, __fp16>(_ExtVector<16, int>, _ExtVector<16, int>, _Constant short, _ExtVector<8, __fp16>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x128_fp8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x128_fp8_bf8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "fp8",
+      "signature": "_ExtVector<8, __fp16>(_ExtVector<16, int>, _ExtVector<16, int>, _Constant short, _ExtVector<8, __fp16>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x128_bf8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x128_bf8_fp8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "bf8",
+      "signature": "_ExtVector<8, __fp16>(_ExtVector<16, int>, _ExtVector<16, int>, _Constant short, _ExtVector<8, __fp16>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x128_bf8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x128_bf8_bf8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "bf8",
+      "signature": "_ExtVector<8, __fp16>(_ExtVector<16, int>, _ExtVector<16, int>, _Constant short, _ExtVector<8, __fp16>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x128_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f8",
+      "signature": "_ExtVector<8, float>(_Constant int, _ExtVector<16, int>, _Constant int, _ExtVector<16, int>, _Constant short, _ExtVector<8, float>)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x128_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f6",
+      "signature": "_ExtVector<8, float>(_Constant int, _ExtVector<16, int>, _Constant int, _ExtVector<16, int>, _Constant short, _ExtVector<8, float>)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x128_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f4",
+      "signature": "_ExtVector<8, float>(_Constant int, _ExtVector<16, int>, _Constant int, _ExtVector<16, int>, _Constant short, _ExtVector<8, float>)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x128_fp8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "_ExtVector<8, float>(_ExtVector<16, int>, _ExtVector<16, int>, _Constant short, _ExtVector<8, float>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x128_fp8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_fp8_bf8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "_ExtVector<8, float>(_ExtVector<16, int>, _ExtVector<16, int>, _Constant short, _ExtVector<8, float>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x128_bf8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_bf8_fp8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "_ExtVector<8, float>(_ExtVector<16, int>, _ExtVector<16, int>, _Constant short, _ExtVector<8, float>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x128_bf8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x128_bf8_bf8",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "_ExtVector<8, float>(_ExtVector<16, int>, _ExtVector<16, int>, _Constant short, _ExtVector<8, float>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x32_f16",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x32_f16",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "_ExtVector<8, float>(_Constant bool, _ExtVector<16, __fp16>, _Constant bool, _ExtVector<16, __fp16>, _Constant short, _ExtVector<8, float>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x32_f16",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x32_f16",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "f16",
+      "signature": "_ExtVector<8, __fp16>(_Constant bool, _ExtVector<16, __fp16>, _Constant bool, _ExtVector<16, __fp16>, _Constant short, _ExtVector<8, __fp16>, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 8} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_32x16x128_f4",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_32x16x128_f4",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f4",
+      "signature": "_ExtVector<16, float>(_ExtVector<16, int>, _ExtVector<8, int>, _Constant short, _ExtVector<16, float>)",
+      "dims": {
+        "M": "32",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "2"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} M{16} L{K1M0} V{M1K2K0}",
+      "b_layout": "K{2, 32} L{K1N} V{K2K0}",
+      "c_d_layout": "M{2, 8} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_f16_w64",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_f16_w64",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V4fV16hV16hV4f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "4",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M0N} V{M1}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_bf16_w64",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_bf16_w64",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V4fV16sV16sV4f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "4",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M0N} V{M1}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x16_f16_w64",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x16_f16_w64",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "f16",
+      "signature": "V8hV16hV16hV8hIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "4",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "dst_bits",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M0N} V{M1S}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_bf16_16x16x16_bf16_w64",
+      "llvm_builtin": "__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w64",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "bf16",
+      "input_dtype": "bf16",
+      "signature": "V8sV16sV16sV8sIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "4",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "dst_bits",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M0N} V{M1S}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x16_f16_tied_w64",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w64",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "f16",
+      "signature": "V8hV16hV16hV8hIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "4",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "dst_bits",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M0N} V{M1S}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_bf16_16x16x16_bf16_tied_w64",
+      "llvm_builtin": "__builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w64",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "bf16",
+      "input_dtype": "bf16",
+      "signature": "V8sV16sV16sV8sIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "4",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "dst_bits",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M0N} V{M1S}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_i32_16x16x16_iu8_w64",
+      "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x16_iu8_w64",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu8",
+      "signature": "V4iIbV4iIbV4iV4iIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "4",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M0N} V{M1}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_i32_16x16x16_iu4_w64",
+      "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x16_iu4_w64",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu4",
+      "signature": "V4iIbV2iIbV2iV4iIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "4",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx11"
+      ],
+      "a_layout": "L{RM} V{K}",
+      "b_layout": "same",
+      "c_d_layout": "M{4} L{M0N} V{M1}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_f16_w64_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_f16_w64_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V4fV4hV4hV4f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_bf16_w64_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_bf16_w64_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V4fV4sV4sV4f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f16_16x16x16_f16_w64_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f16_16x16x16_f16_w64_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "f16",
+      "signature": "V4hV4hV4hV4h",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_bf16_16x16x16_bf16_w64_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w64_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "bf16",
+      "input_dtype": "bf16",
+      "signature": "V4sV4sV4sV4s",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_i32_16x16x16_iu8_w64_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x16_iu8_w64_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu8",
+      "signature": "V4iIbiIbiV4iIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_i32_16x16x16_iu4_w64_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x16_iu4_w64_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu4",
+      "signature": "V4iIbiIbiV4iIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}*",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_fp8_fp8_w64_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w64_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "V4fiiV4f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_fp8_bf8_w64_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_fp8_bf8_w64_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8bf8",
+      "signature": "V4fiiV4f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_bf8_fp8_w64_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_bf8_fp8_w64_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8f8",
+      "signature": "V4fiiV4f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_f32_16x16x16_bf8_bf8_w64_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w64_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "V4fiiV4f",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "16",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{4} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_i32_16x16x32_iu4_w64_gfx12",
+      "llvm_builtin": "__builtin_amdgcn_wmma_i32_16x16x32_iu4_w64_gfx12",
+      "family": "dense",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu4",
+      "signature": "V4iIbiIbiV4iIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "K{8} L{K1M} V{K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x32_f16_w32",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_f16_w32",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V8fV8hV16hV8fi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{2, 4} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 8} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x32_bf16_w32",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_bf16_w32",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V8fV8sV16sV8fi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{2, 4} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 8} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f16_16x16x32_f16_w32",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f16_16x16x32_f16_w32",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "f16",
+      "signature": "V8hV8hV16hV8hi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{2, 4} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 8} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_bf16_16x16x32_bf16_w32",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_bf16_16x16x32_bf16_w32",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "bf16",
+      "input_dtype": "bf16",
+      "signature": "V8sV8sV16sV8si",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{2, 4} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 8} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_i32_16x16x32_iu8_w32",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_i32_16x16x32_iu8_w32",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu8",
+      "signature": "V8iIbV2iIbV4iV8iiIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_i32_16x16x32_iu4_w32",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_i32_16x16x32_iu4_w32",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu4",
+      "signature": "V8iIbiIbV2iV8iiIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_i32_16x16x64_iu4_w32",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_i32_16x16x64_iu4_w32",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu4",
+      "signature": "V8iIbV2iIbV4iV8iiIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{16} L{KP1M} V{KP0}",
+      "b_layout": "K{32} L{K1N} V{K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x32_fp8_fp8_w32",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "V8fV2iV4iV8fi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x32_fp8_bf8_w32",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8bf8",
+      "signature": "V8fV2iV4iV8fi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x32_bf8_fp8_w32",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8f8",
+      "signature": "V8fV2iV4iV8fi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x32_bf8_bf8_w32",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "V8fV2iV4iV8fi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "16",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{16} L{K1N} V{K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x64_bf16",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x64_bf16",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "_ExtVector<8, float>(_Constant bool, _ExtVector<16, __bf16>, _Constant bool, _ExtVector<32, __bf16>, _ExtVector<8, float>, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_bf16_16x16x64_bf16",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_bf16_16x16x64_bf16",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "bf16",
+      "input_dtype": "bf16",
+      "signature": "_ExtVector<8, __bf16>(_Constant bool, _ExtVector<16, __bf16>, _Constant bool, _ExtVector<32, __bf16>, _ExtVector<8, __bf16>, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_bf16f32_16x16x64_bf16",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_bf16f32_16x16x64_bf16",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "bf16f32",
+      "input_dtype": "bf16",
+      "signature": "_ExtVector<8, float>(_Constant bool, _ExtVector<16, __bf16>, _Constant bool, _ExtVector<32, __bf16>, _ExtVector<8, float>, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x128_fp8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x128_fp8_fp8",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "_ExtVector<8, float>(_ExtVector<8, int>, _ExtVector<16, int>, _ExtVector<8, float>, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x128_fp8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x128_fp8_bf8",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "_ExtVector<8, float>(_ExtVector<8, int>, _ExtVector<16, int>, _ExtVector<8, float>, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x128_bf8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x128_bf8_fp8",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "_ExtVector<8, float>(_ExtVector<8, int>, _ExtVector<16, int>, _ExtVector<8, float>, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x128_bf8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x128_bf8_bf8",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "_ExtVector<8, float>(_ExtVector<8, int>, _ExtVector<16, int>, _ExtVector<8, float>, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f16_16x16x128_fp8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f16_16x16x128_fp8_fp8",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "fp8",
+      "signature": "_ExtVector<8, __fp16>(_ExtVector<8, int>, _ExtVector<16, int>, _ExtVector<8, __fp16>, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f16_16x16x128_fp8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f16_16x16x128_fp8_bf8",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "fp8",
+      "signature": "_ExtVector<8, __fp16>(_ExtVector<8, int>, _ExtVector<16, int>, _ExtVector<8, __fp16>, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f16_16x16x128_bf8_fp8",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f16_16x16x128_bf8_fp8",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "bf8",
+      "signature": "_ExtVector<8, __fp16>(_ExtVector<8, int>, _ExtVector<16, int>, _ExtVector<8, __fp16>, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f16_16x16x128_bf8_bf8",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f16_16x16x128_bf8_bf8",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "bf8",
+      "signature": "_ExtVector<8, __fp16>(_ExtVector<8, int>, _ExtVector<16, int>, _ExtVector<8, __fp16>, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_i32_16x16x128_iu8",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_i32_16x16x128_iu8",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu8",
+      "signature": "_ExtVector<8, int>(_Constant bool, _ExtVector<8, int>, _Constant bool, _ExtVector<16, int>, _ExtVector<8, int>, int, _Constant bool, _Constant bool, ...)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x64_f16",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x64_f16",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "_ExtVector<8, float>(_Constant bool, _ExtVector<16, __fp16>, _Constant bool, _ExtVector<32, __fp16>, _ExtVector<8, float>, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f16_16x16x64_f16",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f16_16x16x64_f16",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "f16",
+      "signature": "_ExtVector<8, __fp16>(_Constant bool, _ExtVector<16, __fp16>, _Constant bool, _ExtVector<32, __fp16>, _ExtVector<8, __fp16>, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "1"
+      },
+      "layout_params": {
+        "ABK": "32",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "KP{2, 8} L{KP1M} V{KP2KP0}",
+      "b_layout": "K{2, 16} L{K1N} V{K2K0}",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x32_f16_w64",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_f16_w64",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f16",
+      "signature": "V4fV4hV8hV4fi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{4} L{KP1M} V{KP0}",
+      "b_layout": "K{8} L{K1N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x32_bf16_w64",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_bf16_w64",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf16",
+      "signature": "V4fV4sV8sV4fi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{4} L{KP1M} V{KP0}",
+      "b_layout": "K{8} L{K1N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f16_16x16x32_f16_w64",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f16_16x16x32_f16_w64",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f16",
+      "input_dtype": "f16",
+      "signature": "V4hV4hV8hV4hi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{4} L{KP1M} V{KP0}",
+      "b_layout": "K{8} L{K1N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_bf16_16x16x32_bf16_w64",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_bf16_16x16x32_bf16_w64",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "bf16",
+      "input_dtype": "bf16",
+      "signature": "V4sV4sV8sV4si",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{4} L{KP1M} V{KP0}",
+      "b_layout": "K{8} L{K1N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_i32_16x16x32_iu8_w64",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_i32_16x16x32_iu8_w64",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu8",
+      "signature": "V4iIbiIbV2iV4iiIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{2, 4} L{KP1KP2M} V{KP0}",
+      "b_layout": "K{2, 8} L{K1K2N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_i32_16x16x32_iu4_w64",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_i32_16x16x32_iu4_w64",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu4",
+      "signature": "V4iIbiIbiV4iiIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{8} L{KP1M} V{KP0}",
+      "b_layout": "K{2, 8} L{K1K2N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_i32_16x16x64_iu4_w64",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_i32_16x16x64_iu4_w64",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "i32",
+      "input_dtype": "iu4",
+      "signature": "V4iIbiIbV2iV4iiIb",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "64",
+        "B": "1",
+        "R": "1",
+        "S": "2"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "sign, sign, clamp",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{2, 8} L{KP1KP2M} V{KP0}",
+      "b_layout": "K{2, 16} L{K1K2N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x32_fp8_fp8_w64",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_fp8_fp8_w64",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8",
+      "signature": "V4fiV2iV4fi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{2, 4} L{KP1KP2M} V{KP0}",
+      "b_layout": "K{2, 8} L{K1K2N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x32_fp8_bf8_w64",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_fp8_bf8_w64",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "fp8bf8",
+      "signature": "V4fiV2iV4fi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{2, 4} L{KP1KP2M} V{KP0}",
+      "b_layout": "K{2, 8} L{K1K2N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x32_bf8_fp8_w64",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_bf8_fp8_w64",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8f8",
+      "signature": "V4fiV2iV4fi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{2, 4} L{KP1KP2M} V{KP0}",
+      "b_layout": "K{2, 8} L{K1K2N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "swmmac_f32_16x16x32_bf8_bf8_w64",
+      "llvm_builtin": "__builtin_amdgcn_swmmac_f32_16x16x32_bf8_bf8_w64",
+      "family": "sparse",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "bf8",
+      "signature": "V4fiV2iV4fi",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "32",
+        "B": "1",
+        "R": "1",
+        "S": "4"
+      },
+      "layout_params": {
+        "ABK": "",
+        "AKN": "",
+        "AR": "",
+        "BKN": "",
+        "BR": "",
+        "CM": "",
+        "CMN": ""
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx12"
+      ],
+      "a_layout": "KP{2, 4} L{KP1KP2M} V{KP0}",
+      "b_layout": "K{2, 8} L{K1K2N} V{K0}",
+      "c_d_layout": "M{2, 4} L{M1M2N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "family": "scaled",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f8",
+      "signature": "_ExtVector<8, float>(_Constant int, _ExtVector<16, int>, _Constant int, _ExtVector<16, int>, _Constant short, _ExtVector<8, float>, _Constant int, _Constant int, int, _Constant int, _Constant int, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": ""
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "family": "scaled",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f8",
+      "signature": "_ExtVector<8, float>(_Constant int, _ExtVector<16, int>, _Constant int, _ExtVector<16, int>, _Constant short, _ExtVector<8, float>, _Constant int, _Constant int, long int, _Constant int, _Constant int, long int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": ""
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "family": "scaled",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f6",
+      "signature": "_ExtVector<8, float>(_Constant int, _ExtVector<16, int>, _Constant int, _ExtVector<16, int>, _Constant short, _ExtVector<8, float>, _Constant int, _Constant int, int, _Constant int, _Constant int, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": ""
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "family": "scaled",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f6",
+      "signature": "_ExtVector<8, float>(_Constant int, _ExtVector<16, int>, _Constant int, _ExtVector<16, int>, _Constant short, _ExtVector<8, float>, _Constant int, _Constant int, long int, _Constant int, _Constant int, long int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": ""
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_scale_f32_16x16x128_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+      "family": "scaled",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f4",
+      "signature": "_ExtVector<8, float>(_Constant int, _ExtVector<16, int>, _Constant int, _ExtVector<16, int>, _Constant short, _ExtVector<8, float>, _Constant int, _Constant int, int, _Constant int, _Constant int, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": ""
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_scale16_f32_16x16x128_f8f6f4",
+      "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+      "family": "scaled",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f4",
+      "signature": "_ExtVector<8, float>(_Constant int, _ExtVector<16, int>, _Constant int, _ExtVector<16, int>, _Constant short, _ExtVector<8, float>, _Constant int, _Constant int, long int, _Constant int, _Constant int, long int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "16",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": ""
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "8",
+        "CMN": "1"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} L{K1M} V{K2K0}",
+      "b_layout": "same",
+      "c_d_layout": "M{8} L{M1N} V{M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_scale_f32_32x16x128_f4",
+      "llvm_builtin": "__builtin_amdgcn_wmma_scale_f32_32x16x128_f4",
+      "family": "scaled",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f4",
+      "signature": "_ExtVector<16, float>(_ExtVector<16, int>, _ExtVector<8, int>, _Constant short, _ExtVector<16, float>, _Constant int, _Constant int, int, _Constant int, _Constant int, int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "32",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": ""
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "2"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} M{16} L{K1M0} V{M1K2K0}",
+      "b_layout": "K{2, 32} L{K1N} V{K2K0}",
+      "c_d_layout": "M{2, 8} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    },
+    {
+      "op_id": "wmma_scale16_f32_32x16x128_f4",
+      "llvm_builtin": "__builtin_amdgcn_wmma_scale16_f32_32x16x128_f4",
+      "family": "scaled",
+      "wave_size": 32,
+      "output_dtype": "f32",
+      "input_dtype": "f4",
+      "signature": "_ExtVector<16, float>(_ExtVector<16, int>, _ExtVector<8, int>, _Constant short, _ExtVector<16, float>, _Constant int, _Constant int, long int, _Constant int, _Constant int, long int, _Constant bool, _Constant bool)",
+      "dims": {
+        "M": "32",
+        "N": "16",
+        "K": "128",
+        "B": "1",
+        "R": "1",
+        "S": ""
+      },
+      "layout_params": {
+        "ABK": "64",
+        "AKN": "1",
+        "AR": "1",
+        "BKN": "1",
+        "BR": "1",
+        "CM": "16",
+        "CMN": "2"
+      },
+      "flags": "",
+      "supported_targets": [
+        "gfx1250"
+      ],
+      "a_layout": "K{2, 32} M{16} L{K1M0} V{M1K2K0}",
+      "b_layout": "K{2, 32} L{K1N} V{K2K0}",
+      "c_d_layout": "M{2, 8} L{M1N} V{M2M0}",
+      "layout_notes": "",
+      "note": ""
+    }
+  ]
+}

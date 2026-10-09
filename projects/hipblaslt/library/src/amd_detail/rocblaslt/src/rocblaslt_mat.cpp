@@ -25,6 +25,7 @@
  * ************************************************************************ */
 
 #include "check_numerics_matrix.hpp"
+#include "check_synchronizer.hpp"
 #include "definitions.h"
 #include "handle.h"
 #include "rocblaslt_fused_a2a_validate.hpp"
@@ -269,6 +270,9 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
 
     if(st == rocblaslt_status_success)
     {
+        // No-op unless HIPBLASLT_CHECK_SYNCHRONIZER is set.
+        hipblaslt_check_synchronizer_scan(handle, stream, "rocblaslt_matmul_impl");
+
         const uint32_t call_id = hipblaslt_check_numerics_begin_call(handle);
         if(call_id != 0)
         {

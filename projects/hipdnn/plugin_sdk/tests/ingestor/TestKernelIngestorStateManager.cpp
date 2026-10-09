@@ -16,6 +16,7 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
@@ -1051,6 +1052,26 @@ INSTANTIATE_TEST_SUITE_P(
                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
                     std::string{});
             }},
+        // The tuple is the completed one: a kernel leaving BLOCK_SIZE to its default of 64
+        // is kernel_64_half under another spelling.
+        StateManagerConstructionThrowCase{
+            "RejectsAKernelWhoseDefaultCompletesToAnotherKernelsTuple",
+            "duplicates the metadata tuple",
+            [] {
+                KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID});
+                KernelDescriptor defaulted;
+                defaulted.id = testId(0x75);
+                defaulted.name = "kernel_defaulted_half";
+                defaulted.metadata = {{DTYPE, MetadataValue{std::string{"HALF"}}}};
+                pack.kernels.push_back(defaulted);
+                return std::make_unique<StateManager>(
+                    makeSchema(),
+                    makeTestMatchers(),
+                    makeTestDispatches(),
+                    std::vector<KernelDescriptorPack>{pack},
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    std::string{});
+            }},
         // Overlapping lists need not be equal: a gfx942 device satisfies both, so the
         // tuple really is ambiguous. Plain string equality would let this construct.
         StateManagerConstructionThrowCase{
@@ -1116,6 +1137,17 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<StateManagerConstructionThrowCase>& info) {
         return info.param.name;
     });
+
+TEST(TestKernelIngestorStateManager, MakeEngineRejectsANullStateManager)
+{
+    const StubDeviceResolver resolver;
+
+    EXPECT_THROW((makeEngine<StubHandle, StubSettings, StubContext>(
+                     makeEngineWithKnobs({}),
+                     std::unique_ptr<KernelIngestorStateManager<StubHandle>>{},
+                     resolver)),
+                 std::invalid_argument);
+}
 
 } // namespace
 

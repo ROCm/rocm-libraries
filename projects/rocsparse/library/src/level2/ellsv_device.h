@@ -89,7 +89,7 @@ namespace rocsparse
             if(col < row)
             {
                 const int32_t local_done
-                    = rocsparse::spin_loop<SLEEP>(&done_array[col], __HIP_MEMORY_SCOPE_AGENT);
+                    = rocsparse::spin_loop<SLEEP>(&done_array[col], __MEMORY_SCOPE_DEVICE);
                 local_max = rocsparse::max(local_done, local_max);
             }
         }
@@ -106,8 +106,8 @@ namespace rocsparse
                 rocsparse::atomic_min(zero_pivot, row + idx_base);
             }
 
-            __hip_atomic_store(
-                &done_array[row], local_max + 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(
+                &done_array[row], local_max + 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         }
     }
 
@@ -164,7 +164,7 @@ namespace rocsparse
             if(col > row)
             {
                 const int32_t local_done
-                    = rocsparse::spin_loop<SLEEP>(&done_array[col], __HIP_MEMORY_SCOPE_AGENT);
+                    = rocsparse::spin_loop<SLEEP>(&done_array[col], __MEMORY_SCOPE_DEVICE);
                 local_max = rocsparse::max(local_done, local_max);
             }
         }
@@ -181,8 +181,8 @@ namespace rocsparse
                 rocsparse::atomic_min(zero_pivot, row + idx_base);
             }
 
-            __hip_atomic_store(
-                &done_array[row], local_max + 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(
+                &done_array[row], local_max + 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         }
     }
 
@@ -288,7 +288,7 @@ namespace rocsparse
             // Spin until the dependency row has been solved. Its done flag only
             // ever goes from 0 to 1 here, so the returned value carries no
             // information beyond the wait itself and is discarded.
-            (void)rocsparse::spin_loop<SLEEP>(&done_array[col], __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::spin_loop<SLEEP>(&done_array[col], __MEMORY_SCOPE_DEVICE);
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 
             local_sum = rocsparse::fma(-local_val, y[col * y_inc], local_sum);
@@ -306,7 +306,7 @@ namespace rocsparse
         {
             rocsparse::nontemporal_store(local_sum, &y[row * y_inc]);
 
-            __hip_atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
         }
     }
 }

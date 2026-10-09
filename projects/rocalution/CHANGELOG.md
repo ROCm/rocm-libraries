@@ -17,6 +17,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 ### Resolved issues
 * Fixed wrong smoothed aggregation prolongation operators from the deprecated `LocalMatrix::AMGSmoothedAggregation()` on wave32 devices for rows with 64 or more entries.
 * Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
+* Fixed `LocalMatrix::ItLUSolve()` and `LocalMatrix::ItLLSolve()` on the accelerator limiting the iterations of the second triangular solve to the number of iterations performed by the first one.
 * Fixed a heap corruption in `GlobalMatrix::CoarsenOperator()`, used by the pairwise AMG with MPI, when a process sends its coarse boundary to more than one neighboring process.
 * Fixed `LocalMatrix::Sort()` on the accelerator ignoring errors when creating the identity permutation for CSR and COO matrices.
 * Fixed wrong coarse operators of the AMG preconditioners with MPI on wave32 (RDNA) hardware, caused by `LocalMatrix::CompressAdd()` on the accelerator.
@@ -26,6 +27,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed HIP work in the distributed CSR receive and in `CompressAdd` running on the null stream instead of the current stream.
 * Fixed the Smoothed-Aggregation AMG preconditioner not falling back to the host when the prolongation fill failed on the accelerator or in a non-CSR format.
 * Fixed the FCG and QMRCGStab solvers returning NaN when the initial residual is already below the absolute tolerance, for example a zero right-hand side on the coarsest AMG level.
+* Fixed `init_rocalution()` reporting the HIP backend as available when creating the rocBLAS or rocSPARSE handle failed on a device selected with `set_device_rocalution()`, which caused `info_rocalution()` to crash. rocALUTION now falls back to the host backend in this case.
 
 ## rocALUTION 4.1.0 for ROCm 7.2.0
 

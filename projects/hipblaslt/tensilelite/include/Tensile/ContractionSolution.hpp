@@ -92,6 +92,7 @@ namespace TensileLite
         X_MACRO(StrideCK) \
         X_MACRO(Alpha) \
         X_MACRO(Beta) \
+        X_MACRO(ComputeUnits) \
         X_MACRO(SplitK) \
         X_MACRO(OutputBF16) \
         X_MACRO(Padding) \
@@ -205,6 +206,8 @@ namespace TensileLite
         PersistentGrid,
         PersistentWithBatch,
         PersistentNoBatch,
+        TilesYGSU,
+        ComputeUnits,
         CustomGridSize_Count,
     };
 

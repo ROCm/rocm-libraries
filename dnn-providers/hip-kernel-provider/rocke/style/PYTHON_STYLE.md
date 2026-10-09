@@ -69,6 +69,27 @@ add code that maintains compatibility with pre-3.10 idioms.
 
 ---
 
+## API design (the cross-language standard)
+
+How functions are layered, named, exported, and tested follows the shared
+[API design standard](API_DESIGN_STANDARD.md). That document owns the rules; this guide owns
+how they are expressed in Python:
+
+- **Exports and the author door** — a module's `__all__` is the surface shared with sibling
+  modules; the package `__init__.py` `__all__` is the author door (§8). Also export the result
+  type a function is named with (standard Part 2).
+- **Naming, `_`-private state, read-only `@property` accessors** — §4, §7.
+- **Validation return types** — `(ok, reason)` for a simple gate; a three-tier diagnostic when
+  the caller must tell a reorder-fixable warning from a hard error (§7).
+- **Test coverage** — §11.
+
+Repo protocols the standard depends on (Part 4 — no paths in signatures, numpy-only public
+signatures, `platform/` not importing `library/`) are owned by
+[AGENTS.md](../platform/AGENTS.md). Enforcement of these rules is pending; the standard's
+[What is enforced](API_DESIGN_STANDARD.md#what-is-enforced) is the single home for that status.
+
+---
+
 ## 1. Formatting (owned by black — do not hand-fight it)
 
 - **Line length 88**, **double quotes**, black defaults. No `[tool.black]` overrides
@@ -227,6 +248,10 @@ This is a deliberate house style for a codebase full of hardware subtleties.
   Raise `ValueError` for bad user/spec input and `NotImplementedError` for an
   unsupported-but-valid path (e.g. an atom with no dispatch). Error messages name
   the offending values and the fix, matching the existing structured style.
+- **Layered checks that distinguish a reorder-fixable warning from a hard error** return a
+  three-tier diagnostic (a severity-carrying result) instead of `(ok, reason)`. That form is
+  owned by the [API design standard](API_DESIGN_STANDARD.md#part-1--layering--naming), not
+  restated here.
 
 ## 8. Public API surface (`__all__`)
 
@@ -270,9 +295,19 @@ emitter code:
 
 ## 11. Tests
 
-Test-file naming and the PR-bot test requirement are owned by AGENTS.md. Style note:
-most tests are CPU-only (lowering/serialization/byte-identity); gate GPU-only numeric
-tests on real hardware being present rather than faking it.
+Test-file naming and the PR-bot test requirement are owned by AGENTS.md. The test-coverage
+principles — prove the behaviour, choose cases by consequence, a self-validating setup — are in
+the [API design standard](API_DESIGN_STANDARD.md#part-5--testing-what-you-build). The Python
+mechanics:
+
+- **`pytest`** with `@pytest.mark.parametrize` to sweep the axes that change behaviour (shape,
+  dtype, atom count), not one case.
+- **Prefer a real input over a replacement.** Push the actual object through the real path; a
+  replaced dependency tests the replacement, not the code.
+- **Most tests are CPU-only** (lowering/serialization/byte-identity); gate GPU-only numeric
+  tests on real hardware being present rather than faking it.
+- **Assert the rejections too** — `pytest.raises(..., match=...)` for every guard, not just the
+  passing case.
 
 ## 12. A minimal conforming module
 

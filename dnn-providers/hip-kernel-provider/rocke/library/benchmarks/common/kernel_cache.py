@@ -25,11 +25,12 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import itertools
 import json
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -273,56 +274,30 @@ class KernelIdentity:
         payload = json.dumps(fields, sort_keys=True, separators=(",", ":"))
         return hashlib.sha1(payload.encode()).hexdigest()
 
-    def short_label(self) -> str:
-        """Human-readable label for logs and tables.
+    def label(self) -> str:
+        """The kernel's name in logs and benchmark tables.
 
-        Not a kernel symbol name — the HSACO's entry point is recorded in the
-        cache metadata under ``kernel_name``.
+        Lossless: it spells every field, so :meth:`from_label` turns it back
+        into an equal identity and ``reproduce_kernel.py`` rebuilds the kernel
+        from it. Format: :mod:`benchmarks.common.kernel_label`. Not the HSACO's
+        entry point -- that is recorded in the cache metadata under
+        ``kernel_name``.
         """
-        if self.is_direct:
-            knobs = json.loads(self.knobs) if self.knobs else {}
-            bits = [
-                self.algorithm,
-                f"f{self.filter_h}x{self.filter_w}",
-                f"p{self.pad_h}",
-                f"s{self.stride_h}",
-                f"c{self.cpg}k{self.kpg}",
-            ]
-            bits += [
-                f"{k}{int(v) if isinstance(v, bool) else v}"
-                for k, v in sorted(knobs.items())
-            ]
-            return "_".join(bits)
-        bits = [
-            f"{self.direction}_{self.algorithm}",
-            f"{self.tile_m}x{self.tile_n}x{self.tile_k}",
-            f"w{self.warp_m}x{self.warp_n}",
-            f"a{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}",
-            f"v{self.vector_size_a}{self.vector_size_b}{self.vector_size_c}",
-            self.pipeline,
-            self.epilogue,
-        ]
-        if self.unroll_k:
-            bits.append("unroll")
-        if self.async_dma:
-            bits.append("async")
-        if self.split_k != 1:
-            bits.append(f"sk{self.split_k}")
-        if self.two_stage:
-            bits.append("2stage")
-        if self.group_merge > 1:
-            bits.append(f"gm{self.group_merge}")
-        if self.filter_h:
-            bits.append(f"f{self.filter_h}x{self.filter_w}")
-        if self.cpg:
-            bits.append(f"c{self.cpg}k{self.kpg}")
-        if self.grouped:
-            bits.append("grp")
-        if self.stride_h or self.stride_w:
-            bits.append(f"s{self.stride_h}x{self.stride_w}")
-        if self.dilation_h or self.dilation_w:
-            bits.append(f"d{self.dilation_h}x{self.dilation_w}")
-        return "_".join(bits)
+        from benchmarks.common.kernel_label import encode
+
+        return encode(self)
+
+    @classmethod
+    def from_label(cls, name: str) -> "KernelIdentity":
+        """The identity :meth:`label` named ``name``.
+
+        Launch parameters a benchmark table appends after whitespace
+        (``@split_k=4``) are ignored. Raises ``ValueError`` on a malformed
+        name.
+        """
+        from benchmarks.common.kernel_label import decode
+
+        return decode(name, cls)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -503,9 +478,20 @@ class KernelCache:
         self.link(identity, key, meta)
         return path
 
-    def index(self) -> Dict[str, dict]:
-        """``{identity sha1: metadata}`` for every entry with a binary."""
-        return {ident.stable_hash(): meta for ident, _, meta in self._entries(None)}
+    def index(self, directions: Optional[Iterable[str]] = None) -> Dict[str, dict]:
+        """``{identity sha1: metadata}`` for every entry with a binary.
+
+        ``directions`` limits the walk to those directions' entries; every
+        direction is parsed per entry, so on a large cache reading only the
+        ones needed is the difference between a few files and ~10^6.
+        """
+        if directions is None:
+            entries: Iterable = self._entries(None)
+        else:
+            entries = itertools.chain.from_iterable(
+                self._entries(d) for d in sorted(set(directions))
+            )
+        return {ident.stable_hash(): meta for ident, _, meta in entries}
 
     def meta(self, identity: KernelIdentity) -> Optional[dict]:
         """The identity's metadata, or ``None`` when it has no entry."""
@@ -734,8 +720,8 @@ class KernelCache:
             ("filter_w", ("KW", "X")),
             ("stride_h", ("stride", "sH")),
             ("stride_w", ("stride", "sW")),
-            ("dilation_h", ("dilation", "dH")),
-            ("dilation_w", ("dilation", "dW")),
+            ("dilation_h", ("dilation", "dH", "dil_h")),
+            ("dilation_w", ("dilation", "dW", "dil_w")),
             ("pad_h", ("PAD", "pH")),
             ("pad_w", ("PAD", "pW")),
         ):
@@ -748,6 +734,9 @@ class KernelCache:
             if actual is not None and int(actual) != baked:
                 return False, f"{field}={baked} but problem has {actual}"
 
+        # 0 means runtime here, for direct conv too: the non-grouped direct
+        # kernel takes its channel counts as kernargs (cpg == 0 is never a
+        # real shape, unlike PAD == 0 above).
         if identity.cpg and identity.cpg != cpg:
             return False, f"kernel baked cpg={identity.cpg}, problem has {cpg}"
         if identity.kpg and identity.kpg != kpg:

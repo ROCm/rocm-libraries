@@ -25,6 +25,7 @@
 #include "rocsparse_common.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_coomv_aos.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "coomv_device.h"
@@ -87,6 +88,7 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE,
               uint32_t LOOPS,
+              bool     GRID_STRIDE,
               typename I,
               typename A,
               typename X,
@@ -106,7 +108,7 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != 0)
         {
-            rocsparse::coomvn_aos_atomic_loops_device<BLOCKSIZE, LOOPS>(
+            rocsparse::coomvn_aos_atomic_loops_device<BLOCKSIZE, LOOPS, GRID_STRIDE>(
                 nnz, m, alpha, coo_ind, coo_val, x, y, idx_base);
         }
     }
@@ -159,21 +161,35 @@ namespace rocsparse
         {
         case rocsparse_operation_none:
         {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::coomvn_aos_atomic_loops<256, 1>),
-                dim3((nnz - 1) / 256 + 1),
-                dim3(256),
-                0,
-                stream,
-                nnz,
-                m,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                coo_ind,
-                coo_val,
-                x,
-                y,
-                descr->base,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+#define LAUNCH_COOMVN_AOS_ATOMIC(GRID_STRIDE)                         \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
+        (rocsparse::coomvn_aos_atomic_loops<256, 1, GRID_STRIDE>),    \
+        dim3(grid_size),                                              \
+        dim3(256),                                                    \
+        0,                                                            \
+        stream,                                                       \
+        nnz,                                                          \
+        m,                                                            \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+        coo_ind,                                                      \
+        coo_val,                                                      \
+        x,                                                            \
+        y,                                                            \
+        descr->base,                                                  \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
+
+            // Only a clamped grid needs the tile loop.
+            const int64_t  num_blocks = (nnz - 1) / 256 + 1;
+            const uint32_t grid_size  = rocsparse::get_grid_size_x(handle, num_blocks, 256);
+            if(grid_size < num_blocks)
+            {
+                LAUNCH_COOMVN_AOS_ATOMIC(true);
+            }
+            else
+            {
+                LAUNCH_COOMVN_AOS_ATOMIC(false);
+            }
+#undef LAUNCH_COOMVN_AOS_ATOMIC
             break;
         }
         case rocsparse_operation_transpose:
@@ -181,7 +197,7 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::coomvt_aos_kernel<1024>),
-                dim3((nnz - 1) / 1024 + 1),
+                dim3(rocsparse::get_grid_size_x(handle, (nnz - 1) / 1024 + 1, 1024)),
                 dim3(1024),
                 0,
                 handle->stream,
@@ -340,7 +356,7 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::coomvt_aos_kernel<1024>),
-                dim3((nnz - 1) / 1024 + 1),
+                dim3(rocsparse::get_grid_size_x(handle, (nnz - 1) / 1024 + 1, 1024)),
                 dim3(1024),
                 0,
                 handle->stream,

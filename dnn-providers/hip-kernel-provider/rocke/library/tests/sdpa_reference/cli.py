@@ -13,18 +13,17 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import os
 import shutil
-import subprocess
 import sys
-import tarfile
 import tempfile
 from dataclasses import asdict
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import numpy as np
 
-from .session import _ACTIVE
+from reference_common.source import snapshot
+from reference_common.runner import run_worker
+
 from .architectures import ARCHITECTURES, baseline_lock, get_architecture
 
 from .contract import (
@@ -32,113 +31,33 @@ from .contract import (
     INPUT_GENERATOR,
     checked_inputs,
     Case,
+    independent_reference,
+    make_inputs,
+)
+from reference_common.numeric import (
     ErrorBudget,
     array_digest,
     decode,
     file_digest,
-    independent_reference,
-    make_inputs,
     max_abs_upper,
     payload_digests,
     write_json,
 )
 
 _PACKAGE = Path(__file__).resolve().parent
-DEFAULT_LOCK = baseline_lock("gfx942")
-_SOURCE_PREFIX = PurePosixPath("dnn-providers/hip-kernel-provider/rocke")
-
-
-def snapshot(repository: Path, revision: str, output: Path) -> None:
-    """Export committed baseline sources, recording every file's identity."""
-    revision = subprocess.check_output(
-        ["git", "-C", str(repository), "rev-parse", f"{revision}^{{commit}}"],
-        text=True,
-    ).strip()
-    output.mkdir(parents=True, exist_ok=False)
-    source = output / "source"
-    with tempfile.TemporaryFile() as archive:
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repository),
-                "archive",
-                revision,
-                str(_SOURCE_PREFIX / "platform/python"),
-                str(_SOURCE_PREFIX / "library"),
-            ],
-            stdout=archive,
-            check=True,
-        )
-        archive.seek(0)
-        with tarfile.open(fileobj=archive) as tar:
-            for member in tar:
-                if not member.isfile():
-                    continue
-                relative = PurePosixPath(member.name).relative_to(_SOURCE_PREFIX)
-                if ".." in relative.parts:
-                    raise ValueError("invalid source archive path")
-                destination = source / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                with tar.extractfile(member) as stream:
-                    destination.write_bytes(stream.read())
-    write_json(
-        output / "snapshot.json",
-        {"revision": revision, "files": payload_digests(source)},
-    )
-    print(f"Exported baseline {revision}", flush=True)
 
 
 def _worker(
     request: dict, *, runner: Path, platform: Path, library: Path | None, work: Path
 ) -> tuple[list[np.ndarray], dict]:
-    work.mkdir(parents=True, exist_ok=False)
-    request = dict(request, platform_root=str(platform.resolve()))
-    paths = [platform.resolve()]
-    if library is not None:
-        paths.append(library.resolve())
-        request["library_root"] = str(library.resolve())
-    # The runner lives in tests/, which also contains a dispatch package.
-    # Production packages must resolve before those test-only names.
-    paths.append(runner.resolve())
-    write_json(work / "request.json", request)
-    env = dict(os.environ)
-    # Never let an inherited PYTHONPATH or user site select the other rocKE.
-    env.update(
-        PYTHONPATH=os.pathsep.join(map(str, paths)),
-        PYTHONNOUSERSITE="1",
-        PYTHONDONTWRITEBYTECODE="1",
+    return run_worker(
+        request,
+        runner=runner,
+        platform=platform,
+        library=library,
+        work=work,
+        module="sdpa_reference.worker",
     )
-    session = _ACTIVE.get()
-    if session is not None:
-        session.execute(request["mode"], work / "request.json", env)
-    else:
-        completed = subprocess.run(
-            [
-                sys.executable,
-                "-s",
-                "-m",
-                "sdpa_reference.worker",
-                str(work / "request.json"),
-                str(work),
-            ],
-            cwd=work,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        if completed.returncode:
-            raise RuntimeError(
-                f"SDPA {request['mode']} worker failed:\n"
-                f"{completed.stdout[-4000:]}{completed.stderr[-12000:]}"
-            )
-    report = json.loads((work / "report.json").read_text())
-    if report["launches"] != request["repetitions"]:
-        raise RuntimeError("required SDPA GPU launches did not execute")
-    with np.load(work / "outputs.npz", allow_pickle=False) as archive:
-        outputs = [archive[f"out_{i}"] for i in range(request["repetitions"])]
-    return outputs, report
 
 
 def qualify(
@@ -168,6 +87,11 @@ def qualify(
         _PACKAGE / "architectures",
         runner / "architectures",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "baseline_lock.json"),
+    )
+    shutil.copytree(
+        _PACKAGE.parent / "reference_common",
+        payload / "runner/reference_common",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
     entries = {}
     for case in target.CASES:
@@ -272,7 +196,7 @@ def load_bundle(
 
 
 def _validate_cases(manifest: dict, architecture: str) -> None:
-    """Preserve the cohort and budgets across qualification and storage migration."""
+    """Preserve the cohort and budgets across qualification and verification."""
     target = get_architecture(architecture)
     if set(manifest["cases"]) != {case.id for case in target.CASES}:
         raise ValueError("SDPA bundle does not cover the complete enrolled cohort")
@@ -397,14 +321,6 @@ def main() -> None:
     qualification.add_argument("--baseline", required=True, type=Path)
     qualification.add_argument("--output", required=True, type=Path)
     qualification.add_argument("--repetitions", type=int, default=3)
-    migration = commands.add_parser(
-        "remove-stored-inputs",
-        help="migrate a locked v1 bundle without changing its kernels or corpus",
-    )
-    migration.add_argument("--arch", choices=ARCHITECTURES, default="gfx942")
-    migration.add_argument("--bundle", required=True, type=Path)
-    migration.add_argument("--lock", required=True, type=Path)
-    migration.add_argument("--output", required=True, type=Path)
     verification = commands.add_parser(
         "verify", help="run every required GPU comparison"
     )
@@ -419,12 +335,6 @@ def main() -> None:
     elif args.command == "qualify":
         qualify(
             args.baseline.resolve(), args.output.resolve(), args.repetitions, args.arch
-        )
-    elif args.command == "remove-stored-inputs":
-        from .migration import remove_stored_inputs
-
-        remove_stored_inputs(
-            args.bundle.resolve(), args.lock.resolve(), args.output.resolve(), args.arch
         )
     else:
         bundle = args.bundle.resolve()
