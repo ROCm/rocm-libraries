@@ -204,10 +204,10 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
             for (int c = 0; c < srcDescPtr->c; c++) {
+                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                    Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                     T* srcPtrTemp[3];
                     srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
                     srcPtrTemp[1] = srcPtrChannel + std::min(windowRow + 1, maxValidRow) *
@@ -281,10 +281,10 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[3];
                 srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
                 srcPtrTemp[1] = srcPtrChannel +
@@ -359,10 +359,10 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
 
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[3];
                 srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
                 srcPtrTemp[1] = srcPtrChannel +
@@ -441,10 +441,10 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrRows[3];
                 srcPtrRows[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
                 srcPtrRows[1] = srcPtrChannel +
@@ -548,10 +548,10 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
             for (int c = 0; c < srcDescPtr->c; c++) {
+                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                    Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                     T* srcPtrTemp[5];
                     for (int k = 0; k < 5; k++)
                         srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -623,11 +623,11 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 18) * 18;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[5];
                 for (int k = 0; k < 5; k++)
                     srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -704,11 +704,11 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
 
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[5];
                 for (int k = 0; k < 5; k++)
                     srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -786,11 +786,11 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
                since padLength * 3 number of columns from the beginning and end of each row will
                be computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrRows[5];
                 for (int k = 0; k < 5; k++)
                     srcPtrRows[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -887,10 +887,10 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
             for (int c = 0; c < srcDescPtr->c; c++) {
+                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                    Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                     T* srcPtrTemp[7];
                     for (int k = 0; k < 7; k++)
                         srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -962,11 +962,11 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrRows[7];
                 for (int k = 0; k < 7; k++)
                     srcPtrRows[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -1061,11 +1061,11 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - 2 * padLength * 3) / 12) * 12;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[7];
                 for (int k = 0; k < 7; k++)
                     srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -1130,11 +1130,11 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
 
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[7];
                 for (int k = 0; k < 7; k++)
                     srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -1211,10 +1211,10 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
             for (int c = 0; c < srcDescPtr->c; c++) {
+                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                    Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                     T* srcPtrTemp[9];
                     for (int k = 0; k < 9; k++)
                         srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -1279,11 +1279,11 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 64) * 64;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[9];
                 for (int k = 0; k < 9; k++)
                     srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -1369,11 +1369,11 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrRows[9];
                 for (int k = 0; k < 9; k++)
                     srcPtrRows[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -1460,11 +1460,11 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
             T* dstPtrChannels[3];
             for (int c = 0; c < 3; c++)
                 dstPtrChannels[c] = dstPtrChannel + c * dstDescPtr->strides.cStride;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[9];
                 for (int k = 0; k < 9; k++)
                     srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -1642,10 +1642,10 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 12) * 12;
             for (int c = 0; c < srcDescPtr->c; c++) {
+                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                    Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                     T* srcPtrTemp[3];
                     srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
                     srcPtrTemp[1] = srcPtrChannel + std::min(windowRow + 1, maxValidRow) *
@@ -1715,10 +1715,10 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[3];
                 srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
                 srcPtrTemp[1] = srcPtrChannel +
@@ -1779,11 +1779,11 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[3];
                 srcPtrTemp[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
                 srcPtrTemp[1] = srcPtrChannel +
@@ -1847,11 +1847,11 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 14) * 14;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrRows[3];
                 srcPtrRows[0] = srcPtrChannel + windowRow * srcDescPtr->strides.hStride;
                 srcPtrRows[1] = srcPtrChannel +
@@ -1933,10 +1933,10 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
             for (int c = 0; c < srcDescPtr->c; c++) {
+                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                    Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                     T* srcPtrTemp[5];
                     for (int k = 0; k < 5; k++)
                         srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -1992,11 +1992,11 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength * 3)) / 24) * 24;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[5];
                 for (int k = 0; k < 5; k++)
                     srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -2065,11 +2065,11 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrRows[5];
                 for (int k = 0; k < 5; k++)
                     srcPtrRows[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -2139,11 +2139,11 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[5];
                 for (int k = 0; k < 5; k++)
                     srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -2211,10 +2211,10 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
             for (int c = 0; c < srcDescPtr->c; c++) {
+                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                    Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                     T* srcPtrTemp[7];
                     for (int k = 0; k < 7; k++)
                         srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -2272,11 +2272,11 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[7];
                 for (int k = 0; k < 7; k++)
                     srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -2350,11 +2350,11 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrRows[7];
                 for (int k = 0; k < 7; k++)
                     srcPtrRows[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -2423,11 +2423,11 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[7];
                 for (int k = 0; k < 7; k++)
                     srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -2502,10 +2502,10 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
             for (int c = 0; c < srcDescPtr->c; c++) {
+                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                    Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                     T* srcPtrTemp[9];
                     for (int k = 0; k < 9; k++)
                         srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -2566,11 +2566,11 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                since (padLength * 3) number of columns from the beginning and end of each row
                will be computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[9];
                 for (int k = 0; k < 9; k++)
                     srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -2645,11 +2645,11 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrRows[9];
                 for (int k = 0; k < 9; k++)
                     srcPtrRows[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
@@ -2717,11 +2717,11 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
+            Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
                 Rpp32u windowRow = (i < padLength) ? 0 : (i - padLength);
-                Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
                 T* srcPtrTemp[9];
                 for (int k = 0; k < 9; k++)
                     srcPtrTemp[k] = srcPtrChannel + std::min(windowRow + k, maxValidRow) *
