@@ -110,16 +110,24 @@
 #      read as bf16/f16 rather than f32, its slice offsets halve, and each
 #      value is widened to f32 before it is added, so the scores see the same
 #      arithmetic as an f32 bias. Objects without it build as before.
+#  20. A V head_dim of its own (head_dim_v, MLA): Q and K keep head_dim, while
+#      V, O and the PV product are head_dim_v wide (at most head_dim). V tiles
+#      are staged with K's load mapping; the PV product, the output-column
+#      split and the O store cover only head_dim_v columns, and the V slice
+#      ends at them, so columns past it are never consumed. Objects without
+#      it build as before.
 #
 # Upstream-first: prefer landing these changes in AITER/FlyDSL; this copy exists
 # so the provider is not blocked on that.
 
 """Flash Attention forward kernel for gfx11 (RDNA3 / RDNA3.5), wave32 WMMA.
 
-Uses 16x16x16 WMMA, online softmax and pipelined V loads. Requires
-``head_dim >= 64`` and ``head_dim % 32 == 0``.
+Uses 16x16x16 WMMA, online softmax and pipelined V loads. Requires a baked
+``head_dim >= 64`` with ``head_dim % 32 == 0`` (a generic object serves any multiple
+of 8 up to it), and a ``head_dim_v`` (V and O, default ``head_dim``) at most
+``head_dim``, a multiple of 16.
 
-Baked per object: ``head_dim``, ``causal`` (whether a right bound is applied),
+Baked per object: ``head_dim``, ``head_dim_v``, ``causal`` (whether a right bound is applied),
 ``dtype``, tile sizes, whether an additive bias is applied, the
 output-column split (the grid is
 ``batch * ceil(seq_len_q / block_m) * num_heads * dv_split``), and whether
@@ -165,6 +173,7 @@ def build_flash_attn_func_module(
     generic_head_dim=False,
     hd_pair=False,
     bias_query_dtype=False,
+    head_dim_v=None,
 ):
     """Build the gfx11 Flash Attention launcher.
 
@@ -245,15 +254,22 @@ def build_flash_attn_func_module(
     # The K-steps one wave computes: all of them, or its half with hd_pair.
     K_STEPS_QK_WAVE = K_STEPS_QK // PAIR
 
+    # V and O are head_dim_v wide (MLA: narrower than Q and K); everything on the PV
+    # side -- the output chunks, their split across workgroups and waves, the store --
+    # is sized by it, the QK side by head_dim.
+    HEAD_DIM_V = head_dim if head_dim_v is None else int(head_dim_v)
+    MLA = HEAD_DIM_V != head_dim
+    assert 16 <= HEAD_DIM_V <= head_dim and HEAD_DIM_V % 16 == 0
+    assert not (MLA and generic_head_dim), "a V head_dim of its own is baked"
     D_CHUNK = WMMA_N
-    D_CHUNKS = head_dim // D_CHUNK
+    D_CHUNKS = HEAD_DIM_V // D_CHUNK
     # The output columns may be split across workgroups: each computes the whole
     # of QK^T and the softmax but only DV_TILE columns of O, so it holds O_CHUNKS
     # accumulators instead of D_CHUNKS, and the grid grows by DV_SPLIT. Above 128
     # that, with Q re-read per K-step, is what fits the register file. hd_pair
     # halves each wave's columns again, inside the workgroup.
     if dv_split is None:
-        DV_SPLIT = 2 if head_dim > 128 and not HD_PAIR else 1
+        DV_SPLIT = 2 if HEAD_DIM_V > 128 and not HD_PAIR else 1
     else:
         DV_SPLIT = int(dv_split)
     assert D_CHUNKS % (DV_SPLIT * PAIR) == 0
@@ -518,19 +534,21 @@ def build_flash_attn_func_module(
         # (batch, kv head) slice, so a row at or past seq_len_kv -- including a
         # tail prefetch -- reads zero instead of a neighbouring head or past the
         # allocation. The slice must fit the descriptor's 32-bit num_records.
-        def _kv_buf_ptr(elem_ptr, sb, ss, sh, slice_head):
+        def _kv_buf_ptr(elem_ptr, sb, ss, sh, slice_head, row_elems):
             slice_base = batch_idx * sb + slice_head * sh
             if const_expr(GENERIC_D):
                 slice_elems = (seq_kv_v - fx.Int64(1)) * ss + fx.Int64(head_dim_rt)
             else:
-                slice_elems = (seq_kv_v - fx.Int64(1)) * ss + fx.Int64(HEAD_DIM)
+                slice_elems = (seq_kv_v - fx.Int64(1)) * ss + fx.Int64(row_elems)
             return _bounds_checked_buf_ptr(
                 fx.add_offset(elem_ptr, fx.Int64(slice_base)),
                 fx.Int64(slice_elems) * fx.Int64(ELEM_BYTES),
             )
 
-        k_buf_ptr = _kv_buf_ptr(k_elem_ptr, k_sb, k_ss, k_sh, kv_head_idx)
-        v_buf_ptr = _kv_buf_ptr(v_elem_ptr, v_sb, v_ss, v_sh, v_head_idx)
+        k_buf_ptr = _kv_buf_ptr(k_elem_ptr, k_sb, k_ss, k_sh, kv_head_idx, HEAD_DIM)
+        # A V row is head_dim_v wide: the staged columns past it read the next row (or
+        # zero past the slice) and are never consumed.
+        v_buf_ptr = _kv_buf_ptr(v_elem_ptr, v_sb, v_ss, v_sh, v_head_idx, HEAD_DIM_V)
 
         def k_idx(token_idx, col):
             return token_idx * k_ss + col
@@ -1340,5 +1358,6 @@ def build_flash_attn_func_module(
     launch_flash_attn_func.block_m = BLOCK_M
     launch_flash_attn_func.block_size = BLOCK_SIZE
     launch_flash_attn_func.dv_split = DV_SPLIT
+    launch_flash_attn_func.head_dim_v = HEAD_DIM_V
     launch_flash_attn_func.hd_pair = int(HD_PAIR)
     return launch_flash_attn_func

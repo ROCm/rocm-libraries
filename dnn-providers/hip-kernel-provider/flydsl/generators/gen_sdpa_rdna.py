@@ -302,6 +302,7 @@ def _build_one(
         bias_query_dtype=bool(knobs["bias_q"]),
         generic_head_dim=generic,
         hd_pair=bool(knobs["hd_pair"]),
+        head_dim_v=None if generic else knobs["head_dim_v"],
     )
     if launch.dv_split != knobs["dv_split"]:
         raise GeneratorError(

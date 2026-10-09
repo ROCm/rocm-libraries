@@ -50,6 +50,10 @@
     {
       "name": "bias_q",
       "type": "int"
+    },
+    {
+      "name": "head_dim_v",
+      "type": "int"
     }
   ]
 }

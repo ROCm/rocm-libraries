@@ -96,7 +96,7 @@ GENERIC_N = 0
 
 # Manifest knobs carried as null when not baked in. Only these may take the
 # `GENERIC_N` sentinel; a null anywhere else is a generator bug, not a tier.
-SHAPE_KNOBS = {"N", "head_dim"}
+SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 
 # Fields the graph fixes rather than the tuner choosing. They belong in the
 # metadata schema -- the matcher needs every one of them to pick a variant --
@@ -104,14 +104,15 @@ SHAPE_KNOBS = {"N", "head_dim"}
 # Offering the tuner a dtype or a row length it cannot legally change would
 # have it search a space where all but one point fails to match.
 #
-# Per op: `N` is RMSNorm's row width; `head_dim` and `causal` are what an SDPA
-# graph asks for, and on CDNA so is the kernel family, which the target arch
+# Per op: `N` is RMSNorm's row width; `head_dim`, `head_dim_v` and `causal` are what
+# an SDPA graph asks for, and on CDNA so is the kernel family, which the target arch
 # fixes. The remaining knobs -- block_threads, block_m, block_n -- are launch
 # geometry the tuner may legitimately vary.
 GRAPH_DETERMINED_FIELDS = {
     "N",
     "dtype",
     "head_dim",
+    "head_dim_v",
     "causal",
     "merge_symbol",
     "kernel",

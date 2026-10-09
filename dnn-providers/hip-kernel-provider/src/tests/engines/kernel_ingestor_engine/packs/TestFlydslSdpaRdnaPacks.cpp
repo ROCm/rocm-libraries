@@ -75,6 +75,8 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
     // between two objects for one class an accident of descriptor ids.
     std::set<std::tuple<std::string, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>> classes;
     size_t kernels = 0;
+    // (dtype, head_dim, head_dim_v, causal) of every object whose V is narrower (MLA).
+    std::set<std::tuple<std::string, int64_t, int64_t, int64_t>> mla;
     for(const auto& pack : set.packs)
     {
         for(const auto& kernel : pack.kernels)
@@ -101,6 +103,13 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
             ASSERT_NE(headDimMax, nullptr) << kernel.name;
             ASSERT_NE(decode, nullptr) << kernel.name;
             classes.emplace(*dtype, *headDim, *causal, *hasBias, *biasQ, *headDimMax, *decode);
+            const auto* headDimV
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_HEAD_DIM_V_FIELD);
+            ASSERT_NE(headDimV, nullptr) << kernel.name;
+            if(*headDimV != *headDim)
+            {
+                mla.emplace(*dtype, *headDim, *headDimV, *causal);
+            }
             ++kernels;
 
             // Only ever kpack: pre-built flyDSL code objects with no source to fall back to.
@@ -112,6 +121,15 @@ TEST(TestFlydslSdpaRdnaPacks, ShipsEverySpecializedAndGenericVariantOnce)
     }
 
     EXPECT_EQ(kernels, classes.size()) << "two objects claim one class";
+    // Multi-head latent attention, un-absorbed: Q/K 192 and V 128, both causal variants.
+    EXPECT_EQ(mla.size(), 4U);
+    for(const char* dtype : {"bf16", "f16"})
+    {
+        for(const int64_t causal : {0, 1})
+        {
+            EXPECT_EQ(mla.count({dtype, 192, 128, causal}), 1U) << dtype << " causal=" << causal;
+        }
+    }
     for(const char* dtype : {"bf16", "f16"})
     {
         for(const int64_t headDim : {64, 96, 128, 256})

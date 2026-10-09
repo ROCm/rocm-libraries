@@ -8,7 +8,7 @@ SPDX-License-Identifier:  MIT
 Two packs, built once for each of two LLVM generic targets -- `gfx11-generic`
 (RDNA3 / RDNA3.5: gfx1100–gfx1103, gfx1150–gfx1153) and `gfx12-generic` (RDNA4:
 gfx1200, gfx1201) -- and shipped to every member: **RMSNorm forward** (12 kernel
-objects per family, §1–§4) and **SDPA forward** (128 per family, §5). A third,
+objects per family, §1–§4) and **SDPA forward** (132 per family, §5). A third,
 **SDPA forward on CDNA** (§7), is a separate engine built per arch for gfx950 and
 gfx942 from FlyDSL's own CDNA kernels; it is a first, deliberately narrow object
 set that proves the path end to end. Every graph a pack accepts is
@@ -309,7 +309,7 @@ One SDPA-forward node, and:
 | Q, K, V, O present, rank 4, device operands, **not ragged** | The kernel reads each through a pointer as a dense batch; a ragged (THD) operand would be read as one. |
 | One dtype for all four, `BFLOAT16` or `HALF` | One element type throughout; no fp32 WMMA operand form exists. |
 | Head-dim stride 1 on all four; other strides positive | Each lane reads a row's head-dim values as one contiguous vector. Every other stride is a kernel argument, so BSHD, BHSD and packed-QKV views are all served. |
-| K and V share every extent; O has Q's; V's head dim equals Q/K's | The kernel has one `head_dim` and does not broadcast. |
+| K and V share batch and sequence; K has Q's head dim; O is Q's shape with V's head dim; V's head dim equals Q/K's, or is 128 with Q/K 192 (MLA) | No broadcast. The MLA objects bake both head dims (kernel modification 20); every other object has one. |
 | `Hq % Hk == 0` and `Hq % Hv == 0`; K and V may differ in head count | The K head and the V head are each the query head divided by its own group size. |
 | Any `left_bound`/`right_bound` ≥ −1, either alignment, or the deprecated causal booleans (not both) | The kernel applies the reference's two-sided rule (`CpuFpReferenceSdpa` `isMasked`) directly. |
 | Scale: `attn_scale_value` (> 0), a pass-by-value scalar tensor, or absent | Absent is `1/√head_dim`, the reference's default. The running max is over unscaled scores, which orders them correctly only for a positive scale. |
@@ -339,6 +339,7 @@ queries than keys — gets O = 0 and LSE = −inf, as the reference defines it.
 | 11 | sliding window (`left_bound`) | **served** (and right-side bands) |
 | 12 | varlen / THD | missing (declined) |
 | 13 | decode (`Sq == 1`) | **served by a decode path** (ATT-13): GQA-packed rows and split-KV, for `(Hq / Hk) × Sq ≤ 128` (MQA, speculative steps) at `head_dim` 64/96/128/256 and every other multiple of 8 up to 256 |
+| — | `Dv ≠ Dqk` (MLA) | **served** for un-absorbed prefill, Q/K 192 and V 128, every mask, LSE, no bias; not on the decode objects |
 | 14 | additive bias | **served**: f32 or the query's dtype, broadcast over any of B, H, Sq, Skv; with every mask, the LSE output and every specialized head dim, on the prefill and the decode objects |
 
 ### 5.4 What is still missing, and what closing it takes
@@ -351,7 +352,7 @@ at `check_support()`, never at `execute()`.
 | **Padding mask** (Tier 1) | medium | Two per-batch length pointers read once per workgroup. The diagonal offset is already computed in-kernel from the lengths for exactly this. hipDNN's CPU reference does not implement padding yet, so its semantics must be defined there first. |
 | **Varlen / THD** (Tier 1) | medium, after padding | Ragged offsets replace the batch stride; the grid stays over the longest sequence and tiles past a sequence's end exit early. |
 | Bias on a generic head_dim | small | A `has_bias` variant of the eight generic objects (+8). |
-| `Dv ≠ Dqk` (MLA) | medium–large | A second head dim for V's LDS tile, the O accumulators and the store. |
+| `Dv ≠ Dqk` beyond 192/128 (MLA) | small per pair; large for absorbed 576/512 | 192/128 prefill ships (modification 20). Other pairs are a row each. Absorbed MLA (Q/K 576, V 512, one KV head) needs head dims past 256 and the decode path. |
 | fp32 I/O, FP8, dropout, paged KV, block masks, sinks, ALiBi, softcap | out of scope | As hipDNN's requirements state; ALiBi and softcap have no reference semantics. |
 | **Backward** | out of scope here | Inference-only, as for hipDNN's Tier 0/1. LSE is emitted so a backward can be added without an ABI break. |
 | **Other architectures** | see below | The objects are `gfx11-generic` and `gfx12-generic` builds, so every RDNA3 / RDNA3.5 / RDNA4 part is served. |
@@ -375,7 +376,7 @@ objects.
 
 | Claim | Checked by |
 |---|---|
-| The 128 objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — 128/128 byte-identical |
+| The 132 objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — 132/132 byte-identical |
 | Each decode object carries its merge kernel, with both argument layouts as declared | `gen_sdpa_rdna.py`, before the object is written; the 38-slot main layout by `TestFlydslSdpaRdnaPacks` |
 | Each object has the declared 36-argument layout and spills no registers | `gen_sdpa_rdna.py`, before the object is written |
 | The vendored kernel matches AITER but for its recorded modifications | `tools/diff_upstream.py --aiter` ([REGEN.md](REGEN.md) §5) |
@@ -450,10 +451,11 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA decode, additive f32 bias | one bias object beside each of the 16 above (`has_bias`) | 16 | shipped, `gfx11-generic`; the 16 plain decode objects compile to identical code with the bias arguments appended, the 40 prefill objects are unchanged |
 | SDPA decode, generic head_dim | dtype (2) × causal (2) × largest head {96, 256}; head_dim a runtime argument (appended to both kernels), K/V columns past it never fetched; no bias | 8 | shipped, `gfx11-generic`; the 32 decode objects above compile to identical code with the head_dim argument appended, the prefill objects are unchanged |
 | SDPA forward and decode, bias in the query's dtype | one object beside each of the 32 f32-bias objects above (`bias_q`), the bias read as bf16/f16 and widened to f32 (kernel modification 19) | 32 | shipped, `gfx11-generic`; the 108 above rebuilt byte-identical |
-| **Total, gfx11-generic** | | **140** | |
+| SDPA forward, MLA (V narrower) | dtype (2) × causal (2); Q/K 192, V 128 (`head_dim_v`, kernel modification 20); the 192 schedule (head-dim pairs); no bias | 4 | shipped, `gfx11-generic`; the 140 above rebuilt byte-identical |
+| **Total, gfx11-generic** | | **144** | |
 | SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64, non-causal 128 without a bias and the generic tier up to 64, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 66 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
-| **gfx12-generic** | the same table, built from the same sources for RDNA4 | **140** | shipped; GPU suites pass on gfx1201 |
-| **Total, both families** | | **280** | |
+| **gfx12-generic** | the same table, built from the same sources for RDNA4 | **144** | shipped; GPU suites pass on gfx1201 |
+| **Total, both families** | | **288** | |
 | SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias` | 30 on gfx950, 12 on gfx942 | shipped; GPU suites pass on both |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime

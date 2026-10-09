@@ -134,9 +134,9 @@ for op in rmsnorm sdpa_rdna; do
 done
 ```
 
-Expected, and the state of the tree as committed: **140/140 byte-identical** (12
-RMSNorm, 128 SDPA), all four diffs empty. Repeat with `gfx12-generic` in place of
-`gfx11-generic` throughout: **140/140** there too.
+Expected, and the state of the tree as committed: **144/144 byte-identical** (12
+RMSNorm, 132 SDPA), all four diffs empty. Repeat with `gfx12-generic` in place of
+`gfx11-generic` throughout: **144/144** there too.
 
 The CDNA SDPA op is built per arch rather than per family. The same three steps,
 with `sdpa_cdna` as the only op and `gfx950`, then `gfx942`, as the target:

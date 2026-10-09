@@ -94,7 +94,8 @@ KernelDefinition makeFlydslSdpaRdnaKernel(const std::string& dtype,
                                           std::optional<int64_t> headDimMax = std::nullopt,
                                           int64_t decode = 0,
                                           int64_t hdPair = 0,
-                                          int64_t biasQ = 0)
+                                          int64_t biasQ = 0,
+                                          std::optional<int64_t> headDimV = std::nullopt)
 {
     KernelDefinition kernel;
     kernel.name = "sdpa_" + dtype + "_d" + std::to_string(headDim);
@@ -110,7 +111,8 @@ KernelDefinition makeFlydslSdpaRdnaKernel(const std::string& dtype,
                        {FLYDSL_SDPA_RDNA_MERGE_SYMBOL_FIELD,
                         std::string(decode != 0 ? "flash_attn_decode_merge_rdna_kernel_1" : "")},
                        {FLYDSL_SDPA_RDNA_HD_PAIR_FIELD, hdPair},
-                       {FLYDSL_SDPA_RDNA_BIAS_Q_FIELD, biasQ}};
+                       {FLYDSL_SDPA_RDNA_BIAS_Q_FIELD, biasQ},
+                       {FLYDSL_SDPA_RDNA_HEAD_DIM_V_FIELD, headDimV.value_or(headDim)}};
     kernel.priority = 100;
     return kernel;
 }
@@ -159,6 +161,11 @@ INSTANTIATE_TEST_SUITE_P(
         AcceptedCase{"HeadDim256", accepted([](SdpaGraphSpec& s) { s.headDim = 256; })},
         // Served by the generic tier, which reads head_dim at runtime.
         AcceptedCase{"HeadDim80", accepted([](SdpaGraphSpec& s) { s.headDim = 80; })},
+        // Multi-head latent attention, un-absorbed: V narrower than Q and K.
+        AcceptedCase{"ValueHeadDimNarrower", accepted([](SdpaGraphSpec& s) {
+                         s.headDim = 192;
+                         s.valueHeadDim = 128;
+                     })},
         // K and V may have different head counts, each dividing Q's.
         AcceptedCase{"ValueHeadsDifferFromKeyHeads", accepted([](SdpaGraphSpec& s) {
                          s.heads = 8;
@@ -256,9 +263,8 @@ INSTANTIATE_TEST_SUITE_P(
         // Each lane reads a row's head-dim values as one contiguous vector.
         AcceptedCase{"StridedHeadDim",
                      accepted([](SdpaGraphSpec& s) { s.queryHeadDimStride = 2; })},
-        // One head_dim for Q, K and V.
-        AcceptedCase{"ValueHeadDimDiffers",
-                     accepted([](SdpaGraphSpec& s) { s.valueHeadDim = 128; })},
+        // V's head dim may be narrower than Q/K's (MLA), never wider.
+        AcceptedCase{"ValueHeadDimWider", accepted([](SdpaGraphSpec& s) { s.valueHeadDim = 128; })},
         // The kv head is the query head divided by the group size.
         AcceptedCase{"HeadsNotAMultipleOfKvHeads", accepted([](SdpaGraphSpec& s) {
                          s.heads = 6;
@@ -561,6 +567,29 @@ TEST(TestFlydslSdpaRdnaKernelMatch, ASpecializedObjectServesOnlyItsOwnHead)
                                bindingsFor(spec)));
 }
 
+TEST(TestFlydslSdpaRdnaKernelMatch, AnMlaObjectServesOnlyItsHeadDimPair)
+{
+    SdpaGraphSpec mla;
+    mla.headDim = 192;
+    mla.valueHeadDim = 128;
+    const GraphFixture narrowV(buildFlydslSdpaRdnaGraph(mla));
+    const auto narrowBound = bindingsFor(mla);
+    SdpaGraphSpec square;
+    square.headDim = 192;
+    const GraphFixture sameV(buildFlydslSdpaRdnaGraph(square));
+    const auto squareBound = bindingsFor(square);
+
+    const auto mlaKernel
+        = makeFlydslSdpaRdnaKernel("bf16", 192, 0, 64, 32, 1, 0, 192, 0, 1, 0, int64_t{128});
+    const auto generic
+        = makeFlydslSdpaRdnaKernel("bf16", 0, 0, 64, 32, 1, 0, int64_t{224}, 0, 1, 0, int64_t{0});
+    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA, narrowV.context(), mlaKernel, narrowBound));
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, sameV.context(), mlaKernel, squareBound));
+    // A generic object's V is its runtime head_dim, so it serves only the square graph.
+    EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_RDNA, narrowV.context(), generic, narrowBound));
+    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA, sameV.context(), generic, squareBound));
+}
+
 TEST(TestFlydslSdpaRdnaKernelMatch, ADecodeObjectServesUpToItsRowLimit)
 {
     const auto decode = makeFlydslSdpaRdnaKernel("bf16", 128, 1, 16, 32, 1, 0, 128, 1);
@@ -750,7 +779,8 @@ std::optional<KernelDefinition> findStagedKernel(const std::string& dtype,
                                                  int64_t causal,
                                                  int64_t hasBias,
                                                  int64_t decode = 0,
-                                                 int64_t biasQ = 0)
+                                                 int64_t biasQ = 0,
+                                                 std::optional<int64_t> headDimV = std::nullopt)
 {
     // A build for CDNA targets only stages no RDNA set at all.
     const auto* staged = findLoadedSet(FLYDSL_SDPA_RDNA.engineName);
@@ -787,10 +817,14 @@ std::optional<KernelDefinition> findStagedKernel(const std::string& dtype,
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_DECODE_FIELD);
             const auto* inQueryType
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_BIAS_Q_FIELD);
+            const auto* dimV
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SDPA_RDNA_HEAD_DIM_V_FIELD);
             if(name == nullptr || dim == nullptr || isCausal == nullptr || bias == nullptr
                || dimMax == nullptr || isDecode == nullptr || inQueryType == nullptr
-               || *name != dtype || *isCausal != causal || *bias != hasBias || *isDecode != decode
-               || *inQueryType != biasQ)
+               || dimV == nullptr || *name != dtype || *isCausal != causal || *bias != hasBias
+               || *isDecode != decode || *inQueryType != biasQ
+               || (*dimV == 0 ? headDimV.value_or(headDim) != headDim
+                              : *dimV != headDimV.value_or(headDim)))
             {
                 continue;
             }
@@ -937,7 +971,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                            causal ? 1 : 0,
                            spec.withBias ? 1 : 0,
                            decode ? 1 : 0,
-                           spec.withBias && spec.biasDataType != DataType::FLOAT ? 1 : 0);
+                           spec.withBias && spec.biasDataType != DataType::FLOAT ? 1 : 0,
+                           spec.valueHeadDim);
     if(!kernel.has_value())
     {
         GTEST_SKIP() << "nothing packed for dtype=" << dtype << " head_dim=" << spec.headDim
@@ -954,6 +989,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     ASSERT_NE(prepared, nullptr);
 
     const int64_t d = spec.headDim;
+    // V's and O's head dim: Q/K's, or narrower (MLA).
+    const int64_t dv = spec.valueHeadDim.value_or(d);
     const int64_t valueHeads = spec.valueHeads.value_or(spec.kvHeads);
     // Packed: one [B, S, 3, H, D] buffer, read as a (B, 3H, S, D) tensor whose head ranges
     // [0, H), [H, 2H) and [2H, 3H) are Q, K and V.
@@ -978,8 +1015,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                         sdpaStrides(spec.layout, spec.kvHeads, spec.seqLenKv, d),
                         2U,
                         true);
-        vTensor.emplace(std::vector<int64_t>{spec.batch, valueHeads, spec.seqLenKv, d},
-                        sdpaStrides(spec.layout, valueHeads, spec.seqLenKv, d),
+        vTensor.emplace(std::vector<int64_t>{spec.batch, valueHeads, spec.seqLenKv, dv},
+                        sdpaStrides(spec.layout, valueHeads, spec.seqLenKv, dv),
                         3U,
                         true);
     }
@@ -998,8 +1035,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                                 : kTensor->device();
     void* vPtr = spec.packedQkv ? static_cast<void*>(static_cast<char*>(qkv->device()) + 2 * third)
                                 : vTensor->device();
-    DeviceTensor<T> o({spec.batch, spec.heads, spec.seqLenQ, d},
-                      sdpaStrides(spec.layout, spec.heads, spec.seqLenQ, d),
+    DeviceTensor<T> o({spec.batch, spec.heads, spec.seqLenQ, dv},
+                      sdpaStrides(spec.layout, spec.heads, spec.seqLenQ, dv),
                       4U,
                       false);
 
@@ -1134,7 +1171,7 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                                    + ", expected " + std::to_string(expectedLse);
                     }
                 }
-                for(int64_t e = 0; e < d; ++e)
+                for(int64_t e = 0; e < dv; ++e)
                 {
                     double expected = 0.0;
                     for(int64_t j = 0; j < spec.seqLenKv; ++j)
@@ -1289,6 +1326,38 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, AppliesAWideBandWithMoreQueriesThanKeys)
     spec.seqLenQ = 300;
     spec.seqLenKv = 64;
     spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, ServesAValueHeadDimNarrowerThanTheQueryOne)
+{
+    SKIP_IF_NO_DEVICES();
+    // Multi-head latent attention, un-absorbed: Q and K 192 wide, V and O 128.
+    SdpaGraphSpec spec;
+    spec.headDim = 192;
+    spec.valueHeadDim = 128;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.heads = 4;
+    spec.kvHeads = 4;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
+
+    // Non-causal cross-attention with GQA, the last tile partial, in f16.
+    spec.dataType = DataType::HALF;
+    spec.mask = SdpaMask::NONE;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 150;
+    spec.seqLenKv = 333;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
+
+    // Bottom-right causal over a longer cache, BHSD.
+    spec.dataType = DataType::BFLOAT16;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.layout = SdpaLayout::BHSD;
+    spec.seqLenQ = 64;
+    spec.seqLenKv = 257;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
 }
 

@@ -33,7 +33,7 @@ way to check it, or it is just bytes someone once vouched for.
 
 ## What ships
 
-For RDNA, two ops, 140 kernel objects per family, built once for each of two
+For RDNA, two ops, 144 kernel objects per family, built once for each of two
 LLVM generic targets and shipped to every part each covers:
 
 - **`gfx11-generic`** -- RDNA3 / RDNA3.5: gfx1100, gfx1101, gfx1102, gfx1103,
@@ -56,11 +56,11 @@ phase, bias, other dtypes, non-packed operands — are enumerated in
 [COVERAGE.md §3](COVERAGE.md), each with the reason the shipped objects cannot
 compute it.
 
-**SDPA forward** (`hipkernel:flydsl_sdpa_rdna`), 128 objects: bf16 and f16 ×
+**SDPA forward** (`hipkernel:flydsl_sdpa_rdna`), 132 objects: bf16 and f16 ×
 `head_dim` 64, 96, 128 and 256 × causal on and off × with and without an
 additive bias (`attn_mask`, f32 or the query's dtype, broadcast over any axis), plus a generic tier
 that serves every other `head_dim` that is a multiple of 8 up to 256, and a
-decode path (split-KV, the GQA group packed into one tile, with and without a bias) for decode steps. Batch, both sequence lengths,
+decode path (split-KV, the GQA group packed into one tile, with and without a bias) for decode steps, and multi-head latent attention's un-absorbed prefill (Q/K 192, V 128). Batch, both sequence lengths,
 head counts (MHA, GQA, MQA), every stride, the scale, the mask bounds (causal at
 either corner, right-side bands, sliding windows) and the LSE output are runtime
 arguments, so each object serves every shape and layout of its class. Inference
@@ -243,7 +243,7 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 140/140 per RDNA family, 40/40 gfx950, 42/42 gfx942
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 144/144 per RDNA family, 40/40 gfx950, 42/42 gfx942
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (hsaco UKDs)

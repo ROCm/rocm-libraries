@@ -97,6 +97,7 @@ _ABBREV = {
     "setprio": "prio",
     "bias_q": "biasq",
     "kv_gpfetch": "gpf",
+    "head_dim_v": "vd",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -113,6 +114,7 @@ _NAME_OMITTED_WHEN = {
     "setprio": lambda knobs: knobs["setprio"] == 1,
     "bias_q": lambda knobs: knobs["bias_q"] == 0,
     "kv_gpfetch": lambda knobs: knobs["kv_gpfetch"] == 1,
+    "head_dim_v": lambda knobs: knobs["head_dim_v"] == knobs["head_dim"],
     # A pick rule, not a build choice: two objects never differ in it alone.
     "prefer_feature": lambda knobs: True,
     "prefer_min": lambda knobs: True,
@@ -301,6 +303,12 @@ SDPA_HAS_BIAS = (0, 1)
 # masks in. A bias class ships both; the dtype is a load width, so baked.
 SDPA_BIAS_Q = (0, 1)
 
+# A V head_dim of its own (kernel modification 20): multi-head latent attention
+# (DeepSeek-V2/V3, Kimi K2, GLM-5) runs its prefill un-absorbed, with Q and K 192
+# wide (128 + a 64-wide rotary part) and V 128. One baked pair, both causal
+# variants, no bias; its schedule is the QK width's.
+SDPA_MLA_HEAD_DIMS = ((192, 128),)
+
 
 def sdpa_instances() -> list[Instance]:
     """The SDPA-forward instance table: (dtype, head_dim, causal, has_bias)."""
@@ -333,6 +341,30 @@ def sdpa_instances() -> list[Instance]:
                                 },
                             )
                         )
+        for head_dim, head_dim_v in SDPA_MLA_HEAD_DIMS:
+            for causal in SDPA_CAUSAL:
+                block_m, dv_split, hd_pair = sdpa_prefill_schedule(head_dim, causal, 0)
+                instances.append(
+                    Instance(
+                        op="sdpa_rdna",
+                        dtype=dtype,
+                        priority=PRIORITY_SPECIALIZED,
+                        knobs={
+                            "head_dim": head_dim,
+                            "causal": causal,
+                            "block_m": block_m,
+                            "block_n": SDPA_BLOCK_N,
+                            "dv_split": dv_split,
+                            "has_bias": 0,
+                            "head_dim_max": head_dim,
+                            "decode": 0,
+                            "merge_symbol": "",
+                            "hd_pair": hd_pair,
+                            "bias_q": 0,
+                            "head_dim_v": head_dim_v,
+                        },
+                    )
+                )
         # Generic head_dim, without a bias: a bias on a head no specialized
         # object serves declines.
         for head_dim_max, schedule in SDPA_GENERIC_HEAD_DIM_MAX.items():
@@ -404,6 +436,10 @@ def sdpa_instances() -> list[Instance]:
                         },
                     )
                 )
+    # Every other object's V is as wide as its Q and K (a generic one's too: both
+    # are the runtime head_dim).
+    for instance in instances:
+        instance.knobs.setdefault("head_dim_v", instance.knobs["head_dim"])
     _assert_unique(instances)
     return instances
 

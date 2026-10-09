@@ -94,6 +94,9 @@ constexpr std::string_view BIAS_Q_FIELD = "bias_q";
 /// The largest head_dim the object serves. Equal to head_dim for a specialized object; for
 /// a generic one (head_dim 0, read at runtime) it bounds the heads it takes.
 constexpr std::string_view HEAD_DIM_MAX_FIELD = "head_dim_max";
+/// V's (and O's) head dim. Equal to head_dim except on the MLA objects, whose V is
+/// narrower than Q and K; 0 on a generic object, whose V is its runtime head_dim too.
+constexpr std::string_view HEAD_DIM_V_FIELD = "head_dim_v";
 
 /// 1 for the decode family's objects (flash_attn_decode_rdna.py), 0 for the prefill ones.
 constexpr std::string_view DECODE_FIELD = "decode";
@@ -473,6 +476,8 @@ struct SdpaProblem
     int64_t seqLenQ = 0;
     int64_t seqLenKv = 0;
     int64_t headDim = 0;
+    /// V's and O's head dim; Q/K's unless set from V, which may be narrower (MLA).
+    int64_t headDimV = 0;
     data_objects::DataType dataType = data_objects::DataType::UNSET;
 };
 
@@ -484,6 +489,7 @@ SdpaProblem problemFor(const data_objects::TensorAttributes& q,
     problem.numHeads = q.dims()->Get(HEAD_AXIS);
     problem.seqLenQ = q.dims()->Get(SEQ_AXIS);
     problem.headDim = q.dims()->Get(HEAD_DIM_AXIS);
+    problem.headDimV = problem.headDim;
     problem.numKvHeads = k.dims()->Get(HEAD_AXIS);
     problem.numVHeads = problem.numKvHeads;
     problem.seqLenKv = k.dims()->Get(SEQ_AXIS);
@@ -561,13 +567,16 @@ std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext& contex
         return std::nullopt;
     }
 
-    // --- 4. Cross-tensor shape. No broadcasting: K and V share every extent, O is Q's
-    // shape, and V's head dim must equal Q/K's -- the kernel has one head_dim. V's head count
-    // may differ from K's.
+    // --- 4. Cross-tensor shape. No broadcasting: K and V share batch and sequence, K has
+    // Q's head dim, and O is Q's shape with V's head dim. V's head count may differ from K's,
+    // and its head dim may be narrower than Q/K's (MLA); which head-dim pairs run is the
+    // objects' to say.
     const auto numVHeads = v->dims()->Get(HEAD_AXIS);
-    if(!hasDims(*k, problem.batch, problem.numKvHeads, problem.seqLenKv, problem.headDim)
-       || !hasDims(*v, problem.batch, numVHeads, problem.seqLenKv, problem.headDim)
-       || !hasDims(*o, problem.batch, problem.numHeads, problem.seqLenQ, problem.headDim))
+    const auto headDimV = v->dims()->Get(HEAD_DIM_AXIS);
+    if(headDimV <= 0 || headDimV > problem.headDim
+       || !hasDims(*k, problem.batch, problem.numKvHeads, problem.seqLenKv, problem.headDim)
+       || !hasDims(*v, problem.batch, numVHeads, problem.seqLenKv, headDimV)
+       || !hasDims(*o, problem.batch, problem.numHeads, problem.seqLenQ, headDimV))
     {
         return std::nullopt;
     }
@@ -589,7 +598,7 @@ std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext& contex
         return std::nullopt;
     }
     if(!kvSliceFits(*k, problem.seqLenKv, problem.headDim)
-       || !kvSliceFits(*v, problem.seqLenKv, problem.headDim))
+       || !kvSliceFits(*v, problem.seqLenKv, headDimV))
     {
         return std::nullopt;
     }
@@ -980,6 +989,7 @@ bool flydslSdpaRdnaKernelMatches(const MatchContext& context,
     }
     auto problem = problemFor(*q, *k);
     problem.numVHeads = v->dims()->Get(HEAD_AXIS);
+    problem.headDimV = v->dims()->Get(HEAD_DIM_AXIS);
 
     const auto tile = candidateTile(kernel);
     if(!tile.has_value())
@@ -1020,6 +1030,15 @@ bool flydslSdpaRdnaKernelMatches(const MatchContext& context,
               ? problem.headDim % GENERIC_HEAD_DIM_ALIGN == 0 && problem.headDim <= *headDimMax
               : *bakedHeadDim == problem.headDim && *headDimMax == problem.headDim;
     if(!servesHead)
+    {
+        return false;
+    }
+    // V's head dim: an MLA object's own, every other object's equal to Q/K's (a generic
+    // one's too, both being its runtime head_dim).
+    const auto bakedHeadDimV = integerMetadata(kernel, HEAD_DIM_V_FIELD);
+    if(!bakedHeadDimV.has_value()
+       || (*bakedHeadDimV == GENERIC_HEAD_DIM ? problem.headDimV != problem.headDim
+                                              : *bakedHeadDimV != problem.headDimV))
     {
         return false;
     }
