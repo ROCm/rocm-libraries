@@ -121,8 +121,6 @@ namespace hipblaslt_jit
             return "build";
         case Stage::Support:
             return "support";
-        case Stage::Load:
-            return "load";
         case Stage::Lookup:
             return "lookup";
         case Stage::Publish:
