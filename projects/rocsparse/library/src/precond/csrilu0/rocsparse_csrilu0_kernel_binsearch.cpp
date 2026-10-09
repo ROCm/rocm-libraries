@@ -91,7 +91,7 @@ namespace rocsparse
             // Spin loop until dependency has been resolved
             rocsparse::spin_loop<SLEEP>(&done[local_col], __MEMORY_SCOPE_DEVICE);
 
-            // Make sure updated csr_val is visible
+            // Read the results of the dependencies only after their done flags
             rocsparse::acquire_done_rows();
 
             // Load diagonal entry

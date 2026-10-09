@@ -247,8 +247,10 @@ namespace rocsparse
                 T diag_val;
                 if constexpr(rocsparse::has_noncoherent_xcd_l2)
                 {
-                    // Dependent block rows read the diagonal entry as well, so it is exchanged
-                    // with device scope accesses, completed before the other lanes load it
+                    // Dependent block rows read the diagonal entry as well, so it is stored with a
+                    // device scope atomic. Waiting for the store before the lanes of this
+                    // wavefront load it keeps the exchange ordered, as the wavefront scope release
+                    // and acquire do on other architectures.
                     rocsparse::release_done_row_data();
                     diag_val = rocsparse::load_done_row_data(&bsr_val[row_diag]);
                 }

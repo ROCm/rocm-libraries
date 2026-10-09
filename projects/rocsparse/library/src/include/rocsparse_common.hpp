@@ -2819,23 +2819,24 @@ namespace rocsparse
 
 #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
     // Each XCD has its own L2, and the L2s are not coherent with each other. Agent scope acquire
-    // and release fences therefore invalidate and write back the whole L2, and device scope atomics
-    // are resolved beyond the L2. Kernels that hand results from one row to another through done
-    // flags exchange these results with device scope atomic loads and stores instead, which are
-    // coherent across XCDs. This is correct only if every such result is written and read through
-    // the done row helpers below, and it relies on the gfx9 wait counters: stores are counted in
-    // vmcnt (and lgkmcnt for flat stores), so waiting for all counters to reach zero completes
-    // them. Newer architectures count stores separately and must not be added here without
-    // changing the waits.
-    // See the GFX942 memory model in the LLVM AMDGPUUsage documentation.
+    // and release fences therefore invalidate and write back the whole L2. Kernels that hand
+    // results from one row to another through done flags exchange these results with device scope
+    // atomic loads and stores (sc1) instead, which are coherent across the XCD L2s. This is
+    // correct only if every such result is written and read through the done row helpers below,
+    // and it relies on the gfx9 wait counters: stores are counted in vmcnt (and lgkmcnt for flat
+    // stores), so waiting for all counters to reach zero completes them. Newer architectures count
+    // stores separately and must not be added here without changing the waits. See the GFX942
+    // memory model in the LLVM AMDGPUUsage documentation.
     static constexpr bool has_noncoherent_xcd_l2 = true;
 #else
     static constexpr bool has_noncoherent_xcd_l2 = false;
 #endif
 
-    // Waits until all stores of the calling wavefront have completed. s_waitcnt is not a memory
-    // operation for the compiler, so the workgroup release fence keeps the preceding stores before
-    // it. The fence itself does not touch the caches.
+    // Waits until all stores of the calling wavefront have completed. Only valid where
+    // has_noncoherent_xcd_l2 is true, because s_waitcnt 0 covers the stores only with the gfx9 wait
+    // counters. The builtin has side effects, which the compiler treats as reading and writing all
+    // memory, so memory operations stay on their side of it. The workgroup release fence makes
+    // this ordering explicit and emits no cache maintenance.
     __device__ __forceinline__ void wait_store_completion()
     {
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
@@ -2845,7 +2846,8 @@ namespace rocsparse
     // Orders the reads of the results of the rows the caller has waited for with spin_loop after
     // the done flag loads. Results have to be read with load_done_row_data. With non-coherent XCD
     // L2s the results are read with device scope atomics, so only the compiler has to keep them
-    // after the flag loads; a workgroup scope fence does that without touching the caches.
+    // after the flag loads; a workgroup scope fence does that and emits no cache maintenance
+    // (outside threadgroup split mode, which rocSPARSE does not use).
     __device__ __forceinline__ void acquire_done_rows()
     {
         if constexpr(has_noncoherent_xcd_l2)

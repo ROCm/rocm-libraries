@@ -95,8 +95,8 @@ namespace rocsparse
                 rocsparse::spin_loop<SLEEP>(&done_array[local_col + id], __MEMORY_SCOPE_DEVICE);
             }
 
-            // Make the results of the dependency visible. With non-coherent XCD L2s they are read with
-            // device scope atomics instead
+            // Make the results of the dependencies visible. With non-coherent XCD L2s they are
+            // read with device scope atomics instead.
             if constexpr(!rocsparse::has_noncoherent_xcd_l2)
             {
                 __threadfence();
@@ -180,6 +180,8 @@ namespace rocsparse
 
         if(row < mb && threadIdx.x == 0)
         {
+            // The stores of all wavefronts completed before the barrier, so a relaxed store
+            // suffices; set_done_flag only covers the calling wavefront.
             // Write "row is done" flag
             rocsparse::atomic_store(
                 &done_array[row + id], 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
@@ -258,8 +260,8 @@ namespace rocsparse
                 rocsparse::spin_loop<SLEEP>(&done_array[local_col + id], __MEMORY_SCOPE_DEVICE);
             }
 
-            // Make the results of the dependency visible. With non-coherent XCD L2s they are read with
-            // device scope atomics instead
+            // Make the results of the dependencies visible. With non-coherent XCD L2s they are
+            // read with device scope atomics instead.
             if constexpr(!rocsparse::has_noncoherent_xcd_l2)
             {
                 __threadfence();
@@ -343,6 +345,8 @@ namespace rocsparse
 
         if(row < mb && threadIdx.x == 0)
         {
+            // The stores of all wavefronts completed before the barrier, so a relaxed store
+            // suffices; set_done_flag only covers the calling wavefront.
             // Write "row is done" flag
             rocsparse::atomic_store(
                 &done_array[row + id], 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);

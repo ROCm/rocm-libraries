@@ -231,6 +231,8 @@ namespace rocsparse
 
         if(hipThreadIdx_x == 0)
         {
+            // The stores of all wavefronts completed before the barrier, so a relaxed store
+            // suffices; set_done_flag only covers the calling wavefront.
             // Write the "row is done" flag
             rocsparse::atomic_store(
                 &done_array[row + id], 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);

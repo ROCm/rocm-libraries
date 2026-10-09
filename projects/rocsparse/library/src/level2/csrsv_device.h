@@ -30,10 +30,9 @@ extern "C" void __builtin_amdgcn_s_sleep(int);
 
 namespace rocsparse
 {
-    // With non-coherent XCD L2s, device scope atomics are resolved beyond the L2, so atomics of
-    // all rows on max_nnz serialize. There, each workgroup takes the maximum row length of its rows
-    // with a shared memory atomic, and the last of its rows to finish publishes it with a single
-    // device scope atomic.
+    // With non-coherent XCD L2s, device scope atomics from all rows on max_nnz serialize across
+    // the XCDs. There, each workgroup takes the maximum row length of its rows with a shared memory
+    // atomic, and the last of its rows to finish publishes it with a single device scope atomic.
     template <typename I>
     __device__ __forceinline__ void
         csrsv_analysis_max_nnz(I* max_nnz, I* block_max_nnz, int* block_rows_left, I row_nnz)
