@@ -199,7 +199,10 @@ namespace rocsparse
                                 sdata2[bk][threadIdx.x], sdata1[threadIdx.y][bk], sum);
                         }
 
-                        // Write back to global row m
+                        // Write back to global row m. Block m can be the diagonal or an upper
+                        // block, which dependent rows read. This plain store is safe only
+                        // because the diagonal and upper blocks are stored again below with
+                        // device scope before the done flag is set.
                         if(threadIdx.x < block_dim && threadIdx.y < block_dim)
                         {
                             // Do not pre-cache row m as we read/write only once
@@ -279,7 +282,8 @@ namespace rocsparse
 
                 __threadfence_block();
 
-                // Write diagonal BSR block back to global memory
+                // Write diagonal BSR block back to global memory. This device scope store also
+                // publishes the earlier plain updates of this block to dependent rows.
                 if(threadIdx.x < block_dim && threadIdx.y < block_dim)
                 {
                     rocsparse::store_done_row_data(
@@ -313,7 +317,8 @@ namespace rocsparse
 
                 __threadfence_block();
 
-                // Write row j back to global memory
+                // Write row j back to global memory. This device scope store also publishes the
+                // earlier plain updates of this block to dependent rows.
                 if(threadIdx.x < block_dim && threadIdx.y < block_dim)
                 {
                     rocsparse::store_done_row_data(
