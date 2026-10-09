@@ -858,13 +858,14 @@ def test_build_from_metadata_no_args_raises():
         _buildCustomKernelFromMetadata("k", full, {"MatrixInstruction": [16, 16, 16, 1]})
 
 
-def test_build_from_metadata_streamk_batched_grid():
+@pytest.mark.parametrize("batched", [False, True])
+def test_build_from_metadata_streamk_grid_excludes_batch(batched):
     ck = _buildCustomKernelFromMetadata(
         "k", _kernel_yaml([_D_ARG]),
         {"MatrixInstruction": [16, 16, 16, 1], "TileProcessingStrategy": "StreamK",
-         "WorkAssignment": "StaticGrid", "ProblemType": {"Batched": True}},
+         "WorkAssignment": "StaticGrid", "ProblemType": {"Batched": batched}},
     )
-    assert ck["grid"][0] == "StreamKWithBatch"
+    assert ck["grid"] == ["StreamKNoBatch", "One", "One"]
 
 
 _SK3_TF32_KERNELS = [
