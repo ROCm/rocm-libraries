@@ -150,7 +150,7 @@ struct MetadataTupleValuesHash
 /// catalog, or record a ranking for the same key -- and the last store wins. Both
 /// stores are equally valid, so the cost is the redundant work, never a wrong answer.
 template <typename THandle>
-class KernelIngestorStateManager
+class KernelIngestorSharedState
 {
 public:
     /// How many (graph, device) catalogs to retain; eviction costs a rematch, never a
@@ -308,13 +308,13 @@ public:
     /// Every kernel that applies to the graph and device @p context names, unordered.
     std::vector<const KernelDefinition*> unsortedDefinitions(const MatchContext& context) const
     {
-        return catalogFor(context).entries;
+        return _matchers;
     }
 
-    /// The unranked catalog and the state matching bound, from one lookup.
-    Catalog unsortedCatalog(const MatchContext& context) const
+    const std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash>&
+        dispatches() const
     {
-        return catalogFor(context);
+        return _dispatches;
     }
 
     /// nullopt when the graph supplies no usable content key (no or unverifiable
@@ -424,14 +424,12 @@ public:
     /// Every kernel that applies to the graph and device @p context names, best first.
     std::vector<const KernelDefinition*> sortedDefinitions(const MatchContext& context) const
     {
-        return sortedCatalog(context).entries;
+        return _packs;
     }
 
-    /// The ordered catalog and the state matching bound, from one lookup.
-    ///
-    /// A benchmarked record covering the whole catalog supplies a measured order and
-    /// `rank()` is never called; otherwise the heuristic orders it.
-    Catalog sortedCatalog(const MatchContext& context) const
+    /// One entry per pack, parallel to packs(): its kernels' context-independent
+    /// definitions, completed once at construction.
+    const std::vector<std::vector<KernelDefinition>>& definitions() const
     {
         // Mirrors catalogFor's own reject guard: cacheKey() below reads graph content
         // and device ordinal, not arch, so without this an unresolved-arch context would
@@ -1571,10 +1569,13 @@ private:
         }
     }
 
-    MetadataSchema _schema;
-    std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
-    std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
-    std::vector<KernelDescriptorPack> _packs;
+    /// Shared, immutable, and declared first: every alias below binds into it.
+    std::shared_ptr<const KernelIngestorSharedState<THandle>> _state;
+    const MetadataSchema& _schema;
+    const std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash>& _matchers;
+    const std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash>&
+        _dispatches;
+    const std::vector<KernelDescriptorPack>& _packs;
     /// One entry per pack, parallel to _packs: its kernels' context-independent
     /// definitions, completed once at construction and never mutated after, so the
     /// pointers every Catalog holds into it stay valid for this manager's lifetime.
