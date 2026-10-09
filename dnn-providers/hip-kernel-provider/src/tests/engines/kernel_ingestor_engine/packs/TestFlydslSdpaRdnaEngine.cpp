@@ -368,6 +368,22 @@ TEST(TestFlydslSdpaRdnaBinding, AWindowBindsItsLeftBoundAndClampsAnOversizedOne)
               spec.seqLenQ + spec.seqLenKv);
 }
 
+TEST(TestFlydslSdpaRdnaBinding, ClampsAnOversizedRightBoundPastBothLengths)
+{
+    // Bottom-right with more queries than keys: the diagonal starts at Skv - Sq, so a
+    // bound clamped to Skv would hide keys the first rows reach.
+    SdpaGraphSpec spec;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 64;
+    spec.rightBound = 250;
+    EXPECT_EQ(boundInt(bindingsFor(spec), FLYDSL_SDPA_RDNA_RIGHT_BOUND_TOKEN), 250);
+
+    spec.rightBound = int64_t{1} << 40;
+    EXPECT_EQ(boundInt(bindingsFor(spec), FLYDSL_SDPA_RDNA_RIGHT_BOUND_TOKEN),
+              spec.seqLenQ + spec.seqLenKv);
+}
+
 TEST(TestFlydslSdpaRdnaBinding, ABandSelectsTheCausalVariantWithItsRightBound)
 {
     SdpaGraphSpec spec;
@@ -1260,6 +1276,20 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, AppliesABandToTheRightOfTheDiagonal)
     spec.seqLenQ = 200;
     spec.seqLenKv = 200;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, AppliesAWideBandWithMoreQueriesThanKeys)
+{
+    SKIP_IF_NO_DEVICES();
+    // Bottom-right, Sq > Skv, a right bound past Skv: the band still reaches back to the
+    // first rows, which a bound cut to Skv would leave keyless.
+    SdpaGraphSpec spec;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.rightBound = 250;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 64;
+    spec.stats = SdpaStats::LSE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(spec, BF16_TOLERANCE);
 }
 
 TEST(TestGpuFlydslSdpaRdnaDispatch, ZeroesRowsNoKeyReaches)

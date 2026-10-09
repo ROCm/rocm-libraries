@@ -605,10 +605,12 @@ std::optional<BoundTokens> flydslSdpaRdnaGraphMatches(const MatchContext& contex
     {
         return std::nullopt;
     }
-    // A bound past the sequence masks nothing more than one at it; clamped so the kernel's
-    // int32 sums stay in range.
+    // A bound past Sq + Skv masks nothing more than one at it; clamped so the kernel's
+    // int32 sums stay in range. Skv alone is not enough for the right bound: at the
+    // bottom-right corner with Sq > Skv the diagonal starts at Skv - Sq < 0, and the first
+    // row reaches every key only once the bound is at least Sq - 1.
     const int64_t causal = mask->right >= 0 ? 1 : 0;
-    const int64_t rightBound = std::min(mask->right, problem.seqLenKv);
+    const int64_t rightBound = std::min(mask->right, problem.seqLenQ + problem.seqLenKv);
     const int64_t leftBound = std::min(mask->left, problem.seqLenQ + problem.seqLenKv);
 
     // --- 7. Every optional feature the kernel does not implement, declined explicitly.
