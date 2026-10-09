@@ -821,14 +821,15 @@ namespace TensileLite
 
         // Whether a library ranked with `model` also ranks its problem type's
         // Equality kernels: as TENSILE_TILEWRIGHT_BANK says, or, when it is
-        // unset, when the model reads kernel attributes, which the Equality
-        // variants of one tile need to be told apart.
+        // unset, when the model was trained on them or reads kernel
+        // attributes, which the Equality variants of one tile need to be told
+        // apart.
         static bool ranksBank(tilewright::Model const& model)
         {
             int const setting = Debug::Instance().tilewrightBank();
             if(setting >= 0)
                 return setting == 1;
-            return !tilewright::attribute_names(model).empty();
+            return tilewright::describe(model).bank || !tilewright::attribute_names(model).empty();
         }
 
         // Attaches the attributes listed in `attributeNames`, or all of them

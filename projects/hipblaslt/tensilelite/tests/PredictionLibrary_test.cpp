@@ -61,6 +61,10 @@
 
 #include "FallbackTestUtils.hpp"
 
+#if defined(TILEWRIGHT_TEST_MODEL_WRITER)
+#include "model_writer.hpp"
+#endif
+
 #if defined(TENSILE_MSGPACK)
 #include <Tensile/msgpack/MessagePack.hpp>
 #include <msgpack.hpp>
@@ -1291,7 +1295,8 @@ TEST(PredictionLibraryTest, TilewrightBankFollowsTheSettingAndTheModel)
         ContractionProblemPredictionLibrary lib;
         loadWithTilewright(dir, shippedGfx950Model(), contestedTable, solutions, lib);
         ASSERT_NE(lib.tilewright_ranker, nullptr);
-        // The shipped models read no kernel attributes.
+        // The shipped models were not trained on the bank and read no kernel
+        // attributes.
         EXPECT_EQ(lib.tilewright_bank != nullptr, bank);
     }
 }
@@ -1451,6 +1456,96 @@ TEST(PredictionLibraryTest, TilewrightBankWithoutKernelsRanksThePredictionPool)
     EXPECT_TRUE(pool.bank.empty());
     EXPECT_EQ(pool.ranker, nullptr);
 }
+
+#if defined(TILEWRIGHT_TEST_MODEL_WRITER)
+namespace
+{
+    // MLREC_v3 serving flag of a model trained on the Prediction kernels and
+    // the bank.
+    constexpr std::uint32_t TrainedOnBank = 0x40;
+
+    // An MLREC_v3 model with `servingFlags` that reads `attributes`. Its one
+    // cell scores every problem, with the launch model of gfx950 libraries.
+    std::filesystem::path writeV3Model(ScratchDir const&                             dir,
+                                       std::uint32_t                                 servingFlags,
+                                       std::vector<tilewright_test::AttrSpec> const& attributes)
+    {
+        tilewright_test::CellSpec cell;
+        cell.label = "Large|Large|LargeK|Bnone";
+
+        tilewright_test::ModelSpec spec;
+        spec.arch             = "gfx950";
+        spec.cells            = {cell};
+        spec                  = tilewright_test::as_v3(spec, attributes);
+        spec.v3_serving_flags = servingFlags;
+        spec.provenance
+            = {{"launch_model", TilewrightLaunch<ContractionSolution>("gfx950", {}).id()}};
+
+        auto const image = tilewright_test::write_model(spec);
+        auto const path  = dir.path() / "v3.tilewright.bin";
+        std::ofstream(path, std::ios::binary)
+            .write(reinterpret_cast<char const*>(image.bytes.data()),
+                   static_cast<std::streamsize>(image.bytes.size()));
+        return path;
+    }
+
+    // Ranks the contested table with a writeV3Model model, with
+    // withTile(21, 128, 128) as the bank, and expects findTopSolutions to
+    // return the bank kernel exactly when `bank` is set: origami ranks only
+    // the table, so only tilewright can return it.
+    void expectBankRanked(std::uint32_t                                 servingFlags,
+                          std::vector<tilewright_test::AttrSpec> const& attributes,
+                          bool                                          bank)
+    {
+        SolutionMap<ContractionSolution> solutions;
+        addContestedKernels(solutions);
+        ScratchDir                          dir("tensilelite_tilewright_bank_v3");
+        ContractionProblemPredictionLibrary lib;
+        loadWithTilewright(
+            dir, writeV3Model(dir, servingFlags, attributes), contestedTable, solutions, lib);
+        ASSERT_NE(lib.tilewright_ranker, nullptr);
+        setBankSources(lib, {withTile(21, 128, 128)});
+
+        auto const device = makeGfx950Device();
+        auto       top    = solutionIndices(
+            lib.findTopSolutions(TensileLite::testing::dummyProblem(), device, 4));
+        std::sort(top.begin(), top.end());
+        EXPECT_EQ(top, (bank ? std::vector<int>{11, 12, 13, 21} : std::vector<int>{11, 12, 13}));
+        ASSERT_EQ(lib.tilewright_bank != nullptr, bank);
+        if(bank)
+            EXPECT_EQ(bankIndices(builtPool(lib, device)), (std::vector<int>{21}));
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightRanksTheBankOfAModelTrainedOnIt)
+{
+    ScopedTilewrightBank unset(nullptr);
+    {
+        SCOPED_TRACE("trained on the bank");
+        expectBankRanked(TrainedOnBank, {}, true);
+    }
+    {
+        SCOPED_TRACE("trained on the Prediction kernels");
+        expectBankRanked(0, {}, false);
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightBankSettingOverridesTheModel)
+{
+    {
+        ScopedTilewrightBank bankOff("0");
+        expectBankRanked(TrainedOnBank, {}, false);
+    }
+    ScopedTilewrightBank bankOn("1");
+    expectBankRanked(0, {}, true);
+}
+
+TEST(PredictionLibraryTest, TilewrightBankFollowsTheAttributesOfAModelNotTrainedOnIt)
+{
+    ScopedTilewrightBank unset(nullptr);
+    expectBankRanked(0, {{"work_group_x", 0}}, true);
+}
+#endif
 #endif
 
 TEST(PredictionLibraryTest, LibraryProblemTypeKeyDropsTheHardwareParts)
