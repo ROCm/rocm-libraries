@@ -8,6 +8,9 @@
 # Tier definitions stay in the test_categories.yaml files listed under `categories_file`, which CI
 # does read; this file points at them rather than repeating them.
 #
+# `covers` names the classes from test_coverage_model.yaml that a suite is meant to reach. It is a
+# claim about intent until coverage is measured; `axis.*` means every class on that axis.
+#
 # Everything under `target` and `disposition` is a proposal for the team to review. A `retire` or
 # `merge_into` needs the owning team's agreement before anyone acts on it. Rationales are
 # qualitative for now; unique-coverage and failure-history evidence will come later.
@@ -136,6 +139,28 @@ suites:
       The suite is sound; what changes is where it runs. Math CI's precheckin is today the only
       pull-request signal on gfx90a and gfx12, so it can retire only once TheRock covers those
       architectures at some cadence. Pruning redundant numerical variants buys back the runtime.
+    covers:
+      - type_combo.*
+      - shape.degenerate
+      - shape.tiny
+      - shape.tile_unaligned
+      - shape.tuned_sizes
+      - shape.large_k
+      - layout.*
+      - batching.*
+      - epilogue.*
+      - scalars.*
+      - values.*
+      - api_path.core_c_api
+      - api_path.ext_api
+      - api_path.ext_setproblem
+      - api_path.all_solutions
+      - api_path.user_args
+      - api_path.tuning_override
+      - api_path.streamk
+      - kernel_source.tensilelite_generated
+      - kernel_source.rocroller
+      - system.single_gpu
     tickets: [AIHPBLAS-5036]
     workstreams: [consolidate, cadence]
     open_questions:
@@ -164,6 +189,7 @@ suites:
     rationale: >-
       TheRock already has multi-GPU runners for gfx94X and gfx950. A run mode of the correctness
       suite, not its own suite, and narrow enough today that its coverage needs widening.
+    covers: [system.multi_gpu, device.gfx950]
     tickets: [AIHPBLAS-4625]
     workstreams: [fill_the_holes]
 
@@ -182,6 +208,7 @@ suites:
       The 2^31, 2^32 and launch-size threshold cases exist and are labeled weekly in the categories
       file, but no lane in this inventory selects the stress tier yet. They are the systematic
       answer to a defect class that returned success with wrong output.
+    covers: [shape.past_2_31, shape.past_2_32, shape.launch_limits, values.exact]
     tickets: [AIHPBLAS-4988]
     workstreams: [fill_the_holes]
 
@@ -204,6 +231,7 @@ suites:
       - {system: therock, cadence: weekly, tier: full, archs: "managed-memory capable hosts"}
     disposition: keep
     rationale: "Runs only before a release today; a weekly run would find a break months sooner."
+    covers: [system.managed_memory]
     tickets: []
     workstreams: [cadence]
 
@@ -292,6 +320,7 @@ suites:
       - {system: therock, cadence: presubmit, tier: quick}
     disposition: new
     rationale: "Several public API breaks were found by users first."
+    covers: [api_path.public_headers]
     tickets: [AIHPBLAS-3579]
     workstreams: [fill_the_holes]
 
@@ -348,6 +377,7 @@ suites:
       Two host-only ASAN lanes on different architectures, neither required. Make one required, and
       run it through the CTest presets so it selects the same cases as every other lane. Whether
       both lanes are needed is a question for unique-coverage data.
+    covers: [system.memory_safety, device.gfx90a, device.gfx942, device.gfx950]
     tickets: [AIHPBLAS-1079]
     workstreams: [cadence]
 
@@ -369,6 +399,7 @@ suites:
       - {system: therock, cadence: nightly}
     disposition: keep
     rationale: "Device-side instrumentation is too slow for presubmit; nightly is the right cadence."
+    covers: [system.memory_safety, device.gfx942, device.gfx950]
     tickets: []
     workstreams: []
 
@@ -382,6 +413,7 @@ suites:
       - {system: therock, cadence: nightly}
     disposition: new
     rationale: "TSAN build options exist but no lane uses them, and there is no UBSAN at all."
+    covers: [system.multi_thread, system.memory_safety]
     tickets: [AIHPBLAS-5035]
     workstreams: [cadence]
 
@@ -403,6 +435,7 @@ suites:
       - {system: therock, cadence: presubmit}
     disposition: review
     rationale: "A device-side race detector that runs without GPU capacity. Its place relative to TSAN needs the owners' view."
+    covers: [kernel_source.tensilelite_generated]
     tickets: [AIHPBLAS-3605]
     workstreams: [inventory]
 
@@ -424,6 +457,7 @@ suites:
       - {system: rocpts, cadence: nightly, archs: "beyond gfx950, where the library ships tuned kernels"}
     disposition: keep
     rationale: "The only performance signal today. Widen its architectures and make it report its own failures."
+    covers: [type_combo.*, shape.tuned_sizes, device.gfx950]
     tickets: [AIHPBLAS-5030]
     workstreams: [fill_the_holes]
 
@@ -437,6 +471,7 @@ suites:
       - {system: therock, cadence: presubmit, gates: false}
     disposition: new
     rationale: "Pull requests are not benchmarked, so a regression cannot be attributed to the change that caused it."
+    covers: [shape.tuned_sizes]
     tickets: [AIHPBLAS-5029]
     workstreams: [fill_the_holes]
 
@@ -461,6 +496,7 @@ suites:
       passes are the only runs of those modes over the matmul suite anywhere in CI, so it moves with
       the rest of Math CI rather than retiring. A coverage floor still means little until the
       library is unit-testable.
+    covers: [api_path.core_c_api, device.gfx950]
     tickets: [AIHPBLAS-5033]
     workstreams: [consolidate]
 
@@ -661,6 +697,13 @@ suites:
       The GEMM-selection suite that genuinely needs hardware. TheRock already runs it as its own
       job, so a unit failure cannot hide it. Shard it, extend it to every supported architecture,
       and retire the Math CI stage with the move.
+    covers:
+      - kernel_source.kernel_parameters
+      - type_combo.*
+      - device.gfx90a
+      - device.gfx942
+      - device.gfx950
+      - device.gfx120X
     tickets: [AIHPBLAS-5040, "#12491"]
     workstreams: [cadence, consolidate]
 
@@ -683,6 +726,7 @@ suites:
       - {system: therock, cadence: weekly, tier: multi_gpu, archs: [gfx950-dcgpu]}
     disposition: migrate
     rationale: "The TensileLite side of the multi-GPU feature; should travel with hipblaslt-client-multi-gpu."
+    covers: [system.multi_gpu, device.gfx950]
     tickets: [AIHPBLAS-3354]
     workstreams: [consolidate]
 
@@ -700,6 +744,7 @@ suites:
       ffm-quick, emu-fast and emu-full are defined but no TheRock job selects them. Emulation could
       be the cheapest way to cover architectures without runners, gfx1250 first, so they deserve a
       decision rather than a silent definition.
+    covers: [kernel_source.kernel_parameters, device.gfx1250]
     tickets: []
     workstreams: [inventory]
 
