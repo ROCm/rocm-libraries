@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <set>
 #include <string>
 #include <system_error>
 #include <tuple>
@@ -932,12 +933,12 @@ namespace
 
 /// One graph and how many instances of each family serve it in each catalog, as
 /// gfx950_conv_fwd_aot_serves in convolution_forward.py counts them over
-/// gfx950_conv_fwd_aot_seed.instances.json and gfx950_conv_fwd_aot.instances.json. The
-/// seed and the direct family are the same in both dtypes; the full catalog's
-/// implicit-GEMM count is per dtype, since the no-scratch rule drops a few instances in
-/// one dtype only. The engines' native matcher is checked against those counts, and
-/// test_make_conv_aot_config.py recomputes this table from the two lists: keep one row
-/// per line.
+/// gfx950_conv_fwd_aot_seed.instances.json and the full catalog's per-dtype lists,
+/// gfx950_conv_fwd_aot_{fp16,bf16}.instances.json. The seed and the direct family are
+/// the same in both dtypes; the full catalog's implicit-GEMM count is stated per dtype,
+/// since each dtype's list is rocKE's sweep for that dtype. The engines' native matcher
+/// is checked against those counts, and test_make_conv_aot_config.py recomputes this
+/// table from the lists: keep one row per line.
 struct AotGraph
 {
     std::string name;
@@ -956,30 +957,30 @@ struct AotGraph
 const std::vector<AotGraph>& aotGraphs()
 {
     static const std::vector<AotGraph> s_graphs{
-        {"Smoke", {}, 0, 12, 0, 17530, 17526},
-        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 12, 0, 17530, 17526},
+        {"Smoke", {}, 0, 12, 0, 78940, 78940},
+        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 12, 0, 78940, 78940},
         // An instance is built against a 3x3 probe, so it is never the pointwise GEMM.
-        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 12, 0, 17530, 17526},
-        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 0, 12, 0, 17530, 17526},
-        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 12, 0, 17530, 17526},
-        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 12, 0, 17530, 17526},
+        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 12, 0, 78940, 78940},
+        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 0, 12, 0, 78940, 78940},
+        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 12, 0, 78940, 78940},
+        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 12, 0, 78940, 78940},
         // Three channels per group: only instances 1 wide along C/groups and K/groups.
-        {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 2885, 2883},
-        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 2, 1, 9, 2885, 2883},
-        {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 2, 1, 9, 2885, 2883},
+        {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 11160, 11160},
+        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 2, 1, 9, 7440, 7440},
+        {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 2, 1, 9, 7440, 7440},
         // 64 groups and more: std only.
-        {"DepthwiseG96", {3, 96, 96, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 1, 1, 6, 2885, 2883},
-        {"DepthwiseG256N1", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 256}, 1, 1, 6, 2885, 2883},
-        {"DepthwiseG64Strided5x5", {2, 64, 64, 17, 17, 5, 5, 2, 2, 2, 2, 1, 1, 64}, 1, 1, 6, 2885, 2883},
-        {"DepthwiseG48Strided5x5", {1, 48, 48, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1, 48}, 1, 1, 9, 2885, 2883},
-        {"DepthwiseG12Strided7x7", {2, 12, 12, 21, 15, 7, 7, 2, 2, 3, 3, 1, 1, 12}, 1, 1, 9, 2885, 2883},
-        {"DepthwiseG40Strided7x7", {3, 40, 40, 16, 30, 7, 7, 2, 2, 3, 3, 1, 1, 40}, 1, 1, 9, 2885, 2883},
+        {"DepthwiseG96", {3, 96, 96, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 1, 1, 6, 7440, 7440},
+        {"DepthwiseG256N1", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 256}, 1, 1, 6, 7440, 7440},
+        {"DepthwiseG64Strided5x5", {2, 64, 64, 17, 17, 5, 5, 2, 2, 2, 2, 1, 1, 64}, 1, 1, 6, 7440, 7440},
+        {"DepthwiseG48Strided5x5", {1, 48, 48, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1, 48}, 1, 1, 9, 7440, 7440},
+        {"DepthwiseG12Strided7x7", {2, 12, 12, 21, 15, 7, 7, 2, 2, 3, 3, 1, 1, 12}, 1, 1, 9, 7440, 7440},
+        {"DepthwiseG40Strided7x7", {3, 40, 40, 16, 30, 7, 7, 2, 2, 3, 3, 1, 1, 40}, 1, 1, 9, 7440, 7440},
         // Outside the direct guard: implicit GEMM alone.
-        {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 0, 1, 0, 2885, 2883},
+        {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 0, 1, 0, 7440, 7440},
         // C = 12 admits load widths up to 4 and K = 20 store widths up to 4.
-        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 7, 0, 14991, 14987},
-        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 12, 0, 17530, 17526},
-        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 12, 0, 17530, 17526},
+        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 7, 0, 43152, 43152},
+        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 12, 0, 78940, 78940},
+        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 12, 0, 78940, 78940},
     };
     return s_graphs;
 }
@@ -1101,7 +1102,7 @@ TEST_P(IntegrationGpuGfx950ConvFwdAotSeed, KernelFamilyKnobSelectsEachFamilysIns
 // pinning each one is out of reach; the seed suite above does that. Each graph here runs
 // (a) an unbenchmarked plan, which also checks the serving count of each family,
 // (b) a fixed sample of serving instances, each pinned: the best few by score, then more
-// drawn by a seeded shuffle of the whole dtype shard, and (c) a benchmarked plan under
+// drawn by a seeded shuffle of the dtype's whole catalog, and (c) a benchmarked plan under
 // HIPDNN_INGESTOR_CANDIDATE_LIMIT.
 
 namespace
@@ -1130,34 +1131,39 @@ std::string servedKernel(const LogRecorderBase& recorder)
     return served;
 }
 
-/// Every kernel of the shipped gfx950 shard for @p dtype, as winner-record entries, read
-/// from the product tree main() loads (HIPDNN_DESCRIPTOR_RUNTIME_DIR). Empty when it is
-/// not there. Read once per dtype: the shard holds every instance of the dtype.
-const std::vector<ingestor::RankedEntry>& shippedShard(DataType dtype)
+/// Every kernel of the shipped gfx950 shards for @p dtype, as winner-record entries, read
+/// from the product tree main() loads (HIPDNN_DESCRIPTOR_RUNTIME_DIR). Empty when they are
+/// not there. Read once per dtype: the shards gfx950_conv_fwd_aot_<dtype>_*.kdp.json
+/// together hold every instance of the dtype, each entry under its own shard's pack.
+const std::vector<ingestor::RankedEntry>& shippedCatalog(DataType dtype)
 {
-    static std::map<DataType, std::vector<ingestor::RankedEntry>> s_shards;
-    auto& entries = s_shards[dtype];
+    static std::map<DataType, std::vector<ingestor::RankedEntry>> s_catalogs;
+    auto& entries = s_catalogs[dtype];
     if(!entries.empty())
     {
         return entries;
     }
     const std::filesystem::path root
         = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
-    const std::string name = std::string("gfx950_conv_fwd_aot_")
-                             + (dtype == DataType::HALF ? "fp16" : "bf16") + ".kdp.json";
+    const std::string prefix
+        = std::string("gfx950_conv_fwd_aot_") + (dtype == DataType::HALF ? "fp16" : "bf16") + "_";
+    const std::string suffix = ".kdp.json";
     std::error_code error;
     if(root.empty() || !std::filesystem::is_directory(root, error))
     {
         return entries;
     }
+    std::set<std::string> read;
     for(const auto& file : std::filesystem::recursive_directory_iterator(root, error))
     {
-        const auto& path = file.path();
-        if(path.filename() != name)
+        const auto name = file.path().filename().string();
+        if(name.size() <= prefix.size() + suffix.size() || name.rfind(prefix, 0) != 0
+           || name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0
+           || !read.insert(name).second)
         {
             continue;
         }
-        std::ifstream stream(path);
+        std::ifstream stream(file.path());
         const auto document = nlohmann::json::parse(stream);
         const auto packId
             = hipdnn_flatbuffers_sdk::utilities::parseUuid(document.at("id").get<std::string>());
@@ -1171,8 +1177,11 @@ const std::vector<ingestor::RankedEntry>& shippedShard(DataType dtype)
                  dispatchId,
                  1.0});
         }
-        break;
     }
+    // Directory order is unspecified; the seeded shuffle below needs a fixed start.
+    std::sort(entries.begin(), entries.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.kernelId < rhs.kernelId;
+    });
     return entries;
 }
 
@@ -1312,14 +1321,25 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, SampledServingInstancesMatchCpuReference)
         pinned.push_back(kernel);
     }
 
-    // A record ordering the whole dtype shard covers every candidate, so it serves the
-    // first instance in its order that serves the graph: in a seeded shuffle, a random
-    // serving instance. Instances already served move to the back.
+    // A record ordering every kernel of the dtype's shards covers every candidate, so it
+    // serves the first instance in its order that serves the graph: in a seeded shuffle,
+    // a random serving instance. Instances already served move to the back.
     _candidateLimit.setValue("");
-    auto shard = shippedShard(variant.dtype);
-    ASSERT_GE(shard.size(), catalog) << "the shipped gfx950 shard for this dtype was not found";
-    ASSERT_EQ(shard.front().packId, top.front().packId);
-    ASSERT_EQ(shard.front().dispatchId, top.front().dispatchId);
+    auto shard = shippedCatalog(variant.dtype);
+    ASSERT_GE(shard.size(), catalog) << "the shipped gfx950 shards for this dtype were not found";
+    for(const auto& entry : top)
+    {
+        // The measured record and the shards agree on each kernel's pack and dispatch.
+        ASSERT_NE(std::find_if(shard.begin(),
+                               shard.end(),
+                               [&](const auto& listed) {
+                                   return listed.kernelId == entry.kernelId
+                                          && listed.packId == entry.packId
+                                          && listed.dispatchId == entry.dispatchId;
+                               }),
+                  shard.end())
+            << ingestor::toString(entry.kernelId);
+    }
     std::mt19937 rng(sampleSeed(variant.name));
     for(size_t i = shard.size() - 1; i > 0; --i)
     {

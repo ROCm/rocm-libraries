@@ -3,6 +3,7 @@
 
 """Tests for tools/enumerate_conv_aot_instances.py (no compile, no GPU)."""
 
+import collections
 import dataclasses
 import itertools
 import json
@@ -23,7 +24,6 @@ import launch_surface  # noqa: E402
 _REPO = launch_surface.find_repo_root(_TOOLS)
 _ROCKE = _REPO / "dnn-providers" / "hip-kernel-provider" / "rocke"
 _CONFIGS = Path(__file__).resolve().parent.parent / "configs"
-_SPILLS = _CONFIGS / "gfx950_conv_fwd_aot.spills.json"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -69,19 +69,17 @@ def _identity(**knobs):
 
 @pytest.fixture(scope="module")
 def synthetic_grid():
-    """The forward grid's knob cross product on one geometry."""
+    """Knob combinations on one geometry, each a valid identity of the forward grid."""
     grid = []
-    for pipeline, epilogue, vab, vc, (unroll, dma) in itertools.product(
+    for pipeline, vab, vc, (unroll, dma) in itertools.product(
         ("mem", "compv3", "compv4"),
-        ("default", "cshuffle"),
         (1, 2, 4, 8),
         (1, 2, 4, 8),
-        ((False, False), (True, False), (False, True)),
+        ((False, False), (True, False)),
     ):
         grid.append(
             _identity(
                 pipeline=pipeline,
-                epilogue=epilogue,
                 vector_size_a=vab,
                 vector_size_b=vab,
                 vector_size_c=vc,
@@ -92,131 +90,72 @@ def synthetic_grid():
     return grid
 
 
-def test_knob_rule_keeps_exactly_the_listed_values(synthetic_grid):
-    kept = [i for i in synthetic_grid if not tool.knob_rule_rejection(i)]
-    # pipeline 3 x width pair 6 (epilogue tied to the store width) x K loop 2
-    assert len(kept) == 3 * 6 * 2
-    for knob, values in tool.KNOB_RULE.items():
-        assert {i[knob] for i in kept} == set(values), knob
-    assert {(i["vector_size_a"], i["vector_size_c"]) for i in kept} == set(
-        tool.VECTOR_SIZES
+@pytest.fixture(scope="module")
+def grid_fp16():
+    """rocKE's valid gfx950 fp16 forward implicit-GEMM grid."""
+    return tool.grid_identities("fp16", min(16, os.cpu_count() or 1))
+
+
+def _knob_class(identity):
+    k_loop = (
+        "async" if identity["async_dma"] else "unroll" if identity["unroll_k"] else ""
     )
-    for identity in kept:
-        assert identity["vector_size_b"] == identity["vector_size_a"]
-        expected = tool.EPILOGUE_BY_VECTOR_SIZE_C[identity["vector_size_c"]]
-        assert identity["epilogue"] == expected
+    return (
+        identity["pipeline"],
+        identity["epilogue"],
+        k_loop,
+        identity["vector_size_a"],
+        identity["vector_size_b"],
+        identity["vector_size_c"],
+        identity["async_chunk_a"],
+        identity["async_chunk_b"],
+    )
 
 
-def test_knob_rule_ties_the_epilogue_to_the_store_width():
-    for store, epilogue in ((1, "default"), (4, "cshuffle")):
-        other = "cshuffle" if epilogue == "default" else "default"
-        load = 1
-        assert (
-            tool.knob_rule_rejection(
-                _identity(
-                    vector_size_a=load,
-                    vector_size_b=load,
-                    vector_size_c=store,
-                    epilogue=epilogue,
-                )
-            )
-            == ""
+def test_the_implicit_catalog_is_rockes_whole_forward_sweep(grid_fp16):
+    """No selection of ours: every valid identity kernel_sweep enumerates, once."""
+    from benchmarks.common import kernel_sweep
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx("gfx950")
+    swept = [
+        job.identity.to_dict()
+        for job in kernel_sweep._direction_jobs(
+            "fwd", "gfx950", "fp16", target, (2,), 64
         )
-        assert tool.knob_rule_rejection(
-            _identity(
-                vector_size_a=load,
-                vector_size_b=load,
-                vector_size_c=store,
-                epilogue=other,
-            )
-        ).startswith("epilogue=")
-
-
-@pytest.mark.parametrize(
-    ("change", "knob"),
-    [
-        ({"async_dma": True}, "async_dma"),
-        ({"vector_size_a": 2, "vector_size_b": 2}, "vector_size_a/c"),
-        ({"vector_size_c": 2}, "vector_size_a/c"),
-        (
-            {"vector_size_a": 8, "vector_size_b": 8, "vector_size_c": 4},
-            "vector_size_a/c",
-        ),
-        ({"vector_size_b": 4}, "vector_size_b"),
-        ({"epilogue": "default"}, "epilogue"),
-    ],
-)
-def test_knob_rule_names_the_rejected_knob(change, knob):
-    assert tool.knob_rule_rejection(_identity()) == ""
-    assert tool.knob_rule_rejection(_identity(**change)).startswith(f"{knob}=")
-
-
-@pytest.mark.parametrize(
-    "change",
-    [
-        {"pipeline": "compv4"},
-        {"unroll_k": True},
-        {"vector_size_a": 2, "vector_size_b": 2, "vector_size_c": 2},
-        {"vector_size_a": 1, "vector_size_b": 1, "vector_size_c": 4},
-        {
-            "vector_size_a": 4,
-            "vector_size_b": 4,
-            "vector_size_c": 1,
-            "epilogue": "default",
-        },
-        {
-            "vector_size_a": 1,
-            "vector_size_b": 1,
-            "vector_size_c": 1,
-            "epilogue": "default",
-        },
-    ],
-)
-def test_knob_rule_keeps(change):
-    assert tool.knob_rule_rejection(_identity(**change)) == ""
-
-
-def test_spill_list_round_trip(tmp_path, synthetic_grid):
-    candidates = [i for i in synthetic_grid if not tool.knob_rule_rejection(i)]
-    hashes = {"fp16": [tool.stable_hash(i) for i in candidates]}
-    spilling = candidates[::5]
-    entries = [
-        tool.spill_entry(i, {"vgpr_spill": 3, "scratch_bytes": 16}) for i in spilling
+        if kernel_sweep._spec_is_valid(job, "gfx950", "fp16")
     ]
-    path = tmp_path / "spills.json"
-    tool.write_spill_list(path, entries, hashes)
-
-    assert tool.read_spill_list(path, hashes) == {tool.stable_hash(i) for i in spilling}
-    document = json.loads(path.read_text())
-    assert document["knob_rule"] == tool.knob_rule_document()
-    assert document["spills"] == entries
-
-
-def test_spill_list_refuses_another_candidate_set(tmp_path, synthetic_grid):
-    hashes = {"fp16": [tool.stable_hash(i) for i in synthetic_grid[:4]]}
-    path = tmp_path / "spills.json"
-    tool.write_spill_list(path, [], hashes)
-    with pytest.raises(SystemExit, match="--recompute-spills"):
-        tool.read_spill_list(path, {"fp16": hashes["fp16"][:3]})
+    hashes = sorted(tool.stable_hash(i) for i in grid_fp16)
+    assert hashes == sorted(tool.stable_hash(i) for i in swept)
+    assert len(set(hashes)) == len(hashes)
+    classes = {_knob_class(i) for i in grid_fp16}
+    assert {c[0] for c in classes} == {"mem", "compv3", "compv4"}
+    assert {c[1] for c in classes} == {"default", "cshuffle"}
+    assert {c[2] for c in classes} == {"", "unroll", "async"}
+    assert {c[5] for c in classes} == {1, 2, 4, 8}
 
 
-def test_r1_reads_scratch_or_spill():
-    assert not tool.spills({"vgpr_spill": 0, "scratch_bytes": 0})
-    assert tool.spills({"vgpr_spill": 0, "scratch_bytes": 4})
-    assert tool.spills({"vgpr_spill": 2, "scratch_bytes": 0})
+def test_every_knob_class_of_the_grid_converts(tmp_path, grid_fp16):
+    """One identity of every pipeline, epilogue, K loop, chunk and width class."""
+    import make_conv_aot_config
+    import yaml
 
-
-def test_committed_spill_list_is_hashes_of_knob_rule_candidates():
-    document = json.loads(_SPILLS.read_text())
-    assert document["knob_rule"] == tool.knob_rule_document()
-    for entry in document["spills"]:
-        assert len(entry["instance_id"]) == 40
-        assert entry["dtype"] in tool.DTYPES
-        assert entry["vgpr_spill"] > 0 or entry["scratch_bytes"] > 0
-        assert entry["pipeline"] in tool.KNOB_RULE["pipeline"]
-        pair = (entry["vector_size_ab"], entry["vector_size_c"])
-        assert pair in tool.VECTOR_SIZES
-        assert entry["epilogue"] == tool.EPILOGUE_BY_VECTOR_SIZE_C[pair[1]]
+    sample = list({_knob_class(i): i for i in grid_fp16}.values())
+    assert tool.validate(sample) == []
+    instances = tmp_path / "instances.json"
+    tool.write_instances(instances, sample)
+    out = tmp_path / "aot.yaml"
+    argv = ["--rocke-root", str(_ROCKE), "--instances", str(instances)]
+    assert make_conv_aot_config.main(argv + ["--output", str(out)]) == 0
+    shapes = [
+        shape
+        for pack in yaml.safe_load(out.read_text())["packs"]
+        for variant in pack["variants"]
+        for shape in variant["shapes"]
+    ]
+    assert sorted(s["instance_id"] for s in shapes) == sorted(
+        tool.stable_hash(i) for i in sample
+    )
 
 
 @pytest.mark.parametrize(
@@ -264,35 +203,6 @@ def test_written_instances_are_one_compact_entry_per_line(tmp_path, synthetic_gr
     ]
 
 
-def test_make_conv_aot_config_accepts_the_written_instances(tmp_path):
-    """Every knob combination the rule keeps converts."""
-    import make_conv_aot_config
-    import yaml
-
-    kept = [
-        _identity(
-            pipeline=p,
-            vector_size_a=ab,
-            vector_size_b=ab,
-            vector_size_c=c,
-            epilogue=tool.EPILOGUE_BY_VECTOR_SIZE_C[c],
-            unroll_k=u,
-        )
-        for p in tool.KNOB_RULE["pipeline"]
-        for ab, c in tool.VECTOR_SIZES
-        for u in tool.KNOB_RULE["unroll_k"]
-    ]
-    instances = tmp_path / "instances.json"
-    tool.write_instances(instances, kept)
-    out = tmp_path / "aot.yaml"
-    argv = ["--rocke-root", str(_ROCKE), "--instances", str(instances)]
-    assert make_conv_aot_config.main(argv + ["--output", str(out)]) == 0
-    shapes = yaml.safe_load(out.read_text())["packs"][0]["variants"][0]["shapes"]
-    assert sorted(s["instance_id"] for s in shapes) == sorted(
-        tool.stable_hash(i) for i in kept
-    )
-
-
 # ---- Direct depthwise identities ----
 
 
@@ -301,22 +211,37 @@ def direct_fp16():
     return tool.direct_identities("fp16", 1)
 
 
-def test_direct_identities_are_every_forward_direct_identity_the_launch_runs(
+def test_direct_identities_are_every_forward_direct_identity_the_converter_accepts(
     direct_fp16,
 ):
     import make_conv_aot_config
+    from benchmarks.common.direct_kernel_sweep import enumerate_direct_jobs
+    from rocke.core.arch import ArchTarget
 
-    packaged, grid_count = direct_fp16
-    algorithms = sorted({i["algorithm"] for i in packaged})
-    assert algorithms == sorted(make_conv_aot_config.DIRECT_ALGORITHMS)
-    # The direct grid holds other forward algorithms, which have no packaged launch.
-    assert grid_count > len(packaged)
+    packaged, refused = direct_fp16
+    forward = enumerate_direct_jobs(
+        arch="gfx950",
+        target=ArchTarget.from_gfx("gfx950"),
+        directions=("fwd",),
+        dtype="fp16",
+    )
+    assert len(packaged) + sum(refused.values()) == len(forward)
     for identity in packaged:
         assert identity["dtype_a"] == "fp16"
         assert identity["direction"] == "direct_fwd"
         spec, why = make_conv_aot_config.instance_spec(identity)
         assert spec is not None and spec.is_direct, why
     assert len({tool.stable_hash(i) for i in packaged}) == len(packaged)
+    # Today the packaged direct launch runs the std and spatial depthwise kernels;
+    # every other forward direct algorithm is refused with the converter's reason.
+    assert sorted({i["algorithm"] for i in packaged}) == sorted(
+        make_conv_aot_config.DIRECT_ALGORITHMS
+    )
+    assert refused and all(
+        algorithm not in make_conv_aot_config.DIRECT_ALGORITHMS
+        and "has no packaged launch" in reason
+        for algorithm, reason in refused
+    )
 
 
 def test_direct_identities_round_trip_through_the_compact_form(direct_fp16):
@@ -327,9 +252,9 @@ def test_direct_identities_round_trip_through_the_compact_form(direct_fp16):
         assert KernelIdentity.from_dict(compact).to_dict() == identity
 
 
-def _fake_main(tmp_path, monkeypatch, implicit, direct, excluded=(), extra=()):
-    """Run main() over a synthetic grid and direct list, with ``excluded`` as the R1
-    exclusion list; returns the written list."""
+def _fake_main(tmp_path, monkeypatch, implicit, direct, refused=()):
+    """Run main() over a synthetic grid and direct list; returns the written lists,
+    by dtype."""
     monkeypatch.setattr(
         tool,
         "grid_identities",
@@ -337,42 +262,42 @@ def _fake_main(tmp_path, monkeypatch, implicit, direct, excluded=(), extra=()):
             dict(i, dtype_a=dtype, dtype_b=dtype, dtype_d=dtype) for i in implicit
         ],
     )
-    monkeypatch.setattr(tool, "read_spill_list", lambda path, candidates: set(excluded))
     monkeypatch.setattr(
         tool,
         "direct_identities",
         lambda dtype, jobs: (
             [dict(i, dtype_a=dtype, dtype_b=dtype, dtype_d=dtype) for i in direct],
-            len(direct),
+            collections.Counter(dict(refused)),
         ),
     )
-    out = tmp_path / "instances.json"
-    argv = ["--rocke-root", str(_ROCKE), "--output", str(out), "--jobs", "1"]
-    assert tool.main(argv + list(extra)) == 0
-    return json.loads(out.read_text())
+    out = tmp_path / "lists"
+    argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", "1"]
+    assert tool.main(argv) == 0
+    return {
+        dtype: json.loads((out / tool.INSTANCE_LIST.format(dtype=dtype)).read_text())
+        for dtype in tool.DTYPES
+    }
 
 
-def test_main_orders_by_dtype_then_family_then_hash(
+def test_main_writes_one_list_per_dtype_ordered_by_family_then_hash(
     tmp_path, monkeypatch, synthetic_grid, direct_fp16
 ):
     implicit = synthetic_grid[:12]
     direct = direct_fp16[0][:5]
     written = _fake_main(tmp_path, monkeypatch, implicit, direct)
 
-    kept = [i for i in implicit if not tool.knob_rule_rejection(i)]
-    assert len(written) == 2 * (len(kept) + len(direct))
-    keys = [
-        (e["dtype_a"], e["algorithm"] != "implicit_gemm", tool.stable_hash(e))
-        for e in written
-    ]
-    assert keys == sorted(keys)
-    assert [k[0] for k in keys] == ["bf16"] * (len(keys) // 2) + ["fp16"] * (
-        len(keys) // 2
-    )
-    assert sum(1 for k in keys if k[1]) == 2 * len(direct)
+    assert sorted(written) == sorted(tool.DTYPES)
+    for dtype, entries in written.items():
+        assert len(entries) == len(implicit) + len(direct)
+        assert {e["dtype_a"] for e in entries} == {dtype}
+        keys = [
+            (e["algorithm"] != "implicit_gemm", tool.stable_hash(e)) for e in entries
+        ]
+        assert keys == sorted(keys)
+        assert sum(1 for k in keys if k[0]) == len(direct)
 
 
-def test_main_writes_the_same_list_twice(
+def test_main_writes_the_same_lists_twice(
     tmp_path, monkeypatch, synthetic_grid, direct_fp16
 ):
     implicit, direct = synthetic_grid[:20], direct_fp16[0][:3]
@@ -383,39 +308,53 @@ def test_main_writes_the_same_list_twice(
     assert first == second
 
 
-def test_committed_instance_list_is_what_the_tool_enumerates(tmp_path):
-    """The shipped catalog's list is the tool's output for the rocKE tree beside it: a
-    rocKE grid or rule change that moves the catalog has to regenerate the list (and
-    the bundle make_conv_aot_config.py builds from it)."""
+def test_main_reports_the_direct_identities_the_converter_refuses(
+    tmp_path, monkeypatch, synthetic_grid, capsys
+):
+    refused = {("direct_grouped", "direct algorithm 'direct_grouped' has no launch"): 7}
+    _fake_main(tmp_path, monkeypatch, synthetic_grid[:2], [], refused)
+    assert "direct direct_grouped: 7 not packaged" in capsys.readouterr().out
+
+
+def test_main_refuses_an_implicit_identity_the_converter_refuses(
+    tmp_path, monkeypatch, synthetic_grid, capsys
+):
+    """The implicit-GEMM grid is shipped whole: an identity the converter cannot
+    package is an error, never a silent omission."""
+    unsupported = dict(synthetic_grid[0], split_k=2)
+    monkeypatch.setattr(tool, "grid_identities", lambda dtype, jobs: [unsupported])
+    monkeypatch.setattr(
+        tool, "direct_identities", lambda dtype, jobs: ([], collections.Counter())
+    )
+    out = tmp_path / "lists"
+    argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", "1"]
+    assert tool.main(argv) == 1
+    assert "split_k" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path):
+    """The shipped catalog's lists are the tool's output for the rocKE tree beside it:
+    a rocKE grid change that moves the catalog has to regenerate the lists (and the
+    bundle make_conv_aot_config.py builds from them)."""
     from benchmarks.common.kernel_cache import current_llvm_flavor
 
-    committed = _CONFIGS / "gfx950_conv_fwd_aot.instances.json"
-    flavor = json.loads(committed.read_text())[0]["llvm_flavor"]
+    committed = {
+        dtype: _CONFIGS / tool.INSTANCE_LIST.format(dtype=dtype)
+        for dtype in tool.DTYPES
+    }
+    with committed["fp16"].open() as handle:
+        handle.readline()
+        flavor = json.loads(handle.readline().rstrip(",\n"))["llvm_flavor"]
     if flavor != current_llvm_flavor():
         pytest.skip(
-            f"the list is for LLVM flavor {flavor}, this process lowers to "
+            f"the lists are for LLVM flavor {flavor}, this process lowers to "
             f"{current_llvm_flavor()}, so every identity differs"
         )
-    out = tmp_path / "instances.json"
+    out = tmp_path / "lists"
     jobs = str(min(16, os.cpu_count() or 1))
-    argv = ["--rocke-root", str(_ROCKE), "--output", str(out), "--jobs", jobs]
+    argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", jobs]
     assert tool.main(argv) == 0
-    assert out.read_bytes() == committed.read_bytes()
-
-
-def test_r1_drops_the_listed_spills_unless_asked_to_keep_them(
-    tmp_path, monkeypatch, synthetic_grid
-):
-    kept = [i for i in synthetic_grid if not tool.knob_rule_rejection(i)][:6]
-    spilling = {
-        tool.stable_hash(dict(i, dtype_a=d, dtype_b=d, dtype_d=d))
-        for i in kept[:2]
-        for d in tool.DTYPES
-    }
-    filtered = _fake_main(tmp_path, monkeypatch, kept, [], spilling)
-    assert len(filtered) == 2 * 4
-    assert not {tool.stable_hash(e) for e in filtered} & spilling
-    everything = _fake_main(
-        tmp_path, monkeypatch, kept, [], spilling, ["--keep-spilling"]
-    )
-    assert len(everything) == 2 * 6
+    for dtype, path in committed.items():
+        written = out / tool.INSTANCE_LIST.format(dtype=dtype)
+        assert written.read_bytes() == path.read_bytes(), dtype

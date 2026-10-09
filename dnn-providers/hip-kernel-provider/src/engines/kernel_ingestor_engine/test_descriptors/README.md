@@ -98,8 +98,8 @@ product catalog does not carry the same kernel id twice.
 
 The folder sits under `rocKE/` so the rocKE family switch excludes it the way it excludes
 the production rocKE bundles. Do not edit these files by hand. Regenerate them with
-`tools/make_conv_aot_config.py --engine-name hipkernel:Gfx950ConvFwdAotSeed` from
-`configs/gfx950_conv_fwd_aot_seed.instances.json`; see
+`tools/make_conv_aot_config.py --engine-name hipkernel:Gfx950ConvFwdAotSeed
+--sharding dtype` from `configs/gfx950_conv_fwd_aot_seed.instances.json`; see
 `docs/gfx950_conv_fwd/aot_instances.md`.
 
 ## `archive_fixture/`
