@@ -376,9 +376,9 @@ tables, CI checks regeneration is a no-op.
 | | effect |
 |---|---|
 | emitted IR bytes | **none** — S1–S4 add checks and a data file; no emission path changes |
-| golden | **no re-bless** |
+| golden | **no re-bless** of any shipped kernel. The parity corpus golden moved for its four gfx942 3D/reduce attention cases, because the harness was building the gfx950 kernels for them |
 | byte-identity | must be re-run after S4 (behaviour parity), expected GREEN |
-| `KNOWN_BAD` | arch-unavailable keys become build errors, not allowlist entries; the allowlist itself holds 2 entries, both the same llvm23 backend fatal on attention 3d on gfx942 |
+| `KNOWN_BAD` | arch-unavailable keys become build errors, not allowlist entries; the allowlist itself holds 2 entries, attention 3d d128/b64 on gfx942, which overflow gfx942's LDS at every flavor |
 | B9 | fixed as a consequence: S1 flags it `name_absent` on every arch |
 
 ---
