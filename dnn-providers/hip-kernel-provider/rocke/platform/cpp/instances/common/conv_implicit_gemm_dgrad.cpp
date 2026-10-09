@@ -112,7 +112,7 @@ rocke_dgrad_conv_spec_t rocke_dgrad_conv_spec_default(void)
     s.acc_epilogue = rocke_conv_acc_epilogue_default();
     s.split_k = 1;
     s.num_load_waves = 4;
-    s.max_sub_gemms = 64;
+    s.max_sub_gemms = 1024;
     return s;
 }
 
@@ -757,7 +757,7 @@ int rocke_pack_sub_gemm_buffer(const rocke_sub_gemm_params_t* sgs,
                                int* out_buf,
                                int out_cap)
 {
-    int total = count * ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS;
+    int total = count * (ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS + ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS);
     if(total > out_cap)
         return 0;
     for(int i = 0; i < count; i++)
@@ -786,6 +786,27 @@ int rocke_pack_sub_gemm_buffer(const rocke_sub_gemm_params_t* sgs,
         rec[19] = sg->d_w_stride;
         rec[20] = sg->d_w_offset;
         rec[21] = sg->gemm_k_padded;
+    }
+    /* Magic-division table after the records (Python sub_gemm_magic_pairs):
+     * one (mult, shift) pair per divisor -- kpg, x_dot_slice,
+     * h_tilde_slice*w_tilde_slice, w_tilde_slice. */
+    for(int i = 0; i < count; i++)
+    {
+        const rocke_sub_gemm_params_t* sg = &sgs[i];
+        int* mag = &out_buf[count * ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS
+                            + i * ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS];
+        int divisors[4] = {sg->gemm_k / (sg->y_dot_slice * sg->x_dot_slice),
+                           sg->x_dot_slice,
+                           sg->h_tilde_slice * sg->w_tilde_slice,
+                           sg->w_tilde_slice};
+        for(int j = 0; j < 4; j++)
+        {
+            uint64_t mult = 0;
+            int shift = 0;
+            rocke_calculate_magic_numbers(NULL, _max(divisors[j], 1), &mult, &shift);
+            mag[2 * j] = (int)(uint32_t)mult;
+            mag[2 * j + 1] = shift;
+        }
     }
     return total;
 }
@@ -1187,33 +1208,54 @@ static rocke_conv_lds_layout_t _dgrad_effective_lds_layout(const rocke_dgrad_con
 
 /* AOT: the record count is the runtime num_sub_gemms kernarg -- the tilde
  * decomposition produces a different count per stride/dilation, so it cannot
- * be folded in. Only the trip count stays compile-time:
- * ceil(log2(max_sub_gemms)) + 1 halvings bracket any count up to
- * max_sub_gemms, and running them all unconditionally keeps the search
- * branch-free. Extra iterations on a smaller buffer are harmless -- once the
- * interval collapses, mid stops moving and lo is stable. */
+ * be folded in. So is the trip count: each halving leaves at most
+ * ceil(size / 2) records, so ceil(log2(n)) of them bracket n records, and a
+ * uniform loop runs exactly that many. A stride-1 problem (one record) skips
+ * the search outright instead of waiting out a chain of dependent scalar
+ * loads sized for the largest decomposition. max_sub_gemms only bounds the
+ * trip-count computation. */
 static rocke_value_t* _emit_binary_search(rocke_ir_builder_t* b,
                                           rocke_value_t* flat_block_id,
                                           rocke_value_t* sub_gemm_buf,
                                           rocke_value_t* num_sub_gemms_val,
                                           int max_sub_gemms)
 {
-    rocke_value_t* lo = rocke_b_const_i32(b, 0);
-    rocke_value_t* hi = num_sub_gemms_val;
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* c1 = rocke_b_const_i32(b, 1);
     rocke_value_t* c_record_stride = rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS);
 
-    int max_iters = (int)ceil(log2(_max(max_sub_gemms, 2))) + 1;
-    for(int i = 0; i < max_iters; i++)
+    /* ceil(log2(n)) = the number of powers of two 2**t (t >= 0) below n. */
+    rocke_value_t* n_iters = c0;
+    int max_steps = (int)ceil(log2(_max(max_sub_gemms, 2)));
+    for(int t = 0; t < max_steps; t++)
     {
+        rocke_value_t* below = rocke_b_cmp_lt(b, rocke_b_const_i32(b, 1 << t), num_sub_gemms_val);
+        n_iters = rocke_b_add(b, n_iters, rocke_b_select(b, below, c1, c0));
+    }
+
+    rocke_iter_arg_t search_args[2];
+    search_args[0].name = "bs_lo";
+    search_args[0].init = c0;
+    search_args[1].name = "bs_hi";
+    search_args[1].init = num_sub_gemms_val;
+    rocke_for_t search
+        = rocke_b_scf_for_iter(b, c0, n_iters, c1, search_args, 2, "bs_it", false, true);
+    rocke_b_region_enter(b, search.body);
+    {
+        rocke_value_t* lo = search.iter_vars[0];
+        rocke_value_t* hi = search.iter_vars[1];
         rocke_value_t* _mid_sum = rocke_b_add(b, lo, hi);
         rocke_value_t* mid = rocke_b_div(b, _mid_sum, rocke_b_const_i32(b, 2));
         rocke_value_t* mid_off = rocke_b_mul(b, mid, c_record_stride);
         rocke_value_t* mid_block_start = rocke_b_global_load_i32(b, sub_gemm_buf, mid_off, 4);
         rocke_value_t* take_lo = rocke_b_cmp_le(b, mid_block_start, flat_block_id);
-        lo = rocke_b_select(b, take_lo, mid, lo);
-        hi = rocke_b_select(b, take_lo, hi, mid);
+        rocke_value_t* next[2];
+        next[0] = rocke_b_select(b, take_lo, mid, lo);
+        next[1] = rocke_b_select(b, take_lo, hi, mid);
+        rocke_b_scf_yield(b, next, 2);
     }
-    return lo;
+    rocke_b_region_leave(b);
+    return search.op->results[0];
 }
 
 static rocke_value_t* _emit_load_record_field(rocke_ir_builder_t* b,
@@ -1225,6 +1267,31 @@ static rocke_value_t* _emit_load_record_field(rocke_ir_builder_t* b,
         = rocke_b_mul(b, sg_idx, rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS));
     rocke_value_t* offset = rocke_b_add(b, base, rocke_b_const_i32(b, field_idx));
     return rocke_b_global_load_i32(b, sub_gemm_buf, offset, 4);
+}
+
+/* A runtime divisor with its host-computed magic-division pair (Python
+ * _MagicDiv). */
+struct dgrad_magic_div_t
+{
+    rocke_value_t* value;
+    rocke_value_t* mult;
+    rocke_value_t* shift;
+};
+
+/* Python _magic_divmod: (n // d, n % d) through d's magic pair. n must be
+ * non-negative and below 2**31 (the magic-division range). */
+static void _magic_divmod(rocke_ir_builder_t* b,
+                          rocke_value_t* n,
+                          const dgrad_magic_div_t* d,
+                          rocke_value_t** q_out,
+                          rocke_value_t** r_out)
+{
+    rocke_value_t* tmp = rocke_b_umul_hi_i32(b, n, d->mult);
+    rocke_value_t* summed = rocke_b_add(b, tmp, n);
+    rocke_value_t* q = rocke_b_lshr(b, summed, d->shift);
+    rocke_value_t* qd = rocke_b_mul(b, q, d->value);
+    *q_out = q;
+    *r_out = rocke_b_sub(b, n, qd);
 }
 
 // ===========================================================================
@@ -1245,8 +1312,8 @@ static void _emit_dgrad_tilde_atomic_epilogue(rocke_ir_builder_t* b,
                                               int c_per_lane,
                                               rocke_value_t* gemm_m,
                                               rocke_value_t* gemm_n,
-                                              rocke_value_t* h_tilde_slice,
-                                              rocke_value_t* w_tilde_slice,
+                                              const dgrad_magic_div_t* hw_tilde,
+                                              const dgrad_magic_div_t* w_tilde_slice,
                                               rocke_value_t* d_h_stride,
                                               rocke_value_t* d_h_offset,
                                               rocke_value_t* d_w_stride,
@@ -1293,7 +1360,6 @@ static void _emit_dgrad_tilde_atomic_epilogue(rocke_ir_builder_t* b,
     }
 
     rocke_value_t* c0 = rocke_b_const_i32(b, 0);
-    rocke_value_t* hw_tilde = rocke_b_mul(b, h_tilde_slice, w_tilde_slice);
 
     int flat = 0;
     for(int mi = 0; mi < mfmas_m; mi++)
@@ -1312,10 +1378,9 @@ static void _emit_dgrad_tilde_atomic_epilogue(rocke_ir_builder_t* b,
                 rocke_value_t* c_n = rocke_b_add(b, atom_n_base, cols[i]);
 
                 // Decompose c_m -> (n, htl, wtl)
-                rocke_value_t* n_val = rocke_b_div(b, c_m, hw_tilde);
-                rocke_value_t* m_rem = rocke_b_mod(b, c_m, hw_tilde);
-                rocke_value_t* htl = rocke_b_div(b, m_rem, w_tilde_slice);
-                rocke_value_t* wtl = rocke_b_mod(b, m_rem, w_tilde_slice);
+                rocke_value_t *n_val, *m_rem, *htl, *wtl;
+                _magic_divmod(b, c_m, hw_tilde, &n_val, &m_rem);
+                _magic_divmod(b, m_rem, w_tilde_slice, &htl, &wtl);
 
                 // hi = htl * d_h_stride + d_h_offset
                 rocke_value_t* hi = rocke_b_add(b, rocke_b_mul(b, htl, d_h_stride), d_h_offset);
@@ -1395,9 +1460,10 @@ struct tilde_dy_ctx_t
 {
     rocke_value_t* block_m_off;
     rocke_value_t* k_off;
-    rocke_value_t* rec_x_dot_slice; // xdot_slice for yx_rem decomposition
-    rocke_value_t* hw_tilde;
-    rocke_value_t* rec_w_tilde_slice;
+    dgrad_magic_div_t kpg_div; // k_sub -> (yx_rem, k_out)
+    dgrad_magic_div_t xdot_div; // yx_rem -> (ydot, xdot)
+    dgrad_magic_div_t hw_div; // m_sub -> (n, m_rem)
+    dgrad_magic_div_t w_div; // m_rem -> (htl, wtl)
     rocke_value_t* rec_h_tilde_slice_begin;
     rocke_value_t* rec_w_tilde_slice_begin;
     rocke_value_t* rec_a_embed_h_coeff;
@@ -1442,15 +1508,13 @@ static rocke_value_t* _tilde_dy_descriptor(rocke_ir_builder_t* b_,
 
     // k_out innermost (CK-compatible): k_sub = ydot*xdot_slice*K + xdot*K + k_out
     // Consecutive k_sub → consecutive k_out → contiguous in dY (NHWK, last dim K).
-    rocke_value_t* k_out = rocke_b_mod(b_, k_sub, ctx->c_K);
-    rocke_value_t* yx_rem = rocke_b_div(b_, k_sub, ctx->c_K);
-    rocke_value_t* ydot = rocke_b_div(b_, yx_rem, ctx->rec_x_dot_slice);
-    rocke_value_t* xdot = rocke_b_mod(b_, yx_rem, ctx->rec_x_dot_slice);
+    rocke_value_t *yx_rem, *k_out, *ydot, *xdot;
+    _magic_divmod(b_, k_sub, &ctx->kpg_div, &yx_rem, &k_out);
+    _magic_divmod(b_, yx_rem, &ctx->xdot_div, &ydot, &xdot);
 
-    rocke_value_t* n_val = rocke_b_div(b_, m_sub, ctx->hw_tilde);
-    rocke_value_t* m_rem = rocke_b_mod(b_, m_sub, ctx->hw_tilde);
-    rocke_value_t* htl = rocke_b_div(b_, m_rem, ctx->rec_w_tilde_slice);
-    rocke_value_t* wtl = rocke_b_mod(b_, m_rem, ctx->rec_w_tilde_slice);
+    rocke_value_t *n_val, *m_rem, *htl, *wtl;
+    _magic_divmod(b_, m_sub, &ctx->hw_div, &n_val, &m_rem);
+    _magic_divmod(b_, m_rem, &ctx->w_div, &htl, &wtl);
 
     rocke_value_t* ho_base = rocke_b_add(b_, htl, ctx->rec_h_tilde_slice_begin);
     rocke_value_t* ho_mul = rocke_b_mul(b_, ydot, ctx->rec_a_embed_h_coeff);
@@ -1484,7 +1548,8 @@ struct tilde_w_ctx_t
 {
     rocke_value_t* block_n_off;
     rocke_value_t* k_off;
-    rocke_value_t* rec_x_dot_slice;
+    dgrad_magic_div_t kpg_div; // k_sub -> (yx_rem, k_out)
+    dgrad_magic_div_t xdot_div; // yx_rem -> (ydot, xdot)
     rocke_value_t* rec_b_y_stride;
     rocke_value_t* rec_b_y_offset;
     rocke_value_t* rec_b_x_stride;
@@ -1524,10 +1589,9 @@ static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
 
     // Same k_out-innermost decomposition as _tilde_dy_descriptor (must match).
     // c (row axis) is stride-1 in KYXC; vectorised loads along c use vector_axis_row=true.
-    rocke_value_t* k_out = rocke_b_mod(b_, k_sub, ctx->c_K);
-    rocke_value_t* yx_rem = rocke_b_div(b_, k_sub, ctx->c_K);
-    rocke_value_t* ydot = rocke_b_div(b_, yx_rem, ctx->rec_x_dot_slice);
-    rocke_value_t* xdot = rocke_b_mod(b_, yx_rem, ctx->rec_x_dot_slice);
+    rocke_value_t *yx_rem, *k_out, *ydot, *xdot;
+    _magic_divmod(b_, k_sub, &ctx->kpg_div, &yx_rem, &k_out);
+    _magic_divmod(b_, yx_rem, &ctx->xdot_div, &ydot, &xdot);
 
     rocke_value_t* y_mul = rocke_b_mul(b_, ydot, ctx->rec_b_y_stride);
     rocke_value_t* y = rocke_b_add(b_, y_mul, ctx->rec_b_y_offset);
@@ -1581,8 +1645,8 @@ static void _emit_dgrad_tilde_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                                    rocke_value_t* c0,
                                                    rocke_value_t* bounds_m,
                                                    rocke_value_t* bounds_n,
-                                                   rocke_value_t* hw_tilde,
-                                                   rocke_value_t* w_tilde_slice,
+                                                   const dgrad_magic_div_t* hw_tilde,
+                                                   const dgrad_magic_div_t* w_tilde_slice,
                                                    rocke_value_t* d_h_stride,
                                                    rocke_value_t* d_h_offset,
                                                    rocke_value_t* d_w_stride,
@@ -1628,10 +1692,9 @@ static void _emit_dgrad_tilde_direct_epilogue_wmma(rocke_ir_builder_t* b,
                 rocke_value_t* n_val = rocke_b_add(b, atom_n_off, col_off);
 
                 // Tilde M decomposition → (n_batch, htl, wtl) → (hi, wi)
-                rocke_value_t* n_batch = rocke_b_div(b, m_val, hw_tilde);
-                rocke_value_t* m_rem = rocke_b_mod(b, m_val, hw_tilde);
-                rocke_value_t* htl = rocke_b_div(b, m_rem, w_tilde_slice);
-                rocke_value_t* wtl = rocke_b_mod(b, m_rem, w_tilde_slice);
+                rocke_value_t *n_batch, *m_rem, *htl, *wtl;
+                _magic_divmod(b, m_val, hw_tilde, &n_batch, &m_rem);
+                _magic_divmod(b, m_rem, w_tilde_slice, &htl, &wtl);
                 rocke_value_t* hi = rocke_b_add(b, rocke_b_mul(b, htl, d_h_stride), d_h_offset);
                 rocke_value_t* wi = rocke_b_add(b, rocke_b_mul(b, wtl, d_w_stride), d_w_offset);
 
@@ -1690,8 +1753,8 @@ static void _emit_dgrad_tilde_direct_epilogue_wmma(rocke_ir_builder_t* b,
 
 struct tilde_dx_ctx_t
 {
-    rocke_value_t* hw_tilde;
-    rocke_value_t* w_tilde_slice;
+    dgrad_magic_div_t hw_tilde;
+    dgrad_magic_div_t w_tilde_slice;
     rocke_value_t* d_h_stride;
     rocke_value_t* d_h_offset;
     rocke_value_t* d_w_stride;
@@ -1703,8 +1766,8 @@ struct tilde_dx_ctx_t
     // matching Python's closure which does c0 = b.const_i32(0) inside the fn.
 };
 
-static tilde_dx_ctx_t _make_tilde_dx_ctx(rocke_value_t* hw_tilde,
-                                         rocke_value_t* w_tilde_slice,
+static tilde_dx_ctx_t _make_tilde_dx_ctx(const dgrad_magic_div_t* hw_tilde,
+                                         const dgrad_magic_div_t* w_tilde_slice,
                                          rocke_value_t* d_h_stride,
                                          rocke_value_t* d_h_offset,
                                          rocke_value_t* d_w_stride,
@@ -1714,8 +1777,8 @@ static tilde_dx_ctx_t _make_tilde_dx_ctx(rocke_value_t* hw_tilde,
                                          rocke_value_t* c_C)
 {
     tilde_dx_ctx_t ctx;
-    ctx.hw_tilde = hw_tilde;
-    ctx.w_tilde_slice = w_tilde_slice;
+    ctx.hw_tilde = *hw_tilde;
+    ctx.w_tilde_slice = *w_tilde_slice;
     ctx.d_h_stride = d_h_stride;
     ctx.d_h_offset = d_h_offset;
     ctx.d_w_stride = d_w_stride;
@@ -1741,10 +1804,9 @@ static rocke_value_t* _tilde_dx_addr_fn(rocke_ir_builder_t* b,
     rocke_value_t* c0 = rocke_b_const_i32(b, 0);
 
     // Decompose m_global -> (n_val, htl, wtl)
-    rocke_value_t* n_val = rocke_b_div(b, m_global, ctx->hw_tilde);
-    rocke_value_t* m_rem = rocke_b_mod(b, m_global, ctx->hw_tilde);
-    rocke_value_t* htl = rocke_b_div(b, m_rem, ctx->w_tilde_slice);
-    rocke_value_t* wtl = rocke_b_mod(b, m_rem, ctx->w_tilde_slice);
+    rocke_value_t *n_val, *m_rem, *htl, *wtl;
+    _magic_divmod(b, m_global, &ctx->hw_tilde, &n_val, &m_rem);
+    _magic_divmod(b, m_rem, &ctx->w_tilde_slice, &htl, &wtl);
 
     rocke_value_t* hi = rocke_b_add(b, rocke_b_mul(b, htl, ctx->d_h_stride), ctx->d_h_offset);
     rocke_value_t* wi = rocke_b_add(b, rocke_b_mul(b, wtl, ctx->d_w_stride), ctx->d_w_offset);
@@ -1785,8 +1847,8 @@ static void _emit_dgrad_tilde_direct_epilogue(rocke_ir_builder_t* b,
                                               rocke_value_t* dx_rsrc,
                                               rocke_value_t* bounds_m,
                                               rocke_value_t* bounds_n,
-                                              rocke_value_t* hw_tilde,
-                                              rocke_value_t* w_tilde_slice,
+                                              const dgrad_magic_div_t* hw_tilde,
+                                              const dgrad_magic_div_t* w_tilde_slice,
                                               rocke_value_t* d_h_stride,
                                               rocke_value_t* d_h_offset,
                                               rocke_value_t* d_w_stride,
@@ -1817,8 +1879,8 @@ static void _emit_dgrad_tilde_cshuffle_epilogue(rocke_ir_builder_t* b,
                                                 rocke_value_t* dx_rsrc,
                                                 rocke_value_t* bounds_m,
                                                 rocke_value_t* bounds_n,
-                                                rocke_value_t* hw_tilde,
-                                                rocke_value_t* w_tilde_slice,
+                                                const dgrad_magic_div_t* hw_tilde,
+                                                const dgrad_magic_div_t* w_tilde_slice,
                                                 rocke_value_t* d_h_stride,
                                                 rocke_value_t* d_h_offset,
                                                 rocke_value_t* d_w_stride,
@@ -2059,6 +2121,21 @@ static rocke_kernel_def_t*
     rocke_value_t* rec_d_w_stride = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 19);
     rocke_value_t* rec_d_w_offset = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 20);
 
+    // ---- magic-division pairs of this record's divisors ----
+    // (Python sub_gemm_magic_pairs); the table starts after the last record.
+    rocke_value_t* _c_rec_fields = rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS);
+    rocke_value_t* _magic_rec_end = rocke_b_mul(b, num_sub_gemms_param, _c_rec_fields);
+    rocke_value_t* _c_magic_fields = rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS);
+    rocke_value_t* _magic_rec_off = rocke_b_mul(b, sg_idx, _c_magic_fields);
+    rocke_value_t* _magic_base = rocke_b_add(b, _magic_rec_end, _magic_rec_off);
+    rocke_value_t* rec_magic[ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS];
+    for(int j = 0; j < ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS; j++)
+    {
+        rocke_value_t* _c_j = rocke_b_const_i32(b, j);
+        rocke_value_t* _off = rocke_b_add(b, _magic_base, _c_j);
+        rec_magic[j] = rocke_b_global_load_i32(b, sub_gemm_buf, _off, 4);
+    }
+
     // ---- compute local tile indices ----
     rocke_value_t* local_flat = rocke_b_sub(b, flat_block_id, rec_block_start);
     rocke_value_t* local_m_tile = rocke_b_div(b, local_flat, rec_num_n_tiles);
@@ -2156,6 +2233,12 @@ static rocke_kernel_def_t*
     // k_out-innermost: k_sub = ydot*xdot_slice*K + xdot*K + k_out
     // (c_K is the innermost divisor; ydot_times_xdot no longer needed in descriptors)
     rocke_value_t* hw_tilde = rocke_b_mul(b, rec_h_tilde_slice, rec_w_tilde_slice);
+    // The record's divisors, each with its magic pair. This port has no
+    // grouped path, so the K divisor is K (Python: kpg if grouped else K).
+    const dgrad_magic_div_t kpg_div = {c_K, rec_magic[0], rec_magic[1]};
+    const dgrad_magic_div_t xdot_div = {rec_x_dot_slice, rec_magic[2], rec_magic[3]};
+    const dgrad_magic_div_t hw_div = {hw_tilde, rec_magic[4], rec_magic[5]};
+    const dgrad_magic_div_t w_div = {rec_w_tilde_slice, rec_magic[6], rec_magic[7]};
 
     // ---- LDS ----
     rocke_conv_lds_layout_t lds_layout = _dgrad_effective_lds_layout(spec);
@@ -2362,9 +2445,10 @@ static rocke_kernel_def_t*
     tilde_dy_ctx_t dy_tctx;
     dy_tctx.block_m_off = block_m_off_v;
     dy_tctx.k_off = NULL;
-    dy_tctx.rec_x_dot_slice = rec_x_dot_slice;
-    dy_tctx.hw_tilde = hw_tilde;
-    dy_tctx.rec_w_tilde_slice = rec_w_tilde_slice;
+    dy_tctx.kpg_div = kpg_div;
+    dy_tctx.xdot_div = xdot_div;
+    dy_tctx.hw_div = hw_div;
+    dy_tctx.w_div = w_div;
     dy_tctx.rec_h_tilde_slice_begin = rec_h_tilde_slice_begin;
     dy_tctx.rec_w_tilde_slice_begin = rec_w_tilde_slice_begin;
     dy_tctx.rec_a_embed_h_coeff = rec_a_embed_h_coeff;
@@ -2379,7 +2463,8 @@ static rocke_kernel_def_t*
     tilde_w_ctx_t w_tctx;
     w_tctx.block_n_off = block_n_off_v;
     w_tctx.k_off = NULL;
-    w_tctx.rec_x_dot_slice = rec_x_dot_slice;
+    w_tctx.kpg_div = kpg_div;
+    w_tctx.xdot_div = xdot_div;
     w_tctx.rec_b_y_stride = rec_b_y_stride;
     w_tctx.rec_b_y_offset = rec_b_y_offset;
     w_tctx.rec_b_x_stride = rec_b_x_stride;
@@ -2541,8 +2626,8 @@ static rocke_kernel_def_t*
                                                    c0,
                                                    rec_gemm_m,
                                                    c_dg_N,
-                                                   hw_tilde,
-                                                   rec_w_tilde_slice,
+                                                   &hw_div,
+                                                   &w_div,
                                                    rec_d_h_stride,
                                                    rec_d_h_offset,
                                                    rec_d_w_stride,
@@ -2564,8 +2649,8 @@ static rocke_kernel_def_t*
                                                     dx_rsrc,
                                                     rec_gemm_m,
                                                     c_dg_N,
-                                                    hw_tilde,
-                                                    rec_w_tilde_slice,
+                                                    &hw_div,
+                                                    &w_div,
                                                     rec_d_h_stride,
                                                     rec_d_h_offset,
                                                     rec_d_w_stride,
@@ -2583,8 +2668,8 @@ static rocke_kernel_def_t*
                                                   dx_rsrc,
                                                   rec_gemm_m,
                                                   c_dg_N,
-                                                  hw_tilde,
-                                                  rec_w_tilde_slice,
+                                                  &hw_div,
+                                                  &w_div,
                                                   rec_d_h_stride,
                                                   rec_d_h_offset,
                                                   rec_d_w_stride,
@@ -2609,8 +2694,8 @@ static rocke_kernel_def_t*
                                               c_per_lane,
                                               rec_gemm_m,
                                               c_dg_N,
-                                              rec_h_tilde_slice,
-                                              rec_w_tilde_slice,
+                                              &hw_div,
+                                              &w_div,
                                               rec_d_h_stride,
                                               rec_d_h_offset,
                                               rec_d_w_stride,

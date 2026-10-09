@@ -76,6 +76,8 @@ from rocke.helpers.tensor_view import make_buffer_resource
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
+    calculate_magic_numbers,
+    do_magic_division_dynamic,
     embed,
     pad,
     unmerge_magic,
@@ -324,16 +326,52 @@ def enumerate_sub_gemms(
     return sub_gemms
 
 
+def _magic_i32_pair(divisor: int) -> List[int]:
+    """``(mult, shift)`` of :func:`calculate_magic_numbers`, mult as signed i32."""
+    mult, shift = calculate_magic_numbers(max(int(divisor), 1))
+    return [mult - (1 << 32) if mult >= (1 << 31) else mult, shift]
+
+
+def sub_gemm_magic_pairs(sg: SubGemmParams) -> List[int]:
+    """The magic-division table entry of one sub-GEMM record.
+
+    The kernel decodes ``k -> (ydot, xdot, k_out)`` and
+    ``m -> (n, htl, wtl)`` by the record's own extents; a runtime ``udiv``
+    there costs a long VALU sequence on every K step. One ``(mult, shift)``
+    pair per divisor, in :data:`_MAGIC_FIELDS` order: kpg, x_dot_slice,
+    h_tilde_slice*w_tilde_slice, w_tilde_slice.
+    """
+    kpg = sg.gemm_k // (sg.y_dot_slice * sg.x_dot_slice)
+    out: List[int] = []
+    for d in (
+        kpg,
+        sg.x_dot_slice,
+        sg.h_tilde_slice * sg.w_tilde_slice,
+        sg.w_tilde_slice,
+    ):
+        out += _magic_i32_pair(d)
+    return out
+
+
 def pack_sub_gemm_buffer(
     sub_gemms: List[SubGemmParams], tile_m: int, tile_n: int
 ) -> List[int]:
-    """Pack all sub-GEMM records into a flat i32 buffer for the kernel."""
+    """Pack all sub-GEMM records into a flat i32 buffer for the kernel.
+
+    The buffer is the ``_RECORD_FIELDS``-wide records, then one
+    ``_MAGIC_FIELDS``-wide magic-division entry per record
+    (:func:`sub_gemm_magic_pairs`). The table follows the records rather than
+    widening them so the record stride -- and every binary built against
+    it -- is unchanged; the kernel finds it at ``num_sub_gemms`` records in.
+    """
     buf: List[int] = []
     for sg in sub_gemms:
         record = sg.pack_i32()
         record[1] = _ceil_div(sg.gemm_m, tile_m)
         record[2] = _ceil_div(sg.gemm_n, tile_n)
         buf.extend(record)
+    for sg in sub_gemms:
+        buf.extend(sub_gemm_magic_pairs(sg))
     return buf
 
 
@@ -598,13 +636,15 @@ class DgradConvSpec:
     # Wavelet forces additive (no_alias=True) because A/B stay live across both branches.
     cshuffle_no_alias: bool = False
     # Largest tilde sub-GEMM count this compiled kernel can dispatch over.
-    # The record count is runtime (it follows stride/dilation), but the
-    # CTA's binary search over the record buffer is unrolled at build time,
-    # so its trip count has to cover a declared maximum. The tilde
-    # decomposition yields y_tilde*x_tilde records, bounded by sH*sW, so 64
-    # covers strides up to 8x8. A problem needing more is rejected by
-    # is_valid_dgrad_spec rather than silently mis-dispatched.
-    max_sub_gemms: int = 64
+    # The record count is runtime (it follows stride/dilation), and so is the
+    # CTA's binary search over the record buffer: it runs ceil(log2(count))
+    # steps, which the kernel works out against this bound. The tilde
+    # decomposition yields y_tilde*x_tilde records, bounded by sH*sW, so 1024
+    # covers strides up to 32x32 (the patch embeddings of vision
+    # transformers). A larger bound only lengthens a few scalar compares. A
+    # problem needing more is rejected by is_valid_dgrad_spec rather than
+    # silently mis-dispatched.
+    max_sub_gemms: int = 1024
 
     @property
     def block_size(self) -> int:
@@ -1244,6 +1284,7 @@ def build_implicit_gemm_conv_dgrad(
 
 
 _RECORD_FIELDS = 22  # number of i32 fields per SubGemmRecord
+_MAGIC_FIELDS = 8  # i32 fields per magic-division table entry
 
 
 def _emit_binary_search(
@@ -1253,35 +1294,65 @@ def _emit_binary_search(
     num_sub_gemms_val: Value,
     max_sub_gemms: int,
 ) -> Value:
-    """Emit a fixed-trip binary search over the record buffer's block_starts.
+    """Emit a binary search over the record buffer's block_starts.
 
     Returns the sub-GEMM index (i32) for the CTA at ``flat_block_id``. The
     ``block_start`` field is at offset 0 in each record.
 
     The *bound* is the runtime ``num_sub_gemms_val`` kernarg -- the tilde
     decomposition produces a different record count per stride/dilation, so
-    an AOT kernel cannot fold it in. The *trip count* stays compile-time:
-    ``ceil(log2(max_sub_gemms)) + 1`` halvings bracket any count up to
-    ``max_sub_gemms``, and running the full count unconditionally keeps the
-    search branch-free. Extra iterations on a smaller buffer are harmless --
-    once the interval collapses, ``mid`` stops moving and ``lo`` is stable.
+    an AOT kernel cannot fold it in. So is the *trip count*: each halving
+    leaves at most ``ceil(size / 2)`` records, so ``ceil(log2(n))`` of them
+    bracket ``n`` records, and a uniform loop runs exactly that many. A
+    stride-1 problem (one record) skips the search outright instead of
+    waiting out a chain of dependent scalar loads sized for the largest
+    decomposition. ``max_sub_gemms`` only bounds the trip-count computation.
     """
     import math
 
-    lo = b.const_i32(0)
-    hi = num_sub_gemms_val
+    c0 = b.const_i32(0)
+    c1 = b.const_i32(1)
     c_record_stride = b.const_i32(_RECORD_FIELDS)
 
-    max_iters = int(math.ceil(math.log2(max(max_sub_gemms, 2)))) + 1
-    for _ in range(max_iters):
+    # ceil(log2(n)) = the number of powers of two 2**t (t >= 0) below n.
+    n_iters = c0
+    for t in range(int(math.ceil(math.log2(max(max_sub_gemms, 2))))):
+        below = b.cmp_lt(b.const_i32(1 << t), num_sub_gemms_val)
+        n_iters = b.add(n_iters, b.select(below, c1, c0))
+
+    search = b.scf_for_iter(
+        c0,
+        n_iters,
+        c1,
+        [("bs_lo", c0), ("bs_hi", num_sub_gemms_val)],
+        iv_name="bs_it",
+    )
+    with search as (_it, (lo, hi)):
         mid = b.div(b.add(lo, hi), b.const_i32(2))
         mid_block_start_offset = b.mul(mid, c_record_stride)
         mid_block_start = b.global_load_i32(sub_gemm_buf, mid_block_start_offset)
         take_lo = b.cmp_le(mid_block_start, flat_block_id)
-        lo = b.select(take_lo, mid, lo)
-        hi = b.select(take_lo, hi, mid)
+        b.scf_yield(b.select(take_lo, mid, lo), b.select(take_lo, hi, mid))
 
-    return lo
+    return search.results[0]
+
+
+@dataclass(frozen=True)
+class _MagicDiv:
+    """A runtime divisor with its host-computed magic-division pair."""
+
+    value: Value
+    mult: Value
+    shift: Value
+
+
+def _magic_divmod(b: IRBuilder, n: Value, d: _MagicDiv) -> Tuple[Value, Value]:
+    """``(n // d, n % d)`` through ``d``'s magic pair.
+
+    ``n`` must be non-negative and below 2**31 (the magic-division range).
+    """
+    q = do_magic_division_dynamic(b, n, d.mult, d.shift)
+    return q, b.sub(n, b.mul(q, d.value))
 
 
 def _emit_load_record_field(
@@ -1446,6 +1517,21 @@ def _build_tilde_dgrad(
     rec_d_w_stride = _ld(19)
     rec_d_w_offset = _ld(20)
 
+    # Magic-division pairs of this record's divisors (see
+    # sub_gemm_magic_pairs); the table starts after the last record.
+    _magic_base = b.add(
+        b.mul(num_sub_gemms_param, b.const_i32(_RECORD_FIELDS)),
+        b.mul(sg_idx, b.const_i32(_MAGIC_FIELDS)),
+    )
+
+    def _ld_magic(j: int) -> Value:
+        return b.global_load_i32(sub_gemm_buf, b.add(_magic_base, b.const_i32(j)))
+
+    rec_kpg_magic = (_ld_magic(0), _ld_magic(1))
+    rec_xdot_magic = (_ld_magic(2), _ld_magic(3))
+    rec_hw_magic = (_ld_magic(4), _ld_magic(5))
+    rec_w_magic = (_ld_magic(6), _ld_magic(7))
+
     # Compute local tile indices within this sub-GEMM.
     local_flat = b.sub(flat_block_id, rec_block_start)
     local_m_tile = b.div(local_flat, rec_num_n_tiles)
@@ -1515,6 +1601,11 @@ def _build_tilde_dgrad(
     # k_sub = ydot * XDotSlice * K + xdot * K + k_out
     # Consecutive k_sub → consecutive k_out → contiguous in dY (NHWK, stride-1 in K).
     hw_tilde = b.mul(rec_h_tilde_slice, rec_w_tilde_slice)
+    # The record's divisors, each with its magic pair.
+    kpg_div = _MagicDiv(c_kpg if grouped else c_K, *rec_kpg_magic)
+    xdot_div = _MagicDiv(rec_x_dot_slice, *rec_xdot_magic)
+    hw_div = _MagicDiv(hw_tilde, *rec_hw_magic)
+    w_div = _MagicDiv(rec_w_tilde_slice, *rec_w_magic)
 
     # LDS allocation.
     lds_layout = spec.effective_lds_layout()
@@ -1661,18 +1752,14 @@ def _build_tilde_dgrad(
         # is group-local in [0, kpg); the absolute NHWK channel is g*kpg + k_out.
         # Consecutive k_sub → consecutive k_out → contiguous in dY (NHWK, last dim
         # K) within one group. Condition for vector loads: kpg % load_vec_a == 0.
-        _kdiv = c_kpg if grouped else c_K
-        k_out = b_.mod(k_sub, _kdiv)
-        yx_rem = b_.div(k_sub, _kdiv)
-        ydot = b_.div(yx_rem, rec_x_dot_slice)
-        xdot = b_.mod(yx_rem, rec_x_dot_slice)
+        _kdiv = kpg_div.value
+        yx_rem, k_out = _magic_divmod(b_, k_sub, kpg_div)
+        ydot, xdot = _magic_divmod(b_, yx_rem, xdot_div)
         k_out_abs = b_.add(k_out, k_out_group_base) if grouped else k_out
 
         # Decompose m_sub → (n, htilde_local, wtilde_local)
-        n = b_.div(m_sub, hw_tilde)
-        m_rem = b_.mod(m_sub, hw_tilde)
-        htl = b_.div(m_rem, rec_w_tilde_slice)
-        wtl = b_.mod(m_rem, rec_w_tilde_slice)
+        n, m_rem = _magic_divmod(b_, m_sub, hw_div)
+        htl, wtl = _magic_divmod(b_, m_rem, w_div)
 
         # ho = htl + h_tilde_slice_begin + ydot * a_embed_h_coeff
         ho = b_.add(
@@ -1714,11 +1801,9 @@ def _build_tilde_dgrad(
         # c (row axis) is stride-1 in KYXC; vectorised loads along c use
         # vector_axis="row".  The reduction is per-group, so the decode divisor is
         # kpg (== K when ungrouped) and k_out is group-local in [0, kpg).
-        _kdiv = c_kpg if grouped else c_K
-        k_out = b_.mod(k_sub, _kdiv)
-        yx_rem = b_.div(k_sub, _kdiv)
-        ydot = b_.div(yx_rem, rec_x_dot_slice)
-        xdot = b_.mod(yx_rem, rec_x_dot_slice)
+        _kdiv = kpg_div.value
+        yx_rem, k_out = _magic_divmod(b_, k_sub, kpg_div)
+        ydot, xdot = _magic_divmod(b_, yx_rem, xdot_div)
         k_out_abs = b_.add(k_out, k_out_group_base) if grouped else k_out
 
         # y = ydot * b_y_stride + b_y_offset
@@ -1980,8 +2065,8 @@ def _build_tilde_dgrad(
         _tilde_kwargs = dict(
             bounds_m=rec_gemm_m,
             bounds_n=c_dg_N,
-            hw_tilde=hw_tilde,
-            w_tilde_slice=rec_w_tilde_slice,
+            hw_tilde=hw_div,
+            w_tilde_slice=w_div,
             d_h_stride=rec_d_h_stride,
             d_h_offset=rec_d_h_offset,
             d_w_stride=rec_d_w_stride,
@@ -2009,8 +2094,8 @@ def _build_tilde_dgrad(
                 c_per_lane,
                 rec_gemm_m,
                 c_dg_N,
-                rec_h_tilde_slice,
-                rec_w_tilde_slice,
+                hw_div,
+                w_div,
                 rec_d_h_stride,
                 rec_d_h_offset,
                 rec_d_w_stride,
@@ -2175,8 +2260,8 @@ def _emit_dgrad_tilde_atomic_epilogue(
     c_per_lane: int,
     gemm_m: Value,
     gemm_n: Value,
-    h_tilde_slice: Value,
-    w_tilde_slice: Value,
+    hw_tilde: _MagicDiv,
+    w_tilde_slice: _MagicDiv,
     d_h_stride: Value,
     d_h_offset: Value,
     d_w_stride: Value,
@@ -2221,7 +2306,6 @@ def _emit_dgrad_tilde_atomic_epilogue(
         cols.append(x_col)
 
     c0 = b.const_i32(0)
-    hw_tilde = b.mul(h_tilde_slice, w_tilde_slice)
 
     flat = 0
     for mi in range(mfmas_m):
@@ -2240,10 +2324,8 @@ def _emit_dgrad_tilde_atomic_epilogue(
                 c_n_off = b.add(c_n, c_group_base) if c_group_base is not None else c_n
 
                 # Decompose c_m (the M index) into (n, htl, wtl) at runtime
-                n_val = b.div(c_m, hw_tilde)
-                m_rem = b.mod(c_m, hw_tilde)
-                htl = b.div(m_rem, w_tilde_slice)
-                wtl = b.mod(m_rem, w_tilde_slice)
+                n_val, m_rem = _magic_divmod(b, c_m, hw_tilde)
+                htl, wtl = _magic_divmod(b, m_rem, w_tilde_slice)
 
                 # Compute hi = htl * d_h_stride + d_h_offset
                 hi = b.add(b.mul(htl, d_h_stride), d_h_offset)
@@ -2403,8 +2485,8 @@ def _emit_dgrad_tilde_direct_epilogue_wmma(
     *,
     bounds_m: Value,
     bounds_n: Value,
-    hw_tilde: Value,
-    w_tilde_slice: Value,
+    hw_tilde: _MagicDiv,
+    w_tilde_slice: _MagicDiv,
     d_h_stride: Value,
     d_h_offset: Value,
     d_w_stride: Value,
@@ -2448,10 +2530,8 @@ def _emit_dgrad_tilde_direct_epilogue_wmma(
                 n_val = b.add(atom_n_off, col_off)
 
                 # Tilde M decomposition: m_val → (n_batch, htl, wtl)
-                n_batch = b.div(m_val, hw_tilde)
-                m_rem = b.mod(m_val, hw_tilde)
-                htl = b.div(m_rem, w_tilde_slice)
-                wtl = b.mod(m_rem, w_tilde_slice)
+                n_batch, m_rem = _magic_divmod(b, m_val, hw_tilde)
+                htl, wtl = _magic_divmod(b, m_rem, w_tilde_slice)
                 hi = b.add(b.mul(htl, d_h_stride), d_h_offset)
                 wi = b.add(b.mul(wtl, d_w_stride), d_w_offset)
 
@@ -2573,8 +2653,8 @@ def _tilde_dx_addr_fn(
     b: IRBuilder,
     m_global: Value,
     n_global: Value,
-    hw_tilde: Value,
-    w_tilde_slice: Value,
+    hw_tilde: _MagicDiv,
+    w_tilde_slice: _MagicDiv,
     d_h_stride: Value,
     d_h_offset: Value,
     d_w_stride: Value,
@@ -2600,10 +2680,8 @@ def _tilde_dx_addr_fn(
     """
     c0 = b.const_i32(0)
 
-    n_val = b.div(m_global, hw_tilde)
-    m_rem = b.mod(m_global, hw_tilde)
-    htl = b.div(m_rem, w_tilde_slice)
-    wtl = b.mod(m_rem, w_tilde_slice)
+    n_val, m_rem = _magic_divmod(b, m_global, hw_tilde)
+    htl, wtl = _magic_divmod(b, m_rem, w_tilde_slice)
 
     hi = b.add(b.mul(htl, d_h_stride), d_h_offset)
     wi = b.add(b.mul(wtl, d_w_stride), d_w_offset)
@@ -2637,8 +2715,8 @@ def _emit_dgrad_tilde_direct_epilogue(
     *,
     bounds_m: Value,
     bounds_n: Value,
-    hw_tilde: Value,
-    w_tilde_slice: Value,
+    hw_tilde: _MagicDiv,
+    w_tilde_slice: _MagicDiv,
     d_h_stride: Value,
     d_h_offset: Value,
     d_w_stride: Value,
@@ -2691,8 +2769,8 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
     op=None,
     bounds_m: Value,
     bounds_n: Value,
-    hw_tilde: Value,
-    w_tilde_slice: Value,
+    hw_tilde: _MagicDiv,
+    w_tilde_slice: _MagicDiv,
     d_h_stride: Value,
     d_h_offset: Value,
     d_w_stride: Value,

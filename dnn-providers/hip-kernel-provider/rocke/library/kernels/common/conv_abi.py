@@ -256,9 +256,9 @@ def _dgrad_arg_names(*, is_3d: bool = False) -> List[ArgSpec]:
     out += [("p_dX_stride_hi", "i32"), ("p_dX_stride_wi", "i32")]
     # Only the ``m`` decode needs magic pairs, for the dX store descriptor:
     # ``m -> (n, [di,] hi, wi)`` divides by Wi, then Hi[, then Di]. The dY / W
-    # load descriptors decode ``m`` and ``k`` with plain runtime div/mod
-    # against fields of the tilde sub-GEMM record, not through an
-    # unmerge_magic chain, so they have no divisor to precompute a pair for.
+    # load descriptors and the strided epilogues decode ``m`` and ``k`` by
+    # fields of the tilde sub-GEMM record, which differ per record; their
+    # magic pairs ride in sub_gemm_buf (see pack_sub_gemm_buffer), not here.
     out += _magic("m_", (["Di"] if is_3d else []) + ["Hi", "Wi"])
     out += _grid()
     # The tilde decomposition record buffer is always present.
