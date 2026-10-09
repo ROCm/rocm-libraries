@@ -18,7 +18,10 @@
 # assertion-style test passed anyway because both engines named *a* pointer;
 # only a byte comparison (or an LLVM verifier run) shows it.
 #
-# arch = gfx950, llvm_flavor = AUTO, matching the C side.
+# Each config lowers for a target that has the intrinsics it emits (ARCHES
+# below; the C side carries the same table), at llvm_flavor = AUTO. Lowering one
+# for a target that cannot run it would make the arch-domain lane refuse it in
+# error mode, and both engines refusing reads as parity while comparing nothing.
 from rocke.core.ir import CACHE_STREAM, F16, I32, IRBuilder, KernelDef, PtrType
 
 from _emit_common import run_emit
@@ -135,6 +138,12 @@ def build_scheduler_hints(b: IRBuilder) -> None:
     b.s_alloc_vgpr(8)
     b.asyncmark()
     b.wait_asyncmark(3)
+    b.ret()
+
+
+def build_wait_event(b: IRBuilder) -> None:
+    """``s.wait.event`` on its own: gfx1250 lacks it, and the async marks in
+    build_scheduler_hints exist only there, so no target can lower both."""
     b.s_wait_event(1)
     b.ret()
 
@@ -149,14 +158,31 @@ BUILDERS = [
     build_av_b128,
     build_scheduler_hints,
     build_warp_shuffle_xor_dpp,
+    build_wait_event,
+]
+
+# The target each config lowers for: one the committed arch-domain columns say
+# has every intrinsic the config emits. Must match ARCHES in the C emitter.
+ARCHES = [
+    "gfx1250",  # async LDS copies exist only on gfx1250
+    "gfx1250",
+    "gfx1250",  # s.prefetch.inst
+    "gfx950",
+    "gfx1201",  # permlane16/permlane64 are RDNA
+    "gfx950",
+    "gfx950",
+    "gfx1250",  # s.alloc.vgpr and the async marks
+    "gfx950",  # the DPP shuffles
+    "gfx1201",  # s.wait.event
 ]
 
 
 def _spec(idx: int):
-    """Config selector: the builder for `idx`, as the shared driver expects."""
+    """Config selector: ``(builder, arch)`` for `idx`, as the shared driver
+    expects for a config that pins its own target."""
     if not 0 <= idx < len(BUILDERS):
         raise SystemExit(f"unknown config index {idx}")
-    return BUILDERS[idx]
+    return BUILDERS[idx], ARCHES[idx]
 
 
 def _build(build_fn, *, arch: str = "gfx950") -> KernelDef:
