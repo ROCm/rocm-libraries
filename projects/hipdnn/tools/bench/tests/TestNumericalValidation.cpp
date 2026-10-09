@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <memory>
 #include <random>
@@ -248,6 +249,36 @@ TEST(TestNumericalValidation, NonFiniteOutputDisagreesWithAFiniteReference)
         = crossCheck({ran({1.0F, 2.0F}), ran({1.0F, 2.0F}), ran({1.0F, std::nanf("")})}, tensors());
 
     EXPECT_EQ(verdicts[2].verdict, NumericalVerdict::DISAGREED);
+}
+
+TEST(TestNumericalValidation, UnanimousNonFiniteOutputIsAnErrorNotAgreement)
+{
+    for(const float error : {std::nanf(""), std::numeric_limits<float>::infinity()})
+    {
+        const auto verdicts
+            = crossCheck({ran({1.0F, error}), ran({1.0F, error}), ran({1.0F, error})}, tensors());
+
+        for(const auto& verdict : verdicts)
+        {
+            EXPECT_EQ(verdict.verdict, NumericalVerdict::UNKNOWN);
+            EXPECT_NE(verdict.reason.find("non_finite_output"), std::string::npos);
+        }
+    }
+}
+
+TEST(TestNumericalValidation, ANonFiniteMajorityCannotOutvoteAFiniteOutput)
+{
+    // Three alike NaN outputs once formed the majority and condemned the finite one.
+    const auto nan = std::nanf("");
+    const auto verdicts = crossCheck(
+        {ran({1.0F, nan}), ran({1.0F, 2.0F}), ran({1.0F, nan}), ran({1.0F, nan})}, tensors());
+
+    for(const auto& verdict : verdicts)
+    {
+        EXPECT_NE(verdict.verdict, NumericalVerdict::AGREED);
+    }
+    EXPECT_EQ(verdicts[1].verdict, NumericalVerdict::UNKNOWN);
+    EXPECT_NE(verdicts[1].reason.find("no_reference"), std::string::npos);
 }
 
 TEST(TestNumericalValidation, HalfPrecisionIsDecodedRatherThanComparedAsBytes)

@@ -16,6 +16,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 /// @file NumericalValidation.hpp
@@ -574,6 +575,36 @@ inline bool leftOutputUntouched(const CandidateOutput& candidate,
     return true;
 }
 
+/// Where @p candidate's output first holds a NaN or an infinity, or empty when every
+/// comparable element is finite. Such an output is an error value: candidates that all
+/// produce it have failed alike, not agreed.
+inline std::string firstNonFinite(const CandidateOutput& candidate,
+                                  const std::map<int64_t, TensorDescription>& tensors)
+{
+    for(const auto& [uid, tensor] : tensors)
+    {
+        const auto image = candidate.images.find(uid);
+        const auto width = static_cast<size_t>(elementBits(tensor.dataType) / 8);
+        if(numericKind(tensor.dataType) == NumericKind::NONE || width == 0
+           || image == candidate.images.end())
+        {
+            continue;
+        }
+        const size_t count = image->second.size() / width;
+        for(size_t index = 0; index < count; ++index)
+        {
+            const double value = decodeElement(image->second, index, tensor.dataType);
+            if(!std::isfinite(value))
+            {
+                std::ostringstream detail;
+                detail << "tensor '" << tensor.name << "' element " << index << " is " << value;
+                return detail.str();
+            }
+        }
+    }
+    return {};
+}
+
 /// True when @p left and @p right left every comparable tensor in the same state.
 inline bool sameOutput(const CandidateOutput& left,
                        const CandidateOutput& right,
@@ -616,7 +647,10 @@ inline size_t comparableTensors(const CandidateOutput& candidate,
 /// @brief One verdict per candidate, in add order (RFC 0019 §13.2), holding one host image
 ///        per distinct answer rather than one per candidate.
 ///
-/// Candidates are grouped into cohorts with identical output. A strict-majority cohort is
+/// A candidate whose output holds a NaN or an infinity takes no part in the vote: it is
+/// DISAGREED when the finite candidates reach a majority, and UNKNOWN otherwise, since
+/// candidates that fail alike have not agreed. The rest are grouped into cohorts with
+/// identical output. A strict-majority cohort is
 /// AGREED and everything else DISAGREED; without a strict majority every cross-checked
 /// candidate is DISAGREED, since some candidate is wrong and first-one-wins could invert the
 /// verdicts. Comparison is streaming: only each cohort's founder keeps its images.
@@ -654,6 +688,14 @@ public:
                    "reference open)"};
             return;
         }
+        const auto nonFinite = detail::firstNonFinite(candidate, _tensors);
+        if(!nonFinite.empty())
+        {
+            // An error value: it neither votes nor serves as a reference; verdicts() judges
+            // it against the finite majority, if there is one.
+            _nonFinite.emplace_back(index, nonFinite);
+            return;
+        }
         ++_crossChecked;
         for(auto& cohort : _cohorts)
         {
@@ -682,9 +724,28 @@ public:
     std::vector<ValidationOutcome> verdicts() const
     {
         auto outcomes = _outcomes;
+        const bool decided = decide(outcomes);
+        for(const auto& [index, detailText] : _nonFinite)
+        {
+            outcomes[index] = decided
+                                  ? ValidationOutcome{NumericalVerdict::DISAGREED,
+                                                      "output_mismatch: " + detailText
+                                                          + ", where the agreed output is finite"}
+                                  : ValidationOutcome{NumericalVerdict::UNKNOWN,
+                                                      "non_finite_output: " + detailText
+                                                          + "; an error value is not evidence of "
+                                                            "agreement"};
+        }
+        return outcomes;
+    }
+
+private:
+    /// Fills the verdicts of the finite candidates; true when a strict majority agreed.
+    bool decide(std::vector<ValidationOutcome>& outcomes) const
+    {
         if(_cohorts.empty())
         {
-            return outcomes;
+            return false;
         }
         size_t largest = 0;
         for(size_t cohort = 0; cohort < _cohorts.size(); ++cohort)
@@ -702,7 +763,7 @@ public:
                 = {NumericalVerdict::UNKNOWN,
                    "no_reference: one candidate ran for this problem, so there was nothing to "
                    "cross-check it against"};
-            return outcomes;
+            return false;
         }
 
         if(_cohorts.size() == 1 && detail::leftOutputUntouched(_cohorts[0].founder, _tensors))
@@ -714,7 +775,7 @@ public:
                                    "zero-filled output untouched, so their agreement is not "
                                    "evidence that any of them computed anything"};
             }
-            return outcomes;
+            return false;
         }
 
         // Strict majority, written to avoid overflow; necessarily unique.
@@ -743,10 +804,9 @@ public:
                        (decided ? "output_mismatch: " : "disputed_output: ") + detailText};
             }
         }
-        return outcomes;
+        return decided;
     }
 
-private:
     struct Cohort
     {
         /// The one candidate of this cohort whose images are kept.
@@ -755,6 +815,9 @@ private:
         /// Add-order indices of every candidate that produced this answer, founder first.
         std::vector<size_t> members;
     };
+
+    /// Add-order index and first non-finite element of each candidate kept out of the vote.
+    std::vector<std::pair<size_t, std::string>> _nonFinite;
 
     /// Where @p candidate first parts company with @p reference, named for the row.
     std::string mismatchDetail(const CandidateOutput& candidate,
