@@ -3034,7 +3034,9 @@ rocke_status_t
     st = rocke_direct_conv_problem_short(&spec->problem, short_buf, sizeof(short_buf));
     if(st != ROCKE_OK)
         return st;
-    dtype = spec->problem.dtype ? spec->problem.dtype : "fp16";
+    if(spec->problem.dtype == NULL)
+        return ROCKE_ERR_VALUE;
+    dtype = spec->problem.dtype;
     snprintf(bq_buf, sizeof(bq_buf), "bq%d", spec->block_q);
     snprintf(bg_buf, sizeof(bg_buf), "bg%d", spec->block_groups);
     bh_buf[0] = '\0';
@@ -3082,11 +3084,10 @@ rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
     if(spec == NULL)
         return ROCKE_ERR_VALUE;
     p = &spec->problem;
-    {
-        const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
-            ROCKE_DCONV_GEN_RAISE("DirectConvSpec: unsupported dtype '%s'", dt);
-    }
+    if(p->dtype == NULL)
+        ROCKE_DCONV_GEN_RAISE("DirectConvSpec: dtype is not set");
+    if(strcmp(p->dtype, "fp16") != 0 && strcmp(p->dtype, "bf16") != 0)
+        ROCKE_DCONV_GEN_RAISE("DirectConvSpec: unsupported dtype '%s'", p->dtype);
     if(p->cpg % 4 != 0 || p->cpg < 4)
         ROCKE_DCONV_GEN_RAISE(
             "DirectConvSpec requires cpg to be a positive multiple of 4 (got cpg=%d)", p->cpg);
@@ -3195,11 +3196,10 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
         return false;
     }
     p = &spec->problem;
-    {
-        const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
-            ROCKE_DCONV_GEN_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
-    }
+    if(p->dtype == NULL)
+        ROCKE_DCONV_GEN_REJECT("dtype is not set; expected 'fp16' or 'bf16'");
+    if(strcmp(p->dtype, "fp16") != 0 && strcmp(p->dtype, "bf16") != 0)
+        ROCKE_DCONV_GEN_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", p->dtype);
     {
         char why_[256];
         if(rocke_direct_forward_padding_reason(p, why_, sizeof why_))
@@ -3216,7 +3216,7 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
             "groups %d not divisible by block_groups %d", p->groups, spec->block_groups);
     if(spec->block_q % 16 != 0)
         ROCKE_DCONV_GEN_REJECT("block_q must be a multiple of 16");
-    ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+    ab = (strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
     mma = rocke_archtarget_mma(target);
     if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
         ROCKE_DCONV_GEN_REJECT("missing mfma_f32_16x16x16_%s on %s", ab, arch);

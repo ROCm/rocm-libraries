@@ -100,7 +100,7 @@ static rocke_kernel_def_t*
     const bool RTC = spec->runtime_channels;
     const bool is_bf16 = dconv_xform_is_bf16(p);
     const int BLOCK = 64;
-    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
+    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype);
     dconv_xform_params_t prm;
     if(io_type == NULL)
         return NULL;
@@ -374,7 +374,7 @@ static rocke_kernel_def_t*
     const int N_K_ATOMS = (p->kpg + K_ATOM_SZ - 1) / K_ATOM_SZ;
     const int N_M_TILES = (p->cpg + 15) / 16;
     const int WAVE = 64;
-    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype ? p->dtype : "fp16");
+    const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype);
     dconv_xform_params_t prm;
     if(io_type == NULL)
         return NULL;

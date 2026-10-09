@@ -282,7 +282,7 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
     p = spec->problem;
     ctx->p = p;
     ctx->is_bf16 = p.dtype != NULL && strcmp(p.dtype, "bf16") == 0;
-    ctx->io_type = rocke_b_io_ir_type(b, p.dtype ? p.dtype : "fp16");
+    ctx->io_type = rocke_b_io_ir_type(b, p.dtype);
     if(ctx->io_type == NULL)
         return NULL;
 

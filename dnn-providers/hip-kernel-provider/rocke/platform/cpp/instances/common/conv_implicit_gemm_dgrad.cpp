@@ -204,33 +204,32 @@ rocke_status_t
                      s->warp_tile_k,
                      s->pipeline ? s->pipeline : "mem",
                      s->epilogue ? s->epilogue : "default");
+    /* n is the length snprintf wanted, not what it wrote: check it before
+     * using it to offset into out, and check every append the same way. */
+    if(n < 0 || (size_t)n >= out_cap)
+        return ROCKE_ERR_VALUE;
+#define ROCKE_DGRAD_NAME_APPEND(...)                                       \
+    do                                                                     \
+    {                                                                      \
+        int w_ = snprintf(out + n, out_cap - (size_t)n, __VA_ARGS__);      \
+        if(w_ < 0 || (size_t)w_ >= out_cap - (size_t)n)                    \
+            return ROCKE_ERR_VALUE;                                        \
+        n += w_;                                                           \
+    } while(0)
     /* Flag order must match Python's kernel_name_join flags dict:
      * async, kouter, spk. C previously emitted spk before async, which only
      * diverged for a spec setting both -- none exists -- but the K-outer flag
      * sits between them, so the order is now load-bearing. */
     if(s->async_dma)
-    {
-        int pos = n;
-        n += snprintf(out + pos, out_cap - pos, "_async");
-    }
+        ROCKE_DGRAD_NAME_APPEND("_async");
     if(s->lds_k_outer)
-    {
-        int pos = n;
-        n += snprintf(out + pos, out_cap - pos, "_kouter");
-    }
+        ROCKE_DGRAD_NAME_APPEND("_kouter");
     if(s->split_k > 1)
-    {
-        int pos = n;
-        n += snprintf(out + pos, out_cap - pos, "_spk%d", s->split_k);
-    }
+        ROCKE_DGRAD_NAME_APPEND("_spk%d", s->split_k);
     /* A different K-loop body; only tagged when set (Python flag "ukd"). */
     if(s->uniform_k_decode)
-    {
-        int pos = n;
-        n += snprintf(out + pos, out_cap - pos, "_ukd");
-    }
-    if(n >= (int)out_cap)
-        return ROCKE_ERR_VALUE;
+        ROCKE_DGRAD_NAME_APPEND("_ukd");
+#undef ROCKE_DGRAD_NAME_APPEND
     return ROCKE_OK;
 }
 

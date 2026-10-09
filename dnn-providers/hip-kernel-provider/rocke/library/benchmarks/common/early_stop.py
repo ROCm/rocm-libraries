@@ -62,9 +62,9 @@ def add_early_stop_arg(parser) -> None:
         metavar="N",
         help="time the first N kernels of a sweep in full before --early-stop "
         f"starts skipping (default: {DEFAULT_AFTER}); a seeded case skips from "
-        "the first kernel. A kernel whose first launch is "
-        f"{HOPELESS_MARGIN:g} x (and {HOPELESS_MIN_EXCESS_MS:g} ms) past the "
-        "--early-stop bound is skipped either way",
+        "the first kernel. A kernel whose first launch is far past the "
+        "--early-stop bound, by both a relative and an absolute margin, is "
+        "skipped either way",
     )
     parser.add_argument(
         "--early-stop-seed",
