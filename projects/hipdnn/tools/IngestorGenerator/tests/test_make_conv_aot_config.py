@@ -475,9 +475,11 @@ _GPU_SUITE = (
     / "kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp"
 )
 #: One aotGraphs() row: name, problem (empty = ConvProblem's defaults), then the
-#: seed's direct and implicit counts and the full catalog's.
+#: seed's direct and implicit counts, the full catalog's direct count and its
+#: implicit counts in fp16 and in bf16.
 _GRAPH_ROW = re.compile(
-    r'^\s*\{"(\w+)", \{([\d, ]*)\}, (\d+), (\d+), (\d+), (\d+)\},$', re.MULTILINE
+    r'^\s*\{"(\w+)", \{([\d, ]*)\}, (\d+), (\d+), (\d+), (\d+), (\d+)\},$',
+    re.MULTILINE,
 )
 #: ConvProblem's defaults, in its field order: n, c, k, hi, wi, y, x, strides,
 #: paddings, dilations, groups.
@@ -502,23 +504,119 @@ def _serving_counts(specs, problem, dtype):
     return tuple(counts)
 
 
-def test_gpu_suite_serving_counts_are_the_python_serves_counts():
-    """IntegrationGpuGfx950ConvFwd.cpp states, per graph, how many instances of each
-    family serve it in the seed and in the full catalog; the native matcher is checked
-    against those numbers on the GPU, so they must be what the Python serves function
-    counts over the committed lists, in both dtypes."""
-    rows = _GRAPH_ROW.findall(_GPU_SUITE.read_text())
-    assert len(rows) >= 19, "aotGraphs() rows not found; keep one row per line"
-    catalogs = {
+@pytest.fixture(scope="module")
+def catalogs():
+    """The specs of the seed's and the product's committed instance lists."""
+    return {
         name: _specs(json.loads(_BUNDLES[name][2].read_text()))
         for name in ("seed", "product")
     }
-    for name, problem, *stated in rows:
+
+
+def test_gpu_suite_serving_counts_are_the_python_serves_counts(catalogs):
+    """IntegrationGpuGfx950ConvFwd.cpp states, per graph, how many instances of each
+    family serve it in the seed and in the full catalog; the native matcher is checked
+    against those numbers on the GPU, so they must be what the Python serves function
+    counts over the committed lists, in both dtypes. Every graph is served by both."""
+    rows = _GRAPH_ROW.findall(_GPU_SUITE.read_text())
+    assert len(rows) >= 19, "aotGraphs() rows not found; keep one row per line"
+    for name, problem, *row in rows:
         values = tuple(int(v) for v in problem.split(",")) if problem else ()
         if len(values) == 13:
             values += (1,)
         values = values or _DEFAULT_PROBLEM
-        for dtype in ("fp16", "bf16"):
+        seed_direct, seed_implicit, direct, fp16, bf16 = (int(v) for v in row)
+        for dtype, implicit in (("fp16", fp16), ("bf16", bf16)):
+            stated = (seed_direct, seed_implicit, direct, implicit)
             counted = _serving_counts(catalogs["seed"], values, dtype)
             counted += _serving_counts(catalogs["product"], values, dtype)
-            assert counted == tuple(int(v) for v in stated), (name, dtype)
+            assert counted == stated, (name, dtype)
+            assert sum(counted[:2]) > 0 and sum(counted[2:]) > 0, (name, dtype)
+
+
+#: One graph per problem class the product catalog must serve, in the field order of
+#: _DEFAULT_PROBLEM. Channel counts are per group.
+_PROBLEM_CLASSES = {
+    "odd C": (2, 3, 16, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1),
+    "odd K": (2, 16, 5, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1),
+    "odd C and K": (2, 3, 5, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1),
+    "C % 4 == 2": (2, 6, 16, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1),
+    "K % 4 == 2": (2, 16, 6, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1),
+    "C and K % 4 == 2": (2, 6, 10, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1),
+    "grouped": (2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 4),
+    "grouped, odd C/groups and K/groups": (
+        2,
+        12,
+        20,
+        14,
+        14,
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        4,
+    ),
+    "pointwise": (2, 32, 64, 14, 14, 1, 1, 1, 1, 0, 0, 1, 1, 1),
+    "grouped pointwise, odd C/groups": (2, 12, 12, 14, 14, 1, 1, 1, 1, 0, 0, 1, 1, 4),
+    "depthwise": (2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32),
+    "depthwise outside the direct guard": (
+        2,
+        32,
+        32,
+        14,
+        14,
+        3,
+        3,
+        1,
+        1,
+        0,
+        0,
+        1,
+        1,
+        32,
+    ),
+}
+
+
+@pytest.mark.parametrize("problem_class", sorted(_PROBLEM_CLASSES))
+def test_the_catalog_serves_every_problem_class(catalogs, problem_class):
+    """Every problem class keeps at least one implicit-GEMM instance after the knob
+    rule and R1, in both dtypes."""
+    for dtype in ("fp16", "bf16"):
+        counted = _serving_counts(
+            catalogs["product"], _PROBLEM_CLASSES[problem_class], dtype
+        )
+        assert counted[1] > 0, (problem_class, dtype, counted)
+
+
+def test_the_seed_runs_every_knob_value_the_catalog_ships(seed_identities):
+    """The seed pins each of its instances on the GPU, so it holds, per dtype, at least
+    one instance of every pipeline, width pair and epilogue the full catalog ships."""
+    product = json.loads(_BUNDLES["product"][2].read_text())
+
+    def knobs(identity):
+        return (
+            identity["pipeline"],
+            (identity["vector_size_a"], identity["vector_size_c"]),
+            identity.get("epilogue", "default"),
+        )
+
+    for dtype in ("fp16", "bf16"):
+        implicit = [
+            i
+            for i in seed_identities
+            if i["dtype_a"] == dtype and i["algorithm"] == "implicit_gemm"
+        ]
+        shipped = [
+            i
+            for i in product
+            if i["dtype_a"] == dtype and i["algorithm"] == "implicit_gemm"
+        ]
+        for position in range(3):
+            assert {knobs(i)[position] for i in shipped} <= {
+                knobs(i)[position] for i in implicit
+            }, (dtype, position)

@@ -152,7 +152,6 @@ std::vector<Variant> correctnessVariants()
     }
     return variants;
 }
-#endif
 
 std::vector<Variant> withBothDtypes(
     const std::vector<std::tuple<std::string, ConvProblem, size_t, size_t>>& problems)
@@ -169,7 +168,6 @@ std::vector<Variant> withBothDtypes(
     return variants;
 }
 
-#ifdef HKP_TEST_GFX950_CONV_FWD
 std::vector<Variant> directVariants()
 {
     // Every depthwise request in gfx950_conv_fwd.requests.json that carries
@@ -964,8 +962,10 @@ namespace
 
 /// One graph and how many instances of each family serve it in each catalog, as
 /// gfx950_conv_fwd_aot_serves in convolution_forward.py counts them over
-/// gfx950_conv_fwd_aot_seed.instances.json and gfx950_conv_fwd_aot.instances.json, the
-/// same in both dtypes. The engines' native matcher is checked against those counts, and
+/// gfx950_conv_fwd_aot_seed.instances.json and gfx950_conv_fwd_aot.instances.json. The
+/// seed and the direct family are the same in both dtypes; the full catalog's
+/// implicit-GEMM count is per dtype, since the no-scratch rule drops a few instances in
+/// one dtype only. The engines' native matcher is checked against those counts, and
 /// test_make_conv_aot_config.py recomputes this table from the two lists: keep one row
 /// per line.
 struct AotGraph
@@ -975,7 +975,8 @@ struct AotGraph
     size_t seedDirect;
     size_t seedImplicit;
     size_t direct;
-    size_t implicit;
+    size_t implicitFp16;
+    size_t implicitBf16;
 };
 
 // Direct instances serve only guarded depthwise graphs with their compiled filter, stride
@@ -985,30 +986,30 @@ struct AotGraph
 const std::vector<AotGraph>& aotGraphs()
 {
     static const std::vector<AotGraph> s_graphs{
-        {"Smoke", {}, 0, 12, 0, 16828},
-        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 12, 0, 16828},
+        {"Smoke", {}, 0, 12, 0, 17530, 17526},
+        {"Pointwise", {1, 32, 64, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1}, 0, 12, 0, 17530, 17526},
         // An instance is built against a 3x3 probe, so it is never the pointwise GEMM.
-        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 12, 0, 16828},
-        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 0, 12, 0, 16828},
-        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 12, 0, 16828},
-        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 12, 0, 16828},
+        {"GroupedPointwiseG4", {2, 32, 32, 8, 8, 1, 1, 1, 1, 0, 0, 1, 1, 4}, 0, 12, 0, 17530, 17526},
+        {"Strided", {2, 32, 64, 17, 19, 3, 3, 2, 2, 1, 1, 1, 1}, 0, 12, 0, 17530, 17526},
+        {"Dilated", {1, 32, 32, 15, 17, 3, 3, 1, 1, 2, 2, 2, 2}, 0, 12, 0, 17530, 17526},
+        {"Nonsquare", {2, 32, 64, 11, 17, 3, 5, 1, 2, 1, 2, 1, 1}, 0, 12, 0, 17530, 17526},
         // Three channels per group: only instances 1 wide along C/groups and K/groups.
-        {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 1826},
-        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 2, 1, 9, 1826},
-        {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 2, 1, 9, 1826},
+        {"GroupedG4Cpg3", {2, 12, 24, 11, 11, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 0, 1, 0, 2885, 2883},
+        {"Depthwise", {2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 2, 1, 9, 2885, 2883},
+        {"DepthwiseG5N3", {3, 5, 5, 9, 21, 3, 3, 1, 1, 1, 1, 1, 1, 5}, 2, 1, 9, 2885, 2883},
         // 64 groups and more: std only.
-        {"DepthwiseG96", {3, 96, 96, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 1, 1, 6, 1826},
-        {"DepthwiseG256N1", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 256}, 1, 1, 6, 1826},
-        {"DepthwiseG64Strided5x5", {2, 64, 64, 17, 17, 5, 5, 2, 2, 2, 2, 1, 1, 64}, 1, 1, 6, 1826},
-        {"DepthwiseG48Strided5x5", {1, 48, 48, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1, 48}, 1, 1, 9, 1826},
-        {"DepthwiseG12Strided7x7", {2, 12, 12, 21, 15, 7, 7, 2, 2, 3, 3, 1, 1, 12}, 1, 1, 9, 1826},
-        {"DepthwiseG40Strided7x7", {3, 40, 40, 16, 30, 7, 7, 2, 2, 3, 3, 1, 1, 40}, 1, 1, 9, 1826},
+        {"DepthwiseG96", {3, 96, 96, 20, 24, 3, 3, 1, 1, 1, 1, 1, 1, 96}, 1, 1, 6, 2885, 2883},
+        {"DepthwiseG256N1", {1, 256, 256, 12, 12, 3, 3, 1, 1, 1, 1, 1, 1, 256}, 1, 1, 6, 2885, 2883},
+        {"DepthwiseG64Strided5x5", {2, 64, 64, 17, 17, 5, 5, 2, 2, 2, 2, 1, 1, 64}, 1, 1, 6, 2885, 2883},
+        {"DepthwiseG48Strided5x5", {1, 48, 48, 23, 19, 5, 5, 2, 2, 2, 2, 1, 1, 48}, 1, 1, 9, 2885, 2883},
+        {"DepthwiseG12Strided7x7", {2, 12, 12, 21, 15, 7, 7, 2, 2, 3, 3, 1, 1, 12}, 1, 1, 9, 2885, 2883},
+        {"DepthwiseG40Strided7x7", {3, 40, 40, 16, 30, 7, 7, 2, 2, 3, 3, 1, 1, 40}, 1, 1, 9, 2885, 2883},
         // Outside the direct guard: implicit GEMM alone.
-        {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 0, 1, 0, 1826},
+        {"DepthwiseG64Pad0", {2, 64, 64, 12, 12, 3, 3, 1, 1, 0, 0, 1, 1, 64}, 0, 1, 0, 2885, 2883},
         // C = 12 admits load widths up to 4 and K = 20 store widths up to 4.
-        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 7, 0, 7779},
-        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 12, 0, 16828},
-        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 12, 0, 16828},
+        {"C12K20", {2, 12, 20, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 7, 0, 14991, 14987},
+        {"C24K40", {2, 24, 40, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 12, 0, 17530, 17526},
+        {"Wide", {4, 64, 128, 28, 28, 3, 3, 1, 1, 1, 1, 1, 1}, 0, 12, 0, 17530, 17526},
     };
     return s_graphs;
 }
@@ -1017,15 +1018,21 @@ const std::vector<AotGraph>& aotGraphs()
 /// aotGraphs() in both dtypes, with the seed's serving counts or the full catalog's.
 std::vector<Variant> aotVariants(bool fullCatalog)
 {
-    std::vector<std::tuple<std::string, ConvProblem, size_t, size_t>> problems;
+    std::vector<Variant> variants;
     for(const auto& graph : aotGraphs())
     {
-        problems.emplace_back(graph.name,
-                              graph.problem,
-                              fullCatalog ? graph.direct : graph.seedDirect,
-                              fullCatalog ? graph.implicit : graph.seedImplicit);
+        for(const auto dtype : {DataType::HALF, DataType::BFLOAT16})
+        {
+            const auto implicit = dtype == DataType::HALF ? graph.implicitFp16 : graph.implicitBf16;
+            variants.push_back({graph.name + dtypeSuffix(dtype),
+                                dtype,
+                                0,
+                                graph.problem,
+                                fullCatalog ? graph.direct : graph.seedDirect,
+                                fullCatalog ? implicit : graph.seedImplicit});
+        }
     }
-    return withBothDtypes(problems);
+    return variants;
 }
 
 } // namespace
