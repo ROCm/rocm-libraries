@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
@@ -92,6 +94,39 @@ inline bool recordCovers(const WinnerRecord& record,
     });
 }
 
+namespace detail
+{
+
+/// The `(kernelId, packId, dispatchId)` triple `orderByRecord` matches on.
+struct RecordedKernelKey
+{
+    DescriptorId kernelId{};
+    DescriptorId packId{};
+    DescriptorId dispatchId{};
+
+    bool operator==(const RecordedKernelKey& other) const
+    {
+        return kernelId == other.kernelId && packId == other.packId
+               && dispatchId == other.dispatchId;
+    }
+};
+
+struct RecordedKernelKeyHash
+{
+    size_t operator()(const RecordedKernelKey& key) const noexcept
+    {
+        const DescriptorIdHash hash;
+        size_t seed = hash(key.kernelId);
+        for(const size_t part : {hash(key.packId), hash(key.dispatchId)})
+        {
+            seed ^= part + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+        }
+        return seed;
+    }
+};
+
+} // namespace detail
+
 /// Reorders @p kernels into @p record's ranked order, dropping any kernel the record
 /// does not carry and any entry whose `packId`/`dispatchId` no longer agree (distinct
 /// from `recordCovers`'s coverage check). An empty result means the caller falls back.
@@ -100,6 +135,21 @@ inline std::vector<const KernelDefinition*>
 {
     std::vector<const KernelDefinition*> ordered;
     ordered.reserve(kernels.size());
+    if(record.empty() || kernels.empty())
+    {
+        return ordered;
+    }
+
+    std::unordered_map<detail::RecordedKernelKey, size_t, detail::RecordedKernelKeyHash> firstIndex;
+    firstIndex.reserve(kernels.size());
+    for(size_t index = 0; index < kernels.size(); ++index)
+    {
+        const auto& kernel = kernels[index];
+        // emplace keeps the first index on a repeat, matching find_if's first hit.
+        firstIndex.emplace(
+            detail::RecordedKernelKey{kernel.kernelId, kernel.packId, kernel.dispatchId}, index);
+    }
+
     for(const auto& entry : record)
     {
         const auto match = std::find_if(
@@ -109,7 +159,7 @@ inline std::vector<const KernelDefinition*>
             });
         if(match != kernels.end())
         {
-            ordered.push_back(*match);
+            ordered.push_back(kernels[match->second]);
         }
     }
     return ordered;
