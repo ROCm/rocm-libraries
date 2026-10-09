@@ -1318,6 +1318,21 @@ def _relocate_stage(stage: Path, output: Path) -> None:
         _write_json(path, relocate(json.loads(path.read_text(encoding="utf-8"))))
 
 
+def _train_and_score(
+    train_args: list[str], eval_args: list[str], model_dir: Path, what: str
+) -> tuple[Path, dict]:
+    """Train a model into `model_dir` and score it: `uhd_gen train <train_args>`, then
+    `uhd_gen evaluate <eval_args>`. Returns the evaluation report and its path."""
+    from .__main__ import main, train
+
+    if train(train_args):
+        raise ValueError(f"training {what} failed; no model was published")
+    if main(["evaluate", *eval_args]):
+        raise ValueError(f"evaluating {what} failed; no model was published")
+    report_path = model_dir / "eval_report.json"
+    return report_path, json.loads(report_path.read_text(encoding="utf-8"))
+
+
 def _generate_published(
     args: argparse.Namespace, measured: dict, stage: Path, output: Path, metrics: list
 ) -> int:
@@ -1327,8 +1342,6 @@ def _generate_published(
     are stated rather than inferred, and the model cannot be promoted. The holdout is
     generate's own: `--eval-benchmarks`, `--eval-fraction`, or `--recall`.
     """
-    from .__main__ import main
-
     if args.role == ROLE:
         raise ValueError(
             "a published dataset is a measured catalog; train it as a catalog ranker, "
@@ -1392,7 +1405,6 @@ def _generate_published(
         else ["--features", *args.features]
     )
     train_args = [
-        "train",
         "--input",
         str(train_path),
         *features,
@@ -1430,12 +1442,7 @@ def _generate_published(
     if args.uhd_ids:
         # One model: a bare id, or the one METRIC=UUID entry, names it.
         train_args += ["--uhd-id", args.uhd_ids[0].split("=", 1)[-1]]
-    if main([*train_args, "--no-install-hint"]):
-        raise ValueError(
-            "training the published dataset failed; no model was published"
-        )
     eval_args = [
-        "evaluate",
         "--input",
         str(eval_path),
         "--model-dir",
@@ -1452,10 +1459,9 @@ def _generate_published(
     ]
     if args.feature_evaluator:
         eval_args += ["--feature-evaluator", args.feature_evaluator]
-    if main(eval_args):
-        raise ValueError("evaluating the published dataset's model failed")
-    report_path = model_dir / "eval_report.json"
-    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report_path, report = _train_and_score(
+        train_args, eval_args, model_dir, "the published dataset"
+    )
     training_keys = set(problem_keys(train_frame, grouping))
     evaluated_keys = set(problem_keys(eval_frame, grouping))
     if not args.recall and training_keys & evaluated_keys:
@@ -1488,8 +1494,8 @@ def _generate_published(
                     ),
                     "model_dir": str(model_dir),
                     "corpus": str(stage / "corpus.json"),
-                    "training_arguments": train_args,
-                    "evaluation_arguments": eval_args,
+                    "training_arguments": ["train", *train_args],
+                    "evaluation_arguments": ["evaluate", *eval_args],
                     "training_problem_keys": sorted(training_keys),
                     "eval_problem_keys": sorted(evaluated_keys),
                 }
@@ -1520,7 +1526,7 @@ def _generate_published(
 
 
 def run_generate(args: argparse.Namespace) -> int:
-    from .__main__ import install_hint, main
+    from .__main__ import install_hint
     from .promote import PromoteError, build_plan, run_promote, add_promote_arguments
 
     stage = None
@@ -1876,7 +1882,6 @@ def run_generate(args: argparse.Namespace) -> int:
                 train_path, _absent_as_null(source_train.to_dict(orient="records"))
             )
             train_args = [
-                "train",
                 "--input",
                 str(train_path),
                 "--feature-signature",
@@ -1913,14 +1918,9 @@ def run_generate(args: argparse.Namespace) -> int:
                 train_args.extend(["--uhd-id", uhd_ids[requested]])
             if args.feature_evaluator:
                 train_args.extend(["--feature-evaluator", args.feature_evaluator])
-            if main([*train_args, "--no-install-hint"]):
-                raise ValueError(
-                    f"training {requested} failed; no generated model was published"
-                )
             # Recall scores every (trained) shape: fit to the served space, not
             # extrapolation.
             eval_args = [
-                "evaluate",
                 "--input",
                 str(eval_corpora.get(source, corpora[source])),
                 "--model-dir",
@@ -1933,12 +1933,9 @@ def run_generate(args: argparse.Namespace) -> int:
             ]
             if args.feature_evaluator:
                 eval_args.extend(["--feature-evaluator", args.feature_evaluator])
-            if main(eval_args):
-                raise ValueError(
-                    f"{requested} artifact evaluation failed; no generated model was published"
-                )
-            report_path = model_dir / "eval_report.json"
-            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report_path, report = _train_and_score(
+                train_args, eval_args, model_dir, requested
+            )
             if not report["metrics"]["problems_scored"]:
                 # A wholly deterministic catalog was refused above, so this is a thin
                 # holdout, not an inert engine; say which, as the remedies differ.
@@ -1980,8 +1977,8 @@ def run_generate(args: argparse.Namespace) -> int:
                     "uhd_id": uhd_ids.get(requested),
                     "model_dir": str(model_dir),
                     "corpus": str(corpora[source]),
-                    "training_arguments": train_args,
-                    "evaluation_arguments": eval_args,
+                    "training_arguments": ["train", *train_args],
+                    "evaluation_arguments": ["evaluate", *eval_args],
                     "training_problem_keys": sorted(training_keys),
                     "eval_problem_keys": sorted(evaluated_keys),
                 }

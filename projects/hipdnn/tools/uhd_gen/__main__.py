@@ -261,7 +261,18 @@ def main(argv: list[str] | None = None) -> int:
         return run_knobs(args)
     if args.command == "merge":
         return run_merge(args)
-    return _run_train(args)
+    code = _run_train(args)
+    if code == 0:
+        print(install_hint(args.output_dir, args.role, args.arch, args.uhd_id))
+    return code
+
+
+def train(argv: list[str]) -> int:
+    """`uhd_gen train <argv>` for a caller that places and installs the model itself:
+    `generate` trains into a staging directory and prints the model's final path."""
+    parser = argparse.ArgumentParser(prog="uhd_gen train")
+    _add_train_arguments(parser)
+    return _run_train(parser.parse_args(argv))
 
 
 def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
@@ -367,11 +378,6 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         required=True,
         dest="output_dir",
         help="Output directory for model artifacts",
-    )
-    # `generate` trains into a staging directory it renames afterwards, and prints the
-    # model's final path itself.
-    parser.add_argument(
-        "--no-install-hint", action="store_true", help=argparse.SUPPRESS
     )
     parser.add_argument(
         "--name",
@@ -1002,8 +1008,6 @@ def _run_train(args: argparse.Namespace) -> int:
     print(
         f"UHD generated: {descriptor_path}\nModel: {fb_path}\nFeatures hash: {features_hash}"
     )
-    if not args.no_install_hint:
-        print(install_hint(output_dir, args.role, args.arch, args.uhd_id))
     return 0
 
 
