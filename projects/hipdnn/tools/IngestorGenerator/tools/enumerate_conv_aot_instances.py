@@ -1,26 +1,19 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Enumerate the rocKE gfx950 forward-conv AOT instances the hipkernel pack ships.
+"""Build the rocKE gfx950 forward-conv AOT instance lists the hipkernel pack ships.
 
-The catalog is rocKE's own sweep grids, per dtype, in two families. The only
-selection of ours is the implicit-GEMM exclusion policy (:func:`excluded_reason`).
+The catalog is a curated list of rocKE kernels (:data:`CATALOG_LABELS`): one
+``KernelIdentity.label()`` per line, which :meth:`KernelIdentity.from_label` turns
+back into the identity. Implicit-GEMM entries must be identities of the AOT sweep
+grid (``benchmarks/common/kernel_sweep.py``) and direct entries identities of the
+direct sweep grid (``benchmarks/common/direct_kernel_sweep.py``), for gfx950,
+forward, fp16 or bf16. Every entry must also convert: an identity
+``make_conv_aot_config.py`` refuses, because the packaged launch does not run it,
+fails the run. Nothing is dropped silently.
 
-Implicit GEMM is every valid gfx950 forward implicit-GEMM ``KernelIdentity`` of the
-AOT sweep grid (``benchmarks/common/kernel_sweep.py``) that the policy keeps: every
-tile and warp geometry, pipeline and epilogue the sweep enumerates, the plain and
-unrolled K loops, and the load and store widths of :data:`PACKAGED_VECTOR_WIDTHS`.
-The policy drops the async DMA K loop, every other width pair, and the ``cshuffle``
-epilogue with a store width of 1. Every kept identity must convert: an identity
-``make_conv_aot_config.py`` refuses fails the run.
-
-Direct is every forward identity of the direct sweep grid
-(``benchmarks/common/direct_kernel_sweep.py``) that ``make_conv_aot_config.py``
-accepts, which is the set of direct kernels the packaged launch runs. The others
-are counted per algorithm with the converter's reason and left out, so the
-catalog grows by itself as the converter learns to package more of them.
-
-Which instance serves a given problem is decided at runtime, not here.
+Which instance serves a given problem, and which serving instances run, is decided
+at runtime, not here.
 
 The output is one JSON list per dtype (:data:`INSTANCE_LIST`), one identity per
 line, ordered by family (implicit GEMM first), then ``stable_hash``. Each entry
@@ -28,8 +21,7 @@ is compact (:func:`compact_identity`): the ``KernelIdentity`` fields without a
 plain default, plus every field that differs from its default;
 ``KernelIdentity.from_dict`` restores the rest, so the entry keeps its
 ``stable_hash()``. The lists are the input of ``make_conv_aot_config.py
---instances``, and each entry is validated with that tool's ``instance_spec``
-before anything is written::
+--instances``::
 
     python tools/enumerate_conv_aot_instances.py --rocke-root "$ROCKE" \\
         --output-dir configs
@@ -52,14 +44,12 @@ DTYPES = ("fp16", "bf16")
 #: 50 MB a source host accepts.
 INSTANCE_LIST = "gfx950_conv_fwd_aot_{dtype}.instances.json"
 
-#: The (load, store) width pairs the implicit-GEMM catalog ships, as
-#: ``(vector_size_a, vector_size_c)``; ``vector_size_b`` must equal ``vector_size_a``.
-#: The runtime selection keeps only the widest pair that serves a graph, so these
-#: are the pairs a graph can fall back to as its C and K lose powers of two.
-PACKAGED_VECTOR_WIDTHS = frozenset({(1, 1), (2, 2), (4, 4), (8, 8), (4, 1), (1, 4)})
-
 _HERE = Path(__file__).resolve().parent
 DEFAULT_OUTPUT_DIR = _HERE.parent / "configs"
+
+#: The curated catalog: one ``KernelIdentity.label()`` per line; blank lines and
+#: lines starting with ``#`` are ignored.
+CATALOG_LABELS = DEFAULT_OUTPUT_DIR / "gfx950_conv_fwd_aot.labels.txt"
 
 
 def _bind_rocke(rocke_root: Path) -> None:
@@ -78,68 +68,47 @@ def _converter():
     return make_conv_aot_config
 
 
-def excluded_reason(identity: dict):
-    """Why the catalog leaves out an implicit-GEMM identity, or None to ship it.
+def read_labels(path: Path) -> list:
+    """The identities ``path`` lists, as dicts, in file order.
 
-    - The async DMA K loop. Three in four of its instances compile to the IR of
-      another async instance.
-    - Load and store widths outside :data:`PACKAGED_VECTOR_WIDTHS`.
-    - ``cshuffle`` with a store width of 1: such a graph runs the default epilogue.
+    Raises ``ValueError`` on a malformed label, on one that does not spell its
+    identity exactly (``label()`` of the parsed identity must be the line), and on a
+    repeated identity.
     """
-    if identity["async_dma"]:
-        return "async DMA K loop"
-    load, store = identity["vector_size_a"], identity["vector_size_c"]
-    if identity["vector_size_b"] != load or (load, store) not in PACKAGED_VECTOR_WIDTHS:
-        return "width pair outside PACKAGED_VECTOR_WIDTHS"
-    if identity["epilogue"] == "cshuffle" and store == 1:
-        return "cshuffle with store width 1"
-    return None
+    from benchmarks.common.kernel_cache import KernelIdentity
+
+    identities, seen = [], set()
+    for lineno, line in enumerate(path.read_text().splitlines(), 1):
+        label = line.strip()
+        if not label or label.startswith("#"):
+            continue
+        identity = KernelIdentity.from_label(label)
+        if identity.label() != label:
+            raise ValueError(
+                f"{path}:{lineno}: {label!r} reads back as {identity.label()!r}"
+            )
+        if identity.stable_hash() in seen:
+            raise ValueError(f"{path}:{lineno}: {label!r} is listed twice")
+        seen.add(identity.stable_hash())
+        identities.append(identity.to_dict())
+    return identities
 
 
-def sweep_identities(dtype: str, jobs: int) -> list:
-    """Every valid identity of rocKE's forward implicit-GEMM AOT grid, as dicts."""
+def sweep_hashes(dtype: str, jobs: int) -> set:
+    """``stable_hash`` of every valid forward identity of rocKE's implicit-GEMM AOT
+    grid and of its direct grid, for ``dtype``."""
     from benchmarks.common import kernel_sweep
-    from rocke.core.arch import ArchTarget
-
-    found = kernel_sweep.enumerate_jobs(
-        arch=ARCH,
-        dtype=dtype,
-        target=ArchTarget.from_gfx(ARCH),
-        directions=("fwd",),
-        jobs=jobs,
-    )
-    return [job.identity.to_dict() for job in found]
-
-
-def grid_identities(dtype: str, jobs: int) -> list:
-    """The identities of :func:`sweep_identities` the exclusion policy keeps."""
-    return [i for i in sweep_identities(dtype, jobs) if excluded_reason(i) is None]
-
-
-def direct_identities(dtype: str, jobs: int) -> tuple:
-    """``(packaged, refused)``: the forward identities of rocKE's direct sweep grid
-    that ``make_conv_aot_config.py`` accepts, as dicts, and a ``Counter`` of the
-    others by ``(algorithm, reason)``."""
     from benchmarks.common.direct_kernel_sweep import enumerate_direct_jobs
     from rocke.core.arch import ArchTarget
 
-    converter = _converter()
-    found = enumerate_direct_jobs(
-        arch=ARCH,
-        target=ArchTarget.from_gfx(ARCH),
-        directions=("fwd",),
-        dtype=dtype,
-        jobs=jobs,
+    target = ArchTarget.from_gfx(ARCH)
+    implicit = kernel_sweep.enumerate_jobs(
+        arch=ARCH, dtype=dtype, target=target, directions=("fwd",), jobs=jobs
     )
-    packaged, refused = [], collections.Counter()
-    for job in found:
-        identity = job.identity.to_dict()
-        spec, reason = converter.instance_spec(identity)
-        if spec is None:
-            refused[(identity["algorithm"], reason)] += 1
-        else:
-            packaged.append(identity)
-    return packaged, refused
+    direct = enumerate_direct_jobs(
+        arch=ARCH, target=target, directions=("fwd",), dtype=dtype, jobs=jobs
+    )
+    return {job.identity.stable_hash() for job in [*implicit, *direct]}
 
 
 def stable_hash(identity: dict) -> str:
@@ -199,6 +168,13 @@ def main(argv=None) -> int:
         help="rocKE tree (platform/, library/).",
     )
     parser.add_argument(
+        "--labels",
+        type=Path,
+        default=CATALOG_LABELS,
+        help="The curated catalog, one KernelIdentity label per line "
+        "(default: %(default)s).",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
@@ -214,30 +190,40 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     _bind_rocke(args.rocke_root)
 
+    try:
+        listed = read_labels(args.labels)
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 1
+    others = sorted({i["dtype_a"] for i in listed} - set(DTYPES))
+    if others:
+        print(f"{args.labels}: dtype(s) {others} are not packaged", file=sys.stderr)
+        return 1
+
     lists, failed = {}, False
-    print(f"{'dtype':6s} {'implicit':>8s} {'direct grid':>11s} {'direct':>6s}")
+    print(f"{'dtype':6s} {'implicit':>8s} {'direct':>6s}")
     for dtype in sorted(DTYPES):
-        implicit = sorted(
-            (stable_hash(i), i) for i in grid_identities(dtype, args.jobs)
-        )
-        if len({h for h, _ in implicit}) != len(implicit):
-            print(f"{dtype}: the grid repeats an identity", file=sys.stderr)
-            return 1
-        rejected = validate([i for _, i in implicit], args.jobs)
-        for instance_id, reason in rejected:
+        identities = [i for i in listed if i["dtype_a"] == dtype]
+        swept = sweep_hashes(dtype, args.jobs)
+        for identity in identities:
+            if stable_hash(identity) not in swept:
+                print(
+                    f"not a {ARCH} forward sweep identity: {identity_label(identity)}",
+                    file=sys.stderr,
+                )
+                failed = True
+        for instance_id, reason in validate(identities, args.jobs):
             print(f"unsupported instance {instance_id}: {reason}", file=sys.stderr)
-        failed |= bool(rejected)
-        direct, refused = direct_identities(dtype, args.jobs)
-        direct = sorted(((stable_hash(i), i) for i in direct), key=lambda p: p[0])
-        print(
-            f"{dtype:6s} {len(implicit):8d} "
-            f"{len(direct) + sum(refused.values()):11d} {len(direct):6d}"
-        )
-        for (algorithm, reason), count in sorted(refused.items()):
-            print(f"  direct {algorithm}: {count} not packaged ({reason})")
+            failed = True
+        families = collections.defaultdict(list)
+        for identity in identities:
+            implicit = identity["algorithm"] == "implicit_gemm"
+            families[implicit].append((stable_hash(identity), identity))
+        implicit, direct = sorted(families[True]), sorted(families[False])
+        print(f"{dtype:6s} {len(implicit):8d} {len(direct):6d}")
         lists[dtype] = [i for _, i in implicit] + [i for _, i in direct]
     if failed:
-        print("unsupported implicit-GEMM instance(s); nothing written", file=sys.stderr)
+        print("unsupported catalog entries; nothing written", file=sys.stderr)
         return 1
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for dtype, identities in lists.items():
@@ -245,6 +231,12 @@ def main(argv=None) -> int:
         write_instances(path, identities)
         print(f"{len(identities)} instance(s) written to {path}")
     return 0
+
+
+def identity_label(identity: dict) -> str:
+    from benchmarks.common.kernel_cache import KernelIdentity
+
+    return KernelIdentity.from_dict(identity).label()
 
 
 if __name__ == "__main__":
