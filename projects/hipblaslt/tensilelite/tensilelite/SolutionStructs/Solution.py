@@ -400,7 +400,7 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
 
 
 # _getExpectedTypes / _expectedParamTypes / _skipTypeCheck were moved into
-# Tensile/Common/ValidParameters.py to keep the registry and its derived
+# tensilelite/Common/ValidParameters.py to keep the registry and its derived
 # type map co-located (and to keep the Common -> Solution import direction).
 # They are re-imported above and re-exported here for the existing test
 # module (tensilelite/Tests/unit/test_validateParameterTypes.py) that imports
@@ -754,7 +754,7 @@ class Solution(collections.abc.Mapping):
         assert self.isaInfoMap[isa].asmCaps["SupportedISA"]
         self._state['ISA'] = IsaVersion(isa[0], isa[1], isa[2])
       else:
-        # When calling from Tensile, the ISA is typically not defined.
+        # When calling from TensileLite, the ISA is typically not defined.
         printWarning(f"ISA not set on config using {targetIsas[0]}.")
         self._state['ISA'] = targetIsas[0]
 
