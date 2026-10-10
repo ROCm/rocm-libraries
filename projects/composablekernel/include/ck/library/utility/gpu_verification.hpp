@@ -73,6 +73,7 @@ inline float compute_relative_tolerance(const int number_of_accumulations = 1)
     using F16  = ck::half_t;
     using BF16 = ck::bhalf_t;
     using F32  = float;
+    using TF32 = ck::tf32_t;
     using I8   = int8_t;
     using I16  = int16_t;
     using I32  = int32_t;
@@ -86,7 +87,8 @@ inline float compute_relative_tolerance(const int number_of_accumulations = 1)
     // For types supported by get_relative_threshold, use it
     else if constexpr((std::is_same_v<ComputeDataType, F16> ||
                        std::is_same_v<ComputeDataType, BF16> ||
-                       std::is_same_v<ComputeDataType, F32>) &&
+                       std::is_same_v<ComputeDataType, F32> ||
+                       std::is_same_v<ComputeDataType, TF32>) &&
                       (std::is_same_v<OutDataType, F16> || std::is_same_v<OutDataType, BF16> ||
                        std::is_same_v<OutDataType, F32>) &&
                       (std::is_same_v<AccDataType, F16> || std::is_same_v<AccDataType, BF16> ||
@@ -432,9 +434,10 @@ GpuVerifyResult gpu_verify(IteratorA device_result,
     using F16  = ck::half_t;
     using BF16 = ck::bhalf_t;
     using F32  = float;
+    using TF32 = ck::tf32_t;
 
     if constexpr((std::is_same_v<ComputeDataType, F16> || std::is_same_v<ComputeDataType, BF16> ||
-                  std::is_same_v<ComputeDataType, F32>) &&
+                  std::is_same_v<ComputeDataType, F32> || std::is_same_v<ComputeDataType, TF32>) &&
                  (std::is_same_v<OutDataType, F16> || std::is_same_v<OutDataType, BF16> ||
                   std::is_same_v<OutDataType, F32>) &&
                  (std::is_same_v<AccDataType, F16> || std::is_same_v<AccDataType, BF16> ||

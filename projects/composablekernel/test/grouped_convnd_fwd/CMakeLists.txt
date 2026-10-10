@@ -8,6 +8,9 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
     add_gtest_executable(test_grouped_convnd_fwd test_grouped_convnd_fwd.cpp)
     target_link_device_conv_libraries_if_exist(test_grouped_convnd_fwd PRIVATE utility device_conv_operations)
 
+    add_gtest_executable(test_grouped_convnd_fwd_tf32 test_grouped_convnd_fwd_tf32.cpp)
+    target_link_device_conv_libraries_if_exist(test_grouped_convnd_fwd_tf32 PRIVATE utility device_conv_operations)
+
     # Wavelet XDL conv3d instances (NDHWGC layout, supports gfx9 and gfx11 via Wave32Force16)
     add_gtest_executable(test_grouped_convnd_fwd_wavelet test_grouped_convnd_fwd_wavelet.cpp)
     target_link_device_conv_libraries_if_exist(test_grouped_convnd_fwd_wavelet PRIVATE utility device_conv_operations)

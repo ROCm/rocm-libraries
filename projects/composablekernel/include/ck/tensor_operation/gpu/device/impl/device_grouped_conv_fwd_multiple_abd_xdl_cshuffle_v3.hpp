@@ -412,7 +412,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
     // Force usage of 16x16 instruction for WMMA
     static constexpr bool Wave32Force16MNPerXDL =
         is_NSpatialGC_GKSpatial_NSpatialGK<ALayout, BLayout, ELayout>() &&
-        sizeof(AComputeDataType) == 2 && sizeof(BComputeDataType) == 2 &&
+        (sizeof(AComputeDataType) == 2 || is_same_v<AComputeDataType, tf32_t>) &&
+        (sizeof(BComputeDataType) == 2 || is_same_v<BComputeDataType, tf32_t>) &&
         is_same_v<CDEElementwiseOperation, tensor_operation::element_wise::PassThrough> &&
         (ConvForwardSpecialization == ConvolutionForwardSpecialization::Filter1x1Stride1Pad0 ||
          ConvForwardSpecialization == ConvolutionForwardSpecialization::Default);
@@ -1551,7 +1552,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         if constexpr(is_same_v<AComputeDataType, ck::tf32_t> ||
                      is_same_v<BComputeDataType, ck::tf32_t>)
         {
-            if(!is_tf32_supported())
+            if(!is_tf32_conv_fwd_supported())
             {
                 return false;
             }

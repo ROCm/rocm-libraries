@@ -131,9 +131,11 @@ function(add_instance_library INSTANCE_NAME)
             message(DEBUG "removing gemm_blockscale_wp_f8 instance ${source} ")
             list(REMOVE_ITEM ARGN "${source}")
         endif()
-        # Only build tf32 instances for gfx942 & gfx950
+        # Only build tf32 instances for gfx942, gfx950, gfx11 & gfx120. On gfx11 and gfx120 only the
+        # forward ops accept tf32 at runtime (is_tf32_conv_fwd_supported); the other tf32 instances
+        # are still built there because CK_ENABLE_TF32 makes the instance factories reference them.
         if(source_name MATCHES "_tf32_")
-            if(NOT ((INST_TARGETS MATCHES "gfx942|gfx950") AND CK_ENABLE_TF32))
+            if(NOT ((INST_TARGETS MATCHES "gfx942|gfx950|gfx11|gfx120") AND CK_ENABLE_TF32))
                 message(DEBUG "removing tf32 instance ${source} ")
                 list(REMOVE_ITEM ARGN "${source}")
             endif()
