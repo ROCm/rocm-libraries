@@ -319,6 +319,26 @@ TEST_P(POTF2_LARGE_BATCH, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
+TEST_P(POTF2_LARGE_BATCH_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(POTF2_LARGE_BATCH_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(POTF2_LARGE_BATCH_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(POTF2_LARGE_BATCH_64, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
 TEST_P(POTRF_LARGE_BATCH, batched__float)
 {
     run_tests<true, true, float>();
