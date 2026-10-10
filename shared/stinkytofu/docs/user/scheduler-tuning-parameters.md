@@ -4,6 +4,8 @@ This page lists every tuning value of the gfx1250 (CDNA5) DAG scheduler: what it
 controls, its default, how an unset value is resolved, and where to set it.
 For the placement mechanisms behind the prefetch and filler knobs, see
 [DAG wait and prefetch placement](../developer/dag-wait-and-prefetch-placement.md).
+For how to use and tune the TDM ds window knobs, with measured results, see the
+[TDM / ds_load window tuning guide](tdm-ds-window-tuning-guide.md).
 
 ## Where to set a value
 
@@ -88,6 +90,8 @@ the depth, set `DsReadPerCap` explicitly.
 | `TdmWindowLatencyCycles` | -1 (policy 330) | module option / fork parameter | Tunable L in the TDM window formula `tEnd = L + TdmStageBytes / 256`. It places the ds cap window (a window-placement knob, not a measured TDM latency): henry fp8 128 KB is flat within ~0.2% for L in ~130-330 (window start 400-602); L >= 470 (start 700+) loses 0.5-1.3%. -1 uses the policy value. |
 | `TdmScaleTensors` | 0 | module option (set by TensileLite from `MXBlockA`/`MXBlockB`) | 1: the kernel TDMs MX scale tensors besides the data tiles. Selects the looser policy window cap (2 per span) because a tight cap costs those kernels ~1.4% (nvf4 -1.42%, mxf4 -1.38% with 1; +0.03% / +0.06% with 2) while gaining fp8 1-2%. Empirical, not derived. |
 | `DsPaceTdm` | 0 (off) | module option; `--ds-pace-tdm` | Experimental. Plans a release time for each of a region's ds_loads that no barrier gates, instead of issuing them ASAP under the cap: spread evenly from the region start to the before-barrier, thinned to `DsCapTdmPerCap` per span inside the TDM landing window, count kept (`DsPacePlan.hpp`). Loads a before-barrier gates stay ASAP behind it. Needs the DsCapTdm window. |
+| `DsPaceLeadLoads` | 0 | module option | Experimental, refuted. With `DsPaceTdm`, the first N ungated ds_loads stay ASAP. Do not use. |
+| `DsCapTdmBurst` | 0 | module option; `--ds-cap-tdm-burst=N` | Experimental, refuted (falsification test): 1 lifts the ds cap inside the TDM window, 2 also lifts the ds_read throttle. The real ds rate does not change. Do not use. |
 | `DsReadQueueDepth` | 0 → HW 16 | `--ds-read-queue-depth=N` | In-flight ds_load credits modeled for the LDS return queue. |
 | `DsReadThrottleLatency` | -1 → heuristic | `--ds-read-throttle-latency=N` | Lifetime of one credit. A saturated queue issues one ds_load per `DsReadThrottleLatency / DsReadQueueDepth` cycles. |
 | `DsReadThrottleTransitionFactor` | 1.0 | `--ds-read-throttle-transition-factor=F` | Fraction of the full throttle interval used for the first `TransitionEntries` loads past the queue depth. Clamped to [0, 1]; 1.0 = full throttle. |
