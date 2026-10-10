@@ -8,7 +8,7 @@ matrix atom / unsupported path).
 | Arch | µarch | Matrix engine | Wave | f16 fp32-acc atoms |
 |---|---|---|---|---|
 | gfx942 | CDNA3 | MFMA | 64 | 16x16x16, 32x32x8 |
-| gfx950 | CDNA4 | MFMA | 64 | 16x16x16, 16x16x32, 32x32x8, 32x32x16 |
+| gfx950 | CDNA4 | MFMA | 64 | 16x16x16, 16x16x32, 32x32x8, 32x32x16, scaled 32x32x64 |
 | gfx1151 | RDNA3.5 | WMMA | 32 | 16x16x16 (`wmma_f32_16x16x16_{f16,bf16}`) |
 
 Matrix-core instances below were exercised with a portable f16 **16x16x16**
@@ -41,6 +41,19 @@ atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`
 These emit generic AMDGPU IR; arch only sets the comgr target triple.
 
 ---
+
+## gfx950 native scaled GEMM
+
+`gfx950/block_scaled_gemm` supports all 25 ordered homogeneous/mixed FP8 E4M3,
+BF8 E5M2, FP6 E2M3, BF6 E3M2 and FP4 E2M1 pairs with native 32x32x64 scaled
+MFMA. E8M0 scales cover K32 groups; accumulation is FP32 and output BF16/FP16.
+M/N must be multiples of 32 and K a multiple of 64, within signed i32 indexing.
+LLVM 23 and gfx950 are required. Public selection, binding and sweep APIs live
+in `dispatch/gemm/block_scaled.py`. The [four focused examples](../examples/gfx950/gemm/README.md)
+cover F8, F6, F4 and mixed inputs with independent non-unity scales. Python/C++
+IR and LLVM identity, compiler ISA checks and bounded hardware numeric suites
+cover this consumer; arbitrary-input rounding and special scales remain outside
+the finite verification fixtures.
 
 ## gfx1250 native scaled GEMM
 

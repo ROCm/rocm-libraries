@@ -1020,6 +1020,66 @@ _MMA_FRAGMENT_INFO.update(
 )
 
 
+def _mfma_scaled_a(builder, lane, slot):
+    row = builder.mod(lane, builder.const_i32(32))
+    k = builder.add(
+        builder.mul(builder.div(lane, builder.const_i32(32)), builder.const_i32(32)),
+        builder.const_i32(slot),
+    )
+    return row, k
+
+
+def _mfma_scaled_f8_a(builder, lane, slot):
+    row = builder.mod(lane, builder.const_i32(32))
+    k = builder.add(
+        builder.mul(builder.div(lane, builder.const_i32(32)), builder.const_i32(16)),
+        builder.const_i32((slot // 16) * 32 + slot % 16),
+    )
+    return row, k
+
+
+def _mfma_scaled_f8_b(builder, lane, slot):
+    row, k = _mfma_scaled_f8_a(builder, lane, slot)
+    return k, row
+
+
+def _mfma_scaled_b(builder, lane, slot):
+    row, k = _mfma_scaled_a(builder, lane, slot)
+    return k, row
+
+
+def _mfma_scaled_scale_a(builder, lane, slot):
+    return builder.mod(lane, builder.const_i32(32)), builder.div(
+        lane, builder.const_i32(32)
+    )
+
+
+def _mfma_scaled_scale_b(builder, lane, slot):
+    row, k = _mfma_scaled_scale_a(builder, lane, slot)
+    return k, row
+
+
+_MMA_FRAGMENT_INFO.update(
+    {
+        f"mfma_gfx950_f32_32x32x64_{a}_{b}_scale_e8m0_e8m0_k32": _FragInfo(
+            32,
+            32,
+            16,
+            64,
+            _mfma_scaled_f8_a if a in ("fp8", "bf8") else _mfma_scaled_a,
+            _mfma_scaled_f8_b if b in ("fp8", "bf8") else _mfma_scaled_b,
+            _mfma_acc_32x32,
+            1,
+            1,
+            _mfma_scaled_scale_a,
+            _mfma_scaled_scale_b,
+        )
+        for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
+    }
+)
+
+
 def _frag_info(op_id: str) -> _FragInfo:
     info = _MMA_FRAGMENT_INFO.get(op_id)
     if info is None:

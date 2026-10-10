@@ -30,6 +30,7 @@
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
+#include "rocke/mfma_scale_internal.h"
 #include "rocke/tf32_internal.h"
 #include "rocke/wmma_scale_internal.h"
 
@@ -134,6 +135,27 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     if(!op_id)
     {
         return rocke_h_fail(lw, ROCKE_ERR_KEY, "tile.mma: missing 'op_id' attr");
+    }
+    if(const auto* atom = rocke_gfx950_scaled_mfma(op_id))
+    {
+        if(strcmp(lw->arch.gfx, "gfx950") != 0)
+            return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "scaled MFMA requires gfx950");
+        if(const char* error = rocke_scaled_mfma_error(op_id, op->operands, op->num_operands))
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+        if(op->num_results != 1 || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0)
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "scaled MFMA result must be vec<f32x16>");
+        rocke_h_emitf(lw,
+                      "f32x16 %s = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(%s, %s, %s, %d, "
+                      "%d, 0, %s, 0, %s);",
+                      rocke_h_name(lw, op->results[0]),
+                      rocke_h_name(lw, op->operands[0]),
+                      rocke_h_name(lw, op->operands[1]),
+                      rocke_h_name(lw, op->operands[2]),
+                      rocke_mfma_matrix_format(atom->a_dtype),
+                      rocke_mfma_matrix_format(atom->b_dtype),
+                      rocke_h_name(lw, op->operands[3]),
+                      rocke_h_name(lw, op->operands[4]));
+        return ROCKE_OK;
     }
     int tf32_count = rocke_tf32_mma_count(op_id);
     if(tf32_count)

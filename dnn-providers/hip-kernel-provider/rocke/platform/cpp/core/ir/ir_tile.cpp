@@ -13,6 +13,7 @@
  * rocke_i_attrs / type helpers) lives in bucket 0 (ir_core.c) and is declared
  * in rocke/ir_internal.h.
  */
+#include "rocke/mfma_scale_internal.h"
 #include "rocke/tf32_internal.h"
 #include <stdio.h>
 #include <string.h>
@@ -71,7 +72,7 @@ static bool rocke_mma_is_int_acc(const char* op_id)
 static const char* rocke_mma_result_hint(const char* op_id)
 {
     const char* family = rocke_arch_mma_op_id_family(op_id);
-    if(family && strcmp(family, "wmma_scaled") == 0)
+    if(family && (strcmp(family, "wmma_scaled") == 0 || strcmp(family, "mfma_scaled") == 0))
         return "mxacc";
     size_t i;
     if(op_id)
@@ -612,6 +613,9 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
     const char* tf32_error = rocke_tf32_mma_error(op_id, ops, nops);
     if(tf32_error)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", tf32_error);
+    const char* mx_error = rocke_scaled_mfma_error(op_id, ops, nops);
+    if(mx_error)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", mx_error);
     attrs = rocke_i_attrs(b);
     rocke_attr_set_str(b, &attrs, "op_id", op_id);
     return rocke_i_op1(b, ROCKE_OP_TILE_MMA, ops, nops, vt, &attrs, hint);
