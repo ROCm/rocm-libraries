@@ -35,11 +35,16 @@ if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*/amd
   add_executable( hipblas-example-hgemm example_hgemm.cpp ${hipblas_samples_common} )
 endif( )
 
-if(NOT WIN32)
-  add_executable( hipblas-example-sscal-fortran example_sscal_fortran.F90 $<TARGET_OBJECTS:hipblas_fortran_client>)
-  add_executable( hipblas-example-gemmEx-fortran example_gemm_ex_fortran.F90 $<TARGET_OBJECTS:hipblas_fortran_client>)
+# hipblas_fortran_client exists only under BUILD_FORTRAN_CLIENTS.
+if(BUILD_FORTRAN_CLIENTS AND NOT WIN32)
+  add_executable( hipblas-example-sscal-fortran example_sscal_fortran.F90 )
+  add_executable( hipblas-example-gemmEx-fortran example_gemm_ex_fortran.F90 )
 
   set( sample_list_fortran hipblas-example-sscal-fortran hipblas-example-gemmEx-fortran )
+
+  foreach( exe ${sample_list_fortran} )
+    target_link_libraries( ${exe} PRIVATE hipblas_fortran_client )
+  endforeach()
 endif()
 
 if(HIP_PLATFORM STREQUAL amd)
@@ -92,7 +97,7 @@ foreach( exe IN LISTS hipblas-example-executables)
 
   target_compile_options( ${exe} PRIVATE -DHIPBLAS_BFLOAT16_CLASS )
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-    target_compile_options( ${exe} PRIVATE -mf16c )
+    target_compile_options( ${exe} PRIVATE $<$<COMPILE_LANGUAGE:C,CXX>:-mf16c> )
   endif()
 
   target_compile_definitions( ${exe} PRIVATE HIPBLAS_NO_DEPRECATED_WARNINGS )

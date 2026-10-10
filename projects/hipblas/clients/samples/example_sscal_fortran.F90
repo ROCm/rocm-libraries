@@ -138,8 +138,8 @@ program example_fortran_scal
     integer(c_int) :: i, element
 
     ! Create hipBLAS handle
-    type(c_ptr), target :: handle
-    call HIPBLAS_CHECK(hipblasCreate(c_loc(handle)))
+    type(c_ptr) :: handle
+    call HIPBLAS_CHECK(hipblasCreate(handle))
 
     ! Allocate host-side memory
     allocate(hx(n))
