@@ -714,9 +714,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
         from rocke.core.lower_llvm import (
             LLVM_FLAVOR_LLVM23,
             _datalayout_for_flavor,
-            _detect_llvm_flavor,
-            _flavor_for_rocm,
-            _system_rocm_version,
+            _flavor_for_llvm,
         )
         from rocke.helpers.compile import emit_device_llvm_ir_via_hipcc
 
@@ -728,30 +726,52 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
             attrs={},
         )
 
-        # Validate the constant for the flavor of the REFERENCE toolchain -- the
-        # `hipcc` on PATH (the system /opt/rocm) that emits the IR below. That can
-        # be a DIFFERENT LLVM vintage than the comgr lib `_detect_llvm_flavor()`
-        # resolves at runtime (e.g. a torch-bundled comgr 7.2/llvm22 alongside a
-        # system hipcc 7.0/llvm20). We can only statically validate the constant
-        # whose toolchain is actually present; the comgr flavor is exercised
-        # dynamically by every GPU compile (a wrong datalayout aborts codegen).
-        sys_ver = _system_rocm_version()
-        detected_flavor = (
-            _flavor_for_rocm(*sys_ver) if sys_ver else _detect_llvm_flavor()
+        # This reference is hipcc on PATH, which may differ from loaded COMGR.
+        # Query that executable rather than assigning /opt/rocm's package
+        # metadata to an unrelated compiler selected by an environment module.
+        import re
+        import subprocess
+
+        version = subprocess.run(
+            ["hipcc", "--version"], capture_output=True, text=True, timeout=30
         )
+        match = re.search(r"clang version (\d+)", version.stdout + version.stderr)
+        if version.returncode or not match:
+            self.skipTest("cannot determine reference hipcc's LLVM version")
+        detected_flavor = _flavor_for_llvm(int(match[1]))
         rocke_dl = _datalayout_for_flavor(detected_flavor)
+        # The address spaces LLVM gained in 5bf967cb132b. Bound unconditionally:
+        # the per-arch loop below reads it on the llvm23 path too.
+        expected_p10_p15 = (
+            "-p10:32:32-p11:32:32-p12:32:32-p13:32:32-p14:32:32-p15:32:32"
+        )
+
         if detected_flavor == LLVM_FLAVOR_LLVM23:
-            # Drift proven on LLVM 23 (ROCm 7.13+): its datalayout is the llvm22
-            # one with the ELF symbol-mangling spec `m:e` inserted after the
-            # leading endianness field, and identical otherwise. Pin that exact
+            # rocKE's llvm23 constant is the llvm22 one with TWO independent
+            # additions -- the ELF symbol-mangling spec `m:e` after the leading
+            # endianness field, and address spaces p10-p15 (upstream
+            # 5bf967cb132b) after p9 -- and identical otherwise. Pin that exact
             # relationship (derived from the llvm22 constant, not a second copy)
             # so a stray edit to either constant is caught here, not only by the
             # toolchain diff below.
+            #
+            # p10-p15 is the half that bites: on a staging clang that no longer
+            # overwrites the supplied module DataLayout, the short form fails
+            # codegen and every attention kernel with it. Assert it explicitly so
+            # a regression names the field rather than dumping two long strings.
+            self.assertIn(
+                "-p9:192:256:256:32" + expected_p10_p15 + "-i64:64",
+                rocke_dl,
+                "llvm23 datalayout must carry address spaces p10-p15 between p9 "
+                "and i64; without them codegen rejects the module outright",
+            )
             self.assertEqual(
                 rocke_dl,
-                _datalayout_for_flavor("llvm22").replace("e-", "e-m:e-", 1),
+                _datalayout_for_flavor("llvm22")
+                .replace("e-", "e-m:e-", 1)
+                .replace("-i64:64", expected_p10_p15 + "-i64:64", 1),
                 "llvm23 datalayout must be the llvm22 layout plus the m:e "
-                "symbol-mangling spec",
+                "symbol-mangling spec and address spaces p10-p15",
             )
 
         # Test across all wired arches to confirm datalayout really is gfx-invariant
@@ -768,6 +788,34 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
                     # prove the gfx-invariant datalayout the flavor split needs.
                     self.skipTest(f"hipcc cannot target {arch} on this toolchain: {e}")
                 toolchain_dl = self._extract_datalayout_from_ir(ir)
+                if (
+                    detected_flavor == LLVM_FLAVOR_LLVM23
+                    and toolchain_dl != rocke_dl
+                    and toolchain_dl.replace("-i64:64", expected_p10_p15 + "-i64:64", 1)
+                    == rocke_dl
+                ):
+                    # The ONLY observed difference is that this hipcc's layout
+                    # omits the p10-p15 block (upstream 5bf967cb132b); every other
+                    # field matches. Compiler builds vary here -- a box can pair a
+                    # new-numbered ROCm with a clang whose layout predates that
+                    # commit -- so treat it as build variation rather than drift.
+                    #
+                    # Note what this comparison does and does not show: it only
+                    # says the two strings differ by that block. It says nothing
+                    # about whether this build's backend enforces DataLayout
+                    # compatibility against the module we hand it, so do not read
+                    # the skip as a proof that the superset is accepted here.
+                    #
+                    # Skip rather than fail because failing would push someone to
+                    # "fix" the constant by deleting p10-p15, which re-breaks every
+                    # kernel on a toolchain that does enforce it (see the rationale
+                    # on _DATALAYOUT_LLVM23 in core/lower_llvm.py).
+                    self.skipTest(
+                        f"hipcc for {arch} emits a datalayout that differs from "
+                        f"rocKE's llvm23 constant only by the p10-p15 block "
+                        f"(upstream 5bf967cb132b); treated as compiler-build "
+                        f"variation, not drift"
+                    )
                 self.assertEqual(
                     rocke_dl,
                     toolchain_dl,
