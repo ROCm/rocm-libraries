@@ -198,7 +198,7 @@ inline flatbuffers::FlatBufferBuilder transformGraph(flatbuffers::FlatBufferBuil
                                                      Mutate mutate)
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-    std::unique_ptr<data_objects::GraphT> graph(
+    const std::unique_ptr<data_objects::GraphT> graph(
         data_objects::GetGraph(builder.GetBufferPointer())->UnPack());
     mutate(*graph);
     builder.Clear();
